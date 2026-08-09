@@ -18,12 +18,14 @@ import pprint
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, ValidationError, field_validator
 from typing import Any, List, Optional
 from azentsadminclient.models.docker_container_profile_spec_v1 import DockerContainerProfileSpecV1
+from azentsadminclient.models.docker_container_profile_spec_v2 import DockerContainerProfileSpecV2
 from azentsadminclient.models.kubernetes_pod_profile_spec_v1 import KubernetesPodProfileSpecV1
+from azentsadminclient.models.kubernetes_pod_profile_spec_v2 import KubernetesPodProfileSpecV2
 from pydantic import StrictStr, Field
 from typing import Union, List, Set, Optional, Dict
 from typing_extensions import Literal, Self
 
-RUNTIMEINFRASTRUCTUREPROFILESPEC_ONE_OF_SCHEMAS = ["DockerContainerProfileSpecV1", "KubernetesPodProfileSpecV1"]
+RUNTIMEINFRASTRUCTUREPROFILESPEC_ONE_OF_SCHEMAS = ["DockerContainerProfileSpecV1", "DockerContainerProfileSpecV2", "KubernetesPodProfileSpecV1", "KubernetesPodProfileSpecV2"]
 
 class RuntimeInfrastructureProfileSpec(BaseModel):
     """
@@ -31,19 +33,20 @@ class RuntimeInfrastructureProfileSpec(BaseModel):
     """
     # data type: KubernetesPodProfileSpecV1
     oneof_schema_1_validator: Optional[KubernetesPodProfileSpecV1] = None
+    # data type: KubernetesPodProfileSpecV2
+    oneof_schema_2_validator: Optional[KubernetesPodProfileSpecV2] = None
     # data type: DockerContainerProfileSpecV1
-    oneof_schema_2_validator: Optional[DockerContainerProfileSpecV1] = None
-    actual_instance: Optional[Union[DockerContainerProfileSpecV1, KubernetesPodProfileSpecV1]] = None
-    one_of_schemas: Set[str] = { "DockerContainerProfileSpecV1", "KubernetesPodProfileSpecV1" }
+    oneof_schema_3_validator: Optional[DockerContainerProfileSpecV1] = None
+    # data type: DockerContainerProfileSpecV2
+    oneof_schema_4_validator: Optional[DockerContainerProfileSpecV2] = None
+    actual_instance: Optional[Union[DockerContainerProfileSpecV1, DockerContainerProfileSpecV2, KubernetesPodProfileSpecV1, KubernetesPodProfileSpecV2]] = None
+    one_of_schemas: Set[str] = { "DockerContainerProfileSpecV1", "DockerContainerProfileSpecV2", "KubernetesPodProfileSpecV1", "KubernetesPodProfileSpecV2" }
 
     model_config = ConfigDict(
         validate_assignment=True,
         protected_namespaces=(),
     )
 
-
-    discriminator_value_class_map: Dict[str, str] = {
-    }
 
     def __init__(self, *args, **kwargs) -> None:
         if args:
@@ -65,17 +68,27 @@ class RuntimeInfrastructureProfileSpec(BaseModel):
             error_messages.append(f"Error! Input type `{type(v)}` is not `KubernetesPodProfileSpecV1`")
         else:
             match += 1
+        # validate data type: KubernetesPodProfileSpecV2
+        if not isinstance(v, KubernetesPodProfileSpecV2):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `KubernetesPodProfileSpecV2`")
+        else:
+            match += 1
         # validate data type: DockerContainerProfileSpecV1
         if not isinstance(v, DockerContainerProfileSpecV1):
             error_messages.append(f"Error! Input type `{type(v)}` is not `DockerContainerProfileSpecV1`")
         else:
             match += 1
+        # validate data type: DockerContainerProfileSpecV2
+        if not isinstance(v, DockerContainerProfileSpecV2):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `DockerContainerProfileSpecV2`")
+        else:
+            match += 1
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when setting `actual_instance` in RuntimeInfrastructureProfileSpec with oneOf schemas: DockerContainerProfileSpecV1, KubernetesPodProfileSpecV1. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when setting `actual_instance` in RuntimeInfrastructureProfileSpec with oneOf schemas: DockerContainerProfileSpecV1, DockerContainerProfileSpecV2, KubernetesPodProfileSpecV1, KubernetesPodProfileSpecV2. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when setting `actual_instance` in RuntimeInfrastructureProfileSpec with oneOf schemas: DockerContainerProfileSpecV1, KubernetesPodProfileSpecV1. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when setting `actual_instance` in RuntimeInfrastructureProfileSpec with oneOf schemas: DockerContainerProfileSpecV1, DockerContainerProfileSpecV2, KubernetesPodProfileSpecV1, KubernetesPodProfileSpecV2. Details: " + ", ".join(error_messages))
         else:
             return v
 
@@ -96,19 +109,31 @@ class RuntimeInfrastructureProfileSpec(BaseModel):
             match += 1
         except (ValidationError, ValueError) as e:
             error_messages.append(str(e))
+        # deserialize data into KubernetesPodProfileSpecV2
+        try:
+            instance.actual_instance = KubernetesPodProfileSpecV2.from_json(json_str)
+            match += 1
+        except (ValidationError, ValueError) as e:
+            error_messages.append(str(e))
         # deserialize data into DockerContainerProfileSpecV1
         try:
             instance.actual_instance = DockerContainerProfileSpecV1.from_json(json_str)
             match += 1
         except (ValidationError, ValueError) as e:
             error_messages.append(str(e))
+        # deserialize data into DockerContainerProfileSpecV2
+        try:
+            instance.actual_instance = DockerContainerProfileSpecV2.from_json(json_str)
+            match += 1
+        except (ValidationError, ValueError) as e:
+            error_messages.append(str(e))
 
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when deserializing the JSON string into RuntimeInfrastructureProfileSpec with oneOf schemas: DockerContainerProfileSpecV1, KubernetesPodProfileSpecV1. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when deserializing the JSON string into RuntimeInfrastructureProfileSpec with oneOf schemas: DockerContainerProfileSpecV1, DockerContainerProfileSpecV2, KubernetesPodProfileSpecV1, KubernetesPodProfileSpecV2. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when deserializing the JSON string into RuntimeInfrastructureProfileSpec with oneOf schemas: DockerContainerProfileSpecV1, KubernetesPodProfileSpecV1. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when deserializing the JSON string into RuntimeInfrastructureProfileSpec with oneOf schemas: DockerContainerProfileSpecV1, DockerContainerProfileSpecV2, KubernetesPodProfileSpecV1, KubernetesPodProfileSpecV2. Details: " + ", ".join(error_messages))
         else:
             return instance
 
@@ -122,7 +147,7 @@ class RuntimeInfrastructureProfileSpec(BaseModel):
         else:
             return json.dumps(self.actual_instance)
 
-    def to_dict(self) -> Optional[Union[Dict[str, Any], DockerContainerProfileSpecV1, KubernetesPodProfileSpecV1]]:
+    def to_dict(self) -> Optional[Union[Dict[str, Any], DockerContainerProfileSpecV1, DockerContainerProfileSpecV2, KubernetesPodProfileSpecV1, KubernetesPodProfileSpecV2]]:
         """Returns the dict representation of the actual instance"""
         if self.actual_instance is None:
             return None

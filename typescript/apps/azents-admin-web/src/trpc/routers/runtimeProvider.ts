@@ -49,10 +49,12 @@ const networkPolicySchema = z.object({
   allowed_cidrs: z.array(z.string().min(1)).optional(),
   denied_cidrs: z.array(z.string().min(1)).optional(),
 });
-const kubernetesSpecSchema = z.object({
+const processContainmentSchema = z.object({
+  schema_version: z.literal(1),
+});
+const kubernetesSpecBaseSchema = z.object({
   profile_kind: z.literal("kubernetes_pod"),
   contract_family: z.literal("kubernetes.pod-profile"),
-  schema_version: z.literal(1),
   runner_resources: resourceSchema,
   workspace_volume: z.object({
     storage_class_name: z.string().min(1),
@@ -84,14 +86,31 @@ const kubernetesSpecSchema = z.object({
     })
     .nullable(),
 });
-const dockerSpecSchema = z.object({
+const kubernetesSpecSchema = z.union([
+  kubernetesSpecBaseSchema.extend({
+    schema_version: z.literal(1),
+  }),
+  kubernetesSpecBaseSchema.extend({
+    schema_version: z.literal(2),
+    process_containment: processContainmentSchema.nullable(),
+  }),
+]);
+const dockerSpecBaseSchema = z.object({
   profile_kind: z.literal("docker_container"),
   contract_family: z.literal("docker.container-profile"),
-  schema_version: z.literal(1),
   runner_resources: dockerResourceSchema,
   network_name: z.string().min(1).nullable(),
 });
-const infrastructureSpecSchema = z.discriminatedUnion("profile_kind", [
+const dockerSpecSchema = z.union([
+  dockerSpecBaseSchema.extend({
+    schema_version: z.literal(1),
+  }),
+  dockerSpecBaseSchema.extend({
+    schema_version: z.literal(2),
+    process_containment: processContainmentSchema.nullable(),
+  }),
+]);
+const infrastructureSpecSchema = z.union([
   kubernetesSpecSchema,
   dockerSpecSchema,
 ]);

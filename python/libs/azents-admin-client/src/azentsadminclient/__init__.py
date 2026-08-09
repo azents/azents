@@ -51,6 +51,7 @@ __all__ = [
     "DebugErrorResponse",
     "DebugExceptionResponse",
     "DockerContainerProfileSpecV1",
+    "DockerContainerProfileSpecV2",
     "DockerContainerResources",
     "EmailVerificationListResponse",
     "EmailVerificationResponse",
@@ -68,6 +69,7 @@ __all__ = [
     "KubernetesContainerResources",
     "KubernetesDinDModule",
     "KubernetesPodProfileSpecV1",
+    "KubernetesPodProfileSpecV2",
     "KubernetesSchedulingModule",
     "KubernetesToleration",
     "KubernetesWorkspaceVolume",
@@ -87,6 +89,7 @@ __all__ = [
     "RuntimeInfrastructureProfileResponse",
     "RuntimeInfrastructureProfileSpec",
     "RuntimeNetworkPolicyModule",
+    "RuntimeProcessContainmentModuleV1",
     "RuntimeProfileLifecycle",
     "RuntimeProviderAuthMethod",
     "RuntimeProviderAuthenticationBindingAuditEventResponse",
@@ -201,6 +204,7 @@ from azentsadminclient.models.create_signup_token_response import CreateSignupTo
 from azentsadminclient.models.debug_error_response import DebugErrorResponse as DebugErrorResponse
 from azentsadminclient.models.debug_exception_response import DebugExceptionResponse as DebugExceptionResponse
 from azentsadminclient.models.docker_container_profile_spec_v1 import DockerContainerProfileSpecV1 as DockerContainerProfileSpecV1
+from azentsadminclient.models.docker_container_profile_spec_v2 import DockerContainerProfileSpecV2 as DockerContainerProfileSpecV2
 from azentsadminclient.models.docker_container_resources import DockerContainerResources as DockerContainerResources
 from azentsadminclient.models.email_verification_list_response import EmailVerificationListResponse as EmailVerificationListResponse
 from azentsadminclient.models.email_verification_response import EmailVerificationResponse as EmailVerificationResponse
@@ -218,6 +222,7 @@ from azentsadminclient.models.invitation_status import InvitationStatus as Invit
 from azentsadminclient.models.kubernetes_container_resources import KubernetesContainerResources as KubernetesContainerResources
 from azentsadminclient.models.kubernetes_din_d_module import KubernetesDinDModule as KubernetesDinDModule
 from azentsadminclient.models.kubernetes_pod_profile_spec_v1 import KubernetesPodProfileSpecV1 as KubernetesPodProfileSpecV1
+from azentsadminclient.models.kubernetes_pod_profile_spec_v2 import KubernetesPodProfileSpecV2 as KubernetesPodProfileSpecV2
 from azentsadminclient.models.kubernetes_scheduling_module import KubernetesSchedulingModule as KubernetesSchedulingModule
 from azentsadminclient.models.kubernetes_toleration import KubernetesToleration as KubernetesToleration
 from azentsadminclient.models.kubernetes_workspace_volume import KubernetesWorkspaceVolume as KubernetesWorkspaceVolume
@@ -237,6 +242,7 @@ from azentsadminclient.models.runtime_infrastructure_profile_replace_request imp
 from azentsadminclient.models.runtime_infrastructure_profile_response import RuntimeInfrastructureProfileResponse as RuntimeInfrastructureProfileResponse
 from azentsadminclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec as RuntimeInfrastructureProfileSpec
 from azentsadminclient.models.runtime_network_policy_module import RuntimeNetworkPolicyModule as RuntimeNetworkPolicyModule
+from azentsadminclient.models.runtime_process_containment_module_v1 import RuntimeProcessContainmentModuleV1 as RuntimeProcessContainmentModuleV1
 from azentsadminclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle as RuntimeProfileLifecycle
 from azentsadminclient.models.runtime_provider_auth_method import RuntimeProviderAuthMethod as RuntimeProviderAuthMethod
 from azentsadminclient.models.runtime_provider_authentication_binding_audit_event_response import RuntimeProviderAuthenticationBindingAuditEventResponse as RuntimeProviderAuthenticationBindingAuditEventResponse

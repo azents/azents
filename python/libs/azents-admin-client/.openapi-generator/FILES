@@ -29,6 +29,7 @@ azentsadminclient/docs/DebugErrorResponse.md
 azentsadminclient/docs/DebugExceptionResponse.md
 azentsadminclient/docs/DebugV1Api.md
 azentsadminclient/docs/DockerContainerProfileSpecV1.md
+azentsadminclient/docs/DockerContainerProfileSpecV2.md
 azentsadminclient/docs/DockerContainerResources.md
 azentsadminclient/docs/EmailVerificationListResponse.md
 azentsadminclient/docs/EmailVerificationResponse.md
@@ -48,6 +49,7 @@ azentsadminclient/docs/InvitationV1Api.md
 azentsadminclient/docs/KubernetesContainerResources.md
 azentsadminclient/docs/KubernetesDinDModule.md
 azentsadminclient/docs/KubernetesPodProfileSpecV1.md
+azentsadminclient/docs/KubernetesPodProfileSpecV2.md
 azentsadminclient/docs/KubernetesSchedulingModule.md
 azentsadminclient/docs/KubernetesToleration.md
 azentsadminclient/docs/KubernetesWorkspaceVolume.md
@@ -68,6 +70,7 @@ azentsadminclient/docs/RuntimeInfrastructureProfileReplaceRequest.md
 azentsadminclient/docs/RuntimeInfrastructureProfileResponse.md
 azentsadminclient/docs/RuntimeInfrastructureProfileSpec.md
 azentsadminclient/docs/RuntimeNetworkPolicyModule.md
+azentsadminclient/docs/RuntimeProcessContainmentModuleV1.md
 azentsadminclient/docs/RuntimeProfileLifecycle.md
 azentsadminclient/docs/RuntimeProviderAuthMethod.md
 azentsadminclient/docs/RuntimeProviderAuthenticationBindingAuditEventResponse.md
@@ -163,6 +166,7 @@ azentsadminclient/models/create_signup_token_response.py
 azentsadminclient/models/debug_error_response.py
 azentsadminclient/models/debug_exception_response.py
 azentsadminclient/models/docker_container_profile_spec_v1.py
+azentsadminclient/models/docker_container_profile_spec_v2.py
 azentsadminclient/models/docker_container_resources.py
 azentsadminclient/models/email_verification_list_response.py
 azentsadminclient/models/email_verification_response.py
@@ -180,6 +184,7 @@ azentsadminclient/models/invitation_status.py
 azentsadminclient/models/kubernetes_container_resources.py
 azentsadminclient/models/kubernetes_din_d_module.py
 azentsadminclient/models/kubernetes_pod_profile_spec_v1.py
+azentsadminclient/models/kubernetes_pod_profile_spec_v2.py
 azentsadminclient/models/kubernetes_scheduling_module.py
 azentsadminclient/models/kubernetes_toleration.py
 azentsadminclient/models/kubernetes_workspace_volume.py
@@ -199,6 +204,7 @@ azentsadminclient/models/runtime_infrastructure_profile_replace_request.py
 azentsadminclient/models/runtime_infrastructure_profile_response.py
 azentsadminclient/models/runtime_infrastructure_profile_spec.py
 azentsadminclient/models/runtime_network_policy_module.py
+azentsadminclient/models/runtime_process_containment_module_v1.py
 azentsadminclient/models/runtime_profile_lifecycle.py
 azentsadminclient/models/runtime_provider_auth_method.py
 azentsadminclient/models/runtime_provider_authentication_binding_audit_event_response.py
@@ -288,6 +294,7 @@ azentsadminclient/test/test_debug_error_response.py
 azentsadminclient/test/test_debug_exception_response.py
 azentsadminclient/test/test_debug_v1_api.py
 azentsadminclient/test/test_docker_container_profile_spec_v1.py
+azentsadminclient/test/test_docker_container_profile_spec_v2.py
 azentsadminclient/test/test_docker_container_resources.py
 azentsadminclient/test/test_email_verification_list_response.py
 azentsadminclient/test/test_email_verification_response.py
@@ -307,6 +314,7 @@ azentsadminclient/test/test_invitation_v1_api.py
 azentsadminclient/test/test_kubernetes_container_resources.py
 azentsadminclient/test/test_kubernetes_din_d_module.py
 azentsadminclient/test/test_kubernetes_pod_profile_spec_v1.py
+azentsadminclient/test/test_kubernetes_pod_profile_spec_v2.py
 azentsadminclient/test/test_kubernetes_scheduling_module.py
 azentsadminclient/test/test_kubernetes_toleration.py
 azentsadminclient/test/test_kubernetes_workspace_volume.py
@@ -327,6 +335,7 @@ azentsadminclient/test/test_runtime_infrastructure_profile_replace_request.py
 azentsadminclient/test/test_runtime_infrastructure_profile_response.py
 azentsadminclient/test/test_runtime_infrastructure_profile_spec.py
 azentsadminclient/test/test_runtime_network_policy_module.py
+azentsadminclient/test/test_runtime_process_containment_module_v1.py
 azentsadminclient/test/test_runtime_profile_lifecycle.py
 azentsadminclient/test/test_runtime_provider_auth_method.py
 azentsadminclient/test/test_runtime_provider_authentication_binding_audit_event_response.py

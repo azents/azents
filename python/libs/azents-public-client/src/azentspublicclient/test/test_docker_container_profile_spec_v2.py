@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec
+from azentspublicclient.models.docker_container_profile_spec_v2 import DockerContainerProfileSpecV2
 
-class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
-    """RuntimeInfrastructureProfileSpec unit test stubs"""
+class TestDockerContainerProfileSpecV2(unittest.TestCase):
+    """DockerContainerProfileSpecV2 unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,46 +25,36 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> RuntimeInfrastructureProfileSpec:
-        """Test RuntimeInfrastructureProfileSpec
+    def make_instance(self, include_optional) -> DockerContainerProfileSpecV2:
+        """Test DockerContainerProfileSpecV2
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `RuntimeInfrastructureProfileSpec`
+        # uncomment below to create an instance of `DockerContainerProfileSpecV2`
         """
-        model = RuntimeInfrastructureProfileSpec()
+        model = DockerContainerProfileSpecV2()
         if include_optional:
-            return RuntimeInfrastructureProfileSpec(
+            return DockerContainerProfileSpecV2(
                 profile_kind = 'docker_container',
                 contract_family = 'docker.container-profile',
                 schema_version = 2,
                 runner_resources = { },
-                workspace_volume = { },
-                network_policy = { },
-                service_account_name = '',
-                scheduling = { },
-                dind = { },
-                process_containment = { },
-                network_name = ''
+                network_name = '',
+                process_containment = { }
             )
         else:
-            return RuntimeInfrastructureProfileSpec(
+            return DockerContainerProfileSpecV2(
                 profile_kind = 'docker_container',
                 contract_family = 'docker.container-profile',
                 schema_version = 2,
                 runner_resources = { },
-                workspace_volume = { },
-                network_policy = { },
-                service_account_name = '',
-                scheduling = { },
-                dind = { },
-                process_containment = { },
                 network_name = '',
+                process_containment = { },
         )
         """
 
-    def testRuntimeInfrastructureProfileSpec(self):
-        """Test RuntimeInfrastructureProfileSpec"""
+    def testDockerContainerProfileSpecV2(self):
+        """Test DockerContainerProfileSpecV2"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

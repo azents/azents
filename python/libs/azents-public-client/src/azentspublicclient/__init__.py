@@ -173,6 +173,7 @@ __all__ = [
     "DiscordConnectionCredentials",
     "DiscordConnectionSetupRequest",
     "DockerContainerProfileSpecV1",
+    "DockerContainerProfileSpecV2",
     "DockerContainerResources",
     "ElevateResponse",
     "ElevateWithEmailRequest",
@@ -244,6 +245,7 @@ __all__ = [
     "KubernetesContainerResources",
     "KubernetesDinDModule",
     "KubernetesPodProfileSpecV1",
+    "KubernetesPodProfileSpecV2",
     "KubernetesSchedulingModule",
     "KubernetesToleration",
     "KubernetesWorkspaceVolume",
@@ -359,6 +361,7 @@ __all__ = [
     "RuntimeInfrastructureProfileSpec",
     "RuntimeLifecycleCommandType",
     "RuntimeNetworkPolicyModule",
+    "RuntimeProcessContainmentModuleV1",
     "RuntimeProfileLifecycle",
     "RuntimeProviderConnectionState",
     "RuntimeProviderCredentialExchangeRequest",
@@ -617,6 +620,7 @@ from azentspublicclient.models.discord_connection_configuration import DiscordCo
 from azentspublicclient.models.discord_connection_credentials import DiscordConnectionCredentials as DiscordConnectionCredentials
 from azentspublicclient.models.discord_connection_setup_request import DiscordConnectionSetupRequest as DiscordConnectionSetupRequest
 from azentspublicclient.models.docker_container_profile_spec_v1 import DockerContainerProfileSpecV1 as DockerContainerProfileSpecV1
+from azentspublicclient.models.docker_container_profile_spec_v2 import DockerContainerProfileSpecV2 as DockerContainerProfileSpecV2
 from azentspublicclient.models.docker_container_resources import DockerContainerResources as DockerContainerResources
 from azentspublicclient.models.elevate_response import ElevateResponse as ElevateResponse
 from azentspublicclient.models.elevate_with_email_request import ElevateWithEmailRequest as ElevateWithEmailRequest
@@ -688,6 +692,7 @@ from azentspublicclient.models.kimi_o_auth_session_status import KimiOAuthSessio
 from azentspublicclient.models.kubernetes_container_resources import KubernetesContainerResources as KubernetesContainerResources
 from azentspublicclient.models.kubernetes_din_d_module import KubernetesDinDModule as KubernetesDinDModule
 from azentspublicclient.models.kubernetes_pod_profile_spec_v1 import KubernetesPodProfileSpecV1 as KubernetesPodProfileSpecV1
+from azentspublicclient.models.kubernetes_pod_profile_spec_v2 import KubernetesPodProfileSpecV2 as KubernetesPodProfileSpecV2
 from azentspublicclient.models.kubernetes_scheduling_module import KubernetesSchedulingModule as KubernetesSchedulingModule
 from azentspublicclient.models.kubernetes_toleration import KubernetesToleration as KubernetesToleration
 from azentspublicclient.models.kubernetes_workspace_volume import KubernetesWorkspaceVolume as KubernetesWorkspaceVolume
@@ -803,6 +808,7 @@ from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState 
 from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec as RuntimeInfrastructureProfileSpec
 from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLifecycleCommandType as RuntimeLifecycleCommandType
 from azentspublicclient.models.runtime_network_policy_module import RuntimeNetworkPolicyModule as RuntimeNetworkPolicyModule
+from azentspublicclient.models.runtime_process_containment_module_v1 import RuntimeProcessContainmentModuleV1 as RuntimeProcessContainmentModuleV1
 from azentspublicclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle as RuntimeProfileLifecycle
 from azentspublicclient.models.runtime_provider_connection_state import RuntimeProviderConnectionState as RuntimeProviderConnectionState
 from azentspublicclient.models.runtime_provider_credential_exchange_request import RuntimeProviderCredentialExchangeRequest as RuntimeProviderCredentialExchangeRequest

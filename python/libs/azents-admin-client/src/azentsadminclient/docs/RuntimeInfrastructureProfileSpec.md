@@ -14,6 +14,7 @@ Name | Type | Description | Notes
 **service_account_name** | **str** |  | 
 **scheduling** | [**KubernetesSchedulingModule**](KubernetesSchedulingModule.md) |  | 
 **dind** | [**KubernetesDinDModule**](KubernetesDinDModule.md) |  | 
+**process_containment** | [**RuntimeProcessContainmentModuleV1**](RuntimeProcessContainmentModuleV1.md) |  | 
 **network_name** | **str** |  | 
 
 ## Example
