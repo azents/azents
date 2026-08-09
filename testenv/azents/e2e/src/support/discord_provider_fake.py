@@ -1508,8 +1508,8 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 return
             self._json_response(200, command)
             return
-        if parsed.path.startswith(f"{_API_PREFIX}/applications/"):
-            application_id = parsed.path.rsplit("/", 1)[-1]
+        if parsed.path == f"{_API_PREFIX}/applications/@me":
+            application_id = self.state.application_id
             scenario = self._operation(
                 "configure_interactions_endpoint",
                 metadata={"application_id": application_id},

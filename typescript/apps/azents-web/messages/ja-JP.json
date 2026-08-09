@@ -1095,7 +1095,7 @@
         "discordAppId": "Discord Application ID",
         "discordGuildId": "Discord Guild ID",
         "discordBotToken": "Discord Bot Token",
-        "discordGuide": "Discord Developer Portal で以下の手順を完了してから、下の 3 つの値を入力してください。Azents が Bot Token を検証し、interaction callback と command を自動で設定します。",
+        "discordGuide": "Discord Developer Portal で以下の手順を完了してから、下の 3 つの値を入力してください。Azents が Bot Token を検証し、Interaction Endpoint と command を自動で設定するため、endpoint を手動で入力する必要はありません。",
         "discordGuideTitle": "Discord App を作成して設定",
         "identityUnavailable": "Provider identity は未検証です",
         "credentialsConfigured": "Credential 設定済み",
@@ -1113,8 +1113,8 @@
             "action": "Bot Token を置き換え、この接続を保存して検証してください。"
           },
           "discord_callback_configuration_invalid": {
-            "message": "Discord が interaction endpoint を拒否しました。",
-            "action": "Application 設定と公開 callback URL を確認してから、もう一度検証してください。"
+            "message": "Discord が Azents による Interaction Endpoint の自動設定を拒否しました。",
+            "action": "もう一度検証してください。引き続き失敗する場合は、管理者に公開 callback URL の確認を依頼してください。Discord 側で endpoint を手動設定する必要はありません。"
           },
           "discord_api_unavailable": {
             "message": "Discord を一時的に利用できません。",

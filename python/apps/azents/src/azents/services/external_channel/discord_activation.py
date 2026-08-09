@@ -106,9 +106,9 @@ def discord_activation_failure_detail(
             "Replace the Bot Token and try again.",
         ),
         "discord_callback_configuration_invalid": (
-            "Discord rejected the interaction endpoint.",
-            "Check the Application configuration and public callback URL, "
-            "then try again.",
+            "Discord rejected the automatically configured interaction endpoint.",
+            "Validate again. If it still fails, ask an administrator to check the "
+            "public callback URL; no manual Discord endpoint setup is required.",
         ),
         "discord_api_unavailable": (
             "Discord is temporarily unavailable.",
@@ -239,7 +239,6 @@ class DiscordConnectionActivationService:
         try:
             await self.discord_client.configure_interactions_endpoint(
                 bot_token=credentials.bot_token,
-                application_id=metadata.application_id,
                 endpoint_url=endpoint_url,
             )
             command_set = await self.discord_client.reconcile_required_guild_commands(

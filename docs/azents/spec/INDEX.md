@@ -36,7 +36,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-08-03 | 33 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-08-03 | 21 |
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-08-05 | 38 |
-| [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-05 | 32 |
+| [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-09 | 33 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-04 | 33 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-08-04 | 40 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |

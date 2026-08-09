@@ -623,10 +623,14 @@ def test_discord_replacement_returns_redacted_status(
             DiscordAPIConfigurationInvalid(),
             {
                 "code": "discord_callback_configuration_invalid",
-                "message": "Discord rejected the interaction endpoint.",
+                "message": (
+                    "Discord rejected the automatically configured interaction "
+                    "endpoint."
+                ),
                 "action_hint": (
-                    "Check the Application configuration and public callback URL, "
-                    "then try again."
+                    "Validate again. If it still fails, ask an administrator to "
+                    "check the public callback URL; no manual Discord endpoint setup "
+                    "is required."
                 ),
             },
             "provider_callback",
