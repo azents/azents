@@ -9,7 +9,8 @@ LLM prompts are model-visible source text, so their Python representation should
 - ALWAYS write long multi-line prompt text with triple-quoted strings instead of string concatenation or `"\n".join(...)` lists.
 - Use `textwrap.dedent(...)` for inline or nested prompt definitions where source indentation would otherwise be included in the prompt.
 - Top-level prompt constants may use plain triple-quoted strings when they start at column 0 and do not need indentation stripped.
-- If the prompt intentionally contains long natural-language lines, append `# noqa: E501` on the assignment line rather than splitting the prompt into unreadable fragments.
+- Preserve natural prompt wording instead of splitting model-visible sentences solely for source line length.
+- If a prompt file structurally requires long model-visible lines, configure a narrowly scoped `E501` per-file exception in the owning project's Ruff configuration and document why.
 
 ## Bad
 
@@ -27,7 +28,7 @@ prompt = "\n".join(
 ```python
 SUMMARY_PROMPT = """You are an assistant.
 Given the previous conversation and current state, produce a handoff summary that preserves next actions.
-"""  # noqa: E501
+"""
 ```
 
 ## Good: inline or nested prompt
@@ -35,7 +36,7 @@ Given the previous conversation and current state, produce a handoff summary tha
 ```python
 from textwrap import dedent
 
-prompt = dedent(  # noqa: E501
+prompt = dedent(
     f"""\
     You are an assistant.
     Given {context}, produce a handoff summary that preserves next actions.
