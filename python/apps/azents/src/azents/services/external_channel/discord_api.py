@@ -3,13 +3,25 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Protocol
 
 import httpx
 from fastapi import Depends
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from azents.services.external_channel.discord_endpoint import discord_api_base_url
+from azents.services.external_channel.discord_sdk import (
+    DiscordSDKClientFactory,
+    DiscordSDKCommand,
+    DiscordSDKCredentialsInvalid,
+    DiscordSDKError,
+    DiscordSDKPermissionDenied,
+    DiscordSDKRateLimited,
+    DiscordSDKRequestRejected,
+    DiscordSDKResourceUnavailable,
+    DiscordSDKUnavailable,
+    get_discord_sdk_client_factory,
+)
 
 DISCORD_AZENTS_MESSAGE_COMMAND_NAME = "Ask an Azents Agent"
 
@@ -175,11 +187,59 @@ def discord_command_matches_capability(
     )
 
 
-class DiscordAPIClient:
-    """Fetch the current Application metadata using a Bot Token."""
+class DiscordGuildCommandCreateTransport(Protocol):
+    """The sole direct Discord control-plane gap: create one Guild command."""
+
+    async def create(
+        self,
+        *,
+        bot_token: str,
+        application_id: str,
+        guild_id: str,
+        definition: DiscordGuildCommandDefinition,
+    ) -> DiscordGuildCommand:
+        """Create one command without bulk synchronization."""
+        ...
+
+
+class DiscordGuildCommandCreateHTTPTransport:
+    """Issue only the approved individual Guild command create request."""
 
     def __init__(self, http_client: httpx.AsyncClient) -> None:
         self.http_client = http_client
+
+    async def create(
+        self,
+        *,
+        bot_token: str,
+        application_id: str,
+        guild_id: str,
+        definition: DiscordGuildCommandDefinition,
+    ) -> DiscordGuildCommand:
+        """Create one required command through the fixed SDK-gap route."""
+        try:
+            response = await self.http_client.post(
+                f"{discord_api_base_url()}/applications/{application_id}/guilds/"
+                f"{guild_id}/commands",
+                headers={"Authorization": f"Bot {bot_token}"},
+                json=definition.request_payload(),
+            )
+        except httpx.RequestError as error:
+            raise DiscordAPIUnavailable from error
+        _raise_for_command_create_response(response)
+        return _discord_guild_command_from_response(response)
+
+
+class DiscordAPIClient:
+    """Use public discord.py operations plus the one command-create REST gap."""
+
+    def __init__(
+        self,
+        sdk_factory: DiscordSDKClientFactory,
+        command_create_transport: DiscordGuildCommandCreateTransport,
+    ) -> None:
+        self.sdk_factory = sdk_factory
+        self.command_create_transport = command_create_transport
 
     async def get_current_application(
         self,
@@ -188,24 +248,12 @@ class DiscordAPIClient:
     ) -> DiscordApplicationMetadata:
         """Return App identity and interaction verification key."""
         try:
-            response = await self.http_client.get(
-                f"{discord_api_base_url()}/oauth2/applications/@me",
-                headers={"Authorization": f"Bot {bot_token}"},
-            )
-        except httpx.RequestError as error:
-            raise DiscordAPIUnavailable from error
-        if response.status_code in {401, 403}:
-            raise DiscordAPICredentialsInvalid
-        if response.status_code == 429 or response.status_code >= 500:
-            raise DiscordAPIUnavailable
-        try:
-            payload: object = response.json()
-        except ValueError as error:
-            raise DiscordAPIUnavailable from error
-        if not isinstance(payload, dict):
-            raise DiscordAPIUnavailable
-        application_id = payload.get("id")
-        verify_key = payload.get("verify_key")
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                application = await sdk.fetch_application()
+        except DiscordSDKError as error:
+            raise _api_error(error) from error
+        application_id = application.application_id
+        verify_key = application.verify_key
         if (
             not isinstance(application_id, str)
             or not application_id
@@ -225,22 +273,11 @@ class DiscordAPIClient:
     async def get_current_bot_user_id(self, *, bot_token: str) -> str:
         """Return the current Bot user identity required for mention classification."""
         try:
-            response = await self.http_client.get(
-                f"{discord_api_base_url()}/users/@me",
-                headers={"Authorization": f"Bot {bot_token}"},
-            )
-        except httpx.RequestError as error:
-            raise DiscordAPIUnavailable from error
-        if response.status_code in {401, 403}:
-            raise DiscordAPICredentialsInvalid
-        if response.status_code == 429 or response.status_code >= 500:
-            raise DiscordAPIUnavailable
-        try:
-            payload: object = response.json()
-        except ValueError as error:
-            raise DiscordAPIUnavailable from error
-        bot_user_id = payload.get("id") if isinstance(payload, dict) else None
-        if not isinstance(bot_user_id, str) or not bot_user_id.isdigit():
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                bot_user_id = sdk.current_bot_user_id()
+        except DiscordSDKError as error:
+            raise _api_error(error) from error
+        if not bot_user_id.isdigit():
             raise DiscordAPIUnavailable
         return bot_user_id
 
@@ -252,19 +289,10 @@ class DiscordAPIClient:
     ) -> None:
         """Configure the requesting Bot's outgoing interaction endpoint."""
         try:
-            response = await self.http_client.patch(
-                f"{discord_api_base_url()}/applications/@me",
-                headers={"Authorization": f"Bot {bot_token}"},
-                json={"interactions_endpoint_url": endpoint_url},
-            )
-        except httpx.RequestError as error:
-            raise DiscordAPIUnavailable from error
-        if response.status_code in {401, 403}:
-            raise DiscordAPICredentialsInvalid
-        if response.status_code == 429 or response.status_code >= 500:
-            raise DiscordAPIUnavailable
-        if response.status_code >= 400:
-            raise DiscordAPIConfigurationInvalid
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                await sdk.configure_interactions_endpoint(endpoint_url)
+        except DiscordSDKError as error:
+            raise _api_error(error) from error
 
     async def list_guild_commands(
         self,
@@ -275,27 +303,14 @@ class DiscordAPIClient:
     ) -> tuple[DiscordGuildCommand, ...]:
         """List sanitized current application commands for one target Guild."""
         try:
-            response = await self.http_client.get(
-                f"{discord_api_base_url()}/applications/{application_id}/guilds/"
-                f"{guild_id}/commands",
-                headers={"Authorization": f"Bot {bot_token}"},
-            )
-        except httpx.RequestError as error:
-            raise DiscordAPIUnavailable from error
-        self._raise_for_command_response(response)
-        try:
-            payload: object = response.json()
-        except ValueError as error:
-            raise DiscordAPIUnavailable from error
-        if not isinstance(payload, list):
-            raise DiscordAPIUnavailable
-        commands: list[DiscordGuildCommand] = []
-        for item in payload:
-            command = _discord_guild_command_from_payload(item)
-            if command is None:
-                raise DiscordAPIUnavailable
-            commands.append(command)
-        return tuple(commands)
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                commands = await sdk.list_guild_commands(
+                    application_id=application_id,
+                    guild_id=guild_id,
+                )
+        except DiscordSDKError as error:
+            raise _api_error(error) from error
+        return tuple(_command_from_sdk(command) for command in commands)
 
     async def create_guild_command(
         self,
@@ -306,17 +321,12 @@ class DiscordAPIClient:
         definition: DiscordGuildCommandDefinition,
     ) -> DiscordGuildCommand:
         """Create one required Azents-owned Guild command."""
-        try:
-            response = await self.http_client.post(
-                f"{discord_api_base_url()}/applications/{application_id}/guilds/"
-                f"{guild_id}/commands",
-                headers={"Authorization": f"Bot {bot_token}"},
-                json=definition.request_payload(),
-            )
-        except httpx.RequestError as error:
-            raise DiscordAPIUnavailable from error
-        self._raise_for_command_response(response)
-        return _discord_guild_command_from_response(response)
+        return await self.command_create_transport.create(
+            bot_token=bot_token,
+            application_id=application_id,
+            guild_id=guild_id,
+            definition=definition,
+        )
 
     async def update_guild_command(
         self,
@@ -329,16 +339,20 @@ class DiscordAPIClient:
     ) -> DiscordGuildCommand:
         """Update one recognized Azents-owned Guild command to its current contract."""
         try:
-            response = await self.http_client.patch(
-                f"{discord_api_base_url()}/applications/{application_id}/guilds/"
-                f"{guild_id}/commands/{command_id}",
-                headers={"Authorization": f"Bot {bot_token}"},
-                json=definition.request_payload(),
-            )
-        except httpx.RequestError as error:
-            raise DiscordAPIUnavailable from error
-        self._raise_for_command_response(response)
-        return _discord_guild_command_from_response(response)
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                await sdk.list_guild_commands(
+                    application_id=application_id,
+                    guild_id=guild_id,
+                )
+                updated = await sdk.update_guild_command(
+                    command_id=command_id,
+                    name=definition.name,
+                    command_type=definition.command_type,
+                    description=definition.description,
+                )
+        except DiscordSDKError as error:
+            raise _api_error(error) from error
+        return _command_from_sdk(updated)
 
     async def delete_guild_command(
         self,
@@ -350,14 +364,14 @@ class DiscordAPIClient:
     ) -> None:
         """Delete one recognized obsolete Azents-owned Guild command."""
         try:
-            response = await self.http_client.delete(
-                f"{discord_api_base_url()}/applications/{application_id}/guilds/"
-                f"{guild_id}/commands/{command_id}",
-                headers={"Authorization": f"Bot {bot_token}"},
-            )
-        except httpx.RequestError as error:
-            raise DiscordAPIUnavailable from error
-        self._raise_for_command_response(response)
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                await sdk.list_guild_commands(
+                    application_id=application_id,
+                    guild_id=guild_id,
+                )
+                await sdk.delete_guild_command(command_id=command_id)
+        except DiscordSDKError as error:
+            raise _api_error(error) from error
 
     async def reconcile_required_guild_commands(
         self,
@@ -367,50 +381,52 @@ class DiscordAPIClient:
         guild_id: str,
     ) -> DiscordGuildCommandSetCapability:
         """Reconcile only known Azents commands without replacing customer commands."""
-        current = await self.list_guild_commands(
-            bot_token=bot_token,
-            application_id=application_id,
-            guild_id=guild_id,
-        )
         selected: dict[DiscordGuildCommandRole, DiscordGuildCommand] = {}
         obsolete: list[DiscordGuildCommand] = []
-        for definition in DISCORD_REQUIRED_GUILD_COMMANDS:
-            matching = sorted(
-                (command for command in current if definition.owns(command)),
-                key=lambda command: (
-                    not definition.matches(command),
-                    command.command_id,
-                ),
-            )
-            if not matching:
-                created = await self.create_guild_command(
-                    bot_token=bot_token,
-                    application_id=application_id,
-                    guild_id=guild_id,
-                    definition=definition,
+        try:
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                current = tuple(
+                    _command_from_sdk(command)
+                    for command in await sdk.list_guild_commands(
+                        application_id=application_id,
+                        guild_id=guild_id,
+                    )
                 )
-                _require_definition_match(created, definition)
-                selected[definition.role] = created
-                continue
-            selected_command = matching[0]
-            if not definition.matches(selected_command):
-                selected_command = await self.update_guild_command(
-                    bot_token=bot_token,
-                    application_id=application_id,
-                    guild_id=guild_id,
-                    command_id=selected_command.command_id,
-                    definition=definition,
-                )
-                _require_definition_match(selected_command, definition)
-            selected[definition.role] = selected_command
-            obsolete.extend(matching[1:])
-        for command in obsolete:
-            await self.delete_guild_command(
-                bot_token=bot_token,
-                application_id=application_id,
-                guild_id=guild_id,
-                command_id=command.command_id,
-            )
+                for definition in DISCORD_REQUIRED_GUILD_COMMANDS:
+                    matching = sorted(
+                        (command for command in current if definition.owns(command)),
+                        key=lambda command: (
+                            not definition.matches(command),
+                            command.command_id,
+                        ),
+                    )
+                    if not matching:
+                        created = await self.command_create_transport.create(
+                            bot_token=bot_token,
+                            application_id=application_id,
+                            guild_id=guild_id,
+                            definition=definition,
+                        )
+                        _require_definition_match(created, definition)
+                        selected[definition.role] = created
+                        continue
+                    selected_command = matching[0]
+                    if not definition.matches(selected_command):
+                        selected_command = _command_from_sdk(
+                            await sdk.update_guild_command(
+                                command_id=selected_command.command_id,
+                                name=definition.name,
+                                command_type=definition.command_type,
+                                description=definition.description,
+                            )
+                        )
+                        _require_definition_match(selected_command, definition)
+                    selected[definition.role] = selected_command
+                    obsolete.extend(matching[1:])
+                for command in obsolete:
+                    await sdk.delete_guild_command(command_id=command.command_id)
+        except DiscordSDKError as error:
+            raise _api_error(error) from error
         try:
             return DiscordGuildCommandSetCapability(
                 schema_version=1,
@@ -420,16 +436,6 @@ class DiscordAPIClient:
             )
         except ValidationError as error:
             raise DiscordAPIConfigurationInvalid from error
-
-    @staticmethod
-    def _raise_for_command_response(response: httpx.Response) -> None:
-        """Map one command endpoint response to established safe error types."""
-        if response.status_code in {401, 403}:
-            raise DiscordAPICredentialsInvalid
-        if response.status_code == 429 or response.status_code >= 500:
-            raise DiscordAPIUnavailable
-        if response.status_code >= 400:
-            raise DiscordAPIConfigurationInvalid
 
 
 def _discord_guild_command_from_response(
@@ -483,16 +489,59 @@ def _require_definition_match(
 
 
 async def get_discord_api_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide a bounded HTTP client for Discord Application API calls."""
+    """Provide the bounded G1 individual command-create transport."""
     async with httpx.AsyncClient(timeout=20.0) as client:
         yield client
 
 
-def get_discord_api_client(
+def get_discord_command_create_transport(
     http_client: Annotated[
         httpx.AsyncClient,
         Depends(get_discord_api_http_client),
     ],
+) -> DiscordGuildCommandCreateTransport:
+    """Provide the sole Discord control-plane direct REST gap."""
+    return DiscordGuildCommandCreateHTTPTransport(http_client)
+
+
+def get_discord_api_client(
+    sdk_factory: Annotated[
+        DiscordSDKClientFactory,
+        Depends(get_discord_sdk_client_factory),
+    ],
+    command_create_transport: Annotated[
+        DiscordGuildCommandCreateTransport,
+        Depends(get_discord_command_create_transport),
+    ],
 ) -> DiscordAPIClient:
     """Provide the Discord Application API adapter."""
-    return DiscordAPIClient(http_client)
+    return DiscordAPIClient(sdk_factory, command_create_transport)
+
+
+def _command_from_sdk(command: DiscordSDKCommand) -> DiscordGuildCommand:
+    return DiscordGuildCommand(
+        command_id=command.command_id,
+        name=command.name,
+        command_type=command.command_type,
+        description=command.description,
+    )
+
+
+def _api_error(error: DiscordSDKError) -> DiscordAPIError:
+    if isinstance(error, DiscordSDKCredentialsInvalid | DiscordSDKPermissionDenied):
+        return DiscordAPICredentialsInvalid()
+    if isinstance(error, DiscordSDKRequestRejected | DiscordSDKResourceUnavailable):
+        return DiscordAPIConfigurationInvalid()
+    if isinstance(error, DiscordSDKRateLimited | DiscordSDKUnavailable):
+        return DiscordAPIUnavailable()
+    return DiscordAPIUnavailable()
+
+
+def _raise_for_command_create_response(response: httpx.Response) -> None:
+    """Map the sole command-create REST response to established safe errors."""
+    if response.status_code in {401, 403}:
+        raise DiscordAPICredentialsInvalid
+    if response.status_code == 429 or response.status_code >= 500:
+        raise DiscordAPIUnavailable
+    if response.status_code >= 400:
+        raise DiscordAPIConfigurationInvalid

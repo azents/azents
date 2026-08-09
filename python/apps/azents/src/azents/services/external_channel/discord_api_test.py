@@ -1,6 +1,9 @@
-"""Discord Application metadata client tests."""
+"""Discord public SDK application adapter tests."""
 
-import httpx
+import contextlib
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+
 import pytest
 
 from azents.services.external_channel.discord_api import (
@@ -9,91 +12,191 @@ from azents.services.external_channel.discord_api import (
     DiscordAPIConfigurationInvalid,
     DiscordAPICredentialsInvalid,
     DiscordAPIUnavailable,
+    DiscordGuildCommand,
+    DiscordGuildCommandCreateTransport,
+    DiscordGuildCommandDefinition,
     DiscordGuildCommandRole,
+)
+from azents.services.external_channel.discord_sdk import (
+    DiscordSDKApplication,
+    DiscordSDKCommand,
+    DiscordSDKCredentialsInvalid,
+    DiscordSDKSession,
 )
 
 
-def _client(handler: httpx.MockTransport) -> DiscordAPIClient:
-    return DiscordAPIClient(httpx.AsyncClient(transport=handler))
+@dataclass
+class _SDKSession:
+    application: DiscordSDKApplication = field(
+        default_factory=lambda: DiscordSDKApplication(
+            application_id="app-1",
+            verify_key="ab" * 32,
+        )
+    )
+    bot_user_id: str = "123456789012345678"
+    commands: list[DiscordSDKCommand] = field(default_factory=list)
+    configured_endpoint: str | None = None
+    updated: list[str] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
+
+    async def fetch_application(self) -> DiscordSDKApplication:
+        return self.application
+
+    def current_bot_user_id(self) -> str:
+        return self.bot_user_id
+
+    async def configure_interactions_endpoint(self, endpoint_url: str) -> None:
+        self.configured_endpoint = endpoint_url
+
+    async def list_guild_commands(
+        self,
+        *,
+        application_id: str,
+        guild_id: str,
+    ) -> tuple[DiscordSDKCommand, ...]:
+        assert application_id == "app-1"
+        assert guild_id == "guild-1"
+        return tuple(self.commands)
+
+    async def update_guild_command(
+        self,
+        *,
+        command_id: str,
+        name: str,
+        command_type: int,
+        description: str | None,
+    ) -> DiscordSDKCommand:
+        self.updated.append(command_id)
+        updated = DiscordSDKCommand(
+            command_id=command_id,
+            name=name,
+            command_type=command_type,
+            description=description,
+        )
+        self.commands = [
+            updated if command.command_id == command_id else command
+            for command in self.commands
+        ]
+        return updated
+
+    async def delete_guild_command(self, *, command_id: str) -> None:
+        self.deleted.append(command_id)
+        self.commands = [
+            command for command in self.commands if command.command_id != command_id
+        ]
+
+    async def fetch_message_projection(self, **_: object) -> dict[str, object]:
+        raise AssertionError("application adapter must not fetch messages")
+
+    async def fetch_history_projections(
+        self, **_: object
+    ) -> tuple[dict[str, object], ...]:
+        raise AssertionError("application adapter must not fetch history")
+
+
+@dataclass
+class _SDKFactory:
+    session: _SDKSession
+    error: Exception | None = None
+    open_count: int = 0
+
+    @contextlib.asynccontextmanager
+    async def open(self, *, bot_token: str) -> AsyncIterator[DiscordSDKSession]:
+        assert bot_token == "redacted-token"
+        self.open_count += 1
+        if self.error is not None:
+            raise self.error
+        yield self.session
+
+
+@dataclass
+class _CreateTransport(DiscordGuildCommandCreateTransport):
+    created: list[DiscordGuildCommandDefinition] = field(default_factory=list)
+    next_id: int = 300
+
+    async def create(
+        self,
+        *,
+        bot_token: str,
+        application_id: str,
+        guild_id: str,
+        definition: DiscordGuildCommandDefinition,
+    ) -> DiscordGuildCommand:
+        assert bot_token == "redacted-token"
+        assert application_id == "app-1"
+        assert guild_id == "guild-1"
+        self.created.append(definition)
+        command = DiscordGuildCommand(
+            command_id=str(self.next_id),
+            name=definition.name,
+            command_type=definition.command_type,
+            description=definition.description,
+        )
+        self.next_id += 1
+        return command
+
+
+def _client(
+    session: _SDKSession | None = None,
+    *,
+    error: Exception | None = None,
+) -> tuple[DiscordAPIClient, _SDKFactory, _CreateTransport]:
+    factory = _SDKFactory(session or _SDKSession(), error=error)
+    create = _CreateTransport()
+    return DiscordAPIClient(factory, create), factory, create
 
 
 @pytest.mark.asyncio
-async def test_reads_current_application_verify_key() -> None:
-    """Bot-token metadata exposes only validated authority fields."""
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(
-            200,
-            json={"id": "app-1", "verify_key": "ab" * 32},
-            request=request,
-        )
-    )
-    client = _client(transport)
+async def test_reads_current_application_verify_key_from_sdk() -> None:
+    """Bot-token metadata exposes only validated SDK authority fields."""
+    client, factory, _ = _client()
 
     metadata = await client.get_current_application(bot_token="redacted-token")
 
     assert metadata.application_id == "app-1"
     assert metadata.verify_key == "ab" * 32
-    await client.http_client.aclose()
+    assert factory.open_count == 1
 
 
 @pytest.mark.asyncio
-async def test_rejects_invalid_bot_token() -> None:
+async def test_maps_sdk_login_rejection_to_invalid_credentials() -> None:
     """Credential rejection remains distinct from provider unavailability."""
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(401, request=request)
-    )
-    client = _client(transport)
+    client, _, _ = _client(error=DiscordSDKCredentialsInvalid())
 
     with pytest.raises(DiscordAPICredentialsInvalid):
         await client.get_current_application(bot_token="redacted-token")
-    await client.http_client.aclose()
 
 
 @pytest.mark.asyncio
-async def test_rejects_malformed_verify_key() -> None:
-    """Malformed provider metadata cannot become an interaction verifier."""
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(
-            200,
-            json={"id": "app-1", "verify_key": "not-hex"},
-            request=request,
+async def test_rejects_malformed_sdk_verify_key() -> None:
+    """Malformed SDK metadata cannot become an interaction verifier."""
+    session = _SDKSession(
+        application=DiscordSDKApplication(
+            application_id="app-1",
+            verify_key="not-hex",
         )
     )
-    client = _client(transport)
+    client, _, _ = _client(session)
 
     with pytest.raises(DiscordAPIUnavailable):
         await client.get_current_application(bot_token="redacted-token")
-    await client.http_client.aclose()
 
 
 @pytest.mark.asyncio
-async def test_reads_current_bot_user_identity() -> None:
-    """The Bot identity is stored separately from the Discord Application ID."""
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(
-            200,
-            json={"id": "123456789012345678"},
-            request=request,
-        )
-    )
-    client = _client(transport)
+async def test_reads_current_bot_user_identity_from_sdk() -> None:
+    """The SDK Bot identity remains distinct from the Application ID."""
+    client, _, _ = _client()
 
     bot_user_id = await client.get_current_bot_user_id(bot_token="redacted-token")
 
     assert bot_user_id == "123456789012345678"
-    await client.http_client.aclose()
 
 
 @pytest.mark.asyncio
-async def test_configures_current_application_interaction_endpoint() -> None:
-    """The provider call edits the Bot-owned App without persisting its selector."""
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(200, request=request)
-
-    client = _client(httpx.MockTransport(handler))
+async def test_configures_interaction_endpoint_through_sdk() -> None:
+    """Endpoint configuration uses the public Application edit boundary."""
+    session = _SDKSession()
+    client, _, _ = _client(session)
     endpoint_url = "https://callbacks.example/discord/interactions/opaque-selector"
 
     await client.configure_interactions_endpoint(
@@ -101,63 +204,41 @@ async def test_configures_current_application_interaction_endpoint() -> None:
         endpoint_url=endpoint_url,
     )
 
-    assert len(requests) == 1
-    request = requests[0]
-    assert request.method == "PATCH"
-    assert request.url.path == "/api/v10/applications/@me"
-    assert request.headers["authorization"] == "Bot redacted-token"
-    assert (
-        request.json()
-        if False
-        else request.content
-        == (
-            b'{"interactions_endpoint_url":"'
-            b"https://callbacks.example/discord/interactions/opaque-selector"
-            b'"}'
-        )
-    )
-    await client.http_client.aclose()
+    assert session.configured_endpoint == endpoint_url
 
 
 @pytest.mark.asyncio
-async def test_reconciles_required_commands_without_overwriting_customer_commands() -> (
-    None
-):
-    """The reconciler preserves unrelated Guild commands and returns every role ID."""
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(
-            200,
-            json=[
-                {
-                    "id": "101",
-                    "name": DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
-                    "type": 3,
-                },
-                {
-                    "id": "102",
-                    "name": "Azents settings",
-                    "type": 1,
-                    "description": "Configure Azents settings.",
-                },
-                {
-                    "id": "103",
-                    "name": "Conversation settings",
-                    "type": 3,
-                },
-                {
-                    "id": "900",
-                    "name": "Customer command",
-                    "type": 1,
-                    "description": "Customer-owned command.",
-                },
-            ],
-            request=request,
-        )
-
-    client = _client(httpx.MockTransport(handler))
+async def test_reconciles_required_commands_without_touching_customer_command() -> None:
+    """SDK listing preserves unrelated Guild commands and returns every role ID."""
+    session = _SDKSession(
+        commands=[
+            DiscordSDKCommand(
+                command_id="101",
+                name=DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
+                command_type=3,
+                description=None,
+            ),
+            DiscordSDKCommand(
+                command_id="102",
+                name="Azents settings",
+                command_type=1,
+                description="Configure Azents settings.",
+            ),
+            DiscordSDKCommand(
+                command_id="103",
+                name="Conversation settings",
+                command_type=3,
+                description=None,
+            ),
+            DiscordSDKCommand(
+                command_id="900",
+                name="Customer command",
+                command_type=1,
+                description="Customer-owned command.",
+            ),
+        ]
+    )
+    client, factory, create = _client(session)
 
     command_set = await client.reconcile_required_guild_commands(
         bot_token="redacted-token",
@@ -165,83 +246,50 @@ async def test_reconciles_required_commands_without_overwriting_customer_command
         guild_id="guild-1",
     )
 
-    assert command_set.schema_version == 1
     assert command_set.command_ids == {
         DiscordGuildCommandRole.MESSAGE_ACTION: "101",
         DiscordGuildCommandRole.AZENTS_SETTINGS: "102",
         DiscordGuildCommandRole.CONVERSATION_SETTINGS: "103",
     }
-    assert len(requests) == 1
-    request = requests[0]
-    assert request.method == "GET"
-    assert request.url.path == "/api/v10/applications/app-1/guilds/guild-1/commands"
-    assert request.headers["authorization"] == "Bot redacted-token"
-    await client.http_client.aclose()
+    assert factory.open_count == 1
+    assert create.created == []
+    assert session.updated == []
+    assert session.deleted == []
+    assert any(command.command_id == "900" for command in session.commands)
 
 
 @pytest.mark.asyncio
-async def test_reconciles_missing_stale_and_duplicate_azents_commands_only() -> None:
-    """The reconciler creates, updates, and deletes only recognized Azents commands."""
-    requests: list[httpx.Request] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        if request.method == "GET":
-            return httpx.Response(
-                200,
-                json=[
-                    {
-                        "id": "100",
-                        "name": DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
-                        "type": 3,
-                    },
-                    {
-                        "id": "101",
-                        "name": DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
-                        "type": 3,
-                    },
-                    {
-                        "id": "200",
-                        "name": "Azents settings",
-                        "type": 1,
-                        "description": "Old settings copy.",
-                    },
-                    {
-                        "id": "900",
-                        "name": "Customer command",
-                        "type": 1,
-                        "description": "Customer-owned command.",
-                    },
-                ],
-                request=request,
-            )
-        if request.method == "PATCH":
-            assert request.url.path.endswith("/commands/200")
-            return httpx.Response(
-                200,
-                json={
-                    "id": "200",
-                    "name": "Azents settings",
-                    "type": 1,
-                    "description": "Configure Azents settings.",
-                },
-                request=request,
-            )
-        if request.method == "POST":
-            return httpx.Response(
-                201,
-                json={
-                    "id": "300",
-                    "name": "Conversation settings",
-                    "type": 3,
-                },
-                request=request,
-            )
-        assert request.method == "DELETE"
-        assert request.url.path.endswith("/commands/101")
-        return httpx.Response(204, request=request)
-
-    client = _client(httpx.MockTransport(handler))
+async def test_reconciliation_uses_g1_only_for_missing_command() -> None:
+    """SDK update/delete and the sole G1 create gap reconcile known commands."""
+    session = _SDKSession(
+        commands=[
+            DiscordSDKCommand(
+                command_id="100",
+                name=DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
+                command_type=3,
+                description=None,
+            ),
+            DiscordSDKCommand(
+                command_id="101",
+                name=DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
+                command_type=3,
+                description=None,
+            ),
+            DiscordSDKCommand(
+                command_id="200",
+                name="Azents settings",
+                command_type=1,
+                description="Old settings copy.",
+            ),
+            DiscordSDKCommand(
+                command_id="900",
+                name="Customer command",
+                command_type=1,
+                description="Customer-owned command.",
+            ),
+        ]
+    )
+    client, _, create = _client(session)
 
     command_set = await client.reconcile_required_guild_commands(
         bot_token="redacted-token",
@@ -254,48 +302,40 @@ async def test_reconciles_missing_stale_and_duplicate_azents_commands_only() -> 
         DiscordGuildCommandRole.AZENTS_SETTINGS: "200",
         DiscordGuildCommandRole.CONVERSATION_SETTINGS: "300",
     }
-    assert [(request.method, request.url.path) for request in requests] == [
-        ("GET", "/api/v10/applications/app-1/guilds/guild-1/commands"),
-        ("PATCH", "/api/v10/applications/app-1/guilds/guild-1/commands/200"),
-        ("POST", "/api/v10/applications/app-1/guilds/guild-1/commands"),
-        ("DELETE", "/api/v10/applications/app-1/guilds/guild-1/commands/101"),
+    assert session.updated == ["200"]
+    assert session.deleted == ["101"]
+    assert [definition.role for definition in create.created] == [
+        DiscordGuildCommandRole.CONVERSATION_SETTINGS
     ]
-    assert requests[1].content == (
-        b'{"name":"Azents settings","type":1,'
-        b'"description":"Configure Azents settings."}'
-    )
-    assert requests[2].content == b'{"name":"Conversation settings","type":3}'
-    await client.http_client.aclose()
+    assert any(command.command_id == "900" for command in session.commands)
 
 
 @pytest.mark.asyncio
 async def test_reconciliation_rejects_non_distinct_required_command_ids() -> None:
-    """A provider result cannot activate two required roles with one command ID."""
-    transport = httpx.MockTransport(
-        lambda request: httpx.Response(
-            200,
-            json=[
-                {
-                    "id": "100",
-                    "name": DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
-                    "type": 3,
-                },
-                {
-                    "id": "100",
-                    "name": "Azents settings",
-                    "type": 1,
-                    "description": "Configure Azents settings.",
-                },
-                {
-                    "id": "100",
-                    "name": "Conversation settings",
-                    "type": 3,
-                },
-            ],
-            request=request,
-        )
+    """One provider identity cannot activate two required command roles."""
+    session = _SDKSession(
+        commands=[
+            DiscordSDKCommand(
+                command_id="100",
+                name=DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
+                command_type=3,
+                description=None,
+            ),
+            DiscordSDKCommand(
+                command_id="100",
+                name="Azents settings",
+                command_type=1,
+                description="Configure Azents settings.",
+            ),
+            DiscordSDKCommand(
+                command_id="100",
+                name="Conversation settings",
+                command_type=3,
+                description=None,
+            ),
+        ]
     )
-    client = _client(transport)
+    client, _, _ = _client(session)
 
     with pytest.raises(DiscordAPIConfigurationInvalid):
         await client.reconcile_required_guild_commands(
@@ -303,4 +343,3 @@ async def test_reconciliation_rejects_non_distinct_required_command_ids() -> Non
             application_id="app-1",
             guild_id="guild-1",
         )
-    await client.http_client.aclose()

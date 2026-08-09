@@ -190,6 +190,53 @@ def _project_discord_sdk_event(
     return project_discord_message(message=source, guild_id=guild_id)
 
 
+def project_discord_sdk_history_message(
+    *,
+    message: discord.Message,
+    guild_id: str,
+    conversation_channel_id: str,
+    thread_parent_id: str | None,
+) -> dict[str, object]:
+    """Project one public REST Message without requiring Gateway cache state."""
+    if str(message.id) == conversation_channel_id:
+        raise ValueError("Discord Message identity matches its channel.")
+    if str(message.channel.id) != conversation_channel_id:
+        raise ValueError("Discord Message channel identity is invalid.")
+    source: dict[str, object] = {
+        "id": str(message.id),
+        "channel_id": conversation_channel_id,
+        "guild_id": guild_id,
+        "content": message.content,
+        "timestamp": message.created_at.isoformat(),
+        "author": _sdk_user(message.author),
+        "mentions": [_sdk_user(mention) for mention in message.mentions],
+        "attachments": [
+            {
+                "id": str(attachment.id),
+                "filename": attachment.filename,
+                "size": attachment.size,
+                **(
+                    {"content_type": attachment.content_type}
+                    if attachment.content_type is not None
+                    else {}
+                ),
+            }
+            for attachment in message.attachments
+        ],
+    }
+    if message.edited_at is not None:
+        source["edited_timestamp"] = message.edited_at.isoformat()
+    embeds = [_sdk_embed(embed) for embed in message.embeds]
+    if embeds:
+        source["embeds"] = embeds
+    if thread_parent_id is not None:
+        source["thread"] = {
+            "id": conversation_channel_id,
+            "parent_id": thread_parent_id,
+        }
+    return project_discord_message(message=source, guild_id=guild_id)
+
+
 def _sdk_user(user: discord.abc.User) -> dict[str, object]:
     """Project public Discord user attributes without profile URLs."""
     global_name = getattr(user, "global_name", None)
