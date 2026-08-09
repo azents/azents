@@ -312,7 +312,14 @@ class FakeState:
     def list_guild_commands(self) -> list[dict[str, object]]:
         """Return current fake commands to the Discord adapter."""
         with self.lock:
-            return [dict(command) for command in self.guild_commands.values()]
+            return [
+                _guild_command_response(
+                    command,
+                    application_id=self.application_id,
+                    guild_id=self.guild_id,
+                )
+                for command in self.guild_commands.values()
+            ]
 
     def create_guild_command(self, body: Mapping[str, object]) -> dict[str, object]:
         """Create one bounded Discord command with a deterministic ID."""
@@ -327,7 +334,11 @@ class FakeState:
                 **command_fields,
             }
             self.guild_commands[command_id] = command
-            return dict(command)
+            return _guild_command_response(
+                command,
+                application_id=self.application_id,
+                guild_id=self.guild_id,
+            )
 
     def update_guild_command(
         self,
@@ -335,16 +346,21 @@ class FakeState:
         body: Mapping[str, object],
     ) -> dict[str, object] | None:
         """Update one known command without retaining the request body in evidence."""
-        command_fields = _guild_command_fields(body)
         with self.lock:
-            if command_id not in self.guild_commands:
+            existing = self.guild_commands.get(command_id)
+            if existing is None:
                 return None
+            command_fields = _guild_command_fields({**existing, **body})
             updated: dict[str, object] = {
                 "id": command_id,
                 **command_fields,
             }
             self.guild_commands[command_id] = updated
-            return dict(updated)
+            return _guild_command_response(
+                updated,
+                application_id=self.application_id,
+                guild_id=self.guild_id,
+            )
 
     def delete_guild_command(self, command_id: str) -> bool:
         """Delete one known command."""
@@ -699,6 +715,26 @@ class FakeState:
         with self.lock:
             return self._thread_names.get(channel_id)
 
+    def thread_parent_id(self, channel_id: str) -> str | None:
+        """Return the configured parent identity for one created thread."""
+        with self.lock:
+            return next(
+                (
+                    parent_channel_id
+                    for (parent_channel_id, _), thread_id in self._root_threads.items()
+                    if thread_id == channel_id
+                ),
+                None,
+            )
+
+    def is_source_channel(self, channel_id: str) -> bool:
+        """Return whether configured message state belongs to one source channel."""
+        with self.lock:
+            return any(
+                parent_channel_id == channel_id
+                for parent_channel_id, _ in self.root_messages
+            )
+
     def update_thread_name(self, *, channel_id: str, name: str) -> bool:
         """Replace one known thread name without exposing it in evidence."""
         with self.lock:
@@ -904,7 +940,9 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             if self._controlled_response(scenario):
                 return
             name = self.state.thread_name(channel_id)
-            if name is None:
+            parent_id = self.state.thread_parent_id(channel_id)
+            is_source_channel = self.state.is_source_channel(channel_id)
+            if name is None and not is_source_channel:
                 self.state.record_operation(
                     "thread_title",
                     operation="get_channel",
@@ -924,17 +962,43 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 )
                 self._raw_response(200, b"{malformed")
                 return
-            channel_payload: dict[str, object] = {
-                "id": channel_id,
-                "guild_id": self.state.guild_id,
-                "name": name,
-            }
+            channel_payload: dict[str, object]
+            if is_source_channel:
+                channel_payload = {
+                    "id": channel_id,
+                    "guild_id": self.state.guild_id,
+                    "type": 0,
+                    "name": "discord-source",
+                    "position": 0,
+                    "permission_overwrites": [],
+                }
+                evidence_event = "channel_read"
+            else:
+                assert name is not None
+                assert parent_id is not None
+                channel_payload = {
+                    "id": channel_id,
+                    "guild_id": self.state.guild_id,
+                    "parent_id": parent_id,
+                    "owner_id": self.state.bot_user_id,
+                    "type": 11,
+                    "name": name,
+                    "message_count": 0,
+                    "member_count": 0,
+                    "thread_metadata": {
+                        "archived": False,
+                        "auto_archive_duration": 1440,
+                        "archive_timestamp": "2026-07-28T00:00:00.000000+00:00",
+                        "locked": False,
+                    },
+                }
+                evidence_event = "thread_title"
             if scenario == "response_shape_invalid":
                 channel_payload.pop("name")
             elif scenario == "response_channel_mismatch":
                 channel_payload["id"] = "0"
             self.state.record_operation(
-                "thread_title",
+                evidence_event,
                 operation="get_channel",
                 outcome="delivered",
                 safe_category=(
@@ -1013,7 +1077,16 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 outcome="delivered",
                 metadata=history_metadata,
             )
-            self._json_response_array(200, page)
+            self._json_response_array(
+                200,
+                [
+                    _discord_message_response(
+                        message,
+                        guild_id=self.state.guild_id,
+                    )
+                    for message in page
+                ],
+            )
             return
         if "/channels/" in parsed.path and "/messages/" in parsed.path:
             channel_id, message_id = _channel_message_ids(parsed.path)
@@ -1076,10 +1149,19 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     root_message_id=message_id,
                 )
                 if thread_id is not None:
-                    payload["thread"] = {
-                        "id": thread_id,
-                        "parent_id": channel_id,
-                    }
+                    thread_name = self.state.thread_name(thread_id)
+                    assert thread_name is not None
+                    payload["thread"] = _discord_thread_channel_response(
+                        channel_id=thread_id,
+                        parent_id=channel_id,
+                        guild_id=self.state.guild_id,
+                        owner_id=self.state.bot_user_id,
+                        name=thread_name,
+                    )
+                payload = _discord_message_response(
+                    payload,
+                    guild_id=self.state.guild_id,
+                )
                 if scenario == "response_shape_invalid":
                     self.state.record_operation(
                         "thread_read",
@@ -1296,12 +1378,13 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 )
                 self._json_response(
                     201,
-                    {
-                        "id": thread_id,
-                        "parent_id": channel_id,
-                        "guild_id": self.state.guild_id,
-                        "name": name,
-                    },
+                    _discord_thread_channel_response(
+                        channel_id=thread_id,
+                        parent_id=channel_id,
+                        guild_id=self.state.guild_id,
+                        owner_id=self.state.bot_user_id,
+                        name=name,
+                    ),
                 )
                 return
         if parsed.path.startswith(f"{_API_PREFIX}/channels/") and parsed.path.endswith(
@@ -1414,7 +1497,14 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 metadata={"channel_id": channel_id, "message_id": message_id},
             )
             self._json_response(
-                200, {"id": message_id, "channel_id": response_channel_id}
+                200,
+                _discord_mutation_message_response(
+                    message_id=message_id,
+                    channel_id=response_channel_id,
+                    guild_id=self.state.guild_id,
+                    bot_user_id=self.state.bot_user_id,
+                    body=body,
+                ),
             )
             return
         self._json_response(404, {"message": "Unknown fake endpoint."})
@@ -1422,6 +1512,26 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
     def do_PATCH(self) -> None:
         """Configure callback authority or update a message without retaining bodies."""
         parsed = urlparse(self.path)
+        if parsed.path == f"{_API_PREFIX}/applications/@me":
+            application_id = self.state.application_id
+            scenario = self._operation(
+                "configure_interactions_endpoint",
+                metadata={"application_id": application_id},
+            )
+            if self._controlled_response(scenario):
+                return
+            if scenario == "ok":
+                body = self._json_body_or_empty()
+                endpoint_url = body.get("interactions_endpoint_url")
+                if not isinstance(endpoint_url, str) or not endpoint_url:
+                    self._json_response(400, {"message": "Missing callback URL."})
+                    return
+                self.state.configure_interaction_endpoint(
+                    application_id,
+                    endpoint_url,
+                )
+            self._json_response(200, {})
+            return
         channel_id = _channel_item_id(parsed.path)
         if channel_id is not None:
             body = self._json_body()
@@ -1468,11 +1578,15 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 )
                 self._json_response(404, {"message": "Not found."})
                 return
-            payload: dict[str, object] = {
-                "id": channel_id,
-                "guild_id": self.state.guild_id,
-                "name": name,
-            }
+            parent_id = self.state.thread_parent_id(channel_id)
+            assert parent_id is not None
+            payload = _discord_thread_channel_response(
+                channel_id=channel_id,
+                parent_id=parent_id,
+                guild_id=self.state.guild_id,
+                owner_id=self.state.bot_user_id,
+                name=name,
+            )
             if scenario == "response_shape_invalid":
                 payload.pop("name")
             elif scenario == "response_channel_mismatch":
@@ -1507,26 +1621,6 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 self._json_response(404, {"message": "Not found."})
                 return
             self._json_response(200, command)
-            return
-        if parsed.path == f"{_API_PREFIX}/applications/@me":
-            application_id = self.state.application_id
-            scenario = self._operation(
-                "configure_interactions_endpoint",
-                metadata={"application_id": application_id},
-            )
-            if self._controlled_response(scenario):
-                return
-            if scenario == "ok":
-                body = self._json_body_or_empty()
-                endpoint_url = body.get("interactions_endpoint_url")
-                if not isinstance(endpoint_url, str) or not endpoint_url:
-                    self._json_response(400, {"message": "Missing callback URL."})
-                    return
-                self.state.configure_interaction_endpoint(
-                    application_id,
-                    endpoint_url,
-                )
-            self._json_response(200, {})
             return
         channel_id, message_id = _channel_message_ids(parsed.path)
         if channel_id is not None and message_id is not None:
@@ -1614,7 +1708,14 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 metadata={"channel_id": channel_id, "message_id": message_id},
             )
             self._json_response(
-                200, {"id": message_id, "channel_id": response_channel_id}
+                200,
+                _discord_mutation_message_response(
+                    message_id=message_id,
+                    channel_id=response_channel_id,
+                    guild_id=self.state.guild_id,
+                    bot_user_id=self.state.bot_user_id,
+                    body=body,
+                ),
             )
             return
         self._json_response(404, {"message": "Unknown fake endpoint."})
@@ -1990,6 +2091,111 @@ def _root_messages(value: object) -> dict[tuple[str, str], dict[str, object]]:
     return result
 
 
+def _discord_message_response(
+    message: Mapping[str, object],
+    *,
+    guild_id: str,
+) -> dict[str, object]:
+    """Return the complete provider shape required by discord.py Message."""
+    author = message.get("author", {"id": "600000000000000001"})
+    if not isinstance(author, Mapping):
+        raise ValueError("Discord message author is invalid.")
+    raw_mentions = message.get("mentions", [])
+    if not isinstance(raw_mentions, list):
+        raise ValueError("Discord message mentions are invalid.")
+    mentions = [
+        _discord_user_response(cast(Mapping[str, object], mention))
+        for mention in raw_mentions
+        if isinstance(mention, Mapping)
+    ]
+    if len(mentions) != len(raw_mentions):
+        raise ValueError("Discord message mention is invalid.")
+    return {
+        "type": 0,
+        "content": "",
+        "timestamp": "2026-07-28T00:00:00.000000+00:00",
+        "edited_timestamp": None,
+        "mention_roles": [],
+        "attachments": [],
+        "embeds": [],
+        "components": [],
+        "pinned": False,
+        "mention_everyone": False,
+        "tts": False,
+        "flags": 0,
+        **message,
+        "guild_id": guild_id,
+        "author": _discord_user_response(cast(Mapping[str, object], author)),
+        "mentions": mentions,
+    }
+
+
+def _discord_user_response(user: Mapping[str, object]) -> dict[str, object]:
+    """Return the complete provider shape required by discord.py User."""
+    return {
+        "username": "participant",
+        "discriminator": "0",
+        "avatar": None,
+        **user,
+    }
+
+
+def _discord_mutation_message_response(
+    *,
+    message_id: str,
+    channel_id: str,
+    guild_id: str,
+    bot_user_id: str,
+    body: Mapping[str, object],
+) -> dict[str, object]:
+    """Return a complete Bot-authored message mutation response."""
+    content = body.get("content")
+    embeds = body.get("embeds")
+    components = body.get("components")
+    return _discord_message_response(
+        {
+            "id": message_id,
+            "channel_id": channel_id,
+            "content": content if isinstance(content, str) else "",
+            "author": {
+                "id": bot_user_id,
+                "username": "Azents",
+                "bot": True,
+            },
+            "embeds": embeds if isinstance(embeds, list) else [],
+            "components": components if isinstance(components, list) else [],
+        },
+        guild_id=guild_id,
+    )
+
+
+def _discord_thread_channel_response(
+    *,
+    channel_id: str,
+    parent_id: str,
+    guild_id: str,
+    owner_id: str,
+    name: str,
+) -> dict[str, object]:
+    """Return the complete provider shape required by discord.py Thread."""
+    return {
+        "id": channel_id,
+        "guild_id": guild_id,
+        "parent_id": parent_id,
+        "owner_id": owner_id,
+        "type": 11,
+        "name": name,
+        "message_count": 0,
+        "member_count": 0,
+        "thread_metadata": {
+            "archived": False,
+            "auto_archive_duration": 1440,
+            "archive_timestamp": "2026-07-28T00:00:00.000000+00:00",
+            "locked": False,
+        },
+    }
+
+
 def _serialized_size(value: Mapping[str, object]) -> int:
     """Return bounded JSON size for one provider fixture object."""
     try:
@@ -2226,6 +2432,21 @@ def _guild_command_fields(body: Mapping[str, object]) -> dict[str, object]:
         "name": name,
         "type": command_type,
         **({} if description is None else {"description": description}),
+    }
+
+
+def _guild_command_response(
+    command: Mapping[str, object],
+    *,
+    application_id: str,
+    guild_id: str,
+) -> dict[str, object]:
+    """Return the complete provider shape required by discord.py AppCommand."""
+    return {
+        **command,
+        "application_id": application_id,
+        "guild_id": guild_id,
+        "description": command.get("description", ""),
     }
 
 

@@ -4388,12 +4388,14 @@ def test_discord_single_activation_and_interaction_journey(
         ),
         _headers=headers,
     )
-    assert setup.connection.status is ExternalChannelConnectionStatus.ACTIVE
+    activation_state = _discord_provider_state(discord_provider_fake_url)
+    assert setup.connection.status is ExternalChannelConnectionStatus.ACTIVE, (
+        activation_state
+    )
     assert setup.connection.credentials_configured is True
     assert setup.connection.provider_tenant_id == _DISCORD_GUILD_ID
     assert _DISCORD_BOT_TOKEN not in setup.model_dump_json(by_alias=True)
 
-    activation_state = _discord_provider_state(discord_provider_fake_url)
     assert activation_state["interaction_configurations"] == [
         {"application_id": _DISCORD_APPLICATION_ID}
     ]
@@ -4796,7 +4798,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 generated_detail.title
                 and generated_detail.title_source
                 is AgentSessionTitleSource.AUTO_GENERATED
-                and counts.get("get_channel", 0) == 1
+                and counts.get("get_channel", 0) >= 2
                 and counts.get("update_channel", 0) == 1
             ):
                 return generated_detail
@@ -4890,7 +4892,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert _successful_session_presence_states(state) == ["joined"]
     request_counts = cast(dict[str, int], state["request_counts"])
     assert request_counts["create_thread"] >= 1
-    assert request_counts["get_channel"] == 1
+    assert request_counts["get_channel"] >= 2
     assert request_counts["update_channel"] == 1
     # Thread reconciliation runs before create; canonical history runs after create.
     assert request_counts["get_message"] >= 2
@@ -4899,11 +4901,19 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         for operation in cast(list[dict[str, object]], state["operations"])
         if operation["operation"] in {"create_thread", "get_channel", "update_channel"}
     ]
-    assert title_operations[-3:] == [
+    expected_title_operations = [
         "create_thread",
         "get_channel",
         "update_channel",
     ]
+    matched_title_operation_count = 0
+    for operation in title_operations:
+        if operation != expected_title_operations[matched_title_operation_count]:
+            continue
+        matched_title_operation_count += 1
+        if matched_title_operation_count == len(expected_title_operations):
+            break
+    assert matched_title_operation_count == len(expected_title_operations)
     gateway = cast(dict[str, object], state["gateway"])
     assert cast(int, gateway["connections"]) >= 2
     initial_opcodes = cast(list[object], gateway["initial_opcodes"])

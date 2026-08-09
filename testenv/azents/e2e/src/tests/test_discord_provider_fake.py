@@ -212,7 +212,8 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
         commands_url,
         json={
             "name": "Private Azents settings command",
-            "type": 2,
+            "type": 1,
+            "description": "Stale description.",
         },
         timeout=5,
     )
@@ -229,6 +230,12 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
     )
     message_action.raise_for_status()
     assert message_action.json()["id"] == "500000000000000003"
+    for response in (unrelated, settings, message_action):
+        assert response.json()["application_id"] == "100000000000000001"
+        assert response.json()["guild_id"] == "200000000000000001"
+    for response in (unrelated, message_action):
+        assert response.json()["description"] == ""
+    assert settings.json()["description"] == "Stale description."
     command_id = requests.get(
         f"{discord_fake_url}/__testenv/command-id",
         params={"role": "message_action"},
@@ -249,13 +256,17 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
         f"{commands_url}/{settings.json()['id']}",
         json={
             "name": "Private updated settings command",
-            "type": 2,
+            "description": "Current description.",
         },
         timeout=5,
     )
     updated.raise_for_status()
     assert updated.json()["id"] == settings.json()["id"]
     assert updated.json()["name"] == "Private updated settings command"
+    assert updated.json()["type"] == 1
+    assert updated.json()["application_id"] == "100000000000000001"
+    assert updated.json()["guild_id"] == "200000000000000001"
+    assert updated.json()["description"] == "Current description."
 
     deleted = requests.delete(
         f"{commands_url}/{settings.json()['id']}",
@@ -480,6 +491,19 @@ def test_discord_fake_serves_bounded_history_and_thread_ordering_evidence(
         },
         timeout=5,
     ).raise_for_status()
+    source_channel = requests.get(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001",
+        timeout=5,
+    )
+    source_channel.raise_for_status()
+    assert source_channel.json() == {
+        "id": "400000000000000001",
+        "guild_id": "200000000000000001",
+        "type": 0,
+        "name": "discord-source",
+        "position": 0,
+        "permission_overwrites": [],
+    }
     root = requests.get(
         f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/500000000000000001",
         timeout=5,
@@ -517,15 +541,16 @@ def test_discord_fake_serves_bounded_history_and_thread_ordering_evidence(
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
     events = evidence["operations"]
     assert [event["event"] for event in events] == [
+        "channel_read",
         "thread_read",
         "history_page",
         "history_page",
         "thread_create",
         "thread_read",
     ]
-    assert events[0]["outcome"] == "missing"
-    assert events[3]["thread_channel_id"] == thread.json()["id"]
-    assert events[4]["outcome"] == "reused"
+    assert events[1]["outcome"] == "missing"
+    assert events[4]["thread_channel_id"] == thread.json()["id"]
+    assert events[5]["outcome"] == "reused"
     rendered = str(evidence)
     assert "Private root source" not in rendered
     assert "Private later" not in rendered

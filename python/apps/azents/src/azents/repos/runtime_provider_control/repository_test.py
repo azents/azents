@@ -314,6 +314,7 @@ class TestRuntimeProviderControlRepository:
             rdb_session,
             provider_id=provider_id,
             now=now + datetime.timedelta(seconds=1),
+            for_update=True,
         )
         assert not await repository.has_connected_connection(
             rdb_session,

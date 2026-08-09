@@ -33,6 +33,10 @@ from azents.services.external_channel.discord_history import (
     DiscordConversationHistoryClient,
     DiscordConversationHistoryTrigger,
 )
+from azents.services.external_channel.discord_sdk import (
+    DiscordSDKClientFactory,
+    get_discord_sdk_client_factory,
+)
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
     ExternalChannelTriggerLocator,
@@ -69,20 +73,14 @@ def get_ingestion_slack_conversation_client(
     )
 
 
-async def get_ingestion_discord_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide bounded HTTP transport for synchronous Discord history."""
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        yield client
-
-
 def get_ingestion_discord_conversation_client(
-    http_client: Annotated[
-        httpx.AsyncClient,
-        Depends(get_ingestion_discord_http_client),
+    sdk_factory: Annotated[
+        DiscordSDKClientFactory,
+        Depends(get_discord_sdk_client_factory),
     ],
 ) -> DiscordConversationHistoryClient:
-    """Provide the shared bounded Discord history client."""
-    return DiscordConversationHistoryClient(http_client)
+    """Provide the shared public discord.py history client."""
+    return DiscordConversationHistoryClient(sdk_factory)
 
 
 @dataclass

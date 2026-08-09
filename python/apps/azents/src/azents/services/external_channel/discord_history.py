@@ -1,11 +1,11 @@
 """Bounded Discord conversation-history hydration primitives."""
 
 import asyncio
+import contextlib
 import json
 import time
+from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass
-
-import httpx
 
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.services.external_channel.conversation import (
@@ -22,12 +22,22 @@ from azents.services.external_channel.conversation import (
     ExternalChannelHistoryTriggerMissing,
     ExternalChannelOperationDeadline,
 )
-from azents.services.external_channel.discord_endpoint import discord_api_base_url
 from azents.services.external_channel.discord_events import (
     DiscordEventExcluded,
     DiscordNormalizedMessage,
     normalize_projected_discord_event,
     project_discord_message,
+)
+from azents.services.external_channel.discord_sdk import (
+    DiscordSDKClientFactory,
+    DiscordSDKCredentialsInvalid,
+    DiscordSDKError,
+    DiscordSDKPermissionDenied,
+    DiscordSDKRateLimited,
+    DiscordSDKRequestRejected,
+    DiscordSDKResourceUnavailable,
+    DiscordSDKSession,
+    DiscordSDKUnavailable,
 )
 
 
@@ -63,7 +73,6 @@ class DiscordHistoryResponseMalformed(DiscordHistoryTemporaryError):
     """Discord returned a response outside the requested channel boundary."""
 
 
-MAX_DISCORD_HISTORY_RESPONSE_BYTES = 256 * 1024
 MAX_DISCORD_HISTORY_MESSAGE_BYTES = 64 * 1024
 MAX_DISCORD_HISTORY_PAGES = 20
 MAX_DISCORD_HISTORY_SCANNED_MESSAGES = 2_000
@@ -96,8 +105,8 @@ class DiscordConversationHistoryTrigger:
 class DiscordConversationHistoryClient:
     """Fetch canonical Discord source/thread history without retaining raw pages."""
 
-    def __init__(self, http_client: httpx.AsyncClient) -> None:
-        self.http_client = http_client
+    def __init__(self, sdk_factory: DiscordSDKClientFactory) -> None:
+        self.sdk_factory = sdk_factory
 
     async def fetch_thread_page(
         self,
@@ -112,46 +121,48 @@ class DiscordConversationHistoryClient:
         connected_bot_user_id: str | None,
     ) -> DiscordThreadPage:
         """Fetch one page for a root source or an already-existing thread."""
-        if thread_channel_id is None:
-            if cursor is not None:
-                return DiscordThreadPage(messages=(), next_cursor=None)
-            response = await self._request(
-                "GET",
-                f"/channels/{source_channel_id}/messages/{root_message_id}",
-                bot_token=bot_token,
-            )
-            self._validate_response_size(response)
-            payload = self._object_payload(response)
-            self._validate_message_size(payload)
-            if (
-                payload.get("id") != root_message_id
-                or payload.get("channel_id") != source_channel_id
-            ):
-                raise DiscordHistoryResponseMalformed(
-                    "Discord source message response did not match the request."
-                )
-            message = self._normalize(
-                guild_id=guild_id,
-                raw_message=payload,
-                connected_bot_user_id=connected_bot_user_id,
-            )
-            return DiscordThreadPage(
-                messages=() if message is None else (message,),
-                next_cursor=None,
-            )
+        try:
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                if thread_channel_id is None:
+                    if cursor is not None:
+                        return DiscordThreadPage(messages=(), next_cursor=None)
+                    payload = await sdk.fetch_message_projection(
+                        guild_id=guild_id,
+                        source_channel_id=source_channel_id,
+                        channel_id=source_channel_id,
+                        message_id=root_message_id,
+                    )
+                    self._validate_message_size(payload)
+                    if (
+                        payload.get("id") != root_message_id
+                        or payload.get("channel_id") != source_channel_id
+                    ):
+                        raise DiscordHistoryResponseMalformed(
+                            "Discord source message response did not match the request."
+                        )
+                    message = self._normalize(
+                        guild_id=guild_id,
+                        raw_message=payload,
+                        connected_bot_user_id=connected_bot_user_id,
+                    )
+                    return DiscordThreadPage(
+                        messages=() if message is None else (message,),
+                        next_cursor=None,
+                    )
 
-        page_limit = min(max(limit, 1), 100)
-        params: dict[str, str | int] = {"limit": page_limit}
-        if cursor is not None:
-            params["before"] = cursor
-        response = await self._request(
-            "GET",
-            f"/channels/{thread_channel_id}/messages",
-            bot_token=bot_token,
-            params=params,
-        )
-        self._validate_response_size(response)
-        payload = self._array_payload(response)
+                page_limit = min(max(limit, 1), 100)
+                before_message_id = cursor or str((1 << 63) - 1)
+                payload = list(
+                    await sdk.fetch_history_projections(
+                        guild_id=guild_id,
+                        source_channel_id=source_channel_id,
+                        channel_id=thread_channel_id,
+                        before_message_id=before_message_id,
+                        limit=page_limit,
+                    )
+                )
+        except DiscordSDKError as error:
+            raise _history_error(error) from error
         if len(payload) > page_limit:
             raise DiscordHistoryResponseMalformed(
                 "Discord history response exceeded the requested limit."
@@ -210,162 +221,178 @@ class DiscordConversationHistoryClient:
         pages = 0
         scanned = 0
         normalized_messages: list[DiscordNormalizedMessage] = []
-        while True:
-            if deadline.remaining_seconds() <= 0:
-                raise ExternalChannelHistoryDeadlineExceeded(
-                    "Discord history retrieval exceeded its deadline."
-                )
-            pages += 1
-            if pages > MAX_DISCORD_HISTORY_PAGES:
-                raise ExternalChannelHistoryRangeIncomplete(
-                    "Discord history range exceeded the bounded page limit."
-                )
-            try:
-                if cursor is None:
-                    response = await self._request(
-                        "GET",
-                        f"/channels/{trigger.conversation_channel_id}/messages/"
-                        f"{trigger.trigger_message_id}",
-                        bot_token=bot_token,
-                        deadline=deadline,
-                    )
-                    self._validate_response_size(response)
-                    exact_payload = self._object_payload(response)
-                    self._validate_message_size(exact_payload)
-                    if exact_payload.get("id") != trigger.trigger_message_id:
-                        raise ExternalChannelHistoryTriggerMissing(
-                            "Discord history did not return the exact trigger."
+        try:
+            async with self._open_with_deadline(
+                bot_token=bot_token,
+                deadline=deadline,
+            ) as sdk:
+                while True:
+                    if deadline.remaining_seconds() <= 0:
+                        raise ExternalChannelHistoryDeadlineExceeded(
+                            "Discord history retrieval exceeded its deadline."
                         )
-                    self._validate_history_item(
-                        exact_payload,
-                        trigger=trigger,
-                    )
-                    exact_message = self._normalize(
-                        guild_id=trigger.guild_id,
-                        raw_message=exact_payload,
-                        connected_bot_user_id=None,
-                    )
-                    if exact_message is None:
-                        raise ExternalChannelHistoryTriggerMissing(
-                            "Discord history trigger was authored by the connected Bot."
-                        )
-                    if (
-                        trigger.connected_bot_user_id is not None
-                        and exact_message.provider_user_id
-                        == trigger.connected_bot_user_id
-                    ):
-                        raise ExternalChannelHistoryTriggerMissing(
-                            "Discord history trigger was authored by the connected Bot."
-                        )
-                    normalized_messages.append(exact_message)
-                    scanned = 1
-                    cursor = trigger.trigger_message_id
-                    continue
-                params: dict[str, str | int] = {"limit": 100, "before": cursor}
-                response = await self._request(
-                    "GET",
-                    f"/channels/{trigger.conversation_channel_id}/messages",
-                    bot_token=bot_token,
-                    params=params,
-                    deadline=deadline,
-                )
-                self._validate_response_size(response)
-                payload = self._array_payload(response)
-                if len(payload) > 100:
-                    raise ExternalChannelHistoryMalformed(
-                        "Discord history response exceeded the requested limit."
-                    )
-                page_messages: list[DiscordNormalizedMessage] = []
-                oldest_position: str | None = None
-                for item in payload:
-                    if not is_external_channel_projection(item):
-                        continue
-                    self._validate_message_size(item)
-                    self._validate_history_item(item, trigger=trigger)
-                    message = self._normalize(
-                        guild_id=trigger.guild_id,
-                        raw_message=item,
-                        connected_bot_user_id=None,
-                    )
-                    if message is None:
-                        continue
-                    if (
-                        trigger.connected_bot_user_id is not None
-                        and message.provider_user_id == trigger.connected_bot_user_id
-                    ):
-                        continue
-                    scanned += 1
-                    if scanned > MAX_DISCORD_HISTORY_SCANNED_MESSAGES:
+                    pages += 1
+                    if pages > MAX_DISCORD_HISTORY_PAGES:
                         raise ExternalChannelHistoryRangeIncomplete(
-                            "Discord history range exceeded the bounded message limit."
+                            "Discord history range exceeded the bounded page limit."
                         )
-                    page_messages.append(message)
-                    oldest_position = (
-                        message.provider_position
-                        if oldest_position is None
-                        else min(oldest_position, message.provider_position)
+                    if cursor is None:
+                        exact_payload = await self._with_deadline(
+                            deadline,
+                            sdk.fetch_message_projection(
+                                guild_id=trigger.guild_id,
+                                source_channel_id=trigger.source_channel_id,
+                                channel_id=trigger.conversation_channel_id,
+                                message_id=trigger.trigger_message_id,
+                            ),
+                        )
+                        self._validate_message_size(exact_payload)
+                        if exact_payload.get("id") != trigger.trigger_message_id:
+                            raise ExternalChannelHistoryTriggerMissing(
+                                "Discord history did not return the exact trigger."
+                            )
+                        self._validate_history_item(
+                            exact_payload,
+                            trigger=trigger,
+                        )
+                        exact_message = self._normalize(
+                            guild_id=trigger.guild_id,
+                            raw_message=exact_payload,
+                            connected_bot_user_id=None,
+                        )
+                        if exact_message is None:
+                            raise ExternalChannelHistoryTriggerMissing(
+                                "Discord history trigger was authored by the "
+                                "connected Bot."
+                            )
+                        if (
+                            trigger.connected_bot_user_id is not None
+                            and exact_message.provider_user_id
+                            == trigger.connected_bot_user_id
+                        ):
+                            raise ExternalChannelHistoryTriggerMissing(
+                                "Discord history trigger was authored by the "
+                                "connected Bot."
+                            )
+                        normalized_messages.append(exact_message)
+                        scanned = 1
+                        cursor = trigger.trigger_message_id
+                        continue
+                    payload = list(
+                        await self._with_deadline(
+                            deadline,
+                            sdk.fetch_history_projections(
+                                guild_id=trigger.guild_id,
+                                source_channel_id=trigger.source_channel_id,
+                                channel_id=trigger.conversation_channel_id,
+                                before_message_id=cursor,
+                                limit=100,
+                            ),
+                        )
                     )
+                    if len(payload) > 100:
+                        raise ExternalChannelHistoryMalformed(
+                            "Discord history response exceeded the requested limit."
+                        )
+                    page_messages: list[DiscordNormalizedMessage] = []
+                    oldest_position: str | None = None
+                    for item in payload:
+                        if not is_external_channel_projection(item):
+                            continue
+                        self._validate_message_size(item)
+                        self._validate_history_item(item, trigger=trigger)
+                        message = self._normalize(
+                            guild_id=trigger.guild_id,
+                            raw_message=item,
+                            connected_bot_user_id=None,
+                        )
+                        if message is None:
+                            continue
+                        if (
+                            trigger.connected_bot_user_id is not None
+                            and message.provider_user_id
+                            == trigger.connected_bot_user_id
+                        ):
+                            continue
+                        scanned += 1
+                        if scanned > MAX_DISCORD_HISTORY_SCANNED_MESSAGES:
+                            raise ExternalChannelHistoryRangeIncomplete(
+                                "Discord history range exceeded the bounded "
+                                "message limit."
+                            )
+                        page_messages.append(message)
+                        oldest_position = (
+                            message.provider_position
+                            if oldest_position is None
+                            else min(oldest_position, message.provider_position)
+                        )
+                        eligible_count = sum(
+                            1
+                            for candidate in (*normalized_messages, *page_messages)
+                            if (
+                                exclusive_start_position is None
+                                or candidate.provider_position
+                                > exclusive_start_position
+                            )
+                        )
+                        if eligible_count >= MAX_DISCORD_HISTORY_RETAINED_MESSAGES + 1:
+                            break
+                    normalized_messages.extend(page_messages)
                     eligible_count = sum(
                         1
-                        for candidate in (*normalized_messages, *page_messages)
+                        for message in normalized_messages
                         if (
                             exclusive_start_position is None
-                            or candidate.provider_position > exclusive_start_position
+                            or message.provider_position > exclusive_start_position
                         )
                     )
-                    if eligible_count >= MAX_DISCORD_HISTORY_RETAINED_MESSAGES + 1:
-                        break
-                normalized_messages.extend(page_messages)
-                eligible_count = sum(
-                    1
-                    for message in normalized_messages
+                    reached_start = (
+                        eligible_count >= MAX_DISCORD_HISTORY_RETAINED_MESSAGES + 1
+                    )
                     if (
-                        exclusive_start_position is None
-                        or message.provider_position > exclusive_start_position
-                    )
-                )
-                reached_start = (
-                    eligible_count >= MAX_DISCORD_HISTORY_RETAINED_MESSAGES + 1
-                )
-                if (
-                    exclusive_start_position is not None
-                    and oldest_position is not None
-                    and oldest_position <= exclusive_start_position
-                ):
-                    reached_start = True
-                if not payload or reached_start:
-                    break
-                last_item = payload[-1]
-                if not is_external_channel_projection(last_item):
-                    raise ExternalChannelHistoryRangeIncomplete(
-                        "Discord history pagination cursor is invalid."
-                    )
-                last_item_id = last_item.get("id")
-                if not isinstance(last_item_id, str):
-                    raise ExternalChannelHistoryRangeIncomplete(
-                        "Discord history pagination cursor is invalid."
-                    )
-                cursor = last_item_id
-            except DiscordHistoryCredentialsInvalid as error:
+                        exclusive_start_position is not None
+                        and oldest_position is not None
+                        and oldest_position <= exclusive_start_position
+                    ):
+                        reached_start = True
+                    if not payload or reached_start:
+                        break
+                    last_item = payload[-1]
+                    if not is_external_channel_projection(last_item):
+                        raise ExternalChannelHistoryRangeIncomplete(
+                            "Discord history pagination cursor is invalid."
+                        )
+                    last_item_id = last_item.get("id")
+                    if not isinstance(last_item_id, str):
+                        raise ExternalChannelHistoryRangeIncomplete(
+                            "Discord history pagination cursor is invalid."
+                        )
+                    cursor = last_item_id
+        except DiscordSDKError as error:
+            error = _history_error(error)
+            if isinstance(error, DiscordHistoryCredentialsInvalid):
                 raise ExternalChannelHistoryCredentialsInvalid(str(error)) from error
-            except DiscordHistoryPermissionDenied as error:
+            if isinstance(error, DiscordHistoryPermissionDenied):
                 raise ExternalChannelHistoryPermissionDenied(str(error)) from error
-            except DiscordHistoryResourceUnavailable as error:
+            if isinstance(error, DiscordHistoryResourceUnavailable):
                 raise ExternalChannelHistoryResourceUnavailable(str(error)) from error
-            except DiscordHistoryRateLimited as error:
+            if isinstance(error, DiscordHistoryRateLimited):
                 raise ExternalChannelHistoryRateLimited(
                     error.retry_after_seconds
                 ) from error
-            except DiscordHistoryResponseMalformed as error:
-                raise ExternalChannelHistoryMalformed(str(error)) from error
-            except DiscordHistoryRequestRejected as error:
+            if isinstance(error, DiscordHistoryRequestRejected):
                 raise ExternalChannelHistoryTemporaryFailure(str(error)) from error
-            except DiscordHistoryTemporaryError as error:
-                raise ExternalChannelHistoryTemporaryFailure(str(error)) from error
-            except TimeoutError as error:
-                raise ExternalChannelHistoryDeadlineExceeded(
-                    "Discord history retrieval exceeded its deadline."
-                ) from error
+            raise ExternalChannelHistoryTemporaryFailure(str(error)) from error
+        except DiscordHistoryResponseMalformed as error:
+            raise ExternalChannelHistoryMalformed(str(error)) from error
+        except DiscordHistoryRequestRejected as error:
+            raise ExternalChannelHistoryTemporaryFailure(str(error)) from error
+        except DiscordHistoryTemporaryError as error:
+            raise ExternalChannelHistoryTemporaryFailure(str(error)) from error
+        except TimeoutError as error:
+            raise ExternalChannelHistoryDeadlineExceeded(
+                "Discord history retrieval exceeded its deadline."
+            ) from error
 
         in_range = [
             message
@@ -432,13 +459,6 @@ class DiscordConversationHistoryClient:
             ) from error
 
     @staticmethod
-    def _validate_response_size(response: httpx.Response) -> None:
-        if len(response.content) > MAX_DISCORD_HISTORY_RESPONSE_BYTES:
-            raise DiscordHistoryResponseMalformed(
-                "Discord history response exceeded the size limit."
-            )
-
-    @staticmethod
     def _validate_message_size(message: dict[str, object]) -> None:
         try:
             serialized = json.dumps(
@@ -455,60 +475,30 @@ class DiscordConversationHistoryClient:
                 "Discord history message exceeded the size limit."
             )
 
-    async def _request(
+    @staticmethod
+    async def _with_deadline[T](
+        deadline: ExternalChannelOperationDeadline,
+        request: Awaitable[T],
+    ) -> T:
+        remaining = deadline.remaining_seconds()
+        if remaining <= 0:
+            raise TimeoutError
+        async with asyncio.timeout(remaining):
+            return await request
+
+    @contextlib.asynccontextmanager
+    async def _open_with_deadline(
         self,
-        method: str,
-        path: str,
         *,
         bot_token: str,
-        params: dict[str, str | int] | None = None,
-        deadline: ExternalChannelOperationDeadline | None = None,
-    ) -> httpx.Response:
-        try:
-            remaining: float | None = None
-            if deadline is not None:
-                remaining = deadline.remaining_seconds()
-                if remaining <= 0:
-                    raise TimeoutError
-            request = self.http_client.request(
-                method,
-                f"{discord_api_base_url()}{path}",
-                headers={"Authorization": f"Bot {bot_token}"},
-                params=params,
-            )
-            if deadline is None:
-                response = await request
-            else:
-                assert remaining is not None
-                async with asyncio.timeout(remaining):
-                    response = await request
-        except httpx.RequestError as error:
-            raise DiscordHistoryTemporaryError(
-                "Discord history is temporarily unavailable."
-            ) from error
-        if response.status_code == 401:
-            raise DiscordHistoryCredentialsInvalid(
-                "Discord rejected the active Bot credential."
-            )
-        if response.status_code == 403:
-            raise DiscordHistoryPermissionDenied(
-                "Discord denied access to the tracked conversation."
-            )
-        if response.status_code == 404:
-            raise DiscordHistoryResourceUnavailable(
-                "Discord no longer exposes the tracked conversation."
-            )
-        if response.status_code == 429:
-            raise DiscordHistoryRateLimited(_retry_after_seconds(response))
-        if response.status_code >= 500:
-            raise DiscordHistoryTemporaryError(
-                "Discord history is temporarily unavailable."
-            )
-        if response.status_code >= 400:
-            raise DiscordHistoryRequestRejected(
-                "Discord rejected conversation history retrieval."
-            )
-        return response
+        deadline: ExternalChannelOperationDeadline,
+    ) -> AsyncIterator[DiscordSDKSession]:
+        remaining = deadline.remaining_seconds()
+        if remaining <= 0:
+            raise TimeoutError
+        async with asyncio.timeout(remaining):
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                yield sdk
 
     @staticmethod
     def _validate_history_item(
@@ -537,48 +527,6 @@ class DiscordConversationHistoryClient:
                 "Discord history item had an invalid thread boundary."
             )
 
-    @staticmethod
-    def _object_payload(response: httpx.Response) -> dict[str, object]:
-        try:
-            payload: object = response.json()
-        except ValueError as error:
-            raise DiscordHistoryTemporaryError(
-                "Discord history response was invalid."
-            ) from error
-        if not is_external_channel_projection(payload):
-            raise DiscordHistoryTemporaryError("Discord history response was invalid.")
-        return payload
-
-    @staticmethod
-    def _array_payload(response: httpx.Response) -> list[object]:
-        try:
-            payload: object = response.json()
-        except ValueError as error:
-            raise DiscordHistoryTemporaryError(
-                "Discord history response was invalid."
-            ) from error
-        if not isinstance(payload, list):
-            raise DiscordHistoryTemporaryError("Discord history response was invalid.")
-        return list(payload)
-
-
-def _retry_after_seconds(response: httpx.Response) -> int:
-    """Return a bounded Discord retry delay without retaining provider detail."""
-    try:
-        payload: object = response.json()
-    except ValueError:
-        payload = None
-    retry_after = (
-        payload.get("retry_after") if is_external_channel_projection(payload) else None
-    )
-    if isinstance(retry_after, (int, float)) and not isinstance(retry_after, bool):
-        return max(1, min(int(retry_after), 300))
-    header = response.headers.get("Retry-After")
-    try:
-        return max(1, min(int(header or "1"), 300))
-    except ValueError:
-        return 1
-
 
 def discord_provider_position(message_id: str) -> str:
     """Return a fixed-width lexically sortable Discord snowflake position."""
@@ -589,3 +537,29 @@ def discord_provider_position(message_id: str) -> str:
 
 def _valid_discord_position(position: str) -> bool:
     return len(position) == 20 and position.isdigit()
+
+
+def _history_error(error: DiscordSDKError) -> DiscordHistoryProviderError:
+    if isinstance(error, DiscordSDKCredentialsInvalid):
+        return DiscordHistoryCredentialsInvalid(
+            "Discord rejected the active Bot credential."
+        )
+    if isinstance(error, DiscordSDKPermissionDenied):
+        return DiscordHistoryPermissionDenied(
+            "Discord denied access to the tracked conversation."
+        )
+    if isinstance(error, DiscordSDKResourceUnavailable):
+        return DiscordHistoryResourceUnavailable(
+            "Discord no longer exposes the tracked conversation."
+        )
+    if isinstance(error, DiscordSDKRateLimited):
+        return DiscordHistoryRateLimited(error.retry_after_seconds)
+    if isinstance(error, DiscordSDKRequestRejected):
+        return DiscordHistoryRequestRejected(
+            "Discord rejected conversation history retrieval."
+        )
+    if isinstance(error, DiscordSDKUnavailable):
+        return DiscordHistoryTemporaryError(
+            "Discord history is temporarily unavailable."
+        )
+    return DiscordHistoryTemporaryError("Discord history is temporarily unavailable.")

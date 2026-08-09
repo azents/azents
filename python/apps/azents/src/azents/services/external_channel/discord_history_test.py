@@ -1,12 +1,17 @@
-"""Deterministic Discord bounded-history adapter tests."""
+"""Deterministic Discord public SDK bounded-history adapter tests."""
 
+import contextlib
 import datetime
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from typing import cast
 
-import httpx
 import pytest
 
 from azents.services.external_channel.conversation import (
+    ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryDeadlineExceeded,
+    ExternalChannelHistoryMalformed,
     ExternalChannelHistoryPositionInvalid,
     ExternalChannelHistoryRateLimited,
     ExternalChannelHistoryTriggerMissing,
@@ -19,47 +24,116 @@ from azents.services.external_channel.discord_history import (
     DiscordHistoryResponseMalformed,
     discord_provider_position,
 )
+from azents.services.external_channel.discord_sdk import (
+    DiscordSDKCredentialsInvalid,
+    DiscordSDKRateLimited,
+    DiscordSDKSession,
+)
+
+
+def _message(
+    message_id: int,
+    *,
+    channel_id: str = "200",
+    author_id: str | None = None,
+    content: str | None = None,
+) -> dict[str, object]:
+    return {
+        "id": str(message_id),
+        "channel_id": channel_id,
+        "guild_id": "111",
+        "content": content or f"message-{message_id}",
+        "author": {"id": author_id or str(message_id + 1000)},
+        "timestamp": "2026-07-28T00:00:00.000000+00:00",
+    }
+
+
+@dataclass
+class _SDKSession:
+    exact: dict[str, object]
+    pages: dict[str, tuple[dict[str, object], ...]] = field(default_factory=dict)
+    error: Exception | None = None
+    calls: list[tuple[str, str, int | None]] = field(default_factory=list)
+
+    async def fetch_message_projection(
+        self,
+        *,
+        guild_id: str,
+        source_channel_id: str,
+        channel_id: str,
+        message_id: str,
+    ) -> dict[str, object]:
+        assert guild_id == "111"
+        self.calls.append(("message", message_id, None))
+        if self.error is not None:
+            raise self.error
+        return dict(self.exact)
+
+    async def fetch_history_projections(
+        self,
+        *,
+        guild_id: str,
+        source_channel_id: str,
+        channel_id: str,
+        before_message_id: str,
+        limit: int,
+    ) -> tuple[dict[str, object], ...]:
+        assert guild_id == "111"
+        self.calls.append(("history", before_message_id, limit))
+        if self.error is not None:
+            raise self.error
+        return self.pages.get(before_message_id, ())
+
+
+@dataclass
+class _SDKFactory:
+    session: _SDKSession
+    opens: int = 0
+
+    @contextlib.asynccontextmanager
+    async def open(self, *, bot_token: str) -> AsyncIterator[DiscordSDKSession]:
+        assert bot_token == "discord-secret"
+        self.opens += 1
+        yield cast(DiscordSDKSession, self.session)
+
+
+def _client(
+    session: _SDKSession,
+) -> tuple[DiscordConversationHistoryClient, _SDKFactory]:
+    factory = _SDKFactory(session)
+    return DiscordConversationHistoryClient(factory), factory
+
+
+def _deadline(seconds: float = 1) -> ExternalChannelOperationDeadline:
+    return ExternalChannelOperationDeadline(
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=seconds)
+    )
 
 
 @pytest.mark.asyncio
-async def test_root_history_fetches_only_the_canonical_source_message() -> None:
+async def test_root_history_fetches_only_canonical_sdk_message() -> None:
     """An unthreaded root never imports unrelated parent-channel history."""
-    calls: list[httpx.Request] = []
+    exact = _message(100, content="Need help")
+    exact["embeds"] = [
+        {
+            "title": "Incident",
+            "description": "A visible provider card.",
+            "image": {"present": True},
+        }
+    ]
+    session = _SDKSession(exact=exact)
+    client, factory = _client(session)
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(
-            200,
-            json={
-                "id": "100",
-                "channel_id": "200",
-                "content": "Need help",
-                "author": {"id": "300"},
-                "timestamp": "2026-07-28T00:00:00.000000+00:00",
-                "embeds": [
-                    {
-                        "title": "Incident",
-                        "description": "A visible provider card.",
-                        "url": "https://untrusted.example/card",
-                        "image": {"url": "https://cdn.discordapp.com/incident.png"},
-                    }
-                ],
-            },
-        )
-
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(handler),
-    ) as http_client:
-        page = await DiscordConversationHistoryClient(http_client).fetch_thread_page(
-            bot_token="discord-secret",
-            guild_id="111",
-            source_channel_id="200",
-            root_message_id="100",
-            thread_channel_id=None,
-            cursor=None,
-            limit=100,
-            connected_bot_user_id="900",
-        )
+    page = await client.fetch_thread_page(
+        bot_token="discord-secret",
+        guild_id="111",
+        source_channel_id="200",
+        root_message_id="100",
+        thread_channel_id=None,
+        cursor=None,
+        limit=100,
+        connected_bot_user_id="900",
+    )
 
     assert [message.message_id for message in page.messages] == ["100"]
     assert page.messages[0].attachment_metadata == {
@@ -72,364 +146,282 @@ async def test_root_history_fetches_only_the_canonical_source_message() -> None:
         ]
     }
     assert page.next_cursor is None
-    assert calls[0].url.path == "/api/v10/channels/200/messages/100"
-    assert calls[0].headers["Authorization"] == "Bot discord-secret"
+    assert factory.opens == 1
+    assert session.calls == [("message", "100", None)]
 
 
 @pytest.mark.asyncio
 async def test_read_range_orders_and_bounds_after_bot_exclusion() -> None:
-    """Discord ranges exclude the connected Bot before applying the context bound."""
-    raw_messages = [
-        {
-            "id": str(message_id),
-            "channel_id": "200",
-            "content": f"message-{message_id}",
-            "author": {"id": "900" if message_id == 101 else str(message_id + 1000)},
-            "timestamp": "2026-07-28T00:00:00.000000+00:00",
-        }
-        for message_id in range(121, 99, -1)
-    ]
-
-    calls: list[httpx.Request] = []
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        if request.url.path.endswith("/121"):
-            return httpx.Response(200, json=raw_messages[0])
-        return httpx.Response(200, json=raw_messages[1:])
-
-    deadline = ExternalChannelOperationDeadline(
-        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
-    )
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await DiscordConversationHistoryClient(client).read_range(
-            trigger=DiscordConversationHistoryTrigger(
-                guild_id="111",
-                source_channel_id="200",
-                conversation_channel_id="200",
-                trigger_message_id="121",
-                connected_bot_user_id="900",
-            ),
-            bot_token="discord-secret",
-            exclusive_start_position=None,
-            deadline=deadline,
+    """SDK ranges exclude the connected Bot before the retained-context bound."""
+    page = tuple(
+        _message(
+            message_id,
+            author_id="900" if message_id == 101 else None,
         )
+        for message_id in range(120, 99, -1)
+    )
+    session = _SDKSession(
+        exact=_message(121),
+        pages={"121": page},
+    )
+    client, factory = _client(session)
+
+    result = await client.read_range(
+        trigger=DiscordConversationHistoryTrigger(
+            guild_id="111",
+            source_channel_id="200",
+            conversation_channel_id="200",
+            trigger_message_id="121",
+            connected_bot_user_id="900",
+        ),
+        bot_token="discord-secret",
+        exclusive_start_position=None,
+        deadline=_deadline(),
+    )
 
     assert result.context_omitted is True
     assert len(result.messages) == 20
     assert result.messages[0].message_id == "102"
     assert result.messages[-1].message_id == "121"
     assert all(message.provider_user_id != "900" for message in result.messages)
-    assert [message.provider_position for message in result.messages] == sorted(
-        message.provider_position for message in result.messages
-    )
-    assert result.trigger.message_id == "121"
     assert result.trigger_position == discord_provider_position("121")
     assert result.scanned_message_count == 21
-    assert [request.url.path for request in calls] == [
-        "/api/v10/channels/200/messages/121",
-        "/api/v10/channels/200/messages",
+    assert result.provider_request_count == 2
+    assert factory.opens == 1
+    assert session.calls == [
+        ("message", "121", None),
+        ("history", "121", 100),
     ]
-    assert calls[0].headers["Authorization"] == "Bot discord-secret"
-    assert calls[1].url.params == httpx.QueryParams({"limit": "100", "before": "121"})
 
 
 @pytest.mark.asyncio
-async def test_read_range_requires_exact_trigger() -> None:
-    """A complete page without the trigger is not accepted as a range."""
+async def test_read_range_requires_exact_trigger_identity() -> None:
+    """A mismatched exact SDK message cannot become the trigger."""
+    client, _ = _client(_SDKSession(exact=_message(120)))
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path.endswith("/121"):
-            return httpx.Response(
-                200,
-                json={
-                    "id": "120",
-                    "channel_id": "200",
-                    "content": "message-120",
-                    "author": {"id": "1000"},
-                    "timestamp": "2026-07-28T00:00:00.000000+00:00",
-                },
-            )
-        return httpx.Response(
-            200,
-            json=[
-                {
-                    "id": "120",
-                    "channel_id": "200",
-                    "content": "message-120",
-                    "author": {"id": "1000"},
-                    "timestamp": "2026-07-28T00:00:00.000000+00:00",
-                }
-            ],
+    with pytest.raises(ExternalChannelHistoryTriggerMissing):
+        await client.read_range(
+            trigger=DiscordConversationHistoryTrigger(
+                guild_id="111",
+                source_channel_id="200",
+                conversation_channel_id="200",
+                trigger_message_id="121",
+                connected_bot_user_id=None,
+            ),
+            bot_token="discord-secret",
+            exclusive_start_position=None,
+            deadline=_deadline(),
         )
 
-    deadline = ExternalChannelOperationDeadline(
-        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
-    )
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(ExternalChannelHistoryTriggerMissing):
-            await DiscordConversationHistoryClient(client).read_range(
-                trigger=DiscordConversationHistoryTrigger(
-                    guild_id="111",
-                    source_channel_id="200",
-                    conversation_channel_id="200",
-                    trigger_message_id="121",
-                    connected_bot_user_id="900",
-                ),
-                bot_token="discord-secret",
-                exclusive_start_position=None,
-                deadline=deadline,
-            )
+
+@pytest.mark.asyncio
+async def test_read_range_checks_deadline_before_opening_sdk() -> None:
+    """An expired range budget does not open a provider SDK context."""
+    client, factory = _client(_SDKSession(exact=_message(121)))
+
+    with pytest.raises(ExternalChannelHistoryDeadlineExceeded):
+        await client.read_range(
+            trigger=DiscordConversationHistoryTrigger(
+                guild_id="111",
+                source_channel_id="200",
+                conversation_channel_id="200",
+                trigger_message_id="121",
+                connected_bot_user_id=None,
+            ),
+            bot_token="discord-secret",
+            exclusive_start_position=None,
+            deadline=_deadline(-1),
+        )
+
+    assert factory.opens == 0
+    assert factory.session.calls == []
 
 
 @pytest.mark.asyncio
-async def test_read_range_checks_expired_deadline_before_request() -> None:
-    """An expired range budget does not construct a Discord request."""
-    calls: list[httpx.Request] = []
+async def test_read_range_maps_invalid_start_before_sdk() -> None:
+    """Discord snowflake cursors retain the typed invalid-position failure."""
+    client, factory = _client(_SDKSession(exact=_message(121)))
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        raise AssertionError("expired history must not reach the provider")
+    with pytest.raises(ExternalChannelHistoryPositionInvalid):
+        await client.read_range(
+            trigger=DiscordConversationHistoryTrigger(
+                guild_id="111",
+                source_channel_id="200",
+                conversation_channel_id="200",
+                trigger_message_id="121",
+                connected_bot_user_id=None,
+            ),
+            bot_token="discord-secret",
+            exclusive_start_position="not-a-snowflake",
+            deadline=_deadline(),
+        )
 
-    deadline = ExternalChannelOperationDeadline(
-        datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=1)
-    )
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(ExternalChannelHistoryDeadlineExceeded):
-            await DiscordConversationHistoryClient(client).read_range(
-                trigger=DiscordConversationHistoryTrigger(
-                    guild_id="111",
-                    source_channel_id="200",
-                    conversation_channel_id="200",
-                    trigger_message_id="121",
-                    connected_bot_user_id=None,
-                ),
-                bot_token="discord-secret",
-                exclusive_start_position=None,
-                deadline=deadline,
-            )
-
-    assert calls == []
+    assert factory.opens == 0
 
 
 @pytest.mark.asyncio
-async def test_read_range_maps_invalid_start_position() -> None:
-    """Discord snowflake cursors use the typed invalid-position failure."""
-    deadline = ExternalChannelOperationDeadline(
-        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
+async def test_read_range_maps_sdk_credentials_invalid() -> None:
+    """SDK authentication rejection remains a credentials-invalid failure."""
+    session = _SDKSession(
+        exact=_message(121),
+        error=DiscordSDKCredentialsInvalid(),
     )
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda request: httpx.Response(500))
-    ) as client:
-        with pytest.raises(ExternalChannelHistoryPositionInvalid):
-            await DiscordConversationHistoryClient(client).read_range(
-                trigger=DiscordConversationHistoryTrigger(
-                    guild_id="111",
-                    source_channel_id="200",
-                    conversation_channel_id="200",
-                    trigger_message_id="121",
-                    connected_bot_user_id=None,
-                ),
-                bot_token="discord-secret",
-                exclusive_start_position="not-a-snowflake",
-                deadline=deadline,
-            )
+    client, _ = _client(session)
+
+    with pytest.raises(ExternalChannelHistoryCredentialsInvalid):
+        await client.read_range(
+            trigger=DiscordConversationHistoryTrigger(
+                guild_id="111",
+                source_channel_id="200",
+                conversation_channel_id="200",
+                trigger_message_id="121",
+                connected_bot_user_id=None,
+            ),
+            bot_token="discord-secret",
+            exclusive_start_position=None,
+            deadline=_deadline(),
+        )
 
 
 @pytest.mark.asyncio
-async def test_read_range_maps_provider_rate_limit() -> None:
-    """Discord range provider failures retain the typed retry classification."""
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        del request
-        return httpx.Response(429, json={"retry_after": 2})
-
-    deadline = ExternalChannelOperationDeadline(
-        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
+async def test_read_range_maps_sdk_rate_limit() -> None:
+    """SDK rate-limit errors retain the bounded provider classification."""
+    session = _SDKSession(
+        exact=_message(121),
+        error=DiscordSDKRateLimited(2),
     )
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(ExternalChannelHistoryRateLimited) as raised:
-            await DiscordConversationHistoryClient(client).read_range(
-                trigger=DiscordConversationHistoryTrigger(
-                    guild_id="111",
-                    source_channel_id="200",
-                    conversation_channel_id="200",
-                    trigger_message_id="121",
-                    connected_bot_user_id=None,
-                ),
-                bot_token="discord-secret",
-                exclusive_start_position=None,
-                deadline=deadline,
-            )
+    client, _ = _client(session)
+
+    with pytest.raises(ExternalChannelHistoryRateLimited) as raised:
+        await client.read_range(
+            trigger=DiscordConversationHistoryTrigger(
+                guild_id="111",
+                source_channel_id="200",
+                conversation_channel_id="200",
+                trigger_message_id="121",
+                connected_bot_user_id=None,
+            ),
+            bot_token="discord-secret",
+            exclusive_start_position=None,
+            deadline=_deadline(),
+        )
 
     assert raised.value.retry_after_seconds == 2
 
 
 @pytest.mark.asyncio
-async def test_root_history_rejects_a_cross_channel_root_response() -> None:
-    """A matching root id from another channel cannot enter hydration."""
+async def test_root_history_rejects_cross_channel_sdk_projection() -> None:
+    """A matching root ID from another channel cannot enter hydration."""
+    client, _ = _client(_SDKSession(exact=_message(100, channel_id="999")))
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        del request
-        return httpx.Response(200, json={"id": "100", "channel_id": "999"})
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(DiscordHistoryResponseMalformed):
-            await DiscordConversationHistoryClient(client).fetch_thread_page(
-                bot_token="discord-secret",
-                guild_id="111",
-                source_channel_id="200",
-                root_message_id="100",
-                thread_channel_id=None,
-                cursor=None,
-                limit=100,
-                connected_bot_user_id="900",
-            )
-
-
-@pytest.mark.asyncio
-async def test_thread_history_rejects_unrelated_channel_items_without_projection() -> (
-    None
-):
-    """A page crossing channels is rejected before any item is normalized."""
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        del request
-        return httpx.Response(200, json=[{"id": "200", "channel_id": "999"}])
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(DiscordHistoryResponseMalformed):
-            await DiscordConversationHistoryClient(client).fetch_thread_page(
-                bot_token="discord-secret",
-                guild_id="111",
-                source_channel_id="200",
-                root_message_id="100",
-                thread_channel_id="444",
-                cursor=None,
-                limit=100,
-                connected_bot_user_id="900",
-            )
-
-
-@pytest.mark.asyncio
-async def test_thread_history_pages_backward_with_a_bounded_cursor() -> None:
-    """An existing Discord thread uses a stable oldest-message cursor."""
-    calls: list[httpx.Request] = []
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        calls.append(request)
-        return httpx.Response(
-            200,
-            json=[
-                {
-                    "id": "200",
-                    "channel_id": "444",
-                    "content": "later",
-                    "author": {"id": "300"},
-                },
-                {
-                    "id": "100",
-                    "channel_id": "444",
-                    "content": "earlier",
-                    "author": {"id": "301"},
-                },
-            ],
+    with pytest.raises(DiscordHistoryResponseMalformed):
+        await client.fetch_thread_page(
+            bot_token="discord-secret",
+            guild_id="111",
+            source_channel_id="200",
+            root_message_id="100",
+            thread_channel_id=None,
+            cursor=None,
+            limit=100,
+            connected_bot_user_id="900",
         )
 
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(handler),
-    ) as http_client:
-        page = await DiscordConversationHistoryClient(http_client).fetch_thread_page(
+
+@pytest.mark.asyncio
+async def test_thread_history_pages_backward_with_bounded_cursor() -> None:
+    """An existing thread uses the requested public SDK history cursor."""
+    session = _SDKSession(
+        exact=_message(100),
+        pages={
+            "300": (
+                _message(200, channel_id="444"),
+                _message(100, channel_id="444"),
+            )
+        },
+    )
+    client, _ = _client(session)
+
+    page = await client.fetch_thread_page(
+        bot_token="discord-secret",
+        guild_id="111",
+        source_channel_id="200",
+        root_message_id="100",
+        thread_channel_id="444",
+        cursor="300",
+        limit=2,
+        connected_bot_user_id="900",
+    )
+
+    assert [message.message_id for message in page.messages] == ["200", "100"]
+    assert page.next_cursor == "100"
+    assert session.calls == [("history", "300", 2)]
+
+
+@pytest.mark.asyncio
+async def test_history_rejects_oversized_projected_message() -> None:
+    """An oversized SDK projection cannot enter normalized hydration state."""
+    session = _SDKSession(
+        exact=_message(100),
+        pages={"300": (_message(200, channel_id="444", content="x" * 70000),)},
+    )
+    client, _ = _client(session)
+
+    with pytest.raises(DiscordHistoryResponseMalformed):
+        await client.fetch_thread_page(
             bot_token="discord-secret",
             guild_id="111",
             source_channel_id="200",
             root_message_id="100",
             thread_channel_id="444",
             cursor="300",
-            limit=2,
+            limit=100,
             connected_bot_user_id="900",
         )
 
-    assert [message.message_id for message in page.messages] == ["200", "100"]
-    assert page.next_cursor == "100"
-    assert calls[0].url.path == "/api/v10/channels/444/messages"
-    assert calls[0].url.params == httpx.QueryParams({"limit": "2", "before": "300"})
-
 
 @pytest.mark.asyncio
-async def test_thread_history_rejects_more_items_than_requested_limit() -> None:
-    """Oversized pages are rejected before any hydration projection."""
+async def test_read_range_maps_oversized_sdk_projection_to_malformed() -> None:
+    """SDK projection bounds retain the canonical malformed-history result."""
+    session = _SDKSession(
+        exact=_message(121),
+        pages={"121": (_message(120, content="x" * 70000),)},
+    )
+    client, _ = _client(session)
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        del request
-        return httpx.Response(
-            200,
-            json=[
-                {"id": "200", "channel_id": "444"},
-                {"id": "100", "channel_id": "444"},
-            ],
+    with pytest.raises(ExternalChannelHistoryMalformed):
+        await client.read_range(
+            trigger=DiscordConversationHistoryTrigger(
+                guild_id="111",
+                source_channel_id="200",
+                conversation_channel_id="200",
+                trigger_message_id="121",
+                connected_bot_user_id=None,
+            ),
+            bot_token="discord-secret",
+            exclusive_start_position=None,
+            deadline=_deadline(),
         )
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(DiscordHistoryResponseMalformed):
-            await DiscordConversationHistoryClient(client).fetch_thread_page(
-                bot_token="discord-secret",
-                guild_id="111",
-                source_channel_id="200",
-                root_message_id="100",
-                thread_channel_id="444",
-                cursor=None,
-                limit=1,
-                connected_bot_user_id="900",
-            )
-
 
 @pytest.mark.asyncio
-async def test_history_rejects_oversized_message_before_projection() -> None:
-    """An oversized message body cannot enter normalized hydration state."""
+async def test_fetch_thread_page_maps_sdk_rate_limit() -> None:
+    """SDK retry metadata remains a bounded controlled provider error."""
+    session = _SDKSession(
+        exact=_message(100),
+        error=DiscordSDKRateLimited(2),
+    )
+    client, _ = _client(session)
 
-    async def handler(request: httpx.Request) -> httpx.Response:
-        del request
-        return httpx.Response(
-            200,
-            json=[{"id": "200", "channel_id": "444", "content": "x" * 70000}],
+    with pytest.raises(DiscordHistoryRateLimited) as raised:
+        await client.fetch_thread_page(
+            bot_token="discord-secret",
+            guild_id="111",
+            source_channel_id="200",
+            root_message_id="100",
+            thread_channel_id=None,
+            cursor=None,
+            limit=100,
+            connected_bot_user_id="900",
         )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(DiscordHistoryResponseMalformed):
-            await DiscordConversationHistoryClient(client).fetch_thread_page(
-                bot_token="discord-secret",
-                guild_id="111",
-                source_channel_id="200",
-                root_message_id="100",
-                thread_channel_id="444",
-                cursor=None,
-                limit=100,
-                connected_bot_user_id="900",
-            )
-
-
-@pytest.mark.asyncio
-async def test_history_rate_limit_has_a_bounded_retry_delay() -> None:
-    """Provider retry metadata becomes a bounded controlled error."""
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        del request
-        return httpx.Response(429, json={"retry_after": 2.9})
-
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(handler),
-    ) as http_client:
-        with pytest.raises(DiscordHistoryRateLimited) as raised:
-            await DiscordConversationHistoryClient(http_client).fetch_thread_page(
-                bot_token="discord-secret",
-                guild_id="111",
-                source_channel_id="200",
-                root_message_id="100",
-                thread_channel_id=None,
-                cursor=None,
-                limit=100,
-                connected_bot_user_id="900",
-            )
 
     assert raised.value.retry_after_seconds == 2

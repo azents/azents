@@ -32,7 +32,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-09
-spec_version: 34
+spec_version: 35
 ---
 
 # External Channel Lifecycle
@@ -115,9 +115,11 @@ Command clears that provisional authority and moves the connection to
 `reconnect_required`; normal interactions are rejected until the final activation
 commit. The External Channel Gateway's Discord manager can claim only the newly
 activated configuration; a stale manager cannot continue mutation after replacement
-or disconnect. Endpoint registration edits the Bot-authenticated current Discord
-Application through Discord's current-Application API; it does not require the user to
-copy the opaque per-connection callback into Discord Developer Portal.
+or disconnect. Endpoint registration uses the narrow Bot-authenticated
+current-Application direct-transport gap because the adopted public `discord.py`
+implementation cannot transmit the endpoint field. The gap is removed when that SDK
+capability becomes usable. Registration does not require the user to copy the opaque
+per-connection callback into Discord Developer Portal.
 Retrying a `reconnect_required` Discord connection restores `configuring` while it
 persists a new provisional selector and public key, so endpoint-verification PING can
 authenticate without admitting normal interactions.
@@ -272,6 +274,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-09** (spec_version 35) — Classified automatic Discord Interaction
+  Endpoint registration as a removable direct-transport gap while the adopted public
+  SDK cannot transmit the endpoint field.
 - **2026-08-09** (spec_version 34) — Removed continuation-only and unfinished-task
   restrictions from silent Work completion while preserving binding lifecycle and
   provider-cleanup boundaries.
