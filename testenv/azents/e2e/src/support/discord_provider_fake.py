@@ -312,7 +312,13 @@ class FakeState:
     def list_guild_commands(self) -> list[dict[str, object]]:
         """Return current fake commands to the Discord adapter."""
         with self.lock:
-            return [dict(command) for command in self.guild_commands.values()]
+            return [
+                _guild_command_response(
+                    command,
+                    application_id=self.application_id,
+                )
+                for command in self.guild_commands.values()
+            ]
 
     def create_guild_command(self, body: Mapping[str, object]) -> dict[str, object]:
         """Create one bounded Discord command with a deterministic ID."""
@@ -327,7 +333,10 @@ class FakeState:
                 **command_fields,
             }
             self.guild_commands[command_id] = command
-            return dict(command)
+            return _guild_command_response(
+                command,
+                application_id=self.application_id,
+            )
 
     def update_guild_command(
         self,
@@ -344,7 +353,10 @@ class FakeState:
                 **command_fields,
             }
             self.guild_commands[command_id] = updated
-            return dict(updated)
+            return _guild_command_response(
+                updated,
+                application_id=self.application_id,
+            )
 
     def delete_guild_command(self, command_id: str) -> bool:
         """Delete one known command."""
@@ -2226,6 +2238,19 @@ def _guild_command_fields(body: Mapping[str, object]) -> dict[str, object]:
         "name": name,
         "type": command_type,
         **({} if description is None else {"description": description}),
+    }
+
+
+def _guild_command_response(
+    command: Mapping[str, object],
+    *,
+    application_id: str,
+) -> dict[str, object]:
+    """Return the complete provider shape required by discord.py AppCommand."""
+    return {
+        **command,
+        "application_id": application_id,
+        "description": command.get("description", ""),
     }
 
 
