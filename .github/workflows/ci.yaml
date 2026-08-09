@@ -463,8 +463,8 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: Install kind and kubectl
         run: |
-          kind_version=v0.31.0
-          kubectl_version=v1.35.0
+          kind_version=v0.32.0
+          kubectl_version=v1.36.1
           curl -fsSLO \
             "https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64"
           curl -fsSLO \

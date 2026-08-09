@@ -6,6 +6,7 @@ CLUSTER_NAME="${AZENTS_KUBERNETES_CONTAINMENT_CLUSTER_NAME:-azents-phase5}"
 NAMESPACE="azents-runtime"
 REGISTRY_NAME="${CLUSTER_NAME}-registry"
 REGISTRY_PORT="5001"
+KIND_NODE_IMAGE="kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5"
 TMP_DIR="$(mktemp -d)"
 
 cleanup() {
@@ -67,7 +68,10 @@ nodes:
   - role: control-plane
 EOF
 
-kind create cluster --name "${CLUSTER_NAME}" --config "${TMP_DIR}/kind.yaml"
+kind create cluster \
+  --name "${CLUSTER_NAME}" \
+  --image "${KIND_NODE_IMAGE}" \
+  --config "${TMP_DIR}/kind.yaml"
 docker network connect kind "${REGISTRY_NAME}" 2>/dev/null || true
 for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
   registry_dir="/etc/containerd/certs.d/localhost:${REGISTRY_PORT}"
