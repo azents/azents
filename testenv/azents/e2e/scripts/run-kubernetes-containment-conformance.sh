@@ -80,17 +80,16 @@ nodes:
       - hostPath: /sys/kernel/security
         containerPath: /sys/kernel/security
         readOnly: true
-      - hostPath: ${APPARMOR_PARSER}
-        containerPath: /usr/sbin/apparmor_parser
-        readOnly: true
 EOF
 
 kind create cluster \
   --name "${CLUSTER_NAME}" \
   --image "${KIND_NODE_IMAGE}" \
+  --retain \
   --config "${TMP_DIR}/kind.yaml"
 docker network connect kind "${REGISTRY_NAME}" 2>/dev/null || true
 for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
+  docker cp "${APPARMOR_PARSER}" "${node}:/usr/sbin/apparmor_parser"
   docker exec "${node}" \
     sh -ec '
       test "$(cat /sys/module/apparmor/parameters/enabled)" = "Y"
