@@ -12,14 +12,14 @@ from azents_runtime_runner.bwrap_launcher import (
 
 def test_bwrap_arguments_inject_seccomp_before_command() -> None:
     arguments = [
-        "/usr/bin/bwrap",
+        "/opt/azents-runtime/bin/bwrap",
         "--unshare-user",
         "--",
         "/bin/true",
     ]
 
     assert _bwrap_arguments(arguments, 17) == [
-        "/usr/bin/bwrap",
+        "/opt/azents-runtime/bin/bwrap",
         "--unshare-user",
         "--seccomp",
         "17",
@@ -30,7 +30,7 @@ def test_bwrap_arguments_inject_seccomp_before_command() -> None:
 
 def test_bwrap_arguments_require_command_separator() -> None:
     with pytest.raises(RuntimeError, match="separator"):
-        _bwrap_arguments(["/usr/bin/bwrap"], 17)
+        _bwrap_arguments(["/opt/azents-runtime/bin/bwrap"], 17)
 
 
 def test_seccomp_program_exports_nonempty_bpf() -> None:

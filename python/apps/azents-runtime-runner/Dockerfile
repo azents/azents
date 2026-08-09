@@ -67,7 +67,10 @@ RUN apt-get update \
         graphviz \
     && rm -rf /var/lib/apt/lists/*
 
-RUN chmod 4755 /usr/bin/bwrap
+RUN install -D -o root -g root -m 4755 \
+        /usr/bin/bwrap \
+        /opt/azents-runtime/bin/bwrap \
+    && rm /usr/bin/bwrap
 
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
@@ -116,9 +119,10 @@ RUN playwright install-deps chromium
 RUN docker --version | grep -F "Docker version 28.5.2" \
     && docker buildx version | grep -F "github.com/docker/buildx v0.29.1" \
     && docker compose version | grep -F "Docker Compose version v2.40.3" \
-    && bwrap --version \
-    && bwrap --help | grep -F -- "--seccomp" \
-    && test -u /usr/bin/bwrap \
+    && /opt/azents-runtime/bin/bwrap --version \
+    && /opt/azents-runtime/bin/bwrap --help | grep -F -- "--seccomp" \
+    && test -u /opt/azents-runtime/bin/bwrap \
+    && test ! -e /usr/bin/bwrap \
     && unshare --version \
     && test ! -e /var/run/azents-engine/docker.sock
 
