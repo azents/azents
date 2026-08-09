@@ -156,18 +156,23 @@ class DiscordPyClientFactory:
         *,
         bot_token: str,
     ) -> AsyncIterator[DiscordSDKSession]:
-        client = discord.Client(intents=discord.Intents.none())
-        try:
+        from azents.services.external_channel.discord_gateway import (  # noqa: PLC0415
+            _discord_test_endpoint_override,
+        )
+
+        with _discord_test_endpoint_override():
+            client = discord.Client(intents=discord.Intents.none())
             try:
-                await client.login(bot_token)
-            except discord.LoginFailure as error:
-                raise DiscordSDKCredentialsInvalid from error
-            except (discord.HTTPException, OSError) as error:
-                raise _sdk_error(error) from error
-            yield _DiscordPySession(client)
-        finally:
-            if not client.is_closed():
-                await client.close()
+                try:
+                    await client.login(bot_token)
+                except discord.LoginFailure as error:
+                    raise DiscordSDKCredentialsInvalid from error
+                except (discord.HTTPException, OSError) as error:
+                    raise _sdk_error(error) from error
+                yield _DiscordPySession(client)
+            finally:
+                if not client.is_closed():
+                    await client.close()
 
 
 class _DiscordPySession:
