@@ -34,8 +34,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-07
-spec_version: 52
+last_verified_at: 2026-08-09
+spec_version: 53
 ---
 
 # Agent Runtime Control
@@ -306,6 +306,14 @@ infrastructure Profile, Workspace Runtime Profile, resolved typed configuration,
 image, and generation-scoped Runner credential. Providers reject another Provider's envelope,
 unsupported Profile kinds, invalid typed values, and generation mismatch before backend mutation.
 
+The envelope accepts the retained Kubernetes Pod/Docker Container Profile v1 contracts and their
+Profile v2 equivalents. Profile v2 may select the portable `process_containment` module; Kubernetes
+rejects a Profile that combines it with DinD. Contained Providers lower only trusted deployment
+configuration into Runner bootstrap and workload security. Docker Provider startup requires daemon
+AppArmor support. Kubernetes Provider startup validates trusted containment settings and any
+configured RuntimeClass. Each contained Runner independently qualifies the effective boundary
+before its Control registration and readiness. Failure has no contained-to-direct fallback.
+
 Provider reports include the applied configuration generation and digest. Control records Provider
 acknowledgement only for the exact desired revision. After that acknowledgement, Runner heartbeat
 ACK may carry the same pending evidence; Runner adopts it locally and emits its ordinary state
@@ -321,6 +329,11 @@ and state reports carry the effective absolute Agent Workspace path; Control val
 that value in `agent_runtimes.workspace_path`.
 
 Kubernetes Runtime Pod reuse compares Provider-managed configuration while allowing additive fields injected by Kubernetes admission and defaulting. In particular, configured tolerations must remain present, but built-in `NoExecute` tolerations added by Kubernetes do not make an otherwise reusable Pod stale or trigger replacement during repeated start reconciliation.
+
+Contained workload reuse comparison includes the exact backend bootstrap, security configuration,
+AppArmor/RuntimeClass selection, Agent temporary storage, Runner-private temporary storage, and
+managed environment. The Agent Workspace remains the durable Provider-owned mount. Agent `/tmp`
+and Runner-private temporary storage are Runtime-incarnation-scoped and are recreated with compute.
 
 Missing or non-absolute current Runner workspace evidence records `RUNNER_WORKSPACE_PATH_MISSING` or `RUNNER_WORKSPACE_PATH_INVALID` and prevents Runner readiness. Advancing the desired generation clears the previous Runner path so another generation cannot reuse stale evidence. Control never invents a fallback path.
 
@@ -343,6 +356,28 @@ Runner is operation-only. It handles operations inside an already provisioned Ru
 - file upload/download body streams
 - Git repository/worktree operations used by operation TurnAction execution and cleanup
 - operation heartbeat/progress/final events
+
+Runner selects one backend-neutral execution implementation at startup. Direct execution preserves
+retained v1 and direct-v2 behavior. A contained Runner parses only trusted bootstrap input, loads
+the configured backend, and completes local qualification before opening its normal Control
+connection. Qualification proves the positive filesystem projection, process view, non-root
+UID/GID 1000 identity, zero capability sets, no-new-privileges, nested-user-namespace denial,
+temporary-storage separation, and protected credential/socket/path exclusion. Failure terminates
+startup without registering a weaker Runner.
+
+Agent child environment is built from a code-owned allowlist plus explicitly authorized
+operation/Toolkit values; it is not copied from the Runner environment. Contained processes see the
+Agent Workspace, selected read-only system toolchain, and Agent `/tmp`, while Runner installation,
+Runner-private temporary files, Runtime Control credentials, Provider credentials, workload
+credentials, infrastructure sockets, and unrelated Runtime resources remain outside the
+projection.
+
+The same selected execution backend owns every Agent-selected process and native path operation.
+The Runner routes shell/process, file, edit, patch, search, Git/worktree, import, presentation,
+image, publication, provider-delivery, and transfer path access through a bounded typed helper
+protocol inside containment. Model-visible operation envelopes, paths, results, deadlines, and
+cancellation contracts remain unchanged, and a contained helper failure never retries with trusted
+Runner filesystem or direct process authority.
 
 `file.stat` is the authoritative operation for classifying a workspace path as file, directory, symlink, other, or missing before a caller chooses a file or directory operation.
 
@@ -455,6 +490,15 @@ An unavailable or blocked desired revision prevents create/start/restart/reset/r
 a bounded reason. Stop and terminal delete remain available where needed to remove authority or
 complete decommissioning.
 
+Every explicit Runtime-backed tool or TurnAction resolves one bounded immutable operation target.
+The resolver may request start when that operation permits it, then requires the exact desired and
+applied revision ID/digest, desired generation, accepted Runner generation, Provider connection and
+observation, qualified durable Runner readiness, and current Runner-reported Agent Workspace path.
+Protocol `BUSY` reports retain availability by normalizing to durable `READY`. Callers use the
+prompt-selected revision/digest/generation when available.
+Supersession, disconnection, failure, timeout, cancellation, or authority drift fails closed rather
+than retargeting the operation to another Runtime incarnation.
+
 Desired/applied mismatch never authorizes implicit recreation. Kubernetes NetworkPolicy-only changes
 may adopt in place through exact Provider and Runner evidence. PodSpec, PVC, and Docker changes
 remain waiting for an explicit recreation operation. Recreation snapshots the exact target version
@@ -473,6 +517,13 @@ Production deploys the new path through GitOps:
 
 - ECR repositories and GitHub Actions build/push runtime images.
 - A Docker-enabled Kubernetes Runtime mounts its private DIND Unix socket directly into the Runner.
+- Contained Docker Runtime workloads use the deployment-configured AppArmor profile, a non-root
+  trusted Runner with bounded bootstrap privilege, separated Agent/Runner temporary directories,
+  and no Docker socket projection. The resulting Agent children are non-root and capability-free.
+- Contained Kubernetes Runtime workloads use the deployment-configured AppArmor profile, optional
+  validated RuntimeClass, RuntimeClass read RBAC, and a non-root trusted Runner with bounded
+  bootstrap privilege plus separate Agent and Runner-private `emptyDir` volumes. The resulting
+  Agent children are non-root and capability-free.
 - The Runner and DIND sidecar mount the Agent Workspace and Pod-local shared temporary directory at identical absolute paths so ordinary workspace and temporary-file bind mounts resolve against the same files in both containers.
 - The Runner receives Docker and Testcontainers endpoint settings; no Azents component filters or rewrites Docker HTTP requests.
 - The privileged DIND sidecar receives the Profile's Kubernetes resource values and owns a separate bounded temporary data volume.
@@ -500,7 +551,15 @@ Required deterministic coverage:
 - Provider tests for Docker host bind mount persistence, Kubernetes PVC persistence, direct DIND socket topology, and deployment-owned NetworkPolicy hard caps
 - Runtime Profile tests for exact resolution, current-capability compatibility, desired/applied
   evidence, one-action reconciliation, explicit recreation, stale target skips, and bounded failures
+- shared operation-target tests for delayed start, durable readiness plus protocol `BUSY`
+  normalization, exact revision/digest/generation fencing, Provider disconnection, supersession,
+  timeout, cancellation, and Workspace evidence
+- Runner backend qualification and conformance for UID/GID, capabilities, process/filesystem view,
+  environment redaction, temporary storage, helper parity, deadlines, cancellation, and no fallback
 - Docker compatibility tests for CLI, Buildx, Compose, workspace and temporary-file bind mounts, SDK, Testcontainers Network, PostgreSQL port binding, and Ryuk cleanup
+- deterministic Docker containment evidence under the enforcing AppArmor profile and disposable
+  kind-based Kubernetes containment evidence for workload preparation, qualification, boundaries,
+  Workspace persistence, ephemeral-state clearing, and direct rollback
 - azents deterministic E2E for Agent Workspace bootstrap and lifecycle actions
 - credential-free runtime-provider E2E for explicit/default/unconfigured Profile precedence, exact
   binding, applied evidence, Provider loss without fallback, recreation, and recovery
@@ -510,6 +569,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-09** (spec_version 53) — Added Profile v2 containment preparation, pre-registration
+  Runner qualification, one contained authority for process/native operations, exact bounded
+  operation targeting, separated temporary storage, and deterministic Docker/Kubernetes evidence.
 - **2026-08-05** (spec_version 51) — Serialized bounded `OBSERVE` repair dispatch with the current
   Runtime row through exact configuration lookup and Provider-stream append, retained lifecycle and
   terminal-delete precedence, and added transient correlation logs.

@@ -31,6 +31,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
+  - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/rdb/models/workspace.py
   - python/apps/azents/src/azents/rdb/models/git_worktree_cleanup_claim.py
   - python/apps/azents/src/azents/services/agent_project_catalog/**
@@ -60,6 +61,8 @@ code_paths:
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/app/(app)/join/[handle]/page.tsx
   - python/apps/azents/src/azents/repos/agent_runtime/**
+  - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/api/public/agent_runtime/**
   - python/apps/azents/src/azents/runtime/**
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
@@ -94,8 +97,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-04
-spec_version: 59
+last_verified_at: 2026-08-09
+spec_version: 60
 ---
 
 # Workspace & Membership
@@ -233,7 +236,19 @@ The concrete-session Workspace panel requests the Project browser manifest only 
 | `FAILED` | `UNAVAILABLE` | Show server failure code/message and only available actions |
 | `RUNNING` | `READY` | File list/read/download available only if the current Runner-reported Agent Workspace path and Runner operation path are both valid |
 
-File list/read/write/upload/download APIs work only when Runtime is `RUNNING`, a current Runner report supplied a valid absolute Agent Workspace path, and Runner operation path is ready. Missing or invalid Runner evidence produces `RUNNER_WORKSPACE_PATH_MISSING` or `RUNNER_WORKSPACE_PATH_INVALID`; the server does not invent a fallback path.
+Runtime-dependent file, browser, Project, directory-validation, and worktree operations resolve one
+shared exact operation target. The resolver may request start/wait when the explicit operation
+allows it, then requires matching desired/applied revision and digest, desired/Runner generation,
+Provider/Runner authority, and a valid current Runner-reported Agent Workspace path. Missing or
+invalid Runner evidence produces `RUNNER_WORKSPACE_PATH_MISSING` or
+`RUNNER_WORKSPACE_PATH_INVALID`; supersession or authority drift fails closed, and the server does
+not invent a fallback path. The read-only Workspace summary itself remains non-starting.
+
+The Runtime response includes a server-derived `configuration.containment` projection with
+`enabled`, `applied`, `recreation_required`, `nested_docker_available`, `runtime_available`, and a
+bounded nullable `availability_reason_code`. The projection keeps desired containment identity
+visible while reporting physical application and Runtime operation availability separately. The UI
+renders it as supplied and does not reconstruct containment from raw Provider/Runner states.
 
 Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding; binary preview candidates return no text body and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, stat the regular file, and consume one verified Runtime transfer object in the API response adapter. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
 
@@ -260,6 +275,11 @@ Profile create and complete replacement require `RUNTIME_PROFILES_WRITE`; reads 
 unavailable without deleting it, its Agent selections, or its Runtime references. Availability is
 computed from the exact Provider lifecycle/connection/current capability, infrastructure Profile
 compatibility, and Workspace Profile state. No arbitrary substitute is selected.
+
+Infrastructure and Workspace Runtime Profile responses expose the Profile schema and a derived
+containment/nested-Docker projection. Admin create/edit preserves Profile v1, supports direct
+Profile v2 and contained Profile v2, and rejects Kubernetes DinD plus process containment. Workspace
+and Agent surfaces can select the complete Profile but cannot edit backend or security arguments.
 
 Each Workspace also stores a nullable default Runtime Profile and an optimistic default version.
 The default is copied once when a new Agent omits an explicit selection. Changing or clearing the
@@ -672,6 +692,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-09 (spec_version=60)** — Added exact shared Runtime operation qualification,
+  server-derived containment/application/availability projection, Profile v1/v2 containment
+  presentation, and Admin DinD-exclusion behavior.
 - **2026-08-04 (spec_version=58)** — Added the context-owned non-null Session
   working-folder contract, fixed Project-browser entry and mutation policy, new
   worktree placement with recorded legacy-path preservation, and post-commit

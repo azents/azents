@@ -8,6 +8,7 @@ touches_domains: [agent, workspace, conversation]
 code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
+  - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent_runtime/**
@@ -21,8 +22,8 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-07
-spec_version: 18
+last_verified_at: 2026-08-09
+spec_version: 19
 ---
 
 # Agent Runtime Persistence
@@ -44,8 +45,9 @@ default, environment default, or fallback.
 
 The desired revision records the exact Provider capability revision, infrastructure and Workspace
 Profile IDs/versions/digests, Agent selection version, resolved full configuration, source trace,
-target desired generation, and canonical digest. A blocked resolution is also durable and keeps its
-bounded reason and missing-capability evidence without discarding the last applied revision.
+target desired generation, canonical digest, and complete retained Profile v1 or Profile v2
+containment choice. A blocked resolution is also durable and keeps its bounded reason and
+missing-capability evidence without discarding the last applied revision.
 
 Resolution reads Agent selection, Workspace Profile, infrastructure Profile, Provider, and
 capability inputs as lock-free versioned snapshots. It attaches a new desired pointer only through
@@ -58,6 +60,12 @@ The applied revision pointer is separate physical evidence. It advances only aft
 Provider acknowledges the current revision and the ordinary Runner state report returns the same
 generation and digest. Desired changes therefore become visible immediately while the running
 incarnation may remain applied to an older revision or wait for explicit recreation.
+
+Containment adds no persisted lifecycle enum, boolean, status table, or qualification record.
+Product status is derived from the desired Profile, desired/applied revision equality, current
+Provider/Runner authority, and current Runner-reported Workspace evidence. Enabling or removing
+containment requires explicit recreation because it changes the physical workload; recreation and
+rollback preserve the durable Agent Workspace.
 
 Capability/Profile changes never reassign the Agent to another Provider or Profile. Provider or
 Profile loss preserves IDs, revisions, and existing storage while blocking new create/start/restart/
@@ -155,6 +163,14 @@ DIND sidecar's Kubernetes CPU/memory requests and limits and fixed ephemeral-sto
 PID, nested-container count, and per-Profile network fields are not advertised because direct
 privileged Docker authority bypasses such in-daemon policy claims.
 
+Profile v2 process containment is mutually exclusive with DinD. A contained Pod keeps one
+unprivileged Runner, the same durable Agent Workspace PVC, one Runtime-scoped Agent temporary
+`emptyDir`, and a separate Runner-private temporary `emptyDir`. Provider preparation applies the
+deployment-configured AppArmor/optional RuntimeClass and a non-root trusted Runner with bounded
+bootstrap privilege. Runner-local qualification proves capability-free non-root Agent children
+before the Runner can register. Recreating from contained to direct, or direct to contained, preserves the PVC
+while replacing both ephemeral temporary views.
+
 The Runtime-specific Kubernetes NetworkPolicy is the intersection of the Provider hard boundary,
 the selected Pod Profile preset, and any Workspace narrowing. Required DNS and Runtime Control
 traffic remains protected. Resolution uses the exact Provider's current valid capability revision,
@@ -182,9 +198,18 @@ Docker Provider v1 assumes one stable Docker host. For each Runtime it creates a
 bind-mounts it into the Runner container at its configured Runner home path. The host directory is
 the event persistence source.
 
+The Provider protocol remains Docker Provider v1 while the selected infrastructure Profile may be
+schema v1 or v2. A v2 Profile can opt into process containment only when the Provider advertises
+the deployment-configured capability; each contained Runner still qualifies its effective boundary.
+The durable host Workspace directory remains mounted at the same Agent path;
+contained Agent temporary and Runner-private directories are distinct ephemeral host directories
+owned by that Runtime incarnation.
+
 Stop/restart/recover and ordinary recreation may remove/recreate containers, but must keep the host
-directory. Reset may delete or replace the host directory according to the reset command. Terminal
-delete removes both the container and host directory.
+directory. Containment adoption/removal recreates the container and ephemeral directories while
+keeping the Workspace directory. Reset may delete or replace the host directory according to the
+reset command. Terminal delete removes the container, Workspace directory, and Provider-owned
+ephemeral directories.
 
 ## Agent Workspace Projects
 
@@ -212,11 +237,20 @@ Required checks:
 - Runtime Profile E2E uses Admin/Public API setup and a real Docker Provider to verify unconfigured,
   default, and explicit selection; exact desired/applied evidence; explicit recreation; Provider
   loss without substitution; retained selection; and recovery.
+- Profile tests prove v1/direct-v2 preservation, v2 containment/DinD exclusion, capability
+  requirements, canonical revision identity, and containment recreation classification.
+- Docker and disposable Kubernetes containment evidence proves Workspace persistence,
+  Agent/Runner temporary separation, ephemeral-state clearing on recreation, and direct rollback.
+- Schema and migration searches prove containment application/availability remains derived rather
+  than persisted.
 - Migration tests prove exact legacy effective-selection conversion and final absence of obsolete
   policy/override/snapshot schema.
 
 ## Changelog
 
+- **2026-08-09 (spec_version=19)** — Added persisted Profile v1/v2 containment choice, derived
+  containment status without new lifecycle state, Provider-specific temporary-storage lifetimes,
+  and Workspace-preserving containment adoption and rollback.
 - **2026-08-07 (spec_version=18)** — Made Runtime Profile source reads lock-free and fenced the
   desired pointer attachment by exact versioned source evidence, Runtime generation, and durable
   reconcile convergence after a stale attachment.

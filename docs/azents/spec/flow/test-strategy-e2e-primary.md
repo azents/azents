@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-06
-spec_version: 23
+last_verified_at: 2026-08-09
+spec_version: 24
 ---
 
 # E2E Primary Test Strategy
@@ -151,7 +151,16 @@ Always-on required CI does not depend on external credentials.
   clients against a real Redis container. Memory replicas may overlap and converge at
   the PostgreSQL position fence; Redis replicas serialize the same scope; unavailable
   Redis remains a surfaced retryable failure with no memory fallback.
-- Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run selected `runtime_provider` journeys, including Tool Search Runtime Hooks, provider-native External Channel progress, and the External Channel file-transfer journey.
+- Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run selected `runtime_provider` journeys, including Tool Search Runtime Hooks, provider-native External Channel progress, and the External Channel file-transfer journey. The lane loads the enforcing Runtime containment AppArmor profile before worktree-built images start and unloads it during cleanup. Contained journeys use Profile v2 and fail when required AppArmor evidence is absent rather than reporting a direct or skipped substitute as containment evidence.
+- The change-filtered `ci-kubernetes-containment-e2e-run` is required for containment Profile,
+  Runner backend/helper, Docker AppArmor, Kubernetes Provider, Helm, or conformance-driver changes.
+  It installs pinned kind/kubectl tools, loads the enforcing AppArmor profile, builds the tested
+  Runner and Kubernetes Provider images, pushes them to a disposable local registry, and creates a
+  disposable kind cluster. The test validates digest pulls, RuntimeClass and RBAC preparation, exact
+  contained Pod security/mount/environment lowering, pre-registration qualification, filesystem and
+  UID/GID/capability/process/socket/credential/network boundaries, Agent Workspace persistence,
+  ephemeral-state clearing, and direct Profile rollback. Cleanup uploads bounded resource listings,
+  Pod descriptions, container logs, and JUnit evidence with Runner credentials redacted.
 - Worktree-built Server, Runtime Runner, Docker Runtime Provider, Main Web, and
   Admin Web E2E images import image-specific BuildKit GitHub Actions cache scopes.
   Only `main` push jobs export cache, with one existing lane owning each scope;
@@ -212,6 +221,12 @@ advertised capability whose admission, isolation, network, or storage enforcemen
 must fail. Missing Docker/testcontainers or qualified-cluster prerequisites are unavailable
 evidence, never a local live-PASS substitute.
 
+Required process-containment lanes are deterministic CI rather than optional external-provider
+verification. Missing AppArmor, Docker, kind, kubectl, image pull, RuntimeClass, RBAC, or qualified
+backend enforcement fails the selected required lane. A local environment that lacks those
+prerequisites records unavailable evidence and waits for the required CI result; it does not claim a
+local pass.
+
 ## Feature and Ship Workflow Requirements
 
 azents feature design must include `## Test Strategy` section. Minimum items are E2E primary plan, whether testenv fixture/prerequisite support is needed and why, fixture/product seed, credential contract, prerequisite snapshot, evidence format, CI execution policy, and live/optional skip/fail criteria.
@@ -227,6 +242,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-09** — v24. Added enforcing-AppArmor Docker Runtime Provider coverage and the required
+  disposable kind Kubernetes containment lane with bounded evidence, fail-closed prerequisites,
+  qualification, security boundaries, persistence, ephemeral clearing, and direct rollback.
 - **2026-08-04** — v21. Added deterministic Session working-folder public and
   Docker Runtime E2E coverage plus PostgreSQL expand/backfill/contract migration
   evidence, including archive symlink-boundary and restore behavior.
