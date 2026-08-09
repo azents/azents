@@ -6,11 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord
 import pytest
-from discord.http import Route
 
 from azents.services.external_channel import discord_sdk
 from azents.services.external_channel.discord_sdk import (
-    DiscordPyClientFactory,
     DiscordSDKCredentialsInvalid,
     DiscordSDKPermissionDenied,
     DiscordSDKRequestRejected,
@@ -37,43 +35,6 @@ def test_http_auth_statuses_retain_credentials_permission_distinction(
 ) -> None:
     """HTTP authentication failures retain their provider classification."""
     assert isinstance(discord_sdk._sdk_error(_http_error(status)), expected)
-
-
-@pytest.mark.asyncio
-async def test_factory_applies_test_endpoint_for_full_sdk_session(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Activation uses the deterministic endpoint before Gateway startup."""
-    original_api_base_url = Route.BASE
-    observed_api_base_urls: list[str] = []
-
-    class Client:
-        def __init__(self, *, intents: discord.Intents) -> None:
-            del intents
-            self.closed = False
-
-        async def login(self, token: str) -> None:
-            del token
-            observed_api_base_urls.append(Route.BASE)
-
-        def is_closed(self) -> bool:
-            return self.closed
-
-        async def close(self) -> None:
-            self.closed = True
-
-    monkeypatch.setattr(discord_sdk.discord, "Client", Client)
-    monkeypatch.setenv(
-        "AZ_TESTENV_DISCORD_API_BASE_URL",
-        "http://discord.test/api/v10",
-    )
-    monkeypatch.delenv("AZ_TESTENV_DISCORD_GATEWAY_URL", raising=False)
-
-    async with DiscordPyClientFactory().open(bot_token="redacted"):
-        assert Route.BASE == "http://discord.test/api/v10"
-
-    assert observed_api_base_urls == ["http://discord.test/api/v10"]
-    assert Route.BASE == original_api_base_url
 
 
 def _channel(

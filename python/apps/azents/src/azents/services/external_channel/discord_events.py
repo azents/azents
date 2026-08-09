@@ -4,6 +4,7 @@ import datetime
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 import discord
 
@@ -26,11 +27,13 @@ from azents.core.external_channel_reference import (
     provider_reference_mappings_size,
 )
 from azents.repos.external_channel.data import ExternalChannelTrigger
-from azents.services.external_channel.discord_gateway import DiscordGatewayMessageEvent
 
 _MAX_DISCORD_MESSAGE_CONTENT_BYTES = 64 * 1024
 _MAX_DISCORD_EMBEDS = 10
 _MAX_DISCORD_EMBED_FIELDS = 25
+type DiscordSDKHistoryChannel = (
+    discord.TextChannel | discord.Thread | discord.VoiceChannel | discord.StageChannel
+)
 _MESSAGE_EVENT_TYPES = {
     "message_create": "discord_message_create",
 }
@@ -46,6 +49,16 @@ class DiscordEventExcluded(DiscordEventNormalizationError):
 
 class DiscordMessageContentUnavailable(DiscordEventNormalizationError):
     """Discord omitted message content required by the configured ingress contract."""
+
+
+@dataclass(frozen=True)
+class DiscordGatewayMessageEvent:
+    """One bounded message-create event projected at the Gateway callback boundary."""
+
+    event_type: Literal["message_create"]
+    guild_id: str
+    channel_id: str
+    message: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -86,14 +99,14 @@ def project_discord_gateway_event(
 ) -> ExternalChannelTrigger | None:
     """Build a canonical event exclusively from typed discord.py objects."""
     event_type = _MESSAGE_EVENT_TYPES[event.event_type]
-    guild_id = str(event.channel.guild.id)
+    guild_id = event.guild_id
     if guild_id != target_guild_id:
         return None
-    projection = _project_discord_sdk_event(
-        event=event,
-        guild_id=guild_id,
-        connected_bot_user_id=connected_bot_user_id,
-    )
+    projection = event.message
+    if _required_string(projection, "guild_id") != guild_id:
+        raise ValueError("Discord Gateway projection Guild identity is invalid.")
+    if _required_string(projection, "channel_id") != event.channel_id:
+        raise ValueError("Discord Gateway projection channel identity is invalid.")
     channel_id = _required_string(projection, "channel_id")
     provider_event_id = _discord_gateway_event_id(
         event_type=event_type,
@@ -114,20 +127,18 @@ def project_discord_gateway_event(
     )
 
 
-def _project_discord_sdk_event(
+def project_discord_sdk_gateway_message(
     *,
-    event: DiscordGatewayMessageEvent,
-    guild_id: str,
+    message: discord.Message,
+    channel: DiscordSDKHistoryChannel,
     connected_bot_user_id: str | None,
 ) -> dict[str, object]:
     """Project public SDK attributes into the bounded provider-neutral envelope."""
-    channel_id = str(event.channel.id)
-    message = event.message
-    if message is None:
-        raise ValueError("Discord message event is missing its typed Message.")
+    guild_id = str(channel.guild.id)
+    channel_id = str(channel.id)
     if message.guild is None or str(message.guild.id) != guild_id:
         raise ValueError("Discord Message Guild identity is invalid.")
-    if message.channel.id != event.channel.id:
+    if message.channel.id != channel.id:
         raise ValueError("Discord Message channel identity is invalid.")
     source: dict[str, object] = {
         "id": str(message.id),
@@ -167,12 +178,12 @@ def _project_discord_sdk_event(
     embeds = [_sdk_embed(embed) for embed in message.embeds]
     if embeds:
         source["embeds"] = embeds
-    channel_name = getattr(event.channel, "name", None)
+    channel_name = getattr(channel, "name", None)
     if isinstance(channel_name, str) and channel_name:
         source["channel_name"] = channel_name
-    if isinstance(event.channel, discord.Thread):
-        parent_id = event.channel.parent_id
-        if parent_id == event.channel.id:
+    if isinstance(channel, discord.Thread):
+        parent_id = channel.parent_id
+        if parent_id == channel.id:
             raise ValueError("Discord Thread parent identity is invalid.")
         source["thread"] = {
             "id": channel_id,
@@ -183,7 +194,7 @@ def _project_discord_sdk_event(
                 else {}
             ),
         }
-        parent = event.channel.parent
+        parent = channel.parent
         parent_name = getattr(parent, "name", None)
         if isinstance(parent_name, str) and parent_name:
             source["parent_channel_name"] = parent_name

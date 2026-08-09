@@ -2,6 +2,7 @@
 title: "External Channel Provider Integration Reliability Design"
 created: 2026-08-09
 updated: 2026-08-09
+implemented: 2026-08-09
 tags: [external-channel, slack, discord, sdk, reliability, backend, testenv]
 document_role: primary
 document_type: design

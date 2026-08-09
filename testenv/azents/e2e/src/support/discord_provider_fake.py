@@ -1,13 +1,9 @@
 """Deterministic Discord REST and Gateway boundary for E2E tests."""
 
-import base64
-import hashlib
 import json
 import os
 import re
 import socket
-import socketserver
-import struct
 import threading
 import time
 from collections.abc import Mapping, Sequence
@@ -20,7 +16,6 @@ from urllib.request import Request, urlopen
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 _HTTP_PORT = 8085
-_WEBSOCKET_PORT = 8086
 _API_PREFIX = "/api/v10"
 _VERIFY_KEY = "233988c4fcf6ffd4dcf0590950d79671de856cfa36f65c16a2be13b1613875f0"
 _SIGNING_PRIVATE_KEY = (
@@ -100,7 +95,6 @@ class FakeState:
             self.guild_id = "200000000000000001"
             self.bot_user_id = "300000000000000001"
             self.verify_key = _VERIFY_KEY
-            self.gateway_url = "ws://discord-fake:8086"
             self.api_scenarios: dict[str, str] = {}
             self.api_scenario_sequences: dict[str, list[str]] = {}
             self.history_scenario = "ok"
@@ -716,24 +710,16 @@ class FakeState:
             return self._thread_names.get(channel_id)
 
     def thread_parent_id(self, channel_id: str) -> str | None:
-        """Return the configured parent identity for one created thread."""
+        """Return the parent channel for one deterministic Thread."""
         with self.lock:
-            return next(
-                (
-                    parent_channel_id
-                    for (parent_channel_id, _), thread_id in self._root_threads.items()
-                    if thread_id == channel_id
-                ),
-                None,
-            )
-
-    def is_source_channel(self, channel_id: str) -> bool:
-        """Return whether configured message state belongs to one source channel."""
-        with self.lock:
-            return any(
-                parent_channel_id == channel_id
-                for parent_channel_id, _ in self.root_messages
-            )
+            for (parent_channel_id, _), thread_id in self._root_threads.items():
+                if thread_id == channel_id:
+                    return parent_channel_id
+            for (parent_channel_id, _), message in self.root_messages.items():
+                thread = message.get("thread")
+                if isinstance(thread, dict) and thread.get("id") == channel_id:
+                    return parent_channel_id
+            return None
 
     def update_thread_name(self, *, channel_id: str, name: str) -> bool:
         """Replace one known thread name without exposing it in evidence."""
@@ -753,31 +739,6 @@ class FakeState:
                 len(self.gateway_scenarios) - 1,
             )
             return list(self.gateway_dispatches), self.gateway_scenarios[scenario_index]
-
-    def gateway_ready_payload(self) -> dict[str, object]:
-        """Return the bounded identity projection required by discord.py READY."""
-        with self.lock:
-            return {
-                "session_id": "discord-e2e-session",
-                "resume_gateway_url": "ws://discord-fake:8086",
-                "user": {
-                    "id": self.bot_user_id,
-                    "username": "Azents",
-                    "discriminator": "0",
-                    "avatar": None,
-                    "bot": True,
-                },
-                "application": {
-                    "id": self.application_id,
-                    "flags": 0,
-                },
-                "guilds": [
-                    {
-                        "id": self.guild_id,
-                        "unavailable": True,
-                    }
-                ],
-            }
 
     def gateway_heartbeat(self, sequence: int | None) -> None:
         """Record heartbeat sequence only."""
@@ -866,357 +827,34 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 {"command_id": self.state.command_id_for_role(role)},
             )
             return
-        if parsed.path == f"{_API_PREFIX}/oauth2/applications/@me":
-            if self._controlled_response(self._operation("get_current_application")):
-                return
-            self._json_response(
-                200,
-                {
-                    "id": self.state.application_id,
-                    "name": "Azents E2E",
-                    "description": "Deterministic external-channel provider fake.",
-                    "icon": None,
-                    "bot_public": False,
-                    "bot_require_code_grant": False,
-                    "owner": {
-                        "id": self.state.bot_user_id,
-                        "username": "Azents",
-                        "discriminator": "0",
-                        "avatar": None,
-                    },
-                    "verify_key": self.state.verify_key,
-                },
-            )
-            return
-        if parsed.path == f"{_API_PREFIX}/users/@me":
-            if self._controlled_response(self._operation("get_current_bot_user")):
-                return
-            self._json_response(
-                200,
-                {
-                    "id": self.state.bot_user_id,
-                    "username": "Azents",
-                    "discriminator": "0",
-                    "avatar": None,
-                    "bot": True,
-                },
-            )
-            return
-        if parsed.path == f"{_API_PREFIX}/gateway/bot":
-            if self._controlled_response(self._operation("gateway_discovery")):
-                return
-            self._json_response(
-                200,
-                {
-                    "url": self.state.gateway_url,
-                    "shards": 1,
-                    "session_start_limit": {
-                        "total": 1000,
-                        "remaining": 999,
-                        "reset_after": 0,
-                        "max_concurrency": 1,
-                    },
-                },
-            )
-            return
-        if parsed.path.startswith(f"{_API_PREFIX}/guilds/") and parsed.path.endswith(
-            "/members/@me"
-        ):
-            if self._controlled_response(self._operation("guild_membership")):
-                return
-            self._json_response(200, {"user": {"id": self.state.bot_user_id}})
-            return
-        if _guild_command_collection(parsed.path):
-            if self._controlled_response(self._operation("list_guild_commands")):
-                return
-            self._json_response_array(200, self.state.list_guild_commands())
-            return
-        channel_id = _channel_item_id(parsed.path)
-        if channel_id is not None:
-            scenario = self._operation(
-                "get_channel",
-                metadata={"channel_id": channel_id},
-            )
-            if self._controlled_response(scenario):
-                return
-            name = self.state.thread_name(channel_id)
-            parent_id = self.state.thread_parent_id(channel_id)
-            is_source_channel = self.state.is_source_channel(channel_id)
-            if name is None and not is_source_channel:
-                self.state.record_operation(
-                    "thread_title",
-                    operation="get_channel",
-                    outcome="missing",
-                    safe_category="thread_not_found",
-                    metadata={"channel_id": channel_id},
-                )
-                self._json_response(404, {"message": "Not found."})
-                return
-            if scenario in {"malformed_json", "response_malformed"}:
-                self.state.record_operation(
-                    "thread_title",
-                    operation="get_channel",
-                    outcome="unknown",
-                    safe_category="response_malformed",
-                    metadata={"channel_id": channel_id},
-                )
-                self._raw_response(200, b"{malformed")
-                return
-            channel_payload: dict[str, object]
-            if is_source_channel:
-                channel_payload = {
-                    "id": channel_id,
-                    "guild_id": self.state.guild_id,
-                    "type": 0,
-                    "name": "discord-source",
-                    "position": 0,
-                    "permission_overwrites": [],
-                }
-                evidence_event = "channel_read"
-            else:
-                assert name is not None
-                assert parent_id is not None
-                channel_payload = {
-                    "id": channel_id,
-                    "guild_id": self.state.guild_id,
-                    "parent_id": parent_id,
-                    "owner_id": self.state.bot_user_id,
-                    "type": 11,
-                    "name": name,
-                    "message_count": 0,
-                    "member_count": 0,
-                    "thread_metadata": {
-                        "archived": False,
-                        "auto_archive_duration": 1440,
-                        "archive_timestamp": "2026-07-28T00:00:00.000000+00:00",
-                        "locked": False,
-                    },
-                }
-                evidence_event = "thread_title"
-            if scenario == "response_shape_invalid":
-                channel_payload.pop("name")
-            elif scenario == "response_channel_mismatch":
-                channel_payload["id"] = "0"
-            self.state.record_operation(
-                evidence_event,
-                operation="get_channel",
-                outcome="delivered",
-                safe_category=(
-                    scenario
-                    if scenario
-                    in {"response_shape_invalid", "response_channel_mismatch"}
-                    else None
-                ),
-                metadata={"channel_id": channel_id},
-            )
-            self._json_response(200, channel_payload)
-            return
-        if parsed.path.startswith(f"{_API_PREFIX}/channels/") and parsed.path.endswith(
-            "/messages"
-        ):
-            channel_id = parsed.path.split("/")[-2]
-            query = parse_qs(parsed.query)
-            before_values = query.get("before", [])
-            before = before_values[0] if before_values else None
-            raw_limit = query.get("limit", ["100"])[0]
-            try:
-                limit = int(raw_limit)
-            except ValueError:
-                self._json_response(400, {"message": "Invalid history limit."})
-                return
-            if not 1 <= limit <= _MAX_HISTORY_MESSAGES_PER_PAGE:
-                self._json_response(400, {"message": "Invalid history limit."})
-                return
-            history_metadata: dict[str, object] = {
-                "channel_id": channel_id,
-                "limit": limit,
-            }
-            if before is not None:
-                history_metadata["cursor"] = before
-            scenario = self._operation(
-                "get_history",
-                metadata=history_metadata,
-            )
-            if self._controlled_response(scenario):
-                safe_category = _safe_category(scenario)
-                outcome = (
-                    "unknown"
-                    if safe_category
-                    in {
-                        "transport_unknown",
-                        "provider_5xx_unknown",
-                    }
-                    else "failed"
-                )
-                self.state.record_operation(
-                    "history_page",
-                    operation="get_history",
-                    outcome=outcome,
-                    safe_category=safe_category,
-                    metadata=history_metadata,
-                )
-                return
-            if scenario in {"malformed_json", "response_malformed"}:
-                self.state.record_operation(
-                    "history_page",
-                    operation="get_history",
-                    outcome="unknown",
-                    safe_category="response_malformed",
-                    metadata=history_metadata,
-                )
-                self._raw_response(200, b"{malformed")
-                return
-            page, _ = self.state.history_page(
-                channel_id=channel_id,
-                before=before,
-                limit=limit,
-            )
-            self.state.record_operation(
-                "history_page",
-                operation="get_history",
-                outcome="delivered",
-                metadata=history_metadata,
-            )
-            self._json_response_array(
-                200,
-                [
-                    _discord_message_response(
-                        message,
-                        guild_id=self.state.guild_id,
-                    )
-                    for message in page
-                ],
-            )
-            return
-        if "/channels/" in parsed.path and "/messages/" in parsed.path:
-            channel_id, message_id = _channel_message_ids(parsed.path)
-            if channel_id is not None and message_id is not None:
-                scenario = self._operation(
-                    "get_message",
-                    metadata={"channel_id": channel_id, "message_id": message_id},
-                )
-                if self._controlled_response(scenario):
-                    safe_category = _safe_category(scenario)
-                    outcome = (
-                        "unknown"
-                        if safe_category
-                        in {
-                            "transport_unknown",
-                            "provider_5xx_unknown",
-                        }
-                        else "failed"
-                    )
-                    self.state.record_operation(
-                        "thread_read",
-                        operation="get_message",
-                        outcome=outcome,
-                        safe_category=safe_category,
-                        metadata={
-                            "parent_channel_id": channel_id,
-                            "root_message_id": message_id,
-                        },
-                    )
-                    return
-                payload = self.state.root_message(
-                    parent_channel_id=channel_id,
-                    root_message_id=message_id,
-                )
-                if payload is None and not self.state.allow_synthetic_roots:
-                    self.state.record_operation(
-                        "thread_read",
-                        operation="get_message",
-                        outcome="missing",
-                        safe_category="message_not_found",
-                        metadata={
-                            "parent_channel_id": channel_id,
-                            "root_message_id": message_id,
-                        },
-                    )
-                    self._json_response(404, {"message": "Not found."})
-                    return
-                payload = payload or {
-                    "id": message_id,
-                    "channel_id": channel_id,
-                    "content": "Synthetic Discord message",
-                    "timestamp": "2026-07-26T00:00:00.000000+00:00",
-                    "author": {"id": "600000000000000001"},
-                    "attachments": [],
-                }
-                payload["id"] = message_id
-                payload["channel_id"] = channel_id
-                thread_id = self.state.get_root_thread(
-                    parent_channel_id=channel_id,
-                    root_message_id=message_id,
-                )
-                if thread_id is not None:
-                    thread_name = self.state.thread_name(thread_id)
-                    assert thread_name is not None
-                    payload["thread"] = _discord_thread_channel_response(
-                        channel_id=thread_id,
-                        parent_id=channel_id,
-                        guild_id=self.state.guild_id,
-                        owner_id=self.state.bot_user_id,
-                        name=thread_name,
-                    )
-                payload = _discord_message_response(
-                    payload,
-                    guild_id=self.state.guild_id,
-                )
-                if scenario == "response_shape_invalid":
-                    self.state.record_operation(
-                        "thread_read",
-                        operation="get_message",
-                        outcome="unknown",
-                        safe_category="response_shape_invalid",
-                        metadata={
-                            "parent_channel_id": channel_id,
-                            "root_message_id": message_id,
-                        },
-                    )
-                    self._json_response_array(200, [])
-                    return
-                if scenario == "response_channel_mismatch":
-                    payload["channel_id"] = "0"
-                if scenario in {"malformed_json", "response_malformed"}:
-                    self.state.record_operation(
-                        "thread_read",
-                        operation="get_message",
-                        outcome="unknown",
-                        safe_category="response_malformed",
-                        metadata={
-                            "parent_channel_id": channel_id,
-                            "root_message_id": message_id,
-                        },
-                    )
-                    self._raw_response(200, b"{malformed")
-                    return
-                self.state.record_operation(
-                    "thread_reconcile"
-                    if self.state.consume_thread_reconciliation(
-                        parent_channel_id=channel_id,
-                        root_message_id=message_id,
-                    )
-                    else "thread_read",
-                    operation="get_message",
-                    outcome="reused" if thread_id is not None else "missing",
-                    safe_category=(
-                        "response_channel_mismatch"
-                        if scenario == "response_channel_mismatch"
-                        else None
-                    ),
-                    metadata={
-                        "parent_channel_id": channel_id,
-                        "root_message_id": message_id,
-                    },
-                )
-                self._json_response(200, payload)
-                return
         if parsed.path.startswith("/attachments/"):
             if self._controlled_response(self._operation("download_attachment")):
                 return
             self._bytes_response(200, b"deterministic-discord-attachment")
             return
         self._json_response(404, {"message": "Unknown fake endpoint."})
+
+    def do_PATCH(self) -> None:
+        """Serve the approved current-Application callback mutation gap."""
+        parsed = urlparse(self.path)
+        if parsed.path != f"{_API_PREFIX}/applications/@me":
+            self._json_response(404, {"message": "Unknown fake endpoint."})
+            return
+        scenario = self._operation(
+            "configure_interactions_endpoint",
+            metadata={"application_id": self.state.application_id},
+        )
+        if self._controlled_response(scenario):
+            return
+        endpoint_url = self._json_body_or_empty().get("interactions_endpoint_url")
+        if not isinstance(endpoint_url, str) or not endpoint_url:
+            self._json_response(400, {"message": "Missing callback URL."})
+            return
+        self.state.configure_interaction_endpoint(
+            self.state.application_id,
+            endpoint_url,
+        )
+        self._json_response(200, {})
 
     def do_POST(self) -> None:
         """Serve fake control, command, thread, and message mutations."""
@@ -1276,6 +914,45 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if parsed.path == "/__testenv/sdk":
+            try:
+                body = self._json_body()
+                operation = body.get("operation")
+                arguments = body.get("arguments")
+                if not isinstance(operation, str) or not isinstance(arguments, dict):
+                    raise ValueError("SDK fixture requires operation and arguments.")
+                self._sdk_operation(operation, cast(dict[str, object], arguments))
+            except ValueError as error:
+                self._json_response(400, {"message": str(error)})
+            return
+        if parsed.path == "/__testenv/gateway":
+            try:
+                body = self._json_body()
+                target_guild_id = body.get("target_guild_id")
+                resumed = body.get("resumed")
+                if not isinstance(target_guild_id, str) or not isinstance(
+                    resumed, bool
+                ):
+                    raise ValueError("Gateway fixture request is invalid.")
+                if target_guild_id != self.state.guild_id:
+                    self._json_response(400, {"message": "Guild identity mismatch."})
+                    return
+                dispatches, scenario = self.state.gateway_start(6 if resumed else 2)
+                if scenario == "reconnect":
+                    self.state.gateway_terminal(scenario)
+                    dispatches = []
+                else:
+                    for dispatch in dispatches:
+                        self.state.gateway_dispatch_sent(dispatch)
+                    if scenario != "open":
+                        self.state.gateway_terminal(scenario)
+                self._json_response(
+                    200,
+                    {"scenario": scenario, "dispatches": dispatches},
+                )
+            except ValueError as error:
+                self._json_response(400, {"message": str(error)})
+            return
         if _guild_command_collection(parsed.path):
             if self._controlled_response(self._operation("create_guild_command")):
                 return
@@ -1286,115 +963,22 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 return
             self._json_response(201, command)
             return
-        if parsed.path.endswith("/threads"):
-            thread_parent_path = parsed.path.removesuffix("/threads")
-            channel_id, message_id = _channel_message_ids(thread_parent_path)
-            if channel_id is not None and message_id is not None:
-                body = self._json_body()
-                name = body.get("name")
-                if not isinstance(name, str) or not name or len(name) > 100:
-                    self._json_response(400, {"message": "Invalid thread name."})
-                    return
-                scenario = self._operation(
-                    "create_thread",
-                    metadata={"channel_id": channel_id, "message_id": message_id},
-                )
-                if scenario == "thread_create_committed_unknown":
-                    thread_id = self.state.ensure_root_thread(
-                        parent_channel_id=channel_id,
-                        root_message_id=message_id,
-                        name=name,
-                    )
-                    self.state.mark_thread_reconciliation(
-                        parent_channel_id=channel_id,
-                        root_message_id=message_id,
-                    )
-                    self.state.record_operation(
-                        "thread_create",
-                        operation="create_thread",
-                        outcome="unknown",
-                        safe_category="transport_unknown",
-                        metadata={
-                            "parent_channel_id": channel_id,
-                            "root_message_id": message_id,
-                            "thread_channel_id": thread_id,
-                        },
-                    )
-                    self._close_connection()
-                    return
-                if self._controlled_response(scenario):
-                    safe_category = _safe_category(scenario)
-                    outcome = (
-                        "unknown"
-                        if safe_category
-                        in {
-                            "transport_unknown",
-                            "provider_5xx_unknown",
-                        }
-                        else "failed"
-                    )
-                    self.state.record_operation(
-                        "thread_create",
-                        operation="create_thread",
-                        outcome=outcome,
-                        safe_category=safe_category,
-                        metadata={
-                            "parent_channel_id": channel_id,
-                            "root_message_id": message_id,
-                        },
-                    )
-                    return
-                thread_id = self.state.ensure_root_thread(
-                    parent_channel_id=channel_id,
-                    root_message_id=message_id,
-                    name=name,
-                )
-                if scenario == "thread_response_invalid":
-                    self.state.mark_thread_reconciliation(
-                        parent_channel_id=channel_id,
-                        root_message_id=message_id,
-                    )
-                    self.state.record_operation(
-                        "thread_create",
-                        operation="create_thread",
-                        outcome="unknown",
-                        safe_category="thread_response_invalid",
-                        metadata={
-                            "parent_channel_id": channel_id,
-                            "root_message_id": message_id,
-                        },
-                    )
-                    self._json_response(201, {"id": "bad", "parent_id": "0"})
-                    return
-                self.state.record_operation(
-                    "thread_create",
-                    operation="create_thread",
-                    outcome="delivered",
-                    metadata={
-                        "parent_channel_id": channel_id,
-                        "root_message_id": message_id,
-                        "thread_channel_id": thread_id,
-                    },
-                )
-                self._json_response(
-                    201,
-                    _discord_thread_channel_response(
-                        channel_id=thread_id,
-                        parent_id=channel_id,
-                        guild_id=self.state.guild_id,
-                        owner_id=self.state.bot_user_id,
-                        name=name,
-                    ),
-                )
-                return
         if parsed.path.startswith(f"{_API_PREFIX}/channels/") and parsed.path.endswith(
             "/messages"
         ):
+            if not self.headers.get("Content-Type", "").startswith(
+                "multipart/form-data;"
+            ):
+                self._json_response(404, {"message": "Unknown fake endpoint."})
+                return
             channel_id = parsed.path.split("/")[-2]
             raw_body = self._read_body()
             body = _multipart_or_json_object(raw_body)
             nonce = body.get("nonce")
             file_count, file_bytes = _multipart_file_evidence(raw_body)
+            if file_count < 1:
+                self._json_response(400, {"message": "G2 requires file content."})
+                return
             scenario = self._operation(
                 "create_message",
                 metadata={"channel_id": channel_id},
@@ -1497,308 +1081,485 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 metadata={"channel_id": channel_id, "message_id": message_id},
             )
             self._json_response(
-                200,
-                _discord_mutation_message_response(
-                    message_id=message_id,
-                    channel_id=response_channel_id,
-                    guild_id=self.state.guild_id,
-                    bot_user_id=self.state.bot_user_id,
-                    body=body,
-                ),
+                200, {"id": message_id, "channel_id": response_channel_id}
             )
             return
         self._json_response(404, {"message": "Unknown fake endpoint."})
 
-    def do_PATCH(self) -> None:
-        """Configure callback authority or update a message without retaining bodies."""
-        parsed = urlparse(self.path)
-        if parsed.path == f"{_API_PREFIX}/applications/@me":
-            application_id = self.state.application_id
-            scenario = self._operation(
-                "configure_interactions_endpoint",
-                metadata={"application_id": application_id},
-            )
-            if self._controlled_response(scenario):
+    def _sdk_operation(
+        self,
+        operation: str,
+        arguments: dict[str, object],
+    ) -> None:
+        """Serve one SDK-facing operation without provider routes or credentials."""
+        if operation == "login":
+            if self._controlled_response(self._operation("get_current_bot_user")):
                 return
-            if scenario == "ok":
-                body = self._json_body_or_empty()
-                endpoint_url = body.get("interactions_endpoint_url")
-                if not isinstance(endpoint_url, str) or not endpoint_url:
-                    self._json_response(400, {"message": "Missing callback URL."})
-                    return
-                self.state.configure_interaction_endpoint(
-                    application_id,
-                    endpoint_url,
-                )
-            self._json_response(200, {})
+            self._json_response(200, {"bot_user_id": self.state.bot_user_id})
             return
-        channel_id = _channel_item_id(parsed.path)
-        if channel_id is not None:
-            body = self._json_body()
-            name = body.get("name")
-            if not isinstance(name, str) or not name or len(name) > 100:
-                self._json_response(400, {"message": "Invalid thread name."})
+        if operation == "fetch_application":
+            if self._controlled_response(self._operation("get_current_application")):
                 return
-            scenario = self._operation(
-                "update_channel",
-                metadata={"channel_id": channel_id},
+            self._json_response(
+                200,
+                {
+                    "application_id": self.state.application_id,
+                    "bot_user_id": self.state.bot_user_id,
+                    "verify_key": self.state.verify_key,
+                },
             )
-            safe_category = _safe_category(scenario)
-            if self._controlled_response(scenario):
-                self.state.record_operation(
-                    "thread_title",
-                    operation="update_channel",
-                    outcome=(
-                        "unknown"
-                        if safe_category
-                        in {"transport_unknown", "provider_5xx_unknown"}
-                        else "failed"
-                    ),
-                    safe_category=safe_category,
-                    metadata={"channel_id": channel_id},
-                )
-                return
-            if scenario in {"malformed_json", "response_malformed"}:
-                self.state.record_operation(
-                    "thread_title",
-                    operation="update_channel",
-                    outcome="unknown",
-                    safe_category="response_malformed",
-                    metadata={"channel_id": channel_id},
-                )
-                self._raw_response(200, b"{malformed")
-                return
-            if not self.state.update_thread_name(channel_id=channel_id, name=name):
-                self.state.record_operation(
-                    "thread_title",
-                    operation="update_channel",
-                    outcome="failed",
-                    safe_category="thread_not_found",
-                    metadata={"channel_id": channel_id},
-                )
-                self._json_response(404, {"message": "Not found."})
-                return
-            parent_id = self.state.thread_parent_id(channel_id)
-            assert parent_id is not None
-            payload = _discord_thread_channel_response(
-                channel_id=channel_id,
-                parent_id=parent_id,
-                guild_id=self.state.guild_id,
-                owner_id=self.state.bot_user_id,
-                name=name,
-            )
-            if scenario == "response_shape_invalid":
-                payload.pop("name")
-            elif scenario == "response_channel_mismatch":
-                payload["id"] = "0"
-            self.state.record_operation(
-                "thread_title",
-                operation="update_channel",
-                outcome="delivered",
-                safe_category=(
-                    scenario
-                    if scenario
-                    in {"response_shape_invalid", "response_channel_mismatch"}
-                    else None
-                ),
-                metadata={"channel_id": channel_id},
-            )
-            self._json_response(200, payload)
             return
-        command_id = _guild_command_item(parsed.path)
-        if command_id is not None:
-            if self._controlled_response(self._operation("update_guild_command")):
+        if operation == "list_guild_commands":
+            _sdk_identity(arguments, "application_id", self.state.application_id)
+            _sdk_identity(arguments, "guild_id", self.state.guild_id)
+            if self._controlled_response(self._operation(operation)):
                 return
-            try:
-                command = self.state.update_guild_command(
-                    command_id,
-                    self._json_body(),
-                )
-            except ValueError as error:
-                self._json_response(400, {"message": str(error)})
+            self._json_response(
+                200,
+                {"commands": self.state.list_guild_commands()},
+            )
+            return
+        if operation == "update_guild_command":
+            command_id = _sdk_string(arguments, "command_id")
+            if self._controlled_response(self._operation(operation)):
                 return
+            command = self.state.update_guild_command(
+                command_id,
+                {
+                    "name": _sdk_string(arguments, "name"),
+                    "type": _sdk_int(arguments, "command_type"),
+                    "description": arguments.get("description"),
+                },
+            )
             if command is None:
                 self._json_response(404, {"message": "Not found."})
-                return
-            self._json_response(200, command)
+            else:
+                self._json_response(200, command)
             return
-        channel_id, message_id = _channel_message_ids(parsed.path)
-        if channel_id is not None and message_id is not None:
-            body = self._json_body()
-            scenario = self._operation(
-                "update_message",
-                metadata={"channel_id": channel_id, "message_id": message_id},
+        if operation == "delete_guild_command":
+            command_id = _sdk_string(arguments, "command_id")
+            if self._controlled_response(self._operation(operation)):
+                return
+            if not self.state.delete_guild_command(command_id):
+                self._json_response(404, {"message": "Not found."})
+            else:
+                self._json_response(200, {})
+            return
+        if operation == "fetch_root_thread":
+            self._sdk_fetch_root_thread(arguments)
+            return
+        if operation == "create_thread":
+            self._sdk_create_thread(arguments)
+            return
+        if operation in {"fetch_thread", "update_thread_name"}:
+            self._sdk_thread_title(operation, arguments)
+            return
+        if operation in {"create_message", "update_message", "delete_message"}:
+            self._sdk_message_mutation(operation, arguments)
+            return
+        if operation == "fetch_attachment":
+            self._sdk_fetch_attachment(arguments)
+            return
+        if operation == "fetch_message_projection":
+            self._sdk_message_projection(arguments)
+            return
+        if operation == "fetch_history_projections":
+            self._sdk_history_projections(arguments)
+            return
+        raise ValueError("Unsupported SDK fixture operation.")
+
+    def _sdk_fetch_root_thread(self, arguments: dict[str, object]) -> None:
+        _sdk_identity(arguments, "guild_id", self.state.guild_id)
+        parent_channel_id = _sdk_string(arguments, "parent_channel_id")
+        root_message_id = _sdk_string(arguments, "root_message_id")
+        scenario = self._operation(
+            "get_message",
+            metadata={
+                "channel_id": parent_channel_id,
+                "message_id": root_message_id,
+            },
+        )
+        if self._controlled_response(scenario):
+            return
+        message = self.state.root_message(
+            parent_channel_id=parent_channel_id,
+            root_message_id=root_message_id,
+        )
+        if message is None and not self.state.allow_synthetic_roots:
+            self._json_response(404, {"message": "Not found."})
+            return
+        thread_id = self.state.get_root_thread(
+            parent_channel_id=parent_channel_id,
+            root_message_id=root_message_id,
+        )
+        self.state.record_operation(
+            "thread_reconcile"
+            if self.state.consume_thread_reconciliation(
+                parent_channel_id=parent_channel_id,
+                root_message_id=root_message_id,
             )
-            safe_category = _safe_category(scenario)
-            if self._controlled_response(scenario):
-                outcome = (
-                    "unknown"
-                    if safe_category in {"transport_unknown", "provider_5xx_unknown"}
-                    else "failed"
+            else "thread_read",
+            operation="get_message",
+            outcome="reused" if thread_id is not None else "missing",
+            metadata={
+                "parent_channel_id": parent_channel_id,
+                "root_message_id": root_message_id,
+            },
+        )
+        self._json_response(
+            200,
+            {
+                "thread": (
+                    {
+                        "id": thread_id,
+                        "parent_id": parent_channel_id,
+                        "guild_id": self.state.guild_id,
+                        "name": self.state.thread_name(thread_id) or "Azents",
+                    }
+                    if thread_id is not None
+                    else None
                 )
+            },
+        )
+
+    def _sdk_create_thread(self, arguments: dict[str, object]) -> None:
+        _sdk_identity(arguments, "guild_id", self.state.guild_id)
+        parent_channel_id = _sdk_string(arguments, "parent_channel_id")
+        root_message_id = _sdk_string(arguments, "root_message_id")
+        name = _sdk_string(arguments, "name")
+        scenario = self._operation(
+            "create_thread",
+            metadata={
+                "channel_id": parent_channel_id,
+                "message_id": root_message_id,
+            },
+        )
+        if scenario == "thread_create_committed_unknown":
+            thread_id = self.state.ensure_root_thread(
+                parent_channel_id=parent_channel_id,
+                root_message_id=root_message_id,
+                name=name,
+            )
+            self.state.mark_thread_reconciliation(
+                parent_channel_id=parent_channel_id,
+                root_message_id=root_message_id,
+            )
+            self.state.record_operation(
+                "thread_create",
+                operation="create_thread",
+                outcome="unknown",
+                safe_category="transport_unknown",
+                metadata={
+                    "parent_channel_id": parent_channel_id,
+                    "root_message_id": root_message_id,
+                    "thread_channel_id": thread_id,
+                },
+            )
+            self._close_connection()
+            return
+        if self._controlled_response(scenario):
+            return
+        thread_id = self.state.ensure_root_thread(
+            parent_channel_id=parent_channel_id,
+            root_message_id=root_message_id,
+            name=name,
+        )
+        if scenario == "thread_response_invalid":
+            self.state.mark_thread_reconciliation(
+                parent_channel_id=parent_channel_id,
+                root_message_id=root_message_id,
+            )
+            self._json_response(200, {"id": "bad", "parent_id": "0"})
+            return
+        self.state.record_operation(
+            "thread_create",
+            operation="create_thread",
+            outcome="delivered",
+            metadata={
+                "parent_channel_id": parent_channel_id,
+                "root_message_id": root_message_id,
+                "thread_channel_id": thread_id,
+            },
+        )
+        self._json_response(
+            200,
+            {
+                "id": thread_id,
+                "parent_id": parent_channel_id,
+                "guild_id": self.state.guild_id,
+                "name": name,
+            },
+        )
+
+    def _sdk_thread_title(
+        self,
+        operation: str,
+        arguments: dict[str, object],
+    ) -> None:
+        _sdk_identity(arguments, "guild_id", self.state.guild_id)
+        channel_id = _sdk_string(arguments, "channel_id")
+        provider_operation = (
+            "get_channel" if operation == "fetch_thread" else "update_channel"
+        )
+        scenario = self._operation(
+            provider_operation,
+            metadata={"channel_id": channel_id},
+        )
+        if self._controlled_response(scenario):
+            return
+        if operation == "update_thread_name":
+            name = _sdk_string(arguments, "name")
+            if not self.state.update_thread_name(channel_id=channel_id, name=name):
+                self._json_response(404, {"message": "Not found."})
+                return
+        else:
+            name = self.state.thread_name(channel_id)
+            if name is None:
+                self._json_response(404, {"message": "Not found."})
+                return
+        parent_id = self.state.thread_parent_id(channel_id)
+        if parent_id is None:
+            self._json_response(404, {"message": "Not found."})
+            return
+        self.state.record_operation(
+            "thread_title",
+            operation=provider_operation,
+            outcome="delivered",
+            metadata={"channel_id": channel_id},
+        )
+        self._json_response(
+            200,
+            {
+                "id": channel_id,
+                "parent_id": parent_id,
+                "guild_id": self.state.guild_id,
+                "name": name,
+            },
+        )
+
+    def _sdk_message_mutation(
+        self,
+        operation: str,
+        arguments: dict[str, object],
+    ) -> None:
+        _sdk_identity(arguments, "guild_id", self.state.guild_id)
+        channel_id = _sdk_string(arguments, "channel_id")
+        message_id = (
+            _sdk_string(arguments, "message_id")
+            if operation != "create_message"
+            else None
+        )
+        scenario = self._operation(
+            operation,
+            metadata={
+                "channel_id": channel_id,
+                **({"message_id": message_id} if message_id is not None else {}),
+            },
+        )
+        safe_category = _safe_category(scenario)
+        if operation == "create_message":
+            nonce = _sdk_string(arguments, "nonce")
+            if scenario in _CONFIRMED_CREATE_FAILURE_SCENARIOS:
+                self._controlled_response(scenario)
                 self.state.record_delivery(
-                    operation="update_message",
+                    operation=operation,
                     channel_id=channel_id,
-                    message_id=message_id,
-                    outcome=outcome,
+                    message_id=None,
+                    outcome="failed",
                     safe_category=safe_category,
                 )
                 self.state.record_operation(
                     "message",
-                    operation="update_message",
-                    outcome=outcome,
+                    operation=operation,
+                    outcome="failed",
                     safe_category=safe_category,
-                    metadata={"channel_id": channel_id, "message_id": message_id},
+                    metadata={"channel_id": channel_id},
                 )
                 return
-            response_channel_id = (
-                "0" if scenario == "response_channel_mismatch" else channel_id
+            message_id, outcome = self.state.create_message(
+                channel_id=channel_id,
+                nonce=nonce,
             )
-            if scenario in {"malformed_json", "response_malformed"}:
-                self.state.record_operation(
-                    "message",
-                    operation="update_message",
-                    outcome="unknown",
-                    safe_category="response_malformed",
-                    metadata={"channel_id": channel_id, "message_id": message_id},
-                )
-                self._raw_response(200, b"{malformed")
+            if not self.state.wait_for_delivery_barrier(operation):
+                self._close_connection()
                 return
+        else:
+            assert message_id is not None
+            outcome = "delivered"
             if not self.state.message_exists(
                 channel_id=channel_id,
                 message_id=message_id,
             ):
-                self.state.record_delivery(
-                    operation="update_message",
-                    channel_id=channel_id,
-                    message_id=None,
-                    outcome="failed",
-                    safe_category="message_not_found",
-                )
-                self.state.record_operation(
-                    "message",
-                    operation="update_message",
-                    outcome="failed",
-                    safe_category="message_not_found",
-                    metadata={"channel_id": channel_id, "message_id": message_id},
-                )
                 self._json_response(404, {"message": "Not found."})
                 return
-            self.state.record_delivery(
-                operation="update_message",
-                channel_id=channel_id,
-                message_id=message_id,
-                outcome="delivered",
-                safe_category=(
-                    "response_channel_mismatch"
-                    if scenario == "response_channel_mismatch"
-                    else _session_navigation_category(body)
-                ),
-                session_path=_session_path(body),
-            )
-            self.state.record_operation(
-                "message",
-                operation="update_message",
-                outcome="delivered",
-                safe_category=(
-                    "response_channel_mismatch"
-                    if scenario == "response_channel_mismatch"
-                    else None
-                ),
-                metadata={"channel_id": channel_id, "message_id": message_id},
-            )
-            self._json_response(
-                200,
-                _discord_mutation_message_response(
-                    message_id=message_id,
-                    channel_id=response_channel_id,
-                    guild_id=self.state.guild_id,
-                    bot_user_id=self.state.bot_user_id,
-                    body=body,
-                ),
-            )
-            return
-        self._json_response(404, {"message": "Unknown fake endpoint."})
-
-    def do_DELETE(self) -> None:
-        """Delete one fake message without preserving visible content."""
-        path = urlparse(self.path).path
-        command_id = _guild_command_item(path)
-        if command_id is not None:
-            if self._controlled_response(self._operation("delete_guild_command")):
-                return
-            if not self.state.delete_guild_command(command_id):
-                self._json_response(404, {"message": "Not found."})
-                return
-            self._json_response(204, None)
-            return
-        channel_id, message_id = _channel_message_ids(path)
-        if channel_id is None or message_id is None:
-            self._json_response(404, {"message": "Unknown fake endpoint."})
-            return
-        scenario = self._operation(
-            "delete_message",
-            metadata={"channel_id": channel_id, "message_id": message_id},
-        )
-        safe_category = _safe_category(scenario)
         if self._controlled_response(scenario):
-            outcome = (
+            failure_outcome = (
                 "unknown"
                 if safe_category in {"transport_unknown", "provider_5xx_unknown"}
                 else "failed"
             )
             self.state.record_delivery(
-                operation="delete_message",
+                operation=operation,
                 channel_id=channel_id,
                 message_id=message_id,
-                outcome=outcome,
+                outcome=failure_outcome,
                 safe_category=safe_category,
             )
             self.state.record_operation(
                 "message",
-                operation="delete_message",
-                outcome=outcome,
+                operation=operation,
+                outcome=failure_outcome,
                 safe_category=safe_category,
-                metadata={"channel_id": channel_id, "message_id": message_id},
+                metadata={
+                    "channel_id": channel_id,
+                    **({"message_id": message_id} if message_id is not None else {}),
+                },
             )
             return
-        if not self.state.message_exists(
-            channel_id=channel_id,
-            message_id=message_id,
-        ):
-            self.state.record_delivery(
-                operation="delete_message",
+        assert message_id is not None
+        if scenario in {"malformed_json", "response_malformed"}:
+            self.state.record_operation(
+                "message",
+                operation=operation,
+                outcome="unknown",
+                safe_category="response_malformed",
+                metadata={"channel_id": channel_id, "message_id": message_id},
+            )
+            self._raw_response(200, b"{malformed")
+            return
+        if scenario == "response_shape_invalid":
+            self.state.record_operation(
+                "message",
+                operation=operation,
+                outcome="unknown",
+                safe_category="response_shape_invalid",
+                metadata={"channel_id": channel_id, "message_id": message_id},
+            )
+            self._json_response(200, {"channel_id": channel_id})
+            return
+        if operation == "delete_message":
+            self.state.mark_message_deleted(
                 channel_id=channel_id,
-                message_id=None,
-                outcome="failed",
-                safe_category="message_not_found",
+                message_id=message_id,
             )
-            self.state.record_operation(
-                "message",
-                operation="delete_message",
-                outcome="failed",
-                safe_category="message_not_found",
-                metadata={"channel_id": channel_id, "message_id": message_id},
-            )
-            self._json_response(404, {"message": "Not found."})
-            return
-        self.state.mark_message_deleted(
-            channel_id=channel_id,
-            message_id=message_id,
-        )
+        else:
+            self.state.capture_transient_component_custom_ids(arguments)
         self.state.record_delivery(
-            operation="delete_message",
+            operation=operation,
             channel_id=channel_id,
             message_id=message_id,
-            outcome="delivered",
+            outcome=outcome,
+            safe_category=(
+                _session_navigation_category(arguments)
+                if operation != "delete_message"
+                else None
+            ),
+            session_path=(
+                _session_path(arguments) if operation != "delete_message" else None
+            ),
         )
         self.state.record_operation(
             "message",
-            operation="delete_message",
-            outcome="delivered",
+            operation=operation,
+            outcome=outcome,
             metadata={"channel_id": channel_id, "message_id": message_id},
         )
-        self._json_response(204, None)
+        self._json_response(
+            200,
+            (
+                {
+                    "id": message_id,
+                    "channel_id": (
+                        "0" if scenario == "response_channel_mismatch" else channel_id
+                    ),
+                    "guild_id": self.state.guild_id,
+                }
+                if operation != "delete_message"
+                else {}
+            ),
+        )
+
+    def _sdk_fetch_attachment(self, arguments: dict[str, object]) -> None:
+        _sdk_identity(arguments, "guild_id", self.state.guild_id)
+        channel_id = _sdk_string(arguments, "channel_id")
+        message_id = _sdk_string(arguments, "message_id")
+        attachment_id = _sdk_string(arguments, "attachment_id")
+        if self._controlled_response(
+            self._operation(
+                "get_message",
+                metadata={"channel_id": channel_id, "message_id": message_id},
+            )
+        ):
+            return
+        message = self.state.root_message(
+            parent_channel_id=channel_id,
+            root_message_id=message_id,
+        )
+        attachments = message.get("attachments") if message is not None else None
+        if isinstance(attachments, list):
+            for raw_attachment in attachments:
+                if not isinstance(raw_attachment, dict):
+                    continue
+                attachment = cast(dict[str, object], raw_attachment)
+                if attachment.get("id") != attachment_id:
+                    continue
+                self._json_response(
+                    200,
+                    {
+                        "attachment_id": attachment_id,
+                        "filename": attachment.get("filename"),
+                        "size": attachment.get("size"),
+                        "content_type": attachment.get("content_type"),
+                        "download_url": attachment.get("url"),
+                    },
+                )
+                return
+        self._json_response(404, {"message": "Not found."})
+
+    def _sdk_message_projection(self, arguments: dict[str, object]) -> None:
+        _sdk_identity(arguments, "guild_id", self.state.guild_id)
+        channel_id = _sdk_string(arguments, "channel_id")
+        message_id = _sdk_string(arguments, "message_id")
+        scenario = self._operation(
+            "get_message",
+            metadata={"channel_id": channel_id, "message_id": message_id},
+        )
+        if self._controlled_response(scenario):
+            return
+        message = self.state.root_message(
+            parent_channel_id=channel_id,
+            root_message_id=message_id,
+        )
+        if message is None:
+            self._json_response(404, {"message": "Not found."})
+            return
+        self._json_response(200, message)
+
+    def _sdk_history_projections(self, arguments: dict[str, object]) -> None:
+        _sdk_identity(arguments, "guild_id", self.state.guild_id)
+        channel_id = _sdk_string(arguments, "channel_id")
+        before = _sdk_string(arguments, "before_message_id")
+        limit = _sdk_int(arguments, "limit")
+        metadata: dict[str, object] = {
+            "channel_id": channel_id,
+            "limit": limit,
+            "cursor": before,
+        }
+        scenario = self._operation("get_history", metadata=metadata)
+        if self._controlled_response(scenario):
+            return
+        page, _ = self.state.history_page(
+            channel_id=channel_id,
+            before=before,
+            limit=limit,
+        )
+        self.state.record_operation(
+            "history_page",
+            operation="get_history",
+            outcome="delivered",
+            metadata=metadata,
+        )
+        self._json_response(200, {"messages": page})
 
     def _operation(
         self,
@@ -1907,115 +1668,38 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         del format, args
 
 
-class DiscordWebSocketHandler(socketserver.BaseRequestHandler):
-    """Implement the minimal Gateway protocol without a WebSocket dependency."""
-
-    def handle(self) -> None:
-        """Run HELLO, Identify/Resume, READY, Dispatch, and heartbeat ACKs."""
-        headers = _read_http_headers(self.request)
-        key = headers.get("sec-websocket-key")
-        if key is None:
-            return
-        accept = base64.b64encode(
-            hashlib.sha1(f"{key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11".encode()).digest()
-        ).decode()
-        self.request.sendall(
-            (
-                "HTTP/1.1 101 Switching Protocols\r\n"
-                "Upgrade: websocket\r\n"
-                "Connection: Upgrade\r\n"
-                f"Sec-WebSocket-Accept: {accept}\r\n\r\n"
-            ).encode()
-        )
-        _send_websocket_text(self.request, {"op": 10, "d": {"heartbeat_interval": 500}})
-        while True:
-            try:
-                initial = _receive_websocket_json(self.request)
-            except ConnectionError:
-                return
-            except ValueError:
-                return
-            opcode = initial.get("op")
-            if not isinstance(opcode, int):
-                return
-            if opcode != 1:
-                break
-            sequence = initial.get("d")
-            STATE.gateway_heartbeat(sequence if isinstance(sequence, int) else None)
-            _send_websocket_text(self.request, {"op": 11, "d": None})
-        dispatches, scenario = STATE.gateway_start(opcode)
-        if opcode == 6:
-            _send_websocket_text(
-                self.request,
-                {"op": 0, "s": 1, "t": "RESUMED", "d": {}},
-            )
-        elif opcode == 2:
-            _send_websocket_text(
-                self.request,
-                {
-                    "op": 0,
-                    "s": 1,
-                    "t": "READY",
-                    "d": STATE.gateway_ready_payload(),
-                },
-            )
-        else:
-            return
-        if scenario == "reconnect":
-            STATE.gateway_terminal(scenario)
-            _send_websocket_text(self.request, {"op": 7, "d": None})
-            return
-        for dispatch in dispatches:
-            _send_websocket_text(
-                self.request,
-                {
-                    "op": 0,
-                    "s": dispatch["sequence"],
-                    "t": dispatch["event_type"],
-                    "d": dispatch["payload"],
-                },
-            )
-            STATE.gateway_dispatch_sent(dispatch)
-        if scenario == "invalid_session_resumable":
-            STATE.gateway_terminal(scenario)
-            _send_websocket_text(self.request, {"op": 9, "d": True})
-            return
-        if scenario == "invalid_session_fresh":
-            STATE.gateway_terminal(scenario)
-            _send_websocket_text(self.request, {"op": 9, "d": False})
-            return
-        if scenario == "close_4014":
-            STATE.gateway_terminal(scenario)
-            _send_websocket_close(self.request, 4014)
-            return
-        self.request.settimeout(0.5)
-        while True:
-            try:
-                payload = _receive_websocket_json(self.request)
-            except TimeoutError:
-                continue
-            except ConnectionError:
-                return
-            except ValueError:
-                return
-            if payload.get("op") != 1:
-                continue
-            sequence = payload.get("d")
-            STATE.gateway_heartbeat(sequence if isinstance(sequence, int) else None)
-            _send_websocket_text(self.request, {"op": 11, "d": None})
-
-
-class ThreadingSocketServer(socketserver.ThreadingTCPServer):
-    """Thread-per-connection Gateway server."""
-
-    allow_reuse_address = True
-    daemon_threads = True
-
-
 def _validate_api_scenarios(scenarios: Mapping[str, str]) -> None:
     """Reject unbounded scenario labels before they can affect evidence."""
     if any(value not in _ALLOWED_API_SCENARIOS for value in scenarios.values()):
         raise ValueError("api_scenarios contains an unsupported value.")
+
+
+def _sdk_string(arguments: Mapping[str, object], key: str) -> str:
+    """Return one required bounded SDK fixture string."""
+    value = arguments.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"SDK fixture field '{key}' must be a non-empty string.")
+    if len(value) > _MAX_CONFIGURED_OBJECT_BYTES:
+        raise ValueError(f"SDK fixture field '{key}' exceeds its size bound.")
+    return value
+
+
+def _sdk_int(arguments: Mapping[str, object], key: str) -> int:
+    """Return one required SDK fixture integer."""
+    value = arguments.get(key)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"SDK fixture field '{key}' must be an integer.")
+    return value
+
+
+def _sdk_identity(
+    arguments: Mapping[str, object],
+    key: str,
+    expected: str,
+) -> None:
+    """Reject deterministic fixture calls that cross configured authority."""
+    if _sdk_string(arguments, key) != expected:
+        raise ValueError(f"SDK fixture field '{key}' does not match authority.")
 
 
 def _scenario_sequences(value: object) -> dict[str, list[str]]:
@@ -2089,111 +1773,6 @@ def _root_messages(value: object) -> dict[tuple[str, str], dict[str, object]]:
             raise ValueError("root message exceeds the configured size bound.")
         result[(channel_id, message_id)] = item
     return result
-
-
-def _discord_message_response(
-    message: Mapping[str, object],
-    *,
-    guild_id: str,
-) -> dict[str, object]:
-    """Return the complete provider shape required by discord.py Message."""
-    author = message.get("author", {"id": "600000000000000001"})
-    if not isinstance(author, Mapping):
-        raise ValueError("Discord message author is invalid.")
-    raw_mentions = message.get("mentions", [])
-    if not isinstance(raw_mentions, list):
-        raise ValueError("Discord message mentions are invalid.")
-    mentions = [
-        _discord_user_response(cast(Mapping[str, object], mention))
-        for mention in raw_mentions
-        if isinstance(mention, Mapping)
-    ]
-    if len(mentions) != len(raw_mentions):
-        raise ValueError("Discord message mention is invalid.")
-    return {
-        "type": 0,
-        "content": "",
-        "timestamp": "2026-07-28T00:00:00.000000+00:00",
-        "edited_timestamp": None,
-        "mention_roles": [],
-        "attachments": [],
-        "embeds": [],
-        "components": [],
-        "pinned": False,
-        "mention_everyone": False,
-        "tts": False,
-        "flags": 0,
-        **message,
-        "guild_id": guild_id,
-        "author": _discord_user_response(cast(Mapping[str, object], author)),
-        "mentions": mentions,
-    }
-
-
-def _discord_user_response(user: Mapping[str, object]) -> dict[str, object]:
-    """Return the complete provider shape required by discord.py User."""
-    return {
-        "username": "participant",
-        "discriminator": "0",
-        "avatar": None,
-        **user,
-    }
-
-
-def _discord_mutation_message_response(
-    *,
-    message_id: str,
-    channel_id: str,
-    guild_id: str,
-    bot_user_id: str,
-    body: Mapping[str, object],
-) -> dict[str, object]:
-    """Return a complete Bot-authored message mutation response."""
-    content = body.get("content")
-    embeds = body.get("embeds")
-    components = body.get("components")
-    return _discord_message_response(
-        {
-            "id": message_id,
-            "channel_id": channel_id,
-            "content": content if isinstance(content, str) else "",
-            "author": {
-                "id": bot_user_id,
-                "username": "Azents",
-                "bot": True,
-            },
-            "embeds": embeds if isinstance(embeds, list) else [],
-            "components": components if isinstance(components, list) else [],
-        },
-        guild_id=guild_id,
-    )
-
-
-def _discord_thread_channel_response(
-    *,
-    channel_id: str,
-    parent_id: str,
-    guild_id: str,
-    owner_id: str,
-    name: str,
-) -> dict[str, object]:
-    """Return the complete provider shape required by discord.py Thread."""
-    return {
-        "id": channel_id,
-        "guild_id": guild_id,
-        "parent_id": parent_id,
-        "owner_id": owner_id,
-        "type": 11,
-        "name": name,
-        "message_count": 0,
-        "member_count": 0,
-        "thread_metadata": {
-            "archived": False,
-            "auto_archive_duration": 1440,
-            "archive_timestamp": "2026-07-28T00:00:00.000000+00:00",
-            "locked": False,
-        },
-    }
 
 
 def _serialized_size(value: Mapping[str, object]) -> int:
@@ -2495,92 +2074,9 @@ def _channel_item_id(path: str) -> str | None:
     return parts[3] or None
 
 
-def _read_http_headers(connection: socket.socket) -> dict[str, str]:
-    raw = bytearray()
-    while b"\r\n\r\n" not in raw and len(raw) < 16 * 1024:
-        chunk = connection.recv(4096)
-        if not chunk:
-            break
-        raw.extend(chunk)
-    lines = raw.decode(errors="replace").split("\r\n")
-    headers: dict[str, str] = {}
-    for line in lines[1:]:
-        name, separator, value = line.partition(":")
-        if separator:
-            headers[name.strip().lower()] = value.strip()
-    return headers
-
-
-def _send_websocket_text(connection: socket.socket, payload: dict[str, object]) -> None:
-    body = json.dumps(payload, separators=(",", ":")).encode()
-    header = bytearray([0x81])
-    if len(body) < 126:
-        header.append(len(body))
-    elif len(body) < 65_536:
-        header.append(126)
-        header.extend(struct.pack("!H", len(body)))
-    else:
-        header.append(127)
-        header.extend(struct.pack("!Q", len(body)))
-    connection.sendall(bytes(header) + body)
-
-
-def _send_websocket_close(connection: socket.socket, code: int) -> None:
-    """Send one minimal unmasked WebSocket close frame with a provider close code."""
-    payload = struct.pack("!H", code)
-    connection.sendall(bytes([0x88, len(payload)]) + payload)
-
-
-def _receive_websocket_json(connection: socket.socket) -> dict[str, object]:
-    first, second = _receive_exact(connection, 2)
-    opcode = first & 0x0F
-    if opcode == 0x8:
-        raise ConnectionError("WebSocket closed.")
-    if opcode != 0x1:
-        raise ValueError("Expected WebSocket text frame.")
-    masked = second & 0x80
-    length = second & 0x7F
-    if length == 126:
-        length = struct.unpack("!H", _receive_exact(connection, 2))[0]
-    elif length == 127:
-        length = struct.unpack("!Q", _receive_exact(connection, 8))[0]
-    mask = _receive_exact(connection, 4) if masked else b""
-    payload = bytearray(_receive_exact(connection, length))
-    if mask:
-        for index in range(len(payload)):
-            payload[index] ^= mask[index % 4]
-    value: object = json.loads(payload)
-    if not isinstance(value, dict):
-        raise ValueError("WebSocket payload must be an object.")
-    return cast(dict[str, object], value)
-
-
-def _receive_exact(connection: socket.socket, size: int) -> bytes:
-    result = bytearray()
-    while len(result) < size:
-        chunk = connection.recv(size - len(result))
-        if not chunk:
-            raise ConnectionError("WebSocket connection closed.")
-        result.extend(chunk)
-    return bytes(result)
-
-
 def serve() -> None:
-    """Run the fake REST and Gateway services until process termination."""
-    websocket_server = ThreadingSocketServer(
-        ("0.0.0.0", _WEBSOCKET_PORT),
-        DiscordWebSocketHandler,
-    )
-    websocket_thread = threading.Thread(
-        target=websocket_server.serve_forever,
-        daemon=True,
-    )
-    websocket_thread.start()
-    try:
-        ThreadingHTTPServer(("0.0.0.0", _HTTP_PORT), DiscordHTTPHandler).serve_forever()
-    finally:
-        websocket_server.shutdown()
-        websocket_server.server_close()
+    """Run the injected SDK fixture and approved provider gaps."""
+    ThreadingHTTPServer(("0.0.0.0", _HTTP_PORT), DiscordHTTPHandler).serve_forever()
 
 
 if __name__ == "__main__":

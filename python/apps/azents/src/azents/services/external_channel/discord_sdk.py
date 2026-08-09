@@ -270,23 +270,18 @@ class DiscordPyClientFactory:
         *,
         bot_token: str,
     ) -> AsyncIterator[DiscordSDKSession]:
-        from azents.services.external_channel.discord_gateway import (  # noqa: PLC0415
-            _discord_test_endpoint_override,
-        )
-
-        with _discord_test_endpoint_override():
-            client = discord.Client(intents=discord.Intents.none())
+        client = discord.Client(intents=discord.Intents.none())
+        try:
             try:
-                try:
-                    await client.login(bot_token)
-                except discord.LoginFailure as error:
-                    raise DiscordSDKCredentialsInvalid from error
-                except (discord.HTTPException, OSError) as error:
-                    raise _sdk_error(error) from error
-                yield _DiscordPySession(client)
-            finally:
-                if not client.is_closed():
-                    await client.close()
+                await client.login(bot_token)
+            except discord.LoginFailure as error:
+                raise DiscordSDKCredentialsInvalid from error
+            except (discord.HTTPException, OSError) as error:
+                raise _sdk_error(error) from error
+            yield _DiscordPySession(client)
+        finally:
+            if not client.is_closed():
+                await client.close()
 
 
 class _DiscordPySession:
@@ -701,7 +696,19 @@ class _DiscordPySession:
 
 
 def get_discord_sdk_client_factory() -> DiscordSDKClientFactory:
-    """Provide the production public discord.py client factory."""
+    """Provide the public SDK factory or the injected deterministic testenv fixture."""
+    from azents.services.external_channel.discord_endpoint import (  # noqa: PLC0415
+        discord_test_api_base_url,
+    )
+    from azents.services.external_channel.discord_testenv import (  # noqa: PLC0415
+        DiscordTestenvSDKClientFactory,
+    )
+
+    test_api_base_url = discord_test_api_base_url()
+    if test_api_base_url is not None:
+        return DiscordTestenvSDKClientFactory(
+            test_api_base_url.removesuffix("/api/v10")
+        )
     return DiscordPyClientFactory()
 
 

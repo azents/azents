@@ -1,20 +1,14 @@
 """High-level discord.py Gateway integration."""
 
 import asyncio
-import contextlib
-import dataclasses
-import threading
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol, TypeGuard
 
 import discord
-from discord.gateway import DiscordWebSocket
-from discord.http import Route
-from yarl import URL
 
-from azents.services.external_channel.discord_endpoint import (
-    discord_test_api_base_url,
-    discord_test_gateway_url,
+from azents.services.external_channel.discord_events import (
+    DiscordGatewayMessageEvent,
+    project_discord_sdk_gateway_message,
 )
 
 DISCORD_GATEWAY_INTENTS = 1 | 512 | 32768
@@ -22,7 +16,6 @@ DISCORD_GATEWAY_INTENTS = 1 | 512 | 32768
 type DiscordMessageChannel = (
     discord.TextChannel | discord.Thread | discord.VoiceChannel | discord.StageChannel
 )
-type DiscordGatewayMessageEventType = Literal["message_create"]
 type DiscordGatewayLifecycleState = Literal["disconnected", "ready", "resumed"]
 
 
@@ -46,15 +39,6 @@ class DiscordGatewayTerminalError(DiscordGatewayError):
         self.reason = reason
 
 
-@dataclasses.dataclass(frozen=True)
-class DiscordGatewayMessageEvent:
-    """One typed discord.py message-create event."""
-
-    event_type: DiscordGatewayMessageEventType
-    channel: DiscordMessageChannel
-    message: discord.Message | None = None
-
-
 type DiscordGatewayEventHandler = Callable[
     [DiscordGatewayMessageEvent],
     Awaitable[None],
@@ -74,6 +58,7 @@ class DiscordGatewayRunner(Protocol):
         *,
         bot_token: str,
         target_guild_id: str,
+        connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
     ) -> None:
@@ -88,6 +73,7 @@ class _DiscordLibraryClient(discord.Client):
         self,
         *,
         target_guild_id: int,
+        connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
     ) -> None:
@@ -101,6 +87,7 @@ class _DiscordLibraryClient(discord.Client):
             chunk_guilds_at_startup=False,
         )
         self.target_guild_id = target_guild_id
+        self.connected_bot_user_id = connected_bot_user_id
         self.handle_event = handle_event
         self.handle_lifecycle = handle_lifecycle
         self.event_lock = asyncio.Lock()
@@ -116,8 +103,13 @@ class _DiscordLibraryClient(discord.Client):
             await self.handle_event(
                 DiscordGatewayMessageEvent(
                     event_type="message_create",
-                    channel=channel,
-                    message=message,
+                    guild_id=str(channel.guild.id),
+                    channel_id=str(channel.id),
+                    message=project_discord_sdk_gateway_message(
+                        message=message,
+                        channel=channel,
+                        connected_bot_user_id=self.connected_bot_user_id,
+                    ),
                 )
             )
 
@@ -178,6 +170,7 @@ class DiscordGatewayClient:
         *,
         bot_token: str,
         target_guild_id: str,
+        connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
     ) -> None:
@@ -186,36 +179,36 @@ class DiscordGatewayClient:
             raise DiscordGatewayError("Discord Guild identity is invalid.")
         client = _DiscordLibraryClient(
             target_guild_id=int(target_guild_id),
+            connected_bot_user_id=connected_bot_user_id,
             handle_event=handle_event,
             handle_lifecycle=handle_lifecycle,
         )
-        with _discord_test_endpoint_override():
-            try:
-                await client.start(bot_token, reconnect=True)
-            except discord.LoginFailure as error:
-                raise DiscordGatewayCredentialError(
-                    "Discord rejected the configured Bot credential."
-                ) from error
-            except discord.PrivilegedIntentsRequired as error:
-                raise DiscordGatewayIntentsError(
-                    "Discord rejected the required Message Content intent."
-                ) from error
-            except discord.ConnectionClosed as error:
-                raise DiscordGatewayTerminalError(
-                    _closed_connection_reason(error)
-                ) from error
-            except (
-                discord.GatewayNotFound,
-                discord.HTTPException,
-                discord.InvalidData,
-                OSError,
-            ) as error:
-                raise DiscordGatewayError(
-                    "Discord Gateway transport is unavailable."
-                ) from error
-            finally:
-                if not client.is_closed():
-                    await client.close()
+        try:
+            await client.start(bot_token, reconnect=True)
+        except discord.LoginFailure as error:
+            raise DiscordGatewayCredentialError(
+                "Discord rejected the configured Bot credential."
+            ) from error
+        except discord.PrivilegedIntentsRequired as error:
+            raise DiscordGatewayIntentsError(
+                "Discord rejected the required Message Content intent."
+            ) from error
+        except discord.ConnectionClosed as error:
+            raise DiscordGatewayTerminalError(
+                _closed_connection_reason(error)
+            ) from error
+        except (
+            discord.GatewayNotFound,
+            discord.HTTPException,
+            discord.InvalidData,
+            OSError,
+        ) as error:
+            raise DiscordGatewayError(
+                "Discord Gateway transport is unavailable."
+            ) from error
+        finally:
+            if not client.is_closed():
+                await client.close()
         if client.event_error is not None:
             if isinstance(client.event_error, DiscordGatewayError):
                 raise client.event_error
@@ -223,57 +216,6 @@ class DiscordGatewayClient:
                 "Discord typed callback processing failed."
             ) from client.event_error
         raise DiscordGatewayError("Discord Gateway client stopped unexpectedly.")
-
-
-@dataclasses.dataclass
-class _DiscordTestEndpointState:
-    """Reference-counted deterministic endpoint state."""
-
-    lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
-    depth: int = 0
-    originals: tuple[str, URL] | None = None
-    values: tuple[str | None, str | None] | None = None
-
-
-_test_endpoint_state = _DiscordTestEndpointState()
-
-
-@contextlib.contextmanager
-def _discord_test_endpoint_override() -> Iterator[None]:
-    """Temporarily apply explicit deterministic endpoints with reference counting."""
-    api_base_url = discord_test_api_base_url()
-    gateway_url = discord_test_gateway_url()
-    if api_base_url is None and gateway_url is None:
-        yield
-        return
-
-    configured = (api_base_url, gateway_url)
-    state = _test_endpoint_state
-    with state.lock:
-        if state.depth == 0:
-            state.originals = (Route.BASE, DiscordWebSocket.DEFAULT_GATEWAY)
-            state.values = configured
-            if api_base_url is not None:
-                Route.BASE = api_base_url
-            if gateway_url is not None:
-                DiscordWebSocket.DEFAULT_GATEWAY = type(
-                    DiscordWebSocket.DEFAULT_GATEWAY
-                )(gateway_url)
-        elif state.values != configured:
-            raise DiscordGatewayError(
-                "Discord deterministic endpoint configuration changed while active."
-            )
-        state.depth += 1
-    try:
-        yield
-    finally:
-        with state.lock:
-            state.depth -= 1
-            if state.depth == 0:
-                assert state.originals is not None
-                Route.BASE, DiscordWebSocket.DEFAULT_GATEWAY = state.originals
-                state.originals = None
-                state.values = None
 
 
 def _is_message_channel(channel: object) -> TypeGuard[DiscordMessageChannel]:

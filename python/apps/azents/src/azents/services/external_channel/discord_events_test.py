@@ -3,70 +3,51 @@
 import datetime
 import json
 from typing import cast
-from unittest.mock import MagicMock
 
-import discord
 import pytest
 
-from azents.core.external_channel_file import MAX_EXTERNAL_CHANNEL_FILES
 from azents.services.external_channel.discord_events import (
     DiscordEventExcluded,
     DiscordEventNormalizationError,
+    DiscordGatewayMessageEvent,
     DiscordMessageContentUnavailable,
     normalize_projected_discord_event,
     project_discord_gateway_event,
     project_discord_message,
 )
-from azents.services.external_channel.discord_gateway import DiscordGatewayMessageEvent
 from azents.testing.types import is_string_object_dict
-
-
-def _guild(*, guild_id: int = 300) -> MagicMock:
-    guild = MagicMock(spec=discord.Guild)
-    guild.id = guild_id
-    return guild
-
-
-def _channel(*, guild_id: int = 300) -> MagicMock:
-    channel = MagicMock(spec=discord.TextChannel)
-    channel.id = 200
-    channel.guild = _guild(guild_id=guild_id)
-    channel.name = "incidents"
-    return channel
 
 
 def _event(
     *,
     guild_id: int = 300,
 ) -> DiscordGatewayMessageEvent:
-    """Build one representative typed discord.py event."""
-    channel = _channel(guild_id=guild_id)
-    author = MagicMock(spec=discord.User)
-    author.id = 400
-    author.name = "Example"
-    author.global_name = None
-    author.bot = False
-    author.system = False
-    attachment = MagicMock(spec=discord.Attachment)
-    attachment.id = 500
-    attachment.filename = "report.pdf"
-    attachment.content_type = "application/pdf"
-    attachment.size = 123
-    message = MagicMock(spec=discord.Message)
-    message.id = 100
-    message.guild = channel.guild
-    message.channel = channel
-    message.content = "Please help with this."
-    message.created_at = datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC)
-    message.edited_at = None
-    message.author = author
-    message.mentions = []
-    message.role_mentions = []
-    message.attachments = [attachment]
+    """Build one representative bounded Gateway projection."""
+    guild = str(guild_id)
     return DiscordGatewayMessageEvent(
         event_type="message_create",
-        channel=channel,
-        message=message,
+        guild_id=guild,
+        channel_id="200",
+        message=project_discord_message(
+            guild_id=guild,
+            message={
+                "id": "100",
+                "channel_id": "200",
+                "timestamp": "2026-07-26T00:00:00+00:00",
+                "channel_name": "incidents",
+                "content": "Please help with this.",
+                "author": {"id": "400", "username": "Example"},
+                "mentions": [],
+                "attachments": [
+                    {
+                        "id": "500",
+                        "filename": "report.pdf",
+                        "content_type": "application/pdf",
+                        "size": 123,
+                    }
+                ],
+            },
+        ),
     )
 
 
@@ -129,8 +110,11 @@ def test_projects_message_event_without_attachment_urls_or_raw_payload() -> None
 def test_projects_invalid_attachment_size_as_advisory_metadata() -> None:
     """Discord attachment identity remains usable when event size is malformed."""
     gateway_event = _event()
-    assert gateway_event.message is not None
-    gateway_event.message.attachments[0].size = -1
+    attachments = cast(dict[str, object], gateway_event.message["attachments"])
+    files = attachments.get("files")
+    assert isinstance(files, list)
+    assert isinstance(files[0], dict)
+    cast(dict[str, object], files[0])["declared_size"] = None
 
     event = project_discord_gateway_event(
         connection_id="connection-1",
@@ -150,14 +134,10 @@ def test_projects_invalid_attachment_size_as_advisory_metadata() -> None:
 
 def test_projects_connected_bot_managed_role_as_invocation() -> None:
     """A provider-owned Bot role is equivalent to directly mentioning that Bot."""
-    role_tags = MagicMock(spec=discord.RoleTags)
-    role_tags.bot_id = 900
-    role = MagicMock(spec=discord.Role)
-    role.id = 901
-    role.tags = role_tags
     gateway_event = _event()
-    assert gateway_event.message is not None
-    gateway_event.message.role_mentions = [role]
+    gateway_event.message["managed_bot_role_mentions"] = [
+        {"id": "901", "bot_user_id": "900"}
+    ]
 
     event = project_discord_gateway_event(
         connection_id="connection-1",
@@ -186,24 +166,12 @@ def test_projects_connected_bot_managed_role_as_invocation() -> None:
     assert normalized.invocation is True
 
 
-def test_projects_connected_bot_role_after_unrelated_managed_role_volume() -> None:
-    """Other Bots' roles cannot displace the connected Bot's managed role."""
-    unrelated_roles: list[MagicMock] = []
-    for role_id in range(MAX_EXTERNAL_CHANNEL_FILES):
-        role_tags = MagicMock(spec=discord.RoleTags)
-        role_tags.bot_id = 1_000 + role_id
-        role = MagicMock(spec=discord.Role)
-        role.id = role_id
-        role.tags = role_tags
-        unrelated_roles.append(role)
-    role_tags = MagicMock(spec=discord.RoleTags)
-    role_tags.bot_id = 900
-    managed_role = MagicMock(spec=discord.Role)
-    managed_role.id = 901
-    managed_role.tags = role_tags
+def test_retains_only_bounded_connected_bot_role_projection() -> None:
+    """The callback boundary retains the connected Bot's bounded role authority."""
     gateway_event = _event()
-    assert gateway_event.message is not None
-    gateway_event.message.role_mentions = [*unrelated_roles, managed_role]
+    gateway_event.message["managed_bot_role_mentions"] = [
+        {"id": "901", "bot_user_id": "900"}
+    ]
 
     event = project_discord_gateway_event(
         connection_id="connection-1",
@@ -254,12 +222,7 @@ def test_rejects_unrelated_managed_bot_role_as_invocation() -> None:
 
 def test_omits_ordinary_role_from_invocation_projection() -> None:
     """A manually managed role has no Bot ownership invocation authority."""
-    role = MagicMock(spec=discord.Role)
-    role.id = 901
-    role.tags = None
     gateway_event = _event()
-    assert gateway_event.message is not None
-    gateway_event.message.role_mentions = [role]
 
     event = project_discord_gateway_event(
         connection_id="connection-1",
@@ -315,10 +278,12 @@ def test_ignores_cross_guild_typed_events() -> None:
 def test_rejects_typed_create_without_message() -> None:
     malformed = DiscordGatewayMessageEvent(
         event_type="message_create",
-        channel=_channel(),
+        guild_id="300",
+        channel_id="200",
+        message={},
     )
 
-    with pytest.raises(ValueError, match="typed Message"):
+    with pytest.raises(ValueError, match="field 'guild_id'"):
         project_discord_gateway_event(
             connection_id="connection-1",
             provider_app_id="app-1",

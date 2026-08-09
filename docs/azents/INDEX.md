@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-03 | 63 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-07 | 145 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-09 | 51 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-09 | 52 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
@@ -40,7 +40,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-03 | 21 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-09 | 39 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-09 | 35 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-04 | 33 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-09 | 34 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-04 | 40 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -170,7 +170,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Discord Message Invocation Requirements](requirements/external-260726-discord-message-invocation.md) | external-260726 | 2026-07-26 | - |
 | [External Channel Activity Tracker Session Navigation Requirements](requirements/external-260803-activity-tracker-session-navigation.md) | external-260803 | 2026-08-03 | 2026-08-03 |
 | [External Channel Typed Provider Projection Requirements](requirements/external-260805-typed-provider-projections.md) | external-260805 | 2026-08-05 | 2026-08-05 |
-| [External Channel Provider Integration Reliability Requirements](requirements/external-260809-provider-integration-reliability.md) | external-260809 | 2026-08-09 | - |
+| [External Channel Provider Integration Reliability Requirements](requirements/external-260809-provider-integration-reliability.md) | external-260809 | 2026-08-09 | 2026-08-09 |
 | [Failed-run Error Retry and Finalization Historical Requirements Reconstruction](requirements/failed-260627-failed-error-retry.md) | failed-260627 | 2026-06-27 | - |
 | [Scope Failed-run Retry to One Model Turn Historical Requirements Reconstruction](requirements/failed-260716-failed-retry-to-turn.md) | failed-260716 | 2026-07-16 | 2026-03-26 |
 | [Keep OpenAI HTTP Failure Semantics at the Azents Boundary Historical Requirements Reconstruction](requirements/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md) | failure-260716 | 2026-07-16 | - |

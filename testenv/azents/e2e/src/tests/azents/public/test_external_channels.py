@@ -4798,7 +4798,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 generated_detail.title
                 and generated_detail.title_source
                 is AgentSessionTitleSource.AUTO_GENERATED
-                and counts.get("get_channel", 0) >= 2
+                and counts.get("get_channel", 0) == 1
                 and counts.get("update_channel", 0) == 1
             ):
                 return generated_detail
@@ -4892,7 +4892,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert _successful_session_presence_states(state) == ["joined"]
     request_counts = cast(dict[str, int], state["request_counts"])
     assert request_counts["create_thread"] >= 1
-    assert request_counts["get_channel"] >= 2
+    assert request_counts["get_channel"] == 1
     assert request_counts["update_channel"] == 1
     # Thread reconciliation runs before create; canonical history runs after create.
     assert request_counts["get_message"] >= 2
