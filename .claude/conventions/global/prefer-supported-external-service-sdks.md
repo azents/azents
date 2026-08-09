@@ -1,5 +1,5 @@
 ---
-title: Prefer a supported external service's official or established SDK public APIs over hand-written HTTP, WebSocket, or protocol calls; direct calls require a documented SDK gap and explicit requester approval.
+title: Use supported external-service SDK public APIs instead of hand-written provider calls; exceptions require requester approval.
 ---
 
 # Prefer supported external service SDKs
