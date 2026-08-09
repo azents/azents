@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -95,6 +96,15 @@ class _FakeBackend:
     @property
     def helper_python_path(self) -> str:
         return "/fake/python"
+
+    def agent_environment(
+        self,
+        *,
+        workspace_path: str,
+        operation_environment: Mapping[str, str],
+    ) -> Mapping[str, str]:
+        del workspace_path
+        return dict(operation_environment)
 
     async def qualify(self) -> None:
         return

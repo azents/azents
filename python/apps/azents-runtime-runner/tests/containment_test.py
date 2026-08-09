@@ -164,7 +164,12 @@ def test_contained_bootstrap_rejects_workspace_temporary_overlap(
 
 
 @pytest.mark.asyncio
-async def test_direct_backend_launches_backend_neutral_spec(tmp_path: Path) -> None:
+async def test_direct_backend_launches_backend_neutral_spec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("DOCKER_HOST", "unix:///var/run/azents-engine/docker.sock")
     launched: list[ExecutionSpec] = []
     process = _FakeProcess()
 
@@ -174,6 +179,7 @@ async def test_direct_backend_launches_backend_neutral_spec(tmp_path: Path) -> N
 
     backend = DirectExecutionBackend(launcher=launcher)
     spec = shell_execution_spec(
+        backend=backend,
         command="printf hello",
         cwd=tmp_path,
         workspace_path=str(tmp_path),
@@ -186,11 +192,19 @@ async def test_direct_backend_launches_backend_neutral_spec(tmp_path: Path) -> N
     assert launched == [spec]
     assert spec.argv == ("/bin/bash", "-lc", "printf hello")
     assert spec.environment["HOME"] == str(tmp_path)
+    assert spec.environment["DOCKER_HOST"] == (
+        "unix:///var/run/azents-engine/docker.sock"
+    )
     assert spec.environment["TOOL_TOKEN"] == "value"
 
 
 @pytest.mark.asyncio
-async def test_bwrap_backend_owns_positive_projection_arguments(tmp_path: Path) -> None:
+async def test_bwrap_backend_owns_positive_projection_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOCKER_HOST", "unix:///var/run/azents-engine/docker.sock")
+    monkeypatch.setenv("AZ_RUNTIME_RUNNER_AUTH_TOKEN", "runner-secret")
     temporary = tmp_path.parent / f"{tmp_path.name}-temporary"
     config = parse_containment_bootstrap(
         _bootstrap(tmp_path, temporary),
@@ -207,10 +221,11 @@ async def test_bwrap_backend_owns_positive_projection_arguments(tmp_path: Path) 
     assert backend.helper_python_path == "/usr/local/bin/python"
     await backend.start(
         shell_execution_spec(
+            backend=backend,
             command="id",
             cwd=tmp_path,
             workspace_path=str(tmp_path),
-            operation_environment={},
+            operation_environment={"TOOL_TOKEN": "value"},
             managed=False,
         )
     )
@@ -236,6 +251,10 @@ async def test_bwrap_backend_owns_positive_projection_arguments(tmp_path: Path) 
     assert "contained_helper.py" in " ".join(wrapped.argv)
     assert "contained_protocol.py" in " ".join(wrapped.argv)
     assert "apply_patch.py" in " ".join(wrapped.argv)
+    assert "TOOL_TOKEN" in wrapped.argv
+    assert "value" in wrapped.argv
+    assert "DOCKER_HOST" not in wrapped.argv
+    assert "AZ_RUNTIME_RUNNER_AUTH_TOKEN" not in wrapped.argv
     assert wrapped.argv[-3:] == ("/bin/bash", "-lc", "id")
 
 

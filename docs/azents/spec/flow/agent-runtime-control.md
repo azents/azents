@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-09
-spec_version: 53
+spec_version: 54
 ---
 
 # Agent Runtime Control
@@ -365,12 +365,14 @@ UID/GID 1000 identity, zero capability sets, no-new-privileges, nested-user-name
 temporary-storage separation, and protected credential/socket/path exclusion. Failure terminates
 startup without registering a weaker Runner.
 
-Agent child environment is built from a code-owned allowlist plus explicitly authorized
-operation/Toolkit values; it is not copied from the Runner environment. Contained processes see the
-Agent Workspace, selected read-only system toolchain, and Agent `/tmp`, while Runner installation,
-Runner-private temporary files, Runtime Control credentials, Provider credentials, workload
-credentials, infrastructure sockets, and unrelated Runtime resources remain outside the
-projection.
+Direct Agent processes inherit the Runner environment and then apply explicitly authorized
+operation/Toolkit values. This preserves Provider-supplied Runtime capabilities such as Docker and
+Testcontainers endpoint settings for non-contained Profiles. Contained Agent processes instead use
+a code-owned allowlist plus explicitly authorized operation/Toolkit values; they do not copy the
+Runner environment. Contained processes see the Agent Workspace, selected read-only system
+toolchain, and Agent `/tmp`, while Runner installation, Runner-private temporary files, Runtime
+Control credentials, Provider credentials, workload credentials, infrastructure sockets, and
+unrelated Runtime resources remain outside the projection.
 
 The same selected execution backend owns every Agent-selected process and native path operation.
 The Runner routes shell/process, file, edit, patch, search, Git/worktree, import, presentation,

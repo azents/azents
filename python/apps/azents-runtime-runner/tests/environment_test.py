@@ -2,11 +2,11 @@
 
 import pytest
 
-from azents_runtime_runner.environment import build_agent_environment
+from azents_runtime_runner.environment import build_contained_agent_environment
 
 
-def test_agent_environment_keeps_only_safe_runner_values() -> None:
-    environment = build_agent_environment(
+def test_contained_agent_environment_keeps_only_safe_runner_values() -> None:
+    environment = build_contained_agent_environment(
         workspace_path="/workspace/agent",
         operation_environment={"GITHUB_TOKEN": "tool-token"},
         source_environment={
@@ -37,9 +37,11 @@ def test_agent_environment_keeps_only_safe_runner_values() -> None:
         "AZENTS_RUNTIME_INTERNAL",
     ],
 )
-def test_agent_environment_rejects_reserved_operation_names(name: str) -> None:
+def test_contained_agent_environment_rejects_reserved_operation_names(
+    name: str,
+) -> None:
     with pytest.raises(ValueError, match="reserved"):
-        build_agent_environment(
+        build_contained_agent_environment(
             workspace_path="/workspace/agent",
             operation_environment={name: "override"},
             source_environment={},

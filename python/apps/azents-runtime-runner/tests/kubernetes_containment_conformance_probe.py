@@ -10,7 +10,7 @@ from azents_runtime_runner.containment import (
     ExecutionSpec,
     execution_backend_from_environment,
 )
-from azents_runtime_runner.environment import build_agent_environment
+from azents_runtime_runner.environment import build_contained_agent_environment
 
 _WORKSPACE_PATH = "/runtime/home"
 _AGENT_SCRIPT = textwrap.dedent(
@@ -91,7 +91,7 @@ async def _run() -> None:
                     *sys.argv[1:],
                 ),
                 cwd=Path(_WORKSPACE_PATH),
-                environment=build_agent_environment(
+                environment=build_contained_agent_environment(
                     workspace_path=_WORKSPACE_PATH,
                     operation_environment={},
                 ),

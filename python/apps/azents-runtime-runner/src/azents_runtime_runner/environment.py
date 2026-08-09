@@ -1,4 +1,4 @@
-"""Code-owned Agent process environment construction."""
+"""Code-owned contained Agent process environment construction."""
 
 import os
 from collections.abc import Mapping
@@ -30,13 +30,13 @@ _RESERVED_PREFIXES = (
 )
 
 
-def build_agent_environment(
+def build_contained_agent_environment(
     *,
     workspace_path: str,
     operation_environment: Mapping[str, str],
     source_environment: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """Build one Agent child environment without Runner-secret inheritance."""
+    """Build one contained Agent environment without Runner inheritance."""
     source = os.environ if source_environment is None else source_environment
     environment = {
         name: value

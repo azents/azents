@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
-from azents_runtime_runner.environment import build_agent_environment
+from azents_runtime_runner.environment import build_contained_agent_environment
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +285,15 @@ class ExecutionBackend(Protocol):
         """Return the Python interpreter visible inside the execution boundary."""
         ...
 
+    def agent_environment(
+        self,
+        *,
+        workspace_path: str,
+        operation_environment: Mapping[str, str],
+    ) -> Mapping[str, str]:
+        """Build the Agent process environment enforced by this backend."""
+        ...
+
     async def qualify(self) -> None:
         """Qualify the backend before normal Runner registration."""
         ...
@@ -329,6 +338,17 @@ class DirectExecutionBackend:
     def helper_python_path(self) -> str:
         return sys.executable
 
+    def agent_environment(
+        self,
+        *,
+        workspace_path: str,
+        operation_environment: Mapping[str, str],
+    ) -> Mapping[str, str]:
+        del workspace_path
+        environment = dict(os.environ)
+        environment.update(operation_environment)
+        return environment
+
     async def qualify(self) -> None:
         return
 
@@ -359,6 +379,17 @@ class BwrapExecutionBackend:
     def helper_python_path(self) -> str:
         return _CONTAINED_PYTHON_PATH
 
+    def agent_environment(
+        self,
+        *,
+        workspace_path: str,
+        operation_environment: Mapping[str, str],
+    ) -> Mapping[str, str]:
+        return build_contained_agent_environment(
+            workspace_path=workspace_path,
+            operation_environment=operation_environment,
+        )
+
     async def qualify(self) -> None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._config.qualification_timeout_seconds
@@ -372,7 +403,7 @@ class BwrapExecutionBackend:
                 *(str(path) for path in self._config.runner_private_paths),
             ),
             cwd=self._config.agent_workspace_path,
-            environment=build_agent_environment(
+            environment=self.agent_environment(
                 workspace_path=str(self._config.agent_workspace_path),
                 operation_environment={},
             ),
@@ -426,7 +457,7 @@ class BwrapExecutionBackend:
                     str(ready_path),
                 ),
                 cwd=self._config.agent_workspace_path,
-                environment=build_agent_environment(
+                environment=self.agent_environment(
                     workspace_path=str(self._config.agent_workspace_path),
                     operation_environment={},
                 ),
@@ -679,6 +710,7 @@ def parse_containment_bootstrap(
 
 def shell_execution_spec(
     *,
+    backend: ExecutionBackend,
     command: str,
     cwd: Path,
     workspace_path: str,
@@ -689,7 +721,7 @@ def shell_execution_spec(
     return ExecutionSpec(
         argv=(_BASH_PATH, "-lc", command),
         cwd=cwd,
-        environment=build_agent_environment(
+        environment=backend.agent_environment(
             workspace_path=workspace_path,
             operation_environment=operation_environment,
         ),

@@ -380,6 +380,7 @@ class RunnerOperations:
         try:
             process = await self._execution_backend.start(
                 shell_execution_spec(
+                    backend=self._execution_backend,
                     command=command,
                     cwd=self._workspace.root,
                     workspace_path=str(self._workspace.root),
@@ -473,6 +474,7 @@ class RunnerOperations:
         try:
             process = await self._execution_backend.start(
                 shell_execution_spec(
+                    backend=self._execution_backend,
                     command=command,
                     cwd=cwd,
                     workspace_path=str(self._workspace.root),

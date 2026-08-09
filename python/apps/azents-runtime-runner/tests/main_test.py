@@ -120,6 +120,15 @@ class _FakeExecutionBackend:
     def helper_python_path(self) -> str:
         return "/fake/python"
 
+    def agent_environment(
+        self,
+        *,
+        workspace_path: str,
+        operation_environment: Mapping[str, str],
+    ) -> Mapping[str, str]:
+        del workspace_path
+        return dict(operation_environment)
+
     async def qualify(self) -> None:
         self.qualified += 1
         if self.qualification_error is not None:
