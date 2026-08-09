@@ -1,9 +1,11 @@
 """Discord public SDK application adapter tests."""
 
 import contextlib
+import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
+import httpx
 import pytest
 
 from azents.services.external_channel.discord_api import (
@@ -16,6 +18,8 @@ from azents.services.external_channel.discord_api import (
     DiscordGuildCommandCreateTransport,
     DiscordGuildCommandDefinition,
     DiscordGuildCommandRole,
+    DiscordInteractionEndpointHTTPTransport,
+    DiscordInteractionEndpointTransport,
 )
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKApplication,
@@ -35,7 +39,6 @@ class _SDKSession:
     )
     bot_user_id: str = "123456789012345678"
     commands: list[DiscordSDKCommand] = field(default_factory=list)
-    configured_endpoint: str | None = None
     updated: list[str] = field(default_factory=list)
     deleted: list[str] = field(default_factory=list)
 
@@ -44,9 +47,6 @@ class _SDKSession:
 
     def current_bot_user_id(self) -> str:
         return self.bot_user_id
-
-    async def configure_interactions_endpoint(self, endpoint_url: str) -> None:
-        self.configured_endpoint = endpoint_url
 
     async def list_guild_commands(
         self,
@@ -136,20 +136,40 @@ class _CreateTransport(DiscordGuildCommandCreateTransport):
         return command
 
 
+@dataclass
+class _EndpointTransport(DiscordInteractionEndpointTransport):
+    configured_endpoint: str | None = None
+
+    async def configure(
+        self,
+        *,
+        bot_token: str,
+        endpoint_url: str,
+    ) -> None:
+        assert bot_token == "redacted-token"
+        self.configured_endpoint = endpoint_url
+
+
 def _client(
     session: _SDKSession | None = None,
     *,
     error: Exception | None = None,
-) -> tuple[DiscordAPIClient, _SDKFactory, _CreateTransport]:
+) -> tuple[
+    DiscordAPIClient,
+    _SDKFactory,
+    _EndpointTransport,
+    _CreateTransport,
+]:
     factory = _SDKFactory(session or _SDKSession(), error=error)
+    endpoint = _EndpointTransport()
     create = _CreateTransport()
-    return DiscordAPIClient(factory, create), factory, create
+    return DiscordAPIClient(factory, endpoint, create), factory, endpoint, create
 
 
 @pytest.mark.asyncio
 async def test_reads_current_application_verify_key_from_sdk() -> None:
     """Bot-token metadata exposes only validated SDK authority fields."""
-    client, factory, _ = _client()
+    client, factory, _, _ = _client()
 
     metadata = await client.get_current_application(bot_token="redacted-token")
 
@@ -161,7 +181,7 @@ async def test_reads_current_application_verify_key_from_sdk() -> None:
 @pytest.mark.asyncio
 async def test_maps_sdk_login_rejection_to_invalid_credentials() -> None:
     """Credential rejection remains distinct from provider unavailability."""
-    client, _, _ = _client(error=DiscordSDKCredentialsInvalid())
+    client, _, _, _ = _client(error=DiscordSDKCredentialsInvalid())
 
     with pytest.raises(DiscordAPICredentialsInvalid):
         await client.get_current_application(bot_token="redacted-token")
@@ -176,7 +196,7 @@ async def test_rejects_malformed_sdk_verify_key() -> None:
             verify_key="not-hex",
         )
     )
-    client, _, _ = _client(session)
+    client, _, _, _ = _client(session)
 
     with pytest.raises(DiscordAPIUnavailable):
         await client.get_current_application(bot_token="redacted-token")
@@ -185,7 +205,7 @@ async def test_rejects_malformed_sdk_verify_key() -> None:
 @pytest.mark.asyncio
 async def test_reads_current_bot_user_identity_from_sdk() -> None:
     """The SDK Bot identity remains distinct from the Application ID."""
-    client, _, _ = _client()
+    client, _, _, _ = _client()
 
     bot_user_id = await client.get_current_bot_user_id(bot_token="redacted-token")
 
@@ -193,10 +213,9 @@ async def test_reads_current_bot_user_identity_from_sdk() -> None:
 
 
 @pytest.mark.asyncio
-async def test_configures_interaction_endpoint_through_sdk() -> None:
-    """Endpoint configuration uses the public Application edit boundary."""
-    session = _SDKSession()
-    client, _, _ = _client(session)
+async def test_configures_interaction_endpoint_through_direct_gap() -> None:
+    """Endpoint configuration uses only the approved fixed-route transport."""
+    client, _, endpoint, _ = _client()
     endpoint_url = "https://callbacks.example/discord/interactions/opaque-selector"
 
     await client.configure_interactions_endpoint(
@@ -204,7 +223,37 @@ async def test_configures_interaction_endpoint_through_sdk() -> None:
         endpoint_url=endpoint_url,
     )
 
-    assert session.configured_endpoint == endpoint_url
+    assert endpoint.configured_endpoint == endpoint_url
+
+
+@pytest.mark.asyncio
+async def test_callback_transport_issues_exact_current_application_patch() -> None:
+    """The SDK gap transmits only the exact callback field and Bot authority."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, request=request)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        transport = DiscordInteractionEndpointHTTPTransport(http_client)
+        await transport.configure(
+            bot_token="redacted-token",
+            endpoint_url="https://callbacks.example/discord/interactions/selector",
+        )
+
+    assert len(requests) == 1
+    request = requests[0]
+    assert request.method == "PATCH"
+    assert request.url.path == "/api/v10/applications/@me"
+    assert request.headers["authorization"] == "Bot redacted-token"
+    assert json.loads(request.content) == {
+        "interactions_endpoint_url": (
+            "https://callbacks.example/discord/interactions/selector"
+        )
+    }
 
 
 @pytest.mark.asyncio
@@ -238,7 +287,7 @@ async def test_reconciles_required_commands_without_touching_customer_command() 
             ),
         ]
     )
-    client, factory, create = _client(session)
+    client, factory, _, create = _client(session)
 
     command_set = await client.reconcile_required_guild_commands(
         bot_token="redacted-token",
@@ -289,7 +338,7 @@ async def test_reconciliation_uses_g1_only_for_missing_command() -> None:
             ),
         ]
     )
-    client, _, create = _client(session)
+    client, _, _, create = _client(session)
 
     command_set = await client.reconcile_required_guild_commands(
         bot_token="redacted-token",
@@ -335,7 +384,7 @@ async def test_reconciliation_rejects_non_distinct_required_command_ids() -> Non
             ),
         ]
     )
-    client, _, _ = _client(session)
+    client, _, _, _ = _client(session)
 
     with pytest.raises(DiscordAPIConfigurationInvalid):
         await client.reconcile_required_guild_commands(

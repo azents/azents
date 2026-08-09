@@ -39,7 +39,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-03 | 33 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-03 | 21 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-09 | 39 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-09 | 34 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-09 | 35 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-04 | 33 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-04 | 40 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
@@ -87,6 +87,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Resolve built-in capabilities to model-specific executors Historical Requirements Reconstruction](requirements/builtin-260718-builtin-capabilities-to-executors.md) | builtin-260718 | 2026-07-18 | - |
 | [Complete Specialized Presentation Coverage for Builtin Tools Historical Requirements Reconstruction](requirements/builtin-260721-builtin-presentations.md) | builtin-260721 | 2026-07-21 | - |
 | [Run-Scoped Azents Virtual Filesystem for Managed Skills and Resources Historical Requirements Reconstruction](requirements/bundled-260719-bundled-and-backed-skill-sources.md) | bundled-260719 | 2026-07-19 | - |
+| [Discord Callback SDK Gap Requirements](requirements/callback-260809-discord-sdk-gap.md) | callback-260809 | 2026-08-09 | 2026-08-09 |
 | [Model Catalog Projection and Sync Historical Requirements Reconstruction](requirements/catalog-260620-catalog-projection-sync.md) | catalog-260620 | 2026-06-20 | - |
 | [Responsive Context-Preserving External Conversations Requirements](requirements/channel-260729-responsive-context-preserving-conversations.md) | channel-260729 | 2026-07-29 | 2026-07-30 |
 | [Reliable External Channel Provider Connections Requirements](requirements/channel-260731-reliable-provider-connections.md) | channel-260731 | 2026-07-31 | 2026-07-31 |
@@ -467,6 +468,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Resolve built-in capabilities to model-specific executors](adr/builtin-260718-builtin-capabilities-to-executors.md)
 - [Complete Specialized Presentation Coverage for Builtin Tools](adr/builtin-260721-builtin-presentations.md)
 - [Run-Scoped Azents Virtual Filesystem for Managed Skills and Resources](adr/bundled-260719-bundled-and-backed-skill-sources.md)
+- [Discord Callback SDK Gap Decisions](adr/callback-260809-discord-sdk-gap.md)
 - [Model Catalog Projection and Sync](adr/catalog-260620-catalog-projection-sync.md)
 - [Responsive Context-Preserving External Conversations](adr/channel-260729-responsive-context-preserving-conversations.md)
 - [Reliable External Channel Provider Connections](adr/channel-260731-reliable-provider-connections.md)

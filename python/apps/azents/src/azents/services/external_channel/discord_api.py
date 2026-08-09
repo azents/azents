@@ -202,6 +202,43 @@ class DiscordGuildCommandCreateTransport(Protocol):
         ...
 
 
+class DiscordInteractionEndpointTransport(Protocol):
+    """Configure the Interaction Endpoint missing from the usable SDK surface."""
+
+    async def configure(
+        self,
+        *,
+        bot_token: str,
+        endpoint_url: str,
+    ) -> None:
+        """Configure the current Bot-owned Application callback."""
+        ...
+
+
+class DiscordInteractionEndpointHTTPTransport:
+    """Issue only the approved current-Application callback mutation."""
+
+    def __init__(self, http_client: httpx.AsyncClient) -> None:
+        self.http_client = http_client
+
+    async def configure(
+        self,
+        *,
+        bot_token: str,
+        endpoint_url: str,
+    ) -> None:
+        """Configure one exact Interaction Endpoint through the SDK gap route."""
+        try:
+            response = await self.http_client.patch(
+                f"{discord_api_base_url()}/applications/@me",
+                headers={"Authorization": f"Bot {bot_token}"},
+                json={"interactions_endpoint_url": endpoint_url},
+            )
+        except httpx.RequestError as error:
+            raise DiscordAPIUnavailable from error
+        _raise_for_callback_configuration_response(response)
+
+
 class DiscordGuildCommandCreateHTTPTransport:
     """Issue only the approved individual Guild command create request."""
 
@@ -236,9 +273,11 @@ class DiscordAPIClient:
     def __init__(
         self,
         sdk_factory: DiscordSDKClientFactory,
+        interaction_endpoint_transport: DiscordInteractionEndpointTransport,
         command_create_transport: DiscordGuildCommandCreateTransport,
     ) -> None:
         self.sdk_factory = sdk_factory
+        self.interaction_endpoint_transport = interaction_endpoint_transport
         self.command_create_transport = command_create_transport
 
     async def get_current_application(
@@ -288,11 +327,10 @@ class DiscordAPIClient:
         endpoint_url: str,
     ) -> None:
         """Configure the requesting Bot's outgoing interaction endpoint."""
-        try:
-            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
-                await sdk.configure_interactions_endpoint(endpoint_url)
-        except DiscordSDKError as error:
-            raise _api_error(error) from error
+        await self.interaction_endpoint_transport.configure(
+            bot_token=bot_token,
+            endpoint_url=endpoint_url,
+        )
 
     async def list_guild_commands(
         self,
@@ -489,9 +527,19 @@ def _require_definition_match(
 
 
 async def get_discord_api_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide the bounded G1 individual command-create transport."""
+    """Provide bounded Discord direct-gap transports."""
     async with httpx.AsyncClient(timeout=20.0) as client:
         yield client
+
+
+def get_discord_interaction_endpoint_transport(
+    http_client: Annotated[
+        httpx.AsyncClient,
+        Depends(get_discord_api_http_client),
+    ],
+) -> DiscordInteractionEndpointTransport:
+    """Provide the Discord callback configuration direct gap."""
+    return DiscordInteractionEndpointHTTPTransport(http_client)
 
 
 def get_discord_command_create_transport(
@@ -509,13 +557,21 @@ def get_discord_api_client(
         DiscordSDKClientFactory,
         Depends(get_discord_sdk_client_factory),
     ],
+    interaction_endpoint_transport: Annotated[
+        DiscordInteractionEndpointTransport,
+        Depends(get_discord_interaction_endpoint_transport),
+    ],
     command_create_transport: Annotated[
         DiscordGuildCommandCreateTransport,
         Depends(get_discord_command_create_transport),
     ],
 ) -> DiscordAPIClient:
     """Provide the Discord Application API adapter."""
-    return DiscordAPIClient(sdk_factory, command_create_transport)
+    return DiscordAPIClient(
+        sdk_factory,
+        interaction_endpoint_transport,
+        command_create_transport,
+    )
 
 
 def _command_from_sdk(command: DiscordSDKCommand) -> DiscordGuildCommand:
@@ -539,6 +595,16 @@ def _api_error(error: DiscordSDKError) -> DiscordAPIError:
 
 def _raise_for_command_create_response(response: httpx.Response) -> None:
     """Map the sole command-create REST response to established safe errors."""
+    if response.status_code in {401, 403}:
+        raise DiscordAPICredentialsInvalid
+    if response.status_code == 429 or response.status_code >= 500:
+        raise DiscordAPIUnavailable
+    if response.status_code >= 400:
+        raise DiscordAPIConfigurationInvalid
+
+
+def _raise_for_callback_configuration_response(response: httpx.Response) -> None:
+    """Map the callback direct-gap response to established safe errors."""
     if response.status_code in {401, 403}:
         raise DiscordAPICredentialsInvalid
     if response.status_code == 429 or response.status_code >= 500:

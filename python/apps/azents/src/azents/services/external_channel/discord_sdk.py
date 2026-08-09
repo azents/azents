@@ -79,10 +79,6 @@ class DiscordSDKSession(Protocol):
         """Return the authenticated Bot user identity."""
         ...
 
-    async def configure_interactions_endpoint(self, endpoint_url: str) -> None:
-        """Set the current Application interaction endpoint."""
-        ...
-
     async def list_guild_commands(
         self,
         *,
@@ -197,13 +193,6 @@ class _DiscordPySession:
         if user is None:
             raise DiscordSDKUnavailable("Discord SDK Bot identity is unavailable.")
         return str(user.id)
-
-    async def configure_interactions_endpoint(self, endpoint_url: str) -> None:
-        try:
-            application = await self._client.application_info()
-            await application.edit(interactions_endpoint_url=endpoint_url)
-        except (discord.HTTPException, OSError) as error:
-            raise _sdk_error(error) from error
 
     async def list_guild_commands(
         self,
