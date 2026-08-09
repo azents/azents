@@ -388,7 +388,6 @@ class DiscordTestenvGatewayRunner:
                     resumed=resumed,
                 )
                 scenario = _required_string(payload, "scenario")
-                await handle_lifecycle("resumed" if resumed else "ready")
                 if scenario == "reconnect":
                     await handle_lifecycle("disconnected")
                     resumed = True
@@ -408,6 +407,7 @@ class DiscordTestenvGatewayRunner:
                     raise DiscordGatewayError(
                         "Discord deterministic Gateway scenario is unsupported."
                     )
+                await handle_lifecycle("resumed" if resumed else "ready")
                 for dispatch in _object_list(payload, "dispatches"):
                     event_type = _required_string(dispatch, "event_type")
                     event_payload = _required_object(dispatch, "payload")

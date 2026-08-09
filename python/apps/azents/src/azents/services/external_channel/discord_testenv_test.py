@@ -21,15 +21,13 @@ class _GatewayIdleReached(Exception):
         (
             ["invalid_session_resumable", "open"],
             [False, True],
-            ["ready", "disconnected", "resumed"],
+            ["disconnected", "resumed"],
         ),
         (
             ["reconnect", "invalid_session_fresh", "open"],
             [False, True, False],
             [
-                "ready",
                 "disconnected",
-                "resumed",
                 "disconnected",
                 "ready",
             ],
