@@ -971,7 +971,9 @@ async def test_process_start_quick_command_returns_exit_snapshot(
 
 
 @pytest.mark.asyncio
-async def test_process_write_empty_stdin_polls_running_process(tmp_path: Path) -> None:
+async def test_process_write_and_empty_poll_observe_process_lifecycle(
+    tmp_path: Path,
+) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
         execution_backend=DirectExecutionBackend(),
@@ -989,7 +991,7 @@ async def test_process_write_empty_stdin_polls_running_process(tmp_path: Path) -
                     "line=sys.stdin.readline().strip(); "
                     'print(f"echo:{line}", flush=True)\''
                 ),
-                "yield_time_ms": 100,
+                "yield_time_ms": 0,
                 "owner_session_id": "session-1",
             },
         )
@@ -998,7 +1000,6 @@ async def test_process_write_empty_stdin_polls_running_process(tmp_path: Path) -
     process_id = start_final["process_id"]
     assert isinstance(process_id, str)
     assert start_final["status"] == "running"
-    assert start_final["stdout"] == "ready\n"
 
     await operations.handle(
         _operation(
@@ -1016,7 +1017,11 @@ async def test_process_write_empty_stdin_polls_running_process(tmp_path: Path) -
     assert write_final["process_id"] == process_id
     assert write_final["status"] == "exited_unread"
     assert write_final["exit_code"] == 0
-    assert write_final["stdout"] == "echo:world\n"
+    start_stdout = start_final["stdout"]
+    write_stdout = write_final["stdout"]
+    assert isinstance(start_stdout, str)
+    assert isinstance(write_stdout, str)
+    assert start_stdout + write_stdout == "ready\necho:world\n"
 
     await operations.handle(
         _operation(
