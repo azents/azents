@@ -5,6 +5,8 @@ import os
 import shutil
 import signal
 import subprocess
+import threading
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 
@@ -20,10 +22,13 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 
-from azents_runtime_runner.contained_kernels import _extract_glob_dir_prefix
 from azents_runtime_runner.containment import DirectExecutionBackend
-from azents_runtime_runner.operations import RunnerOperations
-from azents_runtime_runner.workspace import Workspace
+from azents_runtime_runner.operations import (
+    RunnerOperations,
+    # Validate root-prefix parsing without traversing the host root.
+    _extract_glob_dir_prefix,
+)
+from azents_runtime_runner.workspace import FilesystemAccessPolicy, Workspace
 
 
 class _FakeClient:
@@ -253,6 +258,66 @@ async def test_file_write_read_and_list_stay_in_workspace(tmp_path: Path) -> Non
             "modified_at": modified_at,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_contained_native_operations_enforce_filesystem_permissions(
+    tmp_path: Path,
+) -> None:
+    """Python handlers reject denied paths before native filesystem access."""
+    root = tmp_path / "agent"
+    private = tmp_path / "runner-private"
+    outside = Path("/var/lib") / f"azents-native-operation-{tmp_path.name}"
+    root.mkdir()
+    private.mkdir()
+    (private / "credential").write_text("secret")
+    (root / "private-link").symlink_to(private, target_is_directory=True)
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(
+            str(root),
+            access_policy=FilesystemAccessPolicy.contained(
+                temporary_backing_path=tmp_path / "agent-temporary",
+                read_only_paths=(),
+                denied_paths=(private,),
+            ),
+        ),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read",
+            payload={"path": "private-link/credential"},
+        )
+    )
+    await operations.handle(
+        _operation(
+            operation_type="file.write",
+            payload={"path": str(outside / "report.txt")},
+            body_chunks=(RunnerBodyChunk(chunk_id=1, data=b"blocked", final=True),),
+        )
+    )
+    await operations.handle(
+        _operation(
+            operation_type="list_git_refs",
+            payload={"source_project_path": str(private)},
+        )
+    )
+
+    errors = [
+        event.payload
+        for event in client.events
+        if event.event_type is RuntimeRunnerEventType.FINAL_ERROR
+    ]
+    assert [error["error_code"] for error in errors] == [
+        "INVALID_PATH",
+        "INVALID_PATH",
+        "invalid_source_path",
+    ]
+    assert not (outside / "report.txt").exists()
+    await operations.close()
 
 
 @pytest.mark.asyncio
@@ -643,6 +708,201 @@ def test_glob_root_pattern_uses_filesystem_root_prefix() -> None:
     """A glob in the first absolute segment scans from the filesystem root."""
     assert _extract_glob_dir_prefix("/*.txt") == "/"
     assert _extract_glob_dir_prefix("/**/report.txt") == "/"
+
+
+@pytest.mark.asyncio
+async def test_blocked_file_list_does_not_block_unrelated_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A blocked filesystem worker does not block unrelated Runner progress."""
+    (tmp_path / "scan").mkdir()
+    (tmp_path / "scan" / "entry.txt").write_text("scan")
+    (tmp_path / "read.txt").write_text("ready")
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_iter(
+        path: Path,
+        *,
+        workspace: Workspace,
+        recursive: bool,
+        exclude_patterns: list[str],
+        cancellation: threading.Event,
+    ) -> Iterator[Path]:
+        del workspace, recursive, exclude_patterns
+        entered.set()
+        release.wait(timeout=2)
+        if not cancellation.is_set():
+            yield path / "entry.txt"
+
+    monkeypatch.setattr(
+        "azents_runtime_runner.operations._iter_list_entries",
+        blocking_iter,
+    )
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+        max_file_operation_workers=2,
+    )
+
+    list_task = asyncio.create_task(
+        operations.handle(
+            _operation(
+                operation_type="file.list",
+                payload={"path": str(tmp_path / "scan"), "recursive": True},
+            )
+        )
+    )
+    assert await asyncio.to_thread(entered.wait, 1)
+
+    await asyncio.wait_for(
+        operations.handle(
+            _operation(
+                operation_type="file.read",
+                payload={"path": str(tmp_path / "read.txt")},
+            )
+        ),
+        timeout=0.5,
+    )
+
+    read_successes = [
+        event
+        for event in client.events
+        if event.event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+        and event.payload == {"bytes_read": 5}
+    ]
+    assert len(read_successes) == 1
+    assert not list_task.done()
+
+    release.set()
+    await list_task
+    await operations.close()
+
+
+@pytest.mark.asyncio
+async def test_file_operation_executor_never_exceeds_worker_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Queued filesystem work never exceeds the configured worker bound."""
+    for index in range(4):
+        (tmp_path / f"read-{index}.txt").write_text("ready")
+    lock = threading.Lock()
+    active_count = 0
+    maximum_active_count = 0
+    bound_reached = threading.Event()
+    release = threading.Event()
+
+    def blocking_read(
+        path: Path,
+        *,
+        offset: int,
+        max_bytes: int,
+        cancellation: threading.Event,
+    ) -> bytes:
+        del path, offset, max_bytes, cancellation
+        nonlocal active_count, maximum_active_count
+        with lock:
+            active_count += 1
+            maximum_active_count = max(maximum_active_count, active_count)
+            if active_count == 2:
+                bound_reached.set()
+        release.wait(timeout=2)
+        with lock:
+            active_count -= 1
+        return b"ready"
+
+    monkeypatch.setattr(
+        "azents_runtime_runner.operations._read_file_bytes",
+        blocking_read,
+    )
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+        max_file_operation_workers=2,
+    )
+    tasks = [
+        asyncio.create_task(
+            operations.handle(
+                _operation(
+                    operation_type="file.read",
+                    payload={"path": str(tmp_path / f"read-{index}.txt")},
+                )
+            )
+        )
+        for index in range(4)
+    ]
+
+    assert await asyncio.to_thread(bound_reached.wait, 1)
+    await asyncio.sleep(0)
+    assert maximum_active_count == 2
+    assert sum(task.done() for task in tasks) == 0
+
+    release.set()
+    await asyncio.gather(*tasks)
+    assert maximum_active_count == 2
+    await operations.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_file_list_signals_blocking_traversal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancelling a file operation signals its cooperative traversal token."""
+    (tmp_path / "scan").mkdir()
+    entered = threading.Event()
+    release = threading.Event()
+    captured_cancellation: list[threading.Event] = []
+
+    def blocking_iter(
+        path: Path,
+        *,
+        workspace: Workspace,
+        recursive: bool,
+        exclude_patterns: list[str],
+        cancellation: threading.Event,
+    ) -> Iterator[Path]:
+        del workspace, recursive, exclude_patterns
+        captured_cancellation.append(cancellation)
+        entered.set()
+        release.wait(timeout=2)
+        if not cancellation.is_set():
+            yield path / "entry.txt"
+
+    monkeypatch.setattr(
+        "azents_runtime_runner.operations._iter_list_entries",
+        blocking_iter,
+    )
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+    task = asyncio.create_task(
+        operations.handle(
+            _operation(
+                operation_type="file.list",
+                payload={"path": str(tmp_path / "scan"), "recursive": True},
+            )
+        )
+    )
+    assert await asyncio.to_thread(entered.wait, 1)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert len(captured_cancellation) == 1
+    assert captured_cancellation[0].is_set()
+    release.set()
+    await operations.close()
 
 
 @pytest.mark.asyncio

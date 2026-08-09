@@ -22,6 +22,7 @@ from azents_runtime_runner.main import (
     run_runtime_runner,
     runner_limit_config_from_env,
 )
+from azents_runtime_runner.workspace import FilesystemAccessPolicy
 
 
 @pytest.mark.asyncio
@@ -117,8 +118,8 @@ class _FakeExecutionBackend:
         return "fake"
 
     @property
-    def helper_python_path(self) -> str:
-        return "/fake/python"
+    def filesystem_access_policy(self) -> FilesystemAccessPolicy:
+        return FilesystemAccessPolicy.unrestricted()
 
     def agent_environment(
         self,

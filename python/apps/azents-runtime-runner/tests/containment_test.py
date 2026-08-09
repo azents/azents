@@ -121,6 +121,13 @@ def test_contained_bootstrap_selects_bwrap_backend(tmp_path: Path) -> None:
 
     assert isinstance(backend, BwrapExecutionBackend)
     assert backend.kind == "bwrap"
+    policy = backend.filesystem_access_policy
+    assert policy.restricted
+    assert policy.temporary_backing_path == temporary
+    assert policy.denied_paths == (
+        Path("/runner/private"),
+        Path("/run/runner.sock"),
+    )
 
 
 @pytest.mark.parametrize(
@@ -187,7 +194,6 @@ async def test_direct_backend_launches_backend_neutral_spec(
         managed=True,
     )
 
-    assert backend.helper_python_path == sys.executable
     assert await backend.start(spec) is process
     assert launched == [spec]
     assert spec.argv == ("/bin/bash", "-lc", "printf hello")
@@ -218,7 +224,6 @@ async def test_bwrap_backend_owns_positive_projection_arguments(
         return process
 
     backend = BwrapExecutionBackend(config, launcher=launcher)
-    assert backend.helper_python_path == "/usr/local/bin/python"
     await backend.start(
         shell_execution_spec(
             backend=backend,
@@ -248,9 +253,6 @@ async def test_bwrap_backend_owns_positive_projection_arguments(
     )
     assert str(temporary) in wrapped.argv
     assert "/runner/private" not in wrapped.argv
-    assert "contained_helper.py" in " ".join(wrapped.argv)
-    assert "contained_protocol.py" in " ".join(wrapped.argv)
-    assert "apply_patch.py" in " ".join(wrapped.argv)
     assert "TOOL_TOKEN" in wrapped.argv
     assert "value" in wrapped.argv
     assert "DOCKER_HOST" not in wrapped.argv

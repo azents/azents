@@ -2,14 +2,27 @@
 
 import asyncio
 import base64
+import codecs
 import contextlib
+import fnmatch
+import hashlib
 import logging
+import os
+import re
+import shutil
+import signal
+import stat as stat_module
+import tempfile
+import threading
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Literal, Protocol
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal, Protocol, TypeVar
 
 from azents_runtime_control.grpc_runner_client import (
     RuntimeRunnerControlStreamClosed,
@@ -21,9 +34,12 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 
-from azents_runtime_runner.contained_client import (
-    ContainedOperationClient,
-    ContainedOperationEvent,
+from azents_runtime_runner.apply_patch import (
+    ApplyPatchFailure,
+    ApplyPatchFaultInjector,
+    ApplyPatchLimits,
+    ApplyPatchResult,
+    execute_apply_patch,
 )
 from azents_runtime_runner.containment import (
     ExecutionBackend,
@@ -58,33 +74,17 @@ _PROCESS_CLOSE_TIMEOUT_SECONDS = 5.0
 _MAX_MISSING_PROCESS_RECORDS = 128
 _MANAGED_WORKTREE_ROOT = ".azents/worktrees"
 _MAX_MANAGED_WORKTREE_DISCOVERY_ENTRIES = 512
-_CONTAINED_NATIVE_OPERATION_TYPES = frozenset(
-    {
-        "file.read",
-        "file.download",
-        "file.read_text",
-        "file.write",
-        "file.upload",
-        "file.apply_patch",
-        "file.edit",
-        "file.list",
-        "file.glob",
-        "file.grep",
-        "file.stat",
-        "file.delete",
-        "file.mkdir",
-        "file.move",
-        "file.bulk_delete",
-        "file.bulk_move",
-        "list_git_refs",
-        "create_git_worktree",
-        "inspect_git_worktree",
-        "discover_managed_git_worktrees",
-        "remove_discovered_git_worktree",
-        "remove_git_worktree",
-        "delete_git_branch",
-    }
-)
+
+_T = TypeVar("_T")
+
+
+@dataclass
+class _GrepScanState:
+    """Track scan budget consumed while iterating grep targets."""
+
+    searched_file_count: int = 0
+    scanned_bytes: int = 0
+    stopped_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +94,43 @@ class _StreamSnapshot:
     text: str
     truncated: bool
     omitted_bytes: int
+
+
+@dataclass(frozen=True)
+class _GitCommandResult:
+    """Completed Git command output."""
+
+    exit_code: int
+    stdout: str
+    stderr: str
+
+
+@dataclass(frozen=True)
+class _GitWorktreeInspection:
+    """Content-free Git worktree registration and filesystem observation."""
+
+    worktree_path: Path
+    registered: bool
+    registered_branch_name: str | None
+    target_kind: Literal["directory", "missing", "other"]
+    dirty: bool | None
+
+
+@dataclass(frozen=True)
+class _GitWorktreeRegistration:
+    """Exact Git worktree registration observation."""
+
+    registered: bool
+    branch_name: str | None
+
+
+class _FileOperationSemanticError(Exception):
+    """Typed filesystem failure rendered as a Runner final error."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
 
 
 class _ProcessOutputBuffer:
@@ -189,6 +226,9 @@ class RunnerOperations:
         ),
         max_runtime_process_count: int = _DEFAULT_MAX_RUNTIME_PROCESS_COUNT,
         max_session_process_count: int = _DEFAULT_MAX_SESSION_PROCESS_COUNT,
+        max_file_operation_workers: int = _DEFAULT_MAX_FILE_OPERATION_WORKERS,
+        apply_patch_limits: ApplyPatchLimits | None = None,
+        apply_patch_fault_injector: ApplyPatchFaultInjector | None = None,
     ) -> None:
         """Initialize operation handlers."""
         self._client = client
@@ -203,12 +243,15 @@ class RunnerOperations:
         )
         self._max_runtime_process_count = max(max_runtime_process_count, 1)
         self._max_session_process_count = max(max_session_process_count, 1)
-        self._apply_patch_lock = asyncio.Lock()
-        self._execution_backend = execution_backend
-        self._contained_operations = ContainedOperationClient(
-            backend=execution_backend,
-            workspace_path=workspace.root,
+        self._max_file_operation_workers = max(max_file_operation_workers, 1)
+        self._file_operation_executor = ThreadPoolExecutor(
+            max_workers=self._max_file_operation_workers,
+            thread_name_prefix="azents-runtime-file",
         )
+        self._apply_patch_lock = asyncio.Lock()
+        self._apply_patch_limits = apply_patch_limits or ApplyPatchLimits()
+        self._apply_patch_fault_injector = apply_patch_fault_injector
+        self._execution_backend = execution_backend
 
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
         """Run one operation and publish progress/final events."""
@@ -218,11 +261,35 @@ class RunnerOperations:
                 RuntimeRunnerEventType.ACCEPTED,
                 {"operation_type": operation.operation_type},
             )
-            if operation.operation_type in _CONTAINED_NATIVE_OPERATION_TYPES:
-                await self._contained_native_operation(operation)
-                return
             if operation.operation_type == "bash":
                 await self._bash(operation)
+                return
+            if operation.operation_type in {"file.read", "file.download"}:
+                await self._file_read(operation)
+                return
+            if operation.operation_type == "file.read_text":
+                await self._file_read_text(operation)
+                return
+            if operation.operation_type in {"file.write", "file.upload"}:
+                await self._file_write(operation)
+                return
+            if operation.operation_type == "file.apply_patch":
+                await self._file_apply_patch(operation)
+                return
+            if operation.operation_type == "file.edit":
+                await self._file_edit(operation)
+                return
+            if operation.operation_type == "file.list":
+                await self._file_list(operation)
+                return
+            if operation.operation_type == "file.glob":
+                await self._file_glob(operation)
+                return
+            if operation.operation_type == "file.grep":
+                await self._file_grep(operation)
+                return
+            if operation.operation_type == "file.stat":
+                await self._file_stat(operation)
                 return
             if operation.operation_type == "process.start":
                 await self._process_start(operation)
@@ -230,8 +297,44 @@ class RunnerOperations:
             if operation.operation_type == "process.write":
                 await self._process_write(operation)
                 return
+            if operation.operation_type == "file.delete":
+                await self._file_delete(operation)
+                return
+            if operation.operation_type == "file.mkdir":
+                await self._file_mkdir(operation)
+                return
+            if operation.operation_type == "file.move":
+                await self._file_move(operation)
+                return
             if operation.operation_type == "process.terminate_session":
                 await self._process_terminate_session(operation)
+                return
+            if operation.operation_type == "file.bulk_delete":
+                await self._file_bulk_delete(operation)
+                return
+            if operation.operation_type == "file.bulk_move":
+                await self._file_bulk_move(operation)
+                return
+            if operation.operation_type == "list_git_refs":
+                await self._git_list_refs(operation)
+                return
+            if operation.operation_type == "create_git_worktree":
+                await self._git_create_worktree(operation)
+                return
+            if operation.operation_type == "inspect_git_worktree":
+                await self._git_inspect_worktree(operation)
+                return
+            if operation.operation_type == "discover_managed_git_worktrees":
+                await self._git_discover_managed_worktrees(operation)
+                return
+            if operation.operation_type == "remove_discovered_git_worktree":
+                await self._git_remove_discovered_worktree(operation)
+                return
+            if operation.operation_type == "remove_git_worktree":
+                await self._git_remove_worktree(operation)
+                return
+            if operation.operation_type == "delete_git_branch":
+                await self._git_delete_branch(operation)
                 return
             await self._final_error(
                 operation,
@@ -245,60 +348,20 @@ class RunnerOperations:
         except Exception as exc:
             await self._final_error(operation, "RUNNER_OPERATION_ERROR", str(exc))
 
-    async def _contained_native_operation(
-        self,
-        operation: RunnerOperationEnvelope,
-    ) -> None:
-        async def emit(event: ContainedOperationEvent) -> None:
-            payload = dict(event.payload)
-            if event.binary is not None:
-                if event.event_type != RuntimeRunnerEventType.FILE_CHUNK:
-                    raise RuntimeError(
-                        "contained helper sent binary data for an unsupported event"
-                    )
-                payload["data_base64"] = base64.b64encode(event.binary).decode()
-            await self._event(
-                operation,
-                RuntimeRunnerEventType(event.event_type),
-                payload,
-                final=event.final,
-            )
-
-        async def run() -> None:
-            await self._contained_operations.run(
-                operation=operation.operation_type,
-                payload=operation.payload,
-                body_chunks=tuple(chunk.data for chunk in operation.body_chunks),
-                deadline_at=operation.deadline_at,
-                event_handler=emit,
-            )
-
-        if operation.operation_type == "file.apply_patch":
-            async with self._apply_patch_lock:
-                await run()
-            return
-        await run()
-
     async def cancel(self, operation: RunnerOperationEnvelope) -> None:
         """Publish terminal cancellation for work that has not started."""
         if operation.operation_type == "file.apply_patch":
-            await self._event(
+            await self._file_apply_patch_error(
                 operation,
-                RuntimeRunnerEventType.FINAL_ERROR,
-                {
-                    "error_code": "FILE_APPLY_PATCH_FAILED",
-                    "error_message": "Patch was cancelled before commit",
-                    "file_apply_patch": {
-                        "phase": "preflight",
-                        "reason": "cancelled",
-                        "message": "Patch was cancelled before commit",
-                        "applied": [],
-                        "failed": None,
-                        "not_attempted": [],
-                        "exact": True,
-                    },
-                },
-                final=True,
+                ApplyPatchFailure(
+                    phase="preflight",
+                    reason="cancelled",
+                    message="Patch was cancelled before commit",
+                    applied=(),
+                    failed=None,
+                    not_attempted=(),
+                    exact=True,
+                ),
             )
             return
         await self._final_error(
@@ -308,7 +371,8 @@ class RunnerOperations:
         )
 
     async def close(self) -> None:
-        """Terminate managed processes before reconnecting."""
+        """Stop filesystem work and terminate processes before reconnecting."""
+        self._file_operation_executor.shutdown(wait=False, cancel_futures=True)
         records = tuple(self._processes.values())
         if not records:
             return
@@ -366,6 +430,80 @@ class RunnerOperations:
                     "timed_out": timed_out,
                 },
             )
+
+    async def _run_file_operation(
+        self,
+        operation: RunnerOperationEnvelope,
+        func: Callable[[threading.Event], _T],
+    ) -> _T:
+        """Run blocking filesystem work outside the Runner event loop."""
+        cancellation = threading.Event()
+        submitted_at = time.perf_counter()
+        started_at: list[float] = []
+
+        def run() -> _T:
+            started_at.append(time.perf_counter())
+            return func(cancellation)
+
+        future = asyncio.get_running_loop().run_in_executor(
+            self._file_operation_executor,
+            run,
+        )
+        try:
+            result = await future
+        except asyncio.CancelledError:
+            cancellation.set()
+            self._log_file_operation(
+                operation,
+                submitted_at=submitted_at,
+                started_at=started_at[0] if started_at else None,
+                status="cancelled",
+            )
+            raise
+        except Exception:
+            self._log_file_operation(
+                operation,
+                submitted_at=submitted_at,
+                started_at=started_at[0] if started_at else None,
+                status="failed",
+            )
+            raise
+        self._log_file_operation(
+            operation,
+            submitted_at=submitted_at,
+            started_at=started_at[0] if started_at else None,
+            status="completed",
+        )
+        return result
+
+    def _log_file_operation(
+        self,
+        operation: RunnerOperationEnvelope,
+        *,
+        submitted_at: float,
+        started_at: float | None,
+        status: str,
+    ) -> None:
+        """Log filesystem executor queue and blocking durations."""
+        finished_at = time.perf_counter()
+        queue_wait_ms = (
+            None if started_at is None else (started_at - submitted_at) * 1000
+        )
+        execution_ms = None if started_at is None else (finished_at - started_at) * 1000
+        logger.info(
+            "Runtime Runner filesystem operation finished",
+            extra={
+                "request_id": operation.request_id,
+                "runtime_id": operation.runtime_id,
+                "runner_generation": operation.runner_generation,
+                "operation_type": operation.operation_type,
+                "owner_session_id": operation.owner_session_id,
+                "filesystem_status": status,
+                "filesystem_queue_wait_ms": queue_wait_ms,
+                "filesystem_execution_ms": execution_ms,
+                "filesystem_max_workers": self._max_file_operation_workers,
+            },
+        )
 
     async def _bash(self, operation: RunnerOperationEnvelope) -> None:
         command = _str_payload(operation.payload, "command")
@@ -439,6 +577,1044 @@ class RunnerOperations:
             )
         await self._final_success(operation, {"exit_code": process.returncode or 0})
 
+    async def _file_read(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            path = self._workspace.resolve(operation.payload.get("path"))
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        offset = _int_payload(operation.payload, "offset", default=0)
+        max_bytes = _optional_int_payload(operation.payload, "max_bytes")
+        if max_bytes is None:
+            max_bytes = _MAX_FILE_READ_BYTES
+        data = await self._run_file_operation(
+            operation,
+            lambda cancellation: _read_file_bytes(
+                path,
+                offset=offset,
+                max_bytes=max_bytes,
+                cancellation=cancellation,
+            ),
+        )
+        await self._event(
+            operation,
+            RuntimeRunnerEventType.FILE_CHUNK,
+            {"data_base64": base64.b64encode(data).decode()},
+        )
+        await self._final_success(operation, {"bytes_read": len(data)})
+
+    async def _file_read_text(self, operation: RunnerOperationEnvelope) -> None:
+        """Read a bounded decoded text range without a Base64 file event."""
+        try:
+            path = self._workspace.resolve(operation.payload.get("path"))
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        offset = _int_payload(operation.payload, "offset", default=0)
+        requested = _optional_int_payload(operation.payload, "max_bytes")
+        max_bytes = min(
+            requested if requested is not None else _MAX_TEXT_READ_BYTES,
+            _MAX_TEXT_READ_BYTES,
+        )
+        encoding = _optional_str_payload(operation.payload, "encoding") or "utf-8"
+        try:
+            codecs.lookup(encoding)
+        except LookupError:
+            await self._final_error(
+                operation,
+                "FILE_READ_TEXT_UNSUPPORTED_ENCODING",
+                f"Unsupported text encoding: {encoding}",
+            )
+            return
+        try:
+            data = await self._run_file_operation(
+                operation,
+                lambda cancellation: _read_file_range_bytes(
+                    path,
+                    offset=offset,
+                    max_bytes=max_bytes,
+                    cancellation=cancellation,
+                ),
+            )
+            text = data.decode(encoding)
+        except UnicodeDecodeError:
+            await self._final_error(
+                operation,
+                "FILE_READ_TEXT_DECODE_ERROR",
+                f"File range cannot be decoded as {encoding}",
+            )
+            return
+        await self._event(operation, RuntimeRunnerEventType.STDOUT, {"text": text})
+        await self._final_success(operation, {"bytes_read": len(data)})
+
+    async def _file_write(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            path = self._workspace.resolve(
+                operation.payload.get("path"),
+                write=True,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        chunks = tuple(chunk.data for chunk in operation.body_chunks)
+        bytes_written = await self._run_file_operation(
+            operation,
+            lambda cancellation: _write_file_bytes(
+                path,
+                chunks=chunks,
+                cancellation=cancellation,
+            ),
+        )
+        await self._final_success(operation, {"bytes_written": bytes_written})
+
+    async def _file_apply_patch(self, operation: RunnerOperationEnvelope) -> None:
+        base_path = _str_payload(operation.payload, "base_path")
+        if not base_path:
+            await self._file_apply_patch_error(
+                operation,
+                ApplyPatchFailure(
+                    phase="preflight",
+                    reason="base_path_required",
+                    message="base_path is required",
+                    applied=(),
+                    failed=None,
+                    not_attempted=(),
+                    exact=True,
+                ),
+            )
+            return
+        try:
+            authorized_base_path = self._workspace.resolve(
+                base_path,
+                write=True,
+            )
+        except ValueError as exc:
+            await self._file_apply_patch_error(
+                operation,
+                ApplyPatchFailure(
+                    phase="preflight",
+                    reason="base_path_not_permitted",
+                    message=str(exc),
+                    applied=(),
+                    failed=None,
+                    not_attempted=(),
+                    exact=True,
+                ),
+            )
+            return
+        patch = b"".join(chunk.data for chunk in operation.body_chunks)
+        declared_patch_bytes = _int_payload(
+            operation.payload,
+            "total_bytes",
+            default=-1,
+        )
+        schema_version = _int_payload(
+            operation.payload,
+            "schema_version",
+            default=0,
+        )
+        async with self._apply_patch_lock:
+            result = await self._run_apply_patch_operation(
+                operation,
+                base_path=str(authorized_base_path),
+                patch=patch,
+                declared_patch_bytes=declared_patch_bytes,
+                schema_version=schema_version,
+            )
+        if isinstance(result, ApplyPatchFailure):
+            await self._file_apply_patch_error(operation, result)
+            return
+        await self._final_success(operation, result.payload())
+
+    async def _file_edit(self, operation: RunnerOperationEnvelope) -> None:
+        """Apply one exact UTF-8 text replacement without exposing file contents."""
+        try:
+            path = _resolve_lexical_path(
+                operation.payload.get("path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "FILE_EDIT_INVALID_PATH", str(exc))
+            return
+        old_string = _str_payload(operation.payload, "old_string")
+        new_string = _str_payload(operation.payload, "new_string")
+        replace_all = _bool_payload(operation.payload, "replace_all", default=False)
+        try:
+            replacements = await self._run_file_operation(
+                operation,
+                lambda cancellation: _edit_file_text(
+                    path,
+                    old_string=old_string,
+                    new_string=new_string,
+                    replace_all=replace_all,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
+            return
+        await self._final_success(operation, {"replacements": replacements})
+
+    async def _run_apply_patch_operation(
+        self,
+        operation: RunnerOperationEnvelope,
+        *,
+        base_path: str,
+        patch: bytes,
+        declared_patch_bytes: int,
+        schema_version: int,
+    ) -> ApplyPatchResult:
+        cancellation = threading.Event()
+        submitted_at = time.perf_counter()
+        started_at: list[float] = []
+
+        def run() -> ApplyPatchResult:
+            started_at.append(time.perf_counter())
+            return execute_apply_patch(
+                base_path=base_path,
+                patch=patch,
+                declared_patch_bytes=declared_patch_bytes,
+                schema_version=schema_version,
+                cancellation=cancellation,
+                deadline_at=operation.deadline_at,
+                limits=self._apply_patch_limits,
+                fault_injector=self._apply_patch_fault_injector,
+            )
+
+        future = asyncio.get_running_loop().run_in_executor(
+            self._file_operation_executor,
+            run,
+        )
+        while True:
+            try:
+                result = await asyncio.shield(future)
+                break
+            except asyncio.CancelledError:
+                cancellation.set()
+                current_task = asyncio.current_task()
+                if current_task is not None:
+                    current_task.uncancel()
+        self._log_file_operation(
+            operation,
+            submitted_at=submitted_at,
+            started_at=started_at[0] if started_at else None,
+            status="completed",
+        )
+        return result
+
+    async def _file_apply_patch_error(
+        self,
+        operation: RunnerOperationEnvelope,
+        failure: ApplyPatchFailure,
+    ) -> None:
+        await self._event(
+            operation,
+            RuntimeRunnerEventType.FINAL_ERROR,
+            {
+                "error_code": "FILE_APPLY_PATCH_FAILED",
+                "error_message": failure.message,
+                "file_apply_patch": failure.detail_payload(),
+            },
+            final=True,
+        )
+
+    async def _file_list(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            path = self._workspace.resolve(operation.payload.get("path"))
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        recursive = _bool_payload(operation.payload, "recursive", default=False)
+        exclude_patterns = _str_list_payload(operation.payload, "exclude_patterns")
+        entries = await self._run_file_operation(
+            operation,
+            lambda cancellation: _list_file_entries(
+                path,
+                workspace=self._workspace,
+                recursive=recursive,
+                exclude_patterns=exclude_patterns,
+                cancellation=cancellation,
+            ),
+        )
+        await self._final_success(operation, {"entries": entries})
+
+    async def _file_glob(self, operation: RunnerOperationEnvelope) -> None:
+        pattern = _str_payload(operation.payload, "pattern")
+        if not pattern:
+            await self._final_error(operation, "INVALID_PATTERN", "pattern is required")
+            return
+        exclude_patterns = _str_list_payload(operation.payload, "exclude_patterns")
+        try:
+            entries = await self._run_file_operation(
+                operation,
+                lambda cancellation: _glob_file_entries(
+                    pattern,
+                    workspace=self._workspace,
+                    exclude_patterns=exclude_patterns,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
+            return
+        await self._final_success(operation, {"matches": entries})
+
+    async def _file_stat(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            path = _resolve_lexical_path(
+                operation.payload.get("path"),
+                workspace=self._workspace,
+                write=False,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        try:
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _read_stat_payload(
+                    path,
+                    workspace=self._workspace,
+                    cancellation=cancellation,
+                ),
+            )
+        except FileNotFoundError:
+            await self._final_error(operation, "NOT_FOUND", f"No such file: {path}")
+            return
+        except OSError as exc:
+            await self._final_error(operation, "STAT_FAILED", str(exc))
+            return
+        await self._final_success(operation, payload)
+
+    async def _file_delete(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            path = _resolve_lexical_path(
+                operation.payload.get("path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        recursive = _bool_payload(operation.payload, "recursive", default=False)
+        try:
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _delete_path(
+                    path,
+                    workspace=self._workspace,
+                    recursive=recursive,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
+            return
+        await self._final_success(operation, payload)
+
+    async def _file_mkdir(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            path = _resolve_lexical_path(
+                operation.payload.get("path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        parents = _bool_payload(operation.payload, "parents", default=False)
+        try:
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _make_directory(
+                    path,
+                    workspace=self._workspace,
+                    parents=parents,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
+            return
+        await self._final_success(operation, payload)
+
+    async def _file_move(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            source_path = _resolve_lexical_path(
+                operation.payload.get("source_path"),
+                workspace=self._workspace,
+            )
+            destination_path = _resolve_lexical_path(
+                operation.payload.get("destination_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        overwrite = _bool_payload(operation.payload, "overwrite", default=False)
+        try:
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _move_path(
+                    source_path,
+                    destination_path,
+                    workspace=self._workspace,
+                    overwrite=overwrite,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
+            return
+        await self._final_success(operation, payload)
+
+    async def _file_bulk_delete(self, operation: RunnerOperationEnvelope) -> None:
+        paths: list[Path] = []
+        for raw_path in _str_list_payload(operation.payload, "paths"):
+            try:
+                paths.append(_resolve_lexical_path(raw_path, workspace=self._workspace))
+            except ValueError as exc:
+                await self._final_error(operation, "INVALID_PATH", str(exc))
+                return
+        if not paths:
+            await self._final_error(operation, "INVALID_PAYLOAD", "paths is required")
+            return
+        recursive = _bool_payload(operation.payload, "recursive", default=False)
+        try:
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _delete_paths(
+                    paths,
+                    workspace=self._workspace,
+                    recursive=recursive,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
+            return
+        await self._final_success(operation, payload)
+
+    async def _file_bulk_move(self, operation: RunnerOperationEnvelope) -> None:
+        source_paths: list[Path] = []
+        for raw_path in _str_list_payload(operation.payload, "source_paths"):
+            try:
+                source_paths.append(
+                    _resolve_lexical_path(raw_path, workspace=self._workspace)
+                )
+            except ValueError as exc:
+                await self._final_error(operation, "INVALID_PATH", str(exc))
+                return
+        if not source_paths:
+            await self._final_error(
+                operation, "INVALID_PAYLOAD", "source_paths is required"
+            )
+            return
+        try:
+            destination_directory = _resolve_lexical_path(
+                operation.payload.get("destination_directory"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        overwrite = _bool_payload(operation.payload, "overwrite", default=False)
+        try:
+            payload = await self._run_file_operation(
+                operation,
+                lambda cancellation: _move_paths(
+                    source_paths,
+                    destination_directory,
+                    workspace=self._workspace,
+                    overwrite=overwrite,
+                    cancellation=cancellation,
+                ),
+            )
+        except _FileOperationSemanticError as exc:
+            await self._final_error(operation, exc.code, exc.message)
+            return
+        await self._final_success(operation, payload)
+
+    async def _file_grep(self, operation: RunnerOperationEnvelope) -> None:
+        try:
+            path = self._workspace.resolve(operation.payload.get("path"))
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        pattern = _str_payload(operation.payload, "pattern")
+        if not pattern:
+            await self._final_error(operation, "INVALID_PAYLOAD", "pattern is required")
+            return
+        try:
+            regex = re.compile(pattern)
+        except re.error as exc:
+            await self._final_error(operation, "INVALID_REGEX", str(exc))
+            return
+        recursive = _bool_payload(operation.payload, "recursive", default=True)
+        exclude_patterns = _str_list_payload(operation.payload, "exclude_patterns")
+        max_matching_files = _positive_int_payload(
+            operation.payload,
+            "max_matching_files",
+            default=50,
+        )
+        max_lines_per_file = _positive_int_payload(
+            operation.payload,
+            "max_lines_per_file",
+            default=10,
+        )
+        max_searched_files = _positive_int_payload(
+            operation.payload,
+            "max_searched_files",
+            default=_DEFAULT_MAX_GREP_SEARCHED_FILES,
+        )
+        max_scanned_bytes = _positive_int_payload(
+            operation.payload,
+            "max_scanned_bytes",
+            default=_DEFAULT_MAX_GREP_SCANNED_BYTES,
+        )
+        payload = await self._run_file_operation(
+            operation,
+            lambda cancellation: _grep_files(
+                path,
+                workspace=self._workspace,
+                regex=regex,
+                recursive=recursive,
+                exclude_patterns=exclude_patterns,
+                max_matching_files=max_matching_files,
+                max_lines_per_file=max_lines_per_file,
+                max_searched_files=max_searched_files,
+                max_scanned_bytes=max_scanned_bytes,
+                cancellation=cancellation,
+            ),
+        )
+        await self._final_success(operation, payload)
+
+    async def _git_list_refs(self, operation: RunnerOperationEnvelope) -> None:
+        source_path = await self._git_source_path(operation)
+        if source_path is None:
+            return
+        refs_result = await self._run_git_capture(
+            operation,
+            ("for-each-ref", "--format=%(refname)%09%(objectname)%09%(refname:short)"),
+            cwd=source_path,
+        )
+        if refs_result is None:
+            return
+        if refs_result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(refs_result),
+            )
+            return
+        default_branch = await self._default_branch(operation, source_path)
+        head_commit = await self._head_commit(operation, source_path)
+        refs: list[JsonValue] = []
+        for line in refs_result.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) != 3:
+                continue
+            ref, target, short_name = parts
+            refs.append(
+                {
+                    "name": _git_ref_display_name(ref, short_name),
+                    "ref": ref,
+                    "type": _git_ref_type(ref),
+                    "target": target,
+                    "default": _git_ref_is_default(ref, short_name, default_branch),
+                }
+            )
+        await self._final_success(
+            operation,
+            {
+                "git_refs": refs,
+                "default_branch": default_branch,
+                "head_commit": head_commit,
+            },
+        )
+
+    async def _git_create_worktree(self, operation: RunnerOperationEnvelope) -> None:
+        source_path = await self._git_source_path(operation)
+        if source_path is None:
+            return
+        starting_ref = _str_payload(operation.payload, "starting_ref")
+        if not starting_ref:
+            await self._final_error(
+                operation,
+                "invalid_ref",
+                "starting_ref is required",
+            )
+            return
+        branch_name = _str_payload(operation.payload, "branch_name")
+        if not branch_name:
+            await self._final_error(
+                operation,
+                "invalid_branch",
+                "branch_name is required",
+            )
+            return
+        try:
+            worktree_path = _resolve_lexical_path(
+                operation.payload.get("worktree_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "invalid_worktree_path", str(exc))
+            return
+        if worktree_path.exists() or worktree_path.is_symlink():
+            await self._final_error(
+                operation,
+                "worktree_path_exists",
+                f"Worktree path already exists: {worktree_path}",
+            )
+            return
+        base_commit = await self._resolve_git_commit(
+            operation,
+            source_path,
+            starting_ref,
+        )
+        if base_commit is None:
+            return
+        branch_exists = await self._git_branch_exists(
+            operation, source_path, branch_name
+        )
+        if branch_exists is None:
+            return
+        if branch_exists:
+            await self._final_error(
+                operation,
+                "branch_exists",
+                f"Git branch already exists: {branch_name}",
+            )
+            return
+        result = await self._run_git_streaming(
+            operation,
+            (
+                "worktree",
+                "add",
+                "-b",
+                branch_name,
+                str(worktree_path),
+                starting_ref,
+            ),
+            cwd=source_path,
+        )
+        if result is None:
+            return
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return
+        await self._final_success(
+            operation,
+            {
+                "base_commit": base_commit,
+                "worktree_path": self._workspace.display_lexical_path(worktree_path),
+                "branch_name": branch_name,
+            },
+        )
+
+    async def _git_inspect_worktree(self, operation: RunnerOperationEnvelope) -> None:
+        source_path = await self._git_source_path(operation)
+        if source_path is None:
+            return
+        inspection = await self._inspect_git_worktree(operation, source_path)
+        if inspection is None:
+            return
+        payload: dict[str, JsonValue] = {
+            "worktree_path": self._workspace.display_lexical_path(
+                inspection.worktree_path
+            ),
+            "worktree_registered": inspection.registered,
+            "target_kind": inspection.target_kind,
+        }
+        if inspection.registered_branch_name is not None:
+            payload["registered_branch_name"] = inspection.registered_branch_name
+        if inspection.dirty is not None:
+            payload["dirty"] = inspection.dirty
+        await self._final_success(operation, payload)
+
+    async def _git_discover_managed_worktrees(
+        self,
+        operation: RunnerOperationEnvelope,
+    ) -> None:
+        """Discover Git worktrees below the fixed Agent Workspace managed root."""
+        root = self._workspace.root / _MANAGED_WORKTREE_ROOT
+        if root.is_symlink() or (root.exists() and not root.is_dir()):
+            await self._final_error(
+                operation,
+                "managed_worktree_root_invalid",
+                "Managed worktree root is not a directory.",
+            )
+            return
+        if not root.exists():
+            await self._final_success(operation, {"discovered_worktrees": []})
+            return
+        entries: list[JsonValue] = []
+        for session_directory in sorted(root.iterdir(), key=lambda path: path.name):
+            if session_directory.is_symlink() or not session_directory.is_dir():
+                continue
+            direct_entry = await self._discover_managed_worktree_entry(
+                operation,
+                session_directory,
+            )
+            if _bool_payload(direct_entry, "registered", default=False):
+                if len(entries) >= _MAX_MANAGED_WORKTREE_DISCOVERY_ENTRIES:
+                    await self._final_error(
+                        operation,
+                        "managed_worktree_inventory_overflow",
+                        "Managed worktree inventory exceeds the operation limit.",
+                    )
+                    return
+                entries.append(direct_entry)
+                continue
+            for candidate in sorted(
+                session_directory.iterdir(),
+                key=lambda path: path.name,
+            ):
+                if candidate.is_symlink() or not candidate.is_dir():
+                    continue
+                if len(entries) >= _MAX_MANAGED_WORKTREE_DISCOVERY_ENTRIES:
+                    await self._final_error(
+                        operation,
+                        "managed_worktree_inventory_overflow",
+                        "Managed worktree inventory exceeds the operation limit.",
+                    )
+                    return
+                entries.append(
+                    await self._discover_managed_worktree_entry(operation, candidate)
+                )
+        await self._final_success(operation, {"discovered_worktrees": entries})
+
+    async def _discover_managed_worktree_entry(
+        self,
+        operation: RunnerOperationEnvelope,
+        candidate: Path,
+    ) -> dict[str, JsonValue]:
+        """Return a content-free managed worktree identity or bounded failure."""
+        if candidate.is_symlink() or not candidate.is_dir():
+            return _discovered_worktree_payload(
+                candidate,
+                registered=False,
+                repository_anchor_path="",
+                branch_name="",
+                failure_code="worktree_ownership_ambiguous",
+            )
+        result = await self._run_git_capture(
+            operation,
+            ("worktree", "list", "--porcelain", "-z"),
+            cwd=candidate,
+        )
+        if result is None or result.exit_code != 0:
+            return _discovered_worktree_payload(
+                candidate,
+                registered=False,
+                repository_anchor_path="",
+                branch_name="",
+                failure_code="not_git_worktree",
+            )
+        registration = _registered_worktree(result.stdout, worktree_path=candidate)
+        if not registration.registered:
+            return _discovered_worktree_payload(
+                candidate,
+                registered=False,
+                repository_anchor_path="",
+                branch_name="",
+                failure_code="worktree_ownership_ambiguous",
+            )
+        anchor_result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "--path-format=absolute", "--git-common-dir"),
+            cwd=candidate,
+        )
+        head_result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "HEAD"),
+            cwd=candidate,
+        )
+        if (
+            anchor_result is None
+            or anchor_result.exit_code != 0
+            or head_result is None
+            or head_result.exit_code != 0
+        ):
+            return _discovered_worktree_payload(
+                candidate,
+                registered=False,
+                repository_anchor_path="",
+                branch_name="",
+                head_commit="",
+                failure_code="worktree_ownership_ambiguous",
+            )
+        repository_anchor_path = Path(anchor_result.stdout.strip())
+        if not _path_is_within(repository_anchor_path, self._workspace.root):
+            return _discovered_worktree_payload(
+                candidate,
+                registered=False,
+                repository_anchor_path="",
+                branch_name="",
+                head_commit="",
+                failure_code="worktree_ownership_ambiguous",
+            )
+        return _discovered_worktree_payload(
+            candidate,
+            registered=True,
+            repository_anchor_path=str(repository_anchor_path),
+            branch_name=registration.branch_name or "",
+            head_commit=head_result.stdout.strip(),
+            failure_code="",
+        )
+
+    async def _git_remove_discovered_worktree(
+        self,
+        operation: RunnerOperationEnvelope,
+    ) -> None:
+        """Force-remove a previously discovered managed worktree after revalidation."""
+        try:
+            worktree_path = _resolve_lexical_path(
+                operation.payload.get("worktree_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "invalid_worktree_path", str(exc))
+            return
+        displayed_worktree_path = self._workspace.display_lexical_path(worktree_path)
+        managed_root = self._workspace.root / _MANAGED_WORKTREE_ROOT
+        if not _path_is_within(worktree_path, managed_root):
+            await self._final_error(
+                operation,
+                "worktree_ownership_ambiguous",
+                "Worktree path is outside the managed root.",
+            )
+            return
+        if not worktree_path.exists():
+            try:
+                repository_anchor_path = _resolve_lexical_path(
+                    operation.payload.get("repository_anchor_path"),
+                    workspace=self._workspace,
+                )
+            except ValueError as exc:
+                await self._final_error(
+                    operation,
+                    "worktree_ownership_ambiguous",
+                    str(exc),
+                )
+                return
+            if not _path_is_within(repository_anchor_path, self._workspace.root):
+                await self._final_error(
+                    operation,
+                    "worktree_ownership_ambiguous",
+                    "Worktree repository metadata is outside the Agent Workspace.",
+                )
+                return
+            result = await self._run_git_streaming(
+                operation,
+                (
+                    "--git-dir",
+                    str(repository_anchor_path),
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(worktree_path),
+                ),
+                cwd=self._workspace.root,
+            )
+            if result is None:
+                return
+            if result.exit_code != 0:
+                await self._final_error(
+                    operation,
+                    "git_command_failed",
+                    _git_command_error_message(result),
+                )
+                return
+            await self._final_success(
+                operation,
+                {
+                    "removed_discovered_worktree_path": displayed_worktree_path,
+                    "outcome": "already_absent",
+                },
+            )
+            return
+        observed = await self._discover_managed_worktree_entry(operation, worktree_path)
+        if not _bool_payload(observed, "registered", default=False):
+            await self._final_error(
+                operation,
+                _str_payload(observed, "failure_code")
+                or "worktree_ownership_ambiguous",
+                "Managed worktree identity could not be revalidated.",
+            )
+            return
+        expected = (
+            _str_payload(operation.payload, "repository_anchor_path"),
+            _str_payload(operation.payload, "branch_name"),
+            _str_payload(operation.payload, "fingerprint"),
+        )
+        actual = (
+            _str_payload(observed, "repository_anchor_path"),
+            _str_payload(observed, "branch_name"),
+            _str_payload(observed, "fingerprint"),
+        )
+        if expected != actual or not _bool_payload(
+            operation.payload,
+            "force",
+            default=False,
+        ):
+            await self._final_error(
+                operation,
+                "identity_changed",
+                "Managed worktree identity changed after discovery.",
+            )
+            return
+        result = await self._run_git_streaming(
+            operation,
+            ("worktree", "remove", "--force", str(worktree_path)),
+            cwd=worktree_path,
+        )
+        if result is None:
+            return
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return
+        await self._final_success(
+            operation,
+            {
+                "removed_discovered_worktree_path": displayed_worktree_path,
+                "outcome": "removed",
+            },
+        )
+
+    async def _git_remove_worktree(self, operation: RunnerOperationEnvelope) -> None:
+        source_path = await self._git_source_path(operation)
+        if source_path is None:
+            return
+        inspection = await self._inspect_git_worktree(operation, source_path)
+        if inspection is None:
+            return
+        expected_branch_name = _str_payload(operation.payload, "branch_name")
+        if not expected_branch_name:
+            await self._final_error(
+                operation,
+                "invalid_branch",
+                "branch_name is required",
+            )
+            return
+        if inspection.target_kind == "other":
+            await self._final_error(
+                operation,
+                "worktree_ownership_ambiguous",
+                "Recorded worktree target is not a directory.",
+            )
+            return
+        if (
+            inspection.registered
+            and inspection.registered_branch_name != expected_branch_name
+        ):
+            await self._final_error(
+                operation,
+                "worktree_ownership_ambiguous",
+                ("Git worktree registration does not match the recorded branch."),
+            )
+            return
+        if inspection.target_kind == "directory" and not inspection.registered:
+            await self._final_error(
+                operation,
+                "worktree_ownership_ambiguous",
+                (
+                    "Existing worktree target does not match the recorded Git "
+                    "registration."
+                ),
+            )
+            return
+        if inspection.target_kind == "missing" and not inspection.registered:
+            await self._final_success(
+                operation,
+                {
+                    "removed_worktree_path": self._workspace.display_lexical_path(
+                        inspection.worktree_path
+                    ),
+                    "outcome": "already_absent",
+                },
+            )
+            return
+        argv = ["worktree", "remove"]
+        if _bool_payload(operation.payload, "force", default=False):
+            argv.append("--force")
+        argv.append(str(inspection.worktree_path))
+        result = await self._run_git_streaming(operation, tuple(argv), cwd=source_path)
+        if result is None:
+            return
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return
+        await self._final_success(
+            operation,
+            {
+                "removed_worktree_path": self._workspace.display_lexical_path(
+                    inspection.worktree_path
+                ),
+                "outcome": (
+                    "already_absent"
+                    if inspection.target_kind == "missing"
+                    else "removed"
+                ),
+            },
+        )
+
+    async def _git_delete_branch(self, operation: RunnerOperationEnvelope) -> None:
+        source_path = await self._git_source_path(operation)
+        if source_path is None:
+            return
+        branch_name = _str_payload(operation.payload, "branch_name")
+        if not branch_name:
+            await self._final_error(
+                operation,
+                "invalid_branch",
+                "branch_name is required",
+            )
+            return
+        branch_exists = await self._git_branch_exists(
+            operation, source_path, branch_name
+        )
+        if branch_exists is None:
+            return
+        if not branch_exists:
+            await self._final_success(
+                operation,
+                {
+                    "deleted_branch_name": branch_name,
+                    "outcome": "already_absent",
+                },
+            )
+            return
+        result = await self._run_git_streaming(
+            operation,
+            ("branch", "-D", branch_name),
+            cwd=source_path,
+        )
+        if result is None:
+            return
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return
+        await self._final_success(
+            operation,
+            {"deleted_branch_name": branch_name, "outcome": "deleted"},
+        )
+
     async def _process_start(self, operation: RunnerOperationEnvelope) -> None:
         command = _str_payload(operation.payload, "command")
         if not command:
@@ -459,17 +1635,10 @@ class RunnerOperations:
             cwd = (
                 self._workspace.root
                 if workdir is None
-                else self._workspace.resolve(workdir)
+                else self._workspace.resolve_process_directory(workdir)
             )
         except ValueError as exc:
             await self._final_error(operation, "INVALID_WORKDIR", str(exc))
-            return
-        if not cwd.is_dir():
-            await self._final_error(
-                operation,
-                "INVALID_WORKDIR",
-                f"No such directory: {cwd}",
-            )
             return
         try:
             process = await self._execution_backend.start(
@@ -866,6 +2035,82 @@ class RunnerOperations:
             },
         )
 
+    async def _terminate_operation_process_group(
+        self,
+        operation: RunnerOperationEnvelope,
+        process: asyncio.subprocess.Process,
+        *,
+        reason: str,
+    ) -> None:
+        """Terminate an operation-local subprocess group within bounded deadlines."""
+        del self
+        started_at = time.monotonic()
+        process_group_id = process.pid
+        wait_task = asyncio.create_task(process.wait())
+        escalated = False
+        timed_out = False
+        _signal_process_group(
+            process_id=process.pid,
+            process_group_id=process_group_id,
+            requested_signal=signal.SIGTERM,
+            operation=operation,
+        )
+        try:
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(wait_task),
+                    timeout=_PROCESS_TERMINATE_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                pass
+            escalated = _signal_process_group(
+                process_id=process.pid,
+                process_group_id=process_group_id,
+                requested_signal=signal.SIGKILL,
+                operation=operation,
+            )
+            if not wait_task.done():
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(wait_task),
+                        timeout=_PROCESS_KILL_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    timed_out = True
+                    logger.warning(
+                        "Runtime Runner operation process did not exit after SIGKILL",
+                        extra={
+                            **_operation_process_log_extra(
+                                operation,
+                                process_id=process.pid,
+                                process_group_id=process_group_id,
+                            ),
+                            "reason": reason,
+                            "timeout_seconds": _PROCESS_KILL_TIMEOUT_SECONDS,
+                        },
+                    )
+        finally:
+            if not wait_task.done():
+                wait_task.cancel()
+            await asyncio.gather(wait_task, return_exceptions=True)
+            logger.info(
+                "Runtime Runner operation process cleanup finished",
+                extra={
+                    **_operation_process_log_extra(
+                        operation,
+                        process_id=process.pid,
+                        process_group_id=process_group_id,
+                    ),
+                    "reason": reason,
+                    "duration_ms": round(
+                        (time.monotonic() - started_at) * 1000,
+                        3,
+                    ),
+                    "escalated": escalated,
+                    "timed_out": timed_out,
+                },
+            )
+
     async def _wait_for_process_tasks(
         self,
         record: _ManagedProcess,
@@ -979,6 +2224,300 @@ class RunnerOperations:
             missing_reason=missing.reason,
         )
 
+    async def _git_source_path(self, operation: RunnerOperationEnvelope) -> Path | None:
+        try:
+            source_path = _resolve_lexical_path(
+                operation.payload.get("source_project_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "invalid_source_path", str(exc))
+            return None
+        if not source_path.exists():
+            await self._final_error(
+                operation,
+                "not_git_repo",
+                f"Source project path does not exist: {source_path}",
+            )
+            return None
+        if not source_path.is_dir():
+            await self._final_error(
+                operation,
+                "not_git_repo",
+                f"Source project path is not a directory: {source_path}",
+            )
+            return None
+        result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "--is-inside-work-tree"),
+            cwd=source_path,
+        )
+        if result is None:
+            return None
+        if result.exit_code != 0 or result.stdout.strip() != "true":
+            await self._final_error(
+                operation,
+                "not_git_repo",
+                f"Source project path is not a Git repository: {source_path}",
+            )
+            return None
+        return source_path
+
+    async def _resolve_git_commit(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+        ref: str,
+    ) -> str | None:
+        result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "--verify", f"{ref}^{{commit}}"),
+            cwd=source_path,
+        )
+        if result is None:
+            return None
+        if result.exit_code != 0:
+            await self._final_error(
+                operation, "invalid_ref", _git_command_error_message(result)
+            )
+            return None
+        return result.stdout.strip()
+
+    async def _git_branch_exists(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+        branch_name: str,
+    ) -> bool | None:
+        result = await self._run_git_capture(
+            operation,
+            ("show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"),
+            cwd=source_path,
+        )
+        if result is None:
+            return None
+        if result.exit_code == 0:
+            return True
+        if result.exit_code == 1:
+            return False
+        await self._final_error(
+            operation, "git_command_failed", _git_command_error_message(result)
+        )
+        return None
+
+    async def _inspect_git_worktree(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+    ) -> _GitWorktreeInspection | None:
+        """Inspect exact Git registration and physical target state."""
+        try:
+            worktree_path = _resolve_lexical_path(
+                operation.payload.get("worktree_path"),
+                workspace=self._workspace,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "invalid_worktree_path", str(exc))
+            return None
+        result = await self._run_git_capture(
+            operation,
+            ("worktree", "list", "--porcelain", "-z"),
+            cwd=source_path,
+        )
+        if result is None:
+            return None
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return None
+        registration = _registered_worktree(
+            result.stdout,
+            worktree_path=worktree_path,
+        )
+        if worktree_path.is_symlink():
+            target_kind: Literal["directory", "missing", "other"] = "other"
+        elif worktree_path.is_dir():
+            target_kind = "directory"
+        elif worktree_path.exists():
+            target_kind = "other"
+        else:
+            target_kind = "missing"
+        dirty: bool | None = None
+        if registration.registered and target_kind == "directory":
+            status = await self._run_git_capture(
+                operation,
+                ("status", "--porcelain", "--untracked-files=normal"),
+                cwd=worktree_path,
+            )
+            if status is None:
+                return None
+            if status.exit_code != 0:
+                await self._final_error(
+                    operation,
+                    "git_command_failed",
+                    _git_command_error_message(status),
+                )
+                return None
+            dirty = bool(status.stdout)
+        return _GitWorktreeInspection(
+            worktree_path=worktree_path,
+            registered=registration.registered,
+            registered_branch_name=registration.branch_name,
+            target_kind=target_kind,
+            dirty=dirty,
+        )
+
+    async def _default_branch(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+    ) -> str | None:
+        result = await self._run_git_capture(
+            operation,
+            ("symbolic-ref", "--quiet", "--short", "HEAD"),
+            cwd=source_path,
+        )
+        if result is None or result.exit_code != 0:
+            return None
+        value = result.stdout.strip()
+        return value or None
+
+    async def _head_commit(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+    ) -> str | None:
+        result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "HEAD"),
+            cwd=source_path,
+        )
+        if result is None or result.exit_code != 0:
+            return None
+        value = result.stdout.strip()
+        return value or None
+
+    async def _run_git_capture(
+        self,
+        operation: RunnerOperationEnvelope,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+    ) -> _GitCommandResult | None:
+        return await self._run_git_command(
+            operation,
+            argv,
+            cwd=cwd,
+            stream_output=False,
+        )
+
+    async def _run_git_streaming(
+        self,
+        operation: RunnerOperationEnvelope,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+    ) -> _GitCommandResult | None:
+        return await self._run_git_command(
+            operation,
+            argv,
+            cwd=cwd,
+            stream_output=True,
+        )
+
+    async def _run_git_command(
+        self,
+        operation: RunnerOperationEnvelope,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path,
+        stream_output: bool,
+    ) -> _GitCommandResult | None:
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "git",
+                *argv,
+                cwd=cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            await self._final_error(operation, "git_command_failed", str(exc))
+            return None
+        if process.stdout is None or process.stderr is None:
+            raise RuntimeError("git stdout/stderr pipes are required")
+        stdout_task = asyncio.create_task(
+            self._drain_git_stream(
+                operation,
+                RuntimeRunnerEventType.STDOUT,
+                process.stdout,
+                stream_output=stream_output,
+            )
+        )
+        stderr_task = asyncio.create_task(
+            self._drain_git_stream(
+                operation,
+                RuntimeRunnerEventType.STDERR,
+                process.stderr,
+                stream_output=stream_output,
+            )
+        )
+        timeout = _remaining_timeout_seconds(operation.deadline_at)
+        try:
+            if timeout is None:
+                exit_code = await process.wait()
+            else:
+                exit_code = await asyncio.wait_for(process.wait(), timeout=timeout)
+            stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
+        except TimeoutError:
+            await self._terminate_operation_process_group(
+                operation,
+                process,
+                reason="operation_timeout",
+            )
+            await _cancel_tasks(stdout_task, stderr_task)
+            await self._final_error(
+                operation,
+                "operation_timeout",
+                "Git operation timed out",
+            )
+            return None
+        except asyncio.CancelledError:
+            await self._terminate_operation_process_group(
+                operation,
+                process,
+                reason="operation_cancelled",
+            )
+            await _cancel_tasks(stdout_task, stderr_task)
+            raise
+        return _GitCommandResult(
+            exit_code=exit_code,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+    async def _drain_git_stream(
+        self,
+        operation: RunnerOperationEnvelope,
+        event_type: RuntimeRunnerEventType,
+        reader: asyncio.StreamReader,
+        *,
+        stream_output: bool,
+    ) -> str:
+        chunks: list[str] = []
+        while True:
+            data = await reader.read(_PROCESS_READ_CHUNK_BYTES)
+            if not data:
+                return "".join(chunks)
+            text = data.decode(errors="replace")
+            chunks.append(text)
+            if stream_output:
+                await self._event(operation, event_type, {"text": text})
+
     async def _final_success(
         self,
         operation: RunnerOperationEnvelope,
@@ -1025,8 +2564,175 @@ class RunnerOperations:
         )
 
 
+async def _cancel_tasks(*tasks: asyncio.Task[str]) -> None:
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _signal_process_group(
+    *,
+    process_id: int,
+    process_group_id: int,
+    requested_signal: signal.Signals,
+    operation: RunnerOperationEnvelope,
+) -> bool:
+    try:
+        os.killpg(process_group_id, requested_signal)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        logger.exception(
+            "Runtime Runner operation process group signal denied",
+            extra={
+                **_operation_process_log_extra(
+                    operation,
+                    process_id=process_id,
+                    process_group_id=process_group_id,
+                ),
+                "signal": requested_signal.name,
+            },
+        )
+        return False
+    return True
+
+
+def _operation_process_log_extra(
+    operation: RunnerOperationEnvelope,
+    *,
+    process_id: int,
+    process_group_id: int,
+) -> dict[str, JsonValue]:
+    return {
+        "runtime_id": operation.runtime_id,
+        "runner_generation": operation.runner_generation,
+        "request_id": operation.request_id,
+        "operation_type": operation.operation_type,
+        "owner_session_id": operation.owner_session_id,
+        "process_id": process_id,
+        "process_group_id": process_group_id,
+    }
+
+
 def _process_exited(record: _ManagedProcess) -> bool:
     return record.process.returncode is not None
+
+
+def _remaining_timeout_seconds(deadline_at: datetime | None) -> float | None:
+    if deadline_at is None:
+        return None
+    return max((deadline_at - datetime.now(UTC)).total_seconds(), 0.001)
+
+
+def _git_command_error_message(result: _GitCommandResult) -> str:
+    text = result.stderr.strip() or result.stdout.strip()
+    if text:
+        return text
+    return f"Git command failed with exit code {result.exit_code}"
+
+
+def _registered_worktree(
+    porcelain: str,
+    *,
+    worktree_path: Path,
+) -> _GitWorktreeRegistration:
+    """Return exact Git worktree registration and local branch name."""
+    for record in porcelain.split("\0\0"):
+        fields = [field for field in record.split("\0") if field]
+        if not fields or not fields[0].startswith("worktree "):
+            continue
+        registered_path = Path(fields[0].removeprefix("worktree "))
+        if registered_path != worktree_path:
+            continue
+        branch_ref = next(
+            (
+                field.removeprefix("branch ")
+                for field in fields[1:]
+                if field.startswith("branch ")
+            ),
+            None,
+        )
+        branch_name = (
+            branch_ref.removeprefix("refs/heads/")
+            if branch_ref is not None and branch_ref.startswith("refs/heads/")
+            else branch_ref
+        )
+        return _GitWorktreeRegistration(
+            registered=True,
+            branch_name=branch_name,
+        )
+    return _GitWorktreeRegistration(
+        registered=False,
+        branch_name=None,
+    )
+
+
+def _discovered_worktree_payload(
+    worktree_path: Path,
+    *,
+    registered: bool,
+    repository_anchor_path: str,
+    branch_name: str,
+    failure_code: str,
+    head_commit: str = "",
+) -> dict[str, JsonValue]:
+    """Build one content-free managed worktree discovery result."""
+    fingerprint = hashlib.sha256(
+        "\0".join(
+            (
+                str(worktree_path),
+                repository_anchor_path,
+                branch_name,
+                head_commit,
+                failure_code,
+                str(registered),
+            )
+        ).encode()
+    ).hexdigest()
+    return {
+        "worktree_path": str(worktree_path),
+        "registered": registered,
+        "repository_anchor_path": repository_anchor_path,
+        "branch_name": branch_name,
+        "fingerprint": fingerprint,
+        "failure_code": failure_code,
+    }
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    """Return whether the lexical target is inside the fixed managed root."""
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def _git_ref_display_name(ref: str, short_name: str) -> str:
+    if ref.startswith("refs/heads/"):
+        return ref.removeprefix("refs/heads/")
+    if ref.startswith("refs/remotes/"):
+        return ref.removeprefix("refs/remotes/")
+    if ref.startswith("refs/tags/"):
+        return ref.removeprefix("refs/tags/")
+    return short_name
+
+
+def _git_ref_type(ref: str) -> str:
+    if ref.startswith("refs/heads/"):
+        return "branch"
+    if ref.startswith("refs/remotes/"):
+        return "remote_branch"
+    if ref.startswith("refs/tags/"):
+        return "tag"
+    return "other"
+
+
+def _git_ref_is_default(ref: str, short_name: str, default_branch: str | None) -> bool:
+    if default_branch is None:
+        return False
+    return short_name == default_branch or ref == f"refs/heads/{default_branch}"
 
 
 def _yield_time_ms(payload: Mapping[str, JsonValue]) -> int:
@@ -1067,6 +2773,11 @@ def _bool_payload(payload: Mapping[str, JsonValue], key: str, *, default: bool) 
     return value if isinstance(value, bool) else default
 
 
+def _optional_int_payload(payload: Mapping[str, JsonValue], key: str) -> int | None:
+    value = payload.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _non_negative_int_payload(
     payload: Mapping[str, JsonValue],
     key: str,
@@ -1103,6 +2814,898 @@ def _str_mapping_payload(
         for item_key, item_value in value.items()
         if isinstance(item_value, str)
     }
+
+
+def _str_list_payload(payload: Mapping[str, JsonValue], key: str) -> list[str]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def _delete_path(
+    path: Path,
+    *,
+    workspace: Workspace,
+    recursive: bool,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Delete one path in a filesystem worker."""
+    if cancellation.is_set():
+        return {"deleted_path": workspace.display_path(path)}
+    try:
+        stat_result = path.lstat()
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError("NOT_FOUND", f"No such file: {path}") from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("DELETE_FAILED", str(exc)) from exc
+    if (
+        stat_module.S_ISDIR(stat_result.st_mode)
+        and not stat_module.S_ISLNK(stat_result.st_mode)
+        and not recursive
+    ):
+        raise _FileOperationSemanticError(
+            "DIRECTORY_RECURSIVE_REQUIRED",
+            f"Directory delete requires recursive=true: {path}",
+        )
+    try:
+        if stat_module.S_ISDIR(stat_result.st_mode) and not stat_module.S_ISLNK(
+            stat_result.st_mode
+        ):
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError("NOT_FOUND", f"No such file: {path}") from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("DELETE_FAILED", str(exc)) from exc
+    return {"deleted_path": workspace.display_path(path)}
+
+
+def _make_directory(
+    path: Path,
+    *,
+    workspace: Workspace,
+    parents: bool,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Create one directory in a filesystem worker."""
+    if cancellation.is_set():
+        return {"created_path": workspace.display_path(path)}
+    try:
+        path.mkdir(parents=parents, exist_ok=False)
+    except FileExistsError as exc:
+        raise _FileOperationSemanticError(
+            "ALREADY_EXISTS", f"Path exists: {path}"
+        ) from exc
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError(
+            "PARENT_NOT_FOUND",
+            f"Parent directory does not exist: {path.parent}",
+        ) from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("MKDIR_FAILED", str(exc)) from exc
+    return {"created_path": workspace.display_path(path)}
+
+
+def _move_path(
+    source_path: Path,
+    destination_path: Path,
+    *,
+    workspace: Workspace,
+    overwrite: bool,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Move one path in a filesystem worker."""
+    if cancellation.is_set():
+        return {
+            "moved_source_path": workspace.display_path(source_path),
+            "moved_destination_path": workspace.display_path(destination_path),
+        }
+    if not source_path.exists() and not source_path.is_symlink():
+        raise _FileOperationSemanticError("NOT_FOUND", f"No such file: {source_path}")
+    if destination_path.exists() or destination_path.is_symlink():
+        if not overwrite:
+            raise _FileOperationSemanticError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+            )
+        try:
+            if destination_path.is_dir() and not destination_path.is_symlink():
+                shutil.rmtree(destination_path)
+            else:
+                destination_path.unlink()
+        except OSError as exc:
+            raise _FileOperationSemanticError("MOVE_FAILED", str(exc)) from exc
+    if not destination_path.parent.exists():
+        raise _FileOperationSemanticError(
+            "PARENT_NOT_FOUND",
+            f"Parent directory does not exist: {destination_path.parent}",
+        )
+    if not destination_path.parent.is_dir():
+        raise _FileOperationSemanticError(
+            "PARENT_NOT_DIRECTORY",
+            f"Parent path is not a directory: {destination_path.parent}",
+        )
+    try:
+        shutil.move(str(source_path), str(destination_path))
+    except OSError as exc:
+        raise _FileOperationSemanticError("MOVE_FAILED", str(exc)) from exc
+    return {
+        "moved_source_path": workspace.display_path(source_path),
+        "moved_destination_path": workspace.display_path(destination_path),
+    }
+
+
+def _delete_paths(
+    paths: list[Path],
+    *,
+    workspace: Workspace,
+    recursive: bool,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Delete multiple paths in a filesystem worker."""
+    stats: list[tuple[Path, os.stat_result]] = []
+    try:
+        for path in paths:
+            if cancellation.is_set():
+                return {"deleted_paths": []}
+            stats.append((path, path.lstat()))
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError("NOT_FOUND", str(exc)) from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("DELETE_FAILED", str(exc)) from exc
+    for path, stat_result in stats:
+        if (
+            stat_module.S_ISDIR(stat_result.st_mode)
+            and not stat_module.S_ISLNK(stat_result.st_mode)
+            and not recursive
+        ):
+            raise _FileOperationSemanticError(
+                "DIRECTORY_RECURSIVE_REQUIRED",
+                f"Directory delete requires recursive=true: {path}",
+            )
+    deleted_paths: list[JsonValue] = []
+    try:
+        for path, stat_result in stats:
+            if stat_module.S_ISDIR(stat_result.st_mode) and not stat_module.S_ISLNK(
+                stat_result.st_mode
+            ):
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            deleted_paths.append(workspace.display_path(path))
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError("NOT_FOUND", str(exc)) from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("DELETE_FAILED", str(exc)) from exc
+    return {"deleted_paths": deleted_paths}
+
+
+def _move_paths(
+    source_paths: list[Path],
+    destination_directory: Path,
+    *,
+    workspace: Workspace,
+    overwrite: bool,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Move multiple paths into one directory in a filesystem worker."""
+    if cancellation.is_set():
+        return {"moved_entries": []}
+    if not destination_directory.exists():
+        raise _FileOperationSemanticError(
+            "PARENT_NOT_FOUND",
+            f"Destination directory does not exist: {destination_directory}",
+        )
+    if not destination_directory.is_dir():
+        raise _FileOperationSemanticError(
+            "PARENT_NOT_DIRECTORY",
+            f"Destination path is not a directory: {destination_directory}",
+        )
+    seen_destinations: set[Path] = set()
+    moves: list[tuple[Path, Path]] = []
+    for source_path in source_paths:
+        if not source_path.exists() and not source_path.is_symlink():
+            raise _FileOperationSemanticError(
+                "NOT_FOUND", f"No such file: {source_path}"
+            )
+        destination_path = destination_directory / source_path.name
+        if destination_path in seen_destinations:
+            raise _FileOperationSemanticError(
+                "DESTINATION_EXISTS",
+                f"Duplicate destination: {destination_path}",
+            )
+        seen_destinations.add(destination_path)
+        if (
+            destination_path.exists() or destination_path.is_symlink()
+        ) and not overwrite:
+            raise _FileOperationSemanticError(
+                "DESTINATION_EXISTS",
+                f"Destination already exists: {destination_path}",
+            )
+        moves.append((source_path, destination_path))
+    moved_entries: list[JsonValue] = []
+    try:
+        for source_path, destination_path in moves:
+            if destination_path.exists() or destination_path.is_symlink():
+                if destination_path.is_dir() and not destination_path.is_symlink():
+                    shutil.rmtree(destination_path)
+                else:
+                    destination_path.unlink()
+            shutil.move(str(source_path), str(destination_path))
+            moved_entries.append(
+                {
+                    "source_path": workspace.display_path(source_path),
+                    "destination_path": workspace.display_path(destination_path),
+                }
+            )
+    except OSError as exc:
+        raise _FileOperationSemanticError("MOVE_FAILED", str(exc)) from exc
+    return {"moved_entries": moved_entries}
+
+
+def _read_file_bytes(
+    path: Path,
+    *,
+    offset: int,
+    max_bytes: int,
+    cancellation: threading.Event,
+) -> bytes:
+    """Read bounded file bytes in a filesystem worker."""
+    if cancellation.is_set():
+        return b""
+    return path.read_bytes()[offset : offset + max_bytes]
+
+
+def _read_file_range_bytes(
+    path: Path,
+    *,
+    offset: int,
+    max_bytes: int,
+    cancellation: threading.Event,
+) -> bytes:
+    """Read one bounded byte range without reading the complete file."""
+    if cancellation.is_set():
+        return b""
+    with path.open("rb") as source:
+        source.seek(offset)
+        return source.read(max_bytes)
+
+
+def _write_file_bytes(
+    path: Path,
+    *,
+    chunks: tuple[bytes, ...],
+    cancellation: threading.Event,
+) -> int:
+    """Write file bytes in a filesystem worker."""
+    if cancellation.is_set():
+        return 0
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = b"".join(chunks)
+    if cancellation.is_set():
+        return 0
+    path.write_bytes(data)
+    return len(data)
+
+
+def _edit_file_text(
+    path: Path,
+    *,
+    old_string: str,
+    new_string: str,
+    replace_all: bool,
+    cancellation: threading.Event,
+) -> int:
+    """Replace exact UTF-8 text in one regular file with an atomic write."""
+    if cancellation.is_set():
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_CANCELLED",
+            "File edit was cancelled before replacement",
+        )
+    _assert_edit_path_has_no_symlinks(path)
+    try:
+        source_stat = path.lstat()
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_NOT_FOUND",
+            "File does not exist",
+        ) from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("FILE_EDIT_READ_FAILED", str(exc)) from exc
+    if not stat_module.S_ISREG(source_stat.st_mode):
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_UNSUPPORTED_FILE_TYPE",
+            "File is not a regular file",
+        )
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError as exc:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_NOT_FOUND",
+            "File does not exist",
+        ) from exc
+    except OSError as exc:
+        raise _FileOperationSemanticError("FILE_EDIT_READ_FAILED", str(exc)) from exc
+    if cancellation.is_set():
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_CANCELLED",
+            "File edit was cancelled before replacement",
+        )
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_INVALID_UTF8",
+            "File is not valid UTF-8 text",
+        ) from exc
+    matches = text.count(old_string)
+    if matches == 0:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_OLD_STRING_NOT_FOUND",
+            "old_string was not found",
+        )
+    if not replace_all and matches > 1:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_MULTIPLE_MATCHES",
+            str(matches),
+        )
+    edited_text = text.replace(
+        old_string,
+        new_string,
+        -1 if replace_all else 1,
+    )
+    temp_path: Path | None = None
+    try:
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            dir=path.parent,
+        )
+        temp_path = Path(temp_name)
+        with os.fdopen(descriptor, "wb") as file:
+            os.fchmod(file.fileno(), stat_module.S_IMODE(source_stat.st_mode))
+            file.write(edited_text.encode("utf-8"))
+            file.flush()
+            os.fsync(file.fileno())
+        if cancellation.is_set():
+            raise _FileOperationSemanticError(
+                "FILE_EDIT_CANCELLED",
+                "File edit was cancelled before replacement",
+            )
+        _assert_edit_path_has_no_symlinks(path)
+        current_stat = path.lstat()
+        if not _same_file_identity(source_stat, current_stat):
+            raise _FileOperationSemanticError(
+                "FILE_EDIT_FILE_CHANGED",
+                "File changed while edit was in progress",
+            )
+        os.replace(temp_path, path)
+        temp_path = None
+    except PermissionError as exc:
+        raise _FileOperationSemanticError(
+            "FILE_EDIT_PERMISSION_DENIED",
+            "Permission denied while saving file",
+        ) from exc
+    except _FileOperationSemanticError:
+        raise
+    except OSError as exc:
+        raise _FileOperationSemanticError("FILE_EDIT_WRITE_FAILED", str(exc)) from exc
+    finally:
+        if temp_path is not None:
+            with contextlib.suppress(OSError):
+                temp_path.unlink()
+    return matches if replace_all else 1
+
+
+def _assert_edit_path_has_no_symlinks(path: Path) -> None:
+    """Reject edit paths whose final target or parent chain contains a symlink."""
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError as exc:
+            raise _FileOperationSemanticError(
+                "FILE_EDIT_NOT_FOUND",
+                "File does not exist",
+            ) from exc
+        except OSError as exc:
+            raise _FileOperationSemanticError(
+                "FILE_EDIT_READ_FAILED",
+                str(exc),
+            ) from exc
+        if stat_module.S_ISLNK(mode):
+            raise _FileOperationSemanticError(
+                "FILE_EDIT_UNSAFE_PATH",
+                "Editing symlink paths is not supported",
+            )
+
+
+def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    """Return whether two lstat results refer to the same regular file."""
+    return (
+        stat_module.S_ISREG(right.st_mode)
+        and left.st_dev == right.st_dev
+        and left.st_ino == right.st_ino
+    )
+
+
+def _read_stat_payload(
+    path: Path,
+    *,
+    workspace: Workspace,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Read file metadata in a filesystem worker."""
+    if cancellation.is_set():
+        return {}
+    return _stat_payload(path, workspace)
+
+
+def _list_file_entries(
+    path: Path,
+    *,
+    workspace: Workspace,
+    recursive: bool,
+    exclude_patterns: list[str],
+    cancellation: threading.Event,
+) -> list[JsonValue]:
+    """Build a file.list response in a filesystem worker."""
+    entries: list[JsonValue] = []
+    for child in _iter_list_entries(
+        path,
+        workspace=workspace,
+        recursive=recursive,
+        exclude_patterns=exclude_patterns,
+        cancellation=cancellation,
+    ):
+        if cancellation.is_set():
+            break
+        entries.append(
+            {
+                "path": workspace.display_path(child),
+                "type": _entry_type(child),
+                "size_bytes": _file_size(child),
+                "modified_at": _modified_at(child),
+            }
+        )
+    return entries
+
+
+def _glob_file_entries(
+    pattern: str,
+    *,
+    workspace: Workspace,
+    exclude_patterns: list[str],
+    cancellation: threading.Event,
+) -> list[JsonValue]:
+    """Build a file.glob response in a filesystem worker."""
+    if pattern.startswith("~"):
+        raise _FileOperationSemanticError(
+            "INVALID_PATTERN",
+            "Tilde expansion is not supported. Use an absolute runtime path.",
+        )
+    expanded_patterns = _expand_braces(pattern)
+    prefix = workspace.resolve(_extract_glob_dir_prefix(pattern))
+    entries: list[JsonValue] = []
+    for child in _iter_list_entries(
+        prefix,
+        workspace=workspace,
+        recursive=_requires_recursive_glob_list(pattern),
+        exclude_patterns=exclude_patterns,
+        cancellation=cancellation,
+    ):
+        if cancellation.is_set():
+            break
+        display_path = workspace.display_path(child)
+        if not _match_glob_path(display_path, expanded_patterns):
+            continue
+        entries.append(
+            {
+                "path": display_path,
+                "type": _entry_type(child),
+                "size_bytes": _file_size(child),
+                "modified_at": _modified_at(child),
+            }
+        )
+    return entries
+
+
+def _extract_glob_dir_prefix(pattern: str) -> str:
+    """Extract the directory prefix before the first glob segment."""
+    parts: list[str] = []
+    for segment in pattern.split("/"):
+        if _has_glob_meta(segment):
+            break
+        parts.append(segment)
+    prefix = "/".join(parts)
+    if prefix:
+        return prefix
+    return "/" if pattern.startswith("/") else "."
+
+
+def _requires_recursive_glob_list(pattern: str) -> bool:
+    """Return whether a glob needs nested paths below its fixed prefix."""
+    prefix = _extract_glob_dir_prefix(pattern)
+    if prefix == "/":
+        suffix = pattern.lstrip("/")
+    elif prefix == ".":
+        suffix = pattern
+    else:
+        suffix = pattern[len(prefix) :].strip("/")
+    return "/" in suffix or "**" in suffix
+
+
+def _match_glob_path(path: str, expanded_patterns: tuple[str, ...]) -> bool:
+    """Match expanded glob patterns while preserving path segment boundaries."""
+    path_segments = path.strip("/").split("/") if path != "/" else []
+    for expanded_pattern in expanded_patterns:
+        pattern_segments = (
+            expanded_pattern.strip("/").split("/") if expanded_pattern != "/" else []
+        )
+        if _match_glob_segments(path_segments, pattern_segments):
+            return True
+    return False
+
+
+def _match_glob_segments(
+    path_segments: list[str],
+    pattern_segments: list[str],
+) -> bool:
+    """Match path segments with support for the recursive `**` segment."""
+
+    @lru_cache(maxsize=None)
+    def match(path_index: int, pattern_index: int) -> bool:
+        if pattern_index == len(pattern_segments):
+            return path_index == len(path_segments)
+        pattern_segment = pattern_segments[pattern_index]
+        if pattern_segment == "**":
+            if match(path_index, pattern_index + 1):
+                return True
+            return path_index < len(path_segments) and match(
+                path_index + 1, pattern_index
+            )
+        if path_index == len(path_segments):
+            return False
+        return fnmatch.fnmatchcase(
+            path_segments[path_index], pattern_segment
+        ) and match(path_index + 1, pattern_index + 1)
+
+    return match(0, 0)
+
+
+def _expand_braces(pattern: str) -> tuple[str, ...]:
+    """Expand a bounded number of comma-separated brace alternatives."""
+    pending = [pattern]
+    expansions: list[str] = []
+    while pending:
+        candidate = pending.pop()
+        expandable = _find_expandable_brace(candidate)
+        if expandable is None:
+            expansions.append(candidate)
+            continue
+
+        opening, closing, alternatives = expandable
+        prefix = candidate[:opening]
+        suffix = candidate[closing + 1 :]
+        pending.extend(
+            f"{prefix}{alternative}{suffix}" for alternative in reversed(alternatives)
+        )
+        if len(expansions) + len(pending) > _MAX_BRACE_EXPANSIONS:
+            raise _FileOperationSemanticError(
+                "INVALID_PATTERN",
+                f"Brace expansion exceeds the maximum of {_MAX_BRACE_EXPANSIONS} "
+                "alternatives.",
+            )
+    return tuple(expansions)
+
+
+def _find_expandable_brace(
+    pattern: str,
+) -> tuple[int, int, tuple[str, ...]] | None:
+    """Find the first balanced brace containing top-level alternatives."""
+    for opening, opening_char in enumerate(pattern):
+        if opening_char != "{":
+            continue
+        depth = 0
+        for closing in range(opening, len(pattern)):
+            char = pattern[closing]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    alternatives = _split_brace_alternatives(
+                        pattern[opening + 1 : closing]
+                    )
+                    if len(alternatives) >= 2:
+                        return opening, closing, alternatives
+                    break
+    return None
+
+
+def _split_brace_alternatives(value: str) -> tuple[str, ...]:
+    """Split brace contents on commas outside nested braces."""
+    alternatives: list[str] = []
+    depth = 0
+    start = 0
+    for index, char in enumerate(value):
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            alternatives.append(value[start:index])
+            start = index + 1
+    alternatives.append(value[start:])
+    return tuple(alternatives)
+
+
+def _has_glob_meta(segment: str) -> bool:
+    """Return whether a path segment contains glob metacharacters."""
+    return any(char in segment for char in ("*", "?", "[", "{"))
+
+
+def _grep_files(
+    path: Path,
+    *,
+    workspace: Workspace,
+    regex: re.Pattern[str],
+    recursive: bool,
+    exclude_patterns: list[str],
+    max_matching_files: int,
+    max_lines_per_file: int,
+    max_searched_files: int,
+    max_scanned_bytes: int,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue]:
+    """Build a file.grep response in a filesystem worker."""
+    state = _GrepScanState()
+    matches: list[JsonValue] = []
+    for file_path in _iter_grep_files(
+        path,
+        workspace=workspace,
+        recursive=recursive,
+        exclude_patterns=exclude_patterns,
+        cancellation=cancellation,
+    ):
+        if cancellation.is_set():
+            break
+        if len(matches) >= max_matching_files:
+            state.stopped_reason = "matching_file_limit"
+            break
+        if state.searched_file_count >= max_searched_files:
+            state.stopped_reason = "searched_file_limit"
+            break
+        match = _grep_file(
+            file_path,
+            workspace=workspace,
+            regex=regex,
+            max_lines_per_file=max_lines_per_file,
+            max_scanned_bytes=max_scanned_bytes,
+            state=state,
+            cancellation=cancellation,
+        )
+        if match is not None:
+            matches.append(match)
+        if state.stopped_reason is not None:
+            break
+    return {
+        "files": matches,
+        "searched_file_count": state.searched_file_count,
+        "matched_file_count": len(matches),
+        "truncated": state.stopped_reason is not None,
+        "stopped_reason": state.stopped_reason,
+    }
+
+
+def _iter_grep_files(
+    path: Path,
+    *,
+    workspace: Workspace,
+    recursive: bool,
+    exclude_patterns: list[str],
+    cancellation: threading.Event,
+) -> Iterator[Path]:
+    """Yield regular file paths searched by file.grep in sorted order."""
+    for entry in _iter_list_entries(
+        path,
+        workspace=workspace,
+        recursive=recursive,
+        exclude_patterns=exclude_patterns,
+        cancellation=cancellation,
+    ):
+        if cancellation.is_set():
+            return
+        if entry.is_file() and not entry.is_symlink():
+            yield entry
+
+
+def _grep_file(
+    path: Path,
+    *,
+    workspace: Workspace,
+    regex: re.Pattern[str],
+    max_lines_per_file: int,
+    max_scanned_bytes: int,
+    state: _GrepScanState,
+    cancellation: threading.Event,
+) -> dict[str, JsonValue] | None:
+    """Find regex-matching lines in one file."""
+    state.searched_file_count += 1
+    lines: list[JsonValue] = []
+    truncated = False
+    try:
+        with path.open("rb") as file:
+            for line_number, raw_line in enumerate(file, start=1):
+                if cancellation.is_set():
+                    return None
+                state.scanned_bytes += len(raw_line)
+                if state.scanned_bytes > max_scanned_bytes:
+                    state.stopped_reason = "scanned_byte_limit"
+                    break
+                try:
+                    line = raw_line.decode("utf-8").rstrip("\r\n")
+                except UnicodeDecodeError:
+                    return None
+                if not regex.search(line):
+                    continue
+                if len(lines) >= max_lines_per_file:
+                    truncated = True
+                    break
+                line_match: dict[str, JsonValue] = {
+                    "line_number": line_number,
+                    "text": line,
+                }
+                lines.append(line_match)
+    except OSError:
+        return None
+    if not lines:
+        return None
+    file_match: dict[str, JsonValue] = {
+        "path": workspace.display_path(path),
+        "lines": lines,
+        "truncated": truncated,
+    }
+    return file_match
+
+
+def _iter_list_entries(
+    path: Path,
+    *,
+    workspace: Workspace,
+    recursive: bool,
+    exclude_patterns: list[str],
+    cancellation: threading.Event,
+) -> Iterator[Path]:
+    """Yield paths included in file.list responses in sorted order."""
+    if cancellation.is_set():
+        return
+    if path.is_file() or path.is_symlink():
+        yield path
+        return
+    try:
+        children = sorted(path.iterdir(), key=lambda item: item.name)
+    except OSError:
+        return
+    for child in children:
+        if cancellation.is_set():
+            return
+        if _excluded(child, base=path, workspace=workspace, patterns=exclude_patterns):
+            continue
+        yield child
+        if recursive and child.is_dir() and not child.is_symlink():
+            yield from _iter_list_entries(
+                child,
+                workspace=workspace,
+                recursive=True,
+                exclude_patterns=exclude_patterns,
+                cancellation=cancellation,
+            )
+
+
+def _excluded(
+    path: Path,
+    *,
+    base: Path,
+    workspace: Workspace,
+    patterns: list[str],
+) -> bool:
+    """Return whether the path matches an exclude pattern."""
+    del workspace
+    relative_path = _lexical_relative_path(path, base)
+    parts = relative_path.split("/")
+    for pattern in patterns:
+        if fnmatch.fnmatch(relative_path, pattern):
+            return True
+        if any(fnmatch.fnmatch(part, pattern) for part in parts):
+            return True
+    return False
+
+
+def _resolve_lexical_path(
+    raw_path: object,
+    *,
+    workspace: Workspace,
+    write: bool = True,
+) -> Path:
+    """Authorize an absolute path without following its final component."""
+    return workspace.resolve_lexical(raw_path, write=write)
+
+
+def _lexical_relative_path(path: Path, base: Path) -> str:
+    """Return a lexical path relative to base without following symlink targets."""
+    try:
+        return path.relative_to(base).as_posix()
+    except ValueError:
+        return path.name
+
+
+def _stat_payload(path: Path, workspace: Workspace) -> dict[str, JsonValue]:
+    """Build a file.stat payload from lstat."""
+    stat_result = path.lstat()
+    size_bytes: int | None = None
+    if stat_module.S_ISREG(stat_result.st_mode):
+        size_bytes = stat_result.st_size
+    payload: dict[str, JsonValue] = {
+        "path": workspace.display_lexical_path(path),
+        "kind": _mode_kind(stat_result.st_mode),
+        "size_bytes": size_bytes,
+        "symlink": stat_module.S_ISLNK(stat_result.st_mode),
+        "modified_at": datetime.fromtimestamp(stat_result.st_mtime, UTC).isoformat(),
+    }
+    if stat_module.S_ISLNK(stat_result.st_mode):
+        resolved = workspace.resolved_symlink_target(path)
+        if resolved is None:
+            payload["real_path"] = str(path)
+            payload["resolved_kind"] = "missing"
+        else:
+            payload["real_path"] = workspace.display_path(resolved)
+            try:
+                payload["resolved_kind"] = _mode_kind(resolved.stat().st_mode)
+            except OSError:
+                payload["resolved_kind"] = "missing"
+    return payload
+
+
+def _mode_kind(mode: int) -> str:
+    """Convert stat mode to a Runtime file kind string."""
+    if stat_module.S_ISLNK(mode):
+        return "symlink"
+    if stat_module.S_ISDIR(mode):
+        return "directory"
+    if stat_module.S_ISREG(mode):
+        return "file"
+    return "other"
+
+
+def _file_size(path: Path) -> int | None:
+    """Read file size and return None when stat fails."""
+    if not path.is_file() or path.is_symlink():
+        return None
+    try:
+        return path.stat().st_size
+    except OSError:
+        return None
+
+
+def _modified_at(path: Path) -> str | None:
+    """Return lstat modified time as an ISO-8601 UTC string."""
+    try:
+        return datetime.fromtimestamp(path.lstat().st_mtime, UTC).isoformat()
+    except OSError:
+        return None
+
+
+def _entry_type(path: Path) -> str:
+    if path.is_symlink():
+        return "symlink"
+    if path.is_dir():
+        return "directory"
+    if path.is_file():
+        return "file"
+    return "other"
 
 
 def _process_observation_payload(

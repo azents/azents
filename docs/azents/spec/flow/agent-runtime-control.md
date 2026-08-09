@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-09
-spec_version: 55
+spec_version: 56
 ---
 
 # Agent Runtime Control
@@ -374,12 +374,24 @@ toolchain, and Agent `/tmp`, while Runner installation, Runner-private temporary
 Control credentials, Provider credentials, workload credentials, infrastructure sockets, and
 unrelated Runtime resources remain outside the projection.
 
-The same selected execution backend owns every Agent-selected process and native path operation.
-The Runner routes shell/process, file, edit, patch, search, Git/worktree, import, presentation,
-image, publication, provider-delivery, and transfer path access through a bounded typed helper
-protocol inside containment. Model-visible operation envelopes, paths, results, deadlines, and
-cancellation contracts remain unchanged, and a contained helper failure never retries with trusted
-Runner filesystem or direct process authority.
+Runner owns one common filesystem access policy for the Runtime logical namespace. The policy
+defines readable projections, writable Agent Workspace and Runtime-temporary projections,
+Runner-private denied paths, and symlink/path-escape behavior. A contained Profile uses two
+enforcement implementations for that same policy:
+
+- Agent-selected shell and managed process execution uses the selected process backend. The bwrap
+  backend compiles the policy into read-only and writable mount projections, private-path
+  exclusion, capability removal, and the contained process environment.
+- Typed non-shell file, edit, patch, search, Git/worktree, import, presentation, publication,
+  provider-delivery, and transfer operations execute directly in the trusted Runner. Python path
+  authorization maps Runtime-visible paths such as `/tmp` to their Provider-owned backing storage,
+  distinguishes read and write authority, rejects paths outside the policy, and revalidates
+  symlink-sensitive parents before native I/O.
+
+Native operations do not launch a per-operation Python helper or framed helper protocol and do not
+enter bwrap. Model-visible operation envelopes, logical paths, results, deadlines, cancellation,
+bounded-resource, atomicity, and error contracts remain unchanged. A Python authorization failure
+is terminal and never retries with unrestricted Runner filesystem authority.
 
 `file.stat` is the authoritative operation for classifying a workspace path as file, directory, symlink, other, or missing before a caller chooses a file or directory operation.
 
@@ -562,7 +574,8 @@ Required deterministic coverage:
   normalization, exact revision/digest/generation fencing, Provider disconnection, supersession,
   timeout, cancellation, and Workspace evidence
 - Runner backend qualification and conformance for UID/GID, capabilities, process/filesystem view,
-  environment redaction, temporary storage, helper parity, deadlines, cancellation, and no fallback
+  environment redaction, temporary storage, bwrap/Python filesystem-policy parity, deadlines,
+  cancellation, and no fallback
 - Docker compatibility tests for CLI, Buildx, Compose, workspace and temporary-file bind mounts, SDK, Testcontainers Network, PostgreSQL port binding, and Ryuk cleanup
 - deterministic Docker containment evidence under the enforcing AppArmor profile and disposable
   kind-based Kubernetes containment evidence for workload preparation, qualification, boundaries,
@@ -576,12 +589,15 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-09** (spec_version 56) — Made filesystem access permissions one common Runtime policy,
+  retained bwrap enforcement for shell and managed processes, and moved every typed non-shell path
+  operation to direct Python enforcement in the trusted Runner without helper subprocesses.
 - **2026-08-09** (spec_version 55) — Removed live Provider connectivity from immutable Runtime
   configuration identity and made explicit operation targeting wait within its existing bounded
   timeout for same-generation Provider and Runner reconnection.
 - **2026-08-09** (spec_version 53) — Added Profile v2 containment preparation, pre-registration
-  Runner qualification, one contained authority for process/native operations, exact bounded
-  operation targeting, separated temporary storage, and deterministic Docker/Kubernetes evidence.
+  Runner qualification, common contained filesystem authority, exact bounded operation targeting,
+  separated temporary storage, and deterministic Docker/Kubernetes evidence.
 - **2026-08-05** (spec_version 51) — Serialized bounded `OBSERVE` repair dispatch with the current
   Runtime row through exact configuration lookup and Provider-stream append, retained lifecycle and
   terminal-delete precedence, and added transient correlation logs.

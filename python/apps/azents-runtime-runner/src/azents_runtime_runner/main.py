@@ -143,9 +143,12 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         os.environ.get("AZ_RUNTIME_RUNNER_CONNECTION_ID") or uuid.uuid4().hex
     )
     limit_config = runner_limit_config_from_env()
-    workspace = Workspace(workspace_path)
     execution_backend = await _qualified_execution_backend(
         workspace_path=workspace_path,
+    )
+    workspace = Workspace(
+        workspace_path,
+        access_policy=execution_backend.filesystem_access_policy,
     )
     registration = RunnerRegistration(
         runtime_id=runtime_id,
@@ -232,8 +235,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 control=client,
                 transfer=transfer_client,
                 accepted_generation=accepted_generation,
-                execution_backend=execution_backend,
-                workspace_path=Path(workspace_path),
+                workspace=workspace,
             )
             try:
                 client.set_transfer_intent_handler(transfer_manager.handle_intent)
