@@ -589,6 +589,28 @@ def _list_live(
     return _json_object(response)
 
 
+def _wait_for_session_idle(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    timeout: float,
+) -> None:
+    """Wait until the authoritative live projection reports an idle Session."""
+    deadline = time.monotonic() + timeout
+    last_payload: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        last_payload = _list_live(
+            server_url=server_url,
+            token=token,
+            session_id=session_id,
+        )
+        if last_payload.get("session_run_state") == "idle":
+            return
+        time.sleep(0.5)
+    raise TimeoutError(f"Session did not become idle: {last_payload!r}")
+
+
 def _history_events(payload: dict[str, object]) -> list[dict[str, object]]:
     """Validate and return raw REST history events."""
     return _json_object_list_payload(payload.get("items"), label="REST history events")
@@ -1598,6 +1620,12 @@ class TestAgentExecutionPersistence:
             session_id=first.session_id,
             expected=[_COMPACT_SEED, _COMPACT_SEED_RESPONSE],
         )
+        _wait_for_session_idle(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=first.session_id,
+            timeout=120,
+        )
         _run_command(
             public_api_client=public_api_client,
             public_url=azents_public_server_url,
@@ -1686,6 +1714,12 @@ class TestAgentExecutionPersistence:
         )
         second_message_id = _message_id_for_content(before_edit, _SECOND)
 
+        _wait_for_session_idle(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=first.session_id,
+            timeout=120,
+        )
         _edit_user_message(
             public_api_client=public_api_client,
             public_url=azents_public_server_url,

@@ -21,7 +21,7 @@ _BOOTSTRAP_ENV_NAME = "AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"
 _BWRAP_PATH = "/usr/bin/bwrap"
 _BWRAP_LAUNCHER_PATH = Path(__file__).with_name("bwrap_launcher.py").resolve()
 _BASH_PATH = "/bin/bash"
-_QUALIFICATION_PYTHON_PATH = "/usr/local/bin/python"
+_CONTAINED_PYTHON_PATH = "/usr/local/bin/python"
 _QUALIFICATION_SCHEMA_VERSION = 1
 _MIN_QUALIFICATION_TIMEOUT_SECONDS = 1
 _MAX_QUALIFICATION_TIMEOUT_SECONDS = 60
@@ -30,6 +30,20 @@ _TERMINATE_TIMEOUT_SECONDS = 2.0
 _KILL_TIMEOUT_SECONDS = 2.0
 _QUALIFICATION_LOCK_FILENAME = "descendant.lock"
 _QUALIFICATION_READY_FILENAME = "descendant.ready"
+_CONTAINED_HELPER_PATHS = tuple(
+    Path(__file__).with_name(name).resolve()
+    for name in (
+        "__init__.py",
+        "contained_apply_patch.py",
+        "contained_git.py",
+        "contained_helper.py",
+        "contained_kernels.py",
+        "contained_protocol.py",
+        "contained_requests.py",
+        "contained_transfer.py",
+        "workspace.py",
+    )
+)
 _SYSTEM_READ_ONLY_PATHS = (
     "/usr",
     "/etc/alternatives",
@@ -264,6 +278,11 @@ class ExecutionBackend(Protocol):
         """Return the safe backend family identifier."""
         ...
 
+    @property
+    def helper_python_path(self) -> str:
+        """Return the Python interpreter visible inside the execution boundary."""
+        ...
+
     async def qualify(self) -> None:
         """Qualify the backend before normal Runner registration."""
         ...
@@ -304,6 +323,10 @@ class DirectExecutionBackend:
     def kind(self) -> str:
         return "direct"
 
+    @property
+    def helper_python_path(self) -> str:
+        return sys.executable
+
     async def qualify(self) -> None:
         return
 
@@ -330,12 +353,16 @@ class BwrapExecutionBackend:
     def kind(self) -> str:
         return "bwrap"
 
+    @property
+    def helper_python_path(self) -> str:
+        return _CONTAINED_PYTHON_PATH
+
     async def qualify(self) -> None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._config.qualification_timeout_seconds
         qualification = ExecutionSpec(
             argv=(
-                _QUALIFICATION_PYTHON_PATH,
+                _CONTAINED_PYTHON_PATH,
                 "-c",
                 _QUALIFICATION_SCRIPT,
                 str(self._config.agent_workspace_path),
@@ -377,7 +404,7 @@ class BwrapExecutionBackend:
             ready_path = probe_path / _QUALIFICATION_READY_FILENAME
             termination_canary = ExecutionSpec(
                 argv=(
-                    _QUALIFICATION_PYTHON_PATH,
+                    _CONTAINED_PYTHON_PATH,
                     "-c",
                     _TERMINATION_CANARY_SCRIPT,
                     str(lock_path),
@@ -500,7 +527,11 @@ class BwrapExecutionBackend:
         for path in _SYSTEM_READ_ONLY_PATHS:
             argv.extend(("--ro-bind-try", path, path))
         argv.extend(("--ro-bind", "/dev/null", _BWRAP_PATH))
-        argv.extend(_parent_directory_arguments(self._config.agent_workspace_path))
+        argv.extend(
+            _directory_arguments(
+                (self._config.agent_workspace_path, *_CONTAINED_HELPER_PATHS)
+            )
+        )
         argv.extend(
             (
                 "--bind",
@@ -513,6 +544,8 @@ class BwrapExecutionBackend:
                 "/tmp/agent",
             )
         )
+        for helper_path in _CONTAINED_HELPER_PATHS:
+            argv.extend(("--ro-bind", str(helper_path), str(helper_path)))
         for name, value in sorted(spec.environment.items()):
             argv.extend(("--setenv", name, value))
         argv.extend(("--chdir", str(spec.cwd), "--", *spec.argv))
@@ -782,13 +815,15 @@ def _paths_overlap(left: Path, right: Path) -> bool:
     return left == right or left in right.parents or right in left.parents
 
 
-def _parent_directory_arguments(path: Path) -> tuple[str, ...]:
+def _directory_arguments(paths: Sequence[Path]) -> tuple[str, ...]:
     arguments: list[str] = []
-    parents: Sequence[Path] = tuple(reversed(path.parents))
-    for parent in parents:
-        if parent == Path("/"):
-            continue
-        arguments.extend(("--dir", str(parent)))
+    seen: set[Path] = set()
+    for path in paths:
+        for parent in reversed(path.parents):
+            if parent == Path("/") or parent in seen:
+                continue
+            seen.add(parent)
+            arguments.extend(("--dir", str(parent)))
     return tuple(arguments)
 
 

@@ -179,6 +179,7 @@ async def test_direct_backend_launches_backend_neutral_spec(tmp_path: Path) -> N
         managed=True,
     )
 
+    assert backend.helper_python_path == sys.executable
     assert await backend.start(spec) is process
     assert launched == [spec]
     assert spec.argv == ("/bin/bash", "-lc", "printf hello")
@@ -201,6 +202,7 @@ async def test_bwrap_backend_owns_positive_projection_arguments(tmp_path: Path) 
         return process
 
     backend = BwrapExecutionBackend(config, launcher=launcher)
+    assert backend.helper_python_path == "/usr/local/bin/python"
     await backend.start(
         shell_execution_spec(
             command="id",
@@ -233,6 +235,9 @@ async def test_bwrap_backend_owns_positive_projection_arguments(tmp_path: Path) 
     )
     assert str(temporary) in wrapped.argv
     assert "/runner/private" not in wrapped.argv
+    assert "contained_helper.py" in " ".join(wrapped.argv)
+    assert "contained_protocol.py" in " ".join(wrapped.argv)
+    assert "apply_patch.py" in " ".join(wrapped.argv)
     assert wrapped.argv[-3:] == ("/bin/bash", "-lc", "id")
 
 
