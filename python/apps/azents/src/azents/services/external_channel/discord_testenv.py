@@ -56,7 +56,9 @@ class DiscordTestenvSDKClientFactory:
     @contextlib.asynccontextmanager
     async def _open(self) -> AsyncIterator[DiscordSDKSession]:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            yield _DiscordTestenvSDKSession(client, self._fixture_base_url)
+            session = _DiscordTestenvSDKSession(client, self._fixture_base_url)
+            await session.initialize()
+            yield session
 
 
 class _DiscordTestenvSDKSession:
@@ -68,12 +70,16 @@ class _DiscordTestenvSDKSession:
         self._application_id: str | None = None
         self._bot_user_id: str | None = None
 
+    async def initialize(self) -> None:
+        """Model the public SDK login that populates the current Bot user."""
+        result = await self._call("login")
+        self._bot_user_id = _required_string(result, "bot_user_id")
+
     async def fetch_application(self) -> DiscordSDKApplication:
         result = await self._call("fetch_application")
         application_id = _required_string(result, "application_id")
         verify_key = _required_string(result, "verify_key")
         self._application_id = application_id
-        self._bot_user_id = _required_string(result, "bot_user_id")
         return DiscordSDKApplication(
             application_id=application_id,
             verify_key=verify_key,

@@ -127,6 +127,18 @@ def _sdk_call(
     )
 
 
+def test_discord_fake_serves_sdk_login_identity(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Model the public SDK login without accepting the Bot credential."""
+    discord_fake_url, _ = discord_fake_urls
+
+    login = _sdk_call(discord_fake_url, "login")
+
+    login.raise_for_status()
+    assert login.json() == {"bot_user_id": STATE.bot_user_id}
+
+
 def test_discord_fake_redacts_rest_secrets_and_visible_provider_bodies(
     discord_fake_urls: tuple[str, str],
 ) -> None:

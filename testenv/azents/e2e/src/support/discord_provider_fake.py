@@ -1070,9 +1070,12 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         arguments: dict[str, object],
     ) -> None:
         """Serve one SDK-facing operation without provider routes or credentials."""
-        if operation == "fetch_application":
+        if operation == "login":
             if self._controlled_response(self._operation("get_current_bot_user")):
                 return
+            self._json_response(200, {"bot_user_id": self.state.bot_user_id})
+            return
+        if operation == "fetch_application":
             if self._controlled_response(self._operation("get_current_application")):
                 return
             self._json_response(

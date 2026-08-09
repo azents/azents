@@ -1,17 +1,55 @@
 """Tests for deterministic Discord test-environment collaborators."""
 
+import json
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from azents.services.external_channel import discord_testenv
 from azents.services.external_channel.discord_testenv import (
     DiscordTestenvGatewayRunner,
+    DiscordTestenvSDKClientFactory,
 )
 
 
 class _GatewayIdleReached(Exception):
     """Stop the runner after it reaches the stable open state."""
+
+
+@pytest.mark.asyncio
+async def test_sdk_factory_login_populates_current_bot_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opening the fixture session models the public SDK's authenticated user."""
+    operations: list[str] = []
+    async_client = httpx.AsyncClient
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        operation = payload["operation"]
+        operations.append(operation)
+        if operation == "login":
+            return httpx.Response(200, json={"bot_user_id": "900"})
+        return httpx.Response(
+            200,
+            json={"application_id": "800", "verify_key": "0" * 64},
+        )
+
+    def fixture_client(*args: object, **kwargs: object) -> httpx.AsyncClient:
+        del args, kwargs
+        return async_client(transport=httpx.MockTransport(respond))
+
+    monkeypatch.setattr(discord_testenv.httpx, "AsyncClient", fixture_client)
+
+    async with DiscordTestenvSDKClientFactory("http://discord.test").open(
+        bot_token="redacted-token"
+    ) as session:
+        assert session.current_bot_user_id() == "900"
+        application = await session.fetch_application()
+
+    assert application.application_id == "800"
+    assert operations == ["login", "fetch_application"]
 
 
 @pytest.mark.asyncio
