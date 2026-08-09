@@ -20,6 +20,7 @@ from azents.services.agent_runtime.lifecycle_data import (
     AgentRuntimeConfigurationStatus,
     AgentRuntimeLifecycleOutput,
     AgentRuntimeOutput,
+    RuntimeContainmentStatus,
 )
 
 
@@ -110,6 +111,7 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
     ]
     desired: RuntimeConfigurationRevisionResponse | None
     applied: RuntimeConfigurationRevisionResponse | None
+    containment: RuntimeContainmentStatus
 
     @classmethod
     def convert_from(cls, data: AgentRuntimeConfigurationStatus) -> Self:
@@ -126,6 +128,7 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
                 if data.applied is not None
                 else None
             ),
+            containment=data.containment,
         )
 
 

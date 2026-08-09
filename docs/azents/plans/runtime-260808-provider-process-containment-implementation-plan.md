@@ -12,13 +12,13 @@ tags: [runtime, provider, runner, security, sandbox, implementation, validation]
 - Requirements: [runtime-260808/REQ](../requirements/runtime-260808-provider-process-containment.md)
 - ADR: [runtime-260808/ADR](../adr/runtime-260808-provider-process-containment.md)
 - Design: [runtime-260808/DESIGN](../design/runtime-260808-provider-process-containment.md)
-- Approved Design revision: `1`
+- Approved Design revision: `2`
 - Approved Design Authority: `M1`, `M2`, `M3`, `M4`, `M5`, `M6`, `M7`,
-  `M8`, `M9`, `M10`, `M11`, `M12`
+  `M8`, `M9`, `M10`, `M11`, `M12`, `M13`
 - Design delta: `None`
 
-The snapshot is confirmed, all ten material ADR decisions are accepted, Design
-revision 1 is approved for the exact authority set above, and the authority and
+The snapshot is confirmed, all eleven material ADR decisions are accepted, Design
+revision 2 is approved for the exact authority set above, and the authority and
 feasibility audits found no Design blocker.
 
 ## Delivery shape
@@ -108,7 +108,7 @@ Validation:
 
 ## Phase 2 — Runner backend, qualification, process, and environment
 
-Approved mechanisms: `M3`, `M4`, `M6`.
+Approved mechanisms: `M3`, `M4`, `M6`, `M13`.
 
 Deliver:
 
@@ -168,7 +168,7 @@ Validation:
 
 ## Phase 4 — Docker Provider integration
 
-Approved mechanisms: `M2`, `M5`, `M11`, `M12`.
+Approved mechanisms: `M2`, `M5`, `M11`, `M12`, `M13`.
 
 Deliver:
 
@@ -198,7 +198,7 @@ Validation:
 
 ## Phase 5 — Kubernetes Provider integration
 
-Approved mechanisms: `M2`, `M5`, `M11`, `M12`.
+Approved mechanisms: `M2`, `M5`, `M11`, `M12`, `M13`.
 
 Deliver:
 
@@ -259,7 +259,7 @@ Validation:
 
 ## Phase 7 — Validation, Specs, snapshot promotion, and cleanup
 
-Approved mechanisms: `M12` and verification of `M1` through `M11`.
+Approved mechanisms: `M12` and verification of `M1` through `M13`.
 
 Deliver:
 

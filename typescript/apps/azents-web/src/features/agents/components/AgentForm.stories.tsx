@@ -159,6 +159,10 @@ const runtimeProfile: WorkspaceRuntimeProfileResponse = {
   compatible: true,
   missing_capabilities: [],
   incompatible_constraints: [],
+  containment: {
+    enabled: false,
+    nested_docker_available: false,
+  },
   created_at: "2026-07-31T06:00:00Z",
   updated_at: "2026-07-31T06:00:00Z",
 };

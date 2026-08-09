@@ -22,7 +22,6 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project import (
     SessionWorkspaceProjectCleanupInProgress,
@@ -38,12 +37,15 @@ from azents.runtime.control_protocol.runner_operations import (
 )
 from azents.runtime.deps import get_runtime_runner_operation_client
 from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operations
+from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
+from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.runtime_directory_validation import (
     RuntimeDirectoryNotDirectory,
     RuntimeDirectoryNotFound,
     RuntimeDirectoryValidationUnavailable,
     validate_runtime_directory,
 )
+from azents.services.runtime_storage_error import RuntimeStorageError
 
 
 @dataclasses.dataclass(frozen=True)
@@ -195,6 +197,10 @@ class SessionWorkspaceProjectService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
+    runtime_target_resolver: Annotated[
+        RuntimeOperationTargetResolver,
+        Depends(AgentRuntimeService),
+    ]
     runner_operations: Annotated[
         RuntimeRunnerOperationClient | None,
         Depends(get_runtime_runner_operation_client),
@@ -273,15 +279,29 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
-            runtime_result = await self._get_runtime_for_project_context(
-                session,
-                context,
-            )
-            match runtime_result:
-                case Success(runtime):
-                    pass
-                case Failure(error):
-                    return Failure(error)
+            try:
+                runtime = await self.runtime_target_resolver.resolve_operation_target(
+                    context.agent_id
+                )
+            except RuntimeStorageError:
+                return Failure(
+                    InvalidProjectPath(
+                        path=normalized_path,
+                        reason=(
+                            "Project path can only be approved from an available "
+                            "runtime."
+                        ),
+                    )
+                )
+            try:
+                normalized_path = normalize_session_workspace_path(
+                    normalized_path,
+                    workspace_root=runtime.workspace_path,
+                )
+            except ValueError as error:
+                return Failure(
+                    InvalidProjectPath(path=normalized_path, reason=str(error))
+                )
             exists_result = await validate_runtime_directory(
                 self.runner_operations,
                 runtime=runtime,
@@ -462,8 +482,8 @@ class SessionWorkspaceProjectService:
         projection_service = SkillProjectionService(
             store=self.skill_store,
             session_manager=self.session_manager,
+            runtime_target_resolver=self.runtime_target_resolver,
             runner_operations=adapt_runtime_runner_operations(self.runner_operations),
-            runtime_repository=self.agent_runtime_repository,
             project_repository=self.repository,
         )
         await projection_service.sync_latest(
@@ -527,20 +547,6 @@ class SessionWorkspaceProjectService:
                 )
             )
         return Success(normalized)
-
-    async def _get_runtime_for_project_context(
-        self,
-        session: AsyncSession,
-        context: AccessibleProjectContext,
-    ) -> Result[AgentRuntime, AgentNotFound]:
-        """Fetch runtime for a Project context without ensuring new rows."""
-        runtime = await self.agent_runtime_repository.get_by_agent_id(
-            session,
-            context.agent_id,
-        )
-        if runtime is None:
-            return Failure(AgentNotFound())
-        return Success(runtime)
 
     async def _get_accessible_project_context_for_session(
         self,

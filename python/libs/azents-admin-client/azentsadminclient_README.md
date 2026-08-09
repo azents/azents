@@ -206,6 +206,7 @@ Class | Method | HTTP request | Description
  - [RuntimeInfrastructureProfileSpec](azentsadminclient/docs/RuntimeInfrastructureProfileSpec.md)
  - [RuntimeNetworkPolicyModule](azentsadminclient/docs/RuntimeNetworkPolicyModule.md)
  - [RuntimeProcessContainmentModuleV1](azentsadminclient/docs/RuntimeProcessContainmentModuleV1.md)
+ - [RuntimeProfileContainmentStatus](azentsadminclient/docs/RuntimeProfileContainmentStatus.md)
  - [RuntimeProfileLifecycle](azentsadminclient/docs/RuntimeProfileLifecycle.md)
  - [RuntimeProviderAuthMethod](azentsadminclient/docs/RuntimeProviderAuthMethod.md)
  - [RuntimeProviderAuthenticationBindingAuditEventResponse](azentsadminclient/docs/RuntimeProviderAuthenticationBindingAuditEventResponse.md)

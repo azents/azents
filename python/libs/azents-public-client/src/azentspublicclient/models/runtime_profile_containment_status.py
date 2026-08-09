@@ -17,32 +17,19 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictBool
 from typing import Any, ClassVar, Dict, List
-from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec
-from azentspublicclient.models.runtime_profile_containment_status import RuntimeProfileContainmentStatus
 from typing import Optional, Set
 from typing_extensions import Self
 
-class SelectableInfrastructureProfileResponse(BaseModel):
+class RuntimeProfileContainmentStatus(BaseModel):
     """
-    One Provider/Profile option currently selectable by the Workspace.
+    Safe containment capabilities derived from one typed Profile.
     """ # noqa: E501
-    id: StrictStr
-    provider_id: StrictStr
-    provider_display_name: StrictStr
-    provider_kind: StrictStr
-    profile_kind: StrictStr
-    display_name: StrictStr
-    description: StrictStr
-    spec: RuntimeInfrastructureProfileSpec
-    containment: RuntimeProfileContainmentStatus
-    required_capabilities: List[StrictStr]
-    version: StrictInt
-    digest: StrictStr
-    capability_revision_id: StrictStr
+    enabled: StrictBool
+    nested_docker_available: StrictBool
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider_id", "provider_display_name", "provider_kind", "profile_kind", "display_name", "description", "spec", "containment", "required_capabilities", "version", "digest", "capability_revision_id"]
+    __properties: ClassVar[List[str]] = ["enabled", "nested_docker_available"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -62,7 +49,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of SelectableInfrastructureProfileResponse from a JSON string"""
+        """Create an instance of RuntimeProfileContainmentStatus from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -85,12 +72,6 @@ class SelectableInfrastructureProfileResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of spec
-        if self.spec:
-            _dict['spec'] = self.spec.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of containment
-        if self.containment:
-            _dict['containment'] = self.containment.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -100,7 +81,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of SelectableInfrastructureProfileResponse from a dict"""
+        """Create an instance of RuntimeProfileContainmentStatus from a dict"""
         if obj is None:
             return None
 
@@ -108,19 +89,8 @@ class SelectableInfrastructureProfileResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "id": obj.get("id"),
-            "provider_id": obj.get("provider_id"),
-            "provider_display_name": obj.get("provider_display_name"),
-            "provider_kind": obj.get("provider_kind"),
-            "profile_kind": obj.get("profile_kind"),
-            "display_name": obj.get("display_name"),
-            "description": obj.get("description"),
-            "spec": RuntimeInfrastructureProfileSpec.from_dict(obj["spec"]) if obj.get("spec") is not None else None,
-            "containment": RuntimeProfileContainmentStatus.from_dict(obj["containment"]) if obj.get("containment") is not None else None,
-            "required_capabilities": obj.get("required_capabilities"),
-            "version": obj.get("version"),
-            "digest": obj.get("digest"),
-            "capability_revision_id": obj.get("capability_revision_id")
+            "enabled": obj.get("enabled"),
+            "nested_docker_available": obj.get("nested_docker_available")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

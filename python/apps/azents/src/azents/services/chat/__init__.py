@@ -23,7 +23,6 @@ from azents.core.enums import (
     EventKind,
     MailboxItemKind,
     MailboxSchedulingMode,
-    RuntimeRunnerState,
     SessionWorkingFolderCleanupStatus,
 )
 from azents.core.inference_profile import AppliedInferenceProfile
@@ -76,6 +75,8 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationUnavailable,
 )
 from azents.runtime.deps import get_runtime_runner_operation_client
+from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
+from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.mailbox import (
     MailboxAdmissionResult,
@@ -88,6 +89,7 @@ from azents.services.root_agent_session_creation import (
 from azents.services.root_agent_session_creation.data import (
     ExplicitRootWorkspaceIntent,
 )
+from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,
     GitWorktreeWorkspaceItem,
@@ -396,6 +398,10 @@ class ChatSessionService:
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
+    ]
+    runtime_target_resolver: Annotated[
+        RuntimeOperationTargetResolver,
+        Depends(AgentRuntimeService),
     ]
     runner_operations: Annotated[
         RuntimeRunnerOperationClient | None,
@@ -1420,12 +1426,11 @@ class ChatSessionService:
         context: SessionWorkingFolderContext,
     ) -> None:
         """Delete one committed Session folder and terminalize its bounded result."""
-        async with self.session_manager() as session:
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
-                session,
-                agent_id,
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
             )
-        if runtime is None:
+        except RuntimeStorageError:
             await self._complete_working_folder_cleanup(
                 context_id=context.id,
                 status=SessionWorkingFolderCleanupStatus.FAILED,
@@ -1447,13 +1452,6 @@ class ChatSessionService:
             )
             return
 
-        if runtime.runner_state is not RuntimeRunnerState.READY:
-            await self._complete_working_folder_cleanup(
-                context_id=context.id,
-                status=SessionWorkingFolderCleanupStatus.FAILED,
-                summary="Session working-folder cleanup failed: runtime_unavailable.",
-            )
-            return
         runner_operations = self.runner_operations
         if runner_operations is None:
             await self._complete_working_folder_cleanup(

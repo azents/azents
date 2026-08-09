@@ -1,7 +1,7 @@
 """Agent Runtime lifecycle service data models."""
 
 import dataclasses
-from typing import Literal
+from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,55 @@ class AgentRuntimeConfigurationStatus(BaseModel):
     ]
     desired: RuntimeConfigurationRevision | None
     applied: RuntimeConfigurationRevision | None
+    containment: "RuntimeContainmentStatus"
+
+
+class RuntimeContainmentStatus(BaseModel):
+    """Derived process-containment and Runtime operation projection."""
+
+    enabled: bool
+    applied: bool
+    recreation_required: bool
+    nested_docker_available: bool
+    runtime_available: bool
+    availability_reason_code: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeOperationAuthority:
+    """Expected desired Runtime configuration for one explicit operation."""
+
+    configuration_revision_id: str
+    configuration_digest: str
+    desired_generation: int
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeOperationTarget:
+    """Immutable exact Runtime authority for one explicit operation."""
+
+    id: str
+    desired_generation: int
+    runner_generation: int
+    configuration_revision_id: str
+    configuration_digest: str
+    workspace_path: str
+
+
+class RuntimeOperationTargetResolver(Protocol):
+    """Resolve one exact Runtime authority for an explicit operation."""
+
+    async def resolve_operation_target(
+        self,
+        agent_id: str,
+        *,
+        wait_timeout_seconds: float = 120.0,
+        poll_interval_seconds: float = 1.0,
+        expected_authority: RuntimeOperationAuthority | None = None,
+        start_if_stopped: bool = True,
+    ) -> RuntimeOperationTarget:
+        """Wait for and return one exact qualified Runtime target."""
+        ...
 
 
 class AgentRuntimeOutput(BaseModel):
@@ -119,4 +168,8 @@ __all__ = [
     "ProviderDisconnected",
     "RuntimeProviderUnavailable",
     "RuntimeNotFound",
+    "RuntimeContainmentStatus",
+    "RuntimeOperationAuthority",
+    "RuntimeOperationTarget",
+    "RuntimeOperationTargetResolver",
 ]

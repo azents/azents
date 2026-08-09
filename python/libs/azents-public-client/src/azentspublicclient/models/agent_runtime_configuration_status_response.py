@@ -20,6 +20,7 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.runtime_configuration_revision_response import RuntimeConfigurationRevisionResponse
+from azentspublicclient.models.runtime_containment_status import RuntimeContainmentStatus
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -30,8 +31,9 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
     status: StrictStr
     desired: Optional[RuntimeConfigurationRevisionResponse]
     applied: Optional[RuntimeConfigurationRevisionResponse]
+    containment: RuntimeContainmentStatus
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["status", "desired", "applied"]
+    __properties: ClassVar[List[str]] = ["status", "desired", "applied", "containment"]
 
     @field_validator('status')
     def status_validate_enum(cls, value):
@@ -87,6 +89,9 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of applied
         if self.applied:
             _dict['applied'] = self.applied.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of containment
+        if self.containment:
+            _dict['containment'] = self.containment.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -116,7 +121,8 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
         _obj = cls.model_validate({
             "status": obj.get("status"),
             "desired": RuntimeConfigurationRevisionResponse.from_dict(obj["desired"]) if obj.get("desired") is not None else None,
-            "applied": RuntimeConfigurationRevisionResponse.from_dict(obj["applied"]) if obj.get("applied") is not None else None
+            "applied": RuntimeConfigurationRevisionResponse.from_dict(obj["applied"]) if obj.get("applied") is not None else None,
+            "containment": RuntimeContainmentStatus.from_dict(obj["containment"]) if obj.get("containment") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

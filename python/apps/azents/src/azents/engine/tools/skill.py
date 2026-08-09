@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import WebSocketBroadcastPublishError
-from azents.core.enums import AgentSessionRunState, RuntimeRunnerState
+from azents.core.enums import AgentSessionRunState
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -58,9 +58,10 @@ from azents.engine.tools.runtime_io import (
     RuntimeRunnerOperationUnavailable,
 )
 from azents.rdb.session import SessionManager
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
+from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 from azents.transport.chat import chat_input_actions_updated_dump
 
@@ -422,16 +423,16 @@ class SkillProjectionService:
         *,
         store: SkillProjectionStateStore,
         session_manager: SessionManager[AsyncSession],
+        runtime_target_resolver: RuntimeOperationTargetResolver,
         runner_operations: SkillRuntimeFileReader | None = None,
-        runtime_repository: AgentRuntimeRepository | None = None,
         project_repository: SessionWorkspaceProjectRepository | None = None,
         broadcast: SkillBroadcast | None = None,
     ) -> None:
         """Create Skill projection service."""
         self.store = store
         self.session_manager = session_manager
+        self.runtime_target_resolver = runtime_target_resolver
         self.runner_operations = runner_operations
-        self.runtime_repository = runtime_repository or AgentRuntimeRepository()
         self.project_repository = (
             project_repository or SessionWorkspaceProjectRepository()
         )
@@ -449,16 +450,17 @@ class SkillProjectionService:
         if runner_operations is None:
             return await self.store.load(agent_id, session_id)
         async with self.session_manager() as session:
-            runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
             projects = await self.project_repository.list_projects(
                 session,
                 session_id=session_id,
             )
-        if (
-            runtime is None
-            or runtime.runner_state != RuntimeRunnerState.READY
-            or not runtime.workspace_path
-        ):
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                wait_timeout_seconds=0.0,
+                start_if_stopped=False,
+            )
+        except RuntimeStorageError:
             return await self.store.load(agent_id, session_id)
         items = await self._scan_runtime(
             runner_operations=runner_operations,

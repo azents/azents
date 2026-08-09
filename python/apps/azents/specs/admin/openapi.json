@@ -5824,6 +5824,9 @@
           "spec": {
             "$ref": "#/components/schemas/RuntimeInfrastructureProfileSpec"
           },
+          "containment": {
+            "$ref": "#/components/schemas/RuntimeProfileContainmentStatus"
+          },
           "required_capabilities": {
             "items": {
               "type": "string"
@@ -5900,6 +5903,7 @@
           "contract_family",
           "schema_version",
           "spec",
+          "containment",
           "required_capabilities",
           "version",
           "digest",
@@ -5969,6 +5973,26 @@
         ],
         "title": "RuntimeProcessContainmentModuleV1",
         "description": "Portable Provider-owned process containment contract version 1."
+      },
+      "RuntimeProfileContainmentStatus": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "nested_docker_available": {
+            "type": "boolean",
+            "title": "Nested Docker Available"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled",
+          "nested_docker_available"
+        ],
+        "title": "RuntimeProfileContainmentStatus",
+        "description": "Safe containment capabilities derived from one typed Profile."
       },
       "RuntimeProfileLifecycle": {
         "type": "string",

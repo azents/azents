@@ -20,7 +20,6 @@ from azents.core.deps import get_config
 from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeProviderObservedState,
-    RuntimeRunnerState,
 )
 from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
@@ -62,6 +61,12 @@ from azents.runtime.transfer.workspace_download import (
     WorkspaceDownloadError,
     WorkspaceDownloadRequest,
 )
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationTarget,
+    RuntimeOperationTargetResolver,
+)
+from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.runtime_storage_error import RuntimeStorageError
 
 from .data import (
     AgentNotFound,
@@ -81,6 +86,7 @@ _AGENT_REPOSITORY_DEP = Depends(AgentRepository)
 _WORKSPACE_USER_REPOSITORY_DEP = Depends(WorkspaceUserRepository)
 _RUNNER_OPERATION_CLIENT_DEP = Depends(get_runtime_runner_operation_client)
 _RUNTIME_REPOSITORY_DEP = Depends(AgentRuntimeRepository)
+_RUNTIME_TARGET_RESOLVER_DEP = Depends(AgentRuntimeService)
 _SESSION_MANAGER_DEP = Depends(get_session_manager)
 _RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 120
 _WORKSPACE_DOWNLOAD_MAXIMUM_FILE_BYTES = 64 * 1024 * 1024
@@ -626,6 +632,9 @@ class AgentWorkspaceFileService:
         ),
         runner_operations: WorkspaceRunnerOperations = _RUNNER_OPERATION_CLIENT_DEP,
         runtime_repository: AgentRuntimeRepository = _RUNTIME_REPOSITORY_DEP,
+        runtime_target_resolver: RuntimeOperationTargetResolver = (
+            _RUNTIME_TARGET_RESOLVER_DEP
+        ),
         session_manager: SessionManager[AsyncSession] = _SESSION_MANAGER_DEP,
         runtime_workspace_download_service: RuntimeWorkspaceDownloadService | None = (
             _RUNTIME_WORKSPACE_DOWNLOAD_SERVICE_DEP
@@ -635,6 +644,7 @@ class AgentWorkspaceFileService:
         self._workspace_user_repository = workspace_user_repository
         self._runner_operations = runner_operations
         self._runtime_repository = runtime_repository
+        self._runtime_target_resolver = runtime_target_resolver
         self._session_manager = session_manager
         self._runtime_workspace_download_service = runtime_workspace_download_service
 
@@ -689,11 +699,6 @@ class AgentWorkspaceFileService:
         """Fetch AgentRuntime."""
         async with self._session_manager() as session:
             return await self._runtime_repository.get_by_agent_id(session, agent_id)
-
-    async def _ensure_runtime(self, agent_id: str) -> AgentRuntime:
-        """Ensure AgentRuntime."""
-        async with self._session_manager() as session:
-            return await self._runtime_repository.ensure_for_agent(session, agent_id)
 
     async def _workspace_panel_state(
         self,
@@ -821,11 +826,20 @@ class AgentWorkspaceFileService:
                 type="UNAVAILABLE",
                 reason="WORKSPACE_PATH_UNAVAILABLE",
             )
-        runtime = await self._get_runtime(agent.id)
-        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+        try:
+            runtime = await self._runtime_target_resolver.resolve_operation_target(
+                agent.id
+            )
+        except RuntimeStorageError as error:
             return AgentWorkspaceControlUnavailable(
                 type="CONTROL_UNAVAILABLE",
-                detail="Runtime runner is not ready.",
+                detail=str(error),
+                retry_after_ms=1000,
+            )
+        if runtime.id != runtime_id:
+            return AgentWorkspaceControlUnavailable(
+                type="CONTROL_UNAVAILABLE",
+                detail="Runtime changed while workspace access was being prepared.",
                 retry_after_ms=1000,
             )
         ready = await self._ready_access(
@@ -1294,7 +1308,10 @@ class AgentWorkspaceFileService:
         agent_id: str,
         user_id: str,
         raw_path: str | None,
-    ) -> Result[tuple[AgentRuntime, PurePosixPath, PurePosixPath], AgentWorkspaceError]:
+    ) -> Result[
+        tuple[RuntimeOperationTarget, PurePosixPath, PurePosixPath],
+        AgentWorkspaceError,
+    ]:
         """Verify active Runtime and normalize an Agent Workspace path."""
         access = await self._ensure_active_runtime(agent_id, user_id)
         match access:
@@ -1318,7 +1335,7 @@ class AgentWorkspaceFileService:
 
     async def _ready_access(
         self,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         *,
         workspace_root: PurePosixPath,
     ) -> Result[AgentWorkspaceReady, AgentWorkspaceError]:
@@ -1347,7 +1364,7 @@ class AgentWorkspaceFileService:
         self,
         agent_id: str,
         user_id: str,
-    ) -> Result[AgentRuntime, AgentWorkspaceError]:
+    ) -> Result[RuntimeOperationTarget, AgentWorkspaceError]:
         """Check Agent access permission and Runtime active state."""
         access_result = await self._get_agent_for_user(agent_id, user_id=user_id)
         match access_result:
@@ -1358,23 +1375,17 @@ class AgentWorkspaceFileService:
             case _:
                 assert_never(access_result)
 
-        runtime = await self._get_runtime(agent.id)
-        if (
-            runtime is None
-            or runtime.provider_observed_state != RuntimeProviderObservedState.RUNNING
-        ):
-            return Failure(
-                AgentWorkspaceRuntimeInactive(action=_start_action(agent.id))
+        try:
+            runtime = await self._runtime_target_resolver.resolve_operation_target(
+                agent.id
             )
-        if runtime.runner_state != RuntimeRunnerState.READY:
-            return Failure(
-                AgentWorkspaceFileReadError(detail="Runtime runner is not ready.")
-            )
+        except RuntimeStorageError as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         return Success(runtime)
 
     async def _list_entries(
         self,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         path: PurePosixPath,
     ) -> Result[list[AgentWorkspaceEntry], AgentWorkspaceError]:
         """Create Agent Workspace directory entry list."""
@@ -1390,7 +1401,7 @@ class AgentWorkspaceFileService:
 
     async def _with_repository_metadata(
         self,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         entries: list[AgentWorkspaceEntry],
     ) -> Success[list[AgentWorkspaceEntry]]:
         """Attach best-effort repository metadata to directory entries."""
@@ -1404,7 +1415,7 @@ class AgentWorkspaceFileService:
 
     async def _repository_type_for_entry(
         self,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         entry: AgentWorkspaceEntry,
     ) -> AgentWorkspaceEntryRepositoryType | None:
         """Return repository type for a directory entry when it is known."""
@@ -1424,7 +1435,7 @@ class AgentWorkspaceFileService:
 
     async def _read_file(
         self,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         path: PurePosixPath,
         *,
         size_bytes: int | None,
@@ -1469,7 +1480,7 @@ class AgentWorkspaceFileService:
 
     async def _stat_path(
         self,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         path: PurePosixPath,
     ) -> Result[RuntimeFileStatResult, AgentWorkspaceError]:
         """Stat a path through the active Runtime Runner."""
@@ -1492,7 +1503,7 @@ class AgentWorkspaceFileService:
 
     async def _runner_list_files(
         self,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         path: PurePosixPath,
     ) -> Result[tuple[RuntimeFileListEntry, ...], AgentWorkspaceError]:
         """List files through the active Runtime Runner."""
@@ -1514,7 +1525,7 @@ class AgentWorkspaceFileService:
 
     async def _runner_read_text_file(
         self,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         path: PurePosixPath,
         *,
         max_bytes: int,

@@ -18,16 +18,21 @@ from textwrap import dedent
 from typing import List, NoReturn, Protocol
 
 from azcommon.types import JSONObject
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
-    RuntimeDesiredState,
-    RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
-    RuntimeRunnerState,
+)
+from azents.core.runtime_profile import (
+    DockerContainerProfileSpecV1,
+    DockerContainerProfileSpecV2,
+    KubernetesPodProfileSpecV1,
+    KubernetesPodProfileSpecV2,
+    RuntimeConfigurationResolutionStatus,
+    parse_runtime_infrastructure_profile_spec,
 )
 from azents.core.tools import (
     ResolveContext,
@@ -95,7 +100,6 @@ from azents.engine.tools.runtime_io import (
 from azents.engine.tools.write import make_write_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
@@ -107,6 +111,10 @@ from azents.runtime.transfer.runtime_to_provider import (
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.runtime.types import RuntimeDomainConfig
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationAuthority,
+    RuntimeOperationTarget,
+)
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
@@ -117,9 +125,6 @@ from azents.services.file_storage import (
     GrepResult,
 )
 from azents.services.model_file import ModelFileService
-from azents.services.runtime_profile_resolution.data import (
-    RuntimeProfileResolutionUnavailable,
-)
 from azents.services.runtime_storage_error import (
     RuntimeStorageError,
 )
@@ -631,6 +636,29 @@ class RuntimeEnvProvider(Protocol):
         ...
 
 
+_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT = (
+    "Runtime-dependent operations are currently unavailable."
+)
+_RUNTIME_CONTAINED_BEHAVIOR_PROMPT = dedent(
+    """\
+    ## Runtime Behavior
+
+    Runtime-dependent operations follow the selected contained Runtime Profile when
+    they are available:
+
+    - The Agent Workspace is writable and remains the durable working area.
+    - `/tmp` and `/tmp/agent` provide Runtime-scoped temporary storage.
+    - The bundled system and development toolchain is readable and executable but
+      Runtime system state is not persistently writable.
+    - Commands and native file operations run as a non-root user.
+    - Nested Docker execution is unavailable.
+    - Ordinary outbound connectivity remains bounded by the Runtime Provider.
+
+    This describes the desired Runtime behavior, not current Runtime readiness.
+    """
+).strip()
+
+
 class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     """Runtime Runner dependent shell/file tool execution instance."""
 
@@ -684,6 +712,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self._agents_appendix_lock = asyncio.Lock()
         self._agents_missing_cache: dict[str, float] = {}
         self.instruction_context_store: RuntimeInstructionContextStore | None = None
+        self._expected_runtime_authority: RuntimeOperationAuthority | None = None
 
     def set_instruction_context_store(
         self, store: RuntimeInstructionContextStore
@@ -768,6 +797,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             session_manager=self.session_manager,
             runtime_agent_id=runtime_agent_id,
             owner_session_id=self._runtime_session_id,
+            expected_authority_provider=self._required_runtime_authority,
         )
 
         async def resolve_runtime_target() -> ServerToRuntimeTarget:
@@ -776,6 +806,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 agent_runtime_service=(self.agent_runtime_service),
                 session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
+                expected_authority=self._required_runtime_authority(),
             )
             return ServerToRuntimeTarget(
                 runtime_id=runtime.id,
@@ -788,6 +819,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 agent_runtime_service=(self.agent_runtime_service),
                 session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
+                expected_authority=self._required_runtime_authority(),
             )
             return RuntimePatchTarget(
                 runtime_id=runtime.id,
@@ -800,6 +832,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 agent_runtime_service=(self.agent_runtime_service),
                 session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
+                expected_authority=self._required_runtime_authority(),
             )
             return ServerToRuntimeTarget(
                 runtime_id=runtime.id,
@@ -812,6 +845,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 agent_runtime_service=(self.agent_runtime_service),
                 session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
+                expected_authority=self._required_runtime_authority(),
             )
             return RuntimeEditTarget(
                 runtime_id=runtime.id,
@@ -893,6 +927,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
                 peer_toolkits=self._peer_toolkits,
+                expected_authority_provider=self._required_runtime_authority,
             ),
             make_write_stdin_tool(
                 self.runner_operations,
@@ -902,6 +937,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
+                expected_authority_provider=self._required_runtime_authority,
             ),
             apply_patch_tool,
             _with_runtime_native_file_tool_diagnostics(
@@ -943,12 +979,70 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         working_folder_path = await self._load_working_folder_path(
             session_id=self._session_id
         )
+        behavior_prompt, expected_authority = await self._load_runtime_behavior_prompt()
+        self._expected_runtime_authority = expected_authority
         del context
-        return self._render_config_prompt(
+        prompt = self._render_config_prompt(
             projects=projects,
             workspace_root=workspace_root,
             working_folder_path=working_folder_path,
         )
+        if behavior_prompt:
+            return f"{prompt}\n\n{behavior_prompt}"
+        return prompt
+
+    def _required_runtime_authority(self) -> RuntimeOperationAuthority:
+        """Return the prompt-selected Runtime authority or fail closed."""
+        authority = self._expected_runtime_authority
+        if authority is None:
+            raise RuntimeStorageError(_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT)
+        return authority
+
+    async def _load_runtime_behavior_prompt(
+        self,
+    ) -> tuple[str, RuntimeOperationAuthority | None]:
+        """Render desired Profile behavior without consulting Runner readiness."""
+        async with self.session_manager() as session:
+            runtime = await self.agent_runtime_repo.get_by_agent_id(
+                session,
+                self._runtime_agent_id,
+            )
+            if (
+                runtime is None
+                or runtime.desired_runtime_configuration_revision_id is None
+            ):
+                return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, None)
+            profile_repository = self.agent_runtime_service.runtime_profile_repository
+            revision = await profile_repository.get_configuration_revision(
+                session,
+                revision_id=runtime.desired_runtime_configuration_revision_id,
+            )
+        if revision is None:
+            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, None)
+        expected_authority = RuntimeOperationAuthority(
+            configuration_revision_id=revision.id,
+            configuration_digest=revision.digest,
+            desired_generation=revision.target_desired_generation,
+        )
+        if (
+            revision.resolution_status is RuntimeConfigurationResolutionStatus.BLOCKED
+            or revision.resolved_configuration is None
+        ):
+            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
+        effective_profile = revision.resolved_configuration.get("effective_profile")
+        if not isinstance(effective_profile, dict):
+            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
+        try:
+            profile = parse_runtime_infrastructure_profile_spec(effective_profile)
+        except ValidationError:
+            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
+        match profile:
+            case KubernetesPodProfileSpecV2() | DockerContainerProfileSpecV2():
+                if profile.process_containment is not None:
+                    return (_RUNTIME_CONTAINED_BEHAVIOR_PROMPT, expected_authority)
+                return ("", expected_authority)
+            case KubernetesPodProfileSpecV1() | DockerContainerProfileSpecV1():
+                return ("", expected_authority)
 
     async def _make_instruction_context(
         self,
@@ -1256,58 +1350,25 @@ async def _ready_runtime_for_agent(
     agent_id: str,
     wait_timeout_seconds: float | None = None,
     poll_interval_seconds: float = _RUNTIME_READY_POLL_INTERVAL_SECONDS,
-) -> AgentRuntime:
-    """Load the active Runtime and verify that its Runner can accept operations."""
+    expected_authority: RuntimeOperationAuthority | None = None,
+    start_if_stopped: bool = True,
+) -> RuntimeOperationTarget:
+    """Resolve one exact qualified Runtime operation target."""
     if session_manager is None:
         raise RuntimeStorageError("Runtime database session is not configured")
+    del agent_runtime_repo
     wait_timeout_seconds = (
         _RUNTIME_READY_WAIT_TIMEOUT_SECONDS
         if wait_timeout_seconds is None
         else wait_timeout_seconds
     )
-    deadline = time.monotonic() + max(wait_timeout_seconds, 0.0)
-    last_runtime: AgentRuntime | None = None
-    while True:
-        async with session_manager() as session:
-            runtime = await agent_runtime_repo.get_by_agent_id(session, agent_id)
-        last_runtime = runtime
-        if (
-            runtime is not None
-            and runtime.provider_observed_state in _RUNNABLE_PROVIDER_STATES
-            and runtime.runner_state == RuntimeRunnerState.READY
-        ):
-            return runtime
-        if runtime is None:
-            raise RuntimeStorageError("Runtime is not running")
-        if runtime.provider_observed_state == RuntimeProviderObservedState.FAILED:
-            failure_message = getattr(runtime, "failure_message", None)
-            failure_code = getattr(runtime, "failure_code", None)
-            detail = failure_message or failure_code
-            message = "Runtime failed"
-            if detail:
-                message = f"{message}: {detail}"
-            raise RuntimeStorageError(message)
-        if (
-            runtime.provider_connection_state
-            == RuntimeProviderConnectionState.DISCONNECTED
-        ):
-            raise RuntimeStorageError(_RUNTIME_PROVIDER_DISCONNECTED_MSG)
-        if runtime.desired_state != RuntimeDesiredState.RUNNING:
-            try:
-                await agent_runtime_service.ensure_started_for_agent(agent_id)
-            except RuntimeProfileResolutionUnavailable as error:
-                raise RuntimeStorageError(
-                    f"Runtime Profile is unavailable: {error.code}"
-                ) from error
-        if time.monotonic() >= deadline:
-            break
-        await asyncio.sleep(poll_interval_seconds)
-
-    if last_runtime is None:
-        raise RuntimeStorageError("Runtime is not running")
-    if last_runtime.provider_observed_state not in _RUNNABLE_PROVIDER_STATES:
-        raise RuntimeStorageError(_RUNTIME_STARTING_MSG)
-    raise RuntimeStorageError("Runtime runner is not ready")
+    return await agent_runtime_service.resolve_operation_target(
+        agent_id,
+        wait_timeout_seconds=wait_timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+        expected_authority=expected_authority,
+        start_if_stopped=start_if_stopped,
+    )
 
 
 def _raise_storage_error(error: RuntimeRunnerOperationFailedError) -> NoReturn:
@@ -1345,6 +1406,8 @@ class RuntimeRunnerFileStorage:
         session_manager: SessionManager[AsyncSession] | None,
         runtime_agent_id: str,
         owner_session_id: str | None,
+        expected_authority_provider: Callable[[], RuntimeOperationAuthority | None]
+        | None = None,
     ) -> None:
         self.runner_operations = runner_operations
         self.agent_runtime_repo = agent_runtime_repo
@@ -1352,7 +1415,8 @@ class RuntimeRunnerFileStorage:
         self.session_manager = session_manager
         self.runtime_agent_id = runtime_agent_id
         self.owner_session_id = owner_session_id
-        self._runtime: AgentRuntime | None = None
+        self.expected_authority_provider = expected_authority_provider or (lambda: None)
+        self._runtime: RuntimeOperationTarget | None = None
         self._runtime_lock = asyncio.Lock()
         self._runtime_operation_count: ContextVar[int | None] = ContextVar(
             "runtime_runner_file_storage_operation_count",
@@ -1658,7 +1722,8 @@ class RuntimeRunnerFileStorage:
         )
 
     def begin_runtime_operation_count(self) -> Token[int | None]:
-        """Start task-local Runner operation counting for one visible tool."""
+        """Start one visible tool with a freshly fenced Runtime snapshot."""
+        self._runtime = None
         return self._runtime_operation_count.set(0)
 
     def finish_runtime_operation_count(self, token: Token[int | None]) -> int:
@@ -1673,7 +1738,7 @@ class RuntimeRunnerFileStorage:
         if count is not None:
             self._runtime_operation_count.set(count + 1)
 
-    async def _ready_runtime(self, agent_id: str) -> AgentRuntime:
+    async def _ready_runtime(self, agent_id: str) -> RuntimeOperationTarget:
         del agent_id
         runtime = self._runtime
         if runtime is not None:
@@ -1686,13 +1751,14 @@ class RuntimeRunnerFileStorage:
                     agent_runtime_service=(self.agent_runtime_service),
                     session_manager=self.session_manager,
                     agent_id=self.runtime_agent_id,
+                    expected_authority=self.expected_authority_provider(),
                 )
                 self._runtime = runtime
             return runtime
 
     async def _list_entries(
         self,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         path: str,
         *,
         recursive: bool = False,
@@ -1832,6 +1898,7 @@ def make_exec_command_tool(
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
     owner_session_id: str,
+    expected_authority_provider: Callable[[], RuntimeOperationAuthority | None],
     peer_toolkits: Sequence[RuntimeEnvProvider] = (),
 ) -> FunctionTool:
     """Create an exec_command tool backed by Runtime Runner process operations."""
@@ -1861,6 +1928,7 @@ def make_exec_command_tool(
                 agent_runtime_service=(agent_runtime_service),
                 session_manager=session_manager,
                 agent_id=agent_id,
+                expected_authority=expected_authority_provider(),
             )
             await publish_event(RuntimeReadyEvent())
             result = await runner_operations.start_process(
@@ -1925,6 +1993,7 @@ def make_write_stdin_tool(
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
     owner_session_id: str,
+    expected_authority_provider: Callable[[], RuntimeOperationAuthority | None],
 ) -> FunctionTool:
     """Create a write_stdin tool backed by Runtime Runner process operations."""
 
@@ -1935,6 +2004,7 @@ def make_write_stdin_tool(
                 agent_runtime_service=(agent_runtime_service),
                 session_manager=session_manager,
                 agent_id=agent_id,
+                expected_authority=expected_authority_provider(),
             )
             await publish_event(RuntimeReadyEvent())
             result = await runner_operations.write_process_stdin(

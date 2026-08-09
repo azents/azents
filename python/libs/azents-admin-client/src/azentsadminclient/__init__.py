@@ -90,6 +90,7 @@ __all__ = [
     "RuntimeInfrastructureProfileSpec",
     "RuntimeNetworkPolicyModule",
     "RuntimeProcessContainmentModuleV1",
+    "RuntimeProfileContainmentStatus",
     "RuntimeProfileLifecycle",
     "RuntimeProviderAuthMethod",
     "RuntimeProviderAuthenticationBindingAuditEventResponse",
@@ -243,6 +244,7 @@ from azentsadminclient.models.runtime_infrastructure_profile_response import Run
 from azentsadminclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec as RuntimeInfrastructureProfileSpec
 from azentsadminclient.models.runtime_network_policy_module import RuntimeNetworkPolicyModule as RuntimeNetworkPolicyModule
 from azentsadminclient.models.runtime_process_containment_module_v1 import RuntimeProcessContainmentModuleV1 as RuntimeProcessContainmentModuleV1
+from azentsadminclient.models.runtime_profile_containment_status import RuntimeProfileContainmentStatus as RuntimeProfileContainmentStatus
 from azentsadminclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle as RuntimeProfileLifecycle
 from azentsadminclient.models.runtime_provider_auth_method import RuntimeProviderAuthMethod as RuntimeProviderAuthMethod
 from azentsadminclient.models.runtime_provider_authentication_binding_audit_event_response import RuntimeProviderAuthenticationBindingAuditEventResponse as RuntimeProviderAuthenticationBindingAuditEventResponse

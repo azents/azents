@@ -13729,13 +13729,17 @@
                 "type": "null"
               }
             ]
+          },
+          "containment": {
+            "$ref": "#/components/schemas/RuntimeContainmentStatus"
           }
         },
         "type": "object",
         "required": [
           "status",
           "desired",
-          "applied"
+          "applied",
+          "containment"
         ],
         "title": "AgentRuntimeConfigurationStatusResponse",
         "description": "Desired and applied Runtime configuration status."
@@ -24339,6 +24343,52 @@
         "title": "RuntimeConfigurationRevisionResponse",
         "description": "Safe immutable Runtime configuration revision evidence."
       },
+      "RuntimeContainmentStatus": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied"
+          },
+          "recreation_required": {
+            "type": "boolean",
+            "title": "Recreation Required"
+          },
+          "nested_docker_available": {
+            "type": "boolean",
+            "title": "Nested Docker Available"
+          },
+          "runtime_available": {
+            "type": "boolean",
+            "title": "Runtime Available"
+          },
+          "availability_reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Availability Reason Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "applied",
+          "recreation_required",
+          "nested_docker_available",
+          "runtime_available",
+          "availability_reason_code"
+        ],
+        "title": "RuntimeContainmentStatus",
+        "description": "Derived process-containment and Runtime operation projection."
+      },
       "RuntimeDesiredState": {
         "type": "string",
         "enum": [
@@ -24415,6 +24465,26 @@
         ],
         "title": "RuntimeProcessContainmentModuleV1",
         "description": "Portable Provider-owned process containment contract version 1."
+      },
+      "RuntimeProfileContainmentStatus": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "nested_docker_available": {
+            "type": "boolean",
+            "title": "Nested Docker Available"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled",
+          "nested_docker_available"
+        ],
+        "title": "RuntimeProfileContainmentStatus",
+        "description": "Safe containment capabilities derived from one typed Profile."
       },
       "RuntimeProfileLifecycle": {
         "type": "string",
@@ -24895,6 +24965,9 @@
           "spec": {
             "$ref": "#/components/schemas/RuntimeInfrastructureProfileSpec"
           },
+          "containment": {
+            "$ref": "#/components/schemas/RuntimeProfileContainmentStatus"
+          },
           "required_capabilities": {
             "items": {
               "type": "string"
@@ -24925,6 +24998,7 @@
           "display_name",
           "description",
           "spec",
+          "containment",
           "required_capabilities",
           "version",
           "digest",
@@ -27576,6 +27650,9 @@
             "type": "array",
             "title": "Incompatible Constraints"
           },
+          "containment": {
+            "$ref": "#/components/schemas/RuntimeProfileContainmentStatus"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -27605,6 +27682,7 @@
           "compatible",
           "missing_capabilities",
           "incompatible_constraints",
+          "containment",
           "created_at",
           "updated_at"
         ],

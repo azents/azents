@@ -606,6 +606,10 @@
       "unavailable": "利用不可",
       "active": "有効",
       "disabled": "無効",
+      "containmentEnabled": "プロセス分離",
+      "containmentDisabled": "直接実行",
+      "nestedDockerAvailable": "ネストされた Docker を使用可能",
+      "nestedDockerUnavailable": "ネストされた Docker を使用不可",
       "edit": "編集",
       "recreate": "ランタイムを再作成",
       "operationLoading": "再作成の進行状況を読み込んでいます…",
@@ -1992,6 +1996,34 @@
       "configurationApplied": "現在適用中の構成",
       "configurationNoDesired": "解決済みの期待する構成はありません。",
       "configurationNoApplied": "ランタイムに適用された構成はありません。",
+      "containment": {
+        "title": "プロセス分離",
+        "enabled": {
+          "label": "分離ポリシー",
+          "enabled": "有効",
+          "disabled": "無効"
+        },
+        "applied": {
+          "label": "現在の Runtime",
+          "applied": "適用済み",
+          "pending": "適用待ち",
+          "notEnabled": "未使用"
+        },
+        "recreation": {
+          "label": "再作成",
+          "required": "必要",
+          "notRequired": "不要"
+        },
+        "availability": {
+          "label": "Runtime 操作",
+          "available": "使用可能",
+          "unavailable": "使用不可",
+          "availableDescription": "現在の構成で Runtime 操作を実行できます。",
+          "recreationDescription": "新しい構成で Workspace 操作を実行する前に Runtime を再作成してください。",
+          "blockedDescription": "選択した構成がブロックされているため、Runtime 操作を実行できません。",
+          "unavailableDescription": "現在の構成で Runtime の準備が完了するまで操作を実行できません。"
+        }
+      },
       "configurationEvidence": {
         "revision": "Revision",
         "profile": "Runtime Profile",

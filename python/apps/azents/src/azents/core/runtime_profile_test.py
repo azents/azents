@@ -8,6 +8,7 @@ from azents.core.runtime_profile import (
     DockerContainerResources,
     JsonValue,
     KubernetesContainerResources,
+    KubernetesDinDModule,
     KubernetesPodProfileSpecV1,
     KubernetesPodProfileSpecV2,
     KubernetesSchedulingModule,
@@ -21,6 +22,7 @@ from azents.core.runtime_profile import (
     WorkspaceRuntimeProfilePolicyV1,
     classify_runtime_configuration_application,
     compose_workspace_runtime_profile,
+    derive_runtime_profile_containment_status,
     digest_runtime_profile_document,
     evaluate_runtime_profile_compatibility,
     parse_runtime_infrastructure_profile_spec,
@@ -121,6 +123,41 @@ def _docker_spec() -> DockerContainerProfileSpecV1:
         ),
         network_name=None,
     )
+
+
+def test_runtime_profile_containment_status_is_derived_from_typed_profile() -> None:
+    """Product projections distinguish containment and nested Docker safely."""
+    nested_docker = _kubernetes_spec().model_copy(
+        update={
+            "dind": KubernetesDinDModule(
+                engine_resources=KubernetesContainerResources(
+                    cpu_request_millicores=None,
+                    cpu_limit_millicores=None,
+                    memory_request_bytes=None,
+                    memory_limit_bytes=None,
+                ),
+                docker_storage_bytes=1,
+                shared_temporary_storage_bytes=1,
+            )
+        }
+    )
+
+    assert derive_runtime_profile_containment_status(
+        _kubernetes_spec_v2(contained=True)
+    ).model_dump() == {
+        "enabled": True,
+        "nested_docker_available": False,
+    }
+    assert derive_runtime_profile_containment_status(nested_docker).model_dump() == {
+        "enabled": False,
+        "nested_docker_available": True,
+    }
+    assert derive_runtime_profile_containment_status(
+        _docker_spec_v2(contained=False)
+    ).model_dump() == {
+        "enabled": False,
+        "nested_docker_available": False,
+    }
 
 
 def test_kubernetes_profile_preserves_absent_requests_with_limits() -> None:

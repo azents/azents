@@ -24,12 +24,15 @@ from azents.runtime.control_protocol.runner_operations import (
 )
 from azents.runtime.deps import get_runtime_runner_operation_client
 from azents.services.agent.data import NotAdmin, NotBelongToWorkspace
+from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
+from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.runtime_directory_validation import (
     RuntimeDirectoryNotDirectory,
     RuntimeDirectoryNotFound,
     RuntimeDirectoryValidationUnavailable,
     validate_runtime_directory,
 )
+from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
     normalize_agent_workspace_root,
@@ -76,6 +79,10 @@ class AgentAutomaticProjectService:
     session_manager: Annotated[
         SessionManager[AsyncSession],
         Depends(get_session_manager),
+    ]
+    runtime_target_resolver: Annotated[
+        RuntimeOperationTargetResolver,
+        Depends(AgentRuntimeService),
     ]
     runner_operations: Annotated[
         RuntimeRunnerOperationClient | None,
@@ -290,13 +297,26 @@ class AgentAutomaticProjectService:
         InvalidProjectPath | AutomaticSessionProjectsRuntimeUnavailable,
     ]:
         """Validate every replacement path with no database transaction held."""
-        async with self.session_manager() as session:
-            runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
+            )
+        except RuntimeStorageError as error:
+            return Failure(
+                AutomaticSessionProjectsRuntimeUnavailable(message=str(error))
+            )
         for path in project_paths:
+            try:
+                normalized_path = normalize_session_workspace_path(
+                    path,
+                    workspace_root=runtime.workspace_path,
+                )
+            except ValueError as error:
+                return Failure(InvalidProjectPath(path=path, reason=str(error)))
             result = await validate_runtime_directory(
                 self.runner_operations,
                 runtime=runtime,
-                path=path,
+                path=normalized_path,
             )
             if result.success:
                 continue

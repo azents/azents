@@ -6,8 +6,6 @@ from typing import assert_never
 
 from azcommon.result import Failure, Result, Success
 
-from azents.core.enums import RuntimeRunnerState
-from azents.repos.agent_runtime.data import AgentRuntime
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeRunnerOperationClient,
@@ -15,6 +13,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationGenerationError,
     RuntimeRunnerOperationUnavailable,
 )
+from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTarget
 
 _RUNTIME_DIRECTORY_VALIDATION_TIMEOUT_SECONDS = 120
 
@@ -57,19 +56,10 @@ def _runtime_directory_validation_deadline() -> datetime:
 async def validate_runtime_directory(
     runner_operations: RuntimeRunnerOperationClient | None,
     *,
-    runtime: AgentRuntime | None,
+    runtime: RuntimeOperationTarget,
     path: str,
 ) -> Result[None, RuntimeDirectoryValidationError]:
     """Confirm one path resolves to an existing Runtime directory."""
-    if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
-        return Failure(
-            RuntimeDirectoryValidationUnavailable(
-                message=(
-                    "Start the Agent runtime and wait for its Runner to become "
-                    "ready, then retry."
-                )
-            )
-        )
     if runner_operations is None:
         return Failure(
             RuntimeDirectoryValidationUnavailable(

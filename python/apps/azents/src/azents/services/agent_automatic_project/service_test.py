@@ -38,6 +38,11 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationFailedError,
 )
 from azents.services.agent.data import NotAdmin
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationAuthority,
+    RuntimeOperationTarget,
+    RuntimeOperationTargetResolver,
+)
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
 
@@ -147,6 +152,36 @@ class _FakeRunnerOperations(RuntimeRunnerOperationClient):
             resolved_kind="directory",
             modified_at=None,
             final_cursor="0",
+        )
+
+
+class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
+    """Return one qualified Runtime target without lifecycle I/O."""
+
+    async def resolve_operation_target(
+        self,
+        agent_id: str,
+        *,
+        wait_timeout_seconds: float = 120.0,
+        poll_interval_seconds: float = 1.0,
+        expected_authority: RuntimeOperationAuthority | None = None,
+        start_if_stopped: bool = True,
+    ) -> RuntimeOperationTarget:
+        """Return deterministic exact Runtime evidence."""
+        del (
+            agent_id,
+            wait_timeout_seconds,
+            poll_interval_seconds,
+            expected_authority,
+            start_if_stopped,
+        )
+        return RuntimeOperationTarget(
+            id="runtime-1",
+            desired_generation=1,
+            runner_generation=1,
+            configuration_revision_id="revision-1",
+            configuration_digest="a" * 64,
+            workspace_path="/workspace/agent",
         )
 
 
@@ -272,6 +307,7 @@ def _service(
         catalog_repository=AgentProjectCatalogRepository(),
         runtime_repository=AgentRuntimeRepository(),
         session_manager=session_manager,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(),
         runner_operations=runner_operations,
     )
 

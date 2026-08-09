@@ -1,10 +1,13 @@
 """Agent Runtime service."""
 
+import asyncio
 import dataclasses
+import time
 from typing import Annotated, assert_never
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -18,7 +21,13 @@ from azents.core.enums import (
     RuntimeSummary,
     WorkspaceUserRole,
 )
-from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.core.runtime_profile import (
+    RuntimeConfigurationResolutionStatus,
+    RuntimeInfrastructureProfileSpec,
+    RuntimeProfileContainmentStatus,
+    derive_runtime_profile_containment_status,
+    parse_runtime_infrastructure_profile_spec,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -30,6 +39,7 @@ from azents.repos.agent_runtime.data import (
     AgentRuntimeFailureSummary,
     AgentRuntimeSummaryState,
 )
+from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.services.runtime_profile_resolution.data import (
     RuntimeProfileResolutionResult,
@@ -38,6 +48,7 @@ from azents.services.runtime_profile_resolution.data import (
 from azents.services.runtime_profile_resolution.service import (
     RuntimeProfileResolutionService,
 )
+from azents.services.runtime_storage_error import RuntimeStorageError
 
 from .lifecycle_data import (
     AgentAccessDenied,
@@ -48,8 +59,26 @@ from .lifecycle_data import (
     AgentRuntimeOutput,
     InvalidResetFinalDesiredState,
     ProviderDisconnected,
+    RuntimeContainmentStatus,
     RuntimeNotFound,
+    RuntimeOperationAuthority,
+    RuntimeOperationTarget,
     RuntimeProviderUnavailable,
+)
+
+_RUNTIME_OPERATION_WAIT_TIMEOUT_SECONDS = 120.0
+_RUNTIME_OPERATION_POLL_INTERVAL_SECONDS = 1.0
+_SAFE_RUNTIME_CONFIGURATION_REASON_CODES = frozenset(
+    {
+        "provider_disabled",
+        "provider_workspace_unavailable",
+        "provider_disconnected",
+        "provider_capability_unavailable",
+        "provider_capability_invalid",
+        "profile_document_invalid",
+        "profile_incompatible",
+        "runtime_configuration_blocked",
+    }
 )
 
 
@@ -110,7 +139,7 @@ class AgentRuntimeService:
                     message=error.message,
                 )
             )
-        return Success(self._build_output(resolution))
+        return Success(await self._build_output(resolution))
 
     async def start(
         self,
@@ -269,7 +298,7 @@ class AgentRuntimeService:
                 state=self.calculate_state(resolution.runtime),
                 command_type=command.command_type,
                 desired_generation=command.desired_generation,
-                configuration=self._configuration_status(resolution),
+                configuration=await self._configuration_status(resolution),
             )
         )
 
@@ -323,6 +352,182 @@ class AgentRuntimeService:
                 message=("Runtime configuration changed before start could be stored."),
             )
         return (await self._ensure_runtime_for_agent(agent_id)).runtime
+
+    async def resolve_operation_target(
+        self,
+        agent_id: str,
+        *,
+        wait_timeout_seconds: float = _RUNTIME_OPERATION_WAIT_TIMEOUT_SECONDS,
+        poll_interval_seconds: float = _RUNTIME_OPERATION_POLL_INTERVAL_SECONDS,
+        expected_authority: RuntimeOperationAuthority | None = None,
+        start_if_stopped: bool = True,
+    ) -> RuntimeOperationTarget:
+        """Wait for the exact desired configuration and qualified Runner."""
+        deadline = time.monotonic() + max(wait_timeout_seconds, 0.0)
+        last_resolution: RuntimeProfileResolutionResult | None = None
+        expected_desired_generation: int | None = None
+        expected_revision_id: str | None = None
+        while True:
+            try:
+                resolution = await self._ensure_runtime_for_agent(agent_id)
+            except RuntimeProfileResolutionUnavailable as error:
+                raise RuntimeStorageError(
+                    f"Runtime Profile is unavailable: {error.code}"
+                ) from error
+            last_resolution = resolution
+            if expected_authority is not None and not self._matches_expected_authority(
+                resolution,
+                expected_authority,
+            ):
+                raise RuntimeStorageError(
+                    "Runtime configuration changed since the operation context "
+                    "was assembled."
+                )
+            blocked = self.configuration_blocking_error(resolution)
+            if blocked is not None:
+                raise RuntimeStorageError(
+                    f"Runtime Profile is unavailable: {blocked.code}"
+                )
+            runtime = resolution.runtime
+            if runtime.desired_state is not RuntimeDesiredState.RUNNING:
+                if not start_if_stopped:
+                    raise RuntimeStorageError("Runtime is not running.")
+                try:
+                    await self.ensure_started_for_agent(agent_id)
+                except RuntimeProfileResolutionUnavailable as error:
+                    raise RuntimeStorageError(
+                        f"Runtime Profile is unavailable: {error.code}"
+                    ) from error
+                resolution = await self._ensure_runtime_for_agent(agent_id)
+                last_resolution = resolution
+                blocked = self.configuration_blocking_error(resolution)
+                if blocked is not None:
+                    raise RuntimeStorageError(
+                        f"Runtime Profile is unavailable: {blocked.code}"
+                    )
+                runtime = resolution.runtime
+                if (
+                    expected_authority is not None
+                    and not self._matches_expected_authority(
+                        resolution, expected_authority
+                    )
+                ):
+                    raise RuntimeStorageError(
+                        "Runtime configuration changed since the operation context "
+                        "was assembled."
+                    )
+            if expected_desired_generation is None:
+                expected_desired_generation = runtime.desired_generation
+                expected_revision_id = resolution.desired_revision.id
+            elif (
+                runtime.desired_generation != expected_desired_generation
+                or resolution.desired_revision.id != expected_revision_id
+            ):
+                raise RuntimeStorageError(
+                    "Runtime configuration changed while waiting for the operation."
+                )
+            if (
+                runtime.failure_generation == runtime.desired_generation
+                and runtime.failure_code is not None
+            ):
+                detail = runtime.failure_message or runtime.failure_code
+                raise RuntimeStorageError(f"Runtime failed: {detail}")
+            if runtime.provider_observed_state is RuntimeProviderObservedState.FAILED:
+                detail = runtime.failure_message or runtime.failure_code
+                message = "Runtime failed"
+                if detail:
+                    message = f"{message}: {detail}"
+                raise RuntimeStorageError(message)
+            if (
+                runtime.provider_connection_state
+                is RuntimeProviderConnectionState.DISCONNECTED
+            ):
+                raise RuntimeStorageError(
+                    "Runtime Provider is disconnected. Please try again in a moment."
+                )
+            target = self._qualified_operation_target(resolution)
+            if target is not None:
+                return target
+            remaining_wait_seconds = deadline - time.monotonic()
+            if remaining_wait_seconds <= 0:
+                break
+            await asyncio.sleep(
+                min(max(poll_interval_seconds, 0.0), remaining_wait_seconds)
+            )
+        if last_resolution is None:
+            raise RuntimeStorageError("Runtime is not running")
+        if (
+            last_resolution.applied_revision is None
+            or last_resolution.applied_revision.id
+            != last_resolution.desired_revision.id
+        ):
+            raise RuntimeStorageError(
+                "Runtime is still applying the selected Runtime Profile."
+            )
+        if (
+            last_resolution.runtime.provider_observed_state
+            is not RuntimeProviderObservedState.RUNNING
+            or last_resolution.runtime.provider_observed_generation
+            != last_resolution.runtime.desired_generation
+        ):
+            raise RuntimeStorageError(
+                "Runtime is still starting. Please try again in a moment."
+            )
+        raise RuntimeStorageError("Runtime runner is not ready")
+
+    @staticmethod
+    def _qualified_operation_target(
+        resolution: RuntimeProfileResolutionResult,
+    ) -> RuntimeOperationTarget | None:
+        """Return exact operation authority only from complete current evidence."""
+        runtime = resolution.runtime
+        desired = resolution.desired_revision
+        applied = resolution.applied_revision
+        if (
+            applied is None
+            or applied.id != desired.id
+            or desired.target_desired_generation != runtime.desired_generation
+            or desired.provider_reported_digest != desired.digest
+            or desired.runner_reported_digest != desired.digest
+            or desired.provider_acknowledged_at is None
+            or desired.runtime_observed_at is None
+            or runtime.desired_state is not RuntimeDesiredState.RUNNING
+            or runtime.provider_observed_state
+            is not RuntimeProviderObservedState.RUNNING
+            or runtime.provider_observed_generation != runtime.desired_generation
+            or runtime.provider_connection_state
+            is not RuntimeProviderConnectionState.CONNECTED
+            or (
+                runtime.failure_generation == runtime.desired_generation
+                and runtime.failure_code is not None
+            )
+            or runtime.runner_state is not RuntimeRunnerState.READY
+            or runtime.runner_generation <= 0
+            or runtime.workspace_path is None
+        ):
+            return None
+        return RuntimeOperationTarget(
+            id=runtime.id,
+            desired_generation=runtime.desired_generation,
+            runner_generation=runtime.runner_generation,
+            configuration_revision_id=desired.id,
+            configuration_digest=desired.digest,
+            workspace_path=runtime.workspace_path,
+        )
+
+    @staticmethod
+    def _matches_expected_authority(
+        resolution: RuntimeProfileResolutionResult,
+        expected_authority: RuntimeOperationAuthority,
+    ) -> bool:
+        """Check that a resolution still matches the prompt-selected authority."""
+        runtime = resolution.runtime
+        desired = resolution.desired_revision
+        return (
+            desired.id == expected_authority.configuration_revision_id
+            and desired.digest == expected_authority.configuration_digest
+            and runtime.desired_generation == expected_authority.desired_generation
+        )
 
     async def request_terminal_delete_for_agent(
         self,
@@ -442,7 +647,7 @@ class AgentRuntimeService:
                 state=self.calculate_state(resolution.runtime),
                 command_type=command.command_type,
                 desired_generation=command.desired_generation,
-                configuration=self._configuration_status(resolution),
+                configuration=await self._configuration_status(resolution),
             )
         )
 
@@ -509,7 +714,7 @@ class AgentRuntimeService:
             runtime_created=False,
         )
 
-    def _build_output(
+    async def _build_output(
         self,
         resolution: RuntimeProfileResolutionResult,
     ) -> AgentRuntimeOutput:
@@ -517,10 +722,10 @@ class AgentRuntimeService:
         return AgentRuntimeOutput(
             runtime=resolution.runtime,
             state=self.calculate_state(resolution.runtime),
-            configuration=self._configuration_status(resolution),
+            configuration=await self._configuration_status(resolution),
         )
 
-    def _configuration_status(
+    async def _configuration_status(
         self,
         resolution: RuntimeProfileResolutionResult,
     ) -> AgentRuntimeConfigurationStatus:
@@ -538,7 +743,91 @@ class AgentRuntimeService:
             status=status,
             desired=desired,
             applied=applied,
+            containment=self._containment_status(
+                resolution,
+                status=status,
+                profile=await self._desired_profile_for_projection(desired),
+            ),
         )
+
+    async def _desired_profile_for_projection(
+        self,
+        desired: RuntimeConfigurationRevision,
+    ) -> RuntimeInfrastructureProfileSpec | None:
+        """Load the exact desired Profile contract without physical diagnostics."""
+        if desired.resolved_configuration is not None:
+            effective = desired.resolved_configuration.get("effective_profile")
+            if isinstance(effective, dict):
+                try:
+                    return parse_runtime_infrastructure_profile_spec(effective)
+                except ValidationError:
+                    return None
+        async with self.session_manager() as session:
+            infrastructure = (
+                await self.runtime_profile_repository.get_infrastructure_profile(
+                    session,
+                    profile_id=desired.infrastructure_profile_id,
+                    for_update=False,
+                )
+            )
+        expected_digest = desired.source_trace.get("infrastructure_profile_digest")
+        if (
+            infrastructure is None
+            or infrastructure.version != desired.infrastructure_profile_version
+            or not isinstance(expected_digest, str)
+            or infrastructure.digest != expected_digest
+        ):
+            return None
+        try:
+            return parse_runtime_infrastructure_profile_spec(infrastructure.spec)
+        except ValidationError:
+            return None
+
+    def _containment_status(
+        self,
+        resolution: RuntimeProfileResolutionResult,
+        *,
+        status: str,
+        profile: RuntimeInfrastructureProfileSpec | None,
+    ) -> RuntimeContainmentStatus:
+        """Derive safe containment state from existing Runtime authority."""
+        desired = resolution.desired_revision
+        profile_containment = (
+            derive_runtime_profile_containment_status(profile)
+            if profile is not None
+            else RuntimeProfileContainmentStatus(
+                enabled=False,
+                nested_docker_available=False,
+            )
+        )
+        enabled = profile_containment.enabled
+        applied = enabled and status == "applied"
+        runtime_available = (
+            status == "applied"
+            and self._qualified_operation_target(resolution) is not None
+        )
+        reason_code = None
+        if desired.resolution_status is RuntimeConfigurationResolutionStatus.BLOCKED:
+            reason_code = self._safe_configuration_reason_code(desired.reason_code)
+        elif status == "waiting_for_recreation":
+            reason_code = "runtime_recreation_required"
+        elif not runtime_available:
+            reason_code = "runtime_unavailable"
+        return RuntimeContainmentStatus(
+            enabled=enabled,
+            applied=applied,
+            recreation_required=status == "waiting_for_recreation",
+            nested_docker_available=profile_containment.nested_docker_available,
+            runtime_available=runtime_available,
+            availability_reason_code=reason_code,
+        )
+
+    @staticmethod
+    def _safe_configuration_reason_code(reason_code: str | None) -> str:
+        """Return only bounded reason codes in user-facing projections."""
+        if reason_code in _SAFE_RUNTIME_CONFIGURATION_REASON_CODES:
+            return reason_code
+        return "runtime_configuration_blocked"
 
     @staticmethod
     def configuration_blocking_error(
