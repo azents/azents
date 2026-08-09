@@ -894,6 +894,17 @@ def test_discord_fake_confirmed_create_failure_does_not_consume_nonce_identity(
     message_url = f"{discord_fake_url}/api/v10/channels/400000000000000001/messages"
     first = requests.post(message_url, json={"nonce": "retry-nonce"}, timeout=5)
     assert first.status_code == 400
+    failed_evidence = requests.get(
+        f"{discord_fake_url}/__testenv/state", timeout=5
+    ).json()
+    assert failed_evidence["deliveries"] == [
+        {
+            "operation": "create_message",
+            "channel_id": "400000000000000001",
+            "outcome": "failed",
+            "safe_category": "provider_rejected",
+        }
+    ]
     second = requests.post(message_url, json={"nonce": "retry-nonce"}, timeout=5)
     second.raise_for_status()
 
