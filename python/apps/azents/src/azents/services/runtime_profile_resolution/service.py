@@ -39,9 +39,6 @@ from azents.repos.runtime_profile.data import (
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
-from azents.repos.runtime_provider_control.repository import (
-    RuntimeProviderControlRepository,
-)
 from azents.repos.runtime_provider_policy.data import RuntimeProviderContractRevision
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
@@ -82,10 +79,6 @@ class RuntimeProfileResolutionService:
     ]
     provider_repository: Annotated[
         RuntimeProviderRepository, Depends(RuntimeProviderRepository)
-    ]
-    control_repository: Annotated[
-        RuntimeProviderControlRepository,
-        Depends(RuntimeProviderControlRepository),
     ]
     provider_policy_repository: Annotated[
         RuntimeProviderPolicyRepository,
@@ -366,14 +359,6 @@ class RuntimeProfileResolutionService:
             )
         ):
             reason_code = "provider_workspace_unavailable"
-        if reason_code is None and not (
-            await self.control_repository.has_connected_connection(
-                session,
-                provider_id=provider.id,
-                now=tznow(),
-            )
-        ):
-            reason_code = "provider_disconnected"
 
         if provider.current_contract_revision_id is not None:
             capability_revision = (

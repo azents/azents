@@ -438,13 +438,6 @@ class AgentRuntimeService:
                 if detail:
                     message = f"{message}: {detail}"
                 raise RuntimeStorageError(message)
-            if (
-                runtime.provider_connection_state
-                is RuntimeProviderConnectionState.DISCONNECTED
-            ):
-                raise RuntimeStorageError(
-                    "Runtime Provider is disconnected. Please try again in a moment."
-                )
             target = self._qualified_operation_target(resolution)
             if target is not None:
                 return target
@@ -456,6 +449,13 @@ class AgentRuntimeService:
             )
         if last_resolution is None:
             raise RuntimeStorageError("Runtime is not running")
+        if (
+            last_resolution.runtime.provider_connection_state
+            is RuntimeProviderConnectionState.DISCONNECTED
+        ):
+            raise RuntimeStorageError(
+                "Runtime Provider is disconnected. Please try again in a moment."
+            )
         if (
             last_resolution.applied_revision is None
             or last_resolution.applied_revision.id

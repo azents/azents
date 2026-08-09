@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-09
-spec_version: 54
+spec_version: 55
 ---
 
 # Agent Runtime Control
@@ -484,8 +484,10 @@ Lifecycle APIs are desired-state declarations. Repeating the same request must c
 Reset carries its own desired generation and a final desired state. Provider is responsible for performing backend deletion/recreation according to that command and reporting the resulting observed state.
 
 Runtime configuration targets are immutable generation-fenced revisions resolved from the Agent's
-exact Workspace Runtime Profile. Parent Profile or current capability changes create a new desired
-revision automatically; there is no Agent Apply boundary and no legacy policy fallback.
+exact Workspace Runtime Profile and durable Provider, capability, and Profile sources. Live
+Provider connection state is not configuration identity and cannot create a blocked revision.
+Parent Profile or current capability changes create a new desired revision automatically; there is
+no Agent Apply boundary and no legacy policy fallback.
 
 Lifecycle commands that create or replace physical compute require the latest ready desired revision.
 An unavailable or blocked desired revision prevents create/start/restart/reset/recreate and reports
@@ -498,8 +500,11 @@ applied revision ID/digest, desired generation, accepted Runner generation, Prov
 observation, qualified durable Runner readiness, and current Runner-reported Agent Workspace path.
 Protocol `BUSY` reports retain availability by normalizing to durable `READY`. Callers use the
 prompt-selected revision/digest/generation when available.
-Supersession, disconnection, failure, timeout, cancellation, or authority drift fails closed rather
-than retargeting the operation to another Runtime incarnation.
+A transient Provider or Runner disconnection keeps the initially selected revision and desired
+generation and waits within the caller's bounded operation timeout. Dispatch and operation
+qualification still require current Provider and Runner authority. Supersession, current-generation
+failure, timeout, cancellation, or authority drift fails closed rather than retargeting the
+operation to another Runtime incarnation.
 
 Desired/applied mismatch never authorizes implicit recreation. Kubernetes NetworkPolicy-only changes
 may adopt in place through exact Provider and Runner evidence. PodSpec, PVC, and Docker changes
@@ -571,6 +576,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-09** (spec_version 55) — Removed live Provider connectivity from immutable Runtime
+  configuration identity and made explicit operation targeting wait within its existing bounded
+  timeout for same-generation Provider and Runner reconnection.
 - **2026-08-09** (spec_version 53) — Added Profile v2 containment preparation, pre-registration
   Runner qualification, one contained authority for process/native operations, exact bounded
   operation targeting, separated temporary storage, and deterministic Docker/Kubernetes evidence.

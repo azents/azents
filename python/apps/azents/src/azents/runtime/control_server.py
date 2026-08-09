@@ -300,7 +300,6 @@ async def runtime_control_server_lifespan(
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         provider_repository=provider_repository,
-        control_repository=provider_control_repository,
         provider_policy_repository=policy_repository,
     )
     profile_reconciliation = RuntimeProfileReconciliationService(

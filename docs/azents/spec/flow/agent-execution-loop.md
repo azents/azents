@@ -79,7 +79,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-09
-spec_version: 149
+spec_version: 150
 ---
 
 # Agent Execution Loop
@@ -732,8 +732,10 @@ configuration digest, and desired generation as the model step's Runtime authori
 Runtime-backed Tool resolves one bounded target that must also match that prompt-selected authority,
 the applied revision, Provider/Runner generations and readiness, and current Workspace evidence.
 Operation TurnActions, including those executed before prompt construction, use the same exact
-resolver without a prompt fence. In both paths, a configuration or generation change during wait or
-execution fails closed rather than dispatching against a substituted Runtime.
+resolver without a prompt fence. A transient Provider or Runner disconnect waits within the
+caller's bounded timeout while retaining the initially selected revision and desired generation. In
+both paths, a configuration or generation change during wait or execution fails closed rather than
+dispatching against a substituted Runtime.
 
 When the selected Profile enables process containment, every Agent-selected process and native
 file/edit/patch/search/Git/import/presentation/image/transfer operation reaches the same contained
@@ -1228,6 +1230,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-09** (spec_version 150) — Made Runtime-backed Tool and TurnAction target resolution
+  retain exact authority while waiting through bounded same-generation Provider and Runner
+  reconnect gaps.
 - **2026-08-09** (spec_version 149) — Removed External Channel continuation-scope
   transport from mailbox, worker, execution, and Toolkit turn contracts; `ignore` is
   now an unconditional mode authorized through normal active-binding validation.
