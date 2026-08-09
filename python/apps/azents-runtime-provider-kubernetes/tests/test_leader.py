@@ -14,6 +14,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PersistentVolumeClaimResource,
     PodResource,
     PodWatchEvent,
+    RuntimeClassResource,
 )
 from azents_runtime_provider_kubernetes.leader import (
     KubernetesLeaderElector,
@@ -107,6 +108,10 @@ class FakeKubernetesApi(KubernetesApi):
     async def apply_lease(self, lease: LeaseResource) -> None:
         """Apply the fake Lease."""
         self.lease = lease
+
+    async def get_runtime_class(self, name: str) -> RuntimeClassResource | None:
+        """Unused by leader tests."""
+        return None
 
 
 def _elector(

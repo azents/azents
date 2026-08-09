@@ -2,12 +2,14 @@
 
 import dataclasses
 import ipaddress
+import json
 import logging
 import re
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import PurePosixPath
+from typing import Literal
 
 from azents_runtime_control.provider import (
     RuntimeDesiredState,
@@ -25,12 +27,14 @@ from azents_runtime_control.runtime_configuration import (
 )
 from azents_runtime_control.runtime_configuration import (
     KubernetesPodProfileV1,
+    KubernetesPodProfileV2,
     RuntimeConfigurationEvidence,
     RuntimeNetworkPolicy,
     parse_runtime_configuration_envelope,
 )
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
+    AppArmorProfile,
     ContainerResources,
     ContainerSecurityContext,
     ContainerSpec,
@@ -58,6 +62,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodVolume,
     PodWatchEvent,
     Probe,
+    SeccompProfile,
     Toleration,
     VolumeMount,
 )
@@ -92,10 +97,30 @@ _WORKSPACE_VOLUME_NAME = "agent-workspace"
 _ENGINE_SOCKET_VOLUME_NAME = "container-engine-socket"
 _ENGINE_STORAGE_VOLUME_NAME = "container-engine-storage"
 _SHARED_TMP_VOLUME_NAME = "runtime-shared-tmp"
+_CONTAINMENT_AGENT_TMP_VOLUME_NAME = "agent-temporary"
+_CONTAINMENT_RUNNER_PRIVATE_VOLUME_NAME = "runner-private"
 _ENGINE_SOCKET_DIR = "/var/run/azents-engine"
 _ENGINE_STORAGE_PATH = "/var/lib/azents-engine"
 _ENGINE_SOCKET_PATH = f"{_ENGINE_SOCKET_DIR}/docker.sock"
 _SHARED_TMP_PATH = "/tmp"
+_CONTAINMENT_BOOTSTRAP_SCHEMA_VERSION = 1
+_CONTAINMENT_BOOTSTRAP_ENV = "AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"
+_CONTAINMENT_AGENT_TEMPORARY_PATH = "/run/azents/agent-tmp"
+_CONTAINMENT_RUNNER_PRIVATE_PATH = "/run/azents/runner-private"
+_CONTAINMENT_RUNNER_VENV_PATH = "/workspace/python/apps/azents-runtime-runner/.venv"
+_CONTAINMENT_DOCKER_SOCKET_PATH = "/var/run/azents-engine/docker.sock"
+KUBERNETES_BWRAP_APPARMOR_PROFILE = "azents-runtime-bwrap"
+KUBERNETES_BWRAP_RUNTIME_HANDLER = "runc"
+_CONTAINED_CAP_ADD = (
+    "SYS_ADMIN",
+    "SYS_CHROOT",
+    "NET_ADMIN",
+    "SETUID",
+    "SETGID",
+    "SYS_PTRACE",
+    "SETPCAP",
+)
+_CONTAINED_CAP_DROP = ("ALL",)
 _RUNNER_UID = 1000
 _RUNNER_GID = 1000
 _ENGINE_SOCKET_GROUP = "azents-runner"
@@ -165,6 +190,16 @@ class UnsupportedRuntimeConfiguration(ValueError):
 
 
 @dataclasses.dataclass(frozen=True)
+class KubernetesProcessContainmentConfig:
+    """Trusted Kubernetes deployment preparation for contained Runtimes."""
+
+    backend: Literal["bwrap"]
+    security_profile: str
+    qualification_timeout_seconds: int
+    runtime_class_name: str | None
+
+
+@dataclasses.dataclass(frozen=True)
 class KubernetesRuntimeProviderConfig:
     """Configuration for a Kubernetes Runtime Provider process."""
 
@@ -176,6 +211,7 @@ class KubernetesRuntimeProviderConfig:
     runtime_control_labels: Mapping[str, str]
     runtime_control_port: int
     workspace_mount_path: str
+    process_containment: KubernetesProcessContainmentConfig | None = None
     network_hard_cap_allowed_cidrs: tuple[str, ...] = ()
     network_hard_cap_denied_cidrs: tuple[str, ...] = ()
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = ()
@@ -213,6 +249,9 @@ class KubernetesRuntimeProvider:
         self._config = config
         self._runner_env = dict(config.runner_env)
         self._workspace_mount_path = _absolute_posix_path(config.workspace_mount_path)
+        self._process_containment = _validate_process_containment(
+            config.process_containment
+        )
 
     async def start(
         self,
@@ -420,15 +459,18 @@ class KubernetesRuntimeProvider:
         )
         expected_network_policy = self._network_policy(command, policy)
         observed_state, reason = _observed_state(pod)
-        return self._report(
-            command,
-            observed_state=observed_state,
-            reason=reason,
-            provider_runtime_id=pod.metadata.name,
-            reconciliation=_network_policy_reconciliation(
-                network_policy,
-                expected_network_policy,
+        return dataclasses.replace(
+            self._report(
+                command,
+                observed_state=observed_state,
+                reason=reason,
+                provider_runtime_id=pod.metadata.name,
+                reconciliation=_network_policy_reconciliation(
+                    network_policy,
+                    expected_network_policy,
+                ),
             ),
+            diagnostic=_pod_diagnostic(pod),
         )
 
     async def observe_known_runtimes(self) -> tuple[RuntimeProviderReport, ...]:
@@ -504,7 +546,7 @@ class KubernetesRuntimeProvider:
     async def _ensure_pvc(
         self,
         command: RuntimeLifecycleCommand,
-        policy: KubernetesPodProfileV1,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
     ) -> None:
         desired = self._pvc(command, policy)
         existing = await self._api.get_pvc(
@@ -539,7 +581,7 @@ class KubernetesRuntimeProvider:
     async def _ensure_network_policy(
         self,
         command: RuntimeLifecycleCommand,
-        policy: KubernetesPodProfileV1,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
     ) -> None:
         network_policy = self._network_policy(command, policy)
         _LOGGER.info(
@@ -554,7 +596,7 @@ class KubernetesRuntimeProvider:
     async def _ensure_pod(
         self,
         command: RuntimeLifecycleCommand,
-        policy: KubernetesPodProfileV1,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
         *,
         replace: bool,
     ) -> None:
@@ -599,7 +641,7 @@ class KubernetesRuntimeProvider:
         self,
         pod: PodResource,
         command: RuntimeLifecycleCommand,
-        policy: KubernetesPodProfileV1,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
     ) -> bool:
         if _pod_blocks_recreate(pod):
             return False
@@ -624,6 +666,7 @@ class KubernetesRuntimeProvider:
             and pod.status.phase == "Pending"
             and _container_images_equal(pod.spec.containers, expected.spec.containers)
             and _pod_volumes_equal(pod.spec.volumes, expected.spec.volumes)
+            and _pod_preparation_equal(pod.spec, expected.spec)
         ):
             return True
         if not _container_specs_equal(
@@ -636,6 +679,10 @@ class KubernetesRuntimeProvider:
         if pod.spec.image_pull_secrets != expected.spec.image_pull_secrets:
             return False
         if pod.spec.security_context != expected.spec.security_context:
+            return False
+        if pod.spec.host_users != expected.spec.host_users:
+            return False
+        if pod.spec.runtime_class_name != expected.spec.runtime_class_name:
             return False
         expected_service_account = expected.spec.service_account_name
         if expected_service_account is None:
@@ -658,7 +705,7 @@ class KubernetesRuntimeProvider:
         self,
         pod: PodResource,
         command: RuntimeLifecycleCommand,
-        policy: KubernetesPodProfileV1,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
     ) -> bool:
         if _pod_blocks_recreate(pod):
             return False
@@ -691,6 +738,10 @@ class KubernetesRuntimeProvider:
             return False
         if pod.spec.security_context != expected.spec.security_context:
             return False
+        if pod.spec.host_users != expected.spec.host_users:
+            return False
+        if pod.spec.runtime_class_name != expected.spec.runtime_class_name:
+            return False
         expected_service_account = expected.spec.service_account_name
         if expected_service_account is None:
             if pod.spec.service_account_name not in {None, "default"}:
@@ -710,7 +761,7 @@ class KubernetesRuntimeProvider:
         self,
         pvc: PersistentVolumeClaimResource,
         command: RuntimeLifecycleCommand,
-        policy: KubernetesPodProfileV1,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
     ) -> bool:
         expected = self._pvc(command, policy)
         return (
@@ -722,7 +773,7 @@ class KubernetesRuntimeProvider:
     def _pvc(
         self,
         command: RuntimeLifecycleCommand,
-        policy: KubernetesPodProfileV1,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
     ) -> PersistentVolumeClaimResource:
         volume = policy.workspace_volume
         return PersistentVolumeClaimResource(
@@ -742,9 +793,11 @@ class KubernetesRuntimeProvider:
     def _pod(
         self,
         command: RuntimeLifecycleCommand,
-        policy: KubernetesPodProfileV1,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
     ) -> PodResource:
         dind = policy.dind
+        contained = _contained_profile(policy)
+        containment = self._containment_preparation(policy)
         return PodResource(
             metadata=ObjectMeta(
                 name=_pod_name(command.identity.runtime_id),
@@ -755,6 +808,12 @@ class KubernetesRuntimeProvider:
             spec=PodSpec(
                 service_account_name=policy.service_account_name,
                 automount_service_account_token=False,
+                host_users=False if contained else None,
+                runtime_class_name=(
+                    containment.runtime_class_name
+                    if contained and containment is not None
+                    else None
+                ),
                 image_pull_secrets=self._config.image_pull_secrets,
                 security_context=self._pod_security_context(),
                 node_selector=policy.scheduling.node_selector,
@@ -795,6 +854,22 @@ class KubernetesRuntimeProvider:
                         if dind is not None
                         else ()
                     ),
+                    *(
+                        (
+                            EmptyDirVolume(
+                                name=_CONTAINMENT_AGENT_TMP_VOLUME_NAME,
+                                medium=None,
+                                size_limit=None,
+                            ),
+                            EmptyDirVolume(
+                                name=_CONTAINMENT_RUNNER_PRIVATE_VOLUME_NAME,
+                                medium=None,
+                                size_limit=None,
+                            ),
+                        )
+                        if contained
+                        else ()
+                    ),
                 ),
             ),
         )
@@ -802,7 +877,7 @@ class KubernetesRuntimeProvider:
     def _containers(
         self,
         command: RuntimeLifecycleCommand,
-        policy: KubernetesPodProfileV1,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
     ) -> tuple[ContainerSpec, ...]:
         runner_mounts = [
             VolumeMount(
@@ -812,7 +887,9 @@ class KubernetesRuntimeProvider:
             )
         ]
         dind = policy.dind
-        runner_env = self._env(command)
+        contained = _contained_profile(policy)
+        containment = self._containment_preparation(policy)
+        runner_env = self._env(command, policy)
         if dind is not None:
             runner_mounts.append(
                 VolumeMount(
@@ -832,6 +909,21 @@ class KubernetesRuntimeProvider:
             runner_env[_ENV_TESTCONTAINERS_HOST_OVERRIDE] = "127.0.0.1"
             runner_env[_ENV_TESTCONTAINERS_CONNECTION_MODE] = "docker_host"
             runner_env[_ENV_TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE] = _ENGINE_SOCKET_PATH
+        if contained:
+            runner_mounts.extend(
+                (
+                    VolumeMount(
+                        name=_CONTAINMENT_AGENT_TMP_VOLUME_NAME,
+                        mount_path=_CONTAINMENT_AGENT_TEMPORARY_PATH,
+                        read_only=False,
+                    ),
+                    VolumeMount(
+                        name=_CONTAINMENT_RUNNER_PRIVATE_VOLUME_NAME,
+                        mount_path=_CONTAINMENT_RUNNER_PRIVATE_PATH,
+                        read_only=False,
+                    ),
+                )
+            )
         runner = ContainerSpec(
             name=_RUNNER_CONTAINER_NAME,
             image=command.runner_image,
@@ -839,9 +931,15 @@ class KubernetesRuntimeProvider:
             args=(),
             working_dir=self._workspace_mount_path,
             resources=_container_resources(policy.runner_resources),
-            security_context=_unprivileged_security_context(
-                uid=_RUNNER_UID,
-                gid=_RUNNER_GID,
+            security_context=(
+                _contained_security_context(
+                    security_profile=containment.security_profile,
+                )
+                if contained and containment is not None
+                else _unprivileged_security_context(
+                    uid=_RUNNER_UID,
+                    gid=_RUNNER_GID,
+                )
             ),
             readiness_probe=None,
             env=tuple(
@@ -893,7 +991,7 @@ class KubernetesRuntimeProvider:
     def _network_policy(
         self,
         command: RuntimeLifecycleCommand,
-        policy: KubernetesPodProfileV1,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
     ) -> NetworkPolicyResource:
         return NetworkPolicyResource(
             metadata=ObjectMeta(
@@ -956,13 +1054,47 @@ class KubernetesRuntimeProvider:
             **self._configuration_annotations(command),
         }
 
-    def _env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
+    def _env(
+        self,
+        command: RuntimeLifecycleCommand,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
+    ) -> dict[str, str]:
         return {
             **self._stable_env(command),
             **self._runner_env,
             **self._runner_auth_env(command),
             **self._configuration_env(command),
+            **self._containment_env(policy),
             _ENV_PROVIDER_GENERATION: str(command.provider_generation),
+        }
+
+    def _containment_env(
+        self,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
+    ) -> dict[str, str]:
+        containment = self._containment_preparation(policy)
+        if not _contained_profile(policy) or containment is None:
+            return {}
+        bootstrap = {
+            "schema_version": _CONTAINMENT_BOOTSTRAP_SCHEMA_VERSION,
+            "backend": containment.backend,
+            "agent_workspace_path": self._workspace_mount_path,
+            "agent_temporary_path": _CONTAINMENT_AGENT_TEMPORARY_PATH,
+            "runner_private_paths": [
+                _CONTAINMENT_RUNNER_PRIVATE_PATH,
+                _CONTAINMENT_RUNNER_VENV_PATH,
+                _CONTAINMENT_DOCKER_SOCKET_PATH,
+            ],
+            "qualification_timeout_seconds": (
+                containment.qualification_timeout_seconds
+            ),
+        }
+        return {
+            _CONTAINMENT_BOOTSTRAP_ENV: json.dumps(
+                bootstrap,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         }
 
     def _runner_auth_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
@@ -1047,7 +1179,7 @@ class KubernetesRuntimeProvider:
             ),
             provider_runtime_id=pod.metadata.name,
             reason=reason,
-            diagnostic={"source": "pod"},
+            diagnostic={"source": "pod", **_pod_diagnostic(pod)},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
             runtime_configuration=_configuration_evidence_from_metadata(
@@ -1096,7 +1228,11 @@ class KubernetesRuntimeProvider:
         report = self._report_from_pod(event.pod)
         return dataclasses.replace(
             report,
-            diagnostic={"source": "pod_watch", "event_type": event.event_type},
+            diagnostic={
+                "source": "pod_watch",
+                "event_type": event.event_type,
+                **_pod_diagnostic(event.pod),
+            },
         )
 
     def _report_from_pvc(
@@ -1131,7 +1267,7 @@ class KubernetesRuntimeProvider:
     def _validate_command(
         self,
         command: RuntimeLifecycleCommand,
-    ) -> KubernetesPodProfileV1:
+    ) -> KubernetesPodProfileV1 | KubernetesPodProfileV2:
         configuration = parse_runtime_configuration_envelope(
             command.runtime_configuration,
             desired_generation=command.desired_generation,
@@ -1142,13 +1278,27 @@ class KubernetesRuntimeProvider:
                 "Runtime configuration is bound to a different Kubernetes Provider."
             )
         policy = configuration.effective_profile
-        if not isinstance(policy, KubernetesPodProfileV1):
+        if not isinstance(policy, KubernetesPodProfileV1 | KubernetesPodProfileV2):
             raise UnsupportedRuntimeConfiguration(
                 "Kubernetes Runtime Provider requires a Kubernetes Pod Profile."
             )
-        if policy.dind is not None:
+        self._containment_preparation(policy)
+        if policy.dind is not None or _contained_profile(policy):
             _immutable_image_reference(command.runner_image, "Runner image")
         return policy
+
+    def _containment_preparation(
+        self,
+        policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
+    ) -> KubernetesProcessContainmentConfig | None:
+        if isinstance(policy, KubernetesPodProfileV1):
+            return None
+        if self._process_containment is None:
+            raise UnsupportedRuntimeConfiguration(
+                "Kubernetes Pod Profile schema version 2 requires Provider "
+                "process-containment preparation."
+            )
+        return self._process_containment
 
 
 def _engine_security_context() -> ContainerSecurityContext:
@@ -1161,6 +1311,9 @@ def _engine_security_context() -> ContainerSecurityContext:
         run_as_group=0,
         capabilities_add=(),
         capabilities_drop=(),
+        proc_mount=None,
+        seccomp_profile=None,
+        apparmor_profile=None,
     )
 
 
@@ -1179,6 +1332,66 @@ def _unprivileged_security_context(
         run_as_group=gid,
         capabilities_add=(),
         capabilities_drop=("ALL",),
+        proc_mount=None,
+        seccomp_profile=None,
+        apparmor_profile=None,
+    )
+
+
+def _contained_security_context(
+    *,
+    security_profile: str,
+) -> ContainerSecurityContext:
+    return ContainerSecurityContext(
+        privileged=False,
+        allow_privilege_escalation=True,
+        read_only_root_filesystem=False,
+        run_as_non_root=True,
+        run_as_user=_RUNNER_UID,
+        run_as_group=_RUNNER_GID,
+        capabilities_add=_CONTAINED_CAP_ADD,
+        capabilities_drop=_CONTAINED_CAP_DROP,
+        proc_mount="Unmasked",
+        seccomp_profile=SeccompProfile(
+            profile_type="Unconfined",
+            localhost_profile=None,
+        ),
+        apparmor_profile=AppArmorProfile(
+            profile_type="Localhost",
+            localhost_profile=security_profile,
+        ),
+    )
+
+
+def _validate_process_containment(
+    value: KubernetesProcessContainmentConfig | None,
+) -> KubernetesProcessContainmentConfig | None:
+    if value is None:
+        return None
+    if value.backend != "bwrap":
+        raise ValueError("Kubernetes process containment backend is unsupported.")
+    if value.security_profile != KUBERNETES_BWRAP_APPARMOR_PROFILE:
+        raise ValueError(
+            "Kubernetes process containment security profile is unsupported."
+        )
+    if (
+        isinstance(value.qualification_timeout_seconds, bool)
+        or not 1 <= value.qualification_timeout_seconds <= 60
+    ):
+        raise ValueError(
+            "Kubernetes process containment qualification timeout is invalid."
+        )
+    if value.runtime_class_name is not None and not value.runtime_class_name:
+        raise ValueError("Kubernetes process containment RuntimeClass name is invalid.")
+    return value
+
+
+def _contained_profile(
+    policy: KubernetesPodProfileV1 | KubernetesPodProfileV2,
+) -> bool:
+    return bool(
+        isinstance(policy, KubernetesPodProfileV2)
+        and policy.process_containment is not None
     )
 
 
@@ -1516,6 +1729,44 @@ def _container_images_equal(
     }
 
 
+def _pod_preparation_equal(actual: PodSpec, expected: PodSpec) -> bool:
+    if actual.host_users != expected.host_users:
+        return False
+    if actual.runtime_class_name != expected.runtime_class_name:
+        return False
+    if (
+        actual.automount_service_account_token
+        != expected.automount_service_account_token
+    ):
+        return False
+    if actual.security_context != expected.security_context:
+        return False
+    actual_containers = {
+        container.name: (
+            container.security_context,
+            tuple(container.volume_mounts),
+            _container_env_value(container, _CONTAINMENT_BOOTSTRAP_ENV),
+        )
+        for container in actual.containers
+    }
+    expected_containers = {
+        container.name: (
+            container.security_context,
+            tuple(container.volume_mounts),
+            _container_env_value(container, _CONTAINMENT_BOOTSTRAP_ENV),
+        )
+        for container in expected.containers
+    }
+    return actual_containers == expected_containers
+
+
+def _container_env_value(container: ContainerSpec, name: str) -> str | None:
+    return next(
+        (item.value for item in container.env if item.name == name),
+        None,
+    )
+
+
 def _container_specs_equal_for_in_place(
     actual: Sequence[ContainerSpec],
     expected: Sequence[ContainerSpec],
@@ -1716,6 +1967,27 @@ def _observed_state(pod: PodResource) -> tuple[RuntimeProviderObservedState, str
 def _pod_reason(status: PodStatus) -> str:
     reason = status.ready_reason or status.waiting_reason or status.phase or "unknown"
     return f"pod_{reason.lower()}"
+
+
+def _pod_diagnostic(pod: PodResource) -> dict[str, str]:
+    if pod.status is None:
+        return {}
+    diagnostic: dict[str, str] = {}
+    if pod.status.phase is not None:
+        diagnostic["pod_phase"] = pod.status.phase
+    evidence = pod.status.termination_evidence
+    if evidence is None:
+        return diagnostic
+    diagnostic.update(
+        {
+            "container_name": evidence.container_name,
+            "exit_code": str(evidence.exit_code),
+            "oom_killed": str(evidence.oom_killed).lower(),
+        }
+    )
+    if evidence.reason is not None:
+        diagnostic["termination_reason"] = evidence.reason
+    return diagnostic
 
 
 def _pod_blocks_recreate(pod: PodResource) -> bool:

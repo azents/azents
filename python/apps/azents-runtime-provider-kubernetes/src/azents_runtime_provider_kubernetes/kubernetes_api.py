@@ -102,6 +102,25 @@ class ContainerSecurityContext:
     run_as_group: int
     capabilities_add: Sequence[str]
     capabilities_drop: Sequence[str]
+    proc_mount: str | None
+    seccomp_profile: "SeccompProfile | None"
+    apparmor_profile: "AppArmorProfile | None"
+
+
+@dataclasses.dataclass(frozen=True)
+class SeccompProfile:
+    """Kubernetes seccomp profile selection."""
+
+    profile_type: str
+    localhost_profile: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class AppArmorProfile:
+    """Kubernetes AppArmor profile selection."""
+
+    profile_type: str
+    localhost_profile: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -155,6 +174,8 @@ class PodSpec:
 
     service_account_name: str | None
     automount_service_account_token: bool
+    host_users: bool | None
+    runtime_class_name: str | None
     image_pull_secrets: Sequence[LocalObjectReference]
     security_context: PodSecurityContext | None
     node_selector: Mapping[str, str]
@@ -171,6 +192,17 @@ class PodStatus:
     ready: bool
     ready_reason: str | None = None
     waiting_reason: str | None = None
+    termination_evidence: "ContainerTerminationEvidence | None" = None
+
+
+@dataclasses.dataclass(frozen=True)
+class ContainerTerminationEvidence:
+    """Bounded container termination evidence safe for Provider diagnostics."""
+
+    container_name: str
+    exit_code: int
+    reason: str | None
+    oom_killed: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -285,6 +317,14 @@ class LeaseResource:
     resource_version: str | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class RuntimeClassResource:
+    """Kubernetes RuntimeClass evidence used by Provider preparation."""
+
+    name: str
+    handler: str
+
+
 class KubernetesApi(Protocol):
     """Kubernetes operations required by Provider lifecycle and election."""
 
@@ -369,4 +409,8 @@ class KubernetesApi(Protocol):
 
     async def apply_lease(self, lease: LeaseResource) -> None:
         """Create or update a Lease."""
+        ...
+
+    async def get_runtime_class(self, name: str) -> RuntimeClassResource | None:
+        """Return a cluster-scoped RuntimeClass by name."""
         ...

@@ -14,6 +14,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     LeaseSpec,
     LocalObjectReference,
     ObjectMeta,
+    RuntimeClassResource,
 )
 from azents_runtime_provider_kubernetes.kubernetes_http import KubernetesHttpApi
 from azents_runtime_provider_kubernetes.leader import LeaderElectionResult
@@ -25,6 +26,13 @@ from azents_runtime_provider_kubernetes.main import (
     wait_for_provider_credential_change,
 )
 from azents_runtime_provider_kubernetes.provider import RUNNER_LIMIT_ENV_NAMES
+
+_CONTAINMENT_ENV_NAMES = (
+    "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+    "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+    "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
+    "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME",
+)
 
 
 @dataclasses.dataclass
@@ -71,6 +79,8 @@ def _lease(holder_identity: str) -> LeaseResource:
 @pytest.fixture
 def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     for name in RUNNER_LIMIT_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    for name in _CONTAINMENT_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
@@ -135,6 +145,7 @@ def test_provider_settings_loads_provider_global_runtime_controls(
     assert settings.network_hard_cap_allowed_cidrs == ()
     assert settings.network_hard_cap_denied_cidrs == ()
     assert settings.network_hard_cap_extra_egress == ()
+    assert settings.process_containment is None
     assert settings.service_account_token_file == provider_env
     assert read_service_account_token(provider_env) == "test-provider-credential"
 
@@ -312,14 +323,159 @@ def test_provider_settings_accepts_pod_image_pull_secrets(
     )
 
 
+def test_provider_settings_parse_process_containment(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+        "bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+        "azents-runtime-bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
+        "15",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME",
+        "runc-bwrap",
+    )
+
+    settings = ProviderSettings()
+
+    assert settings.process_containment is not None
+    assert settings.process_containment.backend == "bwrap"
+    assert settings.process_containment.security_profile == "azents-runtime-bwrap"
+    assert settings.process_containment.qualification_timeout_seconds == 15
+    assert settings.process_containment.runtime_class_name == "runc-bwrap"
+    registration = provider_main._provider_registration(settings)
+    assert registration.metadata == {
+        "process_containment_backend": "bwrap",
+        "process_containment_runtime_class": "runc-bwrap",
+    }
+    profile_contracts = registration.capability_contract["profile_contracts"]
+    assert isinstance(profile_contracts, list)
+    assert profile_contracts[0]["schema_versions"] == [1, 2]
+
+
+def test_provider_settings_reject_partial_process_containment(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+        "azents-runtime-bwrap",
+    )
+
+    with pytest.raises(RuntimeError, match="require a configured backend"):
+        ProviderSettings()
+
+
+@pytest.mark.asyncio
+async def test_runtime_class_validation_fails_closed_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+        "bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+        "azents-runtime-bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
+        "15",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME",
+        "runc-bwrap",
+    )
+    api = KubernetesHttpApi.__new__(KubernetesHttpApi)
+
+    async def missing(name: str) -> RuntimeClassResource | None:
+        return None
+
+    monkeypatch.setattr(api, "get_runtime_class", missing)
+
+    with pytest.raises(RuntimeError, match="RuntimeClass does not exist"):
+        await provider_main._validate_runtime_class(ProviderSettings(), api)
+
+
+@pytest.mark.asyncio
+async def test_runtime_class_validation_accepts_existing_class(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+        "bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+        "azents-runtime-bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
+        "15",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME",
+        "runc-bwrap",
+    )
+    api = KubernetesHttpApi.__new__(KubernetesHttpApi)
+
+    async def existing(name: str) -> RuntimeClassResource | None:
+        return RuntimeClassResource(name=name, handler="runc")
+
+    monkeypatch.setattr(api, "get_runtime_class", existing)
+
+    await provider_main._validate_runtime_class(ProviderSettings(), api)
+
+
+@pytest.mark.asyncio
+async def test_runtime_class_validation_rejects_incompatible_handler(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+        "bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+        "azents-runtime-bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
+        "15",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME",
+        "gvisor",
+    )
+    api = KubernetesHttpApi.__new__(KubernetesHttpApi)
+
+    async def incompatible(name: str) -> RuntimeClassResource | None:
+        return RuntimeClassResource(name=name, handler="runsc")
+
+    monkeypatch.setattr(api, "get_runtime_class", incompatible)
+
+    with pytest.raises(RuntimeError, match="handler is incompatible"):
+        await provider_main._validate_runtime_class(ProviderSettings(), api)
+
+
 def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
     """Registration advertises the exact current Pod Profile contract."""
     assert provider_main._PROTOCOL_VERSION == "agent-runtime-provider-kubernetes-v2"
-    assert provider_main._CAPABILITY_CONTRACT["implementation_version"] == "0.2.0"
-    assert provider_main._CAPABILITY_CONTRACT["optional_capabilities"] == [
-        "network_policy_reconciliation"
-    ]
-    profile_contracts = provider_main._CAPABILITY_CONTRACT["profile_contracts"]
+    contract = provider_main._capability_contract(containment_enabled=False)
+    assert contract["implementation_version"] == "0.3.0"
+    assert contract["optional_capabilities"] == ["network_policy_reconciliation"]
+    profile_contracts = contract["profile_contracts"]
 
     assert isinstance(profile_contracts, list)
     assert profile_contracts == [
@@ -344,3 +500,9 @@ def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
             },
         }
     ]
+
+    contained_contract = provider_main._capability_contract(containment_enabled=True)
+    contained_profiles = contained_contract["profile_contracts"]
+    assert isinstance(contained_profiles, list)
+    assert contained_profiles[0]["schema_versions"] == [1, 2]
+    assert "runtime.process-containment" in contained_profiles[0]["capabilities"]

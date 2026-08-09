@@ -1,6 +1,7 @@
 """Kubernetes Runtime Provider lifecycle tests."""
 
 import dataclasses
+import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import cast
@@ -24,6 +25,7 @@ from azents_runtime_control.runtime_configuration import (
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ContainerResources,
+    ContainerTerminationEvidence,
     EmptyDirVolume,
     IpBlock,
     KubernetesApi,
@@ -39,13 +41,16 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodResource,
     PodStatus,
     PodWatchEvent,
+    RuntimeClassResource,
     Toleration,
 )
 from azents_runtime_provider_kubernetes.provider import (
+    KUBERNETES_BWRAP_APPARMOR_PROFILE,
     RUNNER_LIMIT_ENV_NAMES,
     InvalidResetFinalDesiredState,
     InvalidRunnerEnvironment,
     InvalidWorkspacePath,
+    KubernetesProcessContainmentConfig,
     KubernetesRuntimeProvider,
     KubernetesRuntimeProviderConfig,
     UnsupportedRuntimeConfiguration,
@@ -70,6 +75,7 @@ class FakeKubernetesApi(KubernetesApi):
         self.deleted_pvcs: list[str] = []
         self.deleted_network_policies: list[str] = []
         self.watch_events: list[PodWatchEvent] = []
+        self.runtime_classes: dict[str, RuntimeClassResource] = {}
         self.fail_pod_deletion = False
         self.defer_pod_deletion = False
 
@@ -190,10 +196,15 @@ class FakeKubernetesApi(KubernetesApi):
     async def apply_lease(self, lease: LeaseResource) -> None:
         """Unused by provider tests."""
 
+    async def get_runtime_class(self, name: str) -> RuntimeClassResource | None:
+        """Return configured RuntimeClass evidence."""
+        return self.runtime_classes.get(name)
+
 
 def _provider(
     api: FakeKubernetesApi,
     *,
+    process_containment: KubernetesProcessContainmentConfig | None = None,
     network_hard_cap_allowed_cidrs: tuple[str, ...] = (),
     network_hard_cap_denied_cidrs: tuple[str, ...] = (),
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = (),
@@ -201,6 +212,7 @@ def _provider(
     return _provider_with_runner_env(
         api,
         {},
+        process_containment=process_containment,
         network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
         network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
         network_hard_cap_extra_egress=network_hard_cap_extra_egress,
@@ -211,6 +223,7 @@ def _provider_with_runner_env(
     api: FakeKubernetesApi,
     runner_env: Mapping[str, str],
     *,
+    process_containment: KubernetesProcessContainmentConfig | None = None,
     network_hard_cap_allowed_cidrs: tuple[str, ...] = (),
     network_hard_cap_denied_cidrs: tuple[str, ...] = (),
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = (),
@@ -228,10 +241,23 @@ def _provider_with_runner_env(
                 "app.kubernetes.io/component": "runtime-control",
             },
             runtime_control_port=8030,
+            process_containment=process_containment,
             network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
             network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
             network_hard_cap_extra_egress=network_hard_cap_extra_egress,
         ),
+    )
+
+
+def _containment_config(
+    *,
+    runtime_class_name: str | None = None,
+) -> KubernetesProcessContainmentConfig:
+    return KubernetesProcessContainmentConfig(
+        backend="bwrap",
+        security_profile=KUBERNETES_BWRAP_APPARMOR_PROFILE,
+        qualification_timeout_seconds=15,
+        runtime_class_name=runtime_class_name,
     )
 
 
@@ -332,6 +358,243 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert "azents/workspace-path" not in pvc.metadata.labels
     assert "azents/workspace-path" not in pod.metadata.annotations
     assert "azents/workspace-path" not in pvc.metadata.annotations
+
+
+@pytest.mark.asyncio
+async def test_schema_v2_requires_enabled_provider_preparation_before_mutation() -> (
+    None
+):
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+
+    with pytest.raises(
+        UnsupportedRuntimeConfiguration,
+        match="schema version 2 requires Provider",
+    ):
+        await provider.start(
+            _command(
+                RuntimeLifecycleCommandType.START,
+                runtime_configuration=_runtime_configuration(schema_version=2),
+            )
+        )
+
+    assert api.pods == {}
+    assert api.pvcs == {}
+    assert api.network_policies == {}
+
+
+@pytest.mark.asyncio
+async def test_direct_v2_preserves_direct_runner_contract() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api, process_containment=_containment_config())
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(schema_version=2),
+        )
+    )
+
+    pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
+    runner = pod.spec.containers[0]
+    env = {item.name: item.value for item in runner.env}
+    assert pod.spec.host_users is None
+    assert pod.spec.runtime_class_name is None
+    assert [volume.name for volume in pod.spec.volumes] == ["agent-workspace"]
+    assert [mount.mount_path for mount in runner.volume_mounts] == ["/runtime/home"]
+    assert "AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG" not in env
+    assert runner.security_context.allow_privilege_escalation is False
+    assert runner.security_context.capabilities_add == ()
+    assert runner.security_context.capabilities_drop == ("ALL",)
+    assert runner.security_context.proc_mount is None
+    assert runner.security_context.seccomp_profile is None
+    assert runner.security_context.apparmor_profile is None
+
+
+@pytest.mark.asyncio
+async def test_contained_v2_emits_exact_bootstrap_volumes_and_security() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(
+        api,
+        process_containment=_containment_config(runtime_class_name="runc-bwrap"),
+    )
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(
+                schema_version=2,
+                process_containment=True,
+            ),
+        )
+    )
+
+    pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
+    assert pod.spec.host_users is False
+    assert pod.spec.runtime_class_name == "runc-bwrap"
+    assert pod.spec.automount_service_account_token is False
+    assert [container.name for container in pod.spec.containers] == ["runner"]
+    assert [volume.name for volume in pod.spec.volumes] == [
+        "agent-workspace",
+        "agent-temporary",
+        "runner-private",
+    ]
+    runner = pod.spec.containers[0]
+    mounts = {mount.mount_path: mount for mount in runner.volume_mounts}
+    assert set(mounts) == {
+        "/runtime/home",
+        "/run/azents/agent-tmp",
+        "/run/azents/runner-private",
+    }
+    assert "/tmp" not in mounts
+    env = {item.name: item.value for item in runner.env}
+    assert json.loads(env["AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"]) == {
+        "schema_version": 1,
+        "backend": "bwrap",
+        "agent_workspace_path": "/runtime/home",
+        "agent_temporary_path": "/run/azents/agent-tmp",
+        "runner_private_paths": [
+            "/run/azents/runner-private",
+            "/workspace/python/apps/azents-runtime-runner/.venv",
+            "/var/run/azents-engine/docker.sock",
+        ],
+        "qualification_timeout_seconds": 15,
+    }
+    security = runner.security_context
+    assert security.privileged is False
+    assert security.allow_privilege_escalation is True
+    assert security.run_as_non_root is True
+    assert security.run_as_user == 1000
+    assert security.run_as_group == 1000
+    assert security.capabilities_add == (
+        "SYS_ADMIN",
+        "SYS_CHROOT",
+        "NET_ADMIN",
+        "SETUID",
+        "SETGID",
+        "SYS_PTRACE",
+        "SETPCAP",
+    )
+    assert security.capabilities_drop == ("ALL",)
+    assert security.proc_mount == "Unmasked"
+    assert security.seccomp_profile is not None
+    assert security.seccomp_profile.profile_type == "Unconfined"
+    assert security.seccomp_profile.localhost_profile is None
+    assert security.apparmor_profile is not None
+    assert security.apparmor_profile.profile_type == "Localhost"
+    assert (
+        security.apparmor_profile.localhost_profile == KUBERNETES_BWRAP_APPARMOR_PROFILE
+    )
+
+
+@pytest.mark.asyncio
+async def test_contained_security_drift_replaces_pod_and_preserves_pvc() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(
+        api,
+        process_containment=_containment_config(runtime_class_name="runc-bwrap"),
+    )
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=2,
+            process_containment=True,
+        ),
+    )
+    await provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pvc_key = ("azents-runtime", "azents-runtime-runtime-1-workspace")
+    pvc = api.pvcs[pvc_key]
+    pod = api.pods[pod_key]
+    runner = pod.spec.containers[0]
+    api.pods[pod_key] = dataclasses.replace(
+        pod,
+        spec=dataclasses.replace(
+            pod.spec,
+            containers=(
+                dataclasses.replace(
+                    runner,
+                    security_context=dataclasses.replace(
+                        runner.security_context,
+                        allow_privilege_escalation=False,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    await provider.start(command)
+
+    assert api.deleted_pods == ["azents-runtime-runtime-1"]
+    assert api.deleted_pvcs == []
+    assert api.pvcs[pvc_key] == pvc
+    replacement = api.pods[pod_key]
+    assert (
+        replacement.spec.containers[0].security_context.allow_privilege_escalation
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_pending_containment_bootstrap_drift_replaces_pod() -> None:
+    api = FakeKubernetesApi()
+    old_provider = _provider(api, process_containment=_containment_config())
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=2,
+            process_containment=True,
+        ),
+    )
+    await old_provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    api.pods[pod_key] = dataclasses.replace(
+        api.pods[pod_key],
+        status=PodStatus(phase="Pending", ready=False),
+    )
+    new_provider = _provider(
+        api,
+        process_containment=dataclasses.replace(
+            _containment_config(),
+            qualification_timeout_seconds=30,
+        ),
+    )
+
+    await new_provider.start(command)
+
+    assert api.deleted_pods == ["azents-runtime-runtime-1"]
+    env = {item.name: item.value for item in api.pods[pod_key].spec.containers[0].env}
+    bootstrap = json.loads(env["AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"])
+    assert bootstrap["qualification_timeout_seconds"] == 30
+
+
+@pytest.mark.asyncio
+async def test_contained_host_user_drift_replaces_pod_and_preserves_pvc() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api, process_containment=_containment_config())
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=2,
+            process_containment=True,
+        ),
+    )
+    await provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pvc_key = ("azents-runtime", "azents-runtime-runtime-1-workspace")
+    pvc = api.pvcs[pvc_key]
+    pod = api.pods[pod_key]
+    api.pods[pod_key] = dataclasses.replace(
+        pod,
+        spec=dataclasses.replace(pod.spec, host_users=None),
+    )
+
+    await provider.start(command)
+
+    assert api.deleted_pods == ["azents-runtime-runtime-1"]
+    assert api.deleted_pvcs == []
+    assert api.pvcs[pvc_key] == pvc
+    assert api.pods[pod_key].spec.host_users is False
 
 
 @pytest.mark.asyncio
@@ -943,6 +1206,38 @@ async def test_observe_terminal_pod_reports_stopped() -> None:
 
     assert report.observed_state is RuntimeProviderObservedState.STOPPED
     assert report.reason == "pod_failed"
+
+
+@pytest.mark.asyncio
+async def test_observe_terminal_pod_reports_only_bounded_termination_evidence() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+    api.pods[pod_key] = dataclasses.replace(
+        pod,
+        status=PodStatus(
+            phase="Failed",
+            ready=False,
+            termination_evidence=ContainerTerminationEvidence(
+                container_name="runner",
+                exit_code=137,
+                reason="OOMKilled",
+                oom_killed=True,
+            ),
+        ),
+    )
+
+    report = await provider.observe(_command(RuntimeLifecycleCommandType.OBSERVE))
+
+    assert report.diagnostic == {
+        "pod_phase": "Failed",
+        "container_name": "runner",
+        "exit_code": "137",
+        "oom_killed": "true",
+        "termination_reason": "OOMKilled",
+    }
 
 
 @pytest.mark.asyncio
@@ -1826,6 +2121,39 @@ async def test_configuration_update_changes_only_network_policy() -> None:
 
 
 @pytest.mark.asyncio
+async def test_configuration_update_rejects_contained_host_user_drift() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api, process_containment=_containment_config())
+    configuration = _runtime_configuration(
+        schema_version=2,
+        process_containment=True,
+    )
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=configuration,
+        )
+    )
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+    api.pods[pod_key] = dataclasses.replace(
+        pod,
+        spec=dataclasses.replace(pod.spec, host_users=None),
+    )
+
+    with pytest.raises(
+        UnsupportedRuntimeConfiguration,
+        match="requires Kubernetes resource recreation",
+    ):
+        await provider.update_configuration(
+            _command(
+                RuntimeLifecycleCommandType.UPDATE_CONFIGURATION,
+                runtime_configuration=configuration,
+            )
+        )
+
+
+@pytest.mark.asyncio
 async def test_invalid_dind_configuration_fails_before_resource_mutation() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
@@ -1869,6 +2197,8 @@ async def test_configuration_bound_to_another_provider_is_rejected() -> None:
 def _runtime_configuration(
     *,
     docker_enabled: bool = False,
+    schema_version: int = 1,
+    process_containment: bool = False,
     desired_generation: int = 1,
     provider_logical_id: str = "provider-k8s",
     bounded: bool = True,
@@ -1902,7 +2232,7 @@ def _runtime_configuration(
     effective_profile: dict[str, JsonValue] = {
         "profile_kind": "kubernetes_pod",
         "contract_family": "kubernetes.pod-profile",
-        "schema_version": 1,
+        "schema_version": schema_version,
         "runner_resources": {
             "cpu_request_millicores": (
                 None if omit_runner_resources else runner_cpu_request_millicores
@@ -1976,6 +2306,10 @@ def _runtime_configuration(
             else None
         ),
     }
+    if schema_version == 2:
+        effective_profile["process_containment"] = (
+            {"schema_version": 1} if process_containment else None
+        )
     configuration: dict[str, JsonValue] = {
         "schema_version": 1,
         "provider": {
