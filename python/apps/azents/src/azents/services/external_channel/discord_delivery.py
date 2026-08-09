@@ -1,20 +1,36 @@
-"""Bounded Discord message delivery primitives."""
+"""Bounded Discord message delivery through public SDK APIs and exact byte gaps."""
 
+import asyncio
+import contextlib
 import json
 import secrets
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
-from typing import Literal
+from typing import Literal, Protocol
 
 import httpx
 
 from azents.core.external_channel_title import normalize_discord_thread_title
 from azents.services.external_channel.discord_endpoint import discord_api_base_url
+from azents.services.external_channel.discord_sdk import (
+    DiscordSDKClientFactory,
+    DiscordSDKCredentialsInvalid,
+    DiscordSDKError,
+    DiscordSDKMessage,
+    DiscordSDKPermissionDenied,
+    DiscordSDKRateLimited,
+    DiscordSDKRequestRejected,
+    DiscordSDKResourceUnavailable,
+    DiscordSDKSession,
+    DiscordSDKThread,
+    DiscordSDKUnavailable,
+)
 from azents.services.external_channel.provider_effect import ProviderOperationKey
 
 _DISCORD_MIN_AUTO_ARCHIVE_MINUTES = 60
 DISCORD_DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024
 DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES = 25 * 1024 * 1024
+_DISCORD_DELIVERY_TIMEOUT_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
@@ -51,56 +67,153 @@ class DiscordOutboundFile:
     content: Callable[[], AsyncIterator[bytes]]
 
 
-class DiscordDeliveryClient:
-    """Perform one Discord message mutation without retrying ambiguous outcomes."""
+class DiscordFileMessageTransport:
+    """G2 direct transport for streamed Discord multipart file messages only."""
 
     def __init__(self, http_client: httpx.AsyncClient) -> None:
         self.http_client = http_client
+
+    async def create_file_message(
+        self,
+        *,
+        bot_token: str,
+        guild_id: str,
+        channel_id: str,
+        content: str,
+        files: tuple[DiscordOutboundFile, ...],
+        nonce: str,
+    ) -> DiscordDeliveryResult:
+        """Create one exact-length multipart message through approved gap G2."""
+        if not files:
+            return _rejected_result()
+        try:
+            stream = _DiscordMultipartStream(
+                payload={
+                    "content": content,
+                    "nonce": nonce,
+                    "enforce_nonce": True,
+                    "attachments": [
+                        {"id": str(index), "filename": file.filename}
+                        for index, file in enumerate(files)
+                    ],
+                },
+                files=files,
+            )
+            response = await self.http_client.post(
+                f"{discord_api_base_url()}/channels/{channel_id}/messages",
+                headers={"Authorization": f"Bot {bot_token}", **stream.headers},
+                content=stream,
+            )
+        except DiscordOutboundFileContentError:
+            return DiscordDeliveryResult(
+                status="unknown",
+                provider_message_key=None,
+                error_kind="provider_ambiguous",
+                error_summary=(
+                    "Discord file delivery outcome is unknown after the source changed."
+                ),
+            )
+        except httpx.RequestError:
+            return _unknown_result(
+                error_kind="transport_unknown",
+                error_summary="Discord file delivery outcome is unknown.",
+            )
+        failure = _response_failure(response)
+        if failure is not None:
+            return failure
+        return _created_message_result(
+            response=response,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+
+
+class DiscordFileMessageTransportProtocol(Protocol):
+    """One exact G2 multipart file-message operation."""
+
+    async def create_file_message(
+        self,
+        *,
+        bot_token: str,
+        guild_id: str,
+        channel_id: str,
+        content: str,
+        files: tuple[DiscordOutboundFile, ...],
+        nonce: str,
+    ) -> DiscordDeliveryResult:
+        """Create one streamed multipart file message."""
+        ...
+
+
+class DiscordDeliveryClient:
+    """Perform Discord mutations through public SDK operations without replay."""
+
+    def __init__(
+        self,
+        sdk_factory: DiscordSDKClientFactory,
+        file_transport: DiscordFileMessageTransportProtocol,
+    ) -> None:
+        self.sdk_factory = sdk_factory
+        self.file_transport = file_transport
 
     async def ensure_thread(
         self,
         *,
         bot_token: str,
+        guild_id: str,
         parent_channel_id: str,
         root_message_id: str,
         name: str | None,
     ) -> DiscordDeliveryResult:
-        """Return only after the root Discord message has a usable thread."""
-        existing = await self._read_root_thread(
-            bot_token=bot_token,
-            parent_channel_id=parent_channel_id,
-            root_message_id=root_message_id,
-        )
-        if existing is not None:
-            return existing
+        """Return only after the root Discord message has a usable Thread."""
         thread_name = _discord_thread_name(name)
-        response = await self._request(
-            "POST",
-            f"/channels/{parent_channel_id}/messages/{root_message_id}/threads",
-            bot_token=bot_token,
-            json_body={
-                "name": thread_name,
-                "auto_archive_duration": _DISCORD_MIN_AUTO_ARCHIVE_MINUTES,
-            },
-        )
-        if isinstance(response, DiscordDeliveryResult):
-            result = response
-        else:
-            result = _thread_result(
-                response=response,
-                parent_channel_id=parent_channel_id,
-                root_message_id=root_message_id,
-            )
-        if result.status == "delivered":
-            return replace(result, created_thread_name=thread_name)
-        reconciled = await self._read_root_thread(
-            bot_token=bot_token,
-            parent_channel_id=parent_channel_id,
-            root_message_id=root_message_id,
-        )
-        if reconciled is not None:
-            return reconciled
-        return result
+        try:
+            async with self._open_sdk(bot_token=bot_token) as sdk:
+                existing = await sdk.fetch_root_thread(
+                    guild_id=guild_id,
+                    parent_channel_id=parent_channel_id,
+                    root_message_id=root_message_id,
+                )
+                if existing is not None:
+                    return _thread_result(
+                        existing,
+                        guild_id=guild_id,
+                        parent_channel_id=parent_channel_id,
+                    )
+                try:
+                    created = await sdk.create_thread(
+                        guild_id=guild_id,
+                        parent_channel_id=parent_channel_id,
+                        root_message_id=root_message_id,
+                        name=thread_name,
+                        auto_archive_duration=_DISCORD_MIN_AUTO_ARCHIVE_MINUTES,
+                    )
+                except DiscordSDKError as error:
+                    result = _sdk_delivery_failure(error)
+                    reconciled = await sdk.fetch_root_thread(
+                        guild_id=guild_id,
+                        parent_channel_id=parent_channel_id,
+                        root_message_id=root_message_id,
+                    )
+                    if reconciled is not None:
+                        return _thread_result(
+                            reconciled,
+                            guild_id=guild_id,
+                            parent_channel_id=parent_channel_id,
+                        )
+                    return result
+                return replace(
+                    _thread_result(
+                        created,
+                        guild_id=guild_id,
+                        parent_channel_id=parent_channel_id,
+                    ),
+                    created_thread_name=thread_name,
+                )
+        except DiscordSDKError as error:
+            return _sdk_delivery_failure(error)
+        except TimeoutError:
+            return _sdk_timeout_result()
 
     async def read_thread_title(
         self,
@@ -109,61 +222,32 @@ class DiscordDeliveryClient:
         guild_id: str,
         channel_id: str,
     ) -> DiscordThreadTitleReadResult:
-        """Read one exact Discord thread title without retry."""
+        """Read one exact Discord Thread title without retry."""
         try:
-            response = await self.http_client.get(
-                f"{discord_api_base_url()}/channels/{channel_id}",
-                headers={"Authorization": f"Bot {bot_token}"},
+            async with self._open_sdk(bot_token=bot_token) as sdk:
+                thread = await sdk.fetch_thread(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                )
+        except DiscordSDKResourceUnavailable:
+            return DiscordThreadTitleReadResult(
+                status="missing", name=None, error_kind="thread_not_found"
             )
-        except httpx.RequestError:
+        except DiscordSDKError as error:
+            failure = _sdk_delivery_failure(error)
+            return DiscordThreadTitleReadResult(
+                status="failed" if failure.status == "failed" else "unknown",
+                name=None,
+                error_kind=failure.error_kind,
+            )
+        except TimeoutError:
             return DiscordThreadTitleReadResult(
                 status="unknown",
                 name=None,
                 error_kind="transport_unknown",
             )
-        if response.status_code == 404:
-            return DiscordThreadTitleReadResult(
-                status="missing",
-                name=None,
-                error_kind="thread_not_found",
-            )
-        failure = _response_failure(response)
-        if failure is not None:
-            return DiscordThreadTitleReadResult(
-                status=("failed" if failure.status == "failed" else "unknown"),
-                name=None,
-                error_kind=failure.error_kind,
-            )
-        try:
-            payload: object = response.json()
-        except ValueError:
-            return DiscordThreadTitleReadResult(
-                status="unknown",
-                name=None,
-                error_kind="response_malformed",
-            )
-        if not isinstance(payload, dict):
-            return DiscordThreadTitleReadResult(
-                status="unknown",
-                name=None,
-                error_kind="response_shape_invalid",
-            )
-        name = payload.get("name")
-        if (
-            payload.get("id") != channel_id
-            or payload.get("guild_id") != guild_id
-            or not isinstance(name, str)
-            or not name.strip()
-        ):
-            return DiscordThreadTitleReadResult(
-                status="unknown",
-                name=None,
-                error_kind="response_shape_invalid",
-            )
         return DiscordThreadTitleReadResult(
-            status="present",
-            name=name,
-            error_kind=None,
+            status="present", name=thread.name, error_kind=None
         )
 
     async def update_thread_title(
@@ -174,91 +258,31 @@ class DiscordDeliveryClient:
         channel_id: str,
         name: str,
     ) -> DiscordDeliveryResult:
-        """Apply one name-only Discord thread update without retry."""
+        """Apply one name-only Discord Thread update without retry."""
         normalized = normalize_discord_thread_title(name)
         if normalized is None:
             return _rejected_result()
-        response = await self._request(
-            "PATCH",
-            f"/channels/{channel_id}",
-            bot_token=bot_token,
-            json_body={"name": normalized},
-        )
-        if isinstance(response, DiscordDeliveryResult):
-            return response
-        failure = _response_failure(response)
-        if failure is not None:
-            return failure
         try:
-            payload: object = response.json()
-        except ValueError:
-            return _unknown_result(
-                error_kind="response_malformed",
-                error_summary="Discord thread update response was malformed.",
-            )
-        if (
-            not isinstance(payload, dict)
-            or payload.get("id") != channel_id
-            or payload.get("guild_id") != guild_id
-            or payload.get("name") != normalized
-        ):
+            async with self._open_sdk(bot_token=bot_token) as sdk:
+                thread = await sdk.update_thread_name(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    name=normalized,
+                )
+        except DiscordSDKError as error:
+            return _sdk_delivery_failure(error)
+        except TimeoutError:
+            return _sdk_timeout_result()
+        if thread.name != normalized:
             return _unknown_result(
                 error_kind="response_shape_invalid",
-                error_summary="Discord thread update response was invalid.",
+                error_summary="Discord Thread update response was invalid.",
             )
         return DiscordDeliveryResult(
             status="delivered",
             provider_message_key=f"discord-thread:{channel_id}",
             error_kind=None,
             error_summary=None,
-        )
-
-    async def _read_root_thread(
-        self,
-        *,
-        bot_token: str,
-        parent_channel_id: str,
-        root_message_id: str,
-    ) -> DiscordDeliveryResult | None:
-        """Read the root once to reconcile an existing or ambiguous thread create."""
-        try:
-            response = await self.http_client.get(
-                (
-                    f"{discord_api_base_url()}/channels/{parent_channel_id}/messages/"
-                    f"{root_message_id}"
-                ),
-                headers={"Authorization": f"Bot {bot_token}"},
-            )
-        except httpx.RequestError:
-            return _unknown_result(
-                error_kind="transport_unknown",
-                error_summary="Discord thread reconciliation transport failed.",
-            )
-        if response.status_code == 404:
-            return None
-        if response.status_code != 200:
-            return _response_failure(response) or _unknown_result(
-                error_kind="response_shape_invalid",
-                error_summary="Discord thread reconciliation response was invalid.",
-            )
-        try:
-            payload: object = response.json()
-        except ValueError:
-            return _unknown_result(
-                error_kind="response_malformed",
-                error_summary="Discord thread reconciliation response was malformed.",
-            )
-        if not isinstance(payload, dict):
-            return _unknown_result(
-                error_kind="response_shape_invalid",
-                error_summary="Discord thread reconciliation response was invalid.",
-            )
-        if "thread" not in payload:
-            return None
-        return _thread_result(
-            response=response,
-            parent_channel_id=parent_channel_id,
-            root_message_id=root_message_id,
         )
 
     async def create_message(
@@ -272,29 +296,22 @@ class DiscordDeliveryClient:
         components: list[dict[str, object]] | None = None,
         embeds: list[dict[str, object]] | None = None,
     ) -> DiscordDeliveryResult:
-        """Create one message with a live-operation duplicate nonce."""
-        payload: dict[str, object] = {
-            "content": content,
-            "nonce": discord_delivery_nonce(operation_key),
-            "enforce_nonce": True,
-        }
-        if components is not None:
-            payload["components"] = components
-        if embeds is not None:
-            payload["embeds"] = embeds
-        response = await self._request(
-            "POST",
-            f"/channels/{channel_id}/messages",
-            bot_token=bot_token,
-            json_body=payload,
-        )
-        if isinstance(response, DiscordDeliveryResult):
-            return response
-        return _created_message_result(
-            response=response,
-            guild_id=guild_id,
-            channel_id=channel_id,
-        )
+        """Create one text message with the SDK nonce boundary."""
+        try:
+            async with self._open_sdk(bot_token=bot_token) as sdk:
+                message = await sdk.create_message(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    content=content,
+                    nonce=discord_delivery_nonce(operation_key),
+                    components=components,
+                    embeds=embeds,
+                )
+        except DiscordSDKError as error:
+            return _sdk_delivery_failure(error)
+        except TimeoutError:
+            return _sdk_timeout_result()
+        return _sdk_message_result(message, guild_id=guild_id, channel_id=channel_id)
 
     async def create_file_message(
         self,
@@ -306,43 +323,14 @@ class DiscordDeliveryClient:
         files: tuple[DiscordOutboundFile, ...],
         operation_key: ProviderOperationKey,
     ) -> DiscordDeliveryResult:
-        """Create one nonce-fenced multipart message from streaming file sources."""
-        if not files:
-            return _rejected_result()
-        try:
-            stream = _DiscordMultipartStream(
-                payload={
-                    "content": content,
-                    "nonce": discord_delivery_nonce(operation_key),
-                    "enforce_nonce": True,
-                    "attachments": [
-                        {"id": str(index), "filename": file.filename}
-                        for index, file in enumerate(files)
-                    ],
-                },
-                files=files,
-            )
-            response = await self._request(
-                "POST",
-                f"/channels/{channel_id}/messages",
-                bot_token=bot_token,
-                json_body=None,
-                content=stream,
-                content_headers=stream.headers,
-            )
-        except DiscordOutboundFileContentError:
-            return DiscordDeliveryResult(
-                status="failed",
-                provider_message_key=None,
-                error_kind="file_source_invalid",
-                error_summary="The outbound file source changed before upload.",
-            )
-        if isinstance(response, DiscordDeliveryResult):
-            return response
-        return _created_message_result(
-            response=response,
+        """Create one nonce-fenced multipart message through approved gap G2."""
+        return await self.file_transport.create_file_message(
+            bot_token=bot_token,
             guild_id=guild_id,
             channel_id=channel_id,
+            content=content,
+            files=files,
+            nonce=discord_delivery_nonce(operation_key),
         )
 
     async def update_message(
@@ -356,43 +344,43 @@ class DiscordDeliveryClient:
         components: list[dict[str, object]] | None = None,
         embeds: list[dict[str, object]] | None = None,
     ) -> DiscordDeliveryResult:
-        """Update one currently owned Discord message."""
-        response = await self._request(
-            "PATCH",
-            f"/channels/{channel_id}/messages/{message_id}",
-            bot_token=bot_token,
-            json_body={
-                "content": content,
-                **({"components": components} if components is not None else {}),
-                **({"embeds": embeds} if embeds is not None else {}),
-            },
-        )
-        if isinstance(response, DiscordDeliveryResult):
-            return response
-        return _created_message_result(
-            response=response,
-            guild_id=guild_id,
-            channel_id=channel_id,
-        )
+        """Update one currently owned Discord message through the SDK."""
+        try:
+            async with self._open_sdk(bot_token=bot_token) as sdk:
+                message = await sdk.update_message(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    content=content,
+                    components=components,
+                    embeds=embeds,
+                )
+        except DiscordSDKError as error:
+            return _sdk_delivery_failure(error)
+        except TimeoutError:
+            return _sdk_timeout_result()
+        return _sdk_message_result(message, guild_id=guild_id, channel_id=channel_id)
 
     async def delete_message(
         self,
         *,
         bot_token: str,
+        guild_id: str,
         channel_id: str,
         message_id: str,
     ) -> DiscordDeliveryResult:
-        """Delete one currently owned Discord message."""
-        response = await self._request(
-            "DELETE",
-            f"/channels/{channel_id}/messages/{message_id}",
-            bot_token=bot_token,
-            json_body=None,
-        )
-        if isinstance(response, DiscordDeliveryResult):
-            return response
-        if response.status_code not in {200, 202, 204}:
-            return _rejected_result()
+        """Delete one currently owned Discord message through the SDK."""
+        try:
+            async with self._open_sdk(bot_token=bot_token) as sdk:
+                await sdk.delete_message(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                )
+        except DiscordSDKError as error:
+            return _sdk_delivery_failure(error)
+        except TimeoutError:
+            return _sdk_timeout_result()
         return DiscordDeliveryResult(
             status="delivered",
             provider_message_key=None,
@@ -400,43 +388,116 @@ class DiscordDeliveryClient:
             error_summary=None,
         )
 
-    async def _request(
+    @contextlib.asynccontextmanager
+    async def _open_sdk(
         self,
-        method: str,
-        path: str,
         *,
         bot_token: str,
-        json_body: dict[str, object] | None,
-        content: httpx.AsyncByteStream | None = None,
-        content_headers: dict[str, str] | None = None,
-    ) -> httpx.Response | DiscordDeliveryResult:
-        try:
-            response = await self.http_client.request(
-                method,
-                f"{discord_api_base_url()}{path}",
-                headers={
-                    "Authorization": f"Bot {bot_token}",
-                    **(content_headers or {}),
-                },
-                json=json_body,
-                content=content,
-            )
-        except httpx.RequestError:
-            return _unknown_result(
-                error_kind="transport_unknown",
-                error_summary="Discord delivery transport outcome is unknown.",
-            )
-        return _response_failure(response) or response
+    ) -> AsyncIterator[DiscordSDKSession]:
+        async with asyncio.timeout(_DISCORD_DELIVERY_TIMEOUT_SECONDS):
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                yield sdk
 
 
 def _discord_thread_name(name: str | None) -> str:
-    """Return one bounded valid Discord thread name."""
+    """Return one bounded valid Discord Thread name."""
     normalized = "" if name is None else " ".join(name.split())
     return (normalized or "Azents")[:100]
 
 
+def discord_delivery_nonce(operation_key: ProviderOperationKey) -> str:
+    """Return the bounded duplicate nonce for one live create operation."""
+    return operation_key.value
+
+
+def _sdk_message_result(
+    message: DiscordSDKMessage,
+    *,
+    guild_id: str,
+    channel_id: str,
+) -> DiscordDeliveryResult:
+    if message.guild_id != guild_id or message.channel_id != channel_id:
+        return _unknown_result(
+            error_kind="response_channel_mismatch",
+            error_summary="Discord message response targeted another channel.",
+        )
+    if not message.message_id.isdigit():
+        return _unknown_result(
+            error_kind="response_shape_invalid",
+            error_summary="Discord message response contained an invalid identity.",
+        )
+    return DiscordDeliveryResult(
+        status="delivered",
+        provider_message_key=f"discord:{guild_id}:{message.message_id}",
+        error_kind=None,
+        error_summary=None,
+    )
+
+
+def _thread_result(
+    thread: DiscordSDKThread,
+    *,
+    guild_id: str,
+    parent_channel_id: str,
+) -> DiscordDeliveryResult:
+    if (
+        thread.guild_id != guild_id
+        or thread.parent_id != parent_channel_id
+        or not thread.thread_id.isdigit()
+    ):
+        return _unknown_result(
+            error_kind="thread_response_invalid",
+            error_summary="Discord Thread response had an invalid relationship.",
+        )
+    return DiscordDeliveryResult(
+        status="delivered",
+        provider_message_key=f"discord-thread:{thread.thread_id}",
+        error_kind=None,
+        error_summary=None,
+    )
+
+
+def _sdk_delivery_failure(error: DiscordSDKError) -> DiscordDeliveryResult:
+    if isinstance(error, DiscordSDKCredentialsInvalid):
+        return DiscordDeliveryResult(
+            status="failed",
+            provider_message_key=None,
+            error_kind="credentials_invalid",
+            error_summary="Discord rejected the active Bot credential.",
+        )
+    if isinstance(error, DiscordSDKPermissionDenied):
+        return DiscordDeliveryResult(
+            status="failed",
+            provider_message_key=None,
+            error_kind="permission_denied",
+            error_summary="Discord denied access to the target conversation.",
+        )
+    if isinstance(error, DiscordSDKResourceUnavailable):
+        return DiscordDeliveryResult(
+            status="failed",
+            provider_message_key=None,
+            error_kind="message_not_found",
+            error_summary="Discord no longer exposes the target message.",
+        )
+    if isinstance(error, DiscordSDKRateLimited):
+        return DiscordDeliveryResult(
+            status="failed",
+            provider_message_key=None,
+            error_kind="rate_limited",
+            error_summary="Discord rate limited the provider operation.",
+        )
+    if isinstance(error, DiscordSDKRequestRejected):
+        return _rejected_result()
+    if isinstance(error, DiscordSDKUnavailable):
+        return _unknown_result(
+            error_kind="provider_ambiguous",
+            error_summary="Discord delivery outcome is unknown.",
+        )
+    return _unknown_result()
+
+
 def _response_failure(response: httpx.Response) -> DiscordDeliveryResult | None:
-    """Map a non-success Discord response into a sanitized delivery outcome."""
+    """Map one G2 HTTP response into a sanitized delivery outcome."""
     if response.status_code in {401, 403}:
         return DiscordDeliveryResult(
             status="failed",
@@ -476,11 +537,6 @@ def _response_failure(response: httpx.Response) -> DiscordDeliveryResult | None:
     return None
 
 
-def discord_delivery_nonce(operation_key: ProviderOperationKey) -> str:
-    """Return the bounded duplicate nonce for one live create operation."""
-    return operation_key.value
-
-
 def _created_message_result(
     *,
     response: httpx.Response,
@@ -503,11 +559,6 @@ def _created_message_result(
             error_kind="response_channel_mismatch",
             error_summary="Discord message response targeted another channel.",
         )
-    if message_id is None:
-        return _unknown_result(
-            error_kind="response_shape_invalid",
-            error_summary="Discord message response omitted its identity.",
-        )
     if not isinstance(message_id, str) or not message_id.isdigit():
         return _unknown_result(
             error_kind="response_shape_invalid",
@@ -516,50 +567,6 @@ def _created_message_result(
     return DiscordDeliveryResult(
         status="delivered",
         provider_message_key=f"discord:{guild_id}:{message_id}",
-        error_kind=None,
-        error_summary=None,
-    )
-
-
-def _thread_result(
-    *,
-    response: httpx.Response,
-    parent_channel_id: str,
-    root_message_id: str,
-) -> DiscordDeliveryResult:
-    """Validate that Discord returned the expected thread channel."""
-    try:
-        payload: object = response.json()
-    except ValueError:
-        return _unknown_result(
-            error_kind="response_malformed",
-            error_summary="Discord thread response was malformed.",
-        )
-    if not isinstance(payload, dict):
-        return _unknown_result(
-            error_kind="response_shape_invalid",
-            error_summary="Discord thread response was invalid.",
-        )
-    thread = payload.get("thread") if "thread" in payload else payload
-    if not isinstance(thread, dict):
-        return _unknown_result(
-            error_kind="thread_response_invalid",
-            error_summary="Discord thread response omitted its thread object.",
-        )
-    thread_id = thread.get("id")
-    if thread.get("parent_id") != parent_channel_id:
-        return _unknown_result(
-            error_kind="thread_response_invalid",
-            error_summary="Discord thread response had the wrong parent channel.",
-        )
-    if not isinstance(thread_id, str) or not thread_id.isdigit():
-        return _unknown_result(
-            error_kind="thread_response_invalid",
-            error_summary="Discord thread response contained an invalid identity.",
-        )
-    return DiscordDeliveryResult(
-        status="delivered",
-        provider_message_key=f"discord-thread:{thread_id}",
         error_kind=None,
         error_summary=None,
     )
@@ -578,6 +585,13 @@ def _unknown_result(
     )
 
 
+def _sdk_timeout_result() -> DiscordDeliveryResult:
+    return _unknown_result(
+        error_kind="transport_unknown",
+        error_summary="Discord delivery exceeded its provider deadline.",
+    )
+
+
 def _rejected_result() -> DiscordDeliveryResult:
     return DiscordDeliveryResult(
         status="failed",
@@ -588,7 +602,7 @@ def _rejected_result() -> DiscordDeliveryResult:
 
 
 class _DiscordMultipartStream(httpx.AsyncByteStream):
-    """Encode a bounded multipart request while yielding file chunks lazily."""
+    """Encode one bounded G2 multipart request while yielding chunks lazily."""
 
     def __init__(
         self,

@@ -64,6 +64,7 @@ from azents.services.external_channel.credentials import ExternalChannelCredenti
 from azents.services.external_channel.discord_delivery import (
     DiscordDeliveryClient,
     DiscordDeliveryResult,
+    DiscordFileMessageTransport,
     DiscordOutboundFile,
     DiscordOutboundFileContentError,
 )
@@ -72,6 +73,10 @@ from azents.services.external_channel.discord_presentation import (
     render_discord_session_navigation_components,
     render_discord_session_presence,
     render_discord_setup_required,
+)
+from azents.services.external_channel.discord_sdk import (
+    DiscordSDKClientFactory,
+    get_discord_sdk_client_factory,
 )
 from azents.services.external_channel.discord_settings_scope import (
     build_discord_binding_settings_open_custom_id,
@@ -101,8 +106,10 @@ from azents.services.external_channel.provider_effect import (
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,
     SlackConversationClient,
+    SlackExternalUploadTransport,
     SlackOutboundFile,
     SlackOutboundFileContentError,
+    SlackPrivateFileTransport,
 )
 from azents.services.external_channel.slack_http import SLACK_SETTINGS_OPEN_ACTION_ID
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
@@ -150,7 +157,8 @@ def get_slack_delivery_client(
     """Provide the Slack Channel Action adapter."""
     return SlackConversationClient(
         web_client=create_slack_web_client(),
-        http_client=http_client,
+        private_file_transport=SlackPrivateFileTransport(http_client),
+        external_upload_transport=SlackExternalUploadTransport(http_client),
     )
 
 
@@ -160,14 +168,28 @@ async def get_discord_delivery_http_client() -> AsyncIterator[httpx.AsyncClient]
         yield client
 
 
-def get_discord_delivery_client(
+def get_discord_file_message_transport(
     http_client: Annotated[
         httpx.AsyncClient,
         Depends(get_discord_delivery_http_client),
     ],
+) -> DiscordFileMessageTransport:
+    """Provide approved G2 Discord multipart file-message transport."""
+    return DiscordFileMessageTransport(http_client)
+
+
+def get_discord_delivery_client(
+    sdk_factory: Annotated[
+        DiscordSDKClientFactory,
+        Depends(get_discord_sdk_client_factory),
+    ],
+    file_transport: Annotated[
+        DiscordFileMessageTransport,
+        Depends(get_discord_file_message_transport),
+    ],
 ) -> DiscordDeliveryClient:
-    """Provide the Discord Channel Action adapter."""
-    return DiscordDeliveryClient(http_client)
+    """Provide the public SDK Discord Channel Action adapter."""
+    return DiscordDeliveryClient(sdk_factory, file_transport)
 
 
 @dataclass(frozen=True)
@@ -556,6 +578,7 @@ class ExternalChannelActionService:
                 return _discord_invalid_payload()
             thread = await self.discord_client.ensure_thread(
                 bot_token=bot_token,
+                guild_id=guild_id,
                 parent_channel_id=parent_channel_id,
                 root_message_id=root_message_id,
                 name=target.agent_name,
@@ -832,6 +855,7 @@ class ExternalChannelActionService:
                     return _discord_invalid_payload()
                 return await self.discord_client.delete_message(
                     bot_token=bot_token,
+                    guild_id=guild_id,
                     channel_id=delivery_channel_id,
                     message_id=message_id,
                 )

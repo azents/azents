@@ -4,6 +4,7 @@ import contextlib
 import json
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from typing import cast
 
 import httpx
 import pytest
@@ -106,7 +107,7 @@ class _SDKFactory:
         self.open_count += 1
         if self.error is not None:
             raise self.error
-        yield self.session
+        yield cast(DiscordSDKSession, self.session)
 
 
 @dataclass

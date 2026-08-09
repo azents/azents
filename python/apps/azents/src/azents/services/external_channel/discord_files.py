@@ -1,5 +1,6 @@
-"""Current-source Discord attachment lookup and bounded download primitives."""
+"""Discord attachment metadata through the SDK and bounded G3 byte transport."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
@@ -14,12 +15,21 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
 )
-from azents.core.external_channel_projection import is_external_channel_projection
 from azents.runtime.transfer.provider_source import ProviderByteStreamResponse
 from azents.services.external_channel.discord_endpoint import (
-    discord_api_base_url,
     discord_test_origin_matches,
 )
+from azents.services.external_channel.discord_sdk import (
+    DiscordSDKAttachment,
+    DiscordSDKClientFactory,
+    DiscordSDKCredentialsInvalid,
+    DiscordSDKError,
+    DiscordSDKPermissionDenied,
+    DiscordSDKRequestRejected,
+    DiscordSDKResourceUnavailable,
+)
+
+_DISCORD_METADATA_TIMEOUT_SECONDS = 20.0
 
 
 class DiscordFileProviderError(RuntimeError):
@@ -58,53 +68,18 @@ class DiscordAttachmentDownloadInfo:
     download_url: str | None = field(repr=False)
 
 
-class DiscordChannelClient:
-    """Fetch retained Discord source attachments without persisting current URLs."""
+class DiscordAttachmentByteTransport:
+    """G3 direct Discord CDN HEAD/GET byte transport."""
 
     def __init__(self, http_client: httpx.AsyncClient) -> None:
         self.http_client = http_client
 
-    async def fetch_attachment_download_info(
-        self,
-        *,
-        bot_token: str,
-        channel_id: str,
-        message_id: str,
-        attachment_id: str,
-    ) -> DiscordAttachmentDownloadInfo:
-        """Revalidate one attachment from its current source message."""
-        response = await self._request(
-            "GET",
-            f"/channels/{channel_id}/messages/{message_id}",
-            bot_token=bot_token,
-        )
-        payload = self._object_payload(response)
-        if payload.get("id") != message_id or payload.get("channel_id") != channel_id:
-            raise DiscordFileTemporaryError(
-                "Discord source message response did not match the requested source."
-            )
-        attachments = payload.get("attachments")
-        if not isinstance(attachments, list):
-            raise DiscordFileTemporaryError(
-                "Discord source message did not include attachment metadata."
-            )
-        for attachment in attachments:
-            if (
-                not is_external_channel_projection(attachment)
-                or attachment.get("id") != attachment_id
-            ):
-                continue
-            metadata = _attachment_metadata(attachment)
-            url = attachment.get("url")
-            if not isinstance(url, str) or not _download_url_allowed(url):
-                url = None
-            return DiscordAttachmentDownloadInfo(metadata=metadata, download_url=url)
-        raise DiscordFileNotFound("Discord no longer exposes the requested attachment.")
-
-    async def fetch_attachment_content_length(
-        self, *, download_url: str, max_bytes: int
-    ) -> int:
+    async def fetch_content_length(self, *, download_url: str, max_bytes: int) -> int:
         """Return the bounded final attachment response length."""
+        if not _download_url_allowed(download_url):
+            raise DiscordFileRequestRejected(
+                "Discord returned an invalid attachment download URL."
+            )
         try:
             response = await self.http_client.head(download_url, follow_redirects=False)
         except httpx.RequestError as error:
@@ -113,19 +88,14 @@ class DiscordChannelClient:
             ) from error
         if response.status_code < 200 or response.status_code >= 300:
             raise DiscordFileRequestRejected("Discord attachment length check failed.")
-        values = response.headers.get_list("Content-Length")
-        if len(values) != 1 or not values[0].isascii() or not values[0].isdecimal():
-            raise DiscordFileRequestRejected(
-                "Discord attachment response has an invalid content length."
-            )
-        size = int(values[0])
+        size = _declared_length(response)
         if size > max_bytes:
             raise DiscordFileTooLarge(
                 "Discord attachment exceeds the configured limit."
             )
         return size
 
-    def open_attachment_stream(
+    def open_stream(
         self,
         *,
         download_url: str,
@@ -133,21 +103,20 @@ class DiscordChannelClient:
         maximum_chunk_size: int,
     ) -> AbstractAsyncContextManager[ProviderByteStreamResponse]:
         """Return one owned bounded attachment stream."""
-        return self._open_attachment_stream(
+        return self._open_stream(
             download_url=download_url,
             max_bytes=max_bytes,
             maximum_chunk_size=maximum_chunk_size,
         )
 
     @asynccontextmanager
-    async def _open_attachment_stream(
+    async def _open_stream(
         self,
         *,
         download_url: str,
         max_bytes: int,
         maximum_chunk_size: int,
     ) -> AsyncIterator[ProviderByteStreamResponse]:
-        """Open one current attachment URL and close it after stream consumption."""
         if max_bytes < 0:
             raise ValueError("Discord attachment limit must not be negative.")
         if maximum_chunk_size <= 0:
@@ -158,9 +127,7 @@ class DiscordChannelClient:
             )
         try:
             async with self.http_client.stream(
-                "GET",
-                download_url,
-                follow_redirects=False,
+                "GET", download_url, follow_redirects=False
             ) as response:
                 if response.status_code == 404:
                     raise DiscordFileNotFound(
@@ -182,23 +149,13 @@ class DiscordChannelClient:
                     raise DiscordFileRequestRejected(
                         "Discord rejected attachment download."
                     )
-                content_lengths = response.headers.get_list("Content-Length")
-                if (
-                    len(content_lengths) != 1
-                    or not content_lengths[0].isascii()
-                    or not content_lengths[0].isdecimal()
-                ):
-                    raise DiscordFileRequestRejected(
-                        "Discord attachment response has an invalid content length."
-                    )
-                declared_length = int(content_lengths[0])
+                declared_length = _declared_length(response)
                 if declared_length > max_bytes:
                     raise DiscordFileTooLarge(
                         "Discord attachment exceeds the configured limit."
                     )
 
                 async def chunks() -> AsyncIterator[bytes]:
-                    """Yield bounded response chunks without retaining all bytes."""
                     actual_size = 0
                     async for chunk in response.aiter_bytes(
                         chunk_size=maximum_chunk_size
@@ -219,63 +176,97 @@ class DiscordChannelClient:
                 "Discord attachment download did not produce a complete response."
             ) from error
 
-    async def _request(
+
+class DiscordChannelClient:
+    """Fetch current Discord attachment metadata through public SDK models."""
+
+    def __init__(
         self,
-        method: str,
-        path: str,
+        sdk_factory: DiscordSDKClientFactory,
+        byte_transport: DiscordAttachmentByteTransport,
+    ) -> None:
+        self.sdk_factory = sdk_factory
+        self.byte_transport = byte_transport
+
+    async def fetch_attachment_download_info(
+        self,
         *,
         bot_token: str,
-    ) -> httpx.Response:
+        guild_id: str,
+        channel_id: str,
+        message_id: str,
+        attachment_id: str,
+    ) -> DiscordAttachmentDownloadInfo:
+        """Revalidate one attachment from its current public SDK Message."""
         try:
-            response = await self.http_client.request(
-                method,
-                f"{discord_api_base_url()}{path}",
-                headers={"Authorization": f"Bot {bot_token}"},
-            )
-        except httpx.RequestError as error:
-            raise DiscordFileTemporaryError(
-                "Discord attachment metadata is temporarily unavailable."
-            ) from error
-        if response.status_code == 401:
+            async with asyncio.timeout(_DISCORD_METADATA_TIMEOUT_SECONDS):
+                async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                    attachment = await sdk.fetch_attachment(
+                        guild_id=guild_id,
+                        channel_id=channel_id,
+                        message_id=message_id,
+                        attachment_id=attachment_id,
+                    )
+        except DiscordSDKCredentialsInvalid as error:
             raise DiscordFileCredentialsInvalid(
                 "Discord rejected the active Bot credential."
-            )
-        if response.status_code == 403:
+            ) from error
+        except DiscordSDKPermissionDenied as error:
             raise DiscordFilePermissionDenied(
                 "Discord denied access to the source message."
-            )
-        if response.status_code == 404:
-            raise DiscordFileNotFound("Discord no longer exposes the source message.")
-        if response.status_code == 429 or response.status_code >= 500:
-            raise DiscordFileTemporaryError(
-                "Discord attachment metadata is temporarily unavailable."
-            )
-        if response.status_code >= 400:
+            ) from error
+        except DiscordSDKResourceUnavailable as error:
+            raise DiscordFileNotFound(
+                "Discord no longer exposes the requested attachment."
+            ) from error
+        except DiscordSDKRequestRejected as error:
             raise DiscordFileRequestRejected(
                 "Discord rejected source message retrieval."
-            )
-        return response
-
-    @staticmethod
-    def _object_payload(response: httpx.Response) -> dict[str, object]:
-        try:
-            payload: object = response.json()
-        except ValueError as error:
-            raise DiscordFileTemporaryError(
-                "Discord source message response was invalid."
             ) from error
-        if not is_external_channel_projection(payload):
+        except DiscordSDKError as error:
             raise DiscordFileTemporaryError(
-                "Discord source message response was invalid."
-            )
-        return payload
+                "Discord attachment metadata is temporarily unavailable."
+            ) from error
+        except TimeoutError as error:
+            raise DiscordFileTemporaryError(
+                "Discord attachment metadata is temporarily unavailable."
+            ) from error
+        url = attachment.download_url
+        return DiscordAttachmentDownloadInfo(
+            metadata=_attachment_metadata(attachment),
+            download_url=url if _download_url_allowed(url) else None,
+        )
+
+    async def fetch_attachment_content_length(
+        self, *, download_url: str, max_bytes: int
+    ) -> int:
+        """Delegate exact CDN length validation to approved gap G3."""
+        return await self.byte_transport.fetch_content_length(
+            download_url=download_url,
+            max_bytes=max_bytes,
+        )
+
+    def open_attachment_stream(
+        self,
+        *,
+        download_url: str,
+        max_bytes: int,
+        maximum_chunk_size: int,
+    ) -> AbstractAsyncContextManager[ProviderByteStreamResponse]:
+        """Delegate bounded CDN streaming to approved gap G3."""
+        return self.byte_transport.open_stream(
+            download_url=download_url,
+            max_bytes=max_bytes,
+            maximum_chunk_size=maximum_chunk_size,
+        )
 
 
-def _attachment_metadata(attachment: dict[str, object]) -> ExternalChannelFileMetadata:
-    provider_file_id = _bounded_string(attachment.get("id"))
-    declared_size = attachment.get("size")
-    name = _bounded_string(attachment.get("filename"))
-    media_type = _bounded_string(attachment.get("content_type"))
+def _attachment_metadata(
+    attachment: DiscordSDKAttachment,
+) -> ExternalChannelFileMetadata:
+    provider_file_id = _bounded_string(attachment.attachment_id)
+    name = _bounded_string(attachment.filename)
+    media_type = _bounded_string(attachment.content_type)
     if provider_file_id is None:
         return ExternalChannelFileMetadata(
             provider=ExternalChannelProvider.DISCORD,
@@ -283,7 +274,7 @@ def _attachment_metadata(attachment: dict[str, object]) -> ExternalChannelFileMe
             name=name,
             title=None,
             media_type=media_type,
-            declared_size=declared_size if _valid_size(declared_size) else None,
+            declared_size=attachment.size if _valid_size(attachment.size) else None,
             mode=None,
             external=False,
             file_access=None,
@@ -296,13 +287,22 @@ def _attachment_metadata(attachment: dict[str, object]) -> ExternalChannelFileMe
         name=name,
         title=None,
         media_type=media_type,
-        declared_size=declared_size if _valid_size(declared_size) else None,
+        declared_size=attachment.size if _valid_size(attachment.size) else None,
         mode=None,
         external=False,
         file_access=None,
         supported=True,
         unsupported_reason=None,
     )
+
+
+def _declared_length(response: httpx.Response) -> int:
+    values = response.headers.get_list("Content-Length")
+    if len(values) != 1 or not values[0].isascii() or not values[0].isdecimal():
+        raise DiscordFileRequestRejected(
+            "Discord attachment response has an invalid content length."
+        )
+    return int(values[0])
 
 
 def _valid_size(value: object) -> TypeGuard[int]:

@@ -60,6 +60,7 @@ from azents.services.external_channel.connection import (
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import ExternalChannelCapabilitySnapshot
 from azents.services.external_channel.discord_files import (
+    DiscordAttachmentByteTransport,
     DiscordAttachmentDownloadInfo,
     DiscordChannelClient,
     DiscordFileCredentialsInvalid,
@@ -69,8 +70,14 @@ from azents.services.external_channel.discord_files import (
     DiscordFileTemporaryError,
     DiscordFileTooLarge,
 )
+from azents.services.external_channel.discord_sdk import (
+    DiscordSDKClientFactory,
+    get_discord_sdk_client_factory,
+)
 from azents.services.external_channel.slack_events import (
     SlackConversationClient,
+    SlackExternalUploadTransport,
+    SlackPrivateFileTransport,
     SlackProviderCredentialsInvalid,
     SlackProviderFileNotFound,
     SlackProviderFileTooLarge,
@@ -167,7 +174,8 @@ def get_slack_file_client(
     """Provide the Slack file-read adapter."""
     return SlackConversationClient(
         web_client=create_slack_web_client(),
-        http_client=http_client,
+        private_file_transport=SlackPrivateFileTransport(http_client),
+        external_upload_transport=SlackExternalUploadTransport(http_client),
     )
 
 
@@ -178,13 +186,20 @@ async def get_discord_file_http_client() -> AsyncIterator[httpx.AsyncClient]:
 
 
 def get_discord_file_client(
+    sdk_factory: Annotated[
+        DiscordSDKClientFactory,
+        Depends(get_discord_sdk_client_factory),
+    ],
     http_client: Annotated[
         httpx.AsyncClient,
         Depends(get_discord_file_http_client),
     ],
 ) -> DiscordChannelClient:
-    """Provide the Discord file-read adapter."""
-    return DiscordChannelClient(http_client)
+    """Provide the SDK metadata adapter and approved G3 byte transport."""
+    return DiscordChannelClient(
+        sdk_factory,
+        DiscordAttachmentByteTransport(http_client),
+    )
 
 
 def get_unconfigured_external_channel_inbound_staging_configuration() -> (
@@ -319,16 +334,20 @@ class ExternalChannelFileTransferService:
                     staging_configuration=staging_configuration,
                 )
             case ExternalChannelProvider.DISCORD:
+                guild_id = target.provider_tenant_id
                 channel_id = locator.provider_channel_id
                 message_id = locator.provider_message_id
-                if not _discord_snowflake(channel_id) or not _discord_snowflake(
-                    message_id
+                if (
+                    not _discord_snowflake(guild_id)
+                    or not _discord_snowflake(channel_id)
+                    or not _discord_snowflake(message_id)
                 ):
                     raise ExternalChannelFileTransferError(
                         "Discord attachment source is unavailable."
                     )
                 return await self._download_discord(
                     bot_token=credentials.bot_token,
+                    guild_id=guild_id,
                     source_identity=(channel_id, message_id),
                     provider_file_id=locator.provider_file_id,
                     path=path,
@@ -505,6 +524,7 @@ class ExternalChannelFileTransferService:
         self,
         *,
         bot_token: str,
+        guild_id: str,
         source_identity: tuple[str, str],
         provider_file_id: str,
         path: str,
@@ -524,6 +544,7 @@ class ExternalChannelFileTransferService:
         try:
             info = await self.discord_client.fetch_attachment_download_info(
                 bot_token=bot_token,
+                guild_id=guild_id,
                 channel_id=channel_id,
                 message_id=message_id,
                 attachment_id=provider_file_id,
@@ -564,6 +585,7 @@ class ExternalChannelFileTransferService:
                     locator=locator,
                     target=target,
                     bot_token=bot_token,
+                    guild_id=guild_id,
                     source_identity=source_identity,
                     expected_metadata=metadata,
                 ),
@@ -653,6 +675,7 @@ class ExternalChannelFileTransferService:
         locator: ExternalChannelFileLocator,
         target: ExternalChannelFileAccessTarget,
         bot_token: str,
+        guild_id: str,
         source_identity: tuple[str, str],
         expected_metadata: ExternalChannelFileMetadata,
     ) -> bool:
@@ -691,6 +714,7 @@ class ExternalChannelFileTransferService:
         channel_id, message_id = source_identity
         info = await self.discord_client.fetch_attachment_download_info(
             bot_token=bot_token,
+            guild_id=guild_id,
             channel_id=channel_id,
             message_id=message_id,
             attachment_id=locator.provider_file_id,

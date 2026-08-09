@@ -279,6 +279,190 @@ class SlackOutboundFile:
     content: Callable[[], AsyncIterator[bytes]]
 
 
+@dataclass(frozen=True)
+class SlackExternalUploadResult:
+    """Sanitized result of one provider-issued G5 upload target."""
+
+    status: Literal["uploaded", "rejected", "rate_limited", "unknown"]
+
+
+class SlackPrivateFileTransport:
+    """G4 authenticated Slack private-file byte transport."""
+
+    def __init__(self, http_client: httpx.AsyncClient) -> None:
+        self.http_client = http_client
+
+    async def fetch_content_length(
+        self,
+        *,
+        bot_token: str,
+        private_url: str,
+        max_bytes: int,
+    ) -> int:
+        """Return one bounded authenticated private-file length."""
+        if not slack_file_url_allowed(private_url):
+            raise SlackProviderTemporaryError(
+                "Slack returned an invalid private file URL."
+            )
+        try:
+            response = await self.http_client.head(
+                private_url,
+                headers={"Authorization": f"Bearer {bot_token}"},
+            )
+        except httpx.RequestError as error:
+            raise SlackProviderTemporaryError(
+                "Slack file download is temporarily unavailable."
+            ) from error
+        if response.status_code < 200 or response.status_code >= 300:
+            raise SlackProviderRequestRejected("Slack file length check failed.")
+        size = _slack_declared_length(response)
+        if size > max_bytes:
+            raise SlackProviderFileTooLarge("Slack file exceeds the configured limit.")
+        return size
+
+    def open_stream(
+        self,
+        *,
+        bot_token: str,
+        private_url: str,
+        max_bytes: int,
+        maximum_chunk_size: int,
+    ) -> AbstractAsyncContextManager[ProviderByteStreamResponse]:
+        """Return one owned authenticated private-file stream."""
+        return self._open_stream(
+            bot_token=bot_token,
+            private_url=private_url,
+            max_bytes=max_bytes,
+            maximum_chunk_size=maximum_chunk_size,
+        )
+
+    @asynccontextmanager
+    async def _open_stream(
+        self,
+        *,
+        bot_token: str,
+        private_url: str,
+        max_bytes: int,
+        maximum_chunk_size: int,
+    ) -> AsyncIterator[ProviderByteStreamResponse]:
+        if maximum_chunk_size <= 0:
+            raise ValueError("Slack stream chunk size must be positive")
+        if not slack_file_url_allowed(private_url):
+            raise SlackProviderTemporaryError(
+                "Slack returned an invalid private file URL."
+            )
+        try:
+            async with self.http_client.stream(
+                "GET",
+                private_url,
+                headers={"Authorization": f"Bearer {bot_token}"},
+            ) as response:
+                _raise_slack_private_file_response(response)
+                declared_response_size = _slack_declared_length(response)
+                if declared_response_size > max_bytes:
+                    raise SlackProviderFileTooLarge(
+                        "Slack file exceeds the configured limit."
+                    )
+
+                async def chunks() -> AsyncIterator[bytes]:
+                    actual_size = 0
+                    async for chunk in response.aiter_bytes(
+                        chunk_size=maximum_chunk_size
+                    ):
+                        actual_size += len(chunk)
+                        if actual_size > max_bytes:
+                            raise SlackProviderFileTooLarge(
+                                "Slack file exceeds the configured limit."
+                            )
+                        yield chunk
+
+                yield ProviderByteStreamResponse(
+                    content_length=declared_response_size,
+                    chunks=chunks(),
+                )
+        except httpx.RequestError as error:
+            raise SlackProviderTemporaryError(
+                "Slack file download did not produce a complete response."
+            ) from error
+
+
+class SlackExternalUploadTransport:
+    """G5 provider-issued presigned upload byte transport."""
+
+    def __init__(self, http_client: httpx.AsyncClient) -> None:
+        self.http_client = http_client
+
+    async def upload(
+        self,
+        *,
+        upload_url: str,
+        file: SlackOutboundFile,
+        timeout: float | None,
+    ) -> SlackExternalUploadResult:
+        """Upload one exact-length stream to a provider-issued target."""
+        if not slack_file_url_allowed(upload_url):
+            return SlackExternalUploadResult("rejected")
+        try:
+            response = await self.http_client.post(
+                upload_url,
+                headers={
+                    "Content-Type": "application/octet-stream",
+                    "Content-Length": str(file.length),
+                },
+                content=file.content(),
+                timeout=timeout,
+            )
+        except SlackOutboundFileContentError:
+            return SlackExternalUploadResult("unknown")
+        except httpx.RequestError:
+            return SlackExternalUploadResult("unknown")
+        try:
+            if response.status_code >= 500:
+                return SlackExternalUploadResult("unknown")
+            if response.status_code == 429:
+                return SlackExternalUploadResult("rate_limited")
+            if response.status_code != 200:
+                return SlackExternalUploadResult("rejected")
+            return SlackExternalUploadResult("uploaded")
+        finally:
+            await response.aclose()
+
+
+def _slack_declared_length(response: httpx.Response) -> int:
+    values = response.headers.get_list("Content-Length")
+    if len(values) != 1 or not values[0].isascii() or not values[0].isdecimal():
+        raise SlackProviderRequestRejected(
+            "Slack file response has an invalid content length."
+        )
+    return int(values[0])
+
+
+def _raise_slack_private_file_response(response: httpx.Response) -> None:
+    if response.status_code == 429:
+        retry_after = response.headers.get("Retry-After", "1")
+        try:
+            retry_after_seconds = int(retry_after)
+        except ValueError:
+            retry_after_seconds = 1
+        raise SlackProviderRateLimited(retry_after_seconds)
+    if response.status_code == 401:
+        raise SlackProviderCredentialsInvalid(
+            "Slack rejected the configured credential."
+        )
+    if response.status_code == 403:
+        raise SlackProviderPermissionDenied(
+            "Slack denied access to the requested file."
+        )
+    if response.status_code == 404:
+        raise SlackProviderFileNotFound("Slack no longer exposes the requested file.")
+    if response.status_code >= 500:
+        raise SlackProviderTemporaryError("Slack is temporarily unavailable.")
+    if response.status_code >= 400:
+        raise SlackProviderRequestRejected("file_download_failed")
+    if response.status_code != 200:
+        raise SlackProviderTemporaryError("Slack private file response is incomplete.")
+
+
 def normalize_slack_event(
     *,
     event_type: str,
@@ -523,10 +707,12 @@ class SlackConversationClient:
         self,
         *,
         web_client: AsyncWebClient,
-        http_client: httpx.AsyncClient,
+        private_file_transport: SlackPrivateFileTransport,
+        external_upload_transport: SlackExternalUploadTransport,
     ) -> None:
         self.web_client = web_client
-        self.http_client = http_client
+        self.private_file_transport = private_file_transport
+        self.external_upload_transport = external_upload_transport
 
     async def fetch_conversation_access(
         self,
@@ -1010,26 +1196,12 @@ class SlackConversationClient:
     async def fetch_private_file_content_length(
         self, *, bot_token: str, private_url: str, max_bytes: int
     ) -> int:
-        """Return the bounded final private-file response length."""
-        try:
-            response = await self.http_client.head(
-                private_url, headers={"Authorization": f"Bearer {bot_token}"}
-            )
-        except httpx.RequestError as error:
-            raise SlackProviderTemporaryError(
-                "Slack file download is temporarily unavailable."
-            ) from error
-        if response.status_code < 200 or response.status_code >= 300:
-            raise SlackProviderRequestRejected("Slack file length check failed.")
-        values = response.headers.get_list("Content-Length")
-        if len(values) != 1 or not values[0].isascii() or not values[0].isdecimal():
-            raise SlackProviderRequestRejected(
-                "Slack file response has an invalid content length."
-            )
-        size = int(values[0])
-        if size > max_bytes:
-            raise SlackProviderFileTooLarge("Slack file exceeds the configured limit.")
-        return size
+        """Delegate authenticated private-file length to approved gap G4."""
+        return await self.private_file_transport.fetch_content_length(
+            bot_token=bot_token,
+            private_url=private_url,
+            max_bytes=max_bytes,
+        )
 
     def open_private_file_stream(
         self,
@@ -1039,99 +1211,13 @@ class SlackConversationClient:
         max_bytes: int,
         maximum_chunk_size: int,
     ) -> AbstractAsyncContextManager[ProviderByteStreamResponse]:
-        """Return one owned bounded private-file stream."""
-        return self._open_private_file_stream(
+        """Delegate authenticated private-file streaming to approved gap G4."""
+        return self.private_file_transport.open_stream(
             bot_token=bot_token,
             private_url=private_url,
             max_bytes=max_bytes,
             maximum_chunk_size=maximum_chunk_size,
         )
-
-    @asynccontextmanager
-    async def _open_private_file_stream(
-        self,
-        *,
-        bot_token: str,
-        private_url: str,
-        max_bytes: int,
-        maximum_chunk_size: int,
-    ) -> AsyncIterator[ProviderByteStreamResponse]:
-        """Open one authenticated private file and close it after stream consumption."""
-        if maximum_chunk_size <= 0:
-            raise ValueError("Slack stream chunk size must be positive")
-        if not slack_file_url_allowed(private_url):
-            raise SlackProviderTemporaryError(
-                "Slack returned an invalid private file URL."
-            )
-        try:
-            async with self.http_client.stream(
-                "GET",
-                private_url,
-                headers={"Authorization": f"Bearer {bot_token}"},
-            ) as response:
-                if response.status_code == 429:
-                    retry_after = response.headers.get("Retry-After", "1")
-                    try:
-                        retry_after_seconds = int(retry_after)
-                    except ValueError:
-                        retry_after_seconds = 1
-                    raise SlackProviderRateLimited(retry_after_seconds)
-                if response.status_code == 401:
-                    raise SlackProviderCredentialsInvalid(
-                        "Slack rejected the configured credential."
-                    )
-                if response.status_code == 403:
-                    raise SlackProviderPermissionDenied(
-                        "Slack denied access to the requested file."
-                    )
-                if response.status_code == 404:
-                    raise SlackProviderFileNotFound(
-                        "Slack no longer exposes the requested file."
-                    )
-                if response.status_code >= 500:
-                    raise SlackProviderTemporaryError(
-                        "Slack is temporarily unavailable."
-                    )
-                if response.status_code >= 400:
-                    raise SlackProviderRequestRejected("file_download_failed")
-                if response.status_code != 200:
-                    raise SlackProviderTemporaryError(
-                        "Slack private file response is incomplete."
-                    )
-                content_lengths = response.headers.get_list("Content-Length")
-                if (
-                    len(content_lengths) != 1
-                    or not content_lengths[0].isascii()
-                    or not content_lengths[0].isdecimal()
-                ):
-                    raise SlackProviderRequestRejected("file_download_invalid_size")
-                declared_response_size = int(content_lengths[0])
-                if declared_response_size > max_bytes:
-                    raise SlackProviderFileTooLarge(
-                        "Slack file exceeds the configured limit."
-                    )
-
-                async def chunks() -> AsyncIterator[bytes]:
-                    """Yield bounded response chunks without retaining all bytes."""
-                    actual_size = 0
-                    async for chunk in response.aiter_bytes(
-                        chunk_size=maximum_chunk_size
-                    ):
-                        actual_size += len(chunk)
-                        if actual_size > max_bytes:
-                            raise SlackProviderFileTooLarge(
-                                "Slack file exceeds the configured limit."
-                            )
-                        yield chunk
-
-                yield ProviderByteStreamResponse(
-                    content_length=declared_response_size,
-                    chunks=chunks(),
-                )
-        except httpx.RequestError as error:
-            raise SlackProviderTemporaryError(
-                "Slack file download did not produce a complete response."
-            ) from error
 
     async def post_approval_control_message(
         self,
@@ -1405,61 +1491,35 @@ class SlackConversationClient:
                         error_kind="provider_response_invalid",
                         error_summary="Slack returned an invalid file upload URL.",
                     )
-                try:
-                    if before_provider_request is not None:
-                        await before_provider_request()
-                    upload_response = await self.http_client.request(
-                        "POST",
-                        upload_url,
-                        headers={
-                            "Content-Type": "application/octet-stream",
-                            "Content-Length": str(file.length),
-                        },
-                        content=file.content(),
-                        timeout=self._delivery_timeout(deadline_at),
-                    )
-                except SlackOutboundFileContentError:
-                    return SlackControlMessageResult(
-                        status="failed",
-                        provider_message_key=None,
-                        error_kind="runtime_file_unavailable",
-                        error_summary=(
-                            "The Runtime file changed or became unreadable "
-                            "during upload."
-                        ),
-                    )
-                except httpx.RequestError:
+                if before_provider_request is not None:
+                    await before_provider_request()
+                upload = await self.external_upload_transport.upload(
+                    upload_url=upload_url,
+                    file=file,
+                    timeout=self._delivery_timeout(deadline_at),
+                )
+                if upload.status == "unknown":
                     return SlackControlMessageResult(
                         status="unknown",
                         provider_message_key=None,
                         error_kind="provider_ambiguous",
                         error_summary="Slack file upload outcome is unknown.",
                     )
-                try:
-                    if upload_response.status_code >= 500:
-                        return SlackControlMessageResult(
-                            status="unknown",
-                            provider_message_key=None,
-                            error_kind="provider_ambiguous",
-                            error_summary="Slack file upload outcome is unknown.",
-                        )
-                    if upload_response.status_code == 429:
-                        return SlackControlMessageResult(
-                            status="failed",
-                            provider_message_key=None,
-                            error_kind="rate_limited",
-                            error_summary="Slack rate limited the file upload.",
-                        )
-                    if upload_response.status_code != 200:
-                        return SlackControlMessageResult(
-                            status="failed",
-                            provider_message_key=None,
-                            error_kind="provider_rejected",
-                            error_summary="Slack rejected the external file upload.",
-                        )
-                    uploaded_files.append({"id": file_id, "title": file.filename})
-                finally:
-                    await upload_response.aclose()
+                if upload.status == "rate_limited":
+                    return SlackControlMessageResult(
+                        status="failed",
+                        provider_message_key=None,
+                        error_kind="rate_limited",
+                        error_summary="Slack rate limited the file upload.",
+                    )
+                if upload.status == "rejected":
+                    return SlackControlMessageResult(
+                        status="failed",
+                        provider_message_key=None,
+                        error_kind="provider_rejected",
+                        error_summary="Slack rejected the external file upload.",
+                    )
+                uploaded_files.append({"id": file_id, "title": file.filename})
             if before_provider_request is not None:
                 await before_provider_request()
             await self._call_api(
