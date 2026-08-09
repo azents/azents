@@ -35,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-05
-spec_version: 38
+last_verified_at: 2026-08-09
+spec_version: 39
 ---
 
 # External Channel Delivery and Channel Work
@@ -50,9 +50,8 @@ enabled, `channel_action` and `download_external_file` are deferred discovery ta
 when disabled, the complete catalog exposes them directly.
 
 The active Toolkit contributes a minimal static prompt stating that ordinary assistant
-output is not delivered and that external publication uses `channel_action`. It also
-states that `external_channel_continuation` may expose `ignore` to end Channel Work
-without external publication. The Tool Search-enabled variant also instructs the
+output is not delivered and that external publication, continuation, and silent
+completion use `channel_action`. The Tool Search-enabled variant also instructs the
 model to discover the appropriate Channel tool. Normal turns do not reload canonical
 Channel Work into a dynamic prompt.
 Mode selection, binding-handle, Channel Work, and file-materialization guidance lives
@@ -60,23 +59,18 @@ in tool descriptions and field schemas. Compaction alone preserves unfinished bi
 provider, resource, title, and ordered task continuity while excluding revisions,
 projection diagnostics, and provider-effect outcomes.
 
-A tool call must identify a binding owned by the current Agent and Session. Normal
-turns support two atomic publication modes:
+A tool call must identify a binding owned by the current Agent and Session. Every
+model input boundary exposes three atomic modes:
 
 - `continue`: optionally send one conversational reply, replace the current
   provider-neutral work title, and replace the ordered Channel Work task list.
 - `finish`: send one required final reply and finish Channel Work.
-
-An `external_channel_continuation` additionally exposes `ignore` only for binding IDs
-carried by that continuation. Client-tool-result follow-up keeps the continuation
-scope until new actionable input replaces it. The service revalidates the eligible
-binding, and `ignore` accepts no message, title, task update, or files. It rejects
-before canonical mutation and provider planning while any task is `pending` or
-`in_progress`. Empty or all-`completed`/`failed` Work finishes by advancing the
-existing Work revisions, setting its finish time, and clearing desired progress while
-retaining current provider projection observation. The returned effect plan and
-outcomes are empty, so no reply, progress update, file, Tracker deletion, or other
-provider request occurs.
+- `ignore`: finish existing active Work silently, regardless of recorded task status.
+  It accepts no message, title, task update, or files. The transition advances the
+  existing Work revisions, sets its finish time, and clears desired progress while
+  retaining current provider projection observation. The returned effect plan and
+  outcomes are empty, so no reply, progress update, file, Tracker deletion, or other
+  provider request occurs.
 
 Within one Run, `channel_action` rejects the same `(binding, mode)` when it
 completed in the immediately preceding model turn. Rejected and failed calls do
@@ -382,10 +376,10 @@ Channel Work state.
 A successfully completed run with unfinished Channel Work remains eligible for idle
 continuation. Continuation is binding-aware and includes the current unfinished work
 snapshot. Sending an intermediate reply does not finish active work. Completing or
-clearing tasks, explicitly finishing with no follow-up work, or eligible `ignore`
-stops continuation for that binding. An `ignore` attempt against pending or in-progress
-tasks is rejected and leaves continuation eligibility unchanged. Other connected
-bindings can still require continuation in the same Session.
+clearing tasks, explicitly finishing with no follow-up work, or `ignore` stops
+continuation for that binding. Recorded pending or in-progress tasks do not override
+the explicit ignore decision. Other connected bindings can still require continuation
+in the same Session.
 
 ## Lifecycle Cleanup Controls
 
@@ -406,6 +400,9 @@ not roll back the terminal lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-09** (spec_version 39) — Exposed `ignore` on every model input boundary,
+  removed continuation binding scope, and made silent active-Work completion
+  independent of recorded task status.
 - **2026-08-05** (spec_version 38) — Suppressed the provider leave-presence
   control when Session archive terminalizes a binding, while retaining the terminal
   transition and Activity Tracker cleanup.

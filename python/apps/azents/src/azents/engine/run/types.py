@@ -326,7 +326,6 @@ class PollMessagesResult:
     user_messages: list[RunUserMessage]
     context_invalidated: bool
     complete_run: bool
-    external_channel_continuation_binding_ids: frozenset[str] | None
 
 
 PollMessages: TypeAlias = Callable[[], Awaitable[PollMessagesResult]]

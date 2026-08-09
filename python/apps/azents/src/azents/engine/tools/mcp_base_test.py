@@ -112,7 +112,6 @@ def _context() -> TurnContext:
         run_id="run-1",
         session_id="session-1",
         publish_event=_publish,
-        external_channel_continuation_binding_ids=frozenset(),
     )
 
 

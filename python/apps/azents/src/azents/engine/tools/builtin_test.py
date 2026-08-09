@@ -171,7 +171,6 @@ def _make_context(
         run_id=run_id,
         publish_event=AsyncMock(),
         resource_authority=resource_authority,
-        external_channel_continuation_binding_ids=frozenset(),
     )
 
 

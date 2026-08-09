@@ -54,7 +54,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-08-09
-spec_version: 85
+spec_version: 86
 ---
 
 # Toolkit
@@ -721,10 +721,8 @@ unprefixed executable entry only when the current root AgentSession has an activ
 External Channel binding. Tool Search defers its model-visible schema when enabled;
 otherwise the complete catalog exposes it directly. A minimal static prompt always
 states that ordinary assistant output is not delivered externally and that external
-publication uses `channel_action`. It also states that
-`external_channel_continuation` may expose `ignore` to end Channel Work without
-external publication. Only the Tool Search-enabled variant adds the discovery
-instruction.
+publication, continuation, and silent completion use `channel_action`. Only the Tool
+Search-enabled variant adds the discovery instruction.
 
 Normal turns do not inject canonical Channel Work snapshots dynamically. Tool-specific
 mode, binding, task-list, and file guidance belongs to the relevant tool description
@@ -735,13 +733,6 @@ not classify the current ordinary user input as an External Channel request.
 Compaction preserves only unfinished work continuity: binding, provider, resource
 label, current title, and ordered tasks. It omits state revisions, provider projection
 diagnostics, and provider-effect outcomes.
-
-An ephemeral continuation scope contains only binding IDs from promoted
-`external_channel_continuation` input. Client-tool-result follow-up preserves that set
-until a new actionable input boundary replaces it; runtime does not reconstruct
-eligibility from transcript history or persist another authorization flag. Initial
-External Channel invocation and every non-continuation or mixed boundary carry an
-empty scope.
 
 Ingress creates the current work cycle and its initial Slack Activity Tracker before
 Agent execution. The tool atomically commits an optional conversational reply and
@@ -759,17 +750,19 @@ supports at most 49 tasks, and its complete desired progress snapshot must fit t
 updates the retained Tracker; message-only continuation leaves progress unchanged.
 `finish` requires a final reply, ends the work cycle, and attempts Tracker deletion
 only after the direct reply effect is delivered. An
-`external_channel_continuation` additionally exposes `ignore`, limited to the binding
-IDs carried by that continuation and revalidated by the service. `ignore` accepts no
-message, title, task update, or files. It rejects before mutation when any task is
-`pending` or `in_progress`; empty or all-`completed`/`failed` Work finishes with
-cleared desired progress, retained current provider projection observation, and an
-empty outcome list. It sends no reply, progress update, file, Tracker deletion, or
-other provider effect. Ordinary Session Todo state remains separate and never becomes
-the Channel Work source of truth.
+`ignore` is always present beside `finish` and `continue`. It accepts no message,
+title, task update, or files and finishes existing active Work regardless of recorded
+task status. The transition clears desired progress, retains current provider
+projection observation, and returns an empty outcome list. It sends no reply, progress
+update, file, Tracker deletion, or other provider effect, and the finished Work is no
+longer eligible for idle continuation. Ordinary Session Todo state remains separate
+and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-08-09** (spec_version 86) — Made `ignore` an unconditional Channel Action
+  mode, removed continuation-scope authorization, and allowed it to finish active Work
+  regardless of task status with zero provider effects.
 - **2026-08-09** (spec_version 85) — Added desired-Profile-only Runtime prompt authority,
   bounded exact execution-time target resolution, non-starting Skill projection, per-visible-file
   target refresh, and unified contained process/native operation authority.

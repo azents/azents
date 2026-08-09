@@ -50,7 +50,6 @@ async def test_goal_toolkit_exposes_goal_tools() -> None:
         run_id="run-1",
         session_id="session-1",
         publish_event=AsyncMock(),
-        external_channel_continuation_binding_ids=frozenset(),
     )
     state = await toolkit.update_context(context)
 
@@ -221,7 +220,6 @@ async def test_create_goal_rejects_existing_unfinished_goal() -> None:
             run_id="run-1",
             session_id="session-1",
             publish_event=AsyncMock(),
-            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     create_goal = state.tools[1]
@@ -257,7 +255,6 @@ async def test_update_goal_complete_appends_briefing_event() -> None:
             run_id="run-1",
             session_id="session-1",
             publish_event=AsyncMock(),
-            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     update_goal = state.tools[2]
@@ -292,7 +289,6 @@ async def test_update_goal_blocked_does_not_append_briefing_event() -> None:
             run_id="run-1",
             session_id="session-1",
             publish_event=AsyncMock(),
-            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     update_goal = state.tools[2]

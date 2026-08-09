@@ -340,7 +340,6 @@ def _make_turn_context() -> TurnContext:
         run_id="run-1",
         publish_event=AsyncMock(),
         session_id="session-1",
-        external_channel_continuation_binding_ids=frozenset(),
     )
 
 

@@ -829,7 +829,6 @@ class ExternalChannelWorkRepository:
         title: str | None,
         tasks: Sequence[ChannelWorkTask] | None,
         files: Sequence[ExternalChannelOutboundFileManifest],
-        ignore_eligible_binding_ids: frozenset[str],
         now: datetime.datetime,
     ) -> ChannelActionTransition:
         """Commit canonical Work and return process-local provider effects."""
@@ -905,13 +904,6 @@ class ExternalChannelWorkRepository:
         )
         if resource is None:
             raise ValueError("External Channel resource is unavailable.")
-        if (
-            mode is ExternalChannelActionMode.IGNORE
-            and binding.id not in ignore_eligible_binding_ids
-        ):
-            raise ValueError(
-                "Ignore is unavailable outside the current External Channel input."
-            )
         workspace = await session.get(RDBWorkspace, agent.workspace_id)
 
         def default_work() -> ChannelWorkState:
@@ -936,18 +928,6 @@ class ExternalChannelWorkRepository:
             if mode is ExternalChannelActionMode.IGNORE:
                 if current.status is not ExternalChannelWorkStatus.ACTIVE:
                     raise ValueError("Ignore requires active Channel Work.")
-                if any(
-                    task.status
-                    in {
-                        ExternalChannelWorkTaskStatus.PENDING,
-                        ExternalChannelWorkTaskStatus.IN_PROGRESS,
-                    }
-                    for task in current.tasks
-                ):
-                    raise ValueError(
-                        "Ignore requires every Channel Work task to be completed "
-                        "or failed."
-                    )
                 work = current.model_copy(deep=True)
                 work.status = ExternalChannelWorkStatus.FINISHED
                 work.state_revision += 1

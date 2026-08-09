@@ -181,7 +181,6 @@ class PromotedMailboxItems:
     """Result of preparing one FIFO MailboxItem."""
 
     turn_effect: TurnEffect
-    external_channel_continuation_binding_ids: frozenset[str] | None
     operation_action: OperationActionInput | None
     requested_inference_profile: RequestedInferenceProfile | None
     user_messages: list[RunUserMessage]
@@ -576,7 +575,6 @@ class MailboxService:
             if not claimed:
                 return PromotedMailboxItems(
                     turn_effect=TurnEffect.NEUTRAL,
-                    external_channel_continuation_binding_ids=None,
                     operation_action=None,
                     requested_inference_profile=None,
                     user_messages=[],
@@ -718,10 +716,6 @@ class MailboxService:
 
         return PromotedMailboxItems(
             turn_effect=outcome.turn_effect,
-            external_channel_continuation_binding_ids=external_channel_continuation_binding_ids_for_buffer(
-                claimed[0],
-                turn_effect=outcome.turn_effect,
-            ),
             operation_action=operation_action,
             requested_inference_profile=(
                 _requested_inference_profile(promoted[0].buffer) if promoted else None
@@ -1629,33 +1623,6 @@ def _preparation_outcome(
         turn_effect=turn_effect,
         operation_action=None,
     )
-
-
-def external_channel_continuation_binding_ids_for_buffer(
-    buffer: MailboxItem,
-    *,
-    turn_effect: TurnEffect,
-) -> frozenset[str] | None:
-    """Return continuation bindings or clear prior continuation scope."""
-    if turn_effect is not TurnEffect.ELIGIBLE:
-        return None
-    if buffer.kind is MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
-        raw_bindings = buffer.presentation.metadata.get("active_bindings")
-        binding_ids = (
-            []
-            if not isinstance(raw_bindings, str)
-            else [
-                binding_id.strip()
-                for binding_id in raw_bindings.split(",")
-                if binding_id.strip()
-            ]
-        )
-        if not binding_ids:
-            raise ValueError(
-                "External Channel continuation requires active binding handles."
-            )
-        return frozenset(binding_ids)
-    return frozenset()
 
 
 class _GoalActionError(Exception):

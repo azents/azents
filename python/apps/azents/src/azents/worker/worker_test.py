@@ -182,7 +182,6 @@ class _MailboxService:
                 claimed_count=0,
                 inserted_count=0,
                 deduped_count=0,
-                external_channel_continuation_binding_ids=None,
             )
         self.consumed = True
         return self.promoted
@@ -1636,7 +1635,6 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
-            external_channel_continuation_binding_ids=None,
         )
     )
     executor.mailbox_item_service = cast(
@@ -1829,7 +1827,6 @@ async def test_prepare_toolkits_enters_before_update_context() -> None:
                 model="test-model",
                 run_id="run-001",
                 publish_event=_noop_publish_event,
-                external_channel_continuation_binding_ids=frozenset(),
             )
         )
     finally:
