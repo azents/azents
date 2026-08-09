@@ -13,10 +13,12 @@ from typing import Any, Self, cast
 import aiohttp
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
+    AppArmorProfile,
     ContainerResourceClaim,
     ContainerResources,
     ContainerSecurityContext,
     ContainerSpec,
+    ContainerTerminationEvidence,
     EmptyDirVolume,
     EnvVar,
     ExecAction,
@@ -42,6 +44,8 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodStatus,
     PodWatchEvent,
     Probe,
+    RuntimeClassResource,
+    SeccompProfile,
     Toleration,
     VolumeMount,
 )
@@ -313,6 +317,14 @@ class KubernetesHttpApi(KubernetesApi):
             _lease_manifest(lease),
         )
 
+    async def get_runtime_class(self, name: str) -> RuntimeClassResource | None:
+        data = await self._request_json(
+            "GET",
+            f"/apis/node.k8s.io/v1/runtimeclasses/{name}",
+            allow_not_found=True,
+        )
+        return None if data is None else _runtime_class_resource(data)
+
     async def _create_or_merge_patch(
         self,
         resource_path: str,
@@ -462,6 +474,10 @@ def pod_manifest(pod: PodResource) -> JsonObject:
     }
     if pod.spec.service_account_name is not None:
         spec["serviceAccountName"] = pod.spec.service_account_name
+    if pod.spec.host_users is not None:
+        spec["hostUsers"] = pod.spec.host_users
+    if pod.spec.runtime_class_name is not None:
+        spec["runtimeClassName"] = pod.spec.runtime_class_name
     if pod.spec.image_pull_secrets:
         spec["imagePullSecrets"] = [
             {"name": secret.name} for secret in pod.spec.image_pull_secrets
@@ -532,7 +548,7 @@ def _container_manifest(container: ContainerSpec) -> JsonObject:
 def _container_security_context_manifest(
     security_context: ContainerSecurityContext,
 ) -> JsonObject:
-    return {
+    manifest: JsonObject = {
         "privileged": security_context.privileged,
         "allowPrivilegeEscalation": security_context.allow_privilege_escalation,
         "readOnlyRootFilesystem": security_context.read_only_root_filesystem,
@@ -544,6 +560,26 @@ def _container_security_context_manifest(
             "drop": list(security_context.capabilities_drop),
         },
     }
+    if security_context.proc_mount is not None:
+        manifest["procMount"] = security_context.proc_mount
+    if security_context.seccomp_profile is not None:
+        manifest["seccompProfile"] = _security_profile_manifest(
+            security_context.seccomp_profile
+        )
+    if security_context.apparmor_profile is not None:
+        manifest["appArmorProfile"] = _security_profile_manifest(
+            security_context.apparmor_profile
+        )
+    return manifest
+
+
+def _security_profile_manifest(
+    profile: SeccompProfile | AppArmorProfile,
+) -> JsonObject:
+    manifest: JsonObject = {"type": profile.profile_type}
+    if profile.localhost_profile is not None:
+        manifest["localhostProfile"] = profile.localhost_profile
+    return manifest
 
 
 def _probe_manifest(probe: Probe) -> JsonObject:
@@ -760,6 +796,8 @@ def pod_resource(data: JsonObject) -> PodResource:
             automount_service_account_token=bool(
                 spec.get("automountServiceAccountToken", True)
             ),
+            host_users=_optional_bool(spec.get("hostUsers"), "spec.hostUsers"),
+            runtime_class_name=cast(str | None, spec.get("runtimeClassName")),
             image_pull_secrets=tuple(
                 LocalObjectReference(name=str(item["name"]))
                 for item in spec.get("imagePullSecrets", [])
@@ -783,6 +821,12 @@ def pod_resource(data: JsonObject) -> PodResource:
         ),
         status=None if status is None else _pod_status(status),
     )
+
+
+def _optional_bool(value: object, field: str) -> bool | None:
+    if value is None or isinstance(value, bool):
+        return value
+    raise RuntimeError(f"{field} must be a boolean")
 
 
 def _container(data: JsonObject) -> ContainerSpec:
@@ -850,6 +894,31 @@ def _container_security_context(data: JsonObject) -> ContainerSecurityContext:
         run_as_group=int(data.get("runAsGroup") or 0),
         capabilities_add=tuple(str(item) for item in capabilities.get("add", [])),
         capabilities_drop=tuple(str(item) for item in capabilities.get("drop", [])),
+        proc_mount=cast(str | None, data.get("procMount")),
+        seccomp_profile=_seccomp_profile(
+            cast(JsonObject | None, data.get("seccompProfile"))
+        ),
+        apparmor_profile=_apparmor_profile(
+            cast(JsonObject | None, data.get("appArmorProfile"))
+        ),
+    )
+
+
+def _seccomp_profile(data: JsonObject | None) -> SeccompProfile | None:
+    if data is None:
+        return None
+    return SeccompProfile(
+        profile_type=str(data["type"]),
+        localhost_profile=cast(str | None, data.get("localhostProfile")),
+    )
+
+
+def _apparmor_profile(data: JsonObject | None) -> AppArmorProfile | None:
+    if data is None:
+        return None
+    return AppArmorProfile(
+        profile_type=str(data["type"]),
+        localhost_profile=cast(str | None, data.get("localhostProfile")),
     )
 
 
@@ -911,6 +980,9 @@ def _pod_status(status: JsonObject) -> PodStatus:
     waiting_reason = _first_waiting_reason(
         cast(list[JsonObject], status.get("containerStatuses") or [])
     )
+    termination_evidence = _first_termination_evidence(
+        cast(list[JsonObject], status.get("containerStatuses") or [])
+    )
     return PodStatus(
         phase=cast(str | None, status.get("phase")),
         ready=ready,
@@ -920,6 +992,7 @@ def _pod_status(status: JsonObject) -> PodStatus:
             else cast(str | None, ready_condition.get("reason"))
         ),
         waiting_reason=waiting_reason,
+        termination_evidence=termination_evidence,
     )
 
 
@@ -932,6 +1005,32 @@ def _first_waiting_reason(container_statuses: list[JsonObject]) -> str | None:
         reason = waiting.get("reason")
         if isinstance(reason, str) and reason:
             return reason
+    return None
+
+
+def _first_termination_evidence(
+    container_statuses: list[JsonObject],
+) -> ContainerTerminationEvidence | None:
+    for item in container_statuses:
+        state = cast(JsonObject, item.get("state") or {})
+        terminated = cast(JsonObject | None, state.get("terminated"))
+        if terminated is None:
+            continue
+        name = item.get("name")
+        exit_code = terminated.get("exitCode")
+        if not isinstance(name, str) or not name:
+            raise RuntimeError("container status name must be a non-empty string")
+        if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+            raise RuntimeError("terminated container exitCode must be an integer")
+        reason = terminated.get("reason")
+        if reason is not None and not isinstance(reason, str):
+            raise RuntimeError("terminated container reason must be a string")
+        return ContainerTerminationEvidence(
+            container_name=name,
+            exit_code=exit_code,
+            reason=reason,
+            oom_killed=reason == "OOMKilled",
+        )
     return None
 
 
@@ -1039,6 +1138,17 @@ def _lease_resource(data: JsonObject) -> LeaseResource:
         ),
         resource_version=cast(str | None, metadata.get("resourceVersion")),
     )
+
+
+def _runtime_class_resource(data: JsonObject) -> RuntimeClassResource:
+    metadata = cast(JsonObject, data["metadata"])
+    name = metadata.get("name")
+    handler = data.get("handler")
+    if not isinstance(name, str) or not name:
+        raise RuntimeError("RuntimeClass metadata.name must be a non-empty string")
+    if not isinstance(handler, str) or not handler:
+        raise RuntimeError("RuntimeClass handler must be a non-empty string")
+    return RuntimeClassResource(name=name, handler=handler)
 
 
 def _object_meta(data: JsonObject) -> ObjectMeta:

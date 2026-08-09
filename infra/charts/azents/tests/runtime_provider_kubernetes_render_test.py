@@ -137,9 +137,71 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_LABELS" in rendered
     assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT" in rendered
+    assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND" not in rendered
+    assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE" not in rendered
+    assert (
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS"
+        not in rendered
+    )
+    assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME" not in rendered
+    assert 'resources: ["runtimeclasses"]' not in rendered
     assert "192.168.0.0/16" in rendered
     assert 'namespace: "default"' in rendered
     assert 'namespace: "azents-runtime"' in rendered
+
+
+def test_runtime_provider_kubernetes_process_containment_render_contract() -> None:
+    """Containment opt-in wires trusted settings and exact RuntimeClass RBAC."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+        "runtimeProviderKubernetes.processContainment.enabled=true",
+        "runtimeProviderKubernetes.processContainment.runtimeClassName=runc-bwrap",
+    )
+
+    assert (
+        "- name: AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND\n"
+        '              value: "bwrap"'
+    ) in rendered
+    assert (
+        "- name: AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE\n"
+        '              value: "azents-runtime-bwrap"'
+    ) in rendered
+    assert (
+        "- name: "
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS\n"
+        '              value: "15"'
+    ) in rendered
+    assert (
+        "- name: AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME\n"
+        '              value: "runc-bwrap"'
+    ) in rendered
+    assert "kind: ClusterRole" in rendered
+    assert "kind: ClusterRoleBinding" in rendered
+    assert 'resources: ["runtimeclasses"]' in rendered
+    assert 'resourceNames:\n      - "runc-bwrap"' in rendered
+    assert 'verbs: ["get"]' in rendered
+
+
+def test_runtime_provider_kubernetes_default_runtime_class_needs_no_cluster_rbac() -> (
+    None
+):
+    """The cluster default RuntimeClass requires no cluster-scoped lookup."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+        "runtimeProviderKubernetes.processContainment.enabled=true",
+    )
+
+    assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND" in rendered
+    assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME" not in rendered
+    assert 'resources: ["runtimeclasses"]' not in rendered
 
 
 def test_runtime_provider_bootstrap_matches_custom_service_account_identity() -> None:

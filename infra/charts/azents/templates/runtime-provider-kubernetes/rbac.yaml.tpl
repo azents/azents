@@ -34,6 +34,38 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "azents.runtimeProviderKubernetesServiceAccountName" . | quote }}
     namespace: {{ include "azents.runtimeProviderKubernetesNamespace" . | quote }}
+{{- if and .Values.runtimeProviderKubernetes.processContainment.enabled .Values.runtimeProviderKubernetes.processContainment.runtimeClassName }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-runtime-class" (include "azents.runtimeProviderKubernetesServiceAccountName" .) | quote }}
+  labels:
+    {{- include "azents.componentLabels" (dict "root" . "component" "runtime-provider-kubernetes") | nindent 4 }}
+    app.kubernetes.io/part-of: "azents"
+rules:
+  - apiGroups: ["node.k8s.io"]
+    resources: ["runtimeclasses"]
+    resourceNames:
+      - {{ .Values.runtimeProviderKubernetes.processContainment.runtimeClassName | quote }}
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-runtime-class" (include "azents.runtimeProviderKubernetesServiceAccountName" .) | quote }}
+  labels:
+    {{- include "azents.componentLabels" (dict "root" . "component" "runtime-provider-kubernetes") | nindent 4 }}
+    app.kubernetes.io/part-of: "azents"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-runtime-class" (include "azents.runtimeProviderKubernetesServiceAccountName" .) | quote }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "azents.runtimeProviderKubernetesServiceAccountName" . | quote }}
+    namespace: {{ include "azents.runtimeProviderKubernetesNamespace" . | quote }}
+{{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
