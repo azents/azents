@@ -212,7 +212,8 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
         commands_url,
         json={
             "name": "Private Azents settings command",
-            "type": 2,
+            "type": 1,
+            "description": "Stale description.",
         },
         timeout=5,
     )
@@ -232,7 +233,9 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
     for response in (unrelated, settings, message_action):
         assert response.json()["application_id"] == "100000000000000001"
         assert response.json()["guild_id"] == "200000000000000001"
+    for response in (unrelated, message_action):
         assert response.json()["description"] == ""
+    assert settings.json()["description"] == "Stale description."
     command_id = requests.get(
         f"{discord_fake_url}/__testenv/command-id",
         params={"role": "message_action"},
@@ -253,16 +256,17 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
         f"{commands_url}/{settings.json()['id']}",
         json={
             "name": "Private updated settings command",
-            "type": 2,
+            "description": "Current description.",
         },
         timeout=5,
     )
     updated.raise_for_status()
     assert updated.json()["id"] == settings.json()["id"]
     assert updated.json()["name"] == "Private updated settings command"
+    assert updated.json()["type"] == 1
     assert updated.json()["application_id"] == "100000000000000001"
     assert updated.json()["guild_id"] == "200000000000000001"
-    assert updated.json()["description"] == ""
+    assert updated.json()["description"] == "Current description."
 
     deleted = requests.delete(
         f"{commands_url}/{settings.json()['id']}",

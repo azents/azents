@@ -346,10 +346,11 @@ class FakeState:
         body: Mapping[str, object],
     ) -> dict[str, object] | None:
         """Update one known command without retaining the request body in evidence."""
-        command_fields = _guild_command_fields(body)
         with self.lock:
-            if command_id not in self.guild_commands:
+            existing = self.guild_commands.get(command_id)
+            if existing is None:
                 return None
+            command_fields = _guild_command_fields({**existing, **body})
             updated: dict[str, object] = {
                 "id": command_id,
                 **command_fields,
