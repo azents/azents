@@ -5,6 +5,7 @@ import dataclasses
 import time
 from typing import Annotated, assert_never
 
+from azcommon.datetime import tznow
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import ValidationError
@@ -41,6 +42,9 @@ from azents.repos.agent_runtime.data import (
 )
 from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.runtime_provider_control.repository import (
+    RuntimeProviderControlRepository,
+)
 from azents.services.runtime_profile_resolution.data import (
     RuntimeProfileResolutionResult,
     RuntimeProfileResolutionUnavailable,
@@ -103,6 +107,10 @@ class AgentRuntimeService:
     runtime_profile_repository: Annotated[
         RuntimeProfileRepository,
         Depends(RuntimeProfileRepository),
+    ]
+    runtime_provider_control_repository: Annotated[
+        RuntimeProviderControlRepository,
+        Depends(RuntimeProviderControlRepository),
     ]
 
     async def get(
@@ -606,6 +614,22 @@ class AgentRuntimeService:
                     desired_state,
                 )
             else:
+                provider_connected = await (
+                    self.runtime_provider_control_repository.has_connected_connection(
+                        session,
+                        provider_id=resolution.desired_revision.provider_id,
+                        now=tznow(),
+                        for_update=True,
+                    )
+                )
+                if not provider_connected:
+                    return Failure(
+                        RuntimeProviderUnavailable(
+                            code="provider_disconnected",
+                            provider_id=resolution.runtime.runtime_provider_id,
+                            message="Runtime Provider is disconnected.",
+                        )
+                    )
                 command = await self.runtime_repository.set_desired_state_if_ready(
                     session,
                     resolution.runtime.id,

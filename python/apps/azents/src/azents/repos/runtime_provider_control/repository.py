@@ -551,36 +551,38 @@ class RuntimeProviderControlRepository:
         *,
         provider_id: str,
         now: datetime.datetime,
+        for_update: bool = False,
     ) -> bool:
         """Return whether one Provider retains current connection authority."""
-        result = await session.execute(
-            sa.select(RDBRuntimeProviderConnection.id).where(
-                RDBRuntimeProviderConnection.provider_id == provider_id,
-                RDBRuntimeProviderConnection.status
-                == RuntimeProviderConnectionStatus.CONNECTED,
-                _active_connection_binding(),
-                _active_connection_provider(),
-                sa.or_(
-                    RDBRuntimeProviderConnection.evidence_expires_at.is_(None),
-                    RDBRuntimeProviderConnection.evidence_expires_at > now,
+        statement = sa.select(RDBRuntimeProviderConnection.id).where(
+            RDBRuntimeProviderConnection.provider_id == provider_id,
+            RDBRuntimeProviderConnection.status
+            == RuntimeProviderConnectionStatus.CONNECTED,
+            _active_connection_binding(),
+            _active_connection_provider(),
+            sa.or_(
+                RDBRuntimeProviderConnection.evidence_expires_at.is_(None),
+                RDBRuntimeProviderConnection.evidence_expires_at > now,
+            ),
+            sa.or_(
+                RDBRuntimeProviderConnection.credential_id.is_(None),
+                sa.exists(
+                    sa.select(RDBRuntimeProviderCredential.id).where(
+                        RDBRuntimeProviderCredential.id
+                        == RDBRuntimeProviderConnection.credential_id,
+                        RDBRuntimeProviderCredential.state
+                        == RuntimeProviderCredentialState.ACTIVE,
+                        sa.or_(
+                            RDBRuntimeProviderCredential.expires_at.is_(None),
+                            RDBRuntimeProviderCredential.expires_at > now,
+                        ),
+                    )
                 ),
-                sa.or_(
-                    RDBRuntimeProviderConnection.credential_id.is_(None),
-                    sa.exists(
-                        sa.select(RDBRuntimeProviderCredential.id).where(
-                            RDBRuntimeProviderCredential.id
-                            == RDBRuntimeProviderConnection.credential_id,
-                            RDBRuntimeProviderCredential.state
-                            == RuntimeProviderCredentialState.ACTIVE,
-                            sa.or_(
-                                RDBRuntimeProviderCredential.expires_at.is_(None),
-                                RDBRuntimeProviderCredential.expires_at > now,
-                            ),
-                        )
-                    ),
-                ),
-            )
+            ),
         )
+        if for_update:
+            statement = statement.with_for_update(read=True)
+        result = await session.execute(statement)
         return result.scalar_one_or_none() is not None
 
     @staticmethod
