@@ -52,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
 last_verified_at: 2026-08-09
-spec_version: 19
+spec_version: 20
 ---
 
 # Runtime Provider
@@ -66,11 +66,13 @@ controller connections do not create or discover Provider resources.
 
 Provider authentication is a separate durable binding domain. A connection selects one explicit authentication method, verifies its evidence, resolves exactly one active binding, and derives the Provider identity from that binding. Registration payload fields are consistency checks only and cannot select a Provider or grant authority.
 
-Providers are optional. A Provider must be enabled, active, connected, Workspace-eligible, and
-currently advertise a valid capability contract that satisfies the exact selected infrastructure
-Profile before a new Runtime incarnation can be created. Decommissioning, force-retired, disabled,
-disconnected, invalid-capability, and incompatible Providers remain durable for Admin inventory but
-cannot satisfy new Runtime creation or recreation.
+Providers are optional. A Provider must be enabled, active, Workspace-eligible, and currently
+advertise a valid capability contract that satisfies the exact selected infrastructure Profile
+before the Runtime configuration can become ready. A live connection is separate operational
+readiness required before lifecycle dispatch or operation qualification. Decommissioning,
+force-retired, disabled, invalid-capability, and incompatible Providers remain durable for Admin
+inventory but cannot satisfy new Runtime creation or recreation; disconnected Providers retain
+their valid configuration identity while physical work waits for reconnect.
 
 ## Policy and capability state
 
@@ -108,7 +110,8 @@ An Agent selection points to one Workspace Runtime Profile. That Profile names o
 resource and one infrastructure Profile owned by that Provider. The resolver does not evaluate an
 Agent Provider preference, Platform default, environment default, or fallback Provider. It checks
 the exact Profile ownership, lifecycle, Provider lifecycle/enablement/scope/Workspace eligibility,
-live connection, current capability, infrastructure compatibility, and Workspace policy.
+current capability, infrastructure compatibility, and Workspace policy. Live connection state does
+not participate in the immutable configuration revision status or digest.
 
 The logical Runtime stores routing identity plus the exact infrastructure Profile, Workspace
 Runtime Profile, desired configuration revision, and applied configuration revision. The immutable
@@ -238,6 +241,9 @@ Agent Workspace.
 
 ## Version history
 
+- **20 (2026-08-09):** Separated durable Runtime configuration identity from live Provider
+  connectivity so transient rollout reconnect gaps retain ready revisions while dispatch and
+  operation qualification still require current connection authority.
 - **19 (2026-08-09):** Added Profile v2 portable process containment, deployment-owned capability
   advertisement plus per-Runtime qualification, explicit recreation, safe derived product
   projections, and fail-closed Docker/Kubernetes preparation.

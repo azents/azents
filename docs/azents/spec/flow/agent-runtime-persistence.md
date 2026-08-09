@@ -23,7 +23,7 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-09
-spec_version: 19
+spec_version: 20
 ---
 
 # Agent Runtime Persistence
@@ -41,13 +41,17 @@ An Agent stores one exact Workspace Runtime Profile selection or no selection. W
 Runtime row is ensured, the Runtime Profile resolver reads that exact Profile and persists the
 logical/durable Provider routing IDs, infrastructure Profile ID, Workspace Runtime Profile ID, and
 an immutable desired configuration revision. It does not consult a Provider preference, Platform
-default, environment default, or fallback.
+default, environment default, fallback, or live Provider connection state.
 
 The desired revision records the exact Provider capability revision, infrastructure and Workspace
 Profile IDs/versions/digests, Agent selection version, resolved full configuration, source trace,
 target desired generation, canonical digest, and complete retained Profile v1 or Profile v2
 containment choice. A blocked resolution is also durable and keeps its bounded reason and
 missing-capability evidence without discarding the last applied revision.
+
+Provider connectivity is operational evidence rather than configuration identity. Disconnect and
+reconnect events do not change revision status or digest; current connection authority separately
+gates lifecycle dispatch and exact Runtime operation qualification.
 
 Resolution reads Agent selection, Workspace Profile, infrastructure Profile, Provider, and
 capability inputs as lock-free versioned snapshots. It attaches a new desired pointer only through
@@ -248,6 +252,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-08-09 (spec_version=20)** — Removed live Provider connectivity from immutable
+  configuration revision identity while retaining connection-gated lifecycle dispatch and
+  operation qualification.
 - **2026-08-09 (spec_version=19)** — Added persisted Profile v1/v2 containment choice, derived
   containment status without new lifecycle state, Provider-specific temporary-storage lifetimes,
   and Workspace-preserving containment adoption and rollback.

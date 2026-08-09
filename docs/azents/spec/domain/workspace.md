@@ -98,7 +98,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-08-09
-spec_version: 60
+spec_version: 61
 ---
 
 # Workspace & Membership
@@ -241,8 +241,10 @@ shared exact operation target. The resolver may request start/wait when the expl
 allows it, then requires matching desired/applied revision and digest, desired/Runner generation,
 Provider/Runner authority, and a valid current Runner-reported Agent Workspace path. Missing or
 invalid Runner evidence produces `RUNNER_WORKSPACE_PATH_MISSING` or
-`RUNNER_WORKSPACE_PATH_INVALID`; supersession or authority drift fails closed, and the server does
-not invent a fallback path. The read-only Workspace summary itself remains non-starting.
+`RUNNER_WORKSPACE_PATH_INVALID`. A transient Provider or Runner disconnect waits within the
+caller's bounded timeout while preserving the initially selected revision and desired generation;
+supersession, timeout, or authority drift fails closed, and the server does not invent a fallback
+path. The read-only Workspace summary itself remains non-starting.
 
 The Runtime response includes a server-derived `configuration.containment` projection with
 `enabled`, `applied`, `recreation_required`, `nested_docker_available`, `runtime_available`, and a
@@ -692,6 +694,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-09 (spec_version=61)** — Made exact Runtime-backed Workspace operations wait through
+  transient same-generation Provider and Runner reconnect gaps within their existing bounded
+  timeout.
 - **2026-08-09 (spec_version=60)** — Added exact shared Runtime operation qualification,
   server-derived containment/application/availability projection, Profile v1/v2 containment
   presentation, and Admin DinD-exclusion behavior.

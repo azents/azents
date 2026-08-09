@@ -306,15 +306,41 @@ async def test_resolve_operation_target_rejects_current_generation_failure() -> 
         await service.resolve_operation_target("agent-1")
 
 
-async def test_resolve_operation_target_rejects_provider_disconnection() -> None:
-    """A disconnected Provider cannot authorize a new explicit operation."""
+async def test_resolve_operation_target_waits_for_provider_reconnection() -> None:
+    """A transient Provider gap can recover without changing target identity."""
+    disconnected = _runtime(
+        provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED
+    )
+    service = _OperationTargetService(
+        [
+            _resolution(runtime=disconnected),
+            _resolution(),
+        ]
+    )
+
+    target = await service.resolve_operation_target(
+        "agent-1",
+        wait_timeout_seconds=1.0,
+        poll_interval_seconds=0.0,
+    )
+
+    assert target.desired_generation == 2
+    assert target.configuration_revision_id == "revision-2"
+
+
+async def test_resolve_operation_target_reports_provider_timeout() -> None:
+    """A Provider that stays disconnected fails after the bounded wait."""
     disconnected = _runtime(
         provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED
     )
     service = _OperationTargetService([_resolution(runtime=disconnected)])
 
     with pytest.raises(RuntimeStorageError, match="Provider is disconnected"):
-        await service.resolve_operation_target("agent-1")
+        await service.resolve_operation_target(
+            "agent-1",
+            wait_timeout_seconds=0.0,
+            poll_interval_seconds=0.0,
+        )
 
 
 @pytest.mark.parametrize(
