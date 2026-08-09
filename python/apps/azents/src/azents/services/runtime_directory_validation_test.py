@@ -4,13 +4,12 @@ import datetime
 
 from azcommon.result import Failure, Success
 
-from azents.core.enums import RuntimeRunnerState
-from azents.repos.agent_runtime.data import AgentRuntime
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeRunnerOperationClient,
     RuntimeRunnerOperationFailedError,
 )
+from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTarget
 
 from .runtime_directory_validation import (
     RuntimeDirectoryNotDirectory,
@@ -60,17 +59,15 @@ class _FakeRunnerOperations(RuntimeRunnerOperationClient):
         )
 
 
-def _ready_runtime() -> AgentRuntime:
-    """Build one ready Runtime domain object."""
-    now = datetime.datetime.now(datetime.UTC)
-    return AgentRuntime(
+def _runtime_target() -> RuntimeOperationTarget:
+    """Build one exact Runtime operation target."""
+    return RuntimeOperationTarget(
         id="runtime-1",
-        workspace_id="workspace-1",
-        agent_id="agent-1",
-        runner_state=RuntimeRunnerState.READY,
+        desired_generation=2,
         runner_generation=3,
-        created_at=now,
-        updated_at=now,
+        configuration_revision_id="revision-1",
+        configuration_digest="a" * 64,
+        workspace_path="/workspace/agent",
     )
 
 
@@ -78,7 +75,7 @@ async def test_validate_runtime_directory_accepts_directory() -> None:
     """A directory stat is valid."""
     result = await validate_runtime_directory(
         _FakeRunnerOperations(),
-        runtime=_ready_runtime(),
+        runtime=_runtime_target(),
         path="/workspace/agent/app",
     )
 
@@ -89,7 +86,7 @@ async def test_validate_runtime_directory_classifies_not_found() -> None:
     """Stable Runner NOT_FOUND proves the target is absent."""
     result = await validate_runtime_directory(
         _FakeRunnerOperations(error_code="NOT_FOUND"),
-        runtime=_ready_runtime(),
+        runtime=_runtime_target(),
         path="/workspace/agent/missing",
     )
 
@@ -101,7 +98,7 @@ async def test_validate_runtime_directory_rejects_non_directory() -> None:
     """A successful file stat is not a valid Project directory."""
     result = await validate_runtime_directory(
         _FakeRunnerOperations(kind="file"),
-        runtime=_ready_runtime(),
+        runtime=_runtime_target(),
         path="/workspace/agent/file",
     )
 
@@ -113,7 +110,7 @@ async def test_validate_runtime_directory_classifies_timeout_as_unavailable() ->
     """Runner timeouts remain retryable validation unavailability."""
     result = await validate_runtime_directory(
         _FakeRunnerOperations(error_code="operation_timeout"),
-        runtime=_ready_runtime(),
+        runtime=_runtime_target(),
         path="/workspace/agent/app",
     )
 

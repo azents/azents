@@ -6,8 +6,10 @@ from pydantic import BaseModel, Field
 
 from azents.core.runtime_profile import (
     RuntimeInfrastructureProfileSpec,
+    RuntimeProfileContainmentStatus,
     RuntimeProfileLifecycle,
     WorkspaceRuntimeProfilePolicyV1,
+    derive_runtime_profile_containment_status,
     parse_runtime_infrastructure_profile_spec,
 )
 from azents.services.runtime_profile_workspace.service import (
@@ -28,6 +30,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
     display_name: str
     description: str
     spec: RuntimeInfrastructureProfileSpec
+    containment: RuntimeProfileContainmentStatus
     required_capabilities: list[str]
     version: int
     digest: str
@@ -41,6 +44,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
         """Convert one safe selectable Profile projection."""
         profile = projection.profile
         provider = projection.provider
+        spec = parse_runtime_infrastructure_profile_spec(profile.spec)
         return cls(
             id=profile.id,
             provider_id=provider.provider_id,
@@ -49,7 +53,8 @@ class SelectableInfrastructureProfileResponse(BaseModel):
             profile_kind=profile.profile_kind.value,
             display_name=profile.display_name,
             description=profile.description,
-            spec=parse_runtime_infrastructure_profile_spec(profile.spec),
+            spec=spec,
+            containment=derive_runtime_profile_containment_status(spec),
             required_capabilities=list(profile.required_capabilities),
             version=profile.version,
             digest=profile.digest,
@@ -82,6 +87,7 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
     compatible: bool
     missing_capabilities: list[str]
     incompatible_constraints: list[str]
+    containment: RuntimeProfileContainmentStatus
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -93,6 +99,9 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
         """Convert one Workspace Profile availability projection."""
         profile = projection.profile
         compatibility = projection.compatibility
+        infrastructure_spec = parse_runtime_infrastructure_profile_spec(
+            projection.infrastructure_profile.spec
+        )
         return cls(
             id=profile.id,
             provider_id=projection.provider.provider_id,
@@ -110,6 +119,7 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
             compatible=compatibility.compatible,
             missing_capabilities=list(compatibility.missing_capabilities),
             incompatible_constraints=list(compatibility.incompatible_constraints),
+            containment=derive_runtime_profile_containment_status(infrastructure_spec),
             created_at=profile.created_at,
             updated_at=profile.updated_at,
         )

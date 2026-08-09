@@ -19,6 +19,7 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
+from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.core.tools import (
     ResolveContext,
     ShellToolkitConfig,
@@ -91,6 +92,10 @@ from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationAuthority,
+    RuntimeOperationTarget,
+)
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.runtime_storage_error import RuntimeStorageError
@@ -100,6 +105,47 @@ from azents.testing.types import is_string_object_dict
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+async def test_ready_runtime_for_agent_forwards_shared_wait_options() -> None:
+    """The Toolkit adapter preserves explicit timeout and polling controls."""
+    service = AsyncMock()
+    target = RuntimeOperationTarget(
+        id="runtime-1",
+        desired_generation=2,
+        runner_generation=3,
+        configuration_revision_id="revision-2",
+        configuration_digest="a" * 64,
+        workspace_path="/workspace/agent",
+    )
+    service.resolve_operation_target.return_value = target
+
+    result = await builtin_module._ready_runtime_for_agent(
+        agent_runtime_repo=AsyncMock(spec=AgentRuntimeRepository),
+        agent_runtime_service=service,
+        session_manager=_make_mock_session_manager(),
+        agent_id="agent-1",
+        wait_timeout_seconds=4.0,
+        poll_interval_seconds=0.25,
+    )
+
+    assert result is target
+    service.resolve_operation_target.assert_awaited_once_with(
+        "agent-1",
+        wait_timeout_seconds=4.0,
+        poll_interval_seconds=0.25,
+        expected_authority=None,
+        start_if_stopped=True,
+    )
+
+
+def test_runtime_toolkit_requires_prompt_selected_authority() -> None:
+    """Runtime tools fail closed before any desired Profile was presented."""
+    toolkit = _make_toolkit()
+    toolkit._expected_runtime_authority = None
+
+    with pytest.raises(RuntimeStorageError, match="currently unavailable"):
+        toolkit._required_runtime_authority()
 
 
 def test_agents_appendix_supports_filesystem_root_workspace() -> None:
@@ -687,6 +733,7 @@ def _make_toolkit(
     agent_runtime_service = AsyncMock()
     agent_runtime_repo.get_by_agent_id.return_value = SimpleNamespace(
         id="runtime-1",
+        desired_runtime_configuration_revision_id="revision-1",
         desired_state=desired_state,
         desired_generation=7,
         provider_connection_state=provider_connection_state,
@@ -694,6 +741,79 @@ def _make_toolkit(
         runner_state=runner_state,
         runner_generation=1,
         workspace_path="/workspace/agent",
+    )
+    profile_repository = agent_runtime_service.runtime_profile_repository
+    profile_repository.get_configuration_revision.return_value = SimpleNamespace(
+        id="revision-1",
+        digest="a" * 64,
+        target_desired_generation=7,
+        resolution_status=RuntimeConfigurationResolutionStatus.READY,
+        resolved_configuration={
+            "effective_profile": {
+                "profile_kind": "docker_container",
+                "contract_family": "docker.container-profile",
+                "schema_version": 1,
+                "runner_resources": {
+                    "cpu_reservation_millicores": None,
+                    "cpu_limit_millicores": None,
+                    "memory_reservation_bytes": None,
+                    "memory_limit_bytes": None,
+                },
+                "network_name": None,
+            }
+        },
+    )
+
+    async def resolve_operation_target(
+        requested_agent_id: str,
+        **options: object,
+    ) -> RuntimeOperationTarget:
+        runtime = await agent_runtime_repo.get_by_agent_id(
+            object(),
+            requested_agent_id,
+        )
+        if runtime.provider_observed_state is RuntimeProviderObservedState.FAILED:
+            raise RuntimeStorageError("Runtime failed")
+        if (
+            runtime.provider_connection_state
+            is RuntimeProviderConnectionState.DISCONNECTED
+        ):
+            raise RuntimeStorageError("Runtime Provider is disconnected")
+        if runtime.desired_state is not RuntimeDesiredState.RUNNING:
+            await agent_runtime_service.ensure_started_for_agent(requested_agent_id)
+        if (
+            runtime.provider_observed_state is not RuntimeProviderObservedState.RUNNING
+            or runtime.runner_state is not RuntimeRunnerState.READY
+        ):
+            wait_timeout_seconds = options.get("wait_timeout_seconds", 120.0)
+            if wait_timeout_seconds == 0.0:
+                raise RuntimeStorageError("Runtime is still starting")
+            runtime = await agent_runtime_repo.get_by_agent_id(
+                object(),
+                requested_agent_id,
+            )
+        if (
+            runtime.provider_observed_state is not RuntimeProviderObservedState.RUNNING
+            or runtime.runner_state is not RuntimeRunnerState.READY
+        ):
+            raise RuntimeStorageError("Runtime runner is not ready")
+        return RuntimeOperationTarget(
+            id=runtime.id,
+            desired_generation=getattr(runtime, "desired_generation", 7),
+            runner_generation=runtime.runner_generation,
+            configuration_revision_id=(
+                getattr(
+                    runtime,
+                    "desired_runtime_configuration_revision_id",
+                    "revision-1",
+                )
+            ),
+            configuration_digest="a" * 64,
+            workspace_path=runtime.workspace_path,
+        )
+
+    agent_runtime_service.resolve_operation_target.side_effect = (
+        resolve_operation_target
     )
     project_repo = AsyncMock(spec=SessionWorkspaceProjectRepository)
     project_repo.list_projects.return_value = projects or []
@@ -742,6 +862,11 @@ def _make_toolkit(
         import_file_staging_configuration=cast(Any, object()),
     )
     toolkit.set_session_id(session_id)
+    toolkit._expected_runtime_authority = RuntimeOperationAuthority(
+        configuration_revision_id="revision-1",
+        configuration_digest="a" * 64,
+        desired_generation=7,
+    )
     cast(Any, toolkit)._test_runner_operations = runner_operations
     cast(Any, toolkit)._test_agent_runtime_repo = agent_runtime_repo
     cast(Any, toolkit)._test_agent_runtime_service = agent_runtime_service
@@ -850,6 +975,11 @@ class TestBuiltinToolkitProviderResolve:
         assert isinstance(toolkit, RuntimeToolkit)
         toolkit.set_session_id("session-1")
         await toolkit.update_context(_make_context())
+        toolkit._expected_runtime_authority = RuntimeOperationAuthority(
+            configuration_revision_id="revision-1",
+            configuration_digest="a" * 64,
+            desired_generation=1,
+        )
 
         first = await toolkit.append_agents_after_read(
             MagicMock(
@@ -1203,6 +1333,82 @@ class TestRuntimeToolkitUpdateContext:
         ctx = _make_context()
         await toolkit.update_context(ctx)
         assert "Runtime Workspace" in (await toolkit.get_static_prompt(_make_context()))
+
+    @pytest.mark.asyncio
+    async def test_prompt_renders_contained_desired_profile_without_readiness(
+        self,
+    ) -> None:
+        """Desired Profile behavior is available without physical Runtime readiness."""
+        toolkit = _make_toolkit(
+            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+            runner_state=RuntimeRunnerState.STARTING,
+        )
+        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
+        profile_repository = runtime_service.runtime_profile_repository
+        profile_repository.get_configuration_revision.return_value = SimpleNamespace(
+            id="revision-1",
+            digest="a" * 64,
+            target_desired_generation=7,
+            resolution_status=RuntimeConfigurationResolutionStatus.READY,
+            resolved_configuration={
+                "effective_profile": {
+                    "profile_kind": "kubernetes_pod",
+                    "contract_family": "kubernetes.pod-profile",
+                    "schema_version": 2,
+                    "runner_resources": {
+                        "cpu_request_millicores": 100,
+                        "cpu_limit_millicores": 1000,
+                        "memory_request_bytes": 268_435_456,
+                        "memory_limit_bytes": 1_073_741_824,
+                    },
+                    "workspace_volume": {
+                        "storage_class_name": "standard",
+                        "storage_request_bytes": 1_073_741_824,
+                    },
+                    "network_policy": {
+                        "allowed_cidrs": [],
+                        "denied_cidrs": [],
+                    },
+                    "service_account_name": None,
+                    "scheduling": {
+                        "node_selector": {},
+                        "tolerations": [],
+                    },
+                    "dind": None,
+                    "process_containment": {"schema_version": 1},
+                }
+            },
+        )
+
+        prompt = await toolkit.get_static_prompt(_make_context())
+
+        assert "## Runtime Behavior" in prompt
+        assert "Commands and native file operations run as a non-root user." in prompt
+        assert "Nested Docker execution is unavailable." in prompt
+        assert "not current Runtime readiness" in prompt
+        runtime_service.ensure_started_for_agent.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_prompt_uses_generic_unavailable_for_blocked_profile(self) -> None:
+        """Blocked desired Profiles do not expose internal diagnostics."""
+        toolkit = _make_toolkit()
+        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
+        profile_repository = runtime_service.runtime_profile_repository
+        profile_repository.get_configuration_revision.return_value = SimpleNamespace(
+            id="revision-1",
+            digest="a" * 64,
+            target_desired_generation=7,
+            resolution_status=RuntimeConfigurationResolutionStatus.BLOCKED,
+            resolved_configuration=None,
+            reason_code="provider_capability_missing",
+        )
+
+        prompt = await toolkit.get_static_prompt(_make_context())
+
+        assert "Runtime-dependent operations are currently unavailable." in prompt
+        assert "provider_capability_missing" not in prompt
+        assert "## Runtime Behavior" not in prompt
+        runtime_service.ensure_started_for_agent.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_prompt_includes_agent_workspace_path(self) -> None:
@@ -1584,6 +1790,49 @@ async def test_runtime_file_storage_reads_one_bounded_range() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_file_storage_revalidates_authority_for_each_operation() -> None:
+    """A cached target cannot bypass a Profile change after prompt assembly."""
+    runner_operations = _FakeRunnerOperations(
+        {"/workspace/agent/report.txt": b"abcdef"}
+    )
+    authority = RuntimeOperationAuthority(
+        configuration_revision_id="revision-1",
+        configuration_digest="a" * 64,
+        desired_generation=7,
+    )
+    target = RuntimeOperationTarget(
+        id="runtime-1",
+        desired_generation=7,
+        runner_generation=1,
+        configuration_revision_id="revision-1",
+        configuration_digest="a" * 64,
+        workspace_path="/workspace/agent",
+    )
+    service = AsyncMock()
+    service.resolve_operation_target.return_value = target
+    storage = RuntimeRunnerFileStorage(
+        runner_operations=cast(Any, runner_operations),
+        agent_runtime_repo=_make_runtime_repo(),
+        agent_runtime_service=service,
+        session_manager=cast(Any, _make_mock_session_manager()),
+        runtime_agent_id="agent-1",
+        owner_session_id="session-1",
+        expected_authority_provider=lambda: authority,
+    )
+
+    first_token = storage.begin_runtime_operation_count()
+    await storage.stat("/workspace/agent/report.txt", agent_id="agent-1")
+    storage.finish_runtime_operation_count(first_token)
+    second_token = storage.begin_runtime_operation_count()
+    await storage.stat("/workspace/agent/report.txt", agent_id="agent-1")
+    storage.finish_runtime_operation_count(second_token)
+
+    assert service.resolve_operation_target.await_count == 2
+    for call in service.resolve_operation_target.await_args_list:
+        assert call.kwargs["expected_authority"] is authority
+
+
+@pytest.mark.asyncio
 async def test_runtime_file_range_maps_runner_disconnect_to_storage_error() -> None:
     """A disconnected Runner becomes a controlled outbound source failure."""
     runner_operations = _FakeRunnerOperations(
@@ -1833,6 +2082,15 @@ class TestProcessToolHandler:
         assert result.metadata["kind"] == "exec_command_result"
         assert "session_id" not in result.metadata
         assert result.metadata["process_id"] == "proc-1"
+        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
+        expected_authority = runtime_service.resolve_operation_target.await_args.kwargs[
+            "expected_authority"
+        ]
+        assert expected_authority == RuntimeOperationAuthority(
+            configuration_revision_id="revision-1",
+            configuration_digest="a" * 64,
+            desired_generation=7,
+        )
         assert runner_operations.process_start_calls == [
             {
                 "command": "echo hello",

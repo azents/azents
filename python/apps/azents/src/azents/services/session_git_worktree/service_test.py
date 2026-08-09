@@ -89,6 +89,11 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationFailedError,
 )
 from azents.services.agent_project_catalog import AgentProjectCatalogService
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationAuthority,
+    RuntimeOperationTarget,
+    RuntimeOperationTargetResolver,
+)
 from azents.services.agent_session_input import AgentSessionInputService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.mailbox import MailboxService
@@ -96,6 +101,7 @@ from azents.services.model_file import ModelFileService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
+from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_git_worktree import (
     GitWorktreeCleanupNotFound,
     GitWorktreeCleanupSubagentReadOnly,
@@ -170,6 +176,7 @@ def _readonly_service() -> SessionGitWorktreeService:
         action_execution_repository=cast(ActionExecutionRepository, object()),
         event_transcript_repository=cast(EventTranscriptRepository, object()),
         session_manager=_session_manager_double,
+        runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),
         runner_operations=cast(RuntimeRunnerOperationClient, object()),
     )
 
@@ -222,6 +229,51 @@ class _UnavailableRuntimeRepository(_RuntimeRepository):
         assert runtime is not None
         return runtime.model_copy(
             update={"runner_state": RuntimeRunnerState.DISCONNECTED}
+        )
+
+
+class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
+    """Resolve exact test targets from one Runtime repository."""
+
+    def __init__(
+        self,
+        session_manager: SessionManager[AsyncSession],
+        runtime_repository: AgentRuntimeRepository,
+    ) -> None:
+        self.session_manager = session_manager
+        self.runtime_repository = runtime_repository
+
+    async def resolve_operation_target(
+        self,
+        agent_id: str,
+        *,
+        wait_timeout_seconds: float = 120.0,
+        poll_interval_seconds: float = 1.0,
+        expected_authority: RuntimeOperationAuthority | None = None,
+        start_if_stopped: bool = True,
+    ) -> RuntimeOperationTarget:
+        """Return ready fixture evidence or bounded unavailability."""
+        del (
+            wait_timeout_seconds,
+            poll_interval_seconds,
+            expected_authority,
+            start_if_stopped,
+        )
+        async with self.session_manager() as session:
+            runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
+        if (
+            runtime is None
+            or runtime.runner_state is not RuntimeRunnerState.READY
+            or runtime.workspace_path is None
+        ):
+            raise RuntimeStorageError("Runtime runner is not ready.")
+        return RuntimeOperationTarget(
+            id=runtime.id,
+            desired_generation=runtime.desired_generation,
+            runner_generation=runtime.runner_generation,
+            configuration_revision_id="revision-1",
+            configuration_digest="a" * 64,
+            workspace_path=runtime.workspace_path,
         )
 
 
@@ -684,11 +736,12 @@ def _service(
     refresh_status: AgentProjectCatalogStatus = AgentProjectCatalogStatus.AVAILABLE,
 ) -> SessionGitWorktreeService:
     """Build the service under test."""
+    runtime_repository = _RuntimeRepository()
     return SessionGitWorktreeService(
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
-        agent_runtime_repository=_RuntimeRepository(),
+        agent_runtime_repository=runtime_repository,
         session_git_worktree_repository=SessionGitWorktreeRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         agent_project_catalog_repository=catalog_repository
@@ -697,6 +750,10 @@ def _service(
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         session_manager=session_manager,
+        runtime_target_resolver=_RuntimeTargetResolver(
+            session_manager,
+            runtime_repository,
+        ),
         runner_operations=runner,
     )
 
@@ -2155,7 +2212,12 @@ class TestSessionGitWorktreeService:
             slug="archive-runner-unavailable",
             runner=runner,
         )
-        worktree_service.agent_runtime_repository = _UnavailableRuntimeRepository()
+        unavailable_repository = _UnavailableRuntimeRepository()
+        worktree_service.agent_runtime_repository = unavailable_repository
+        worktree_service.runtime_target_resolver = _RuntimeTargetResolver(
+            rdb_session_manager,
+            unavailable_repository,
+        )
 
         with caplog.at_level(
             logging.WARNING,

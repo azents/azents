@@ -38,6 +38,10 @@ from azents.engine.tools.skill import (
     skill_items_from_vfs_projection,
 )
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationTarget,
+    RuntimeOperationTargetResolver,
+)
 from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 
 
@@ -83,6 +87,36 @@ def _project(
 async def _noop_publish_event(event: object) -> None:
     """Ignore test-only published events."""
     del event
+
+
+class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
+    """Return one deterministic target for projection service tests."""
+
+    async def resolve_operation_target(
+        self,
+        agent_id: str,
+        *,
+        wait_timeout_seconds: float = 120.0,
+        poll_interval_seconds: float = 1.0,
+        expected_authority: object = None,
+        start_if_stopped: bool = True,
+    ) -> RuntimeOperationTarget:
+        """Return exact fixture evidence."""
+        del (
+            agent_id,
+            wait_timeout_seconds,
+            poll_interval_seconds,
+            expected_authority,
+            start_if_stopped,
+        )
+        return RuntimeOperationTarget(
+            id="runtime-1",
+            desired_generation=1,
+            runner_generation=1,
+            configuration_revision_id="revision-1",
+            configuration_digest="a" * 64,
+            workspace_path="/workspace/agent",
+        )
 
 
 @asynccontextmanager
@@ -563,6 +597,7 @@ class TestSkillProjectionService:
         service = _TestableSkillProjectionService(
             store=_SkillStore(SkillProjectionState()),
             session_manager=_session_manager,
+            runtime_target_resolver=_RuntimeTargetResolver(),
         )
 
         items = await service.scan_runtime_for_test(
@@ -598,6 +633,7 @@ class TestSkillProjectionService:
         service = _TestableSkillProjectionService(
             store=_SkillStore(SkillProjectionState()),
             session_manager=_session_manager,
+            runtime_target_resolver=_RuntimeTargetResolver(),
         )
 
         items = await service.scan_runtime_for_test(
@@ -625,6 +661,7 @@ class TestSkillProjectionService:
         service = SkillProjectionService(
             store=_SkillStore(SkillProjectionState()),
             session_manager=_session_manager,
+            runtime_target_resolver=_RuntimeTargetResolver(),
             broadcast=broadcast,
         )
 

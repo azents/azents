@@ -38,6 +38,7 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
+from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.mailbox import MailboxService
 from azents.services.root_agent_session_creation import (
@@ -185,6 +186,7 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
             object(),
         ),
         session_manager=rdb_session_manager,
+        runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),
     )
 
 

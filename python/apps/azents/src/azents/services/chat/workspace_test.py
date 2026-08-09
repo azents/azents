@@ -42,7 +42,13 @@ from azents.runtime.transfer.workspace_download import (
     RuntimeWorkspaceDownloadService,
     WorkspaceDownloadRequest,
 )
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationAuthority,
+    RuntimeOperationTarget,
+    RuntimeOperationTargetResolver,
+)
 from azents.services.chat.workspace import AgentWorkspaceFileService
+from azents.services.runtime_storage_error import RuntimeStorageError
 
 AGENT_WORKSPACE_ROOT = PurePosixPath("/runtime/home")
 
@@ -105,6 +111,48 @@ class _FakeRuntimeRepository(AgentRuntimeRepository):
         if self._runtime is None:
             self._runtime = _make_agent_runtime()
         return self._runtime
+
+
+class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
+    """Resolve a target from the configured Runtime fixture."""
+
+    def __init__(self, runtime: AgentRuntime | None) -> None:
+        self.runtime = runtime
+
+    async def resolve_operation_target(
+        self,
+        agent_id: str,
+        *,
+        wait_timeout_seconds: float = 120.0,
+        poll_interval_seconds: float = 1.0,
+        expected_authority: RuntimeOperationAuthority | None = None,
+        start_if_stopped: bool = True,
+    ) -> RuntimeOperationTarget:
+        """Return qualified fixture evidence or the normal bounded error."""
+        del (
+            agent_id,
+            wait_timeout_seconds,
+            poll_interval_seconds,
+            expected_authority,
+            start_if_stopped,
+        )
+        runtime = self.runtime
+        if (
+            runtime is None
+            or runtime.provider_observed_state
+            is not RuntimeProviderObservedState.RUNNING
+            or runtime.runner_state is not RuntimeRunnerState.READY
+            or runtime.workspace_path is None
+        ):
+            raise RuntimeStorageError("Runtime runner is not ready.")
+        return RuntimeOperationTarget(
+            id=runtime.id,
+            desired_generation=runtime.desired_generation,
+            runner_generation=runtime.runner_generation,
+            configuration_revision_id="revision-1",
+            configuration_digest="a" * 64,
+            workspace_path=runtime.workspace_path,
+        )
 
 
 class _FakeRunnerOperations:
@@ -394,6 +442,7 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -423,6 +472,7 @@ async def test_get_workspace_uses_agent_runtime_without_session_match() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -450,6 +500,7 @@ async def test_get_workspace_reports_missing_provider_workspace_path() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -475,6 +526,7 @@ async def test_get_workspace_reports_stopped_runtime_not_started() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -497,6 +549,7 @@ async def test_get_workspace_shows_starting_when_start_requested() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -521,6 +574,7 @@ async def test_get_workspace_error_exposes_restart_action() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -543,6 +597,7 @@ async def test_read_path_uses_stat_to_return_file_preview() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
     file_path = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
@@ -571,6 +626,7 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
         runtime_workspace_download_service=cast(
             RuntimeWorkspaceDownloadService,
@@ -610,6 +666,7 @@ async def test_read_path_uses_stat_to_return_directory_listing() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -658,6 +715,7 @@ async def test_read_path_marks_git_repository_directories() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -686,6 +744,7 @@ async def test_stat_path_returns_inspector_metadata() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
     file_path = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
@@ -712,6 +771,7 @@ async def test_mkdir_path_calls_runner_with_normalized_path() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -733,6 +793,7 @@ async def test_delete_path_rejects_workspace_root() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -756,6 +817,7 @@ async def test_move_path_rejects_destination_outside_workspace_root() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
 
@@ -780,6 +842,7 @@ async def test_move_path_calls_runner_for_rename() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
     source = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
@@ -810,6 +873,7 @@ async def test_bulk_delete_paths_calls_runner() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
     first = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()
@@ -835,6 +899,7 @@ async def test_bulk_move_paths_calls_runner() -> None:
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
     first = (AGENT_WORKSPACE_ROOT / "README.md").as_posix()

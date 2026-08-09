@@ -362,6 +362,43 @@ type RuntimeInfrastructureProfileSpec = Annotated[
 ]
 
 
+class RuntimeProfileContainmentStatus(_FrozenProfileModel):
+    """Safe containment capabilities derived from one typed Profile."""
+
+    enabled: bool
+    nested_docker_available: bool
+
+
+def derive_runtime_profile_containment_status(
+    spec: RuntimeInfrastructureProfileSpec,
+) -> RuntimeProfileContainmentStatus:
+    """Derive product-facing containment capabilities from a typed Profile."""
+    match spec:
+        case KubernetesPodProfileSpecV1():
+            return RuntimeProfileContainmentStatus(
+                enabled=False,
+                nested_docker_available=spec.dind is not None,
+            )
+        case KubernetesPodProfileSpecV2():
+            enabled = spec.process_containment is not None
+            return RuntimeProfileContainmentStatus(
+                enabled=enabled,
+                nested_docker_available=spec.dind is not None and not enabled,
+            )
+        case DockerContainerProfileSpecV1():
+            return RuntimeProfileContainmentStatus(
+                enabled=False,
+                nested_docker_available=False,
+            )
+        case DockerContainerProfileSpecV2():
+            return RuntimeProfileContainmentStatus(
+                enabled=spec.process_containment is not None,
+                nested_docker_available=False,
+            )
+        case _:
+            assert_never(spec)
+
+
 class WorkspaceRuntimeProfilePolicyV1(_FrozenProfileModel):
     """Workspace-owned restrictions attached to one Runtime Profile."""
 

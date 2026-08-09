@@ -12,7 +12,11 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import type { RuntimeConfigurationState } from "../types";
-import type { RuntimeConfigurationRevisionResponse } from "@azents/public-client";
+import type {
+  AgentRuntimeConfigurationStatusResponse,
+  RuntimeConfigurationRevisionResponse,
+  RuntimeContainmentStatus as RuntimeContainmentStatusData,
+} from "@azents/public-client";
 
 interface RuntimeConfigurationStatusProps {
   state: RuntimeConfigurationState;
@@ -149,6 +153,96 @@ function RevisionPanel({
   );
 }
 
+type ContainmentAvailabilityDescription =
+  | "containment.availability.availableDescription"
+  | "containment.availability.recreationDescription"
+  | "containment.availability.blockedDescription"
+  | "containment.availability.unavailableDescription";
+
+function ContainmentStatus({
+  containment,
+  configurationStatus,
+}: {
+  containment: RuntimeContainmentStatusData;
+  configurationStatus: AgentRuntimeConfigurationStatusResponse["status"];
+}): React.ReactElement {
+  const t = useTranslations("chat.workspacePanel");
+  const availabilityDescription: ContainmentAvailabilityDescription =
+    containment.runtime_available
+      ? "containment.availability.availableDescription"
+      : containment.recreation_required
+        ? "containment.availability.recreationDescription"
+        : configurationStatus === "configuration_blocked"
+          ? "containment.availability.blockedDescription"
+          : "containment.availability.unavailableDescription";
+
+  const statuses = [
+    {
+      label: t("containment.enabled.label"),
+      value: containment.enabled
+        ? t("containment.enabled.enabled")
+        : t("containment.enabled.disabled"),
+      color: containment.enabled ? "green" : "gray",
+    },
+    {
+      label: t("containment.applied.label"),
+      value: !containment.enabled
+        ? t("containment.applied.notEnabled")
+        : containment.applied
+          ? t("containment.applied.applied")
+          : t("containment.applied.pending"),
+      color: !containment.enabled
+        ? "gray"
+        : containment.applied
+          ? "green"
+          : "yellow",
+    },
+    {
+      label: t("containment.recreation.label"),
+      value: containment.recreation_required
+        ? t("containment.recreation.required")
+        : t("containment.recreation.notRequired"),
+      color: containment.recreation_required ? "yellow" : "gray",
+    },
+    {
+      label: t("containment.availability.label"),
+      value: containment.runtime_available
+        ? t("containment.availability.available")
+        : t("containment.availability.unavailable"),
+      color: containment.runtime_available ? "green" : "red",
+    },
+  ];
+
+  return (
+    <Stack gap="xs">
+      <Text size="sm" fw={600}>
+        {t("containment.title")}
+      </Text>
+      <Paper withBorder p="sm" radius="md">
+        <Stack gap="xs">
+          {statuses.map((status) => (
+            <Group
+              key={status.label}
+              justify="space-between"
+              align="center"
+              gap="sm"
+              wrap="nowrap"
+            >
+              <Text size="xs">{status.label}</Text>
+              <Badge color={status.color} variant="light" size="sm">
+                {status.value}
+              </Badge>
+            </Group>
+          ))}
+        </Stack>
+      </Paper>
+      <Text size="xs" c="dimmed">
+        {t(availabilityDescription)}
+      </Text>
+    </Stack>
+  );
+}
+
 export function RuntimeConfigurationStatus({
   state,
 }: RuntimeConfigurationStatusProps): React.ReactElement {
@@ -189,6 +283,11 @@ export function RuntimeConfigurationStatus({
             {t(`configurationStatus.${configuration.status}.description`)}
           </Text>
         </Stack>
+
+        <ContainmentStatus
+          containment={configuration.containment}
+          configurationStatus={configuration.status}
+        />
 
         {hasTechnicalDetails && (
           <Accordion variant="contained" radius="md">

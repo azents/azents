@@ -8,7 +8,7 @@ from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentProjectCatalogStatus, RuntimeRunnerState
+from azents.core.enums import AgentProjectCatalogStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
@@ -17,7 +17,6 @@ from azents.repos.agent_project_catalog.data import (
     AgentProjectCatalogStatusPatch,
 )
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeRunnerOperationClient,
@@ -26,6 +25,12 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationUnavailable,
 )
 from azents.runtime.deps import get_runtime_runner_operation_client
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationTarget,
+    RuntimeOperationTargetResolver,
+)
+from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
     normalize_agent_workspace_root,
@@ -55,6 +60,10 @@ class AgentProjectCatalogService:
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
+    ]
+    runtime_target_resolver: Annotated[
+        RuntimeOperationTargetResolver,
+        Depends(AgentRuntimeService),
     ]
     runner_operations: Annotated[
         RuntimeRunnerOperationClient | None,
@@ -156,22 +165,32 @@ class AgentProjectCatalogService:
         path: str,
     ) -> Result[AgentProjectCatalogEntry, InvalidProjectPath]:
         """Refresh one Project candidate filesystem status projection."""
-        async with self.session_manager() as session:
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
-                session,
-                agent_id,
+        runtime: RuntimeOperationTarget | None = None
+        unavailable_detail = "Runtime runner is not ready."
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
             )
+        except RuntimeStorageError as error:
+            unavailable_detail = str(error)
+        async with self.session_manager() as session:
             try:
-                workspace_root = normalize_agent_workspace_root(
-                    runtime.workspace_path if runtime is not None else None
-                ).as_posix()
+                workspace_root = (
+                    normalize_agent_workspace_root(runtime.workspace_path).as_posix()
+                    if runtime is not None
+                    else await self._workspace_root(session, agent_id)
+                )
                 normalized = normalize_session_workspace_path(
                     path,
                     workspace_root=workspace_root,
                 )
             except ValueError as exc:
                 return Failure(InvalidProjectPath(path=path, reason=str(exc)))
-        patch = await self._status_patch(runtime, normalized)
+        patch = await self._status_patch(
+            runtime,
+            normalized,
+            unavailable_detail=unavailable_detail,
+        )
         async with self.session_manager() as session:
             entry = await self.catalog_repository.update_status(
                 session,
@@ -189,22 +208,35 @@ class AgentProjectCatalogService:
         paths: list[str],
     ) -> Result[list[AgentProjectCatalogEntry], InvalidProjectPath]:
         """Refresh multiple Project candidate filesystem status projections."""
-        async with self.session_manager() as session:
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
-                session,
-                agent_id,
+        runtime: RuntimeOperationTarget | None = None
+        unavailable_detail = "Runtime runner is not ready."
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
             )
+        except RuntimeStorageError as error:
+            unavailable_detail = str(error)
+        async with self.session_manager() as session:
             try:
-                workspace_root = normalize_agent_workspace_root(
-                    runtime.workspace_path if runtime is not None else None
-                ).as_posix()
+                workspace_root = (
+                    normalize_agent_workspace_root(runtime.workspace_path).as_posix()
+                    if runtime is not None
+                    else await self._workspace_root(session, agent_id)
+                )
                 normalized_paths = normalize_session_workspace_project_paths(
                     paths,
                     workspace_root=workspace_root,
                 )
             except ValueError as exc:
                 return Failure(InvalidProjectPath(path="", reason=str(exc)))
-        patches = [await self._status_patch(runtime, path) for path in normalized_paths]
+        patches = [
+            await self._status_patch(
+                runtime,
+                path,
+                unavailable_detail=unavailable_detail,
+            )
+            for path in normalized_paths
+        ]
         async with self.session_manager() as session:
             entries: list[AgentProjectCatalogEntry] = []
             for path, patch in zip(normalized_paths, patches, strict=True):
@@ -235,15 +267,17 @@ class AgentProjectCatalogService:
 
     async def _status_patch(
         self,
-        runtime: AgentRuntime | None,
+        runtime: RuntimeOperationTarget | None,
         path: str,
+        *,
+        unavailable_detail: str,
     ) -> AgentProjectCatalogStatusPatch:
         """Build the current status patch for a path."""
         checked_at = datetime.now(UTC)
-        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+        if runtime is None:
             return AgentProjectCatalogStatusPatch(
                 status=AgentProjectCatalogStatus.UNAVAILABLE,
-                status_detail="Runtime runner is not ready.",
+                status_detail=unavailable_detail,
                 checked_at=checked_at,
             )
         if self.runner_operations is None:

@@ -34,6 +34,11 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.agent_project_catalog import AgentProjectCatalogService
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationAuthority,
+    RuntimeOperationTarget,
+    RuntimeOperationTargetResolver,
+)
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .project_browser_manifest import (
@@ -62,6 +67,36 @@ class _Fixture:
     agent_id: str
     session_id: str
     user_id: str
+
+
+class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
+    """Return one deterministic Runtime target for manifest tests."""
+
+    async def resolve_operation_target(
+        self,
+        agent_id: str,
+        *,
+        wait_timeout_seconds: float = 120.0,
+        poll_interval_seconds: float = 1.0,
+        expected_authority: RuntimeOperationAuthority | None = None,
+        start_if_stopped: bool = True,
+    ) -> RuntimeOperationTarget:
+        """Return exact fixture evidence."""
+        del (
+            agent_id,
+            wait_timeout_seconds,
+            poll_interval_seconds,
+            expected_authority,
+            start_if_stopped,
+        )
+        return RuntimeOperationTarget(
+            id="runtime-1",
+            desired_generation=1,
+            runner_generation=1,
+            configuration_revision_id="revision-1",
+            configuration_digest="a" * 64,
+            workspace_path="/workspace/agent",
+        )
 
 
 async def _create_fixture(
@@ -160,6 +195,7 @@ def _service(session: AsyncSession) -> ProjectBrowserManifestService:
             catalog_repository=catalog_repository,
             agent_runtime_repository=AgentRuntimeRepository(),
             session_manager=session_manager,
+            runtime_target_resolver=_RuntimeTargetResolver(),
             runner_operations=None,
         ),
         session_manager=session_manager,

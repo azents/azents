@@ -23,7 +23,6 @@ from azents.core.enums import (
     AgentSessionStatus,
     EventKind,
     GitWorktreePathClaimState,
-    RuntimeRunnerState,
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
 )
@@ -52,7 +51,6 @@ from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import (
@@ -75,6 +73,12 @@ from azents.runtime.control_protocol.runner_operations import (
 from azents.runtime.deps import get_runtime_runner_operation_client
 from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operations
 from azents.services.agent_project_catalog import AgentProjectCatalogService
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationTarget,
+    RuntimeOperationTargetResolver,
+)
+from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
     normalize_agent_workspace_root,
@@ -252,6 +256,10 @@ class SessionGitWorktreeService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
+    runtime_target_resolver: Annotated[
+        RuntimeOperationTargetResolver,
+        Depends(AgentRuntimeService),
+    ]
     runner_operations: Annotated[
         RuntimeRunnerOperationClient | None,
         Depends(get_runtime_runner_operation_client),
@@ -281,14 +289,12 @@ class SessionGitWorktreeService:
             )
             if workspace_user is None:
                 return Failure(GitRefPreviewAccessDenied())
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
-                session,
-                agent_id,
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
             )
-        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
-            return Failure(
-                GitRefPreviewRuntimeUnavailable(reason="Runtime runner is not ready.")
-            )
+        except RuntimeStorageError as error:
+            return Failure(GitRefPreviewRuntimeUnavailable(reason=str(error)))
         if self.runner_operations is None:
             return Failure(
                 GitRefPreviewRuntimeUnavailable(
@@ -513,8 +519,30 @@ class SessionGitWorktreeService:
                 completed=True,
                 context_invalidated=False,
             )
-        runtime = await self._get_runtime(agent_id=agent_id)
-        if runtime is None:
+        async with self.session_manager() as session:
+            execution = await self.action_execution_repository.mark_running(
+                session,
+                action_execution_id=execution.id,
+                started_at=datetime.now(UTC),
+            )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="create_session_working_folder",
+            command_argv=None,
+            content="Preparing Session working folder.",
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
+            )
+        except RuntimeStorageError:
             await self._mark_session_working_folder_action_failed(
                 execution=execution,
                 reason_code="runtime_unavailable",
@@ -536,37 +564,6 @@ class SessionGitWorktreeService:
             await self._mark_session_working_folder_action_failed(
                 execution=execution,
                 reason_code="invalid_stored_path",
-                on_projection_updated=on_projection_updated,
-                on_history_event_appended=on_history_event_appended,
-            )
-            return GitWorktreeActionExecutionResult(
-                completed=True,
-                context_invalidated=False,
-            )
-
-        async with self.session_manager() as session:
-            execution = await self.action_execution_repository.mark_running(
-                session,
-                action_execution_id=execution.id,
-                started_at=datetime.now(UTC),
-            )
-        await self._publish_action_execution_projection(
-            execution=execution,
-            on_projection_updated=on_projection_updated,
-        )
-        await self._append_action_execution_event(
-            execution=execution,
-            kind=ActionExecutionEventKind.STEP_STARTED,
-            step_key="create_session_working_folder",
-            command_argv=None,
-            content="Preparing Session working folder.",
-            exit_code=None,
-            on_projection_updated=on_projection_updated,
-        )
-        if runtime.runner_state is not RuntimeRunnerState.READY:
-            await self._mark_session_working_folder_action_failed(
-                execution=execution,
-                reason_code="runtime_unavailable",
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
@@ -799,27 +796,46 @@ class SessionGitWorktreeService:
                 completed=True,
                 context_invalidated=False,
             )
-        runtime = await self._get_runtime(agent_id=agent_id)
-        if (
-            runtime is None
-            or runtime.runner_state != RuntimeRunnerState.READY
-            or runtime.id != context_runtime_id
-        ):
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
+            )
+        except RuntimeStorageError as error:
+            L.warning(
+                "Manual orphan Git worktree cleanup failed",
+                extra=_cleanup_log_summary(
+                    stage="terminal",
+                    reason_code="runtime_unavailable",
+                    candidates=[],
+                ),
+            )
+            await self._mark_cleanup_action_failed(
+                execution=execution,
+                result=_cleanup_result(phase="failed", candidates=[]),
+                reason=str(error),
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        if runtime.id != context_runtime_id:
             L.warning(
                 "Manual orphan Git worktree cleanup failed",
                 extra={
                     **_cleanup_log_summary(
                         stage="terminal",
-                        reason_code="runtime_unavailable",
+                        reason_code="runtime_changed",
                         candidates=[],
                     ),
-                    "current_runtime_id": runtime.id if runtime is not None else None,
+                    "current_runtime_id": runtime.id,
                 },
             )
             await self._mark_cleanup_action_failed(
                 execution=execution,
                 result=_cleanup_result(phase="failed", candidates=[]),
-                reason="Runtime runner is not ready.",
+                reason="Runtime changed before cleanup could start.",
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
@@ -1494,10 +1510,44 @@ class SessionGitWorktreeService:
                 completed=True,
                 context_invalidated=False,
             )
-        runtime = await self._get_runtime(agent_id=agent_id)
+        async with self.session_manager() as session:
+            execution = await self.action_execution_repository.mark_running(
+                session,
+                action_execution_id=execution.id,
+                started_at=datetime.now(UTC),
+            )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="wait_for_runtime",
+            command_argv=None,
+            content="Waiting for Runtime readiness.",
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
+            )
+        except RuntimeStorageError as error:
+            await self._mark_action_execution_failed(
+                execution=execution,
+                allocation=None,
+                reason=str(error),
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
         try:
             workspace_root = normalize_agent_workspace_root(
-                runtime.workspace_path if runtime is not None else None
+                runtime.workspace_path
             ).as_posix()
             normalized_source_path = normalize_session_workspace_path(
                 action.source_project_path,
@@ -1535,11 +1585,6 @@ class SessionGitWorktreeService:
                 context_invalidated=False,
             )
         async with self.session_manager() as session:
-            execution = await self.action_execution_repository.mark_running(
-                session,
-                action_execution_id=execution.id,
-                started_at=datetime.now(UTC),
-            )
             allocation = await self._ensure_action_worktree_allocation(
                 session,
                 execution=execution,
@@ -1563,18 +1608,6 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
 
-        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
-            await self._mark_action_execution_failed(
-                execution=execution,
-                allocation=allocation,
-                reason="Runtime runner is not ready.",
-                on_projection_updated=on_projection_updated,
-                on_history_event_appended=on_history_event_appended,
-            )
-            return GitWorktreeActionExecutionResult(
-                completed=True,
-                context_invalidated=False,
-            )
         if self.runner_operations is None:
             await self._mark_action_execution_failed(
                 execution=execution,
@@ -1729,7 +1762,7 @@ class SessionGitWorktreeService:
     async def _run_action_create_worktree_step(
         self,
         *,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         execution: ActionExecution,
         allocation: SessionGitWorktree,
         on_projection_updated: ActionExecutionProjectionCallback | None,
@@ -2269,8 +2302,8 @@ class SessionGitWorktreeService:
         projection_service = SkillProjectionService(
             store=self.skill_store,
             session_manager=self.session_manager,
+            runtime_target_resolver=self.runtime_target_resolver,
             runner_operations=adapt_runtime_runner_operations(self.runner_operations),
-            runtime_repository=self.agent_runtime_repository,
             project_repository=self.session_workspace_project_repository,
         )
         await projection_service.sync_latest(
@@ -2399,11 +2432,14 @@ class SessionGitWorktreeService:
         ]
         if not cleanup_targets:
             return
-        runtime = await self._get_runtime(agent_id=agent_id)
-        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
+            )
+        except RuntimeStorageError as error:
             await self._mark_cleanup_targets_failed(
                 allocations=cleanup_targets,
-                reason="Runtime runner is not ready.",
+                reason=str(error),
             )
             return
         if self.runner_operations is None:
@@ -2479,8 +2515,11 @@ class SessionGitWorktreeService:
             if allocation.status is not SessionGitWorktreeStatus.CLEANED
         ]
         if cleanup_targets:
-            runtime = await self._get_runtime(agent_id=agent_id)
-            if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+            try:
+                runtime = await self.runtime_target_resolver.resolve_operation_target(
+                    agent_id
+                )
+            except RuntimeStorageError as error:
                 for allocation in cleanup_targets:
                     _log_archive_cleanup_failure(
                         agent_id=agent_id,
@@ -2490,7 +2529,7 @@ class SessionGitWorktreeService:
                     )
                 await self._mark_cleanup_targets_failed(
                     allocations=cleanup_targets,
-                    reason="Runtime runner is not ready.",
+                    reason=str(error),
                 )
                 return len(allocations)
             if self.runner_operations is None:
@@ -2599,7 +2638,7 @@ class SessionGitWorktreeService:
         agent_id: str,
         session_id: str,
         claim_owner_session_id: str,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         allocation: SessionGitWorktree,
         force: bool,
     ) -> SessionGitWorktree | None:
@@ -2729,7 +2768,7 @@ class SessionGitWorktreeService:
     async def _cleanup_empty_session_worktree_parent(
         self,
         *,
-        runtime: AgentRuntime,
+        runtime: RuntimeOperationTarget,
         allocation: SessionGitWorktree,
     ) -> None:
         """Delete the session worktree directory after its last child is removed."""
@@ -2804,14 +2843,6 @@ class SessionGitWorktreeService:
                 worktree_id=worktree_id,
                 cleanup_summary=reason,
                 failed_at=failed_at,
-            )
-
-    async def _get_runtime(self, *, agent_id: str) -> AgentRuntime | None:
-        """Fetch current AgentRuntime."""
-        async with self.session_manager() as session:
-            return await self.agent_runtime_repository.get_by_agent_id(
-                session,
-                agent_id,
             )
 
     async def _choose_available_target(

@@ -31,18 +31,23 @@ import {
   resourceUnitForValue,
   resourceUnitValue,
 } from "../resourceUnits";
-import type { InfrastructureProfilesSectionProps } from "../containers/InfrastructureProfilesSectionContainer";
+import type {
+  InfrastructureProfilesSectionProps,
+  InfrastructureProfileSubmission,
+} from "../containers/InfrastructureProfilesSectionContainer";
 import type { InfrastructureProfileKind } from "../runtimeProviderPresentation";
 import type {
   KubernetesToleration,
   RuntimeInfrastructureProfileResponse,
-  RuntimeInfrastructureProfileSpec,
+  RuntimeProcessContainmentModuleV1,
 } from "@azents/admin-client";
 
 interface InfrastructureProfileFormValues {
   displayName: string;
   description: string;
   lifecycle: "active" | "disabled";
+  schemaVersion: 1 | 2;
+  processContainmentEnabled: boolean;
   runnerCpuRequest: number | null;
   runnerCpuLimit: number | null;
   runnerMemoryRequest: number | null;
@@ -126,6 +131,8 @@ function blankValues(): InfrastructureProfileFormValues {
     displayName: "",
     description: "",
     lifecycle: "active",
+    schemaVersion: 1,
+    processContainmentEnabled: false,
     runnerCpuRequest: null,
     runnerCpuLimit: null,
     runnerMemoryRequest: null,
@@ -270,6 +277,9 @@ function valuesFromProfile(
       displayName: profile.display_name,
       description: profile.description,
       lifecycle: profile.lifecycle,
+      schemaVersion: spec.schema_version,
+      processContainmentEnabled:
+        spec.schema_version === 2 && spec.process_containment !== null,
       runnerCpuRequest: spec.runner_resources.cpu_request_millicores,
       runnerCpuLimit: spec.runner_resources.cpu_limit_millicores,
       runnerMemoryRequest: spec.runner_resources.memory_request_bytes,
@@ -300,6 +310,9 @@ function valuesFromProfile(
     displayName: profile.display_name,
     description: profile.description,
     lifecycle: profile.lifecycle,
+    schemaVersion: spec.schema_version,
+    processContainmentEnabled:
+      spec.schema_version === 2 && spec.process_containment !== null,
     dockerCpuReservation: spec.runner_resources.cpu_reservation_millicores,
     dockerCpuLimit: spec.runner_resources.cpu_limit_millicores,
     dockerMemoryReservation: spec.runner_resources.memory_reservation_bytes,
@@ -311,42 +324,81 @@ function valuesFromProfile(
 function buildSpec(
   kind: InfrastructureProfileKind,
   values: InfrastructureProfileFormValues,
-): RuntimeInfrastructureProfileSpec {
+): InfrastructureProfileSubmission["spec"] {
   if (kind === "kubernetes_pod") {
+    const runnerResources = {
+      cpu_request_millicores: values.runnerCpuRequest,
+      cpu_limit_millicores: values.runnerCpuLimit,
+      memory_request_bytes: values.runnerMemoryRequest,
+      memory_limit_bytes: values.runnerMemoryLimit,
+    };
+    const workspaceVolume = {
+      storage_class_name: values.storageClassName,
+      storage_request_bytes: values.storageRequestBytes,
+    };
+    const networkPolicy = {
+      allowed_cidrs: lines(values.allowedCidrs),
+      denied_cidrs: lines(values.deniedCidrs),
+    };
+    const scheduling = {
+      node_selector: nodeSelectorFromText(values.nodeSelector),
+      tolerations: tolerationsFromText(values.tolerations),
+    };
+    const dind = values.dindEnabled
+      ? {
+          engine_resources: {
+            cpu_request_millicores: values.dindCpuRequest,
+            cpu_limit_millicores: values.dindCpuLimit,
+            memory_request_bytes: values.dindMemoryRequest,
+            memory_limit_bytes: values.dindMemoryLimit,
+          },
+          docker_storage_bytes: values.dockerStorageBytes,
+          shared_temporary_storage_bytes: values.sharedTemporaryStorageBytes,
+        }
+      : null;
+    const processContainment: RuntimeProcessContainmentModuleV1 | null =
+      values.processContainmentEnabled ? { schema_version: 1 } : null;
+    if (values.schemaVersion === 2 || values.processContainmentEnabled) {
+      return {
+        profile_kind: "kubernetes_pod",
+        contract_family: "kubernetes.pod-profile",
+        schema_version: 2,
+        runner_resources: runnerResources,
+        workspace_volume: workspaceVolume,
+        network_policy: networkPolicy,
+        service_account_name: values.serviceAccountName.trim() || null,
+        scheduling,
+        dind,
+        process_containment: processContainment,
+      };
+    }
     return {
       profile_kind: "kubernetes_pod",
       contract_family: "kubernetes.pod-profile",
       schema_version: 1,
-      runner_resources: {
-        cpu_request_millicores: values.runnerCpuRequest,
-        cpu_limit_millicores: values.runnerCpuLimit,
-        memory_request_bytes: values.runnerMemoryRequest,
-        memory_limit_bytes: values.runnerMemoryLimit,
-      },
-      workspace_volume: {
-        storage_class_name: values.storageClassName,
-        storage_request_bytes: values.storageRequestBytes,
-      },
-      network_policy: {
-        allowed_cidrs: lines(values.allowedCidrs),
-        denied_cidrs: lines(values.deniedCidrs),
-      },
+      runner_resources: runnerResources,
+      workspace_volume: workspaceVolume,
+      network_policy: networkPolicy,
       service_account_name: values.serviceAccountName.trim() || null,
-      scheduling: {
-        node_selector: nodeSelectorFromText(values.nodeSelector),
-        tolerations: tolerationsFromText(values.tolerations),
-      },
-      dind: values.dindEnabled
-        ? {
-            engine_resources: {
-              cpu_request_millicores: values.dindCpuRequest,
-              cpu_limit_millicores: values.dindCpuLimit,
-              memory_request_bytes: values.dindMemoryRequest,
-              memory_limit_bytes: values.dindMemoryLimit,
-            },
-            docker_storage_bytes: values.dockerStorageBytes,
-            shared_temporary_storage_bytes: values.sharedTemporaryStorageBytes,
-          }
+      scheduling,
+      dind,
+    };
+  }
+  const runnerResources = {
+    cpu_reservation_millicores: values.dockerCpuReservation,
+    cpu_limit_millicores: values.dockerCpuLimit,
+    memory_reservation_bytes: values.dockerMemoryReservation,
+    memory_limit_bytes: values.dockerMemoryLimit,
+  };
+  if (values.schemaVersion === 2 || values.processContainmentEnabled) {
+    return {
+      profile_kind: "docker_container",
+      contract_family: "docker.container-profile",
+      schema_version: 2,
+      runner_resources: runnerResources,
+      network_name: values.dockerNetworkName.trim() || null,
+      process_containment: values.processContainmentEnabled
+        ? { schema_version: 1 }
         : null,
     };
   }
@@ -354,12 +406,7 @@ function buildSpec(
     profile_kind: "docker_container",
     contract_family: "docker.container-profile",
     schema_version: 1,
-    runner_resources: {
-      cpu_reservation_millicores: values.dockerCpuReservation,
-      cpu_limit_millicores: values.dockerCpuLimit,
-      memory_reservation_bytes: values.dockerMemoryReservation,
-      memory_limit_bytes: values.dockerMemoryLimit,
-    },
+    runner_resources: runnerResources,
     network_name: values.dockerNetworkName.trim() || null,
   };
 }
@@ -732,7 +779,9 @@ function InfrastructureProfileEditor({
               <Divider label="Docker-in-Docker" />
               <Switch
                 label="Enable DinD topology"
+                description="Disable process containment before enabling nested Docker."
                 checked={form.values.dindEnabled}
+                disabled={form.values.processContainmentEnabled}
                 onChange={(event) =>
                   form.setFieldValue("dindEnabled", event.currentTarget.checked)
                 }
@@ -852,6 +901,24 @@ function InfrastructureProfileEditor({
             </>
           )}
 
+          <Divider label="Runtime containment" />
+          <Switch
+            label="Enable process containment"
+            description={
+              kind === "kubernetes_pod" && form.values.dindEnabled
+                ? "Disable DinD before enabling process containment."
+                : "Use the Provider-owned contained Runtime authority for Agent operations."
+            }
+            checked={form.values.processContainmentEnabled}
+            disabled={kind === "kubernetes_pod" && form.values.dindEnabled}
+            onChange={(event) =>
+              form.setFieldValue(
+                "processContainmentEnabled",
+                event.currentTarget.checked,
+              )
+            }
+          />
+
           {errorMessage !== null && <Alert color="red">{errorMessage}</Alert>}
           <Group justify="flex-end">
             <Button variant="default" onClick={onClose}>
@@ -937,9 +1004,34 @@ export function InfrastructureProfilesSection({
                     >
                       {profile.compatible ? "Compatible" : "Incompatible"}
                     </Badge>
+                    <Badge
+                      color={profile.containment.enabled ? "green" : "gray"}
+                      variant="light"
+                    >
+                      {profile.containment.enabled
+                        ? "Process isolation"
+                        : "Direct execution"}
+                    </Badge>
+                    <Badge
+                      color={
+                        profile.containment.nested_docker_available
+                          ? "blue"
+                          : "gray"
+                      }
+                      variant="light"
+                    >
+                      {profile.containment.nested_docker_available
+                        ? "Nested Docker available"
+                        : "Nested Docker unavailable"}
+                    </Badge>
                     {profile.lifecycle === "disabled" && (
                       <Badge color="gray" variant="outline">
                         Disabled
+                      </Badge>
+                    )}
+                    {profile.schema_version !== 1 && (
+                      <Badge color="blue" variant="outline">
+                        Schema v{profile.schema_version}
                       </Badge>
                     )}
                   </Group>

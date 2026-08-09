@@ -1,6 +1,13 @@
 """AgentRuntimeService lifecycle summary tests."""
 
+import dataclasses
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from typing import Any, AsyncIterator, cast
+from unittest.mock import AsyncMock
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeDesiredState,
@@ -101,6 +108,12 @@ def _resolution(
         applied_revision=None,
         runtime_created=False,
     )
+
+
+@asynccontextmanager
+async def _projection_session_manager() -> AsyncIterator[AsyncSession]:
+    """Yield one unused typed session for projection repository doubles."""
+    yield cast(AsyncSession, object())
 
 
 class TestAgentRuntimeLifecycleSummary:
@@ -237,3 +250,65 @@ class TestAgentRuntimeLifecycleSummary:
         )
 
         assert error is None
+
+    async def test_blocked_contained_profile_preserves_desired_projection(
+        self,
+    ) -> None:
+        """Provider unavailability does not relabel selected containment as direct."""
+        resolution = _resolution(
+            status=RuntimeConfigurationResolutionStatus.BLOCKED,
+            reason_code="provider_disabled",
+        )
+        resolution = dataclasses.replace(
+            resolution,
+            desired_revision=dataclasses.replace(
+                resolution.desired_revision,
+                source_trace={
+                    "infrastructure_profile_digest": "profile-digest",
+                },
+            ),
+        )
+        repository = SimpleNamespace(
+            get_infrastructure_profile=AsyncMock(
+                return_value=SimpleNamespace(
+                    version=1,
+                    digest="profile-digest",
+                    spec={
+                        "profile_kind": "kubernetes_pod",
+                        "contract_family": "kubernetes.pod-profile",
+                        "schema_version": 2,
+                        "runner_resources": {
+                            "cpu_request_millicores": None,
+                            "cpu_limit_millicores": None,
+                            "memory_request_bytes": None,
+                            "memory_limit_bytes": None,
+                        },
+                        "workspace_volume": {
+                            "storage_class_name": "standard",
+                            "storage_request_bytes": 1,
+                        },
+                        "network_policy": {
+                            "allowed_cidrs": [],
+                            "denied_cidrs": [],
+                        },
+                        "service_account_name": None,
+                        "scheduling": {
+                            "node_selector": {},
+                            "tolerations": [],
+                        },
+                        "dind": None,
+                        "process_containment": {"schema_version": 1},
+                    },
+                )
+            )
+        )
+        self.service.session_manager = cast(Any, _projection_session_manager)
+        self.service.runtime_profile_repository = cast(Any, repository)
+
+        status = await self.service._configuration_status(resolution)
+
+        assert status.status == "configuration_blocked"
+        assert status.containment.enabled is True
+        assert status.containment.applied is False
+        assert status.containment.runtime_available is False
+        assert status.containment.availability_reason_code == "provider_disabled"

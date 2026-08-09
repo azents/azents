@@ -159,6 +159,10 @@ def get_skill_toolkit_provider(
         VfsProjectionService[AsyncSession],
         Depends(get_vfs_projection_service),
     ],
+    agent_runtime_service: Annotated[
+        AgentRuntimeService,
+        Depends(),
+    ],
 ) -> SkillToolkitProvider:
     """SkillToolkitProvider dependency for Worker with runtime sync support."""
     store = SkillStateStore(session_manager=session_manager)
@@ -167,8 +171,8 @@ def get_skill_toolkit_provider(
         projection_service=SkillProjectionService(
             store=store,
             session_manager=session_manager,
+            runtime_target_resolver=agent_runtime_service,
             runner_operations=runner_operations,
-            runtime_repository=AgentRuntimeRepository(),
             project_repository=SessionWorkspaceProjectRepository(),
             broadcast=broadcast,
         ),

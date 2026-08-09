@@ -606,6 +606,10 @@
       "unavailable": "사용 불가",
       "active": "활성",
       "disabled": "비활성",
+      "containmentEnabled": "프로세스 격리",
+      "containmentDisabled": "직접 실행",
+      "nestedDockerAvailable": "중첩 Docker 사용 가능",
+      "nestedDockerUnavailable": "중첩 Docker 사용 불가",
       "edit": "수정",
       "recreate": "런타임 재생성",
       "operationLoading": "재생성 진행 상태를 불러오는 중…",
@@ -1992,6 +1996,34 @@
       "configurationApplied": "현재 적용된 구성",
       "configurationNoDesired": "확정된 원하는 구성이 없습니다.",
       "configurationNoApplied": "런타임에 적용된 구성이 없습니다.",
+      "containment": {
+        "title": "프로세스 격리",
+        "enabled": {
+          "label": "격리 정책",
+          "enabled": "활성화",
+          "disabled": "비활성화"
+        },
+        "applied": {
+          "label": "현재 Runtime",
+          "applied": "적용됨",
+          "pending": "적용 대기",
+          "notEnabled": "사용 안 함"
+        },
+        "recreation": {
+          "label": "재생성",
+          "required": "필요",
+          "notRequired": "필요 없음"
+        },
+        "availability": {
+          "label": "Runtime 작업",
+          "available": "사용 가능",
+          "unavailable": "사용 불가",
+          "availableDescription": "현재 구성으로 Runtime 작업을 실행할 수 있습니다.",
+          "recreationDescription": "새 구성으로 Workspace 작업을 실행하려면 Runtime을 다시 생성하세요.",
+          "blockedDescription": "선택한 구성이 차단되어 Runtime 작업을 실행할 수 없습니다.",
+          "unavailableDescription": "현재 구성으로 Runtime 준비가 완료될 때까지 작업을 실행할 수 없습니다."
+        }
+      },
       "configurationEvidence": {
         "revision": "Revision",
         "profile": "Runtime Profile",
