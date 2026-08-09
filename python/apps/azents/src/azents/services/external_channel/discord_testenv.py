@@ -393,11 +393,18 @@ class DiscordTestenvGatewayRunner:
                     await handle_lifecycle("disconnected")
                     resumed = True
                     continue
+                if scenario in {
+                    "invalid_session_resumable",
+                    "invalid_session_fresh",
+                }:
+                    await handle_lifecycle("disconnected")
+                    resumed = scenario == "invalid_session_resumable"
+                    continue
                 if scenario == "close_4014":
                     raise DiscordGatewayIntentsError(
                         "Discord rejected the required Message Content intent."
                     )
-                if scenario not in {"open", "invalid_session_resumable"}:
+                if scenario != "open":
                     raise DiscordGatewayError(
                         "Discord deterministic Gateway scenario is unsupported."
                     )
