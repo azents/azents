@@ -4906,11 +4906,14 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         "get_channel",
         "update_channel",
     ]
-    assert any(
-        title_operations[index : index + len(expected_title_operations)]
-        == expected_title_operations
-        for index in range(len(title_operations) - len(expected_title_operations) + 1)
-    )
+    matched_title_operation_count = 0
+    for operation in title_operations:
+        if operation != expected_title_operations[matched_title_operation_count]:
+            continue
+        matched_title_operation_count += 1
+        if matched_title_operation_count == len(expected_title_operations):
+            break
+    assert matched_title_operation_count == len(expected_title_operations)
     gateway = cast(dict[str, object], state["gateway"])
     assert cast(int, gateway["connections"]) >= 2
     initial_opcodes = cast(list[object], gateway["initial_opcodes"])
