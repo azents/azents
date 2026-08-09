@@ -491,6 +491,19 @@ def test_discord_fake_serves_bounded_history_and_thread_ordering_evidence(
         },
         timeout=5,
     ).raise_for_status()
+    source_channel = requests.get(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001",
+        timeout=5,
+    )
+    source_channel.raise_for_status()
+    assert source_channel.json() == {
+        "id": "400000000000000001",
+        "guild_id": "200000000000000001",
+        "type": 0,
+        "name": "discord-source",
+        "position": 0,
+        "permission_overwrites": [],
+    }
     root = requests.get(
         f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/500000000000000001",
         timeout=5,
@@ -528,15 +541,16 @@ def test_discord_fake_serves_bounded_history_and_thread_ordering_evidence(
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
     events = evidence["operations"]
     assert [event["event"] for event in events] == [
+        "channel_read",
         "thread_read",
         "history_page",
         "history_page",
         "thread_create",
         "thread_read",
     ]
-    assert events[0]["outcome"] == "missing"
-    assert events[3]["thread_channel_id"] == thread.json()["id"]
-    assert events[4]["outcome"] == "reused"
+    assert events[1]["outcome"] == "missing"
+    assert events[4]["thread_channel_id"] == thread.json()["id"]
+    assert events[5]["outcome"] == "reused"
     rendered = str(evidence)
     assert "Private root source" not in rendered
     assert "Private later" not in rendered

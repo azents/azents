@@ -715,6 +715,26 @@ class FakeState:
         with self.lock:
             return self._thread_names.get(channel_id)
 
+    def thread_parent_id(self, channel_id: str) -> str | None:
+        """Return the configured parent identity for one created thread."""
+        with self.lock:
+            return next(
+                (
+                    parent_channel_id
+                    for (parent_channel_id, _), thread_id in self._root_threads.items()
+                    if thread_id == channel_id
+                ),
+                None,
+            )
+
+    def is_source_channel(self, channel_id: str) -> bool:
+        """Return whether configured message state belongs to one source channel."""
+        with self.lock:
+            return any(
+                parent_channel_id == channel_id
+                for parent_channel_id, _ in self.root_messages
+            )
+
     def update_thread_name(self, *, channel_id: str, name: str) -> bool:
         """Replace one known thread name without exposing it in evidence."""
         with self.lock:
@@ -920,7 +940,9 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             if self._controlled_response(scenario):
                 return
             name = self.state.thread_name(channel_id)
-            if name is None:
+            parent_id = self.state.thread_parent_id(channel_id)
+            is_source_channel = self.state.is_source_channel(channel_id)
+            if name is None and not is_source_channel:
                 self.state.record_operation(
                     "thread_title",
                     operation="get_channel",
@@ -940,17 +962,43 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 )
                 self._raw_response(200, b"{malformed")
                 return
-            channel_payload: dict[str, object] = {
-                "id": channel_id,
-                "guild_id": self.state.guild_id,
-                "name": name,
-            }
+            channel_payload: dict[str, object]
+            if is_source_channel:
+                channel_payload = {
+                    "id": channel_id,
+                    "guild_id": self.state.guild_id,
+                    "type": 0,
+                    "name": "discord-source",
+                    "position": 0,
+                    "permission_overwrites": [],
+                }
+                evidence_event = "channel_read"
+            else:
+                assert name is not None
+                assert parent_id is not None
+                channel_payload = {
+                    "id": channel_id,
+                    "guild_id": self.state.guild_id,
+                    "parent_id": parent_id,
+                    "owner_id": self.state.bot_user_id,
+                    "type": 11,
+                    "name": name,
+                    "message_count": 0,
+                    "member_count": 0,
+                    "thread_metadata": {
+                        "archived": False,
+                        "auto_archive_duration": 1440,
+                        "archive_timestamp": "2026-07-28T00:00:00.000000+00:00",
+                        "locked": False,
+                    },
+                }
+                evidence_event = "thread_title"
             if scenario == "response_shape_invalid":
                 channel_payload.pop("name")
             elif scenario == "response_channel_mismatch":
                 channel_payload["id"] = "0"
             self.state.record_operation(
-                "thread_title",
+                evidence_event,
                 operation="get_channel",
                 outcome="delivered",
                 safe_category=(
@@ -1029,7 +1077,16 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 outcome="delivered",
                 metadata=history_metadata,
             )
-            self._json_response_array(200, page)
+            self._json_response_array(
+                200,
+                [
+                    _discord_message_response(
+                        message,
+                        guild_id=self.state.guild_id,
+                    )
+                    for message in page
+                ],
+            )
             return
         if "/channels/" in parsed.path and "/messages/" in parsed.path:
             channel_id, message_id = _channel_message_ids(parsed.path)
@@ -1092,10 +1149,19 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     root_message_id=message_id,
                 )
                 if thread_id is not None:
-                    payload["thread"] = {
-                        "id": thread_id,
-                        "parent_id": channel_id,
-                    }
+                    thread_name = self.state.thread_name(thread_id)
+                    assert thread_name is not None
+                    payload["thread"] = _discord_thread_channel_response(
+                        channel_id=thread_id,
+                        parent_id=channel_id,
+                        guild_id=self.state.guild_id,
+                        owner_id=self.state.bot_user_id,
+                        name=thread_name,
+                    )
+                payload = _discord_message_response(
+                    payload,
+                    guild_id=self.state.guild_id,
+                )
                 if scenario == "response_shape_invalid":
                     self.state.record_operation(
                         "thread_read",
@@ -1312,12 +1378,13 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 )
                 self._json_response(
                     201,
-                    {
-                        "id": thread_id,
-                        "parent_id": channel_id,
-                        "guild_id": self.state.guild_id,
-                        "name": name,
-                    },
+                    _discord_thread_channel_response(
+                        channel_id=thread_id,
+                        parent_id=channel_id,
+                        guild_id=self.state.guild_id,
+                        owner_id=self.state.bot_user_id,
+                        name=name,
+                    ),
                 )
                 return
         if parsed.path.startswith(f"{_API_PREFIX}/channels/") and parsed.path.endswith(
@@ -2004,6 +2071,82 @@ def _root_messages(value: object) -> dict[tuple[str, str], dict[str, object]]:
             raise ValueError("root message exceeds the configured size bound.")
         result[(channel_id, message_id)] = item
     return result
+
+
+def _discord_message_response(
+    message: Mapping[str, object],
+    *,
+    guild_id: str,
+) -> dict[str, object]:
+    """Return the complete provider shape required by discord.py Message."""
+    author = message.get("author", {"id": "600000000000000001"})
+    if not isinstance(author, Mapping):
+        raise ValueError("Discord message author is invalid.")
+    raw_mentions = message.get("mentions", [])
+    if not isinstance(raw_mentions, list):
+        raise ValueError("Discord message mentions are invalid.")
+    mentions = [
+        _discord_user_response(cast(Mapping[str, object], mention))
+        for mention in raw_mentions
+        if isinstance(mention, Mapping)
+    ]
+    if len(mentions) != len(raw_mentions):
+        raise ValueError("Discord message mention is invalid.")
+    return {
+        "type": 0,
+        "content": "",
+        "timestamp": "2026-07-28T00:00:00.000000+00:00",
+        "edited_timestamp": None,
+        "mention_roles": [],
+        "attachments": [],
+        "embeds": [],
+        "components": [],
+        "pinned": False,
+        "mention_everyone": False,
+        "tts": False,
+        "flags": 0,
+        **message,
+        "guild_id": guild_id,
+        "author": _discord_user_response(cast(Mapping[str, object], author)),
+        "mentions": mentions,
+    }
+
+
+def _discord_user_response(user: Mapping[str, object]) -> dict[str, object]:
+    """Return the complete provider shape required by discord.py User."""
+    return {
+        "username": "participant",
+        "discriminator": "0",
+        "avatar": None,
+        **user,
+    }
+
+
+def _discord_thread_channel_response(
+    *,
+    channel_id: str,
+    parent_id: str,
+    guild_id: str,
+    owner_id: str,
+    name: str,
+) -> dict[str, object]:
+    """Return the complete provider shape required by discord.py Thread."""
+    return {
+        "id": channel_id,
+        "guild_id": guild_id,
+        "parent_id": parent_id,
+        "owner_id": owner_id,
+        "type": 11,
+        "name": name,
+        "message_count": 0,
+        "member_count": 0,
+        "thread_metadata": {
+            "archived": False,
+            "auto_archive_duration": 1440,
+            "archive_timestamp": "2026-07-28T00:00:00.000000+00:00",
+            "locked": False,
+        },
+    }
 
 
 def _serialized_size(value: Mapping[str, object]) -> int:
