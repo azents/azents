@@ -1,7 +1,7 @@
 ---
 title: "Provider Process Containment Phase 2 Execution Plan"
 created: 2026-08-08
-updated: 2026-08-08
+updated: 2026-08-09
 tags: [runtime, runner, security, sandbox, implementation]
 ---
 
@@ -18,9 +18,8 @@ tags: [runtime, runner, security, sandbox, implementation]
 - Inputs:
   - completed Phase 1 commit `899e2ca88` and PR `#1209`;
   - confirmed `runtime-260808/REQ`;
-  - accepted `runtime-260808/ADR-D1` through `ADR-D10`;
-  - approved `runtime-260808/DESIGN` revision 1 and authority IDs `M1` through
-    `M12`;
+  - accepted `runtime-260808/ADR-D1` through `ADR-D11`;
+  - `runtime-260808/DESIGN` revision 2 and authority IDs `M1` through `M13`;
   - current Runner operation, cancellation, registration, image, and Runtime
     Control contracts.
 - Deliverables:
@@ -44,8 +43,11 @@ tags: [runtime, runner, security, sandbox, implementation]
   - complete descendant termination retained across timeout, cancellation,
     Session termination, quota pruning, generation change, reconnect, and Runner
     shutdown;
-  - Runner image includes the initial backend binary and deterministic package
-    validation.
+  - Runner image includes the initial backend binary in its supported set-user-ID
+    mode, the Runner-owned Agent-child seccomp launcher, and deterministic package
+    validation;
+  - positive projection masks the privileged bwrap inode from the Agent child while
+    retaining the ordinary read-only system toolchain.
 - Non-goals:
   - native file, patch, search, Git, worktree, import, presentation, image, or
     transfer helper containment;
@@ -72,18 +74,19 @@ tags: [runtime, runner, security, sandbox, implementation]
     Agent Workspace read-write, maps the dedicated Agent temporary backing path to
     `/tmp`, preserves `/tmp/agent`, exposes the code-owned system toolchain
     manifest read-only, creates a fresh process view, drops capabilities, prevents
-    privilege escalation and nested user namespaces, and excludes Runner-private
-    paths and environment;
+    privilege escalation and nested user namespaces through the Runner-owned
+    seccomp program, masks its set-user-ID inode, and excludes Runner-private paths
+    and environment;
   - qualification completes before constructing the normal Control clients and
     `RunnerRegistration`; transport reconnect in the same Runner process reuses the
     already qualified backend;
   - current Runner operation envelopes and result/event contracts remain unchanged.
-- Approved Design mechanisms: `M3`, `M4`, `M6`
+- Approved Design mechanisms: `M3`, `M4`, `M6`, `M13`
 - Authority references:
   `runtime-260808/REQ-2`, `REQ-3`, `REQ-4`, `REQ-5`, `REQ-6`, `REQ-7`,
   `REQ-9`, `REQ-10`, `REQ-11`, `REQ-12`, `REQ-14`;
-  `runtime-260808/ADR-D2`, `ADR-D3`, `ADR-D6`, `ADR-D7`, `ADR-D10`;
-  `runtime-260808/DESIGN` revision 1.
+  `runtime-260808/ADR-D2`, `ADR-D3`, `ADR-D6`, `ADR-D7`, `ADR-D10`,
+  `ADR-D11`; `runtime-260808/DESIGN` revision 2.
 - Design delta: `None`
 - Removal obligations:
   - remove direct Agent `create_subprocess_shell()` authority from Runner operation
@@ -105,7 +108,7 @@ tags: [runtime, runner, security, sandbox, implementation]
 | Workstream | Owner | Owned paths | Depends on | Output | Validation |
 | --- | --- | --- | --- | --- | --- |
 | Phase plan | `/root` | `docs/azents/plans/runtime-260808-provider-process-containment-phase-2-runner-backend.md` | Phase 1 PR | Tracked execution scope | Snapshot/frontmatter validation, `git diff --check` |
-| Backend contract and bootstrap | `/root` | `python/apps/azents-runtime-runner/src/azents_runtime_runner/{containment,environment}.py`; focused tests | Fixed interfaces | Typed bootstrap, backend registry, safe environment, direct and bwrap adapters, qualification | Runner Ruff, format, ty, focused pytest |
+| Backend contract and bootstrap | `/root` | `python/apps/azents-runtime-runner/src/azents_runtime_runner/{bwrap_launcher,containment,environment}.py`; focused tests | Fixed interfaces | Typed bootstrap, backend registry, safe environment, direct and bwrap adapters, Agent-child seccomp, qualification | Runner Ruff, format, ty, focused pytest |
 | Runner startup integration | `/root` | `python/apps/azents-runtime-runner/src/azents_runtime_runner/main.py`; `tests/main_test.py` | Backend contract | Pre-registration one-time qualification and bounded startup failure | Focused startup pytest, ty |
 | Process operation integration | `/root` | `python/apps/azents-runtime-runner/src/azents_runtime_runner/operations.py`; `tests/operations_test.py` | Backend process handle | Shell and managed-process routing with unchanged events and quotas | Focused process pytest, cancellation/timeout/shutdown tests |
 | Runner image | `/root` | `python/apps/azents-runtime-runner/Dockerfile`; image validation only | bwrap adapter | Pinned image contains backend binary and required system tools | Docker build, binary/version probe, image smoke test |
@@ -133,7 +136,7 @@ tags: [runtime, runner, security, sandbox, implementation]
     exclusion, positive projection, privilege/process boundaries, descendant
     termination, v1 direct behavior, stable operation contracts, no native
     operation or Provider activation drift, and `Design delta: None`.
-  - Inputs: Requirements, ADR, Design revision 1, multi-phase plan, this phase
+  - Inputs: Requirements, ADR, Design revision 2, multi-phase plan, this phase
     plan, Phase 1 contract, current Specs, diff, and validation evidence.
   - Output: grounded Critical/Warning findings or explicit no findings.
 - Final validation:
@@ -163,15 +166,17 @@ tags: [runtime, runner, security, sandbox, implementation]
     a contained grandchild Workspace-lock canary.
   - Agent children receive only the code-owned safe environment; Runner variables
     are absent and reserved operation overrides are rejected.
-  - The Runner image contains bubblewrap 0.11.0 and util-linux 2.41. Image digest
-    `sha256:ef4e057c7dbee8d4b80de16dbf52081a830c8d9ae06386b3a8d73927510c25b2`
-    passed binary/option probes and the strengthened adapter diagnostic.
-  - The diagnostic root/privileged execution is not Provider deployment
-    conformance. Docker and Kubernetes capability advertisement remains blocked
-    until Phase 4 and Phase 5 qualify the real Runner with preserved UID/GID 1000;
-    changing to root, privileged, setuid, or another material mechanism requires
-    renewed Design authority.
-  - Runner Ruff format/check, whole-project ty, all 178 tests, focused startup,
+  - The Runner image contains bubblewrap 0.11.0 in root-owned mode 4755, util-linux
+    2.41, and the Runner-owned Agent-child seccomp launcher. Docker image digest
+    `sha256:c69844b76858f01334c3507b8789c54f26063089bb2915012ced7ba1b6ba04a0`
+    passed real non-root backend qualification.
+  - Docker qualification ran the Runner as UID/GID 1000 and proved the contained
+    Agent remains UID/GID 1000, all capability sets are zero, `NoNewPrivs=1`,
+    nested user namespaces are denied, ordinary process creation works, and the
+    privileged bwrap inode is absent from the Agent execution view. Kubernetes
+    capability advertisement remains disabled until Phase 5 proves the same
+    contract in its real workload environment.
+  - Runner Ruff format/check, whole-project ty, all 181 tests, focused startup,
     environment, cancellation, timeout, quota, generation, and shutdown coverage,
     documentation validation, static removal searches, and `git diff --check`
     passed.

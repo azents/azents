@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -211,11 +212,19 @@ async def test_bwrap_backend_owns_positive_projection_arguments(tmp_path: Path) 
     )
 
     wrapped = launched[0]
-    assert wrapped.argv[0] == "/usr/bin/bwrap"
+    assert wrapped.argv[0] == sys.executable
+    assert wrapped.argv[1].endswith("/azents_runtime_runner/bwrap_launcher.py")
+    assert wrapped.argv[2] == "/usr/bin/bwrap"
     assert "--unshare-pid" in wrapped.argv
-    assert "--disable-userns" in wrapped.argv
+    assert "--disable-userns" not in wrapped.argv
+    assert "--assert-userns-disabled" not in wrapped.argv
     assert "--uid" not in wrapped.argv
     assert "--gid" not in wrapped.argv
+    assert ("--ro-bind", "/dev/null", "/usr/bin/bwrap") == tuple(
+        wrapped.argv[
+            wrapped.argv.index("/dev/null") - 1 : wrapped.argv.index("/dev/null") + 2
+        ]
+    )
     assert ("--bind", str(tmp_path), str(tmp_path)) == tuple(
         wrapped.argv[
             wrapped.argv.index(str(tmp_path)) - 1 : wrapped.argv.index(str(tmp_path))

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import signal
+import sys
 import tempfile
 import textwrap
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _BOOTSTRAP_ENV_NAME = "AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"
 _BWRAP_PATH = "/usr/bin/bwrap"
+_BWRAP_LAUNCHER_PATH = Path(__file__).with_name("bwrap_launcher.py").resolve()
 _BASH_PATH = "/bin/bash"
 _QUALIFICATION_PYTHON_PATH = "/usr/local/bin/python"
 _QUALIFICATION_SCHEMA_VERSION = 1
@@ -460,12 +462,12 @@ class BwrapExecutionBackend:
 
     def _bwrap_argv(self, spec: ExecutionSpec) -> tuple[str, ...]:
         argv = [
+            sys.executable,
+            str(_BWRAP_LAUNCHER_PATH),
             _BWRAP_PATH,
             "--die-with-parent",
             "--new-session",
             "--unshare-user",
-            "--disable-userns",
-            "--assert-userns-disabled",
             "--unshare-pid",
             "--unshare-ipc",
             "--unshare-uts",
@@ -497,6 +499,7 @@ class BwrapExecutionBackend:
         ]
         for path in _SYSTEM_READ_ONLY_PATHS:
             argv.extend(("--ro-bind-try", path, path))
+        argv.extend(("--ro-bind", "/dev/null", _BWRAP_PATH))
         argv.extend(_parent_directory_arguments(self._config.agent_workspace_path))
         argv.extend(
             (
