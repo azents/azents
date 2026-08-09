@@ -79,7 +79,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-09
-spec_version: 150
+spec_version: 151
 ---
 
 # Agent Execution Loop
@@ -737,11 +737,15 @@ caller's bounded timeout while retaining the initially selected revision and des
 both paths, a configuration or generation change during wait or execution fails closed rather than
 dispatching against a substituted Runtime.
 
-When the selected Profile enables process containment, every Agent-selected process and native
-file/edit/patch/search/Git/import/presentation/image/transfer operation reaches the same contained
-Runner authority. The execution loop retains the existing tool call/result, deadline, cancellation,
-metadata, and model-visible path contracts; containment failure never creates an automatic direct
-retry.
+When the selected Profile enables containment, every Runtime-backed Tool uses the same filesystem
+access policy and logical path namespace. Shell and managed process Tools have that policy enforced
+by the Runner's bwrap process backend. Typed non-shell
+file/edit/patch/search/Git/import/presentation/image/transfer operations execute directly in Python
+inside the trusted Runner and have the same readable, writable, temporary, denied-path, and
+symlink/path-escape rules enforced before native I/O. Non-shell operations do not launch a helper
+process or enter bwrap. The execution loop retains the existing tool call/result, deadline,
+cancellation, metadata, and model-visible path contracts; policy enforcement failure never creates
+an automatic unrestricted retry.
 
 An active root External Channel binding may additionally expose
 `download_external_file` and file-bearing `channel_action`. The download Tool accepts one
@@ -1230,6 +1234,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-09** (spec_version 151) — Defined the shared filesystem access policy as the authority
+  behind both bwrap-enforced shell/process execution and direct Python-enforced typed non-shell
+  operations, removing per-operation helper subprocesses without changing Tool contracts.
 - **2026-08-09** (spec_version 150) — Made Runtime-backed Tool and TurnAction target resolution
   retain exact authority while waiting through bounded same-generation Provider and Runner
   reconnect gaps.

@@ -54,7 +54,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-08-09
-spec_version: 86
+spec_version: 87
 ---
 
 # Toolkit
@@ -343,10 +343,12 @@ Memory Read and Memory Write are resolved as separate auto-bound capabilities. M
 
 One `RuntimeRunnerFileStorage` instance is created per Runtime Toolkit turn and shared by visible file tools and instruction appendix loaders. The storage is bound to the Runtime Agent identity and carries the invoking Agent Session ID as `owner_session_id` on every Runner file operation. It clears its cached target at every model-visible file-tool boundary and resolves a fresh exact qualified target using the prompt-selected authority; appendix reads within that boundary share the same target. A subagent therefore uses its parent Agent Runtime while retaining its own Session ownership. An in-flight boundary does not retry a failed mutation against a replacement Runner generation.
 
-When the selected Profile enables containment, every Agent-selected process, file, edit, patch,
-search, Git, import, presentation, image, publication, provider-delivery, and transfer operation
-uses the same contained Runner authority. Model-visible paths and operation/result contracts remain
-the same as direct execution.
+When the selected Profile enables containment, every Runtime Tool uses the same filesystem access
+policy. Shell and managed process execution has that policy enforced by bwrap. Typed non-shell file,
+edit, patch, search, Git, import, presentation, image, publication, provider-delivery, and transfer
+operations execute directly in Python inside the trusted Runner and enforce the same logical path,
+read/write projection, denied-path, and symlink/path-escape rules without a helper subprocess.
+Model-visible paths and operation/result contracts remain the same as direct execution.
 
 Structured logs separate visible file-tool duration and Runtime operation count from appendix processing. They include tool status, Session identity, phase duration, candidate/discovery/cache/dedupe counts, and internal list/stat/read counts as applicable. Raw file content, rendered appendix content, and model-visible output are not logged.
 
@@ -562,7 +564,7 @@ Toolkit resolution receives an execution mode. Root sessions use root mode. Chil
 - `[default-shell-env-not-deletable]` Deleting default ShellEnvironment returns 400 (`DefaultCannotBeDeleted`).
 - `[shell-domain-whitelist]` If ShellEnvironment.allowed_domains is not empty, sandbox network proxy blocks domain requests outside whitelist. denied_domains are always blocked regardless of allow status.
 - `[shell-env-name-unique]` `(workspace_id, name)` is UNIQUE — duplicate ShellEnvironment name forbidden.
-- `[agent-workspace-file-tool-boundary]` Shell file tools guide current Runner-reported Agent Workspace subpaths and `/tmp/**` paths. External Exchange files and internal Artifacts enter Runtime through `import_file`; `/tmp/**` import result includes transient warning and original file-location URI. User-downloadable file is exported by `present_file` only from an Agent Workspace subfile as `exchange://{object_key}` attachment. A contained Profile executes all Agent-selected process and native path operations through the same contained authority while preserving these model-visible paths and contracts.
+- `[agent-workspace-file-tool-boundary]` Shell file tools guide current Runner-reported Agent Workspace subpaths and `/tmp/**` paths. External Exchange files and internal Artifacts enter Runtime through `import_file`; `/tmp/**` import result includes transient warning and original file-location URI. User-downloadable file is exported by `present_file` only from an Agent Workspace subfile as `exchange://{object_key}` attachment. A contained Profile preserves these paths under one filesystem access policy: bwrap enforces shell/process access and direct Python handlers enforce typed non-shell access.
 - `[agents-md-project-boundary]` Project-scoped `AGENTS.md` auto-load works only inside registered Project. Agent Workspace root instruction is separate root scope, and Agent Workspace root itself is not treated as Project.
 - `[toolkit-hook-effects]` Toolkit tool-call hook may perform `on_before_tool_call` deny and `on_after_tool_call` text output replacement within [hook-260518/ADR](../../adr/hook-260518-hook.md) scope. Arbitrary input mutation, retry/continuation wrapper, credential trace storage are not allowed.
 - `[toolkit-session-lifecycle]` Executable Toolkit instance is managed by session-scoped lifecycle registry tied to `_SessionRunner` active lifetime. Each actionable wake-up resolves a fresh desired toolkit snapshot. A binding with the same stable identity and source revision retains its entered instance; a changed revision enters a replacement before the previous instance is closed. New or replacement toolkit `__aenter__()` must complete before engine `update_context()` call. Removed and replaced toolkits are `__aexit__()` only after successful reconciliation.
@@ -760,6 +762,8 @@ and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-08-09** (spec_version 87) — Clarified one filesystem access policy with bwrap enforcement
+  for shell/process Tools and direct Python enforcement for typed non-shell Runtime Tools.
 - **2026-08-09** (spec_version 86) — Made `ignore` an unconditional Channel Action
   mode, removed continuation-scope authorization, and allowed it to finish active Work
   regardless of task status with zero provider effects.
