@@ -268,7 +268,7 @@ Deliver:
 - full security canary and removal absence evidence;
 - Design Authority drift audit against the final stack;
 - current living Spec updates through `/spec-review`;
-- matching `implemented: 2026-08-08` dates on Requirements and Design only after
+- matching `implemented: 2026-08-09` dates on Requirements and Design only after
   complete validation;
 - removal of this implementation plan and all seven phase plans.
 
