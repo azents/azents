@@ -404,7 +404,8 @@ runtime_pod() {
 wait_for_qualification() {
   local pod
   pod="$(runtime_pod)"
-  kubectl wait -n "${NAMESPACE}" --for=condition=Ready "pod/${pod}" --timeout=120s
+  kubectl wait -n "${NAMESPACE}" --for=condition=Ready "pod/${pod}" --timeout=120s \
+    >/dev/null
   for _ in $(seq 1 120); do
     if kubectl logs -n "${NAMESPACE}" "${pod}" -c runner 2>&1 |
       grep -Fq "Runtime Runner execution backend qualification succeeded"; then
