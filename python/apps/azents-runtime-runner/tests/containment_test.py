@@ -214,6 +214,8 @@ async def test_bwrap_backend_owns_positive_projection_arguments(tmp_path: Path) 
     assert wrapped.argv[0] == "/usr/bin/bwrap"
     assert "--unshare-pid" in wrapped.argv
     assert "--disable-userns" in wrapped.argv
+    assert "--uid" not in wrapped.argv
+    assert "--gid" not in wrapped.argv
     assert ("--bind", str(tmp_path), str(tmp_path)) == tuple(
         wrapped.argv[
             wrapped.argv.index(str(tmp_path)) - 1 : wrapped.argv.index(str(tmp_path))
