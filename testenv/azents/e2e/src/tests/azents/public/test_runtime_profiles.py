@@ -192,10 +192,10 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
     )
     assert replaced_default.runtime_profile_id == default_profile_id
 
-    default_agent = agent_api.agent_v1_create_agent(
+    omitted_profile_agent = agent_api.agent_v1_create_agent(
         handle=handle,
         agent_create_request=AgentCreateRequest(
-            name=f"Default {suffix}",
+            name=f"Omitted Profile {suffix}",
             model_selection=model_selection,
             lightweight_model_selection=model_selection,
             type=AgentType.PUBLIC,
@@ -213,7 +213,12 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
         ),
         _headers=headers,
     )
-    assert default_agent.runtime_profile_id == default_profile_id
+    assert omitted_profile_agent.runtime_profile_id is None
+    assert omitted_profile_agent.runtime_profile_available is False
+    assert (
+        omitted_profile_agent.runtime_profile_availability_reason_code
+        == "runtime_profile_unconfigured"
+    )
     assert explicit_agent.runtime_profile_id == explicit_profile_id
     assert explicit_agent.runtime_profile_available is True
 
