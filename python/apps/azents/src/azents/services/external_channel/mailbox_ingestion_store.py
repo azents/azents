@@ -17,6 +17,7 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionProductMode,
     AgentSessionStartReason,
+    AgentSessionStatus,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
     ExternalChannelConversationLocation,
@@ -67,6 +68,10 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_state import ChannelWorkState
 from azents.services.external_channel.conversation import ExternalChannelHistoryRange
+from azents.services.external_channel.conversation_provisioning import (
+    ExternalChannelConversationPreparation,
+    ExternalChannelConversationProvisioningService,
+)
 from azents.services.external_channel.discord_selector_scope import (
     build_discord_selector_custom_id,
 )
@@ -80,6 +85,7 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthorityKind,
+    ExternalChannelReplayBoundary,
     ExternalChannelSetupReplayBoundary,
 )
 from azents.services.external_channel.participation_state import (
@@ -148,6 +154,10 @@ class ExternalChannelMailboxIngestionStore:
         ExternalChannelWorkRepository,
         Depends(ExternalChannelWorkRepository.create),
     ]
+    conversation_provisioning: Annotated[
+        ExternalChannelConversationProvisioningService,
+        Depends(ExternalChannelConversationProvisioningService),
+    ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
         AgentSessionRepository,
@@ -159,6 +169,78 @@ class ExternalChannelMailboxIngestionStore:
     ]
     mailbox_service: Annotated[MailboxService, Depends(MailboxService)]
     config: Annotated[Config, Depends(get_config)]
+
+    async def create_configured_binding(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: str,
+        route_id: str,
+        response_mode: ExternalChannelResponseMode,
+    ) -> ExternalChannelBinding:
+        """Create or reuse configured Session state in the caller transaction."""
+        resource = await self.repository.lock_resource(
+            session,
+            resource_id=resource_id,
+        )
+        route = await self.repository.get_routable_route_by_id(
+            session,
+            route_id=route_id,
+        )
+        if (
+            resource is None
+            or resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or route is None
+            or route.connection_id != resource.connection_id
+        ):
+            raise ValueError("External Channel configured conversation is unavailable.")
+        binding = await self.repository.lock_connected_binding_by_resource(
+            session,
+            resource_id=resource.id,
+        )
+        existing = binding is not None
+        if binding is None:
+            binding = (
+                await self._create_binding(
+                    session,
+                    route=route,
+                    resource=resource,
+                    response_mode=response_mode,
+                )
+            ).binding
+        elif binding.route_id != route.id or binding.response_mode is not response_mode:
+            raise ValueError("External Channel Resource has an incompatible Binding.")
+        target_session = await self.agent_session_repository.lock_by_id(
+            session,
+            binding.agent_session_id,
+        )
+        if (
+            target_session is None
+            or target_session.status is not AgentSessionStatus.ACTIVE
+            or target_session.stop_requested_at is not None
+        ):
+            raise ValueError("External Channel configured Session is unavailable.")
+        agent_id = route.require_active_agent_id()
+        work = await self.work_repository.ensure_active_work(
+            session,
+            agent_id=agent_id,
+            session_id=binding.agent_session_id,
+            binding_id=binding.id,
+            desired_progress=checking_progress(),
+        )
+        if not existing:
+            await self._create_session_presence_intent(
+                session,
+                resource=resource,
+                binding=binding,
+            )
+        await self._create_initial_progress_intent(
+            session,
+            agent_id=agent_id,
+            binding=binding,
+            work=work,
+        )
+        return binding
 
     async def prepare(
         self,
@@ -317,6 +399,7 @@ class ExternalChannelMailboxIngestionStore:
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+        provider_preparation: ExternalChannelConversationPreparation | None,
     ) -> ExternalChannelIngestionAcceptance:
         """Atomically enqueue provider history and advance its durable position."""
         now = _utc_now()
@@ -454,6 +537,7 @@ class ExternalChannelMailboxIngestionStore:
                     session,
                     ExternalChannelAccessRequestCreate(
                         route_id=conversation.route.id,
+                        source_resource_id=conversation.source_resource.id,
                         resource_id=conversation.resource.id,
                         trigger_provider_message_key=(
                             request.locator.trigger_provider_message_key
@@ -502,6 +586,19 @@ class ExternalChannelMailboxIngestionStore:
             binding = conversation.binding
             existing_binding = binding is not None
             if binding is None:
+                if request.operation in {
+                    ExternalChannelIngestionOperation.ACCESS_ALLOW,
+                    ExternalChannelIngestionOperation.SETUP_CONTINUATION,
+                }:
+                    if provider_preparation is None:
+                        raise ValueError(
+                            "External Channel provider preparation is unavailable."
+                        )
+                    await self.conversation_provisioning.apply(
+                        session,
+                        target_resource_id=conversation.resource.id,
+                        preparation=provider_preparation,
+                    )
                 creation = await self._create_binding(
                     session,
                     route=conversation.route,
@@ -514,6 +611,19 @@ class ExternalChannelMailboxIngestionStore:
                 )
                 binding = creation.binding
                 session_created = creation.session_created
+            target_session = await self.agent_session_repository.lock_by_id(
+                session,
+                binding.agent_session_id,
+            )
+            if (
+                target_session is None
+                or target_session.status is not AgentSessionStatus.ACTIVE
+                or target_session.stop_requested_at is not None
+            ):
+                await session.commit()
+                return _rejected(
+                    ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+                )
             agent_id = conversation.route.agent_id
             if agent_id is None:
                 raise RuntimeError("External Channel route has no active Agent.")
@@ -931,6 +1041,11 @@ class ExternalChannelMailboxIngestionStore:
             resource_id=source_resource.id,
         )
         if source_binding is not None:
+            if (
+                isinstance(boundary, ExternalChannelReplayBoundary)
+                and boundary.target_resource_id != source_resource.id
+            ):
+                raise ValueError("External Channel replay target is no longer current.")
             route = await self.repository.get_routable_route_by_id(
                 session,
                 route_id=source_binding.route_id,
@@ -985,6 +1100,11 @@ class ExternalChannelMailboxIngestionStore:
                         deleted_at=None,
                     ),
                 )
+            if (
+                isinstance(boundary, ExternalChannelReplayBoundary)
+                and boundary.target_resource_id != target_resource.id
+            ):
+                raise ValueError("External Channel replay target is no longer current.")
             binding = await self.repository.lock_connected_binding_by_resource(
                 session,
                 resource_id=target_resource.id,
@@ -1018,6 +1138,11 @@ class ExternalChannelMailboxIngestionStore:
                 setup_claim_id=None,
                 now=now,
             )
+        if (
+            isinstance(boundary, ExternalChannelReplayBoundary)
+            and boundary.target_resource_id != source_resource.id
+        ):
+            raise ValueError("External Channel replay target is no longer current.")
         return _Conversation(
             source_resource=source_resource,
             resource=source_resource,
@@ -1106,6 +1231,7 @@ class ExternalChannelMailboxIngestionStore:
                 session,
                 ExternalChannelAccessRequestCreate(
                     route_id=route.id,
+                    source_resource_id=conversation.source_resource.id,
                     resource_id=conversation.source_resource.id,
                     trigger_provider_message_key=(
                         request.locator.trigger_provider_message_key

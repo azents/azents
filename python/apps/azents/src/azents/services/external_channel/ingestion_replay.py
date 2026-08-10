@@ -86,6 +86,7 @@ class _ReplaySource:
     configuration: ExternalChannelConnectionConfiguration
     position: ExternalChannelConversationPosition
     resource: ExternalChannelResource
+    target_resource_id: str
     principal: ExternalChannelPrincipal
     route_id: str
     trigger_provider_message_key: str
@@ -137,7 +138,8 @@ class ExternalChannelIngestionReplayService:
                 session,
                 connection_id=request.connection_id,
                 conversation_position_id=request.conversation_position_id,
-                resource_id=request.resource_id,
+                resource_id=request.source_resource_id,
+                target_resource_id=request.resource_id,
                 principal_id=request.principal_id,
                 route_id=request.route_id,
                 trigger_provider_message_key=(request.trigger_provider_message_key),
@@ -188,6 +190,7 @@ class ExternalChannelIngestionReplayService:
                 connection_id=state.connection_id,
                 conversation_position_id=state.conversation_position_id,
                 resource_id=state.resource_id,
+                target_resource_id=state.resource_id,
                 principal_id=state.principal_id,
                 route_id=state.selected_route_id,
                 trigger_provider_message_key=state.trigger_provider_message_key,
@@ -389,6 +392,7 @@ class ExternalChannelIngestionReplayService:
         connection_id: str,
         conversation_position_id: str,
         resource_id: str,
+        target_resource_id: str,
         principal_id: str,
         route_id: str,
         trigger_provider_message_key: str,
@@ -440,6 +444,7 @@ class ExternalChannelIngestionReplayService:
             configuration=configuration,
             position=position,
             resource=resource,
+            target_resource_id=target_resource_id,
             principal=principal,
             route_id=route_id,
             trigger_provider_message_key=trigger_provider_message_key,
@@ -510,7 +515,8 @@ def _build_request(
         selected_route_id=source.route_id,
         replay_boundary=ExternalChannelReplayBoundary(
             connection_id=configuration.id,
-            resource_id=source.resource.id,
+            source_resource_id=source.resource.id,
+            target_resource_id=source.target_resource_id,
             principal_id=source.principal.id,
             trigger_provider_message_key=source.trigger_provider_message_key,
             conversation_position_id=source.position.id,

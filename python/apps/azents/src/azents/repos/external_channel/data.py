@@ -495,6 +495,7 @@ class ExternalChannelAccessRequest(_Record):
 
     id: str
     route_id: str
+    source_resource_id: str
     resource_id: str
     trigger_provider_message_key: str
     principal_id: str
@@ -520,6 +521,7 @@ class ExternalChannelAccessRequestCreate(_Record):
     """Access-request creation payload."""
 
     route_id: str
+    source_resource_id: str
     resource_id: str
     trigger_provider_message_key: str
     principal_id: str

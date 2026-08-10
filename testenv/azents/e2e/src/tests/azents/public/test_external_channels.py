@@ -12,6 +12,7 @@ from urllib.parse import urlencode
 
 import azentsadminclient
 import azentspublicclient
+import psycopg
 import pytest
 import requests
 from azentspublicclient.api.agent_v1_api import AgentV1Api
@@ -95,6 +96,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
+from testcontainers.postgres import PostgresContainer
 
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
@@ -310,6 +312,56 @@ def _discord_provider_state(discord_provider_fake_url: str) -> dict[str, object]
     )
     response.raise_for_status()
     return cast(dict[str, object], response.json())
+
+
+def _active_ingress_state(
+    postgres_container: PostgresContainer,
+    *,
+    connection_id: str,
+) -> dict[str, object]:
+    """Return content-free active ingress owner and item evidence from PostgreSQL."""
+    with psycopg.connect(
+        host=postgres_container.get_container_host_ip(),
+        port=postgres_container.get_exposed_port(5432),
+        user=postgres_container.username,
+        password=postgres_container.password,
+        dbname=postgres_container.dbname,
+    ) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                item.id,
+                item.owner_id,
+                owner.session_id,
+                owner.binding_id,
+                owner.preparation_attempt_count,
+                owner.lease_generation,
+                item.state::text,
+                item.attempt_count
+            FROM external_channel_ingress_items AS item
+            JOIN external_channel_ingress_owners AS owner
+              ON owner.id = item.owner_id
+            WHERE item.connection_id = %s
+            ORDER BY item.queue_key
+            """,
+            (connection_id,),
+        ).fetchall()
+    return {
+        "items": [
+            {
+                "id": row[0],
+                "owner_id": row[1],
+                "session_id": row[2],
+                "binding_id": row[3],
+                "owner_ready": row[2] is not None and row[3] is not None,
+                "preparation_attempt_count": row[4],
+                "lease_generation": row[5],
+                "state": row[6],
+                "attempt_count": row[7],
+            }
+            for row in rows
+        ]
+    }
 
 
 def _discord_command_id(
@@ -5018,6 +5070,421 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         "session_presence_left",
     ]
     assert _DISCORD_BOT_TOKEN not in str(terminal_state)
+
+
+@pytest.mark.parametrize(
+    ("setup_action_code", "preparation_operation", "owner_ready_while_blocked"),
+    [
+        pytest.param("st", "create_thread", False, id="threads"),
+        pytest.param("sc", "get_message", True, id="channel"),
+    ],
+)
+def test_discord_configured_message_durably_provisions_conversation(
+    request: pytest.FixtureRequest,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    discord_provider_fake_url: str,
+    azents_engine_worker_container: Container,
+    postgres_container: PostgresContainer,
+    azents_external_channel_gateway_factory: Callable[
+        [], AbstractContextManager[Container]
+    ],
+    setup_action_code: str,
+    preparation_operation: str,
+    owner_ready_while_blocked: bool,
+) -> None:
+    """Provision configured channel/thread Sessions after durable Gateway receipt."""
+    del azents_engine_worker_container
+    suffix = "11" if setup_action_code == "st" else "12"
+    application_id = f"1000000000000000{suffix}"
+    guild_id = f"2000000000000000{suffix}"
+    bot_user_id = f"3000000000000000{suffix}"
+    bot_role_id = f"3500000000000000{suffix}"
+    channel_id = f"4000000000000000{suffix}"
+    first_message_id = f"5000000000000000{suffix}"
+    second_message_id = f"5100000000000000{suffix}"
+    participant_id = f"6000000000000000{suffix}"
+    timestamp = "2026-08-10T00:00:00.000000+00:00"
+    first_text = f"<@&{bot_role_id}> Configure durable {setup_action_code}"
+    second_text = f"<@&{bot_role_id}> Provision durable {setup_action_code}"
+    author: dict[str, object] = {
+        "id": participant_id,
+        "username": "participant",
+        "discriminator": "0",
+        "avatar": None,
+    }
+    bot: dict[str, object] = {
+        "id": bot_user_id,
+        "username": "Azents",
+        "discriminator": "0",
+        "avatar": None,
+        "bot": True,
+    }
+
+    def provider_message(message_id: str, content: str) -> dict[str, object]:
+        return {
+            "id": message_id,
+            "channel_id": channel_id,
+            "guild_id": guild_id,
+            "content": content,
+            "timestamp": timestamp,
+            "edited_timestamp": None,
+            "author": author,
+            "mentions": [],
+            "mention_roles": [bot_role_id],
+            "attachments": [],
+            "embeds": [],
+            "components": [],
+            "type": 0,
+            "pinned": False,
+            "mention_everyone": False,
+            "tts": False,
+        }
+
+    def guild_create() -> dict[str, object]:
+        return {
+            "id": guild_id,
+            "name": "Durable Provisioning E2E",
+            "unavailable": False,
+            "owner_id": participant_id,
+            "roles": [
+                {
+                    "id": bot_role_id,
+                    "name": "Azents",
+                    "color": 0,
+                    "hoist": False,
+                    "position": 1,
+                    "permissions": "0",
+                    "managed": True,
+                    "mentionable": True,
+                    "flags": 0,
+                    "tags": {"bot_id": bot_user_id},
+                }
+            ],
+            "emojis": [],
+            "stickers": [],
+            "features": [],
+            "channels": [
+                {
+                    "id": channel_id,
+                    "guild_id": guild_id,
+                    "type": 0,
+                    "name": "durable-provisioning",
+                    "position": 0,
+                    "permission_overwrites": [],
+                }
+            ],
+            "threads": [],
+            "members": [
+                {
+                    "user": bot,
+                    "roles": [bot_role_id],
+                    "joined_at": timestamp,
+                    "deaf": False,
+                    "mute": False,
+                    "flags": 0,
+                }
+            ],
+            "presences": [],
+            "voice_states": [],
+            "stage_instances": [],
+            "guild_scheduled_events": [],
+            "member_count": 1,
+        }
+
+    def configure_gateway(message: dict[str, object], *, sequence: int) -> None:
+        requests.post(
+            f"{discord_provider_fake_url}/__testenv/configure",
+            json={
+                "application_id": application_id,
+                "guild_id": guild_id,
+                "bot_user_id": bot_user_id,
+                "root_messages": [message],
+                "gateway_dispatches": [
+                    {
+                        "sequence": sequence,
+                        "event_type": "GUILD_CREATE",
+                        "payload": guild_create(),
+                    },
+                    {
+                        "sequence": sequence + 1,
+                        "event_type": "MESSAGE_CREATE",
+                        "payload": message,
+                    },
+                ],
+                "gateway_scenarios": ["open"],
+            },
+            timeout=5,
+        ).raise_for_status()
+
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    configure_gateway(provider_message(first_message_id, first_text), sequence=2)
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        runtime_profile_provider_id=None,
+        shell_enabled=False,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_discord_connection(
+        agent_id=agent_id,
+        handle=handle,
+        discord_connection_setup_request=DiscordConnectionSetupRequest(
+            app_id=application_id,
+            configuration=DiscordConnectionConfiguration(target_guild_id=guild_id),
+            credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
+        ),
+        _headers=headers,
+    )
+    request.addfinalizer(
+        lambda: external_api.external_channel_v1_disconnect_connection(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+    )
+    external_api.external_channel_v1_update_connection_access_policy(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        connection_access_policy_request=ConnectionAccessPolicyRequest(
+            open_access_enabled=True,
+        ),
+        _headers=headers,
+    )
+    chat_api = ChatV1Api(public_api_client)
+
+    def active_discord_binding(
+        *,
+        excluded_session_ids: set[str],
+    ) -> tuple[Any, Any] | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        for session in sessions.items:
+            if session.id in excluded_session_ids:
+                continue
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if (
+                len(projection.items) == 1
+                and projection.items[0].provider.value == "discord"
+                and projection.items[0].disconnected_at is None
+            ):
+                return session, projection.items[0]
+        return None
+
+    initial_session_ids = {
+        session.id
+        for session in chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+    }
+    with azents_external_channel_gateway_factory():
+        setup_custom_id = cast(
+            str,
+            wait_until(
+                lambda: _discord_settings_component_id(
+                    discord_provider_fake_url,
+                    action_code=setup_action_code,
+                ),
+                timeout=30,
+                interval=0.2,
+                message=(
+                    "Discord configured provisioning setup control was not delivered"
+                ),
+            ),
+        )
+        _select_discord_setup_location(
+            discord_provider_fake_url=discord_provider_fake_url,
+            interaction_id=f"7000000000000000{suffix}",
+            application_id=application_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=participant_id,
+            custom_id=setup_custom_id,
+        )
+        first_session, first_binding = cast(
+            tuple[Any, Any],
+            wait_until(
+                lambda: active_discord_binding(
+                    excluded_session_ids=initial_session_ids,
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Discord setup replay did not create the initial binding",
+            ),
+        )
+        wait_until(
+            lambda: (
+                evidence
+                if len(
+                    evidence := _external_channel_input_evidence(
+                        public_server_url=azents_public_server_url,
+                        token=token,
+                        session_id=first_session.id,
+                        include_pending=False,
+                    )
+                )
+                == 1
+                else None
+            ),
+            timeout=30,
+            interval=0.2,
+            message="Discord setup replay input was not promoted",
+        )
+
+    external_api.external_channel_v1_disconnect_session_channel(
+        agent_id=agent_id,
+        session_id=first_session.id,
+        binding_id=first_binding.id,
+        handle=handle,
+        _headers=headers,
+    )
+    baseline_session_ids = {
+        session.id
+        for session in chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+    }
+    configure_gateway(provider_message(second_message_id, second_text), sequence=10)
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/barrier",
+        json={"operation": preparation_operation, "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    request.addfinalizer(
+        lambda: requests.post(
+            f"{discord_provider_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+    )
+
+    with azents_external_channel_gateway_factory():
+        try:
+            wait_until(
+                lambda: (
+                    state
+                    if (
+                        state := requests.get(
+                            f"{discord_provider_fake_url}/__testenv/barrier",
+                            timeout=5,
+                        ).json()
+                    ).get("reached")
+                    is True
+                    else None
+                ),
+                timeout=60,
+                interval=0.2,
+                message=(
+                    "Configured Discord ingress did not reach blocked provider work"
+                ),
+            )
+        except TimeoutError as exc:
+            provider_state = _discord_provider_state(discord_provider_fake_url)
+            active_ingress = _active_ingress_state(
+                postgres_container,
+                connection_id=setup.connection.id,
+            )
+            barrier_state = requests.get(
+                f"{discord_provider_fake_url}/__testenv/barrier",
+                timeout=5,
+            ).json()
+            pytest.fail(
+                f"{exc}; barrier_state={barrier_state!r}; "
+                f"provider_state={provider_state!r}; "
+                f"active_ingress={active_ingress!r}"
+            )
+
+        def blocked_owner() -> dict[str, object] | None:
+            observation = _active_ingress_state(
+                postgres_container,
+                connection_id=setup.connection.id,
+            )
+            matching = cast(list[dict[str, object]], observation["items"])
+            if (
+                len(matching) == 1
+                and matching[0]["owner_ready"] is owner_ready_while_blocked
+            ):
+                return matching[0]
+            return None
+
+        retained = cast(
+            dict[str, object],
+            wait_until(
+                blocked_owner,
+                timeout=15,
+                interval=0.2,
+                message="Configured Discord callback did not retain one durable owner",
+            ),
+        )
+        if owner_ready_while_blocked:
+            assert isinstance(retained["session_id"], str)
+        else:
+            assert retained["session_id"] is None
+            assert (
+                active_discord_binding(excluded_session_ids=baseline_session_ids)
+                is None
+            )
+        requests.post(
+            f"{discord_provider_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+        second_session, _ = cast(
+            tuple[Any, Any],
+            wait_until(
+                lambda: active_discord_binding(
+                    excluded_session_ids=baseline_session_ids,
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Configured Discord message did not converge on one binding",
+            ),
+        )
+        second_evidence = cast(
+            list[dict[str, object]],
+            wait_until(
+                lambda: (
+                    evidence
+                    if len(
+                        evidence := _external_channel_input_evidence(
+                            public_server_url=azents_public_server_url,
+                            token=token,
+                            session_id=second_session.id,
+                            include_pending=False,
+                        )
+                    )
+                    == 1
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message=(
+                    "Configured Discord message was not promoted after provisioning"
+                ),
+            ),
+        )
+
+    assert second_evidence[0]["body"] == second_text
+    state = _discord_provider_state(discord_provider_fake_url)
+    counts = cast(dict[str, int], state["request_counts"])
+    assert counts.get("create_thread", 0) == (1 if setup_action_code == "st" else 0)
+    assert second_text not in str(state)
+    assert _DISCORD_BOT_TOKEN not in str(state)
 
 
 def test_discord_message_command_selector_and_component_journey(

@@ -68,7 +68,8 @@ async def test_access_allow_rebuilds_slack_replay_without_content() -> None:
         status=ExternalChannelAccessRequestStatus.ALLOWED,
         connection_id="connection-1",
         conversation_position_id="position-1",
-        resource_id="resource-1",
+        source_resource_id="source-resource-1",
+        resource_id="target-resource-1",
         trigger_provider_message_key="slack:tenant-1:channel-1:2.000000",
         principal_id="principal-1",
         route_id="route-1",
@@ -101,7 +102,7 @@ async def test_access_allow_rebuilds_slack_replay_without_content() -> None:
         ),
         get_resource=AsyncMock(
             return_value=SimpleNamespace(
-                id="resource-1",
+                id="source-resource-1",
                 connection_id="connection-1",
                 provider_resource_key="slack:tenant-1:channel-1:2.000000",
                 labels={"thread_ts": "2.000000"},
@@ -153,7 +154,12 @@ async def test_access_allow_rebuilds_slack_replay_without_content() -> None:
     assert replay.locator.provider_event_type == "unknown"
     assert replay.locator.provider_user_id == "participant-1"
     assert replay.replay_boundary.principal_id == "principal-1"
+    assert replay.replay_boundary.source_resource_id == "source-resource-1"
+    assert replay.replay_boundary.target_resource_id == "target-resource-1"
     assert replay.replay_boundary.range_start_position == "00000000000000000001"
+    assert repository.get_resource.await_args.kwargs["resource_id"] == (
+        "source-resource-1"
+    )
     assert "participant-1" not in repr(replay)
     assert "channel-1" not in repr(replay)
 
@@ -165,6 +171,7 @@ async def test_access_allow_rebuilds_discord_replay_from_legacy_thread_label() -
         status=ExternalChannelAccessRequestStatus.ALLOWED,
         connection_id="connection-1",
         conversation_position_id="position-1",
+        source_resource_id="resource-1",
         resource_id="resource-1",
         trigger_provider_message_key="discord:guild-1:message-2",
         principal_id="principal-1",
@@ -263,6 +270,7 @@ async def test_access_allow_retains_unresolved_discord_root_for_durable_ingestio
         status=ExternalChannelAccessRequestStatus.ALLOWED,
         connection_id="connection-1",
         conversation_position_id="position-1",
+        source_resource_id="resource-1",
         resource_id="resource-1",
         trigger_provider_message_key=f"discord:{guild_id}:{message_id}",
         principal_id="principal-1",
@@ -375,6 +383,7 @@ async def test_access_allow_replay_uses_durable_connection_authority(
                 status=ExternalChannelAccessRequestStatus.ALLOWED,
                 connection_id="connection-1",
                 conversation_position_id="position-1",
+                source_resource_id="resource-1",
                 resource_id="resource-1",
                 trigger_provider_message_key="discord:200:500",
                 principal_id="principal-1",

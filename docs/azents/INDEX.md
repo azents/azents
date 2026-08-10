@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-03 | 63 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-07 | 145 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-10 | 53 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-10 | 54 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
@@ -40,7 +40,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-10 | 22 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-09 | 39 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-09 | 35 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-10 | 35 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-10 | 36 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-04 | 40 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -306,6 +306,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Persist Requested and Resolved AgentRun Provenance Historical Requirements Reconstruction](requirements/provenance-260710-inference-provenance.md) | provenance-260710 | 2026-07-10 | - |
 | [Platform Runtime Provider Management Requirements](requirements/provider-260722-platform-runtime-provider-management.md) | provider-260722 | 2026-07-22 | - |
 | [Direct Provider Conversation Continuity Requirements](requirements/provider-260731-direct-conversation-continuity.md) | provider-260731 | 2026-07-31 | 2026-07-31 |
+| [Durable External Channel Conversation Provisioning Requirements](requirements/provisioning-260810-durable-external-channel-conversation.md) | provisioning-260810 | 2026-08-10 | 2026-08-10 |
 | [Use an Explicit Nested Inference Profile Request Historical Requirements Reconstruction](requirements/public-260710-public-inference-profile-request-contract.md) | public-260710 | 2026-07-10 | - |
 | [Pyright Configuration Review Historical Requirements Reconstruction](requirements/pyright-260310-pyright-config.md) | pyright-260310 | 2026-03-10 | 2026-03-10 |
 | [Runtime File Read Data Plane Requirements](requirements/read-260730-runtime-file-read-data-plane.md) | read-260730 | 2026-07-30 | 2026-07-30 |
@@ -689,6 +690,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Persist Requested and Resolved AgentRun Provenance](adr/provenance-260710-inference-provenance.md)
 - [Platform Runtime Provider Management](adr/provider-260722-platform-runtime-provider-management.md)
 - [Direct Provider Conversation Continuity](adr/provider-260731-direct-conversation-continuity.md)
+- [Durable External Channel Conversation Provisioning Decisions](adr/provisioning-260810-durable-external-channel-conversation.md)
 - [Use an Explicit Nested Inference Profile Request](adr/public-260710-public-inference-profile-request-contract.md)
 - [Pyright Configuration Review Historical Decision Reconstruction](adr/pyright-260310-pyright-config.md)
 - [Runtime File Read Data Plane](adr/read-260730-runtime-file-read-data-plane.md)

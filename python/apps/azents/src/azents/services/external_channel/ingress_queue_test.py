@@ -39,7 +39,7 @@ from azents.repos.external_channel.ingress_queue_data import (
     ExternalChannelIngressBatch,
     ExternalChannelIngressItem,
     ExternalChannelIngressLeaseClaim,
-    ExternalChannelIngressSession,
+    ExternalChannelIngressOwner,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox.data import MailboxItem
@@ -52,6 +52,9 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.ingress_metrics import (
     ExternalChannelIngressMetrics,
+)
+from azents.services.external_channel.ingress_provisioning import (
+    ExternalChannelIngressProvisioningService,
 )
 from azents.services.external_channel.ingress_queue import (
     ExternalChannelIngressDrainService,
@@ -77,24 +80,24 @@ _NOW = datetime.datetime(2026, 8, 10, 2, tzinfo=datetime.UTC)
 def test_job_request_coalesces_one_drain_lifecycle_and_separates_recreation() -> None:
     """A recreated drain cannot coalesce into the task ending its predecessor."""
     first = build_external_channel_ingress_job_request(
-        session_id="session-1",
+        owner_id="owner-1",
         drain_created_at=_NOW,
         now=_NOW,
     )
     same_lifecycle = build_external_channel_ingress_job_request(
-        session_id="session-1",
+        owner_id="owner-1",
         drain_created_at=_NOW,
         now=_NOW + datetime.timedelta(seconds=1),
     )
     recreated = build_external_channel_ingress_job_request(
-        session_id="session-1",
+        owner_id="owner-1",
         drain_created_at=_NOW + datetime.timedelta(microseconds=1),
         now=_NOW + datetime.timedelta(seconds=1),
     )
 
     assert first.execution_key == same_lifecycle.execution_key
     assert first.execution_key != recreated.execution_key
-    assert first.payload == recreated.payload == {"session_id": "session-1"}
+    assert first.payload == recreated.payload == {"owner_id": "owner-1"}
 
 
 class _Session:
@@ -129,7 +132,7 @@ def _item(
     """Build one complete content-free active queue item."""
     return ExternalChannelIngressItem.model_construct(
         id=item_id,
-        session_id="session-1",
+        owner_id="owner-1",
         queue_key=item_id,
         deduplication_key=f"dedupe-{item_id}",
         provider_event_id=f"event-{item_id}",
@@ -148,8 +151,7 @@ def _item(
         provider_thread_key="thread-1",
         delivery_thread_key="thread-1",
         provider_resource_key="resource-1",
-        resource_id="resource-1",
-        binding_id="binding-1",
+        source_resource_id="resource-1",
         conversation_position_id="position-1",
         principal_id="principal-1",
         trigger_provider_message_key=trigger_key,
@@ -236,6 +238,9 @@ def _history(
 def _batch(*items: ExternalChannelIngressItem) -> ExternalChannelIngressBatch:
     """Build one fenced claimed batch."""
     return ExternalChannelIngressBatch(
+        owner_id="owner-1",
+        target_resource_id="resource-1",
+        binding_id="binding-1",
         session_id="session-1",
         batch_id="batch-1",
         lease_owner="owner-1",
@@ -289,6 +294,10 @@ def _service(
         ),
         provider_policies=cast(
             ExternalChannelIngressProviderPolicyRegistry,
+            MagicMock(),
+        ),
+        provisioning_service=cast(
+            ExternalChannelIngressProvisioningService,
             MagicMock(),
         ),
         mailbox_service=cast(MailboxService, mailbox_service),
@@ -415,7 +424,7 @@ async def test_late_cursor_cas_conflict_rolls_back_and_resets_claim(
     reset_transaction.commit.assert_awaited_once()
     queue_repository.reset_batch_for_coordination.assert_awaited_once_with(
         reset_transaction,
-        drain=drain,
+        owner=drain,
         items=[row],
     )
     queue_repository.finish_batch.assert_not_awaited()
@@ -436,7 +445,9 @@ async def test_coordination_exhaustion_releases_current_lease(
     queue_repository = MagicMock()
     queue_repository.claim_lease = AsyncMock(
         return_value=ExternalChannelIngressLeaseClaim(
-            session=ExternalChannelIngressSession.model_construct(
+            owner=ExternalChannelIngressOwner.model_construct(
+                id="owner-1",
+                binding_id="binding-1",
                 session_id="session-1",
                 lease_generation=7,
             )
@@ -461,7 +472,7 @@ async def test_coordination_exhaustion_releases_current_lease(
     monkeypatch.setattr(service, "_finalize_batch", finalize)
 
     await service.drain(
-        session_id="session-1",
+        owner_id="owner-1",
         deadline=_NOW + datetime.timedelta(minutes=20),
     )
 
@@ -472,7 +483,7 @@ async def test_coordination_exhaustion_releases_current_lease(
     assert final_claim_args is not None
     queue_repository.release_lease.assert_awaited_once_with(
         transactions[-1],
-        session_id="session-1",
+        owner_id="owner-1",
         lease_owner=final_claim_args.kwargs["lease_owner"],
         lease_generation=7,
     )
@@ -616,6 +627,65 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
     assert finalization_stale is False
     assert repository.lock_connection_for_routing.await_args_list[0].args
     assert queue_repository.lock_claimed_batch.await_count == 1
+
+
+async def test_preparation_locks_connection_before_owner() -> None:
+    """Provider completion follows the callback's connection-first lock order."""
+    transaction = _Session()
+    calls: list[str] = []
+    owner = ExternalChannelIngressOwner.model_construct(
+        id="owner-1",
+        connection_id="connection-1",
+        lease_generation=1,
+    )
+    repository = MagicMock()
+
+    async def lock_connection(
+        _session: AsyncSession,
+        *,
+        connection_id: str,
+    ) -> ExternalChannelConnection:
+        assert connection_id == owner.connection_id
+        calls.append("connection")
+        return ExternalChannelConnection.model_construct(id=connection_id)
+
+    repository.lock_connection_for_routing = AsyncMock(side_effect=lock_connection)
+    queue_repository = MagicMock()
+
+    async def lock_owner(
+        _session: AsyncSession,
+        **_kwargs: object,
+    ) -> ExternalChannelIngressOwner:
+        calls.append("owner")
+        return owner
+
+    queue_repository.lock_leased_owner = AsyncMock(side_effect=lock_owner)
+    queue_repository.mark_owner_ready = AsyncMock()
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=MagicMock(),
+        agent_session_repository=MagicMock(),
+        wake_dispatcher=MagicMock(),
+    )
+    service.provisioning_service.prepare = AsyncMock(return_value=object())
+    service.provisioning_service.complete = AsyncMock(
+        return_value=ExternalChannelBinding.model_construct(
+            id="binding-1",
+            agent_session_id="session-1",
+        )
+    )
+
+    prepared = await service._prepare_owner(  # noqa: SLF001
+        owner=owner,
+        lease_owner="worker-1",
+        lease_generation=1,
+    )
+
+    assert prepared
+    assert calls == ["connection", "owner"]
+    transaction.commit.assert_awaited_once()
 
 
 async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(

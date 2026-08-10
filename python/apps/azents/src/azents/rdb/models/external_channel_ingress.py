@@ -14,12 +14,14 @@ from azents.core.enums import (
     ExternalChannelIngressItemState,
     ExternalChannelIngressProfile,
     ExternalChannelProvider,
+    ExternalChannelResponseMode,
 )
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.external_channel import (
     external_channel_conversation_scope_kind_enum,
     external_channel_ingress_profile_enum,
     external_channel_provider_enum,
+    external_channel_response_mode_enum,
 )
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -43,13 +45,18 @@ external_channel_ingress_item_state_enum = ENUM(
 )
 
 
-class RDBExternalChannelIngressSession(RDBModel):
-    """One active drain owner for a Session with queued ingress work."""
+class RDBExternalChannelIngressOwner(RDBModel):
+    """One active drain owner for an effective provider conversation."""
 
-    __tablename__ = "external_channel_ingress_sessions"
+    __tablename__ = "external_channel_ingress_owners"
 
+    UQ_TARGET_RESOURCE = sa.UniqueConstraint(
+        "target_resource_id",
+        name="uq_external_channel_ingress_owners_target_resource",
+    )
     IX_RECOVERY = sa.Index(
-        "ix_external_channel_ingress_sessions_recovery",
+        "ix_external_channel_ingress_owners_recovery",
+        "preparation_next_attempt_at",
         "lease_expires_at",
         "updated_at",
     )
@@ -58,19 +65,88 @@ class RDBExternalChannelIngressSession(RDBModel):
         "AND lease_expires_at IS NULL) OR "
         "(lease_owner IS NOT NULL AND lease_acquired_at IS NOT NULL "
         "AND lease_expires_at IS NOT NULL)",
-        name="ck_external_channel_ingress_sessions_lease",
+        name="ck_external_channel_ingress_owners_lease",
     )
     CK_BATCH = sa.CheckConstraint(
         "(current_batch_id IS NULL AND current_batch_started_at IS NULL) OR "
         "(current_batch_id IS NOT NULL AND current_batch_started_at IS NOT NULL "
         "AND lease_owner IS NOT NULL)",
-        name="ck_external_channel_ingress_sessions_batch",
+        name="ck_external_channel_ingress_owners_batch",
+    )
+    CK_READY = sa.CheckConstraint(
+        "(binding_id IS NULL AND session_id IS NULL) OR "
+        "(binding_id IS NOT NULL AND session_id IS NOT NULL)",
+        name="ck_external_channel_ingress_owners_ready",
+    )
+    CK_SETTING = sa.CheckConstraint(
+        "(participation_setting_id IS NULL "
+        "AND participation_settings_generation IS NULL) OR "
+        "(participation_setting_id IS NOT NULL "
+        "AND participation_settings_generation IS NOT NULL)",
+        name="ck_external_channel_ingress_owners_setting",
+    )
+    CK_PREPARATION_ATTEMPTS = sa.CheckConstraint(
+        "preparation_attempt_count >= 0 AND preparation_attempt_count <= 5",
+        name="ck_external_channel_ingress_owners_preparation_attempt_count",
     )
 
-    session_id: Mapped[str] = mapped_column(
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    connection_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_connections.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    target_resource_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_resources.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    route_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_agent_routes.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    participation_setting_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "external_channel_participation_settings.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    participation_settings_generation: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+    )
+    response_mode: Mapped[ExternalChannelResponseMode] = mapped_column(
+        external_channel_response_mode_enum,
+        nullable=False,
+    )
+    binding_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_bindings.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    session_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("agent_sessions.id", ondelete="RESTRICT"),
-        primary_key=True,
+        nullable=True,
+    )
+    preparation_attempt_count: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    preparation_next_attempt_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
     )
     lease_owner: Mapped[str | None] = mapped_column(
         sa.String(255),
@@ -123,7 +199,15 @@ class RDBExternalChannelIngressSession(RDBModel):
         onupdate=sa.func.now(),
     )
 
-    __table_args__ = (IX_RECOVERY, CK_LEASE, CK_BATCH)
+    __table_args__ = (
+        UQ_TARGET_RESOURCE,
+        IX_RECOVERY,
+        CK_LEASE,
+        CK_BATCH,
+        CK_READY,
+        CK_SETTING,
+        CK_PREPARATION_ATTEMPTS,
+    )
 
 
 class RDBExternalChannelIngressItem(RDBModel):
@@ -132,7 +216,7 @@ class RDBExternalChannelIngressItem(RDBModel):
     __tablename__ = "external_channel_ingress_items"
 
     UQ_ACTIVE_IDENTITY = sa.UniqueConstraint(
-        "session_id",
+        "owner_id",
         "deduplication_key",
         name="uq_external_channel_ingress_items_active_identity",
     )
@@ -140,9 +224,9 @@ class RDBExternalChannelIngressItem(RDBModel):
         "queue_key",
         name="uq_external_channel_ingress_items_queue_key",
     )
-    IX_SESSION_DUE_QUEUE = sa.Index(
-        "ix_external_channel_ingress_items_session_due_queue",
-        "session_id",
+    IX_OWNER_DUE_QUEUE = sa.Index(
+        "ix_external_channel_ingress_items_owner_due_queue",
+        "owner_id",
         "state",
         "next_attempt_at",
         "queue_key",
@@ -190,12 +274,9 @@ class RDBExternalChannelIngressItem(RDBModel):
         init=False,
         default_factory=lambda: uuid7().hex,
     )
-    session_id: Mapped[str] = mapped_column(
+    owner_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey(
-            "external_channel_ingress_sessions.session_id",
-            ondelete="CASCADE",
-        ),
+        sa.ForeignKey("external_channel_ingress_owners.id", ondelete="CASCADE"),
         nullable=False,
     )
     queue_key: Mapped[str] = mapped_column(sa.String(32), nullable=False)
@@ -241,14 +322,9 @@ class RDBExternalChannelIngressItem(RDBModel):
     provider_thread_key: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     delivery_thread_key: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     provider_resource_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    resource_id: Mapped[str] = mapped_column(
+    source_resource_id: Mapped[str] = mapped_column(
         sa.String(32),
         sa.ForeignKey("external_channel_resources.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    binding_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("external_channel_bindings.id", ondelete="RESTRICT"),
         nullable=False,
     )
     conversation_position_id: Mapped[str] = mapped_column(
@@ -323,7 +399,7 @@ class RDBExternalChannelIngressItem(RDBModel):
     __table_args__ = (
         UQ_ACTIVE_IDENTITY,
         UQ_QUEUE_KEY,
-        IX_SESSION_DUE_QUEUE,
+        IX_OWNER_DUE_QUEUE,
         IX_POSITION,
         CK_SCOPE_KEY,
         CK_ATTEMPT_COUNT,
