@@ -27,6 +27,9 @@ from azents.core.enums import (
 )
 from azents.rdb.models.action_execution import RDBActionExecution
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_automatic_project_item import (
+    RDBAgentAutomaticProjectItem,
+)
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
@@ -367,12 +370,20 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
             summary=None,
         )
     )
+    rdb_session.add(
+        RDBAgentAutomaticProjectSetting(
+            agent_id=agent.id,
+            revision=1,
+            updated_by_workspace_user_id=None,
+        )
+    )
+    await rdb_session.flush()
     rdb_session.add_all(
         (
-            RDBAgentAutomaticProjectSetting(
+            RDBAgentAutomaticProjectItem(
                 agent_id=agent.id,
-                revision=1,
-                updated_by_workspace_user_id=None,
+                path="/workspace/automatic",
+                position=0,
             ),
             RDBAgentProjectCatalogEntry(
                 agent_id=agent.id,
@@ -453,6 +464,17 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
 
     assert scanned == 3
     assert invalidated == 2
+    replayed_cleanup = await repository.cleanup_batch(
+        rdb_session,
+        agent_id=agent.id,
+        agent_runtime_id=runtime.id,
+        operation_id=operation_id,
+        after_context_id=cursor,
+        limit=1,
+        now=datetime.datetime.now(datetime.UTC),
+    )
+    assert replayed_cleanup.completed is True
+    assert replayed_cleanup.scanned_count == 0
     await repository.require_cleanup_complete(
         rdb_session,
         agent_id=agent.id,
@@ -478,6 +500,19 @@ async def test_bounded_cleanup_invalidates_bindings_and_preserves_retained_state
     assert bound_context.working_folder_invalidated_by_removal_id == operation_id
     assert await rdb_session.get(RDBAgent, agent.id) is not None
     assert await rdb_session.get(RDBAgentSession, session_id) is not None
+    automatic_project_setting = await rdb_session.get(
+        RDBAgentAutomaticProjectSetting,
+        agent.id,
+    )
+    assert automatic_project_setting is not None
+    assert automatic_project_setting.revision == 2
+    assert not await rdb_session.scalar(
+        sa.select(
+            sa.exists().where(
+                RDBAgentAutomaticProjectItem.agent_id == agent.id,
+            )
+        )
+    )
     assert (
         await rdb_session.scalar(
             sa.select(sa.func.count(RDBAgentMemory.id)).where(
