@@ -12,6 +12,7 @@ from fastapi import Depends
 from azents.core.enums import (
     ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
+    ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
@@ -42,14 +43,6 @@ class ExternalChannelIngestionOperation(enum.StrEnum):
     SELECTOR_CONTINUATION = "selector_continuation"
     ACCESS_ALLOW = "access_allow"
     SETUP_CONTINUATION = "setup_continuation"
-
-
-class ExternalChannelIngressAuthorityKind(enum.StrEnum):
-    """Authority proof used by the final ingestion transaction."""
-
-    CONFIGURATION = "configuration"
-    LEASE = "lease"
-    DURABLE_REPLAY = "durable_replay"
 
 
 class ExternalChannelIngestionOutcomeKind(enum.StrEnum):

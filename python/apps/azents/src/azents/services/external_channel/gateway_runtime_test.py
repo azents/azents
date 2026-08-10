@@ -12,6 +12,9 @@ from azents.services.external_channel.gateway_runtime import (
     ExternalChannelGatewayManagerStopped,
     ExternalChannelGatewayRuntime,
 )
+from azents.services.external_channel.ingress_recovery import (
+    ExternalChannelIngressRecoveryService,
+)
 from azents.services.external_channel.socket_manager import (
     SlackSocketManagerService,
 )
@@ -62,12 +65,16 @@ def _runtime(
             DiscordGatewayManagerService,
             discord_manager,
         ),
+        ingress_recovery_service=cast(
+            ExternalChannelIngressRecoveryService,
+            _WaitingManager(),
+        ),
     )
 
 
 @pytest.mark.asyncio
 async def test_runtime_runs_both_managers_until_shutdown() -> None:
-    """Both required manager loops share one graceful shutdown event."""
+    """All required producer loops share one graceful shutdown event."""
     slack_manager = _WaitingManager()
     discord_manager = _WaitingManager()
     shutdown_event = asyncio.Event()

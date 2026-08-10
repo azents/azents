@@ -1,5 +1,6 @@
 """FastAPI app creation utilities."""
 
+import asyncio
 import json
 import logging
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -15,6 +16,9 @@ from azents.consts import PROJECT_ROOT
 from azents.core.config import Config
 from azents.core.deps import get_appctx
 from azents.job_runtime.deps import get_job_runtime
+from azents.services.external_channel.ingress_recovery import (
+    ExternalChannelIngressRecoveryService,
+)
 from azents.services.runtime_provider_bootstrap.runner import (
     RuntimeProviderBootstrapRunner,
 )
@@ -249,6 +253,8 @@ def _create_fastapi_lifespan(
                 await stack.enter_async_context(appctx)
                 await stack.enter_async_context(container)
             await _preload_process_services(container)
+            if owns_resources:
+                await stack.enter_async_context(_run_ingress_recovery(container))
             if initialize_system_bootstrap:
                 service = await container.solve(SystemBootstrapService)
                 await service.initialize()
@@ -260,6 +266,24 @@ def _create_fastapi_lifespan(
                 yield
 
     return lifespan
+
+
+@asynccontextmanager
+async def _run_ingress_recovery(
+    container: di.Container,
+) -> AsyncIterator[None]:
+    """Run the API producer recovery scan for the lifespan."""
+    shutdown_event = asyncio.Event()
+    service = await container.solve(ExternalChannelIngressRecoveryService)
+    task = asyncio.create_task(
+        service.run(shutdown_event),
+        name="external-channel-ingress-recovery",
+    )
+    try:
+        yield
+    finally:
+        shutdown_event.set()
+        await task
 
 
 async def _preload_process_services(container: di.Container) -> None:

@@ -67,6 +67,7 @@ class LocalJobRuntime:
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._lock = asyncio.Lock()
         self._tasks: dict[str, asyncio.Task[JobOutcome]] = {}
+        self._rerun_requests: dict[str, JobRequest] = {}
         self._detached_cleanups: set[asyncio.Task[None]] = set()
         self._detached_execution_keys: set[str] = set()
         self._closed = False
@@ -87,6 +88,8 @@ class LocalJobRuntime:
                 )
             existing = self._tasks.get(request.execution_key)
             if existing is not None:
+                if self.handlers.reruns_on_coalesce(request.handler_key):
+                    self._rerun_requests[request.execution_key] = request
                 return LocalJobHandle(existing)
             task = asyncio.create_task(
                 self._run_tracked(request),
@@ -122,16 +125,32 @@ class LocalJobRuntime:
 
     async def _run_tracked(self, request: JobRequest) -> JobOutcome:
         """Keep one accepted task registered until its terminal outcome exists."""
+        current_request = request
         try:
-            return await self._execute(request)
-        except asyncio.CancelledError:
-            raise
-        except Exception as error:
-            logger.exception(
-                "Registered Job Runtime task escaped structured outcome",
-                extra={"job_execution_key": request.execution_key},
-            )
-            return JobOutcome.failed(error)
+            while True:
+                try:
+                    outcome = await self._execute(current_request)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    logger.exception(
+                        "Registered Job Runtime task escaped structured outcome",
+                        extra={"job_execution_key": current_request.execution_key},
+                    )
+                    outcome = JobOutcome.failed(error)
+                current = asyncio.current_task()
+                async with self._lock:
+                    if current_request.execution_key in self._detached_execution_keys:
+                        return outcome
+                    rerun = self._rerun_requests.pop(
+                        current_request.execution_key,
+                        None,
+                    )
+                    if rerun is None:
+                        if self._tasks.get(current_request.execution_key) is current:
+                            del self._tasks[current_request.execution_key]
+                        return outcome
+                    current_request = rerun
         finally:
             current = asyncio.current_task()
             async with self._lock:
@@ -140,6 +159,7 @@ class LocalJobRuntime:
                     and self._tasks.get(request.execution_key) is current
                 ):
                     del self._tasks[request.execution_key]
+                self._rerun_requests.pop(request.execution_key, None)
 
     async def _execute(self, request: JobRequest) -> JobOutcome:
         """Run one registered handler inside a task-local DI container."""
@@ -302,6 +322,7 @@ class LocalJobRuntime:
             async with self._lock:
                 self._detached_execution_keys.discard(request.execution_key)
                 self._tasks.pop(request.execution_key, None)
+                self._rerun_requests.pop(request.execution_key, None)
                 if current is not None:
                     self._detached_cleanups.discard(current)
 

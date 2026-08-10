@@ -30,6 +30,9 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
 )
+from azents.services.external_channel.ingress_admission import (
+    ExternalChannelIngressAdmissionService,
+)
 from azents.services.external_channel.transport_ingestion import (
     ExternalChannelTransportIngestionService,
     external_channel_transport_deadline,
@@ -122,9 +125,29 @@ class _Ingestion:
         )
 
 
+class _QueueAdmission:
+    """Defer projection-only tests to the legacy ingestion capture."""
+
+    def __init__(
+        self,
+        outcome: ExternalChannelIngestionOutcome | None = None,
+    ) -> None:
+        self.outcome = outcome
+
+    async def admit_current_trigger(
+        self,
+        *,
+        provider_event_id: str,
+        request: ExternalChannelIngestionRequest,
+    ) -> ExternalChannelIngestionOutcome | None:
+        del provider_event_id, request
+        return self.outcome
+
+
 def _service(
     *,
     repository: _Repository | None = None,
+    queue_outcome: ExternalChannelIngestionOutcome | None = None,
 ) -> tuple[ExternalChannelTransportIngestionService, _Ingestion]:
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[AsyncSession]:
@@ -141,6 +164,10 @@ def _service(
             ingestion_service=cast(
                 ExternalChannelConversationIngestionService,
                 ingestion,
+            ),
+            queue_admission_service=cast(
+                ExternalChannelIngressAdmissionService,
+                _QueueAdmission(queue_outcome),
             ),
         ),
         ingestion,
@@ -237,6 +264,17 @@ def _discord_event(
     )
 
 
+def _queued_outcome() -> ExternalChannelIngestionOutcome:
+    """Build one content-free durable admission result."""
+    return ExternalChannelIngestionOutcome(
+        kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
+        reason=ExternalChannelIngestionReason.ACCEPTED,
+        mailbox_item_id=None,
+        control_plans=(),
+        connection_id=None,
+    )
+
+
 @pytest.mark.asyncio
 async def test_slack_parent_invocation_projects_content_free_parent_request() -> None:
     service, ingestion = _service()
@@ -255,6 +293,23 @@ async def test_slack_parent_invocation_projects_content_free_parent_request() ->
     assert request.locator.delivery_thread_key == "100.000001"
     assert request.locator.provider_resource_key == ("slack:T100:C100:100.000001")
     assert "private inbound content" not in repr(request)
+
+
+@pytest.mark.asyncio
+async def test_slack_durable_admission_short_circuits_provider_history() -> None:
+    """An established Session callback returns after its DB-only queue admission."""
+    queued = _queued_outcome()
+    service, ingestion = _service(queue_outcome=queued)
+
+    outcome = await service.ingest_slack_event(
+        event=_slack_event(thread_ts="90.000001"),
+        connected_bot_user_id="UAUTH",
+        authority=_authority(ExternalChannelIngressProfile.SLACK_HTTP),
+        deadline=external_channel_transport_deadline(_NOW),
+    )
+
+    assert outcome is queued
+    assert ingestion.requests == []
 
 
 @pytest.mark.asyncio
@@ -322,6 +377,27 @@ async def test_discord_parent_invocation_defers_thread_provisioning_to_ingestion
     assert request.locator.provider_resource_key == "discord:300:100"
     assert request.locator.delivery_thread_key == "100"
     assert request.locator.provider_parent_channel_id == "200"
+
+
+@pytest.mark.asyncio
+async def test_discord_durable_admission_short_circuits_provider_history() -> None:
+    """A gateway callback returns after DB-only queue admission."""
+    queued = _queued_outcome()
+    service, ingestion = _service(queue_outcome=queued)
+
+    outcome = await service.ingest_discord_event(
+        event=_discord_event(
+            channel_id="201",
+            thread_id="201",
+            parent_channel_id="200",
+            invocation=True,
+        ),
+        authority=_authority(ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP),
+        deadline=external_channel_transport_deadline(_NOW),
+    )
+
+    assert outcome is queued
+    assert ingestion.requests == []
 
 
 @pytest.mark.asyncio

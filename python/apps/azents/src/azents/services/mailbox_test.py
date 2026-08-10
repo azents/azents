@@ -2647,6 +2647,7 @@ def _external_projection_item(
         invocation_id="batch-1",
         binding_id="binding-1",
         trigger_provider_message_key="C123:1",
+        prompt_role="invocation",
         context_omitted=False,
         sequence=0,
         revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
@@ -2742,6 +2743,7 @@ async def test_external_channel_message_projection() -> None:
         invocation_id="batch-1",
         binding_id="binding-1",
         trigger_provider_message_key="C123:1.0:2",
+        prompt_role="context",
         context_omitted=True,
         sequence=0,
         revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
@@ -2767,6 +2769,7 @@ async def test_external_channel_message_projection() -> None:
     invocation = context.model_copy(
         update={
             "sequence": 1,
+            "prompt_role": "invocation",
             "body": "Invoke",
             "provider_message_key": "C123:1.0:2",
             "provider_position": "2",
