@@ -16,7 +16,7 @@ from azents.engine.events.types import ExternalChannelMessagePayload
 from azents.rdb.models.event import JSONValue
 from azents.repos.mailbox.data import (
     ExternalChannelContinuationMailboxPayload,
-    ExternalChannelInvocationMailboxPayload,
+    ExternalChannelMessageMailboxPayload,
     MailboxEnvelopePayload,
     MailboxItem,
     MailboxPresentationItem,
@@ -38,6 +38,8 @@ def _item(
         requested_model_target_label=None,
         requested_reasoning_effort=None,
         sender_user_id=None,
+        order_group="0123456789abcdef0123456789abcdef",
+        order_sequence=0,
         content="hello",
         idempotency_key=None,
         metadata={"source": "test"},
@@ -66,7 +68,7 @@ def _external_message_data() -> dict[str, object]:
         "provider_user_id": None,
         "sender_display_name": None,
         "author_type": "human",
-        "authorization": "context_only",
+        "prompt_role": "context",
         "body": "hello",
         "attachment_metadata": {},
         "reference_mappings": {},
@@ -141,13 +143,13 @@ def test_external_payload_rejects_malformed_provider_or_resource(
         ExternalChannelMessagePayload.model_validate(payload)
 
 
-def test_external_payload_rejects_non_contiguous_sequence() -> None:
-    with pytest.raises(ValidationError, match="sequence"):
-        ExternalChannelInvocationMailboxPayload(
-            type="external_channel_invocation",
+def test_external_payload_rejects_more_than_one_message() -> None:
+    with pytest.raises(ValidationError, match="requires one message"):
+        ExternalChannelMessageMailboxPayload(
+            type="external_channel_message",
             items=[
                 MailboxPresentationItem(
-                    item_key="external_channel:0",
+                    item_key="external_channel_message:0",
                     presentation_kind="external_channel_message",
                     metadata=cast(
                         dict[str, JSONValue],
@@ -155,7 +157,7 @@ def test_external_payload_rejects_non_contiguous_sequence() -> None:
                     ),
                 ),
                 MailboxPresentationItem(
-                    item_key="external_channel:2",
+                    item_key="external_channel_message:1",
                     presentation_kind="external_channel_message",
                     metadata=cast(
                         dict[str, JSONValue],

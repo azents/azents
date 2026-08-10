@@ -7,6 +7,7 @@ import logging
 from typing import Annotated, Literal
 from urllib.parse import quote, urlparse, urlunparse
 
+from azcommon.uuid import uuid7
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -263,10 +264,15 @@ class ExternalChannelMailboxIngestionStore:
                     existing = await self.mailbox_service.get_by_idempotency_key(
                         session,
                         session_id=binding.agent_session_id,
-                        kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
-                        idempotency_key=_mailbox_idempotency_key(
-                            request=request,
-                            position_id=position.id,
+                        kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
+                        idempotency_key=_mailbox_message_idempotency_key(
+                            invocation_id=_mailbox_idempotency_key(
+                                request=request,
+                                position_id=position.id,
+                            ),
+                            provider_message_key=(
+                                request.locator.trigger_provider_message_key
+                            ),
                         ),
                     )
                     if existing is not None:
@@ -554,29 +560,58 @@ class ExternalChannelMailboxIngestionStore:
                 trigger_principal_id=conversation.principal_id,
                 invocation_id=idempotency_key,
             )
-            enqueue = await self.mailbox_service.enqueue(
+            order_group = uuid7().hex
+            enqueues = await self.mailbox_service.enqueue_many(
                 session,
-                MailboxEnqueue(
-                    session_id=binding.agent_session_id,
-                    kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
-                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                    requested_model_target_label=None,
-                    requested_reasoning_effort=None,
-                    sender_user_id=None,
-                    content="",
-                    idempotency_key=idempotency_key,
-                    metadata={},
-                    attachments=[],
-                    file_parts=[],
-                    action=None,
-                    payload=build_external_channel_mailbox_payload(
-                        projection,
-                        initial_title_eligible=(
-                            session_created or request.initial_title_eligible
+                [
+                    MailboxEnqueue(
+                        session_id=binding.agent_session_id,
+                        kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
+                        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                        requested_model_target_label=None,
+                        requested_reasoning_effort=None,
+                        sender_user_id=None,
+                        order_group=order_group,
+                        order_sequence=item.sequence,
+                        content="",
+                        idempotency_key=_mailbox_message_idempotency_key(
+                            invocation_id=idempotency_key,
+                            provider_message_key=item.provider_message_key,
                         ),
-                    ),
-                ),
+                        metadata={},
+                        attachments=[],
+                        file_parts=[],
+                        action=None,
+                        payload=build_external_channel_mailbox_payload(
+                            item,
+                            context_omitted=(
+                                item.sequence == 0 and item.context_omitted
+                            ),
+                            initial_title_eligible=(
+                                (session_created or request.initial_title_eligible)
+                                and item.provider_message_key
+                                == request.locator.trigger_provider_message_key
+                            ),
+                        ),
+                    )
+                    for item in projection
+                ],
             )
+            created_states = {enqueue.created for enqueue in enqueues}
+            if len(created_states) != 1:
+                raise RuntimeError(
+                    "External Channel mailbox messages partially existed."
+                )
+            trigger_idempotency_key = _mailbox_message_idempotency_key(
+                invocation_id=idempotency_key,
+                provider_message_key=request.locator.trigger_provider_message_key,
+            )
+            trigger_enqueue = next(
+                enqueue
+                for enqueue in enqueues
+                if enqueue.mailbox_item.idempotency_key == trigger_idempotency_key
+            )
+            created = trigger_enqueue.created
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 binding.agent_session_id,
@@ -620,7 +655,7 @@ class ExternalChannelMailboxIngestionStore:
                 )
             control_plans = (
                 ()
-                if not enqueue.created
+                if not created
                 else tuple(
                     plan
                     for plan in (
@@ -632,13 +667,13 @@ class ExternalChannelMailboxIngestionStore:
                 )
             )
             return ExternalChannelIngestionAcceptance(
-                status="accepted" if enqueue.created else "duplicate",
+                status="accepted" if created else "duplicate",
                 reason=(
                     ExternalChannelIngestionReason.ACCEPTED
-                    if enqueue.created
+                    if created
                     else ExternalChannelIngestionReason.DUPLICATE
                 ),
-                mailbox_item_id=enqueue.mailbox_item.id,
+                mailbox_item_id=trigger_enqueue.mailbox_item.id,
                 session_id=binding.agent_session_id,
                 control_plans=control_plans,
                 connection_id=connection.id if control_plans else None,
@@ -1842,6 +1877,19 @@ def _mailbox_idempotency_key(
         ).encode()
     ).hexdigest()
     return f"external-channel:{digest}"
+
+
+def _mailbox_message_idempotency_key(
+    *,
+    invocation_id: str,
+    provider_message_key: str,
+) -> str:
+    """Return one stable provider-message mailbox identity."""
+    digest = hashlib.md5(  # noqa: S324 - non-cryptographic durable identity only
+        f"{len(invocation_id)}:{invocation_id}{provider_message_key}".encode(),
+        usedforsecurity=False,
+    ).hexdigest()
+    return f"external-channel-message:{digest}"
 
 
 def _invocation_projection(

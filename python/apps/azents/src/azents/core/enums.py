@@ -311,7 +311,7 @@ class MailboxItemKind(enum.StrEnum):
     EXTERNAL_CHANNEL_CONTINUATION = "external_channel_continuation"
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"
-    EXTERNAL_CHANNEL_INVOCATION = "external_channel_invocation"
+    EXTERNAL_CHANNEL_MESSAGE = "external_channel_message"
 
 
 class MailboxSchedulingMode(enum.StrEnum):

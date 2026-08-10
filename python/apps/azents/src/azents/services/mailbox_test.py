@@ -102,7 +102,7 @@ from azents.testing.model_selection import (
 )
 
 from .mailbox import (
-    ExternalChannelInvocationMailboxProcessor,
+    ExternalChannelMessageMailboxProcessor,
     MailboxEnqueue,
     MailboxOwnerGenerationStaleError,
     MailboxPreparationContext,
@@ -252,6 +252,8 @@ async def _create_buffer(
                 requested_model_target_label=model_target_label,
                 requested_reasoning_effort=reasoning_effort,
                 sender_user_id=user_id,
+                order_group=None,
+                order_sequence=0,
                 content=content,
                 idempotency_key=None,
                 metadata={"source": "chat"},
@@ -282,6 +284,8 @@ async def _create_action_buffer(
                 requested_model_target_label="Fast",
                 requested_reasoning_effort=ModelReasoningEffort.HIGH,
                 sender_user_id=user_id,
+                order_group=None,
+                order_sequence=0,
                 content=content,
                 idempotency_key=None,
                 metadata={"source": "chat"},
@@ -311,6 +315,8 @@ async def _create_agent_message_buffer(
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 sender_user_id=None,
+                order_group=None,
+                order_sequence=0,
                 content=content,
                 idempotency_key=None,
                 metadata={
@@ -351,6 +357,8 @@ async def _create_agent_result_buffer(
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 sender_user_id=None,
+                order_group=None,
+                order_sequence=0,
                 content=content,
                 idempotency_key=f"agent_result:{source_run_id}",
                 metadata={
@@ -834,6 +842,8 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         requested_model_target_label="Quality",
         requested_reasoning_effort=None,
         sender_user_id=None,
+        order_group="buffer-001",
+        order_sequence=0,
         content="inspect the image",
         idempotency_key="request-001",
         metadata={"source": "chat"},
@@ -1004,6 +1014,8 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
         requested_model_target_label="Quality",
         requested_reasoning_effort=None,
         sender_user_id="user-001",
+        order_group="buffer-001",
+        order_sequence=0,
         content="deferred action",
         idempotency_key="request-001",
         metadata={"source": "chat"},
@@ -1172,6 +1184,8 @@ class TestMailboxService:
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
                     sender_user_id=user_id,
+                    order_group=None,
+                    order_sequence=0,
                     content="wake me",
                     idempotency_key="client-request-001",
                     metadata={"source": "test"},
@@ -1238,6 +1252,8 @@ class TestMailboxService:
             requested_model_target_label="Quality",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             sender_user_id=user_id,
+            order_group=None,
+            order_sequence=0,
             content="profile-aware input",
             idempotency_key="client-request-profile",
             metadata={"source": "test"},
@@ -1305,6 +1321,8 @@ class TestMailboxService:
             requested_model_target_label="Fast",
             requested_reasoning_effort=ModelReasoningEffort.LOW,
             sender_user_id="user-001",
+            order_group="buffer-winner",
+            order_sequence=0,
             content="winner",
             idempotency_key="client-request-race",
             metadata={"source": "test"},
@@ -1332,6 +1350,8 @@ class TestMailboxService:
             requested_model_target_label="Quality",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             sender_user_id="user-001",
+            order_group=None,
+            order_sequence=0,
             content="loser",
             idempotency_key="client-request-race",
             metadata={"source": "test"},
@@ -1446,6 +1466,8 @@ class TestMailboxService:
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
                     sender_user_id=None,
+                    order_group=None,
+                    order_sequence=0,
                     content="",
                     idempotency_key=("idle_continuation:run-001:external_channel:0"),
                     metadata={
@@ -2662,17 +2684,30 @@ def _external_projection_item(
 def test_external_projection_rejects_malformed_resource_identity(
     updates: dict[str, object],
 ) -> None:
-    with pytest.raises(ValueError, match="External invocation"):
-        build_external_channel_mailbox_payload([_external_projection_item(**updates)])
+    with pytest.raises(ValueError, match="External Channel message"):
+        build_external_channel_mailbox_payload(
+            _external_projection_item(**updates),
+            context_omitted=False,
+            initial_title_eligible=False,
+        )
 
 
-def test_external_projection_rejects_non_contiguous_sequence() -> None:
-    with pytest.raises(ValueError, match="sequence"):
-        build_external_channel_mailbox_payload([_external_projection_item(sequence=1)])
+def test_external_projection_builds_one_message_payload() -> None:
+    payload = build_external_channel_mailbox_payload(
+        _external_projection_item(sequence=7),
+        context_omitted=True,
+        initial_title_eligible=True,
+    )
+
+    assert payload.type == "external_channel_message"
+    assert payload.context_omitted is True
+    assert payload.initial_title_eligible is True
+    assert len(payload.items) == 1
+    assert payload.items[0].item_key == "external_channel_message:0"
 
 
-async def test_external_invocation_projection() -> None:
-    """Project one batch contiguously with an authorized trigger boundary."""
+async def test_external_channel_message_projection() -> None:
+    """Promote each provider message row independently in stable group order."""
 
     def at(second: int) -> datetime.datetime:
         return datetime.datetime(
@@ -2703,142 +2738,132 @@ async def test_external_invocation_projection() -> None:
         ],
         "files_truncated": False,
     }
-
-    class _ProjectionRepository:
-        async def list_invocation_projection_items(
-            self,
-            session: AsyncSession,
-            *,
-            batch_id: str,
-        ) -> list[ExternalChannelMailboxProjectionItem]:
-            del session
-            assert batch_id == "batch-1"
-            first = ExternalChannelMailboxProjectionItem(
-                invocation_id="batch-1",
-                binding_id="binding-1",
-                trigger_provider_message_key="C123:1.0:2",
-                context_omitted=True,
-                sequence=0,
-                revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
-                body="Context",
-                attachment_metadata=source_attachment_metadata,
-                reference_mappings=None,
-                resource_id="resource-1",
-                provider_resource_key="C123:1.0",
-                resource_type=ExternalChannelResourceType.THREAD,
-                resource_labels={"channel_id": "C123", "thread_ts": "1.0"},
-                provider=ExternalChannelProvider.SLACK,
-                provider_tenant_id="T1",
-                provider_message_key="C123:1.0:1",
-                provider_position="1",
-                principal_id="principal-1",
-                provider_user_id="U1",
-                sender_display_name="Alice",
-                author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-                provider_created_at=at(1),
-                provider_updated_at=None,
-                original_url="https://slack.example/message",
-            )
-            return [
-                first,
-                first.model_copy(
-                    update={
-                        "sequence": 1,
-                        "body": "Invoke",
-                        "provider_message_key": "C123:1.0:2",
-                        "provider_position": "2",
-                        "provider_created_at": at(2),
-                    }
-                ),
-            ]
-
-    projection_items = await _ProjectionRepository().list_invocation_projection_items(
-        cast(AsyncSession, object()), batch_id="batch-1"
+    context = ExternalChannelMailboxProjectionItem(
+        invocation_id="batch-1",
+        binding_id="binding-1",
+        trigger_provider_message_key="C123:1.0:2",
+        context_omitted=True,
+        sequence=0,
+        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+        body="Context",
+        attachment_metadata=source_attachment_metadata,
+        reference_mappings=None,
+        resource_id="resource-1",
+        provider_resource_key="C123:1.0",
+        resource_type=ExternalChannelResourceType.THREAD,
+        resource_labels={"channel_id": "C123", "thread_ts": "1.0"},
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="T1",
+        provider_message_key="C123:1.0:1",
+        provider_position="1",
+        principal_id="principal-1",
+        provider_user_id="U1",
+        sender_display_name="Alice",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        provider_created_at=at(1),
+        provider_updated_at=None,
+        original_url="https://slack.example/message",
     )
-    mailbox_item = MailboxItem(
-        id="buffer-1",
+    invocation = context.model_copy(
+        update={
+            "sequence": 1,
+            "body": "Invoke",
+            "provider_message_key": "C123:1.0:2",
+            "provider_position": "2",
+            "provider_created_at": at(2),
+        }
+    )
+
+    def mailbox_item(
+        *,
+        item: ExternalChannelMailboxProjectionItem,
+        mailbox_id: str,
+        initial_title_eligible: bool,
+    ) -> MailboxItem:
+        return MailboxItem(
+            id=mailbox_id,
+            session_id="session-1",
+            kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            sender_user_id=None,
+            order_group="00000000000000000000000000000001",
+            order_sequence=item.sequence,
+            content="",
+            idempotency_key=f"external-channel-message:{item.sequence}",
+            metadata={},
+            payload=build_external_channel_mailbox_payload(
+                item,
+                context_omitted=item.sequence == 0 and item.context_omitted,
+                initial_title_eligible=initial_title_eligible,
+            ),
+            action=None,
+            attachments=[],
+            file_parts=[],
+            created_at=at(0),
+        )
+
+    processor = ExternalChannelMessageMailboxProcessor(
+        cast(MailboxService, SimpleNamespace())
+    )
+    preparation_context = MailboxPreparationContext(
+        session=cast(AsyncSession, object()),
         session_id="session-1",
-        kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
-        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-        requested_model_target_label=None,
-        requested_reasoning_effort=None,
-        sender_user_id=None,
-        content="",
-        idempotency_key="external-channel-invocation:batch-1",
-        metadata={},
-        payload=build_external_channel_mailbox_payload(
-            projection_items,
+        active_run_id=None,
+        required_inference_profile=None,
+        prepared_inference_state=None,
+        prepared_files=PreparedMailboxFiles(
+            attachments=[],
+            file_parts=[],
+            created_model_file_ids=[],
+        ),
+    )
+    context_outcome = await processor.process(
+        preparation_context,
+        mailbox_item(
+            item=context,
+            mailbox_id="buffer-1",
+            initial_title_eligible=False,
+        ),
+    )
+    invocation_outcome = await processor.process(
+        preparation_context,
+        mailbox_item(
+            item=invocation,
+            mailbox_id="buffer-2",
             initial_title_eligible=True,
         ),
-        action=None,
-        attachments=[],
-        file_parts=[],
-        created_at=at(0),
-    )
-    service = cast(
-        MailboxService,
-        SimpleNamespace(external_channel_repository=_ProjectionRepository()),
-    )
-    processor = ExternalChannelInvocationMailboxProcessor(service)
-
-    outcome = await processor.process(
-        MailboxPreparationContext(
-            session=cast(AsyncSession, object()),
-            session_id="session-1",
-            active_run_id=None,
-            required_inference_profile=None,
-            prepared_inference_state=None,
-            prepared_files=PreparedMailboxFiles(
-                attachments=[],
-                file_parts=[],
-                created_model_file_ids=[],
-            ),
-        ),
-        mailbox_item,
     )
 
-    assert outcome.turn_effect is TurnEffect.ELIGIBLE
-    assert [item.external_id for item in outcome.promoted] == [
+    assert [item.external_id for item in context_outcome.promoted] == [
         "external-channel:buffer-1:context-omitted",
         "external-channel:binding-1:C123:1.0:1",
-        "external-channel:binding-1:C123:1.0:2",
     ]
-    assert [item.initial_title_eligible for item in outcome.promoted] == [
-        False,
-        False,
-        True,
-    ]
-    assert [item.event_kind for item in outcome.promoted] == [
+    assert [item.event_kind for item in context_outcome.promoted] == [
         EventKind.SYSTEM_REMINDER,
         EventKind.EXTERNAL_CHANNEL_MESSAGE,
-        EventKind.EXTERNAL_CHANNEL_MESSAGE,
     ]
-    assert outcome.promoted[0].payload == {
+    assert context_outcome.promoted[0].payload == {
         "text": (
             "Earlier messages from this external conversation were omitted. "
             "Only the newest 20 provider messages are included below."
         )
     }
-    assert outcome.promoted[1].payload["authorization"] == "context_only"
-    assert outcome.promoted[2].payload["authorization"] == "authorized_invocation"
-    assert "revision_kind" not in outcome.promoted[2].payload
-    assert "correction_of_revision_id" not in outcome.promoted[2].payload
-    assert outcome.promoted[0].item_key == "external_channel:0"
-    assert outcome.promoted[1].item_key == "external_channel:1"
-    assert outcome.promoted[2].item_key == "external_channel:2"
-    assert outcome.promoted[1].payload["invocation_batch_id"] == "batch-1"
-    projected_metadata = outcome.promoted[1].payload["attachment_metadata"]
+    assert context_outcome.promoted[1].payload["prompt_role"] == "context"
+    assert context_outcome.promoted[1].item_key == "external_channel_message:0"
+    assert invocation_outcome.promoted[0].payload["prompt_role"] == "invocation"
+    assert invocation_outcome.promoted[0].initial_title_eligible is True
+    assert invocation_outcome.promoted[0].item_key == "external_channel_message:0"
+    assert "revision_kind" not in invocation_outcome.promoted[0].payload
+    assert "correction_of_revision_id" not in invocation_outcome.promoted[0].payload
+    assert context_outcome.promoted[1].payload["invocation_batch_id"] == "batch-1"
+    projected_metadata = context_outcome.promoted[1].payload["attachment_metadata"]
     assert isinstance(projected_metadata, dict)
     projected_files = projected_metadata["files"]
     assert isinstance(projected_files, list)
     assert isinstance(projected_files[0], dict)
     assert projected_files[0]["file"] == "external-file:v1:slack:binding-1:::F123"
-    second_metadata = cast(
-        dict[str, object], outcome.promoted[2].payload["attachment_metadata"]
-    )
-    second_files = cast(list[object], second_metadata["files"])
-    second_file = cast(dict[str, object], second_files[0])
-    assert second_file["file"] == "external-file:v1:slack:binding-1:::F123"
     source_files = source_attachment_metadata["files"]
     assert isinstance(source_files, list)
     assert isinstance(source_files[0], dict)

@@ -156,7 +156,7 @@ def test_context_breakdown_counts_external_file_metadata() -> None:
         provider_user_id="U1",
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-        authorization="authorized_invocation",
+        prompt_role="invocation",
         body="Process the attached report.",
         attachment_metadata={
             "files": [

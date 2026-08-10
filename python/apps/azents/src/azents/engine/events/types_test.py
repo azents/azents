@@ -182,7 +182,7 @@ def _external_message_payload(
         provider_user_id="U1",
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-        authorization="authorized_invocation",
+        prompt_role="invocation",
         body="hello",
         attachment_metadata={},
         provider_created_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),

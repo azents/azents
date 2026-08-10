@@ -213,6 +213,8 @@ class IdleContinuationService:
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=None,
+            order_group=None,
+            order_sequence=0,
             content=continuation.content,
             idempotency_key=_continuation_idempotency_key(
                 run_id,

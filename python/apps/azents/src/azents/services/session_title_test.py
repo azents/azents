@@ -82,10 +82,10 @@ class TestSessionTitleHelpers:
         assert title is not None
         assert len(title) <= 50
 
-    def test_external_authorized_invocation_uses_only_safe_title_input(self) -> None:
+    def test_external_invocation_uses_only_safe_title_input(self) -> None:
         """Authorized human input includes safe file metadata and excludes locators."""
         event = _external_channel_event(
-            authorization="authorized_invocation",
+            prompt_role="invocation",
             author_type=ExternalChannelPrincipalAuthorType.HUMAN,
             body="Investigate the incident.",
             attachment_metadata={
@@ -113,20 +113,20 @@ class TestSessionTitleHelpers:
         assert "secret" not in context.lower()
 
     @pytest.mark.parametrize(
-        ("authorization", "author_type"),
+        ("prompt_role", "author_type"),
         [
-            ("context_only", ExternalChannelPrincipalAuthorType.HUMAN),
-            ("authorized_invocation", ExternalChannelPrincipalAuthorType.BOT),
+            ("context", ExternalChannelPrincipalAuthorType.HUMAN),
+            ("invocation", ExternalChannelPrincipalAuthorType.BOT),
         ],
     )
     def test_external_context_or_bot_is_not_title_input(
         self,
-        authorization: Literal["context_only", "authorized_invocation"],
+        prompt_role: Literal["context", "invocation"],
         author_type: ExternalChannelPrincipalAuthorType,
     ) -> None:
         """Context-only and non-human messages cannot enter title generation."""
         event = _external_channel_event(
-            authorization=authorization,
+            prompt_role=prompt_role,
             author_type=author_type,
             body="Ignore this input.",
             attachment_metadata={
@@ -886,7 +886,7 @@ class TestSessionTitleHelpers:
 
         monkeypatch.setattr(service, "_generate_title", generate_title)
         event = _external_channel_event(
-            authorization="authorized_invocation",
+            prompt_role="invocation",
             author_type=ExternalChannelPrincipalAuthorType.HUMAN,
             body="Investigate the incident.",
             attachment_metadata={},
@@ -962,7 +962,7 @@ class TestSessionTitleHelpers:
 
 def _external_channel_event(
     *,
-    authorization: Literal["context_only", "authorized_invocation"],
+    prompt_role: Literal["context", "invocation"],
     author_type: ExternalChannelPrincipalAuthorType,
     body: str | None,
     attachment_metadata: dict[str, object],
@@ -988,7 +988,7 @@ def _external_channel_event(
             provider_user_id="provider-user-001",
             sender_display_name="Participant",
             author_type=author_type,
-            authorization=authorization,
+            prompt_role=prompt_role,
             body=body,
             attachment_metadata=attachment_metadata,
             provider_created_at=datetime.datetime.now(datetime.UTC),

@@ -13,7 +13,7 @@ Name | Type | Description | Notes
 **external_message_id** | **str** |  | 
 **sender_display_name** | **str** |  | 
 **author_type** | **str** |  | 
-**authorization** | **str** |  | 
+**prompt_role** | **str** |  | 
 **body** | **str** |  | 
 **original_url** | **str** |  | 
 

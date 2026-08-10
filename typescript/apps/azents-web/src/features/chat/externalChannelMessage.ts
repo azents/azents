@@ -1,5 +1,7 @@
 import type { ChatMessage } from "./types";
 
+export type ExternalChannelPromptRole = "context" | "invocation";
+
 export interface ExternalChannelMessagePresentation {
   provider: string;
   resourceLabel: string;
@@ -8,7 +10,7 @@ export interface ExternalChannelMessagePresentation {
   providerUserId: string | null;
   providerMessageKey: string | null;
   authorType: string;
-  authorization: string;
+  promptRole: ExternalChannelPromptRole;
   providerTimestamp: string;
   originalUrl: string | null;
   body: string;
@@ -62,6 +64,12 @@ function referenceMappings(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function externalChannelPromptRole(
+  value: unknown,
+): ExternalChannelPromptRole | null {
+  return value === "context" || value === "invocation" ? value : null;
 }
 
 function stringRecord(value: unknown): Record<string, string> {
@@ -139,6 +147,10 @@ export function externalChannelMessagePresentation(
   if (metadata?.source !== "external_channel") {
     return null;
   }
+  const promptRole = externalChannelPromptRole(metadata.prompt_role);
+  if (promptRole === null) {
+    return null;
+  }
   const providerTimestamp =
     metadata.provider_updated_at ??
     metadata.provider_created_at ??
@@ -162,7 +174,7 @@ export function externalChannelMessagePresentation(
     providerUserId: metadata.provider_user_id ?? null,
     providerMessageKey: metadata.provider_message_key ?? null,
     authorType: metadata.author_type ?? "unknown",
-    authorization: metadata.authorization ?? "context_only",
+    promptRole,
     providerTimestamp,
     originalUrl: validHttpUrl(metadata.original_url),
     body: visibleReferences(visibleBody(message), mappings),

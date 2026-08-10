@@ -177,9 +177,7 @@ def initial_title_from_external_channel_event(event: Event) -> str | None:
     """Create a title from one eligible authorized External Channel Event."""
     if event.kind is not EventKind.EXTERNAL_CHANNEL_MESSAGE:
         return None
-    return initial_title_from_user_text(
-        _external_channel_authorized_invocation_text(event.payload)
-    )
+    return initial_title_from_user_text(_external_channel_message_text(event.payload))
 
 
 def title_context_from_initial_prompt(event: Event) -> str:
@@ -187,9 +185,7 @@ def title_context_from_initial_prompt(event: Event) -> str:
     if event.kind is EventKind.USER_MESSAGE:
         return _user_payload_text(event.payload)[:_TITLE_CONTEXT_CHAR_LIMIT]
     if event.kind is EventKind.EXTERNAL_CHANNEL_MESSAGE:
-        return _external_channel_authorized_invocation_text(event.payload)[
-            :_TITLE_CONTEXT_CHAR_LIMIT
-        ]
+        return _external_channel_message_text(event.payload)[:_TITLE_CONTEXT_CHAR_LIMIT]
     return ""
 
 
@@ -673,11 +669,11 @@ def _assistant_payload_text(payload: object) -> str:
     return _content_text(payload.content)
 
 
-def _external_channel_authorized_invocation_text(payload: object) -> str:
+def _external_channel_message_text(payload: object) -> str:
     """Render only safe title input from one authorized human invocation."""
     if (
         not isinstance(payload, ExternalChannelMessagePayload)
-        or payload.authorization != "authorized_invocation"
+        or payload.prompt_role != "invocation"
         or payload.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
     ):
         return ""

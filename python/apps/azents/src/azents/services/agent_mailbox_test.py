@@ -101,6 +101,8 @@ class _MailboxService:
                 requested_model_target_label=input.requested_model_target_label,
                 requested_reasoning_effort=input.requested_reasoning_effort,
                 sender_user_id=input.sender_user_id,
+                order_group=f"buffer-{len(self.inputs)}",
+                order_sequence=0,
                 content=input.content,
                 idempotency_key=input.idempotency_key,
                 metadata=input.metadata,

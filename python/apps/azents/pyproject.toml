@@ -103,6 +103,12 @@ select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003
 [tool.ty.environment]
 python-version = "3.14"
 
+[tool.ty.src]
+exclude = [
+    # Immutable historical migration imports the enum member that this revision removes.
+    "db-schemas/rdb/migrations/versions/8bbe580fddad_evolve_input_buffers_into_mailbox_items.py",
+]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

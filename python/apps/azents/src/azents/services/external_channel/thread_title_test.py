@@ -63,9 +63,7 @@ def _service(client: _DiscordClient) -> ExternalChannelThreadTitleService:
 def _event(
     *,
     provider: ExternalChannelProvider = ExternalChannelProvider.DISCORD,
-    authorization: Literal["context_only", "authorized_invocation"] = (
-        "authorized_invocation"
-    ),
+    prompt_role: Literal["context", "invocation"] = ("invocation"),
 ) -> Event:
     return Event(
         id="1" * 32,
@@ -87,7 +85,7 @@ def _event(
             provider_user_id="user-1",
             sender_display_name="Participant",
             author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-            authorization=authorization,
+            prompt_role=prompt_role,
             body="Investigate the incident",
             attachment_metadata={},
             provider_created_at=datetime.datetime.now(datetime.UTC),
@@ -292,7 +290,7 @@ async def test_projection_cancellation_propagates_without_retry(
     "event",
     [
         _event(provider=ExternalChannelProvider.SLACK),
-        _event(authorization="context_only"),
+        _event(prompt_role="context"),
     ],
 )
 async def test_projection_ignores_noneligible_external_events(

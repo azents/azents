@@ -76,6 +76,16 @@ class RDBMailboxItem(RDBModel):
         sa.String(120),
         nullable=True,
     )
+    order_group: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        init=False,
+    )
+    order_sequence: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        init=False,
+    )
     payload: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
@@ -93,8 +103,18 @@ class RDBMailboxItem(RDBModel):
         "sender_user_id IS NULL OR kind IN ('user_message', 'action_message')",
         name="ck_mailbox_items_sender_user_kind",
     )
+    CK_ORDER_SEQUENCE = sa.CheckConstraint(
+        "order_sequence >= 0",
+        name="ck_mailbox_items_order_sequence",
+    )
     IX_SESSION_ID = sa.Index("ix_mailbox_items_session_id", "session_id")
-    IX_SESSION_ID_ID = sa.Index("ix_mailbox_items_session_id_id", "session_id", "id")
+    IX_SESSION_ORDER = sa.Index(
+        "ix_mailbox_items_session_order",
+        "session_id",
+        "order_group",
+        "order_sequence",
+        "id",
+    )
     IX_SESSION_ID_SCHEDULING_MODE = sa.Index(
         "ix_mailbox_items_session_id_scheduling_mode",
         "session_id",
@@ -113,8 +133,9 @@ class RDBMailboxItem(RDBModel):
     __table_args__ = (
         CK_REQUESTED_PROFILE,
         CK_SENDER_USER_KIND,
+        CK_ORDER_SEQUENCE,
         IX_SESSION_ID,
-        IX_SESSION_ID_ID,
+        IX_SESSION_ORDER,
         IX_SESSION_ID_SCHEDULING_MODE,
         IX_KIND,
         UQ_SESSION_KIND_IDEMPOTENCY,

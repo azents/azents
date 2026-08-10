@@ -1,18 +1,77 @@
 """Docker-backed integration coverage for the mailbox persistence migration."""
 
 from collections.abc import Generator
+from types import SimpleNamespace
+from typing import Annotated, Literal, TypeAlias
 
 import pytest
 import sqlalchemy as sa
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import DBAPIError
 from testcontainers.postgres import PostgresContainer
 
+import azents.engine.events.types as event_types
+import azents.repos.mailbox.data as mailbox_data
 from azents.consts import PROJECT_ROOT
+from azents.core.enums import (
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    MailboxItemKind,
+)
 
 _PARENT_REVISION = "cc31dfa97a1b"
 _MAILBOX_REVISION = "8bbe580fddad"
+
+
+class _HistoricalExternalChannelMailboxPayload(mailbox_data.MailboxPayloadBase):
+    """Legacy payload contract used only while replaying the immutable migration."""
+
+    type: Literal["external_channel_invocation"]
+    initial_title_eligible: bool = False
+
+
+class _HistoricalExternalChannelMessagePayload(BaseModel):
+    """Legacy message fields read by the immutable mailbox migration."""
+
+    binding_id: str
+    attachment_metadata: dict[str, object]
+    revision_kind: ExternalChannelMessageRevisionKind
+    lifecycle: ExternalChannelMessageLifecycle | None
+    reference_mappings: dict[str, dict[str, str]]
+    correction_of_revision_id: str | None = None
+
+
+_HistoricalMailboxEnvelopePayload: TypeAlias = Annotated[
+    mailbox_data.UserMessageMailboxPayload
+    | mailbox_data.GoalContinuationMailboxPayload
+    | mailbox_data.ExternalChannelContinuationMailboxPayload
+    | mailbox_data.AgentMessageMailboxPayload
+    | _HistoricalExternalChannelMailboxPayload
+    | mailbox_data.TurnActionMailboxPayload,
+    Field(discriminator="type"),
+]
+
+
+def _patch_historical_runtime_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Supply the code snapshot required to replay one immutable old revision."""
+    monkeypatch.setattr(
+        mailbox_data,
+        "MailboxEnvelopePayload",
+        _HistoricalMailboxEnvelopePayload,
+    )
+    monkeypatch.setattr(
+        event_types,
+        "ExternalChannelMessagePayload",
+        _HistoricalExternalChannelMessagePayload,
+    )
+    monkeypatch.setattr(
+        MailboxItemKind,
+        "EXTERNAL_CHANNEL_INVOCATION",
+        SimpleNamespace(value="external_channel_invocation"),
+        raising=False,
+    )
 
 
 def _migration_database() -> Generator[tuple[AlembicConfig, sa.Engine], None, None]:
@@ -413,9 +472,11 @@ def _seed_valid_database(connection: sa.Connection) -> None:
 
 def test_mailbox_migration_upgrades_all_kinds_and_downgrades_cleanly(
     check_docker_availability: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Upgrade every kind and preserve compound External Channel ordering."""
     del check_docker_availability
+    _patch_historical_runtime_contract(monkeypatch)
     database = _migration_database()
     config, engine = next(database)
     try:
@@ -481,9 +542,11 @@ def test_mailbox_migration_upgrades_all_kinds_and_downgrades_cleanly(
 
 def test_mailbox_migration_rejects_unresolvable_external_row(
     check_docker_availability: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Reject an External Channel row without a batch before dropping legacy columns."""
     del check_docker_availability
+    _patch_historical_runtime_contract(monkeypatch)
     database = _migration_database()
     config, engine = next(database)
     try:

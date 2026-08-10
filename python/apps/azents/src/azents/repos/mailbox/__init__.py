@@ -53,6 +53,8 @@ class MailboxRepository:
                 )
             ).model_dump(mode="json"),
         )
+        rdb.order_group = create.order_group or rdb.id
+        rdb.order_sequence = create.order_sequence
         session.add(rdb)
         await session.flush()
         return self._build(rdb)
@@ -65,10 +67,11 @@ class MailboxRepository:
         idempotency_key: str,
     ) -> MailboxItem:
         """Atomically upsert MailboxItem by source idempotency key."""
+        mailbox_item_id = uuid7().hex
         stmt = (
             pg_insert(RDBMailboxItem)
             .values(
-                id=uuid7().hex,
+                id=mailbox_item_id,
                 session_id=create.session_id,
                 kind=create.kind,
                 scheduling_mode=create.scheduling_mode,
@@ -76,6 +79,8 @@ class MailboxRepository:
                 requested_reasoning_effort=create.requested_reasoning_effort,
                 sender_user_id=create.sender_user_id,
                 idempotency_key=idempotency_key,
+                order_group=create.order_group or mailbox_item_id,
+                order_sequence=create.order_sequence,
                 payload=(
                     create.payload
                     or mailbox_payload_from_fields(
@@ -142,7 +147,11 @@ class MailboxRepository:
         result = await session.execute(
             sa.select(RDBMailboxItem)
             .where(RDBMailboxItem.session_id == session_id)
-            .order_by(RDBMailboxItem.id.asc())
+            .order_by(
+                RDBMailboxItem.order_group.asc(),
+                RDBMailboxItem.order_sequence.asc(),
+                RDBMailboxItem.id.asc(),
+            )
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
@@ -193,7 +202,11 @@ class MailboxRepository:
         query = (
             sa.select(RDBMailboxItem)
             .where(RDBMailboxItem.session_id == session_id)
-            .order_by(RDBMailboxItem.id.asc())
+            .order_by(
+                RDBMailboxItem.order_group.asc(),
+                RDBMailboxItem.order_sequence.asc(),
+                RDBMailboxItem.id.asc(),
+            )
         )
         if limit is not None:
             query = query.limit(limit)
@@ -209,7 +222,11 @@ class MailboxRepository:
         result = await session.execute(
             sa.select(RDBMailboxItem)
             .where(RDBMailboxItem.session_id == session_id)
-            .order_by(RDBMailboxItem.id.asc())
+            .order_by(
+                RDBMailboxItem.order_group.asc(),
+                RDBMailboxItem.order_sequence.asc(),
+                RDBMailboxItem.id.asc(),
+            )
             .limit(1)
             .with_for_update()
         )
@@ -333,6 +350,8 @@ class MailboxRepository:
             requested_model_target_label=rdb.requested_model_target_label,
             requested_reasoning_effort=rdb.requested_reasoning_effort,
             sender_user_id=rdb.sender_user_id,
+            order_group=rdb.order_group,
+            order_sequence=rdb.order_sequence,
             content=presentation.content,
             idempotency_key=rdb.idempotency_key,
             metadata={str(k): str(v) for k, v in presentation.metadata.items()},

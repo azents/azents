@@ -1179,6 +1179,8 @@ class ChatSessionService:
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 sender_user_id=None,
+                order_group=None,
+                order_sequence=0,
                 content="",
                 idempotency_key=(f"session-working-folder:initial:{agent_session.id}"),
                 metadata=metadata,
@@ -1209,6 +1211,8 @@ class ChatSessionService:
                             requested_model_target_label=None,
                             requested_reasoning_effort=None,
                             sender_user_id=user_id,
+                            order_group=None,
+                            order_sequence=0,
                             content="",
                             idempotency_key=None,
                             metadata=metadata,
@@ -1771,6 +1775,8 @@ class ChatSessionService:
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
                     sender_user_id=None,
+                    order_group=None,
+                    order_sequence=0,
                     content="",
                     idempotency_key=(f"session-working-folder:restore:{session_id}"),
                     metadata={
@@ -2316,6 +2322,8 @@ class ChatSessionService:
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
                     sender_user_id=None,
+                    order_group=None,
+                    order_sequence=0,
                     content="",
                     idempotency_key=(
                         f"session-working-folder:prepare:{session_id}:"

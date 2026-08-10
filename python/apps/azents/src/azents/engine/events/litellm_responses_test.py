@@ -204,7 +204,7 @@ def _external_payload(
         provider_user_id="U1",
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-        authorization="authorized_invocation",
+        prompt_role="invocation",
         body=body,
         attachment_metadata=attachment_metadata or {},
         provider_created_at=datetime.datetime(2026, 7, 22, 12, 0, tzinfo=datetime.UTC),

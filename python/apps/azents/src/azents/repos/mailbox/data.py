@@ -61,20 +61,24 @@ class AgentMessageMailboxPayload(MailboxPayloadBase):
     type: Literal["agent_message"]
 
 
-class ExternalChannelInvocationMailboxPayload(MailboxPayloadBase):
-    """Typed immutable External Channel invocation snapshot."""
+class ExternalChannelMessageMailboxPayload(MailboxPayloadBase):
+    """Typed immutable single-message External Channel snapshot."""
 
-    type: Literal["external_channel_invocation"]
+    type: Literal["external_channel_message"]
+    context_omitted: bool = False
     initial_title_eligible: bool = False
 
     @model_validator(mode="after")
-    def validate_item_sequence(self) -> "ExternalChannelInvocationMailboxPayload":
-        """Require the immutable projection order to remain contiguous."""
-        expected_keys = [
-            f"external_channel:{index}" for index in range(len(self.items))
-        ]
-        if [item.item_key for item in self.items] != expected_keys:
-            raise ValueError("External invocation batch sequence is not contiguous.")
+    def validate_single_message(self) -> "ExternalChannelMessageMailboxPayload":
+        """Require exactly one canonical provider-message presentation."""
+        if len(self.items) != 1:
+            raise ValueError("External Channel mailbox payload requires one message.")
+        item = self.items[0]
+        if (
+            item.item_key != "external_channel_message:0"
+            or item.presentation_kind != "external_channel_message"
+        ):
+            raise ValueError("External Channel mailbox message shape is invalid.")
         return self
 
 
@@ -89,7 +93,7 @@ MailboxEnvelopePayload: TypeAlias = Annotated[
     | GoalContinuationMailboxPayload
     | ExternalChannelContinuationMailboxPayload
     | AgentMessageMailboxPayload
-    | ExternalChannelInvocationMailboxPayload
+    | ExternalChannelMessageMailboxPayload
     | TurnActionMailboxPayload,
     Field(discriminator="type"),
 ]
@@ -106,11 +110,7 @@ def mailbox_payload_from_fields(
 ) -> MailboxEnvelopePayload:
     """Build a closed typed payload from admission-boundary fields."""
     item = MailboxPresentationItem(
-        item_key=(
-            "external_channel:0"
-            if kind is MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION
-            else f"{kind.value}:0"
-        ),
+        item_key=f"{kind.value}:0",
         presentation_kind=kind.value,
         content=content,
         metadata=cast(dict[str, JSONValue], metadata),
@@ -126,8 +126,8 @@ def mailbox_payload_from_fields(
         return ExternalChannelContinuationMailboxPayload(type=kind.value, items=[item])
     if kind is MailboxItemKind.AGENT_MESSAGE:
         return AgentMessageMailboxPayload(type=kind.value, items=[item])
-    if kind is MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
-        return ExternalChannelInvocationMailboxPayload(type=kind.value, items=[item])
+    if kind is MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
+        return ExternalChannelMessageMailboxPayload(type=kind.value, items=[item])
     return TurnActionMailboxPayload(type=kind.value, items=[item])
 
 
@@ -147,6 +147,8 @@ class MailboxItem(BaseModel):
         description="Requested reasoning effort, or null for Default/inheritance",
     )
     sender_user_id: str | None = Field(description="Author User ID")
+    order_group: str = Field(description="Stable FIFO order group")
+    order_sequence: int = Field(ge=0, description="Sequence within the FIFO group")
     content: str = Field(description="Input body")
     idempotency_key: str | None = Field(description="Source idempotency key")
     metadata: dict[str, str] = Field(description="Input metadata snapshot")
@@ -202,6 +204,10 @@ class MailboxItemCreate(BaseModel):
         description="Requested reasoning effort, or null for Default/inheritance",
     )
     sender_user_id: str | None = Field(description="Author User ID")
+    order_group: str | None = Field(
+        description="Stable FIFO order group, or null to use the new row ID",
+    )
+    order_sequence: int = Field(ge=0, description="Sequence within the FIFO group")
     content: str = Field(description="Input body")
     idempotency_key: str | None = Field(description="Source idempotency key")
     metadata: dict[str, str] = Field(description="Input metadata snapshot")

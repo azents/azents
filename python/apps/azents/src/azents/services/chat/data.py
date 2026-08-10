@@ -73,7 +73,7 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
     external_message_id: str
     sender_display_name: str | None
     author_type: str
-    authorization: Literal["context_only", "authorized_invocation"]
+    prompt_role: Literal["context", "invocation"]
     body: str | None
     original_url: str | None
 

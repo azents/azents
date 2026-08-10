@@ -324,6 +324,8 @@ class AgentSessionInputService:
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
                     sender_user_id=requester_user_id,
+                    order_group=None,
+                    order_sequence=0,
                     content=message.text,
                     idempotency_key=(
                         _human_mailbox_item_idempotency_key(
@@ -881,6 +883,8 @@ class AgentSessionInputService:
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 sender_user_id=None,
+                order_group=None,
+                order_sequence=0,
                 content="",
                 idempotency_key=(f"session-working-folder:initial:{agent_session.id}"),
                 metadata={
@@ -913,6 +917,8 @@ class AgentSessionInputService:
                             requested_model_target_label=inference_profile.model_target_label,
                             requested_reasoning_effort=inference_profile.reasoning_effort,
                             sender_user_id=user_id,
+                            order_group=None,
+                            order_sequence=0,
                             content="",
                             idempotency_key=(
                                 f"{client_request_id}:setup:{index}"
@@ -958,6 +964,8 @@ class AgentSessionInputService:
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 sender_user_id=None,
+                order_group=None,
+                order_sequence=0,
                 content="",
                 idempotency_key=f"session-working-folder:adoption:{context.id}",
                 metadata={
@@ -990,6 +998,8 @@ class AgentSessionInputService:
                 requested_model_target_label=inference_profile.model_target_label,
                 requested_reasoning_effort=inference_profile.reasoning_effort,
                 sender_user_id=user_id,
+                order_group=None,
+                order_sequence=0,
                 content=message.text,
                 idempotency_key=client_request_id,
                 metadata=message.metadata,

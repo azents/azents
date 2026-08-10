@@ -366,7 +366,7 @@ def mailbox_item_to_pending_projection(
                 ),
                 content=item.content,
             )
-        elif mailbox_item.kind is MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
+        elif mailbox_item.kind is MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
             raw_payload = item.metadata.get("external_channel_message")
             if not isinstance(raw_payload, dict):
                 raise ValueError("External mailbox item payload is malformed")
@@ -379,7 +379,7 @@ def mailbox_item_to_pending_projection(
                 external_message_id=external.external_message_id,
                 sender_display_name=external.sender_display_name,
                 author_type=external.author_type.value,
-                authorization=external.authorization,
+                prompt_role=external.prompt_role,
                 body=external.body,
                 original_url=external.original_url,
             )
@@ -418,7 +418,7 @@ def mailbox_item_to_pending_projection(
 
 def mailbox_item_to_live_event(mailbox_item: MailboxItem) -> Event | None:
     """Convert MailboxItem to non-durable live event projection."""
-    if mailbox_item.kind == MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
+    if mailbox_item.kind == MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
         return None
     if mailbox_item.kind == MailboxItemKind.ACTION_MESSAGE:
         if mailbox_item.presentation.action is None:
@@ -514,7 +514,7 @@ def _event_kind_for_mailbox_item(kind: MailboxItemKind) -> EventKind:
             return EventKind.ACTION_MESSAGE
         case MailboxItemKind.AGENT_MESSAGE:
             return EventKind.AGENT_MESSAGE
-        case MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
+        case MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
             return EventKind.EXTERNAL_CHANNEL_MESSAGE
         case _:
             raise ValueError(f"Unsupported MailboxItem kind: {kind}")

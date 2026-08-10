@@ -271,6 +271,8 @@ async def _create_session_with_buffer(
             requested_model_target_label="main",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             sender_user_id=user_id,
+            order_group=None,
+            order_sequence=0,
             content="pending input",
             idempotency_key=None,
             metadata={"source": "chat"},

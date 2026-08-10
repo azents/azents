@@ -189,7 +189,7 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                     "provider_message_key": payload.provider_message_key,
                     "provider_position": payload.provider_position,
                     "author_type": payload.author_type.value,
-                    "authorization": payload.authorization,
+                    "prompt_role": payload.prompt_role,
                     "event_render_key": f"event:{row.external_id or row.id}",
                     **(
                         {"principal_id": payload.principal_id}

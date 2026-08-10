@@ -40,7 +40,7 @@ def external_channel_message_visible_value(
             "display_name": payload.sender_display_name,
             "author_type": payload.author_type.value,
         },
-        "authorization": payload.authorization,
+        "prompt_role": payload.prompt_role,
         "timestamp": timestamp.isoformat() if timestamp is not None else None,
         "body": _body(payload),
     }
@@ -71,7 +71,7 @@ def render_external_channel_message(
         f"Provider: {payload.provider.value}",
         f"Resource: {payload.resource_label}",
         f"Sender: {sender} ({payload.author_type.value})",
-        f"Authorization: {payload.authorization}",
+        f"Prompt role: {payload.prompt_role}",
     ]
     if timestamp is not None:
         lines.append(f"Timestamp: {timestamp.isoformat()}")
@@ -118,7 +118,7 @@ def render_external_channel_turn(
             [
                 f"{index}. Sender: {sender}",
                 f"   Author Type: {payload.author_type.value}",
-                f"   Authorization: {payload.authorization}",
+                f"   Prompt role: {payload.prompt_role}",
             ]
         )
         if timestamp is not None:

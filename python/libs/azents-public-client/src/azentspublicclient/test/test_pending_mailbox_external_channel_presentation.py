@@ -42,7 +42,7 @@ class TestPendingMailboxExternalChannelPresentation(unittest.TestCase):
                 external_message_id = '',
                 sender_display_name = '',
                 author_type = '',
-                authorization = 'context_only',
+                prompt_role = 'context',
                 body = '',
                 original_url = ''
             )
@@ -55,7 +55,7 @@ class TestPendingMailboxExternalChannelPresentation(unittest.TestCase):
                 external_message_id = '',
                 sender_display_name = '',
                 author_type = '',
-                authorization = 'context_only',
+                prompt_role = 'context',
                 body = '',
                 original_url = '',
         )

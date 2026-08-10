@@ -126,6 +126,8 @@ def _create_payload(
         requested_model_target_label="Quality",
         requested_reasoning_effort=ModelReasoningEffort.HIGH,
         sender_user_id=user_id,
+        order_group=None,
+        order_sequence=0,
         content=content,
         idempotency_key=None,
         metadata={"timestamp": "2026-05-19T00:00:00+00:00", "source": "chat"},

@@ -30,7 +30,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.repos.mailbox.data import (
-    ExternalChannelInvocationMailboxPayload,
+    ExternalChannelMessageMailboxPayload,
     MailboxItem,
     MailboxPresentationItem,
 )
@@ -56,6 +56,8 @@ def test_user_mailbox_item_live_event_preserves_nullable_requested_profile() -> 
             requested_model_target_label="quality",
             requested_reasoning_effort=None,
             sender_user_id="user-1",
+            order_group="0023456789abcdef0123456789abcdef",
+            order_sequence=0,
             content="Use the quality model",
             idempotency_key=None,
             metadata={"source": "chat"},
@@ -85,6 +87,8 @@ def test_external_channel_continuation_has_dedicated_live_projections() -> None:
         requested_model_target_label="quality",
         requested_reasoning_effort=None,
         sender_user_id=None,
+        order_group="0523456789abcdef0123456789abcdef",
+        order_sequence=0,
         content="",
         idempotency_key="idle_continuation:run-1:external_channel:0",
         metadata={
@@ -119,6 +123,8 @@ def test_agent_result_mailbox_item_live_event_restores_terminal_metadata() -> No
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=None,
+            order_group="0223456789abcdef0123456789abcdef",
+            order_sequence=0,
             content="Review completed.",
             idempotency_key="agent_result:" + "2" * 32,
             metadata={
@@ -160,6 +166,8 @@ def test_action_mailbox_item_live_event_preserves_requested_profile() -> None:
             requested_model_target_label="reasoning",
             requested_reasoning_effort=ModelReasoningEffort.HIGH,
             sender_user_id="user-1",
+            order_group="0123456789abcdef0123456789abcdef",
+            order_sequence=0,
             content="Review this PR",
             idempotency_key=None,
             metadata={"source": "chat"},
@@ -187,11 +195,13 @@ def test_external_invocation_live_projection_defers_to_durable_event() -> None:
         MailboxItem(
             id="0323456789abcdef0123456789abcdef",
             session_id="1123456789abcdef0123456789abcdef",
-            kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+            kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=None,
+            order_group="0323456789abcdef0123456789abcdef",
+            order_sequence=0,
             content="",
             idempotency_key="external-batch:" + "4" * 32,
             metadata={"invocation_batch_id": "4" * 32},
@@ -223,7 +233,7 @@ def test_external_invocation_pending_projection_exposes_safe_snapshot() -> None:
         provider_user_id="provider-user-1",
         sender_display_name="Ada",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-        authorization="authorized_invocation",
+        prompt_role="invocation",
         body="Deploy is ready.",
         attachment_metadata={},
         reference_mappings={},
@@ -236,22 +246,24 @@ def test_external_invocation_pending_projection_exposes_safe_snapshot() -> None:
     mailbox_item = MailboxItem(
         id="0423456789abcdef0123456789abcdef",
         session_id="1123456789abcdef0123456789abcdef",
-        kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+        kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
         scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         requested_model_target_label=None,
         requested_reasoning_effort=None,
         sender_user_id=None,
+        order_group="0423456789abcdef0123456789abcdef",
+        order_sequence=0,
         content="",
         idempotency_key="batch-1",
         metadata={"source": "external_channel"},
         action=None,
         attachments=[],
         file_parts=[],
-        payload=ExternalChannelInvocationMailboxPayload(
-            type="external_channel_invocation",
+        payload=ExternalChannelMessageMailboxPayload(
+            type="external_channel_message",
             items=[
                 MailboxPresentationItem(
-                    item_key="external_channel:0",
+                    item_key="external_channel_message:0",
                     presentation_kind="external_channel_message",
                     content="Deploy is ready.",
                     metadata={
@@ -268,7 +280,7 @@ def test_external_invocation_pending_projection_exposes_safe_snapshot() -> None:
     projection = mailbox_item_to_pending_projection(mailbox_item)
 
     assert projection.mailbox_item_id == mailbox_item.id
-    assert projection.items[0].id == f"{mailbox_item.id}:external_channel:0"
+    assert projection.items[0].id == (f"{mailbox_item.id}:external_channel_message:0")
     presentation = projection.items[0].presentation
     assert presentation.type == "external_channel_message"
     assert presentation.body == "Deploy is ready."

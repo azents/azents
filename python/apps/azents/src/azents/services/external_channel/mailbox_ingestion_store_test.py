@@ -72,6 +72,7 @@ from azents.services.external_channel.participation_state import (
     projection_with_setup_source,
     setup_source_from_projection,
 )
+from azents.services.mailbox import MailboxService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
@@ -231,7 +232,7 @@ def _store(
         agent_session_repository=MagicMock(),
         root_agent_session_creation_service=root_creation_service
         or create_autospec(RootAgentSessionCreationService, instance=True),
-        mailbox_service=MagicMock(),
+        mailbox_service=create_autospec(MailboxService, instance=True),
         config=Config.model_construct(
             web_url="https://azents.example/base",
         ),
@@ -314,11 +315,17 @@ async def _accepted_control_plan_case(
     repository = MagicMock()
     work_repository = MagicMock()
     mailbox_service = MagicMock()
-    mailbox_service.enqueue = AsyncMock(
-        return_value=SimpleNamespace(
-            created=True,
-            mailbox_item=SimpleNamespace(id="mailbox-1"),
-        )
+    mailbox_service.enqueue_many = AsyncMock(
+        side_effect=lambda _session, inputs: [
+            SimpleNamespace(
+                created=True,
+                mailbox_item=SimpleNamespace(
+                    id=f"mailbox-{index}",
+                    idempotency_key=input.idempotency_key,
+                ),
+            )
+            for index, input in enumerate(inputs)
+        ],
     )
     store = _store(repository=repository, work_repository=work_repository)
     store.session_manager = MagicMock(return_value=session_context())
@@ -647,7 +654,7 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
     root_creation_service = MagicMock()
     root_creation_service.create_root_session = AsyncMock()
     mailbox_service = MagicMock()
-    mailbox_service.enqueue = AsyncMock()
+    mailbox_service.enqueue_many = AsyncMock()
     agent_session_repository = MagicMock()
     agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
     store = _store(
@@ -729,7 +736,7 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
     repository.create_binding_idempotent.assert_not_awaited()
     work_repository.ensure_active_work.assert_not_awaited()
     root_creation_service.create_root_session.assert_not_awaited()
-    mailbox_service.enqueue.assert_not_awaited()
+    mailbox_service.enqueue_many.assert_not_awaited()
     agent_session_repository.mark_running_for_input_wakeup.assert_not_awaited()
 
 

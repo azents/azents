@@ -161,7 +161,7 @@ def _history_message(
     return message
 
 
-def test_normalizes_human_app_mention_as_authorized_invocation_candidate() -> None:
+def test_normalizes_human_app_mention_as_invocation_candidate() -> None:
     """A human mention establishes the thread resource and invocation identity."""
     normalized = normalize_slack_event(
         event_type="app_mention",

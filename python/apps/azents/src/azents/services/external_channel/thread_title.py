@@ -90,7 +90,7 @@ class ExternalChannelThreadTitleService:
             or not isinstance(payload, ExternalChannelMessagePayload)
             or payload.provider is not ExternalChannelProvider.DISCORD
             or payload.resource_type is not ExternalChannelResourceType.THREAD
-            or payload.authorization != "authorized_invocation"
+            or payload.prompt_role != "invocation"
             or payload.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
         ):
             return

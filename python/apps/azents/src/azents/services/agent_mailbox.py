@@ -198,6 +198,8 @@ class AgentMailboxService:
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 sender_user_id=None,
+                order_group=None,
+                order_sequence=0,
                 content=content,
                 idempotency_key=idempotency_key,
                 metadata=metadata,

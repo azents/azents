@@ -23205,13 +23205,13 @@
             "type": "string",
             "title": "Author Type"
           },
-          "authorization": {
+          "prompt_role": {
             "type": "string",
             "enum": [
-              "context_only",
-              "authorized_invocation"
+              "context",
+              "invocation"
             ],
-            "title": "Authorization"
+            "title": "Prompt Role"
           },
           "body": {
             "anyOf": [
@@ -23245,7 +23245,7 @@
           "external_message_id",
           "sender_display_name",
           "author_type",
-          "authorization",
+          "prompt_role",
           "body",
           "original_url"
         ],
