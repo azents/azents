@@ -33,11 +33,11 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
     external_message_id: StrictStr
     sender_display_name: Optional[StrictStr]
     author_type: StrictStr
-    authorization: StrictStr
+    prompt_role: StrictStr
     body: Optional[StrictStr]
     original_url: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["type", "provider", "resource_label", "resource_type", "external_message_id", "sender_display_name", "author_type", "authorization", "body", "original_url"]
+    __properties: ClassVar[List[str]] = ["type", "provider", "resource_label", "resource_type", "external_message_id", "sender_display_name", "author_type", "prompt_role", "body", "original_url"]
 
     @field_validator('type')
     def type_validate_enum(cls, value):
@@ -46,11 +46,11 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
             raise ValueError("must be one of enum values ('external_channel_message')")
         return value
 
-    @field_validator('authorization')
-    def authorization_validate_enum(cls, value):
+    @field_validator('prompt_role')
+    def prompt_role_validate_enum(cls, value):
         """Validates the enum"""
-        if value not in set(['context_only', 'authorized_invocation']):
-            raise ValueError("must be one of enum values ('context_only', 'authorized_invocation')")
+        if value not in set(['context', 'invocation']):
+            raise ValueError("must be one of enum values ('context', 'invocation')")
         return value
 
     model_config = ConfigDict(
@@ -133,7 +133,7 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
             "external_message_id": obj.get("external_message_id"),
             "sender_display_name": obj.get("sender_display_name"),
             "author_type": obj.get("author_type"),
-            "authorization": obj.get("authorization"),
+            "prompt_role": obj.get("prompt_role"),
             "body": obj.get("body"),
             "original_url": obj.get("original_url")
         })

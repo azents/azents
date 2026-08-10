@@ -403,7 +403,7 @@ class ExternalChannelMessagePayload(BaseModel):
     provider_user_id: str | None
     sender_display_name: str | None
     author_type: ExternalChannelPrincipalAuthorType
-    authorization: Literal["context_only", "authorized_invocation"]
+    prompt_role: Literal["context", "invocation"]
     lifecycle: ExternalChannelMessageLifecycle | None = Field(
         default=None,
         exclude=True,

@@ -14,7 +14,10 @@ import * as Sentry from "@sentry/nextjs";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { continuationMetadata } from "../continuationPresentation";
-import { externalChannelReferenceMappingsMetadata } from "../externalChannelMessage";
+import {
+  externalChannelPromptRole,
+  externalChannelReferenceMappingsMetadata,
+} from "../externalChannelMessage";
 import { isLivePartialHistoryEvent } from "../hooks/chatLiveHistoryProjection";
 import {
   liveRunForDisplay,
@@ -823,6 +826,7 @@ function externalChannelEventMetadata(
   const referenceMappings = externalChannelReferenceMappingsMetadata(
     payload.reference_mappings,
   );
+  const promptRole = externalChannelPromptRole(payload.prompt_role);
   return {
     ...eventMetadata(event),
     source: "external_channel",
@@ -836,7 +840,7 @@ function externalChannelEventMetadata(
     projection_root_id: stringField(payload, "projection_root_id") ?? "",
     provider_position: stringField(payload, "provider_position") ?? "",
     author_type: stringField(payload, "author_type") ?? "unknown",
-    authorization: stringField(payload, "authorization") ?? "context_only",
+    ...(promptRole === null ? {} : { prompt_role: promptRole }),
     provider_created_at:
       stringField(payload, "provider_created_at") ?? event.created_at,
     ...optionalEventMetadata(payload, "provider_updated_at"),

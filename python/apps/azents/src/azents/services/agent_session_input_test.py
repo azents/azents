@@ -264,6 +264,8 @@ class _MailboxServiceDouble(MailboxService):
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=input.sender_user_id,
+            order_group="buffer-1",
+            order_sequence=0,
             content=input.content,
             idempotency_key=input.idempotency_key,
             metadata=input.metadata,

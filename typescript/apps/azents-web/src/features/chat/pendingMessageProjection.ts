@@ -87,7 +87,7 @@ export function pendingMailboxMessage(
           resource_type: presentation.resource_type,
           provider_message_key: presentation.external_message_id,
           author_type: presentation.author_type,
-          authorization: presentation.authorization,
+          prompt_role: presentation.prompt_role,
           provider_created_at: item.created_at,
           ...(presentation.sender_display_name
             ? { sender_display_name: presentation.sender_display_name }

@@ -537,7 +537,7 @@ def _external_channel_input_evidence(
                     if not isinstance(raw_envelope, dict):
                         continue
                     envelope = cast(dict[str, object], raw_envelope)
-                    if envelope.get("kind") != "external_channel_invocation":
+                    if envelope.get("kind") != "external_channel_message":
                         continue
                     raw_items = envelope.get("items")
                     if not isinstance(raw_items, list):
@@ -581,7 +581,7 @@ def _external_channel_input_evidence(
         evidence = {
             "provider": provider,
             "external_message_id": external_message_id,
-            "authorization": candidate.get("authorization"),
+            "prompt_role": candidate.get("prompt_role"),
             "body": candidate.get("body"),
             "original_url": candidate.get("original_url"),
         }
@@ -1235,7 +1235,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     logical_input = input_evidence[0]
     assert logical_input["provider"] == "slack"
     assert logical_input["external_message_id"]
-    assert logical_input["authorization"] == "authorized_invocation"
+    assert logical_input["prompt_role"] == "invocation"
     assert logical_input["body"] == "Please investigate the deterministic incident."
     assert logical_input["original_url"] == (
         f"https://example.slack.com/archives/{_CHANNEL_ID}/p"
@@ -2535,7 +2535,7 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
     )
     assert input_evidence[0]["provider"] == "slack"
     assert input_evidence[0]["external_message_id"]
-    assert input_evidence[0]["authorization"] == "authorized_invocation"
+    assert input_evidence[0]["prompt_role"] == "invocation"
     assert input_evidence[0]["body"] == source_text
     assert input_evidence[0]["original_url"] == (
         f"https://example.slack.com/archives/{_CHANNEL_ID}/p"
@@ -4873,7 +4873,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     logical_input = input_evidence[0]
     assert logical_input["provider"] == "discord"
     assert logical_input["external_message_id"]
-    assert logical_input["authorization"] == "authorized_invocation"
+    assert logical_input["prompt_role"] == "invocation"
     assert logical_input["body"] == source_text
     assert logical_input["original_url"] == (
         f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"

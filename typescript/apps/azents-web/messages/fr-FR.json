@@ -2589,7 +2589,7 @@
       "providerUserId": "ID utilisateur du fournisseur",
       "providerMessageId": "ID du message du fournisseur",
       "authorType": "Type d’auteur",
-      "authorization": "Autorisation",
+      "promptRole": "Rôle dans le prompt",
       "timestamp": "Heure du fournisseur",
       "openOriginal": "Ouvrir le message original",
       "openOriginalAccessible": "Ouvrir le message original dans {resource}",

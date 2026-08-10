@@ -2589,7 +2589,7 @@
       "providerUserId": "Provider 사용자 ID",
       "providerMessageId": "Provider 메시지 ID",
       "authorType": "작성자 유형",
-      "authorization": "권한 상태",
+      "promptRole": "프롬프트 역할",
       "timestamp": "제공자 시간",
       "openOriginal": "원본 메시지 열기",
       "openOriginalAccessible": "{resource}의 원본 메시지 열기",

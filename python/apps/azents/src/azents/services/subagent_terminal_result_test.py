@@ -265,6 +265,8 @@ class _AgentMailboxService:
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=None,
+            order_group=f"buffer-{len(self.attempts)}",
+            order_sequence=0,
             content=content,
             idempotency_key=f"agent_result:{run.id}",
             metadata={"message_kind": "agent_result"},

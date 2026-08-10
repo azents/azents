@@ -386,6 +386,8 @@ class _BufferedInputService(AgentSessionInputService):
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=str(kwargs["user_id"]),
+            order_group="0123456789abcdef0123456789abcdef",
+            order_sequence=0,
             content=str(message.text),
             idempotency_key=(
                 str(kwargs["client_request_id"])
@@ -467,6 +469,8 @@ class _BufferedInputService(AgentSessionInputService):
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id=str(kwargs["user_id"]),
+            order_group="0123456789abcdef0123456789abcdef",
+            order_sequence=0,
             content=str(message.text),
             idempotency_key=(
                 str(kwargs["client_request_id"])
@@ -527,6 +531,8 @@ class _RestWriteChatService(ChatSessionService):
             requested_model_target_label=None,
             requested_reasoning_effort=None,
             sender_user_id="user-1",
+            order_group="0123456789abcdef0123456789abcdef",
+            order_sequence=0,
             content="hello",
             idempotency_key="client-1",
             metadata={"source": "chat"},
@@ -834,6 +840,8 @@ class _RestWriteIdempotencyService(ChatWriteService):
                 requested_model_target_label=None,
                 requested_reasoning_effort=None,
                 sender_user_id=str(kwargs["user_id"]),
+                order_group="0123456789abcdef0123456789abcdef",
+                order_sequence=0,
                 content=str(kwargs["text"]),
                 idempotency_key=str(kwargs["client_request_id"]),
                 metadata=cast(dict[str, str], kwargs["metadata"]),

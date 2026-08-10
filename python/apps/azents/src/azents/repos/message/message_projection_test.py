@@ -169,7 +169,7 @@ def test_external_channel_message_projects_source_metadata() -> None:
         provider_user_id="U1",
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-        authorization="authorized_invocation",
+        prompt_role="invocation",
         body="updated",
         attachment_metadata={},
         provider_created_at=created_at,

@@ -21,7 +21,7 @@ function message(
       resource_label: "#incident / thread",
       sender_display_name: "Alice",
       author_type: "human",
-      authorization: "authorized_invocation",
+      prompt_role: "invocation",
       provider_created_at: "2026-07-22T00:59:00.000Z",
       ...metadata,
     },
@@ -38,10 +38,25 @@ void test("projects validated source presentation", () => {
   assert.equal(projected.provider, "slack");
   assert.equal(projected.resourceLabel, "#incident / thread");
   assert.equal(projected.senderDisplayName, "Alice");
+  assert.equal(projected.promptRole, "invocation");
   assert.equal(projected.providerTimestamp, "2026-07-22T00:59:00.000Z");
   assert.equal(
     projected.originalUrl,
     "https://example.slack.com/archives/C1/p1",
+  );
+});
+
+void test("rejects missing or invalid prompt roles instead of coercing context", () => {
+  const missing = message();
+  if (missing.metadata == null) {
+    throw new Error("Expected External Channel metadata.");
+  }
+  delete missing.metadata.prompt_role;
+
+  assert.equal(externalChannelMessagePresentation(missing), null);
+  assert.equal(
+    externalChannelMessagePresentation(message({}, { prompt_role: "invalid" })),
+    null,
   );
 });
 

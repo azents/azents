@@ -42,7 +42,7 @@ def _payload(
         provider_user_id="U1",
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-        authorization="authorized_invocation",
+        prompt_role="invocation",
         body=body,
         attachment_metadata=attachment_metadata or {},
         reference_mappings=reference_mappings or {},
@@ -66,7 +66,7 @@ def test_shared_renderer_preserves_source_and_truncation_metadata() -> None:
         "type": "thread",
     }
     assert value["truncated_context"] == {"message_count": 2, "size": 128}
-    assert "Authorization: authorized_invocation" in rendered
+    assert "Prompt role: invocation" in rendered
     assert "Truncated context: 2 messages, 128 bytes" in rendered
 
 

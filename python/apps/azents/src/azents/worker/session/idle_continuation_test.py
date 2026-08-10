@@ -62,6 +62,8 @@ class _MailboxService:
                     requested_model_target_label=None,
                     requested_reasoning_effort=None,
                     sender_user_id=input.sender_user_id,
+                    order_group=f"{index + 1:032d}",
+                    order_sequence=0,
                     content=input.content,
                     idempotency_key=input.idempotency_key,
                     metadata=input.metadata,

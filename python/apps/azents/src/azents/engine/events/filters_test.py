@@ -1859,7 +1859,7 @@ def _external_payload() -> ExternalChannelMessagePayload:
         provider_user_id="U1",
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-        authorization="context_only",
+        prompt_role="context",
         body="context body",
         attachment_metadata={
             "files": [
@@ -1915,7 +1915,7 @@ def test_external_message_is_visible_to_tokens_and_continuity() -> None:
 
     assert is_string_object_dict(value)
     assert value["message_type"] == "external_channel_message"
-    assert value["authorization"] == "context_only"
+    assert value["prompt_role"] == "context"
     assert value["truncated_context"] == {"message_count": 3, "size": 256}
     attachments = value["attachments"]
     assert is_string_object_dict(attachments)
@@ -1935,7 +1935,7 @@ def test_external_message_is_visible_to_tokens_and_continuity() -> None:
     assert visible_bytes > filters._estimate_event_visible_bytes(without_files)
     assert text is not None
     assert "Provider: slack" in text
-    assert "Authorization: context_only" in text
+    assert "Prompt role: context" in text
     assert "context body" in text
     assert "Files:" in text
     assert "File: external-file:v1:slack:binding-1:::F123" in text

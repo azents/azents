@@ -216,6 +216,8 @@ class ChatWriteService:
                     requested_model_target_label=inference_profile.model_target_label,
                     requested_reasoning_effort=inference_profile.reasoning_effort,
                     sender_user_id=user_id,
+                    order_group=None,
+                    order_sequence=0,
                     content=text,
                     idempotency_key=client_request_id,
                     metadata=metadata,

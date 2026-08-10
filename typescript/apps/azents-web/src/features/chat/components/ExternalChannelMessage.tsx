@@ -63,7 +63,7 @@ function sourceStatusLabel(
   source: ExternalChannelMessagePresentation,
   t: ChatTranslator,
 ): string {
-  if (source.authorization === "authorized_invocation") {
+  if (source.promptRole === "invocation") {
     return t("externalMessage.status.invoked");
   }
   return t("externalMessage.status.context");
@@ -72,7 +72,7 @@ function sourceStatusLabel(
 function statusColor(
   source: ExternalChannelMessagePresentation,
 ): "blue" | "yellow" {
-  if (source.authorization === "authorized_invocation") {
+  if (source.promptRole === "invocation") {
     return "blue";
   }
   return "yellow";
@@ -100,8 +100,8 @@ function sourceMetadataRows(
     { label: t("externalMessage.sender"), value: source.senderDisplayName },
     { label: t("externalMessage.authorType"), value: source.authorType },
     {
-      label: t("externalMessage.authorization"),
-      value: source.authorization,
+      label: t("externalMessage.promptRole"),
+      value: source.promptRole,
     },
     {
       label: t("externalMessage.timestamp"),

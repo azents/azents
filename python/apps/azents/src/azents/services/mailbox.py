@@ -72,7 +72,7 @@ from azents.repos.external_channel.data import ExternalChannelMailboxProjectionI
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import (
-    ExternalChannelInvocationMailboxPayload,
+    ExternalChannelMessageMailboxPayload,
     MailboxEnvelopePayload,
     MailboxItem,
     MailboxItemCreate,
@@ -107,6 +107,8 @@ class MailboxEnqueue:
     requested_model_target_label: str | None
     requested_reasoning_effort: ModelReasoningEffort | None
     sender_user_id: str | None
+    order_group: str | None
+    order_sequence: int
     content: str
     idempotency_key: str | None
     metadata: dict[str, str]
@@ -316,6 +318,8 @@ class MailboxService:
                 requested_model_target_label=input.requested_model_target_label,
                 requested_reasoning_effort=input.requested_reasoning_effort,
                 sender_user_id=input.sender_user_id,
+                order_group=input.order_group,
+                order_sequence=input.order_sequence,
                 content=input.content,
                 idempotency_key=input.idempotency_key,
                 metadata=input.metadata,
@@ -1010,8 +1014,8 @@ class MailboxService:
                 return _ExternalChannelContinuationMailboxProcessor(self)
             case MailboxItemKind.AGENT_MESSAGE:
                 return _AgentMessageMailboxProcessor(self)
-            case MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
-                return ExternalChannelInvocationMailboxProcessor(self)
+            case MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
+                return ExternalChannelMessageMailboxProcessor(self)
             case MailboxItemKind.ACTION_MESSAGE:
                 if buffer.presentation.action is None:
                     raise ValueError(
@@ -1401,87 +1405,68 @@ class _AgentMessageMailboxProcessor:
 
 
 def build_external_channel_mailbox_payload(
-    items: Sequence[ExternalChannelMailboxProjectionItem],
+    item: ExternalChannelMailboxProjectionItem,
     *,
-    initial_title_eligible: bool = False,
-) -> ExternalChannelInvocationMailboxPayload:
-    """Materialize immutable External Channel message snapshots at admission."""
-    if not items:
-        raise ValueError("External invocation batch has no projection items.")
-    ordered = sorted(items, key=lambda item: item.sequence)
-    if [item.sequence for item in ordered] != list(range(len(ordered))):
-        raise ValueError("External invocation batch sequence is not contiguous.")
-    embedded: list[MailboxPresentationItem] = []
-    context_omitted = ordered[0].context_omitted
-    if any(item.context_omitted is not context_omitted for item in ordered):
-        raise ValueError("External invocation batch omission state is inconsistent.")
-    sequence_offset = 0
-    if context_omitted:
-        embedded.append(
-            MailboxPresentationItem(
-                item_key="external_channel:0",
-                presentation_kind="system_reminder",
-                content=_EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER,
-            )
-        )
-        sequence_offset = 1
-    for item in ordered:
-        if not item.provider_tenant_id:
-            raise ValueError("External invocation is missing provider tenant ID.")
-        payload = ExternalChannelMessagePayload(
-            provider=item.provider,
-            provider_tenant_id=item.provider_tenant_id,
-            resource_id=item.resource_id,
-            resource_label=_external_resource_label(item),
-            resource_type=item.resource_type,
+    context_omitted: bool,
+    initial_title_eligible: bool,
+) -> ExternalChannelMessageMailboxPayload:
+    """Materialize one immutable External Channel message at admission."""
+    if not item.provider_tenant_id:
+        raise ValueError("External Channel message is missing provider tenant ID.")
+    payload = ExternalChannelMessagePayload(
+        provider=item.provider,
+        provider_tenant_id=item.provider_tenant_id,
+        resource_id=item.resource_id,
+        resource_label=_external_resource_label(item),
+        resource_type=item.resource_type,
+        binding_id=item.binding_id,
+        invocation_batch_id=item.invocation_id,
+        external_message_id=item.provider_message_key,
+        projection_root_id=(
+            f"external-channel:{item.binding_id}:{item.provider_message_key}"
+        ),
+        provider_message_key=item.provider_message_key,
+        provider_position=item.provider_position,
+        principal_id=item.principal_id,
+        provider_user_id=item.provider_user_id,
+        sender_display_name=item.sender_display_name,
+        author_type=item.author_type,
+        prompt_role=(
+            "invocation"
+            if item.provider_message_key == item.trigger_provider_message_key
+            else "context"
+        ),
+        body=item.body,
+        attachment_metadata=add_external_channel_file_locators(
+            item.attachment_metadata or {},
             binding_id=item.binding_id,
-            invocation_batch_id=item.invocation_id,
-            external_message_id=item.provider_message_key,
-            projection_root_id=(
-                f"external-channel:{item.binding_id}:{item.provider_message_key}"
-            ),
             provider_message_key=item.provider_message_key,
-            provider_position=item.provider_position,
-            principal_id=item.principal_id,
-            provider_user_id=item.provider_user_id,
-            sender_display_name=item.sender_display_name,
-            author_type=item.author_type,
-            authorization=(
-                "authorized_invocation"
-                if item.provider_message_key == item.trigger_provider_message_key
-                else "context_only"
-            ),
-            body=item.body,
-            attachment_metadata=add_external_channel_file_locators(
-                item.attachment_metadata or {},
-                binding_id=item.binding_id,
-                provider_message_key=item.provider_message_key,
-            ),
-            reference_mappings=_external_reference_mappings(item.reference_mappings),
-            provider_created_at=item.provider_created_at,
-            provider_updated_at=item.provider_updated_at,
-            original_url=item.original_url,
-            truncated_context_message_count=0,
-            truncated_context_size=0,
-        )
-        embedded.append(
+        ),
+        reference_mappings=_external_reference_mappings(item.reference_mappings),
+        provider_created_at=item.provider_created_at,
+        provider_updated_at=item.provider_updated_at,
+        original_url=item.original_url,
+        truncated_context_message_count=0,
+        truncated_context_size=0,
+    )
+    return ExternalChannelMessageMailboxPayload(
+        type=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE.value,
+        items=[
             MailboxPresentationItem(
-                item_key=f"external_channel:{item.sequence + sequence_offset}",
+                item_key="external_channel_message:0",
                 presentation_kind="external_channel_message",
                 content=item.body or "",
                 metadata={"external_channel_message": payload.model_dump(mode="json")},
             )
-        )
-    return ExternalChannelInvocationMailboxPayload(
-        type=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION.value,
-        items=embedded,
+        ],
+        context_omitted=context_omitted,
         initial_title_eligible=initial_title_eligible,
     )
 
 
 @dataclasses.dataclass(frozen=True)
-class ExternalChannelInvocationMailboxProcessor:
-    """Prepare one durable external invocation batch as contiguous events."""
+class ExternalChannelMessageMailboxProcessor:
+    """Prepare one durable External Channel message row."""
 
     service: MailboxService
 
@@ -1490,54 +1475,48 @@ class ExternalChannelInvocationMailboxProcessor:
         context: MailboxPreparationContext,
         buffer: MailboxItem,
     ) -> MailboxPreparationOutcome:
+        del context
+        if not isinstance(buffer.payload, ExternalChannelMessageMailboxPayload):
+            raise ValueError("External Channel MailboxItem payload is malformed.")
+        embedded = buffer.payload.items[0]
+        raw_payload = embedded.metadata.get("external_channel_message")
+        if not isinstance(raw_payload, dict):
+            raise ValueError("External Channel mailbox message is malformed.")
+        payload = ExternalChannelMessagePayload.model_validate(raw_payload)
         promoted: list[_PromotedMailboxItem] = []
-        if not isinstance(buffer.payload, ExternalChannelInvocationMailboxPayload):
-            raise ValueError("External invocation MailboxItem payload is malformed.")
-        for embedded in buffer.payload.items:
-            if embedded.presentation_kind == "system_reminder":
-                if embedded.metadata or embedded.action is not None:
-                    raise ValueError(
-                        "External invocation omission reminder is malformed."
-                    )
-                payload = SystemReminderPayload(text=embedded.content)
-                promoted.append(
-                    _PromotedMailboxItem(
-                        buffer=buffer,
-                        user_message=None,
-                        event_kind=EventKind.SYSTEM_REMINDER,
-                        payload=_JSON_OBJECT_ADAPTER.validate_python(
-                            payload.model_dump(mode="json")
-                        ),
-                        external_id=(f"external-channel:{buffer.id}:context-omitted"),
-                        item_key=embedded.item_key,
-                    )
-                )
-                continue
-            if embedded.presentation_kind != "external_channel_message":
-                raise ValueError("External invocation payload item kind is malformed.")
-            raw_payload = embedded.metadata.get("external_channel_message")
-            if not isinstance(raw_payload, dict):
-                raise ValueError("External invocation payload item is malformed.")
-            payload = ExternalChannelMessagePayload.model_validate(raw_payload)
-            external_id = payload.projection_root_id
+        if buffer.payload.context_omitted:
+            reminder = SystemReminderPayload(
+                text=_EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER
+            )
             promoted.append(
                 _PromotedMailboxItem(
                     buffer=buffer,
                     user_message=None,
-                    event_kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                    event_kind=EventKind.SYSTEM_REMINDER,
                     payload=_JSON_OBJECT_ADAPTER.validate_python(
-                        payload.model_dump(mode="json")
+                        reminder.model_dump(mode="json")
                     ),
-                    external_id=external_id,
-                    item_key=embedded.item_key,
-                    initial_title_eligible=(
-                        buffer.payload.initial_title_eligible
-                        and payload.authorization == "authorized_invocation"
-                        and payload.author_type
-                        is ExternalChannelPrincipalAuthorType.HUMAN
-                    ),
+                    external_id=f"external-channel:{buffer.id}:context-omitted",
+                    item_key="external_channel_message:context-omitted",
                 )
             )
+        promoted.append(
+            _PromotedMailboxItem(
+                buffer=buffer,
+                user_message=None,
+                event_kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                payload=_JSON_OBJECT_ADAPTER.validate_python(
+                    payload.model_dump(mode="json")
+                ),
+                external_id=payload.projection_root_id,
+                item_key=embedded.item_key,
+                initial_title_eligible=(
+                    buffer.payload.initial_title_eligible
+                    and payload.prompt_role == "invocation"
+                    and payload.author_type is ExternalChannelPrincipalAuthorType.HUMAN
+                ),
+            )
+        )
         return _preparation_outcome(promoted, TurnEffect.ELIGIBLE)
 
 
@@ -1650,7 +1629,7 @@ def _external_resource_label(item: ExternalChannelMailboxProjectionItem) -> str:
     labels = item.resource_labels
     provider_resource_key = item.provider_resource_key
     if not isinstance(labels, dict) or not labels:
-        raise ValueError("External invocation is missing resource labels.")
+        raise ValueError("External Channel message is missing resource labels.")
     channel_id = (
         labels.get("display_name")
         or labels.get("channel_name")
@@ -1659,14 +1638,14 @@ def _external_resource_label(item: ExternalChannelMailboxProjectionItem) -> str:
         or labels.get("thread_id")
     )
     if not isinstance(channel_id, str) or not channel_id:
-        raise ValueError("External invocation is missing resource channel label.")
+        raise ValueError("External Channel message is missing resource channel label.")
     thread_ts = labels.get("thread_ts")
     if thread_ts is None and labels.get("parent_channel_id") == channel_id:
         thread_ts = labels.get("thread_id")
     if thread_ts is not None and not isinstance(thread_ts, str):
-        raise ValueError("External invocation has an invalid thread label.")
+        raise ValueError("External Channel message has an invalid thread label.")
     if not isinstance(provider_resource_key, str) or not provider_resource_key:
-        raise ValueError("External invocation is missing resource identity.")
+        raise ValueError("External Channel message is missing resource identity.")
     return f"{channel_id}:{thread_ts}" if thread_ts else channel_id
 
 
@@ -1702,7 +1681,7 @@ def _buffer_requires_inference(buffer: MailboxItem) -> bool:
             | MailboxItemKind.GOAL_CONTINUATION
             | MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
             | MailboxItemKind.AGENT_MESSAGE
-            | MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION
+            | MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE
         ):
             return True
         case MailboxItemKind.ACTION_MESSAGE:

@@ -2589,7 +2589,7 @@
       "providerUserId": "プロバイダーユーザー ID",
       "providerMessageId": "プロバイダーメッセージ ID",
       "authorType": "投稿者タイプ",
-      "authorization": "認可状態",
+      "promptRole": "プロンプトロール",
       "timestamp": "プロバイダー時刻",
       "openOriginal": "元のメッセージを開く",
       "openOriginalAccessible": "{resource} の元のメッセージを開く",
