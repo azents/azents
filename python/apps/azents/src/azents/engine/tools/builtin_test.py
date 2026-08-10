@@ -44,6 +44,7 @@ from azents.engine.run.types import (
     FunctionToolCancelRequest,
     FunctionToolError,
     FunctionToolResult,
+    PlaintextCustomToolHandler,
 )
 from azents.engine.tools import builtin as builtin_module
 from azents.engine.tools.builtin import (
@@ -1080,6 +1081,59 @@ class TestRuntimeToolkitUpdateContext:
         assert "apply_patch" in names
         assert {"read", "write", "delete", "glob", "grep"} <= names
         assert names.isdisjoint({"import_file", "present_file", "read_image"})
+
+    @pytest.mark.asyncio
+    async def test_runtime_guard_preserves_plaintext_custom_apply_patch(self) -> None:
+        """Capability admission keeps the apply_patch transport adapter intact."""
+        toolkit = _make_toolkit()
+
+        state = await toolkit.update_context(_make_context())
+        apply_patch = _find_tool(state.tools, "apply_patch")
+
+        assert isinstance(apply_patch.handler, PlaintextCustomToolHandler)
+
+    @pytest.mark.asyncio
+    async def test_plaintext_custom_apply_patch_rechecks_runtime_capability(
+        self,
+    ) -> None:
+        """Plaintext-custom execution is denied before a stale Runtime dispatch."""
+        provider_calls = 0
+
+        async def current_snapshot_provider() -> RuntimeCapabilitySnapshot:
+            nonlocal provider_calls
+            provider_calls += 1
+            return RuntimeCapabilitySnapshot(
+                state=(
+                    AgentRuntimeCapability.MANAGED
+                    if provider_calls <= 3
+                    else AgentRuntimeCapability.NONE
+                ),
+                version=1,
+                shell_enabled=True,
+            )
+
+        resolver = RuntimeCapabilityResolver.from_agent(
+            state=AgentRuntimeCapability.MANAGED,
+            version=1,
+            shell_enabled=True,
+            current_snapshot_provider=current_snapshot_provider,
+        )
+        toolkit = _make_toolkit(runtime_capability_resolver=resolver)
+        state = await toolkit.update_context(_make_context())
+        apply_patch = _find_tool(state.tools, "apply_patch")
+
+        assert isinstance(apply_patch.handler, PlaintextCustomToolHandler)
+        with pytest.raises(FunctionToolError) as error:
+            await apply_patch.handler.execute_plaintext_custom(
+                "*** Base Path: /workspace/agent\n*** Begin Patch\n*** End Patch"
+            )
+
+        assert error.value.metadata["kind"] == "runtime_capability_denied"
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+        assert runner_operations.file_operation_calls == []
 
     @pytest.mark.asyncio
     async def test_includes_resource_file_tools_only_with_authority(self) -> None:

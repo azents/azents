@@ -58,7 +58,9 @@ from azents.engine.run.types import (
     FunctionTool,
     FunctionToolCancelRequest,
     FunctionToolError,
+    FunctionToolHandler,
     FunctionToolResult,
+    PlaintextCustomToolHandler,
 )
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.apply_patch import RuntimePatchTarget, make_apply_patch_tool
@@ -665,6 +667,31 @@ _RUNTIME_CONTAINED_BEHAVIOR_PROMPT = dedent(
 ).strip()
 
 
+@dataclasses.dataclass(frozen=True)
+class _RuntimeCapabilityGuardedPlaintextHandler:
+    """Preserve plaintext-custom execution while enforcing Runtime admission."""
+
+    original_handler: FunctionToolHandler
+    require_capability: Callable[[], Awaitable[None]]
+
+    async def __call__(self, arguments: str) -> str | FunctionToolResult:
+        """Enforce capability admission before JSON-function execution."""
+        await self.require_capability()
+        return await self.original_handler(arguments)
+
+    async def execute_plaintext_custom(
+        self,
+        arguments: str,
+    ) -> str | FunctionToolResult:
+        """Enforce capability admission before plaintext-custom execution."""
+        await self.require_capability()
+        if not isinstance(self.original_handler, PlaintextCustomToolHandler):
+            raise RuntimeError(
+                "Plaintext-custom Runtime guard requires a compatible handler"
+            )
+        return await self.original_handler.execute_plaintext_custom(arguments)
+
+
 class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     """Runtime Runner dependent shell/file tool execution instance."""
 
@@ -822,9 +849,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         original_handler = tool.handler
         original_cancel_handler = tool.cancel_handler
 
-        async def guarded_handler(
-            arguments: str,
-        ) -> str | FunctionToolResult:
+        async def require_capability() -> None:
             if resolver is None:
                 raise FunctionToolError(
                     "Runtime capability context is unavailable.",
@@ -845,6 +870,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                         "reason_code": exc.reason_code,
                     },
                 ) from None
+
+        async def guarded_handler(
+            arguments: str,
+        ) -> str | FunctionToolResult:
+            await require_capability()
             return await original_handler(arguments)
 
         async def guarded_cancel_handler(
@@ -858,9 +888,16 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 return
             await original_cancel_handler(request)
 
+        handler: FunctionToolHandler = guarded_handler
+        if isinstance(original_handler, PlaintextCustomToolHandler):
+            handler = _RuntimeCapabilityGuardedPlaintextHandler(
+                original_handler=original_handler,
+                require_capability=require_capability,
+            )
+
         return dataclasses.replace(
             tool,
-            handler=guarded_handler,
+            handler=handler,
             cancel_handler=(
                 guarded_cancel_handler if original_cancel_handler is not None else None
             ),
