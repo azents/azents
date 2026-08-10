@@ -72,6 +72,8 @@ class AgentRuntimeRemovalRepository:
                 sa.select(RDBAgentRuntimeRemovalOperation).where(
                     RDBAgentRuntimeRemovalOperation.agent_id == agent_id,
                     RDBAgentRuntimeRemovalOperation.idempotency_key == idempotency_key,
+                    RDBAgentRuntimeRemovalOperation.status
+                    != AgentRuntimeRemovalStatus.COMPLETED,
                 )
             )
         if row is None:
@@ -111,6 +113,22 @@ class AgentRuntimeRemovalRepository:
                 RDBAgentRuntimeRemovalOperation.agent_id == agent_id,
                 RDBAgentRuntimeRemovalOperation.status
                 != AgentRuntimeRemovalStatus.COMPLETED,
+            )
+        )
+        return None if row is None else self._build(row)
+
+    async def get_by_agent_idempotency_key(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        idempotency_key: str,
+    ) -> AgentRuntimeRemovalOperation | None:
+        """Fetch an active or completed operation by idempotency identity."""
+        row = await session.scalar(
+            sa.select(RDBAgentRuntimeRemovalOperation).where(
+                RDBAgentRuntimeRemovalOperation.agent_id == agent_id,
+                RDBAgentRuntimeRemovalOperation.idempotency_key == idempotency_key,
             )
         )
         return None if row is None else self._build(row)

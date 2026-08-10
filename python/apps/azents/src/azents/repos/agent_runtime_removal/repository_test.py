@@ -226,6 +226,9 @@ async def test_create_claim_progress_complete_and_recreate(
     assert latest_completed is not None
     assert latest_completed.id == completed.id
 
+    with pytest.raises(RuntimeError, match="creation failed"):
+        await create("remove-1", 3)
+
     next_operation = await create("remove-2", 3)
     assert next_operation.idempotency_match is True
     assert next_operation.operation.id != claimed.id

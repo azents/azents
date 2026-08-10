@@ -7,6 +7,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRuntimeCapability,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderKind,
@@ -19,6 +20,7 @@ from azents.core.runtime_profile import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
@@ -362,6 +364,7 @@ class RuntimeRecreationReconciler:
     session_manager: SessionManager[AsyncSession]
     profile_repository: RuntimeProfileRepository
     runtime_repository: AgentRuntimeRepository
+    agent_repository: AgentRepository
     operation_limit: int = _DEFAULT_OPERATION_LIMIT
     item_limit: int = _DEFAULT_ITEM_LIMIT
     maximum_attempts: int = _DEFAULT_MAXIMUM_ATTEMPTS
@@ -520,6 +523,19 @@ class RuntimeRecreationReconciler:
                     failure_message=(
                         "The Runtime target changed after recreation dispatch."
                     ),
+                )
+            agent = await self.agent_repository.lock_by_id(session, runtime.agent_id)
+            if (
+                agent is None
+                or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+            ):
+                return False, await self.profile_repository.finish_recreation_item(
+                    session,
+                    item_id=item.id,
+                    expected_attempt=item.attempt,
+                    status=RuntimeRecreationItemStatus.SKIPPED,
+                    failure_code="runtime_capability_unavailable",
+                    failure_message=("The Agent no longer permits Runtime recreation."),
                 )
             target_version = (
                 await self.profile_repository.get_recreation_target_version(

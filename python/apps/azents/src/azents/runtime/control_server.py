@@ -289,6 +289,7 @@ async def runtime_control_server_lifespan(
     transport = runtime_control_transport(settings)
     engine = _create_engine(settings)
     session_manager = _session_manager(engine)
+    agent_repository = AgentRepository()
     runtime_repository = AgentRuntimeRepository()
     policy_repository = RuntimeProviderPolicyRepository()
     profile_repository = RuntimeProfileRepository()
@@ -296,7 +297,7 @@ async def runtime_control_server_lifespan(
     provider_control_repository = RuntimeProviderControlRepository()
     profile_resolution = RuntimeProfileResolutionService(
         session_manager=session_manager,
-        agent_repository=AgentRepository(),
+        agent_repository=agent_repository,
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         provider_repository=provider_repository,
@@ -349,6 +350,7 @@ async def runtime_control_server_lifespan(
         verifier=runner_credential_verifier,
     )
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=agent_repository,
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=session_manager,
@@ -373,6 +375,7 @@ async def runtime_control_server_lifespan(
         session_manager=session_manager,
         profile_repository=profile_repository,
         runtime_repository=runtime_repository,
+        agent_repository=agent_repository,
     )
     stop_reconciler = asyncio.Event()
     reconciler_task = asyncio.create_task(
