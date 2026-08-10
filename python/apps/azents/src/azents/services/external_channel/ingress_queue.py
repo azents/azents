@@ -5,6 +5,7 @@ import datetime
 import enum
 import hashlib
 import logging
+import time
 from typing import Annotated, Literal, assert_never
 
 from azcommon.uuid import uuid7
@@ -69,6 +70,10 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.ingestion_history import (
     ExternalChannelProviderHistoryReader,
+)
+from azents.services.external_channel.ingress_metrics import (
+    ExternalChannelIngressMetrics,
+    get_external_channel_ingress_metrics,
 )
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
@@ -201,6 +206,10 @@ class ExternalChannelIngressDrainService:
         ExternalChannelMailboxWakeDispatcher,
         Depends(ExternalChannelMailboxWakeDispatcher),
     ]
+    metrics: Annotated[
+        ExternalChannelIngressMetrics,
+        Depends(get_external_channel_ingress_metrics),
+    ]
 
     async def drain(
         self,
@@ -244,8 +253,15 @@ class ExternalChannelIngressDrainService:
                     )
                     await session.commit()
                 return
-            prepared = await self._prepare_batch(batch, deadline=deadline)
-            stale = await self._finalize_batch(batch, prepared=prepared)
+            self.metrics.record_claim(len(batch.items))
+            started_at = time.perf_counter()
+            try:
+                prepared = await self._prepare_batch(batch, deadline=deadline)
+                stale = await self._finalize_batch(batch, prepared=prepared)
+            finally:
+                self.metrics.record_processing_duration(
+                    time.perf_counter() - started_at
+                )
             if stale:
                 coordination_retries += 1
                 if coordination_retries >= _MAX_COORDINATION_RETRIES:
@@ -449,6 +465,7 @@ class ExternalChannelIngressDrainService:
             retry_outcomes: list[_PreparedFailure] = []
             delete_items = []
             bounded_failures: list[_PreparedFailure] = []
+            cursor_suppressions = 0
             for outcome in prepared:
                 item = outcome.item
                 locked_item = locked_by_id[item.id]
@@ -546,6 +563,7 @@ class ExternalChannelIngressDrainService:
                             order_sequence += 1
                         delete_items.append(locked_item)
                     case _PreparedSuppressed():
+                        cursor_suppressions += 1
                         delete_items.append(locked_item)
                     case _PreparedFailure() as failure:
                         covered_position = successful_positions.get(
@@ -555,6 +573,7 @@ class ExternalChannelIngressDrainService:
                             covered_position is not None
                             and item.trigger_position <= covered_position
                         ):
+                            cursor_suppressions += 1
                             delete_items.append(locked_item)
                             continue
                         transition = _retry_transition(failure, now=now)
@@ -609,13 +628,18 @@ class ExternalChannelIngressDrainService:
                         ),
                     },
                 )
-            del retry_outcomes
             await self.queue_repository.finish_batch(
                 session,
                 drain=drain,
                 deleted_items=delete_items,
             )
             await session.commit()
+        self.metrics.record_finalization(
+            retries=len(retry_outcomes),
+            bounded_failures=len(bounded_failures),
+            cursor_suppressions=cursor_suppressions,
+            mailbox_rows=len(mailbox_results),
+        )
         if wake is not None:
             try:
                 await self.wake_dispatcher.dispatch(
@@ -627,10 +651,13 @@ class ExternalChannelIngressDrainService:
                     ),
                 )
             except ExternalChannelWakeDispatchUnavailable:
+                self.metrics.record_wake_attempt(failed=True)
                 logger.warning(
                     "External Channel post-batch Session wake is pending",
                     extra={"external_channel_session_id": wake[1]},
                 )
+            else:
+                self.metrics.record_wake_attempt(failed=False)
         return False
 
     async def _reset_claim(self, batch: ExternalChannelIngressBatch) -> None:

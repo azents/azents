@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-09
-spec_version: 24
+last_verified_at: 2026-08-10
+spec_version: 25
 ---
 
 # E2E Primary Test Strategy
@@ -58,9 +58,10 @@ provider-safe metadata, acknowledgements, state transitions, delivery outcomes, 
 count, and aggregate byte count.
 
 The Slack and Discord fakes also provide bounded provider-history ranges, mixed author
-types, omission boundaries, failure sequences, duplicate/concurrency barriers, and
-transport acknowledgement evidence for External Channel synchronous ingestion.
-Evidence retains request counts, lifecycle categories, positions, file counts,
+types, omission boundaries, ordered failure and `Retry-After` sequences,
+exact/history operation barriers, duplicate/concurrency controls, and transport
+acknowledgement evidence for durable batched External Channel ingress. Evidence retains
+request counts, lifecycle categories, positions, bounded barrier state, file counts,
 aggregate byte counts, deterministic hashes, and canonical relative Azents Session
 routes only.
 
@@ -128,7 +129,12 @@ Always-on required CI does not depend on external credentials.
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
   REST failure outcomes, and multipart redaction.
 - The deterministic External Channel module covers Slack HTTP, Slack Socket Mode,
-  Discord HTTP interactions, and Discord Gateway synchronous admission; durable admission before acknowledgement;
+  Discord HTTP interactions, and Discord Gateway durable admission; acknowledgement
+  after content-free queue insertion and before provider history;
+  first-one/later-ten batch limits; per-message mailbox cardinality and ordering;
+  same-conversation cursor suppression; mixed success/retry/failure finalization;
+  retry-tail and bounded `Retry-After`; post-commit wake failure and recovery;
+  active-ingress diagnostics and Runtime shutdown drain;
   SDK-owned Slack endpoint replacement; Discord Identify-to-Resume recovery;
   provisioned or reused thread targeting; direct parent-channel targeting; bound continuation;
   mixed-author bounded history; duplicate
@@ -147,10 +153,10 @@ Always-on required CI does not depend on external credentials.
 - The deterministic External Channel fixture explicitly enables provider participation;
   backend and Helm defaults remain disabled so the always-on lane is the only default
   environment that activates setup, parent-channel writes, and provider settings.
-- Backend contract tests run both independent in-memory conversation locks and two
-  clients against a real Redis container. Memory replicas may overlap and converge at
-  the PostgreSQL position fence; Redis replicas serialize the same scope; unavailable
-  Redis remains a surfaced retryable failure with no memory fallback.
+- Backend contract tests verify PostgreSQL first-one/later-ten claims, fenced Session
+  leases, retry-tail movement, same-batch cursor views, final cursor CAS, atomic
+  successful-subset mailbox admission, one post-batch wake, bounded failure logs,
+  active diagnostics, producer recovery scans, and Redis-independent correctness.
 - Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run selected `runtime_provider` journeys, including Tool Search Runtime Hooks, provider-native External Channel progress, and the External Channel file-transfer journey. The lane loads the enforcing Runtime containment AppArmor profile before worktree-built images start and unloads it during cleanup. Contained journeys use Profile v2 and fail when required AppArmor evidence is absent rather than reporting a direct or skipped substitute as containment evidence.
 - The change-filtered `ci-kubernetes-containment-e2e-run` is required for containment Profile,
   Runner backend/helper, Docker AppArmor, Kubernetes Provider, Helm, or conformance-driver changes.
@@ -242,6 +248,10 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-10** — v25. Added deterministic active-ingress barriers, ordered
+  `Retry-After` controls, durable acknowledgement-before-history evidence,
+  batching/cursor/mailbox/retry/wake diagnostics, and local prerequisite-failure
+  handling for the batched External Channel ingress matrix.
 - **2026-08-09** — v24. Added enforcing-AppArmor Docker Runtime Provider coverage and the required
   disposable kind Kubernetes containment lane with bounded evidence, fail-closed prerequisites,
   qualification, security boundaries, persistence, ephemeral clearing, and direct rollback.

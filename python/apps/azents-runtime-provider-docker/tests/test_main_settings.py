@@ -6,8 +6,8 @@ from azents_runtime_control.provider import JsonValue
 
 from azents_runtime_provider_docker.main import (
     ProviderSettings,
+    _effective_process_containment,
     _provider_registration,
-    _validate_containment_security_options,
     create_provider_control_client,
 )
 from azents_runtime_provider_docker.provider import RUNNER_LIMIT_ENV_NAMES
@@ -130,8 +130,12 @@ def test_registration_keeps_v1_contract_when_containment_is_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set_required_env(monkeypatch)
+    settings = ProviderSettings()
 
-    registration = _provider_registration(ProviderSettings())
+    registration = _provider_registration(
+        settings,
+        process_containment=settings.process_containment,
+    )
 
     assert registration.capability_contract == _expected_capability_contract(
         containment_enabled=False
@@ -157,7 +161,10 @@ def test_registration_advertises_v2_only_for_configured_containment(
     )
 
     settings = ProviderSettings()
-    registration = _provider_registration(settings)
+    registration = _provider_registration(
+        settings,
+        process_containment=settings.process_containment,
+    )
 
     assert settings.process_containment is not None
     assert registration.capability_contract == _expected_capability_contract(
@@ -209,28 +216,73 @@ def test_unsupported_containment_security_profiles_are_rejected(
         ProviderSettings()
 
 
-@pytest.mark.parametrize(
-    "security_options",
-    (
-        [],
-        ["name=seccomp,profile=builtin", "name=cgroupns"],
-    ),
-)
-def test_containment_requires_docker_apparmor_support(
-    security_options: list[str],
+def test_registration_omits_containment_when_configured_support_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with pytest.raises(RuntimeError, match="requires Docker AppArmor support"):
-        _validate_containment_security_options(security_options)
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+        "bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+        "azents-runtime-bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
+        "15",
+    )
+    settings = ProviderSettings()
+
+    registration = _provider_registration(settings, process_containment=None)
+
+    assert registration.capability_contract == _expected_capability_contract(
+        containment_enabled=False
+    )
+    assert "process_containment_backend" not in registration.metadata
 
 
 @pytest.mark.parametrize(
-    "security_options",
+    ("security_options", "expected_available"),
     (
-        ["name=apparmor"],
-        ["name=apparmor,profile=default"],
+        ([], False),
+        (["name=seccomp,profile=builtin", "name=cgroupns"], False),
+        (["name=apparmor"], True),
+        (["name=apparmor,profile=default"], True),
     ),
 )
-def test_containment_accepts_docker_apparmor_support(
+def test_effective_containment_tracks_docker_apparmor_support(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     security_options: list[str],
+    expected_available: bool,
 ) -> None:
-    _validate_containment_security_options(security_options)
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+        "bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+        "azents-runtime-bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
+        "15",
+    )
+    settings = ProviderSettings()
+
+    with caplog.at_level("WARNING"):
+        effective = _effective_process_containment(settings, security_options)
+
+    assert (effective is not None) is expected_available
+    if expected_available:
+        assert effective == settings.process_containment
+        assert caplog.records == []
+    else:
+        assert len(caplog.records) == 1
+        assert (
+            caplog.records[0].__dict__["containment_unavailable_reason"]
+            == "apparmor_unavailable"
+        )
+        assert "name=seccomp" not in caplog.text

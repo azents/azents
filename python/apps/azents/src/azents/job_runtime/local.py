@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import logging
+import time
 from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -71,11 +72,17 @@ class LocalJobRuntime:
         self._detached_cleanups: set[asyncio.Task[None]] = set()
         self._detached_execution_keys: set[str] = set()
         self._closed = False
+        self._shutdown_drain_seconds: float | None = None
 
     @property
     def active_count(self) -> int:
         """Return the number of accepted executions not yet settled."""
         return len(self._tasks)
+
+    @property
+    def shutdown_drain_seconds(self) -> float | None:
+        """Return the duration of the latest completed shutdown drain."""
+        return self._shutdown_drain_seconds
 
     async def submit(self, request: JobRequest) -> JobHandle:
         """Accept one execution or coalesce an already active execution key."""
@@ -100,8 +107,10 @@ class LocalJobRuntime:
 
     async def close(self) -> None:
         """Close submission and wait for every accepted bounded execution."""
+        started_at = time.perf_counter()
         async with self._lock:
-            if not self._closed:
+            measure_drain = not self._closed
+            if measure_drain:
                 self._closed = True
         cancellation: asyncio.CancelledError | None = None
         while True:
@@ -110,6 +119,11 @@ class LocalJobRuntime:
                 cleanup_tasks = tuple(self._detached_cleanups)
                 tasks = tuple({*execution_tasks, *cleanup_tasks})
             if not tasks:
+                if measure_drain:
+                    self._shutdown_drain_seconds = max(
+                        0.0,
+                        time.perf_counter() - started_at,
+                    )
                 if cancellation is not None:
                     raise cancellation
                 return

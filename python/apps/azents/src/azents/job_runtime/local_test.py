@@ -443,6 +443,7 @@ async def test_close_rejects_new_work_and_drains_accepted_task() -> None:
         await release.wait()
 
     runtime = _runtime(handler)
+    assert runtime.shutdown_drain_seconds is None
     handle = await runtime.submit(_request("accepted"))
     await started.wait()
 
@@ -457,6 +458,8 @@ async def test_close_rejects_new_work_and_drains_accepted_task() -> None:
     await close_task
     assert (await handle.wait()).status is JobOutcomeStatus.SUCCEEDED
     assert runtime.active_count == 0
+    assert runtime.shutdown_drain_seconds is not None
+    assert runtime.shutdown_drain_seconds >= 0
 
 
 @pytest.mark.asyncio

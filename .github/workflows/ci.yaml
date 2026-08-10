@@ -326,11 +326,6 @@ jobs:
           uv run ty check --error-on-warning
       - name: Verify Runtime Docker workflows
         run: python testenv/azents/scripts/verify-runtime-docker.py
-      - name: Load Runtime containment AppArmor profile
-        run: |
-          test "$(cat /sys/module/apparmor/parameters/enabled)" = "Y"
-          sudo apparmor_parser --replace \
-            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
       - name: Run deterministic E2E
         run: |
           set -o pipefail
@@ -347,11 +342,6 @@ jobs:
             --durations-min=0.25 \
             -m "not live_external and not runtime_provider and not web_surface" \
             ./src/tests
-      - name: Unload Runtime containment AppArmor profile
-        if: always()
-        run: |
-          sudo apparmor_parser --remove \
-            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
       - name: Capture deterministic E2E diagnostics
         if: always()
         run: |
@@ -412,6 +402,7 @@ jobs:
           mkdir -p "$report_dir"
           cd testenv/azents/e2e
           AZENTS_E2E_ARTIFACT_DIR="$report_dir" \
+            AZENTS_E2E_DOCKER_PROCESS_CONTAINMENT=true \
             AZENTS_E2E_DOCKER_BUILDER="${{ steps.buildx.outputs.name }}" \
             AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX="azents-e2e-v1" \
             AZENTS_E2E_DOCKER_GHA_CACHE_WRITE_REPOSITORIES="${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'azents-runtime-runner,azents-runtime-provider-docker' || '' }}" \
@@ -540,11 +531,6 @@ jobs:
         run: |
           cd testenv/azents/e2e
           uv sync
-      - name: Load Runtime containment AppArmor profile
-        run: |
-          test "$(cat /sys/module/apparmor/parameters/enabled)" = "Y"
-          sudo apparmor_parser --replace \
-            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
       - name: Run Web Surface E2E
         run: |
           set -o pipefail
@@ -561,11 +547,6 @@ jobs:
             --durations-min=0.25 \
             -m "web_surface and not live_external and not runtime_provider" \
             ./src/tests
-      - name: Unload Runtime containment AppArmor profile
-        if: always()
-        run: |
-          sudo apparmor_parser --remove \
-            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
       - name: Capture Web Surface E2E diagnostics
         if: always()
         run: |

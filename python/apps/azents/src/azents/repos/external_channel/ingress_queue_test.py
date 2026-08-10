@@ -312,3 +312,56 @@ async def test_recovery_query_includes_unowned_processing_rows() -> None:
     )
     assert "'processing'" in sql
     assert "external_channel_ingress_sessions.lease_owner IS NULL" in sql
+
+
+async def test_active_diagnostics_are_bounded_and_content_free() -> None:
+    """Inspection exposes active ownership and timing without provider content."""
+    repository = ExternalChannelIngressQueueRepository()
+    session = _session()
+    item = _item(1)
+    item.state = ExternalChannelIngressItemState.RETRY_WAITING
+    item.attempt_count = 2
+    item.next_attempt_at = _NOW + datetime.timedelta(seconds=30)
+    drain = _drain(first_batch_pending=False)
+    drain.current_batch_id = "batch-1"
+    drain.current_batch_started_at = _NOW - datetime.timedelta(seconds=2)
+
+    summary_result = MagicMock()
+    summary_result.one.return_value = (
+        1,
+        0,
+        0,
+        1,
+        _NOW - datetime.timedelta(seconds=10),
+        1,
+    )
+    rows_result = MagicMock()
+    rows_result.tuples.return_value = [(item, drain)]
+    session.execute.side_effect = [summary_result, rows_result]
+
+    snapshot = await repository.inspect_active(
+        session,
+        now=_NOW,
+        limit=10,
+    )
+
+    assert snapshot.session_count == 1
+    assert snapshot.counts.pending == 0
+    assert snapshot.counts.processing == 0
+    assert snapshot.counts.retry_waiting == 1
+    assert snapshot.counts.total == 1
+    assert snapshot.oldest_queue_age_seconds == 10
+    assert snapshot.truncated is False
+    assert snapshot.items[0].connection_id == "connection-1"
+    assert snapshot.items[0].attempt_count == 2
+    assert snapshot.items[0].next_attempt_at == item.next_attempt_at
+    assert snapshot.items[0].lease_owner == "owner-1"
+    serialized = snapshot.model_dump_json()
+    for forbidden in (
+        "deduplication_key",
+        "provider_event_id",
+        "trigger_provider_message_key",
+        "provider_user_id",
+        "principal_id",
+    ):
+        assert forbidden not in serialized

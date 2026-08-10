@@ -20,6 +20,10 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelWakeDispatchResult,
     ExternalChannelWakeDispatchUnavailable,
 )
+from azents.services.external_channel.ingress_test_control import (
+    ExternalChannelIngressTestControl,
+    get_external_channel_ingress_test_control,
+)
 from azents.services.mailbox import MailboxService
 
 
@@ -33,6 +37,10 @@ class ExternalChannelMailboxWakeDispatcher:
     ]
     mailbox_service: Annotated[MailboxService, Depends(MailboxService)]
     broker: Annotated[SessionBroker, Depends(get_broker)]
+    test_control: Annotated[
+        ExternalChannelIngressTestControl,
+        Depends(get_external_channel_ingress_test_control),
+    ]
 
     async def dispatch(
         self,
@@ -44,6 +52,10 @@ class ExternalChannelMailboxWakeDispatcher:
     ) -> ExternalChannelWakeDispatchResult:
         """Send a recoverable wake using the mailbox item as durable identity."""
         del now
+        if self.test_control.consume_wake_failure(session_id=session_id):
+            raise ExternalChannelWakeDispatchUnavailable(
+                "Testenv injected External Channel wake failure."
+            )
         async with self.session_manager() as session:
             mailbox_item = await self.mailbox_service.get_by_id(
                 session,

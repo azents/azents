@@ -142,6 +142,16 @@ class JobHandle(Protocol):
 class JobRuntime(Protocol):
     """Common backend boundary for registered background execution."""
 
+    @property
+    def active_count(self) -> int:
+        """Return accepted executions that have not settled."""
+        ...
+
+    @property
+    def shutdown_drain_seconds(self) -> float | None:
+        """Return the most recent completed shutdown drain duration."""
+        ...
+
     async def submit(self, request: JobRequest) -> JobHandle:
         """Accept or coalesce one process-local execution request."""
         ...

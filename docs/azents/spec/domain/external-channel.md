@@ -19,8 +19,12 @@ code_paths:
   - python/apps/azents/src/azents/core/enums.py
   - python/apps/azents/src/azents/engine/events/external_channel_rendering.py
   - python/apps/azents/src/azents/rdb/models/external_channel.py
+  - python/apps/azents/src/azents/rdb/models/external_channel_ingress.py
   - python/apps/azents/src/azents/repos/external_channel/**
   - python/apps/azents/src/azents/services/external_channel/**
+  - python/apps/azents/src/azents/job_runtime/**
+  - python/apps/azents/src/azents/api/testenv/external_channel_ingress/**
+  - python/apps/azents/src/azents/cli/external_channel_ingress.py
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/worker/session/**
@@ -60,8 +64,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-09
-spec_version: 52
+last_verified_at: 2026-08-10
+spec_version: 53
 ---
 
 # External Channel
@@ -90,9 +94,11 @@ contain multiple independent bindings.
   Work cycle and Work-owned provider projection parts are one Session-bound Toolkit
   State value under `external_channel/channel_work:{binding_id}`.
 - Credentials are encrypted at rest and decrypted only inside provider adapters. Public APIs, generated clients, prompts, events, logs, UI state, and test evidence expose only redacted credential status.
-- Provider history is the inbound content authority. One accepted history range becomes
-  one canonical mailbox item and then contiguous Session events with provider, resource,
-  sender, author type, authorization, and message identity attribution.
+- Provider history is the inbound content authority. A callback admits only a
+  content-free active ingress identity. One resolved history range becomes independent
+  canonical mailbox rows, one per provider message, and then contiguous Session events
+  with provider, resource, sender, author type, `prompt_role`, and message identity
+  attribution.
 - Bounded Slack and Discord provider projections are decoded and encoded through
   Azents-owned typed contracts at the durable JSON boundary. SDK objects, signed raw
   bodies, SDK private state, and Gateway frames remain process-local and are never
@@ -114,8 +120,9 @@ contain multiple independent bindings.
   through canonical Session/Run authority without inferring a User from the principal, approver,
   route owner, Agent creator, Workspace owner, or broker signal.
 - External Channel wake-ups are routing-only `SessionWakeUp(session_id)` notifications.
-  The canonical mailbox item is the accepted-input and wake-recovery identity; provider
-  content is never carried by the broker.
+  A non-empty processing batch sends one wake after its mailbox rows commit. Pending
+  canonical mailbox input and the existing Session recovery path are wake-recovery
+  authority; provider content is never carried by the broker.
 - Unfinished Channel Work uses the dedicated
   `external_channel_continuation` hook input, mailbox kind, event kind, model
   reminder, public projection, and UI presentation. It never reuses
@@ -141,8 +148,9 @@ contain multiple independent bindings.
 | Resource | One provider conversation. `parent_channel` uses the stable provider parent-channel identity and delivers directly there. Thread Resources use a Slack root message or Discord root/existing thread and may retain a provisioned Discord delivery-thread identity. A directly and unambiguously created Discord delivery thread additionally retains its exact normalized provisional name as optional one-shot initial-title evidence. Scope is explicit in type and labels and is never inferred from a missing thread field. |
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. Configured parent/thread creation copies the active participation setting; legacy isolated-thread access replay without a setup claim copies the Agent default. Binding, real Session, and first canonical mailbox input commit together only after setup selection or for an already configured conversation. |
-| Mailbox item and Session events | One deterministic mailbox item contains the ordered immutable provider-history projection. The conversation position compare-and-set is the sole duplicate-prevention and ordering authority. Mailbox identity owns input idempotency and pending wake recovery. Only a mailbox whose admission created the root Session may transiently authorize its exact human `authorized_invocation` event as the initial automatic-title input; promotion and mailbox deletion consume that eligibility. Promotion creates the canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
+| Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. Configured parent/thread creation copies the active participation setting; legacy isolated-thread access replay without a setup claim copies the Agent default. Binding, real Session, initial Channel Work, and the first content-free ingress item commit together only after setup selection or for an already configured conversation. |
+| Ingress Session and item | One active ingress-session row owns the Session lease, first-batch flag, and current processing-batch fence. Each active ingress item retains a content-free provider trigger locator, immutable target Session/Binding authority, queue order, attempt/original-age state, and processing ownership. The first claim is one item and later claims are at most ten. Successful, suppressed, and bounded-failure rows are deleted; no completed outcome, tombstone, generic job, or durable wake row exists. |
+| Mailbox item and Session events | Every canonical provider message uses one deterministic `external_channel_message` mailbox row with one `prompt_role = context | invocation`, provider-message idempotency identity, and explicit order group/sequence. PostgreSQL conversation-position compare-and-set is the duplicate-prevention and ordering authority. Pending mailbox state owns wake recovery. Only the exact eligible human `invocation` row created with the root Session may carry transient initial-title eligibility; promotion and mailbox deletion consume it. Promotion creates canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
 | Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, finish timestamp, and ordered current provider projection parts. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
 
@@ -164,7 +172,7 @@ contain multiple independent bindings.
 - Slack Socket Mode uses the public aiohttp `SocketModeClient` with SDK automatic
   reconnect enabled. The SDK owns endpoint acquisition and replacement, WebSocket
   establishment, Ping/Pong, stale-session detection, frame receipt, queue dispatch,
-  and recoverable reconnect. Azents owns the fenced lease, synchronous durable
+  and recoverable reconnect. Azents owns the fenced lease, DB-only durable
   admission, acknowledgement ordering, typed lifecycle projection, and bounded
   terminal health classification. Public SDK Socket Mode request and response types
   validate envelopes and construct acknowledgements.
@@ -181,7 +189,9 @@ contain multiple independent bindings.
 - Durable execution mutations are fenced by the current Session owner generation.
   Provider principals, Slack callback actors, Workspace requesters, and approvers
   remain provenance or authorization identities and never become the execution User.
-- A resource is `active`, `unavailable`, or `deleted`. Provider history is read on demand for one synchronous ingestion operation and has no durable hydration lifecycle.
+- A resource is `active`, `unavailable`, or `deleted`. Provider history is read on
+  demand by a leased Session drain after durable callback admission and has no durable
+  hydration lifecycle.
 - A binding has no active/inactive lifecycle state. `disconnected_at IS NULL` means
   connected, and explicit disconnect sets the terminal timestamp and reason. Gateway
   health, lease ownership, reconnect state, and provider-ingress availability never
@@ -247,15 +257,15 @@ contain multiple independent bindings.
   declaration and body must match that size exactly; excess bytes terminate streaming
   and an early end fails without a Runtime destination commit. Provider URLs and bytes
   remain outside durable External Channel state.
-- Selected setup replay or configured synchronous binding acceptance atomically
-  commits the binding, real Session, canonical mailbox input, conversation-position
-  advance, running transition, and one checking work projection, then returns
-  process-local joined-presence and initial-progress plans.
-  Broker wake follows that commit using the mailbox item as its recovery identity.
-  The ingress caller attempts the plans once after its provider acknowledgement
-  boundary. Failed, unknown, cancelled, or interrupted presence or progress effects
-  never block mailbox promotion, Session wake, or AgentRun creation and create no
-  recovery work. Slack lowers work through its
+- Selected setup replay or configured binding acceptance atomically commits the
+  Binding, real Session, initial Channel Work, and first content-free ingress item.
+  Provider history, per-message mailbox admission, cursor advancement, and the running
+  transition occur later in the leased Session drain. A non-empty processing batch
+  sends one post-commit broker wake; failure leaves canonical mailbox input
+  recoverable. Process-local joined-presence and initial-progress plans remain
+  independent controls. Failed, unknown, cancelled, or interrupted presence or
+  progress effects never block mailbox promotion, Session wake, or AgentRun creation
+  and create no recovery work. Slack lowers work through its
   retained Tracker message; Discord lowers each work snapshot to one retained compact
   Embed Tracker. The Embed title carries the current-work title, while its bounded
   description carries the status summary, every ordered task title and status marker,
@@ -270,8 +280,8 @@ contain multiple independent bindings.
   target, and sends approval controls, Session navigation, replies, files, progress,
   and cleanup to that thread. A delivered final answer permits active-progress
   deletion, and separate work cycles never share provider identities.
-- A newly created External Channel root Session uses only the creating mailbox's exact
-  human `authorized_invocation` event for the existing two-phase automatic title
+- A newly created External Channel root Session uses only the exact eligible human
+  mailbox event whose `prompt_role` is `invocation` for the existing two-phase automatic title
   lifecycle. The title model receives prompt-only guidance to ignore Bot or App markup
   used only to address the Agent while preserving request-relevant references; canonical
   provider content, reference evidence, and deterministic initial-title input remain
@@ -440,6 +450,11 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-10** (spec_version 53) — Added active PostgreSQL ingress Session/item
+  authority, first-one/later-ten draining, independent per-message mailbox rows,
+  `prompt_role`, retry-tail/cursor-CAS recovery, one post-batch wake, and bounded
+  diagnostics while removing synchronous callback processing and legacy batch-shaped
+  mailbox authority.
 - **2026-08-09** (spec_version 52) — Classified Discord current-Application
   Interaction Endpoint configuration as a narrow direct-transport gap until the
   adopted public SDK can transmit the endpoint field correctly.
