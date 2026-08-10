@@ -1263,6 +1263,180 @@
         }
       }
     },
+    "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add": {
+      "post": {
+        "tags": [
+          "Agent Runtime v1"
+        ],
+        "summary": "Add Agent Runtime",
+        "description": "Add a stopped managed Runtime through the dedicated transition.",
+        "operationId": "agent_runtime_v1_add_agent_runtime",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddAgentRuntimeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRuntimeAdditionResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot manage this Agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRuntimeActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The Runtime addition cannot be committed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRuntimeActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/remove": {
+      "post": {
+        "tags": [
+          "Agent Runtime v1"
+        ],
+        "summary": "Remove Agent Runtime",
+        "description": "Commit final irreversible managed Runtime removal.",
+        "operationId": "agent_runtime_v1_remove_agent_runtime",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveAgentRuntimeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRuntimeRemovalResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The caller cannot manage this Agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRuntimeActionErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The irreversible Runtime removal cannot be committed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRuntimeActionErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/start": {
       "post": {
         "tags": [
@@ -12969,6 +13143,40 @@
         "title": "ActionExecutionResponse",
         "description": "Action execution live projection response."
       },
+      "AddAgentRuntimeRequest": {
+        "properties": {
+          "workspace_runtime_profile_id": {
+            "type": "string",
+            "title": "Workspace Runtime Profile Id",
+            "description": "Explicit available Workspace Runtime Profile ID"
+          },
+          "expected_capability_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Capability Version"
+          },
+          "expected_runtime_profile_selection_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Runtime Profile Selection Version"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_runtime_profile_id",
+          "expected_capability_version",
+          "expected_runtime_profile_selection_version",
+          "idempotency_key"
+        ],
+        "title": "AddAgentRuntimeRequest",
+        "description": "Dedicated Runtime addition request."
+      },
       "AgentAdminAddRequest": {
         "properties": {
           "workspace_user_id": {
@@ -13548,6 +13756,31 @@
             ],
             "title": "Runtime Profile Availability Reason Code"
           },
+          "runtime_capability": {
+            "$ref": "#/components/schemas/AgentRuntimeCapability"
+          },
+          "runtime_capability_version": {
+            "type": "integer",
+            "title": "Runtime Capability Version"
+          },
+          "runtime_profile_configuration_status": {
+            "type": "string",
+            "enum": [
+              "not_applicable",
+              "profile_required",
+              "configured",
+              "unavailable"
+            ],
+            "title": "Runtime Profile Configuration Status"
+          },
+          "runtime_add_available": {
+            "type": "boolean",
+            "title": "Runtime Add Available"
+          },
+          "runtime_remove_available": {
+            "type": "boolean",
+            "title": "Runtime Remove Available"
+          },
           "shell_enabled": {
             "type": "boolean",
             "title": "Shell Enabled"
@@ -13621,6 +13854,11 @@
           "runtime_profile_selection_version",
           "runtime_profile_available",
           "runtime_profile_availability_reason_code",
+          "runtime_capability",
+          "runtime_capability_version",
+          "runtime_profile_configuration_status",
+          "runtime_add_available",
+          "runtime_remove_available",
           "shell_enabled",
           "memory_enabled",
           "tool_search_enabled",
@@ -13663,6 +13901,38 @@
         "title": "AgentRunStatus",
         "description": "Agent run status."
       },
+      "AgentRuntimeActionErrorDetail": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "AgentRuntimeActionErrorDetail",
+        "description": "Stable dedicated Runtime action error."
+      },
+      "AgentRuntimeActionErrorResponse": {
+        "properties": {
+          "detail": {
+            "$ref": "#/components/schemas/AgentRuntimeActionErrorDetail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "AgentRuntimeActionErrorResponse",
+        "description": "FastAPI envelope for a dedicated Runtime action error."
+      },
       "AgentRuntimeActionsResponse": {
         "properties": {
           "start": {
@@ -13696,6 +13966,34 @@
         ],
         "title": "AgentRuntimeActionsResponse",
         "description": "Agent Runtime action availability response."
+      },
+      "AgentRuntimeAdditionResponse": {
+        "properties": {
+          "runtime": {
+            "$ref": "#/components/schemas/AgentRuntimeResponse"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runtime",
+          "replayed"
+        ],
+        "title": "AgentRuntimeAdditionResponse",
+        "description": "Committed or replayed Runtime addition."
+      },
+      "AgentRuntimeCapability": {
+        "type": "string",
+        "enum": [
+          "none",
+          "managed",
+          "removing"
+        ],
+        "title": "AgentRuntimeCapability",
+        "description": "Agent-owned managed Runtime capability state."
       },
       "AgentRuntimeConfigurationStatusResponse": {
         "properties": {
@@ -13797,6 +14095,55 @@
         ],
         "title": "AgentRuntimeLifecycleResponse",
         "description": "Agent Runtime lifecycle command response."
+      },
+      "AgentRuntimePublicActionsResponse": {
+        "properties": {
+          "add": {
+            "type": "boolean",
+            "title": "Add"
+          },
+          "remove": {
+            "type": "boolean",
+            "title": "Remove"
+          },
+          "start": {
+            "type": "boolean",
+            "title": "Start"
+          },
+          "stop": {
+            "type": "boolean",
+            "title": "Stop"
+          },
+          "restart": {
+            "type": "boolean",
+            "title": "Restart"
+          },
+          "reset": {
+            "type": "boolean",
+            "title": "Reset"
+          },
+          "observe": {
+            "type": "boolean",
+            "title": "Observe"
+          },
+          "use_runner": {
+            "type": "boolean",
+            "title": "Use Runner"
+          }
+        },
+        "type": "object",
+        "required": [
+          "add",
+          "remove",
+          "start",
+          "stop",
+          "restart",
+          "reset",
+          "observe",
+          "use_runner"
+        ],
+        "title": "AgentRuntimePublicActionsResponse",
+        "description": "Complete public Runtime action availability."
       },
       "AgentRuntimeRawStateResponse": {
         "properties": {
@@ -14020,26 +14367,372 @@
         "title": "AgentRuntimeRawStateResponse",
         "description": "Agent Runtime raw state response."
       },
-      "AgentRuntimeResponse": {
+      "AgentRuntimeRemovalImpactResponse": {
+        "properties": {
+          "active_root_session_count": {
+            "type": "integer",
+            "title": "Active Root Session Count"
+          },
+          "active_subagent_count": {
+            "type": "integer",
+            "title": "Active Subagent Count"
+          },
+          "active_run_count": {
+            "type": "integer",
+            "title": "Active Run Count"
+          },
+          "queued_runtime_action_count": {
+            "type": "integer",
+            "title": "Queued Runtime Action Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active_root_session_count",
+          "active_subagent_count",
+          "active_run_count",
+          "queued_runtime_action_count"
+        ],
+        "title": "AgentRuntimeRemovalImpactResponse",
+        "description": "Privacy-safe aggregate Runtime removal impact."
+      },
+      "AgentRuntimeRemovalProgressResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AgentRuntimeRemovalStatus"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/AgentRuntimeRemovalStage"
+          },
+          "confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Confirmed At"
+          },
+          "cleanup_scanned_context_count": {
+            "type": "integer",
+            "title": "Cleanup Scanned Context Count"
+          },
+          "cleanup_invalidated_context_count": {
+            "type": "integer",
+            "title": "Cleanup Invalidated Context Count"
+          },
+          "product_cleanup_completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Cleanup Completed At"
+          },
+          "physical_deletion_required": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Physical Deletion Required"
+          },
+          "physical_delete_requested_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Physical Delete Requested At"
+          },
+          "physical_delete_acknowledgement_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeTerminalDeleteAcknowledgementKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "physical_delete_acknowledged_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Physical Delete Acknowledged At"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "title": "Attempt Count"
+          },
+          "next_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Attempt At"
+          },
+          "last_error_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Kind"
+          },
+          "last_error_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Summary"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "stage",
+          "confirmed_at",
+          "cleanup_scanned_context_count",
+          "cleanup_invalidated_context_count",
+          "product_cleanup_completed_at",
+          "physical_deletion_required",
+          "physical_delete_requested_at",
+          "physical_delete_acknowledgement_kind",
+          "physical_delete_acknowledged_at",
+          "attempt_count",
+          "next_attempt_at",
+          "last_error_kind",
+          "last_error_summary",
+          "started_at",
+          "completed_at",
+          "updated_at"
+        ],
+        "title": "AgentRuntimeRemovalProgressResponse",
+        "description": "Bounded durable Runtime removal progress."
+      },
+      "AgentRuntimeRemovalResponse": {
         "properties": {
           "runtime": {
-            "$ref": "#/components/schemas/AgentRuntimeRawStateResponse"
+            "$ref": "#/components/schemas/AgentRuntimeResponse"
           },
-          "state": {
-            "$ref": "#/components/schemas/AgentRuntimeSummaryResponse"
-          },
-          "configuration": {
-            "$ref": "#/components/schemas/AgentRuntimeConfigurationStatusResponse"
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
           }
         },
         "type": "object",
         "required": [
           "runtime",
+          "replayed"
+        ],
+        "title": "AgentRuntimeRemovalResponse",
+        "description": "Committed or replayed Runtime removal."
+      },
+      "AgentRuntimeRemovalStage": {
+        "type": "string",
+        "enum": [
+          "fencing",
+          "interrupting_work",
+          "cleaning_product_state",
+          "deleting_runtime",
+          "finalizing",
+          "completed"
+        ],
+        "title": "AgentRuntimeRemovalStage",
+        "description": "Current durable Runtime removal stage."
+      },
+      "AgentRuntimeRemovalStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "retry_wait",
+          "completed"
+        ],
+        "title": "AgentRuntimeRemovalStatus",
+        "description": "Durable Runtime removal operation status."
+      },
+      "AgentRuntimeResponse": {
+        "properties": {
+          "capability": {
+            "$ref": "#/components/schemas/AgentRuntimeCapability"
+          },
+          "capability_version": {
+            "type": "integer",
+            "title": "Capability Version"
+          },
+          "runtime_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Profile Id"
+          },
+          "runtime_profile_selection_version": {
+            "type": "integer",
+            "title": "Runtime Profile Selection Version"
+          },
+          "runtime_profile_status": {
+            "type": "string",
+            "enum": [
+              "not_applicable",
+              "profile_required",
+              "configured",
+              "unavailable"
+            ],
+            "title": "Runtime Profile Status"
+          },
+          "runtime_profile_available": {
+            "type": "boolean",
+            "title": "Runtime Profile Available"
+          },
+          "runtime_profile_availability_reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Profile Availability Reason Code"
+          },
+          "removal_impact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRuntimeRemovalImpactResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "removal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRuntimeRemovalProgressResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runtime": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRuntimeRawStateResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRuntimeSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "configuration": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRuntimeConfigurationStatusResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actions": {
+            "$ref": "#/components/schemas/AgentRuntimePublicActionsResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "capability",
+          "capability_version",
+          "runtime_profile_id",
+          "runtime_profile_selection_version",
+          "runtime_profile_status",
+          "runtime_profile_available",
+          "runtime_profile_availability_reason_code",
+          "removal_impact",
+          "removal",
+          "runtime",
           "state",
-          "configuration"
+          "configuration",
+          "actions"
         ],
         "title": "AgentRuntimeResponse",
-        "description": "Agent Runtime response."
+        "description": "Unified capability-aware Agent Runtime response."
       },
       "AgentRuntimeSummaryResponse": {
         "properties": {
@@ -24094,6 +24787,41 @@
         "title": "RefreshTokenResponse",
         "description": "Token refresh response."
       },
+      "RemoveAgentRuntimeRequest": {
+        "properties": {
+          "expected_capability_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Capability Version"
+          },
+          "expected_runtime_profile_selection_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Runtime Profile Selection Version"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Idempotency Key"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "const": true,
+            "title": "Confirmed",
+            "description": "Explicit final destructive confirmation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_capability_version",
+          "expected_runtime_profile_selection_version",
+          "idempotency_key",
+          "confirmed"
+        ],
+        "title": "RemoveAgentRuntimeRequest",
+        "description": "Final irreversible Runtime removal request."
+      },
       "RequestSignupEmailRequest": {
         "properties": {
           "email": {
@@ -24914,6 +25642,15 @@
         ],
         "title": "RuntimeSummary",
         "description": "Server-computed Agent Runtime summary status."
+      },
+      "RuntimeTerminalDeleteAcknowledgementKind": {
+        "type": "string",
+        "enum": [
+          "provider_report",
+          "no_physical_binding"
+        ],
+        "title": "RuntimeTerminalDeleteAcknowledgementKind",
+        "description": "Authority that proved one terminal Runtime deletion."
       },
       "SelectableInfrastructureProfileListResponse": {
         "properties": {

@@ -1,13 +1,18 @@
 """Agent Runtime lifecycle service data models."""
 
 import dataclasses
+import datetime
 from typing import Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from azents.core.enums import (
+    AgentRuntimeCapability,
+    AgentRuntimeRemovalStage,
+    AgentRuntimeRemovalStatus,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
+    RuntimeTerminalDeleteAcknowledgementKind,
 )
 from azents.repos.agent_runtime.data import (
     AgentRuntime,
@@ -15,6 +20,7 @@ from azents.repos.agent_runtime.data import (
     AgentRuntimeFailureSummary,
     AgentRuntimeSummaryState,
 )
+from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
 from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
 
 
@@ -42,6 +48,84 @@ class RuntimeContainmentStatus(BaseModel):
     nested_docker_available: bool
     runtime_available: bool
     availability_reason_code: str | None
+
+
+RuntimeProfileConfigurationStatus = Literal[
+    "not_applicable",
+    "profile_required",
+    "configured",
+    "unavailable",
+]
+
+
+class AgentRuntimePublicActions(BaseModel):
+    """Complete server-computed public Runtime action availability."""
+
+    add: bool
+    remove: bool
+    start: bool
+    stop: bool
+    restart: bool
+    reset: bool
+    observe: bool
+    use_runner: bool
+
+
+class AgentRuntimeRemovalProgress(BaseModel):
+    """Privacy-safe durable Runtime removal progress."""
+
+    id: str
+    status: AgentRuntimeRemovalStatus
+    stage: AgentRuntimeRemovalStage
+    confirmed_at: datetime.datetime
+    cleanup_scanned_context_count: int
+    cleanup_invalidated_context_count: int
+    product_cleanup_completed_at: datetime.datetime | None
+    physical_deletion_required: bool | None
+    physical_delete_requested_at: datetime.datetime | None
+    physical_delete_acknowledgement_kind: (
+        RuntimeTerminalDeleteAcknowledgementKind | None
+    )
+    physical_delete_acknowledged_at: datetime.datetime | None
+    attempt_count: int
+    next_attempt_at: datetime.datetime | None
+    last_error_kind: str | None
+    last_error_summary: str | None
+    started_at: datetime.datetime | None
+    completed_at: datetime.datetime | None
+    updated_at: datetime.datetime
+
+
+class AgentRuntimeReadOutput(BaseModel):
+    """Unified capability-aware Agent Runtime read model."""
+
+    capability: AgentRuntimeCapability
+    capability_version: int = Field(ge=1)
+    runtime_profile_id: str | None
+    runtime_profile_selection_version: int = Field(ge=1)
+    runtime_profile_status: RuntimeProfileConfigurationStatus
+    runtime_profile_available: bool
+    runtime_profile_availability_reason_code: str | None
+    removal_impact: AgentRuntimeRemovalImpact | None
+    removal: AgentRuntimeRemovalProgress | None
+    runtime: AgentRuntime | None
+    state: AgentRuntimeSummaryState | None
+    configuration: AgentRuntimeConfigurationStatus | None
+    actions: AgentRuntimePublicActions
+
+
+class AgentRuntimeAdditionOutput(BaseModel):
+    """Dedicated Runtime addition response."""
+
+    runtime: AgentRuntimeReadOutput
+    replayed: bool
+
+
+class AgentRuntimeRemovalOutput(BaseModel):
+    """Dedicated irreversible Runtime removal response."""
+
+    runtime: AgentRuntimeReadOutput
+    replayed: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -126,6 +210,21 @@ class AgentAccessDenied:
 
 
 @dataclasses.dataclass(frozen=True)
+class AgentManagementAccessDenied:
+    """No Agent settings management permission."""
+
+    agent_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentRuntimeActionUnavailable:
+    """A dedicated Runtime transition is unavailable."""
+
+    code: str
+    message: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeNotFound:
     """Runtime not found."""
 
@@ -157,13 +256,20 @@ class InvalidResetFinalDesiredState:
 
 __all__ = [
     "AgentAccessDenied",
+    "AgentManagementAccessDenied",
     "AgentNotBelongToWorkspace",
     "AgentNotFound",
+    "AgentRuntimeActionUnavailable",
+    "AgentRuntimeAdditionOutput",
     "AgentRuntimeActions",
     "AgentRuntimeConfigurationStatus",
     "AgentRuntimeFailureSummary",
     "AgentRuntimeLifecycleOutput",
     "AgentRuntimeOutput",
+    "AgentRuntimePublicActions",
+    "AgentRuntimeReadOutput",
+    "AgentRuntimeRemovalProgress",
+    "AgentRuntimeRemovalOutput",
     "AgentRuntimeSummaryState",
     "InvalidResetFinalDesiredState",
     "ProviderDisconnected",
@@ -173,4 +279,5 @@ __all__ = [
     "RuntimeOperationAuthority",
     "RuntimeOperationTarget",
     "RuntimeOperationTargetResolver",
+    "RuntimeProfileConfigurationStatus",
 ]

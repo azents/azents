@@ -237,6 +237,8 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
         handle=handle,
         _headers=headers,
     )
+    assert initial_runtime.configuration is not None
+    assert initial_runtime.runtime is not None
     assert initial_runtime.configuration.status == "configured_not_created"
     assert initial_runtime.configuration.applied is None
     assert initial_runtime.configuration.desired is not None
@@ -273,9 +275,13 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
             handle=handle,
             _headers=headers,
         )
+        configuration = applied_runtime.configuration
+        state = applied_runtime.state
         return (
-            applied_runtime.configuration.status == "applied"
-            and applied_runtime.state.summary == RuntimeSummary.RUNNING
+            configuration is not None
+            and state is not None
+            and configuration.status == "applied"
+            and state.summary == RuntimeSummary.RUNNING
         )
 
     wait_until(
@@ -285,6 +291,7 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
         message="Runtime Profile did not become applied",
     )
     assert applied_runtime is not None
+    assert applied_runtime.configuration is not None
     desired = applied_runtime.configuration.desired
     applied = applied_runtime.configuration.applied
     assert desired is not None
@@ -346,9 +353,11 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
             handle=handle,
             _headers=headers,
         )
-        current_applied = recreated_runtime.configuration.applied
+        configuration = recreated_runtime.configuration
+        current_applied = configuration.applied if configuration is not None else None
         return (
-            recreated_runtime.configuration.status == "applied"
+            configuration is not None
+            and configuration.status == "applied"
             and current_applied is not None
             and current_applied.id != prior_applied_revision_id
         )

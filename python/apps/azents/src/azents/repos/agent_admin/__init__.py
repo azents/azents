@@ -84,6 +84,24 @@ class AgentAdminRepository:
         )
         return result.scalar_one() > 0
 
+    async def list_admin_agent_ids(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_user_id: str,
+        agent_ids: list[str],
+    ) -> set[str]:
+        """Return Agent IDs administered by one WorkspaceUser."""
+        if not agent_ids:
+            return set()
+        result = await session.execute(
+            sa.select(RDBAgentAdmin.agent_id).where(
+                RDBAgentAdmin.workspace_user_id == workspace_user_id,
+                RDBAgentAdmin.agent_id.in_(agent_ids),
+            )
+        )
+        return set(result.scalars().all())
+
     async def count_by_agent(self, session: AsyncSession, agent_id: str) -> int:
         """Count Agent admins.
 

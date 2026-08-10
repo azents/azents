@@ -7,19 +7,28 @@ from pydantic import BaseModel, Field
 from typing_extensions import Self
 
 from azents.core.enums import (
+    AgentRuntimeCapability,
+    AgentRuntimeRemovalStage,
+    AgentRuntimeRemovalStatus,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
     RuntimeSummary,
+    RuntimeTerminalDeleteAcknowledgementKind,
 )
 from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
 from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
 from azents.services.agent_runtime.lifecycle_data import (
+    AgentRuntimeAdditionOutput,
     AgentRuntimeConfigurationStatus,
     AgentRuntimeLifecycleOutput,
-    AgentRuntimeOutput,
+    AgentRuntimeReadOutput,
+    AgentRuntimeRemovalOutput,
+    AgentRuntimeRemovalProgress,
     RuntimeContainmentStatus,
 )
 
@@ -161,61 +170,230 @@ class AgentRuntimeRawStateResponse(BaseModel):
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
+    @classmethod
+    def convert_from(cls, data: AgentRuntime) -> Self:
+        """Convert the optional physical Runtime state."""
+        return cls(
+            id=data.id,
+            workspace_id=data.workspace_id,
+            agent_id=data.agent_id,
+            runtime_provider_id=data.runtime_provider_id,
+            runtime_provider_resource_id=data.runtime_provider_resource_id,
+            infrastructure_profile_id=data.infrastructure_profile_id,
+            workspace_runtime_profile_id=data.workspace_runtime_profile_id,
+            desired_runtime_configuration_revision_id=(
+                data.desired_runtime_configuration_revision_id
+            ),
+            applied_runtime_configuration_revision_id=(
+                data.applied_runtime_configuration_revision_id
+            ),
+            desired_state=data.desired_state,
+            desired_generation=data.desired_generation,
+            last_lifecycle_command=data.last_lifecycle_command,
+            reset_final_desired_state=data.reset_final_desired_state,
+            provider_observed_state=data.provider_observed_state,
+            provider_observed_generation=data.provider_observed_generation,
+            provider_connection_state=data.provider_connection_state,
+            runner_state=data.runner_state,
+            runner_generation=data.runner_generation,
+            workspace_path=data.workspace_path,
+            failure_generation=data.failure_generation,
+            failure_code=data.failure_code,
+            failure_message=data.failure_message,
+            last_state_change_at=data.last_state_change_at,
+            created_at=data.created_at,
+            updated_at=data.updated_at,
+        )
+
+
+class AgentRuntimePublicActionsResponse(BaseModel):
+    """Complete public Runtime action availability."""
+
+    add: bool
+    remove: bool
+    start: bool
+    stop: bool
+    restart: bool
+    reset: bool
+    observe: bool
+    use_runner: bool
+
+
+class AgentRuntimeRemovalImpactResponse(BaseModel):
+    """Privacy-safe aggregate Runtime removal impact."""
+
+    active_root_session_count: int
+    active_subagent_count: int
+    active_run_count: int
+    queued_runtime_action_count: int
+
+    @classmethod
+    def convert_from(cls, data: AgentRuntimeRemovalImpact) -> Self:
+        """Convert aggregate impact without Session details."""
+        return cls(
+            active_root_session_count=data.active_root_session_count,
+            active_subagent_count=data.active_subagent_count,
+            active_run_count=data.active_run_count,
+            queued_runtime_action_count=data.queued_runtime_action_count,
+        )
+
+
+class AgentRuntimeRemovalProgressResponse(BaseModel):
+    """Bounded durable Runtime removal progress."""
+
+    id: str
+    status: AgentRuntimeRemovalStatus
+    stage: AgentRuntimeRemovalStage
+    confirmed_at: datetime.datetime
+    cleanup_scanned_context_count: int
+    cleanup_invalidated_context_count: int
+    product_cleanup_completed_at: datetime.datetime | None
+    physical_deletion_required: bool | None
+    physical_delete_requested_at: datetime.datetime | None
+    physical_delete_acknowledgement_kind: (
+        RuntimeTerminalDeleteAcknowledgementKind | None
+    )
+    physical_delete_acknowledged_at: datetime.datetime | None
+    attempt_count: int
+    next_attempt_at: datetime.datetime | None
+    last_error_kind: str | None
+    last_error_summary: str | None
+    started_at: datetime.datetime | None
+    completed_at: datetime.datetime | None
+    updated_at: datetime.datetime
+
+    @classmethod
+    def convert_from(cls, data: AgentRuntimeRemovalProgress) -> Self:
+        """Convert removal progress without internal authority or private data."""
+        return cls(
+            id=data.id,
+            status=data.status,
+            stage=data.stage,
+            confirmed_at=data.confirmed_at,
+            cleanup_scanned_context_count=data.cleanup_scanned_context_count,
+            cleanup_invalidated_context_count=(data.cleanup_invalidated_context_count),
+            product_cleanup_completed_at=data.product_cleanup_completed_at,
+            physical_deletion_required=data.physical_deletion_required,
+            physical_delete_requested_at=data.physical_delete_requested_at,
+            physical_delete_acknowledgement_kind=(
+                data.physical_delete_acknowledgement_kind
+            ),
+            physical_delete_acknowledged_at=data.physical_delete_acknowledged_at,
+            attempt_count=data.attempt_count,
+            next_attempt_at=data.next_attempt_at,
+            last_error_kind=data.last_error_kind,
+            last_error_summary=data.last_error_summary,
+            started_at=data.started_at,
+            completed_at=data.completed_at,
+            updated_at=data.updated_at,
+        )
+
 
 class AgentRuntimeResponse(BaseModel):
-    """Agent Runtime response."""
+    """Unified capability-aware Agent Runtime response."""
+
+    capability: AgentRuntimeCapability
+    capability_version: int
+    runtime_profile_id: str | None
+    runtime_profile_selection_version: int
+    runtime_profile_status: Literal[
+        "not_applicable",
+        "profile_required",
+        "configured",
+        "unavailable",
+    ]
+    runtime_profile_available: bool
+    runtime_profile_availability_reason_code: str | None
+    removal_impact: AgentRuntimeRemovalImpactResponse | None
+    removal: AgentRuntimeRemovalProgressResponse | None
+    runtime: AgentRuntimeRawStateResponse | None
+    state: AgentRuntimeSummaryResponse | None
+    configuration: AgentRuntimeConfigurationStatusResponse | None
+    actions: AgentRuntimePublicActionsResponse
+
+    @classmethod
+    def convert_from(cls, data: AgentRuntimeReadOutput) -> Self:
+        """Convert the unified service read model."""
+        return cls(
+            capability=data.capability,
+            capability_version=data.capability_version,
+            runtime_profile_id=data.runtime_profile_id,
+            runtime_profile_selection_version=(data.runtime_profile_selection_version),
+            runtime_profile_status=data.runtime_profile_status,
+            runtime_profile_available=data.runtime_profile_available,
+            runtime_profile_availability_reason_code=(
+                data.runtime_profile_availability_reason_code
+            ),
+            removal_impact=(
+                AgentRuntimeRemovalImpactResponse.convert_from(data.removal_impact)
+                if data.removal_impact is not None
+                else None
+            ),
+            removal=(
+                AgentRuntimeRemovalProgressResponse.convert_from(data.removal)
+                if data.removal is not None
+                else None
+            ),
+            runtime=(
+                AgentRuntimeRawStateResponse.convert_from(data.runtime)
+                if data.runtime is not None
+                else None
+            ),
+            state=(
+                AgentRuntimeSummaryResponse(
+                    summary=data.state.summary,
+                    actions=AgentRuntimeActionsResponse.model_validate(
+                        data.state.actions,
+                        from_attributes=True,
+                    ),
+                    failure=(
+                        AgentRuntimeFailureResponse.model_validate(
+                            data.state.failure,
+                            from_attributes=True,
+                        )
+                        if data.state.failure is not None
+                        else None
+                    ),
+                )
+                if data.state is not None
+                else None
+            ),
+            configuration=(
+                AgentRuntimeConfigurationStatusResponse.convert_from(data.configuration)
+                if data.configuration is not None
+                else None
+            ),
+            actions=AgentRuntimePublicActionsResponse.model_validate(
+                data.actions,
+                from_attributes=True,
+            ),
+        )
+
+
+class AgentRuntimeLifecycleResponse(BaseModel):
+    """Agent Runtime lifecycle command response."""
 
     runtime: AgentRuntimeRawStateResponse
     state: AgentRuntimeSummaryResponse
     configuration: AgentRuntimeConfigurationStatusResponse
+    command_type: RuntimeLifecycleCommandType
+    desired_generation: int
 
     @classmethod
-    def convert_from(cls, data: AgentRuntimeOutput) -> Self:
-        """Convert service output to a response object."""
+    def convert_from_lifecycle(cls, data: AgentRuntimeLifecycleOutput) -> Self:
+        """Convert service lifecycle output to a response object."""
         return cls(
-            runtime=AgentRuntimeRawStateResponse(
-                id=data.runtime.id,
-                workspace_id=data.runtime.workspace_id,
-                agent_id=data.runtime.agent_id,
-                runtime_provider_id=data.runtime.runtime_provider_id,
-                runtime_provider_resource_id=(
-                    data.runtime.runtime_provider_resource_id
-                ),
-                infrastructure_profile_id=data.runtime.infrastructure_profile_id,
-                workspace_runtime_profile_id=(
-                    data.runtime.workspace_runtime_profile_id
-                ),
-                desired_runtime_configuration_revision_id=(
-                    data.runtime.desired_runtime_configuration_revision_id
-                ),
-                applied_runtime_configuration_revision_id=(
-                    data.runtime.applied_runtime_configuration_revision_id
-                ),
-                desired_state=data.runtime.desired_state,
-                desired_generation=data.runtime.desired_generation,
-                last_lifecycle_command=data.runtime.last_lifecycle_command,
-                reset_final_desired_state=data.runtime.reset_final_desired_state,
-                provider_observed_state=data.runtime.provider_observed_state,
-                provider_observed_generation=data.runtime.provider_observed_generation,
-                provider_connection_state=data.runtime.provider_connection_state,
-                runner_state=data.runtime.runner_state,
-                runner_generation=data.runtime.runner_generation,
-                workspace_path=data.runtime.workspace_path,
-                failure_generation=data.runtime.failure_generation,
-                failure_code=data.runtime.failure_code,
-                failure_message=data.runtime.failure_message,
-                last_state_change_at=data.runtime.last_state_change_at,
-                created_at=data.runtime.created_at,
-                updated_at=data.runtime.updated_at,
-            ),
+            runtime=AgentRuntimeRawStateResponse.convert_from(data.runtime),
             state=AgentRuntimeSummaryResponse(
                 summary=data.state.summary,
                 actions=AgentRuntimeActionsResponse.model_validate(
-                    data.state.actions, from_attributes=True
+                    data.state.actions,
+                    from_attributes=True,
                 ),
                 failure=(
                     AgentRuntimeFailureResponse.model_validate(
-                        data.state.failure, from_attributes=True
+                        data.state.failure,
+                        from_attributes=True,
                     )
                     if data.state.failure is not None
                     else None
@@ -224,32 +402,74 @@ class AgentRuntimeResponse(BaseModel):
             configuration=AgentRuntimeConfigurationStatusResponse.convert_from(
                 data.configuration
             ),
-        )
-
-
-class AgentRuntimeLifecycleResponse(AgentRuntimeResponse):
-    """Agent Runtime lifecycle command response."""
-
-    command_type: RuntimeLifecycleCommandType
-    desired_generation: int
-
-    @classmethod
-    def convert_from_lifecycle(cls, data: AgentRuntimeLifecycleOutput) -> Self:
-        """Convert service lifecycle output to a response object."""
-        base = AgentRuntimeResponse.convert_from(
-            AgentRuntimeOutput(
-                runtime=data.runtime,
-                state=data.state,
-                configuration=data.configuration,
-            )
-        )
-        return cls(
-            runtime=base.runtime,
-            state=base.state,
-            configuration=base.configuration,
             command_type=data.command_type,
             desired_generation=data.desired_generation,
         )
+
+
+class AddAgentRuntimeRequest(BaseModel):
+    """Dedicated Runtime addition request."""
+
+    workspace_runtime_profile_id: str = Field(
+        description="Explicit available Workspace Runtime Profile ID"
+    )
+    expected_capability_version: int = Field(ge=1)
+    expected_runtime_profile_selection_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=120)
+
+
+class RemoveAgentRuntimeRequest(BaseModel):
+    """Final irreversible Runtime removal request."""
+
+    expected_capability_version: int = Field(ge=1)
+    expected_runtime_profile_selection_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=120)
+    confirmed: Literal[True] = Field(
+        description="Explicit final destructive confirmation"
+    )
+
+
+class AgentRuntimeAdditionResponse(BaseModel):
+    """Committed or replayed Runtime addition."""
+
+    runtime: AgentRuntimeResponse
+    replayed: bool
+
+    @classmethod
+    def convert_from(cls, data: AgentRuntimeAdditionOutput) -> Self:
+        """Convert a dedicated addition output."""
+        return cls(
+            runtime=AgentRuntimeResponse.convert_from(data.runtime),
+            replayed=data.replayed,
+        )
+
+
+class AgentRuntimeRemovalResponse(BaseModel):
+    """Committed or replayed Runtime removal."""
+
+    runtime: AgentRuntimeResponse
+    replayed: bool
+
+    @classmethod
+    def convert_from(cls, data: AgentRuntimeRemovalOutput) -> Self:
+        """Convert a dedicated removal output."""
+        return cls(
+            runtime=AgentRuntimeResponse.convert_from(data.runtime),
+            replayed=data.replayed,
+        )
+
+
+class AgentRuntimeActionErrorDetail(BaseModel):
+    """Stable dedicated Runtime action error."""
+
+    code: str
+    message: str
+
+
+class AgentRuntimeActionErrorResponse(BaseModel):
+    """FastAPI envelope for a dedicated Runtime action error."""
+
+    detail: AgentRuntimeActionErrorDetail
 
 
 class ResetAgentRuntimeRequest(BaseModel):

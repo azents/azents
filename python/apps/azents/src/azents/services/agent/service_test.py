@@ -182,6 +182,10 @@ class TestAgentServiceModelSelection:
         assert repository_create.runtime_capability is AgentRuntimeCapability.NONE
         assert repository_create.shell_enabled is False
         assert repository_create.tool_search_enabled is True
+        assert result.value.runtime_capability is AgentRuntimeCapability.NONE
+        assert result.value.runtime_profile_configuration_status == "not_applicable"
+        assert result.value.runtime_add_available is True
+        assert result.value.runtime_remove_available is False
         runtime_profile_service = cast(Any, service.runtime_profile_service)
         runtime_profile_service.require_available_agent_profile.assert_not_awaited()
         runtime_profile_repository = cast(Any, service.runtime_profile_repository)
@@ -241,6 +245,10 @@ class TestAgentServiceModelSelection:
         assert repository_create.runtime_profile_id == "profile-1"
         assert repository_create.runtime_capability is AgentRuntimeCapability.MANAGED
         assert repository_create.shell_enabled is True
+        assert result.value.runtime_capability is AgentRuntimeCapability.MANAGED
+        assert result.value.runtime_profile_configuration_status == "configured"
+        assert result.value.runtime_add_available is False
+        assert result.value.runtime_remove_available is True
         runtime_profile_repository.enqueue_reconcile_task.assert_awaited_once()
 
     async def test_create_rejects_unavailable_explicit_runtime_profile(self) -> None:
@@ -343,17 +351,15 @@ class TestAgentServiceModelSelection:
 
         assert isinstance(result, Failure)
         assert isinstance(result.error, RuntimeProfileSelectionInvalid)
-        assert result.error.code == "runtime_capability_unavailable"
+        assert result.error.code == "runtime_action_required"
         repository.replace_runtime_profile_selection.assert_not_awaited()
 
-    async def test_runtime_free_update_keeps_shell_disabled(self) -> None:
-        """Legacy shell updates cannot grant Runtime-free authority."""
+    async def test_runtime_free_update_rejects_enabling_shell(self) -> None:
+        """Runtime-free shell enablement requires the dedicated add transition."""
         service = _make_service()
         repository = cast(Any, service.repository)
         runtime_free_agent = _make_agent()
         repository.get_by_id.return_value = runtime_free_agent
-        repository.lock_by_id.return_value = runtime_free_agent
-        repository.update_by_id.return_value = Success(runtime_free_agent)
 
         result = await service.update_by_id(
             "agent-1",
@@ -363,10 +369,11 @@ class TestAgentServiceModelSelection:
             role=WorkspaceUserRole.OWNER,
         )
 
-        assert isinstance(result, Success)
-        repository.lock_by_id.assert_awaited_once()
-        repo_update = repository.update_by_id.await_args.args[2]
-        assert repo_update["shell_enabled"] is False
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, RuntimeProfileSelectionInvalid)
+        assert result.error.code == "runtime_action_required"
+        repository.lock_by_id.assert_not_awaited()
+        repository.update_by_id.assert_not_awaited()
 
     async def test_runtime_profile_update_rechecks_capability_under_lock(self) -> None:
         """A concurrent removal fence blocks stale Runtime Profile updates."""
@@ -394,7 +401,7 @@ class TestAgentServiceModelSelection:
 
         assert isinstance(result, Failure)
         assert isinstance(result.error, RuntimeProfileSelectionInvalid)
-        assert result.error.code == "runtime_capability_unavailable"
+        assert result.error.code == "runtime_removal_in_progress"
         repository.lock_by_id.assert_awaited_once()
         repository.replace_runtime_profile_selection.assert_not_awaited()
         repository.update_by_id.assert_not_awaited()

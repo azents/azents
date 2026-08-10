@@ -125,3 +125,40 @@ tags: [agent, runtime, api, openapi, client, backend]
   as optional, privacy-safe public models and leaves Web consumption to Phase 7.
   Phase 8 remains responsible for E2E promotion, Living Specs, implemented markers,
   and plan cleanup.
+
+## Completion Checkpoint
+
+- Completed behavior:
+  - Agent responses publish capability/version, Profile configuration status, and
+    contextual add/remove availability.
+  - Runtime GET is capability-aware and read-only, represents missing physical
+    Runtime state with nullable physical/configuration projections, and exposes
+    privacy-safe removal impact/progress plus server-computed actions.
+  - Dedicated idempotent add/remove routes delegate to the Phase 4 transition and
+    Phase 5 irreversible removal authorities with exact optimistic fences.
+  - Generic Agent patch rejects Profile or shell enablement that requires a
+    dedicated action while preserving managed-only partial Profile updates.
+  - Public OpenAPI and generated Python/TypeScript clients expose the complete
+    contract; testenv managed-Runtime consumers explicitly narrow optional physical
+    projections.
+- Removal and privacy evidence:
+  - Focused tests prove Runtime-free and managed-not-created GET paths never call
+    Runtime ensure and never synthesize a physical summary.
+  - OpenAPI/schema checks prove optional physical Runtime/state and aggregate-only
+    removal impact.
+  - The service read model projects repository removal operations into a bounded
+    privacy-safe progress model before the API adapter.
+- Validation evidence:
+  - Backend Ruff, format, and `ty`: passed.
+  - Backend full pytest: `4164 passed`.
+  - Focused public Runtime/Agent contract tests: passed.
+  - Generated Python client pytest: `648 passed`; changed Runtime API/model files
+    pass targeted `ty`.
+  - TypeScript public-client generation and full workspace lint, typecheck, and
+    build: passed.
+  - Testenv and E2E `ty`: passed.
+  - Repository pre-commit: passed.
+- Independent review: `hardtack` completed read-only review and targeted re-review;
+  no Critical or Warning findings remain.
+- Scope result: M1/M5/M6/M14 are covered; `Design delta: None`. Web UX, product E2E
+  promotion, Living Specs, implemented markers, and plan cleanup remain Phases 7–8.

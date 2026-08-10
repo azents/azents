@@ -57,14 +57,15 @@ with azentspublicclient.ApiClient(configuration) as api_client:
     api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
     agent_id = 'agent_id_example' # str | 
     handle = 'handle_example' # str | 
+    add_agent_runtime_request = azentspublicclient.AddAgentRuntimeRequest() # AddAgentRuntimeRequest | 
 
     try:
-        # Get Agent Runtime
-        api_response = api_instance.agent_runtime_v1_get_agent_runtime(agent_id, handle)
-        print("The response of AgentRuntimeV1Api->agent_runtime_v1_get_agent_runtime:\n")
+        # Add Agent Runtime
+        api_response = api_instance.agent_runtime_v1_add_agent_runtime(agent_id, handle, add_agent_runtime_request)
+        print("The response of AgentRuntimeV1Api->agent_runtime_v1_add_agent_runtime:\n")
         pprint(api_response)
     except ApiException as e:
-        print("Exception when calling AgentRuntimeV1Api->agent_runtime_v1_get_agent_runtime: %s\n" % e)
+        print("Exception when calling AgentRuntimeV1Api->agent_runtime_v1_add_agent_runtime: %s\n" % e)
 
 ```
 
@@ -74,8 +75,10 @@ All URIs are relative to *http://localhost*
 
 Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
+*AgentRuntimeV1Api* | [**agent_runtime_v1_add_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_add_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add | Add Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_get_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_get_agent_runtime) | **GET** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime | Get Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_observe_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_observe_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/observe | Observe Agent Runtime
+*AgentRuntimeV1Api* | [**agent_runtime_v1_remove_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_remove_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/remove | Remove Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_reset_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_reset_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/reset | Reset Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_restart_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_restart_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/restart | Restart Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_start_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_start_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/start | Start Agent Runtime
@@ -307,6 +310,7 @@ Class | Method | HTTP request | Description
  - [ActionExecutionEventResponse](azentspublicclient/docs/ActionExecutionEventResponse.md)
  - [ActionExecutionProjectionResponse](azentspublicclient/docs/ActionExecutionProjectionResponse.md)
  - [ActionExecutionResponse](azentspublicclient/docs/ActionExecutionResponse.md)
+ - [AddAgentRuntimeRequest](azentspublicclient/docs/AddAgentRuntimeRequest.md)
  - [AgentAdminAddRequest](azentspublicclient/docs/AgentAdminAddRequest.md)
  - [AgentAdminListResponse](azentspublicclient/docs/AgentAdminListResponse.md)
  - [AgentAdminResponse](azentspublicclient/docs/AgentAdminResponse.md)
@@ -320,11 +324,21 @@ Class | Method | HTTP request | Description
  - [AgentResponse](azentspublicclient/docs/AgentResponse.md)
  - [AgentRunPhase](azentspublicclient/docs/AgentRunPhase.md)
  - [AgentRunStatus](azentspublicclient/docs/AgentRunStatus.md)
+ - [AgentRuntimeActionErrorDetail](azentspublicclient/docs/AgentRuntimeActionErrorDetail.md)
+ - [AgentRuntimeActionErrorResponse](azentspublicclient/docs/AgentRuntimeActionErrorResponse.md)
  - [AgentRuntimeActionsResponse](azentspublicclient/docs/AgentRuntimeActionsResponse.md)
+ - [AgentRuntimeAdditionResponse](azentspublicclient/docs/AgentRuntimeAdditionResponse.md)
+ - [AgentRuntimeCapability](azentspublicclient/docs/AgentRuntimeCapability.md)
  - [AgentRuntimeConfigurationStatusResponse](azentspublicclient/docs/AgentRuntimeConfigurationStatusResponse.md)
  - [AgentRuntimeFailureResponse](azentspublicclient/docs/AgentRuntimeFailureResponse.md)
  - [AgentRuntimeLifecycleResponse](azentspublicclient/docs/AgentRuntimeLifecycleResponse.md)
+ - [AgentRuntimePublicActionsResponse](azentspublicclient/docs/AgentRuntimePublicActionsResponse.md)
  - [AgentRuntimeRawStateResponse](azentspublicclient/docs/AgentRuntimeRawStateResponse.md)
+ - [AgentRuntimeRemovalImpactResponse](azentspublicclient/docs/AgentRuntimeRemovalImpactResponse.md)
+ - [AgentRuntimeRemovalProgressResponse](azentspublicclient/docs/AgentRuntimeRemovalProgressResponse.md)
+ - [AgentRuntimeRemovalResponse](azentspublicclient/docs/AgentRuntimeRemovalResponse.md)
+ - [AgentRuntimeRemovalStage](azentspublicclient/docs/AgentRuntimeRemovalStage.md)
+ - [AgentRuntimeRemovalStatus](azentspublicclient/docs/AgentRuntimeRemovalStatus.md)
  - [AgentRuntimeResponse](azentspublicclient/docs/AgentRuntimeResponse.md)
  - [AgentRuntimeSummaryResponse](azentspublicclient/docs/AgentRuntimeSummaryResponse.md)
  - [AgentSessionCreateRequest](azentspublicclient/docs/AgentSessionCreateRequest.md)
@@ -599,6 +613,7 @@ Class | Method | HTTP request | Description
  - [RedeemSignupTokenResponse](azentspublicclient/docs/RedeemSignupTokenResponse.md)
  - [RefreshTokenRequest](azentspublicclient/docs/RefreshTokenRequest.md)
  - [RefreshTokenResponse](azentspublicclient/docs/RefreshTokenResponse.md)
+ - [RemoveAgentRuntimeRequest](azentspublicclient/docs/RemoveAgentRuntimeRequest.md)
  - [RequestSignupEmailRequest](azentspublicclient/docs/RequestSignupEmailRequest.md)
  - [RequestSignupEmailResponse](azentspublicclient/docs/RequestSignupEmailResponse.md)
  - [RequestedInferenceProfile](azentspublicclient/docs/RequestedInferenceProfile.md)
@@ -630,6 +645,7 @@ Class | Method | HTTP request | Description
  - [RuntimeRecreationTargetKind](azentspublicclient/docs/RuntimeRecreationTargetKind.md)
  - [RuntimeRunnerState](azentspublicclient/docs/RuntimeRunnerState.md)
  - [RuntimeSummary](azentspublicclient/docs/RuntimeSummary.md)
+ - [RuntimeTerminalDeleteAcknowledgementKind](azentspublicclient/docs/RuntimeTerminalDeleteAcknowledgementKind.md)
  - [Secrets](azentspublicclient/docs/Secrets.md)
  - [Secrets1](azentspublicclient/docs/Secrets1.md)
  - [SelectableInfrastructureProfileListResponse](azentspublicclient/docs/SelectableInfrastructureProfileListResponse.md)

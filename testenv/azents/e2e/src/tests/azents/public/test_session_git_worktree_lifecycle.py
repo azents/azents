@@ -210,7 +210,7 @@ def _wait_for_runtime_runner_ready(
             _headers=headers,
         )
         last_state = state
-        if state.state.actions.use_runner:
+        if state.state is not None and state.state.actions.use_runner:
             return
         time.sleep(1)
     raise AssertionError(f"runtime runner did not become ready: {last_state!r}")

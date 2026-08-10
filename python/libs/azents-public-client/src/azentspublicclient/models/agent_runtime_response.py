@@ -17,23 +17,44 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr, field_validator
+from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_configuration_status_response import AgentRuntimeConfigurationStatusResponse
+from azentspublicclient.models.agent_runtime_public_actions_response import AgentRuntimePublicActionsResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse
+from azentspublicclient.models.agent_runtime_removal_impact_response import AgentRuntimeRemovalImpactResponse
+from azentspublicclient.models.agent_runtime_removal_progress_response import AgentRuntimeRemovalProgressResponse
 from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
 class AgentRuntimeResponse(BaseModel):
     """
-    Agent Runtime response.
+    Unified capability-aware Agent Runtime response.
     """ # noqa: E501
-    runtime: AgentRuntimeRawStateResponse
-    state: AgentRuntimeSummaryResponse
-    configuration: AgentRuntimeConfigurationStatusResponse
+    capability: AgentRuntimeCapability
+    capability_version: StrictInt
+    runtime_profile_id: Optional[StrictStr]
+    runtime_profile_selection_version: StrictInt
+    runtime_profile_status: StrictStr
+    runtime_profile_available: StrictBool
+    runtime_profile_availability_reason_code: Optional[StrictStr]
+    removal_impact: Optional[AgentRuntimeRemovalImpactResponse]
+    removal: Optional[AgentRuntimeRemovalProgressResponse]
+    runtime: Optional[AgentRuntimeRawStateResponse]
+    state: Optional[AgentRuntimeSummaryResponse]
+    configuration: Optional[AgentRuntimeConfigurationStatusResponse]
+    actions: AgentRuntimePublicActionsResponse
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["runtime", "state", "configuration"]
+    __properties: ClassVar[List[str]] = ["capability", "capability_version", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_status", "runtime_profile_available", "runtime_profile_availability_reason_code", "removal_impact", "removal", "runtime", "state", "configuration", "actions"]
+
+    @field_validator('runtime_profile_status')
+    def runtime_profile_status_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['not_applicable', 'profile_required', 'configured', 'unavailable']):
+            raise ValueError("must be one of enum values ('not_applicable', 'profile_required', 'configured', 'unavailable')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -76,6 +97,12 @@ class AgentRuntimeResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of removal_impact
+        if self.removal_impact:
+            _dict['removal_impact'] = self.removal_impact.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of removal
+        if self.removal:
+            _dict['removal'] = self.removal.to_dict()
         # override the default output from pydantic by calling `to_dict()` of runtime
         if self.runtime:
             _dict['runtime'] = self.runtime.to_dict()
@@ -85,10 +112,48 @@ class AgentRuntimeResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of configuration
         if self.configuration:
             _dict['configuration'] = self.configuration.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of actions
+        if self.actions:
+            _dict['actions'] = self.actions.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
+
+        # set to None if runtime_profile_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.runtime_profile_id is None and "runtime_profile_id" in self.model_fields_set:
+            _dict['runtime_profile_id'] = None
+
+        # set to None if runtime_profile_availability_reason_code (nullable) is None
+        # and model_fields_set contains the field
+        if self.runtime_profile_availability_reason_code is None and "runtime_profile_availability_reason_code" in self.model_fields_set:
+            _dict['runtime_profile_availability_reason_code'] = None
+
+        # set to None if removal_impact (nullable) is None
+        # and model_fields_set contains the field
+        if self.removal_impact is None and "removal_impact" in self.model_fields_set:
+            _dict['removal_impact'] = None
+
+        # set to None if removal (nullable) is None
+        # and model_fields_set contains the field
+        if self.removal is None and "removal" in self.model_fields_set:
+            _dict['removal'] = None
+
+        # set to None if runtime (nullable) is None
+        # and model_fields_set contains the field
+        if self.runtime is None and "runtime" in self.model_fields_set:
+            _dict['runtime'] = None
+
+        # set to None if state (nullable) is None
+        # and model_fields_set contains the field
+        if self.state is None and "state" in self.model_fields_set:
+            _dict['state'] = None
+
+        # set to None if configuration (nullable) is None
+        # and model_fields_set contains the field
+        if self.configuration is None and "configuration" in self.model_fields_set:
+            _dict['configuration'] = None
 
         return _dict
 
@@ -102,9 +167,19 @@ class AgentRuntimeResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
+            "capability": obj.get("capability"),
+            "capability_version": obj.get("capability_version"),
+            "runtime_profile_id": obj.get("runtime_profile_id"),
+            "runtime_profile_selection_version": obj.get("runtime_profile_selection_version"),
+            "runtime_profile_status": obj.get("runtime_profile_status"),
+            "runtime_profile_available": obj.get("runtime_profile_available"),
+            "runtime_profile_availability_reason_code": obj.get("runtime_profile_availability_reason_code"),
+            "removal_impact": AgentRuntimeRemovalImpactResponse.from_dict(obj["removal_impact"]) if obj.get("removal_impact") is not None else None,
+            "removal": AgentRuntimeRemovalProgressResponse.from_dict(obj["removal"]) if obj.get("removal") is not None else None,
             "runtime": AgentRuntimeRawStateResponse.from_dict(obj["runtime"]) if obj.get("runtime") is not None else None,
             "state": AgentRuntimeSummaryResponse.from_dict(obj["state"]) if obj.get("state") is not None else None,
-            "configuration": AgentRuntimeConfigurationStatusResponse.from_dict(obj["configuration"]) if obj.get("configuration") is not None else None
+            "configuration": AgentRuntimeConfigurationStatusResponse.from_dict(obj["configuration"]) if obj.get("configuration") is not None else None,
+            "actions": AgentRuntimePublicActionsResponse.from_dict(obj["actions"]) if obj.get("actions") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

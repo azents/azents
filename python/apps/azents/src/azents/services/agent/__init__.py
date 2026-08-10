@@ -440,7 +440,7 @@ class AgentService:
                     source_version=str(agent.runtime_profile_selection_version),
                     available_at=tznow(),
                 )
-        return Success(await self._build_output(agent))
+        return Success(await self._build_output(agent, can_manage=True))
 
     async def list_by_workspace(
         self,
@@ -457,7 +457,22 @@ class AgentService:
                 result = await self.repository.list_visible_by_workspace(
                     session, workspace_id, workspace_user_id
                 )
-        items = [await self._build_output(a) for a in result.items]
+        if role is WorkspaceUserRole.OWNER:
+            managed_agent_ids = {agent.id for agent in result.items}
+        else:
+            async with self.session_manager() as session:
+                managed_agent_ids = await self.admin_repository.list_admin_agent_ids(
+                    session,
+                    workspace_user_id=workspace_user_id,
+                    agent_ids=[agent.id for agent in result.items],
+                )
+        items = [
+            await self._build_output(
+                agent,
+                can_manage=agent.id in managed_agent_ids,
+            )
+            for agent in result.items
+        ]
         return AgentListOutput(items=items)
 
     async def get_by_id(
@@ -478,14 +493,15 @@ class AgentService:
             return Failure(NotFound(agent_id=agent_id))
         if agent.workspace_id != workspace_id:
             return Failure(NotBelongToWorkspace(agent_id=agent_id))
-        if agent.type == AgentType.PRIVATE and role != WorkspaceUserRole.OWNER:
+        can_manage = role is WorkspaceUserRole.OWNER
+        if not can_manage:
             async with self.session_manager() as session:
-                is_admin = await self.admin_repository.is_admin(
+                can_manage = await self.admin_repository.is_admin(
                     session, agent_id, workspace_user_id
                 )
-            if not is_admin:
-                return Failure(PrivateAgentAccessDenied(agent_id=agent_id))
-        return Success(await self._build_output(agent))
+        if agent.type == AgentType.PRIVATE and not can_manage:
+            return Failure(PrivateAgentAccessDenied(agent_id=agent_id))
+        return Success(await self._build_output(agent, can_manage=can_manage))
 
     async def update_by_id(
         self,
@@ -517,11 +533,24 @@ class AgentService:
             return Failure(NotBelongToWorkspace(agent_id=agent_id))
         if (
             "runtime_profile_id" in update
-            and existing.runtime_capability is not AgentRuntimeCapability.MANAGED
-        ):
-            return Failure(
-                RuntimeProfileSelectionInvalid(code="runtime_capability_unavailable")
+            and (
+                error_code := self._runtime_capability_update_error(
+                    existing.runtime_capability
+                )
             )
+            is not None
+        ):
+            return Failure(RuntimeProfileSelectionInvalid(code=error_code))
+        if (
+            update.get("shell_enabled") is True
+            and (
+                error_code := self._runtime_capability_update_error(
+                    existing.runtime_capability
+                )
+            )
+            is not None
+        ):
+            return Failure(RuntimeProfileSelectionInvalid(code=error_code))
 
         admin_check = await self._check_admin_or_owner(
             agent_id, workspace_user_id, role
@@ -667,19 +696,26 @@ class AgentService:
                     return Failure(NotBelongToWorkspace(agent_id=agent_id))
                 if (
                     "runtime_profile_id" in update
-                    and locked.runtime_capability is not AgentRuntimeCapability.MANAGED
-                ):
-                    return Failure(
-                        RuntimeProfileSelectionInvalid(
-                            code="runtime_capability_unavailable"
+                    and (
+                        error_code := self._runtime_capability_update_error(
+                            locked.runtime_capability
                         )
                     )
+                    is not None
+                ):
+                    return Failure(RuntimeProfileSelectionInvalid(code=error_code))
                 if "shell_enabled" in update:
-                    repo_update["shell_enabled"] = (
+                    if (
                         update["shell_enabled"]
-                        if locked.runtime_capability is AgentRuntimeCapability.MANAGED
-                        else False
-                    )
+                        and (
+                            error_code := self._runtime_capability_update_error(
+                                locked.runtime_capability
+                            )
+                        )
+                        is not None
+                    ):
+                        return Failure(RuntimeProfileSelectionInvalid(code=error_code))
+                    repo_update["shell_enabled"] = update["shell_enabled"]
             if "runtime_profile_id" in update:
                 if "expected_runtime_profile_selection_version" not in update:
                     return Failure(RuntimeProfileSelectionVersionRequired())
@@ -723,7 +759,7 @@ class AgentService:
             result = await self.repository.update_by_id(session, agent_id, repo_update)
         match result:
             case Success(value):
-                return Success(await self._build_output(value))
+                return Success(await self._build_output(value, can_manage=True))
             case Failure(error):
                 return Failure(error)
             case _:
@@ -1008,7 +1044,7 @@ class AgentService:
                 )
             except Exception:  # noqa: BLE001 — best-effort cleanup
                 pass
-        return Success(await self._build_output(updated_agent))
+        return Success(await self._build_output(updated_agent, can_manage=True))
 
     async def remove_avatar(
         self,
@@ -1046,9 +1082,14 @@ class AgentService:
                 )
             except Exception:  # noqa: BLE001
                 pass
-        return Success(await self._build_output(updated_agent))
+        return Success(await self._build_output(updated_agent, can_manage=True))
 
-    async def _build_output(self, agent: Agent) -> AgentOutput:
+    async def _build_output(
+        self,
+        agent: Agent,
+        *,
+        can_manage: bool,
+    ) -> AgentOutput:
         """Convert `Agent` domain model to output."""
         avatar = await self._resolve_avatar(agent.avatar)
         context_window = self._compute_effective_context_window(agent)
@@ -1080,7 +1121,19 @@ class AgentService:
             ),
             runtime_profile_available=runtime_profile_available,
             runtime_profile_availability_reason_code=runtime_profile_reason,
+            can_manage=can_manage,
         )
+
+    @staticmethod
+    def _runtime_capability_update_error(
+        capability: AgentRuntimeCapability,
+    ) -> str | None:
+        """Return the dedicated-action error for Runtime-only Agent settings."""
+        if capability is AgentRuntimeCapability.NONE:
+            return "runtime_action_required"
+        if capability is AgentRuntimeCapability.REMOVING:
+            return "runtime_removal_in_progress"
+        return None
 
     def _compute_effective_context_window(
         self,
