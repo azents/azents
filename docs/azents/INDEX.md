@@ -327,6 +327,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Deployment Continuity Requirements](requirements/runtime-260804-deployment-continuity.md) | runtime-260804 | 2026-08-04 | 2026-08-04 |
 | [Runtime Bounded Drift Re-observation Requirements](requirements/runtime-260805-bounded-drift-reobservation.md) | runtime-260805 | 2026-08-05 | 2026-08-05 |
 | [Provider-Owned Runtime Process Containment Requirements](requirements/runtime-260808-provider-process-containment.md) | runtime-260808 | 2026-08-08 | 2026-08-09 |
+| [Docker Runtime Provider Development Availability Requirements](requirements/runtime-260810-docker-provider-development-availability.md) | runtime-260810 | 2026-08-10 | - |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
@@ -709,6 +710,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Runtime Deployment Continuity](adr/runtime-260804-deployment-continuity.md)
 - [Runtime Bounded Drift Re-observation](adr/runtime-260805-bounded-drift-reobservation.md)
 - [Provider-Owned Runtime Process Containment](adr/runtime-260808-provider-process-containment.md)
+- [Docker Runtime Provider Development Availability](adr/runtime-260810-docker-provider-development-availability.md)
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)

@@ -76,8 +76,12 @@ async def _run_control_loop(
     *,
     stop: asyncio.Event,
 ) -> None:
-    if settings.process_containment is not None:
-        _validate_containment_security_options(await docker.security_options())
+    process_containment = settings.process_containment
+    if process_containment is not None:
+        process_containment = _effective_process_containment(
+            settings,
+            await docker.security_options(),
+        )
     provider = DockerRuntimeProvider(
         docker,
         DockerRuntimeProviderConfig(
@@ -86,10 +90,13 @@ async def _run_control_loop(
             runner_env=settings.runner_env,
             workspace_mount_path=settings.workspace_path,
             tmp_mount_path=settings.tmp_path,
-            process_containment=settings.process_containment,
+            process_containment=process_containment,
         ),
     )
-    registration = _provider_registration(settings)
+    registration = _provider_registration(
+        settings,
+        process_containment=process_containment,
+    )
     while not stop.is_set():
         control_client = create_provider_control_client(settings)
         connection_id = _control_connection_id(settings.connection_id)
@@ -221,11 +228,15 @@ def _process_containment_from_env() -> DockerProcessContainmentConfig | None:
     )
 
 
-def _provider_registration(settings: ProviderSettings) -> ProviderRegistration:
-    containment_enabled = settings.process_containment is not None
+def _provider_registration(
+    settings: ProviderSettings,
+    *,
+    process_containment: DockerProcessContainmentConfig | None,
+) -> ProviderRegistration:
+    containment_enabled = process_containment is not None
     metadata = {"tmp_path": settings.tmp_path}
-    if settings.process_containment is not None:
-        metadata["process_containment_backend"] = settings.process_containment.backend
+    if process_containment is not None:
+        metadata["process_containment_backend"] = process_containment.backend
     return ProviderRegistration(
         provider_id=settings.provider_id,
         provider_type="docker",
@@ -245,17 +256,27 @@ def _provider_registration(settings: ProviderSettings) -> ProviderRegistration:
     )
 
 
-def _validate_containment_security_options(
+def _effective_process_containment(
+    settings: ProviderSettings,
     security_options: Sequence[str],
-) -> None:
-    if not any(
+) -> DockerProcessContainmentConfig | None:
+    process_containment = settings.process_containment
+    if process_containment is None:
+        return None
+    if any(
         option == _DOCKER_APPARMOR_SECURITY_OPTION
         or option.startswith(f"{_DOCKER_APPARMOR_SECURITY_OPTION},")
         for option in security_options
     ):
-        raise RuntimeError(
-            "Docker process containment requires Docker AppArmor support."
-        )
+        return process_containment
+    _LOGGER.warning(
+        "Docker process containment unavailable; continuing with direct Profiles",
+        extra={
+            "provider_id": settings.provider_id,
+            "containment_unavailable_reason": "apparmor_unavailable",
+        },
+    )
+    return None
 
 
 def _capability_contract(*, containment_enabled: bool) -> dict[str, JsonValue]:
