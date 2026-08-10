@@ -325,6 +325,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Hierarchical Runtime Execution Profiles Requirements](requirements/runtime-260726-hierarchical-execution-profiles.md) | runtime-260726 | 2026-07-26 | - |
 | [Profile-Only Runtime Execution Policy Requirements](requirements/runtime-260727-profile-only-execution-policy.md) | runtime-260727 | 2026-07-27 | 2026-07-27 |
 | [Workspace-Owned Runtime Profiles Requirements](requirements/runtime-260730-workspace-owned-runtime-profiles.md) | runtime-260730 | 2026-07-30 | 2026-07-31 |
+| [Optional Managed Runtime for Agents Requirements](requirements/runtime-260803-optional-managed-runtime.md) | runtime-260803 | 2026-08-03 | - |
 | [Runtime Deployment Continuity Requirements](requirements/runtime-260804-deployment-continuity.md) | runtime-260804 | 2026-08-04 | 2026-08-04 |
 | [Runtime Bounded Drift Re-observation Requirements](requirements/runtime-260805-bounded-drift-reobservation.md) | runtime-260805 | 2026-08-05 | 2026-08-05 |
 | [Provider-Owned Runtime Process Containment Requirements](requirements/runtime-260808-provider-process-containment.md) | runtime-260808 | 2026-08-08 | 2026-08-09 |
@@ -709,6 +710,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Hierarchical Runtime Execution Profiles](adr/runtime-260726-hierarchical-execution-profiles.md)
 - [Profile-Only Runtime Execution Policy](adr/runtime-260727-profile-only-execution-policy.md)
 - [Workspace-Owned Runtime Profiles](adr/runtime-260730-workspace-owned-runtime-profiles.md)
+- [Optional Managed Runtime for Agents](adr/runtime-260803-optional-managed-runtime.md)
 - [Runtime Deployment Continuity](adr/runtime-260804-deployment-continuity.md)
 - [Runtime Bounded Drift Re-observation](adr/runtime-260805-bounded-drift-reobservation.md)
 - [Provider-Owned Runtime Process Containment](adr/runtime-260808-provider-process-containment.md)

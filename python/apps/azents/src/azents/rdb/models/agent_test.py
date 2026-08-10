@@ -1,5 +1,6 @@
 """Agent RDB model tests."""
 
+from azents.core.enums import AgentRuntimeCapability
 from azents.rdb.models.agent import RDBAgent
 
 
@@ -13,6 +14,8 @@ def test_agent_constructor_materializes_complete_selectable_model_settings() -> 
     )
 
     assert agent.tool_search_enabled is True
+    assert agent.runtime_capability is AgentRuntimeCapability.MANAGED
+    assert agent.runtime_capability_version == 1
     assert agent.selectable_model_options is not None
     assert [option["settings"] for option in agent.selectable_model_options] == [
         {

@@ -16,6 +16,7 @@ from azents.core.agent import (
 )
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRuntimeCapability,
     AgentType,
     ExternalChannelResponseMode,
 )
@@ -58,6 +59,8 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         type=AgentType.PUBLIC,
         runtime_profile_id=None,
         runtime_profile_selection_version=1,
+        runtime_capability=AgentRuntimeCapability.MANAGED,
+        runtime_capability_version=1,
         shell_enabled=True,
         memory_enabled=True,
         tool_search_enabled=False,

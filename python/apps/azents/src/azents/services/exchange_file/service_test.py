@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRuntimeCapability,
     AgentSessionKind,
     AgentSessionProductMode,
     AgentSessionStartReason,
@@ -488,6 +489,8 @@ def _make_agent() -> Agent:
         type=AgentType.PUBLIC,
         runtime_profile_id=None,
         runtime_profile_selection_version=1,
+        runtime_capability=AgentRuntimeCapability.MANAGED,
+        runtime_capability_version=1,
         shell_enabled=True,
         memory_enabled=True,
         tool_search_enabled=False,

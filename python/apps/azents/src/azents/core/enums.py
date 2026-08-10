@@ -129,6 +129,34 @@ class AgentLifecycleStatus(enum.StrEnum):
     DECOMMISSIONING = "decommissioning"
 
 
+class AgentRuntimeCapability(enum.StrEnum):
+    """Agent-owned managed Runtime capability state."""
+
+    NONE = "none"
+    MANAGED = "managed"
+    REMOVING = "removing"
+
+
+class AgentRuntimeRemovalStatus(enum.StrEnum):
+    """Durable Runtime removal operation status."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    RETRY_WAIT = "retry_wait"
+    COMPLETED = "completed"
+
+
+class AgentRuntimeRemovalStage(enum.StrEnum):
+    """Current durable Runtime removal stage."""
+
+    FENCING = "fencing"
+    INTERRUPTING_WORK = "interrupting_work"
+    CLEANING_PRODUCT_STATE = "cleaning_product_state"
+    DELETING_RUNTIME = "deleting_runtime"
+    FINALIZING = "finalizing"
+    COMPLETED = "completed"
+
+
 class AgentDecommissionStatus(enum.StrEnum):
     """Durable Agent decommission job state."""
 
@@ -212,6 +240,15 @@ class SessionWorkingFolderCleanupStatus(enum.StrEnum):
     PENDING = "pending"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+
+
+class SessionWorkingFolderBindingState(enum.StrEnum):
+    """Runtime authority state for one Session working-folder binding."""
+
+    NONE = "none"
+    PENDING = "pending"
+    BOUND = "bound"
+    INVALIDATED = "invalidated"
 
 
 class GitWorktreePathClaimOwnerKind(enum.StrEnum):
@@ -463,6 +500,13 @@ class RuntimeDesiredState(enum.StrEnum):
 
     RUNNING = "running"
     STOPPED = "stopped"
+
+
+class RuntimeTerminalDeleteAcknowledgementKind(enum.StrEnum):
+    """Authority that proved one terminal Runtime deletion."""
+
+    PROVIDER_REPORT = "provider_report"
+    NO_PHYSICAL_BINDING = "no_physical_binding"
 
 
 class RuntimeLifecycleCommandType(enum.StrEnum):

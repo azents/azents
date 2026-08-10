@@ -61,6 +61,7 @@ from azents.repos.agent_session.data import (
     AgentSessionUnreadTerminalRunProjection,
     SessionAgent,
     SessionWorkingFolderContext,
+    require_session_working_folder_path,
 )
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.message import MessageRepository
@@ -1443,7 +1444,7 @@ class ChatSessionService:
             return
         try:
             working_folder_path = validate_session_working_folder_path(
-                context.working_folder_path,
+                require_session_working_folder_path(context),
                 workspace_root=normalize_agent_workspace_root(
                     runtime.workspace_path
                 ).as_posix(),

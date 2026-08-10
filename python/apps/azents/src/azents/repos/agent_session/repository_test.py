@@ -30,6 +30,7 @@ from azents.core.enums import (
     LLMProvider,
     RuntimeRunnerState,
     SessionAgentKind,
+    SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
 )
 from azents.core.inference_profile import SessionInferenceState
@@ -531,6 +532,10 @@ class TestAgentSessionRepository:
         assert (
             context.working_folder_path
             == "/runtime/working-folder-context/.azents/sessions/cactus-river-window"
+        )
+        assert (
+            context.working_folder_binding_state
+            is SessionWorkingFolderBindingState.BOUND
         )
         assert (
             context.working_folder_cleanup_status

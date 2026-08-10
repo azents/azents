@@ -16,6 +16,7 @@ from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRuntimeCapability,
     AgentType,
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
@@ -145,6 +146,8 @@ def _make_agent(
         type=AgentType.PUBLIC,
         runtime_profile_id=None,
         runtime_profile_selection_version=1,
+        runtime_capability=AgentRuntimeCapability.MANAGED,
+        runtime_capability_version=1,
         shell_enabled=True,
         memory_enabled=True,
         tool_search_enabled=tool_search_enabled,

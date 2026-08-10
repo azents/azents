@@ -16,6 +16,7 @@ from azents.core.enums import (
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
+    RuntimeTerminalDeleteAcknowledgementKind,
 )
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
@@ -59,6 +60,12 @@ runtime_runner_state_enum = ENUM(
 runtime_provider_binding_origin_enum = ENUM(
     RuntimeProviderBindingOrigin,
     name="runtime_provider_binding_origin",
+    create_type=False,
+    values_callable=_enum_values,
+)
+runtime_terminal_delete_acknowledgement_kind_enum = ENUM(
+    RuntimeTerminalDeleteAcknowledgementKind,
+    name="runtime_terminal_delete_acknowledgement_kind",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -113,6 +120,15 @@ class RDBAgentRuntime(RDBModel):
         "provider_observe_requested_at",
     )
     IX_RUNNER_STATE = sa.Index("ix_agent_runtimes_runner_state", "runner_state")
+    CK_TERMINAL_DELETE_ACKNOWLEDGEMENT = sa.CheckConstraint(
+        "(terminal_delete_acknowledged_generation IS NULL "
+        "AND terminal_delete_acknowledged_at IS NULL "
+        "AND terminal_delete_acknowledgement_kind IS NULL) OR "
+        "(terminal_delete_acknowledged_generation IS NOT NULL "
+        "AND terminal_delete_acknowledged_at IS NOT NULL "
+        "AND terminal_delete_acknowledgement_kind IS NOT NULL)",
+        name="ck_agent_runtimes_terminal_delete_acknowledgement",
+    )
     id: Mapped[str] = mapped_column(
         sa.String(32),
         primary_key=True,
@@ -229,6 +245,14 @@ class RDBAgentRuntime(RDBModel):
         nullable=True,
         default=None,
     )
+    terminal_delete_acknowledgement_kind: Mapped[
+        RuntimeTerminalDeleteAcknowledgementKind | None
+    ] = mapped_column(
+        runtime_terminal_delete_acknowledgement_kind_enum,
+        init=False,
+        nullable=True,
+        default=None,
+    )
     provider_observed_state: Mapped[RuntimeProviderObservedState] = mapped_column(
         runtime_provider_observed_state_enum,
         init=False,
@@ -339,4 +363,5 @@ class RDBAgentRuntime(RDBModel):
         IX_PROVIDER_CONNECTION_STATE,
         IX_PROVIDER_OBSERVE_REQUESTED_AT,
         IX_RUNNER_STATE,
+        CK_TERMINAL_DELETE_ACKNOWLEDGEMENT,
     )

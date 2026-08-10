@@ -17,6 +17,7 @@ from azents.core.agent import (
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRuntimeCapability,
     AgentSessionKind,
     AgentSessionProductMode,
     AgentSessionStartReason,
@@ -1050,6 +1051,8 @@ class _AgentRepository:
             type=AgentType.PUBLIC,
             runtime_profile_id=None,
             runtime_profile_selection_version=1,
+            runtime_capability=AgentRuntimeCapability.MANAGED,
+            runtime_capability_version=1,
             created_at=now,
             updated_at=now,
         )

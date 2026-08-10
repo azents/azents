@@ -22,6 +22,7 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
     RuntimeRunnerState,
+    RuntimeTerminalDeleteAcknowledgementKind,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -419,6 +420,12 @@ class TestAgentRuntimeRepository:
             provider_generation=1,
             acknowledged_generation=requested.desired_generation,
         )
+        repeated_acknowledgement = await repo.record_terminal_delete_acknowledgement(
+            rdb_session,
+            runtime.id,
+            provider_generation=2,
+            acknowledged_generation=requested.desired_generation,
+        )
         finalizable = await repo.get_terminal_delete_acknowledged(
             rdb_session, runtime.id
         )
@@ -452,6 +459,10 @@ class TestAgentRuntimeRepository:
         assert repeated_request.desired_generation == requested.desired_generation
         assert stale_acknowledgement is None
         assert acknowledged is not None
+        assert repeated_acknowledgement is None
+        assert acknowledged.terminal_delete_acknowledgement_kind is (
+            RuntimeTerminalDeleteAcknowledgementKind.PROVIDER_REPORT
+        )
         assert finalizable is not None
         assert finalizable.workspace_path is None
         assert late_runner is None
@@ -465,6 +476,9 @@ class TestAgentRuntimeRepository:
         assert (
             repeated_acknowledged_request.terminal_delete_acknowledged_generation
             == requested.desired_generation
+        )
+        assert repeated_acknowledged_request.terminal_delete_acknowledgement_kind is (
+            RuntimeTerminalDeleteAcknowledgementKind.PROVIDER_REPORT
         )
 
     async def test_record_provider_and_runner_state(

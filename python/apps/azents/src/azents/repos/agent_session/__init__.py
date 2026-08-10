@@ -27,6 +27,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     AgentSessionTitleSource,
     SessionAgentKind,
+    SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
 )
 from azents.core.inference_profile import SessionInferenceState
@@ -1997,6 +1998,7 @@ class AgentSessionRepository:
                 root_session_handle,
                 workspace_root=runtime.workspace_path,
             ),
+            working_folder_binding_state=SessionWorkingFolderBindingState.BOUND,
             working_folder_cleanup_status=(
                 SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
             ),
@@ -2113,6 +2115,9 @@ class AgentSessionRepository:
             agent_id=rdb.agent_id,
             agent_runtime_id=rdb.agent_runtime_id,
             working_folder_path=rdb.working_folder_path,
+            binding_state=rdb.working_folder_binding_state,
+            invalidated_by_removal_id=(rdb.working_folder_invalidated_by_removal_id),
+            invalidated_at=rdb.working_folder_invalidated_at,
             cleanup_status=rdb.working_folder_cleanup_status,
         )
 
