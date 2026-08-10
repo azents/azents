@@ -44,10 +44,17 @@ def _runtime(
     max_concurrency: int = 2,
     cancellation_grace_seconds: float = 0.1,
     container_factory: Callable[[], di.Container] = di.Container,
+    rerun_on_coalesce: bool = False,
 ) -> LocalJobRuntime:
     return LocalJobRuntime(
         handlers=JobHandlerRegistry(
-            (JobHandlerDefinition(key="test.handler", handler=handler),)
+            (
+                JobHandlerDefinition(
+                    key="test.handler",
+                    handler=handler,
+                    rerun_on_coalesce=rerun_on_coalesce,
+                ),
+            )
         ),
         container_factory=container_factory,
         max_concurrency=max_concurrency,
@@ -86,6 +93,44 @@ async def test_submit_coalesces_execution_and_waiter_cancellation_isolated() -> 
 
     assert outcome.status is JobOutcomeStatus.SUCCEEDED
     assert outcome.result == {"completed": True}
+    assert runtime.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_opted_in_handler_reruns_one_coalesced_submission() -> None:
+    """A wake submitted during handler exit is consumed by the same tracked task."""
+    first_started = asyncio.Event()
+    first_release = asyncio.Event()
+    second_started = asyncio.Event()
+    runs = 0
+
+    async def handler(_context: JobExecutionContext) -> JobPayload:
+        nonlocal runs
+        runs += 1
+        if runs == 1:
+            first_started.set()
+            await first_release.wait()
+        else:
+            second_started.set()
+        return {"runs": runs}
+
+    runtime = _runtime(handler, rerun_on_coalesce=True)
+    first = await runtime.submit(_request("same"))
+    await first_started.wait()
+    second = await runtime.submit(_request("same"))
+
+    assert isinstance(first, LocalJobHandle)
+    assert isinstance(second, LocalJobHandle)
+    assert first.task is second.task
+    assert runs == 1
+
+    first_release.set()
+    outcome = await second.wait()
+
+    assert second_started.is_set()
+    assert runs == 2
+    assert outcome.status is JobOutcomeStatus.SUCCEEDED
+    assert outcome.result == {"runs": 2}
     assert runtime.active_count == 0
 
 

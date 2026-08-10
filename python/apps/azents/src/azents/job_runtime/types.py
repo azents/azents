@@ -101,6 +101,7 @@ class JobHandlerDefinition:
 
     key: str
     handler: JobHandler
+    rerun_on_coalesce: bool = False
 
 
 class JobHandlerRegistry:
@@ -108,7 +109,7 @@ class JobHandlerRegistry:
 
     def __init__(self, definitions: tuple[JobHandlerDefinition, ...]) -> None:
         """Validate and retain unique handler definitions."""
-        handlers: dict[str, JobHandler] = {}
+        handlers: dict[str, JobHandlerDefinition] = {}
         for definition in definitions:
             if not definition.key:
                 raise ValueError("Registered job handler key must not be blank.")
@@ -116,12 +117,18 @@ class JobHandlerRegistry:
                 raise ValueError(
                     f"Duplicate registered job handler key: {definition.key}"
                 )
-            handlers[definition.key] = definition.handler
-        self._handlers: Mapping[str, JobHandler] = handlers
+            handlers[definition.key] = definition
+        self._handlers: Mapping[str, JobHandlerDefinition] = handlers
 
     def get(self, key: str) -> JobHandler | None:
         """Return one registered handler by its closed key."""
-        return self._handlers.get(key)
+        definition = self._handlers.get(key)
+        return None if definition is None else definition.handler
+
+    def reruns_on_coalesce(self, key: str) -> bool:
+        """Return whether an active execution consumes one coalesced rerun."""
+        definition = self._handlers.get(key)
+        return definition is not None and definition.rerun_on_coalesce
 
 
 class JobHandle(Protocol):

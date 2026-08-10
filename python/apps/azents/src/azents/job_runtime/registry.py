@@ -18,6 +18,7 @@ def get_job_handler_registry() -> JobHandlerRegistry:
             JobHandlerDefinition(
                 key=EXTERNAL_CHANNEL_INGRESS_JOB_HANDLER_KEY,
                 handler=execute_external_channel_ingress_job,
+                rerun_on_coalesce=True,
             ),
             JobHandlerDefinition(
                 key=SCHEDULER_JOB_HANDLER_KEY,
