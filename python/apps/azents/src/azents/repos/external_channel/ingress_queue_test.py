@@ -5,22 +5,52 @@ from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
+import sqlalchemy as sa
+from azcommon.result import Success
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    ExternalChannelAppMode,
+    ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
     ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressItemState,
     ExternalChannelIngressProfile,
+    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
+    ExternalChannelResourceStatus,
+    ExternalChannelResourceType,
+    ExternalChannelResponseMode,
+    ExternalChannelRouteCatalogStatus,
+    ExternalChannelRouteMode,
+    ExternalChannelTransport,
+    LLMProvider,
 )
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.external_channel_ingress import (
     RDBExternalChannelIngressItem,
+    RDBExternalChannelIngressOwner,
+)
+from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.repos.external_channel.data import (
+    ExternalChannelAgentRouteCreate,
+    ExternalChannelConnectionCreate,
+    ExternalChannelConversationPositionCreate,
+    ExternalChannelPrincipalCreate,
+    ExternalChannelResourceCreate,
 )
 from azents.repos.external_channel.ingress_queue import (
     ExternalChannelIngressQueueRepository,
 )
+from azents.repos.external_channel.ingress_queue_data import (
+    ExternalChannelIngressItemCreate,
+    ExternalChannelIngressOwnerCreate,
+)
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.workspace import WorkspaceRepository
+from azents.repos.workspace.data import WorkspaceCreate
+from azents.testing.model_selection import make_test_model_selection_dict
 
 _NOW = datetime.datetime(2026, 8, 10, 1, tzinfo=datetime.UTC)
 
@@ -36,7 +66,7 @@ class _ExpiredUpdatedAtItem(SimpleNamespace):
         return super().__getattribute__(name)
 
 
-def _drain(
+def _owner(
     *,
     first_batch_pending: bool,
     lease_owner: str | None = "owner-1",
@@ -45,7 +75,17 @@ def _drain(
 ) -> SimpleNamespace:
     """Build one mutable ORM-shaped drain row."""
     return SimpleNamespace(
+        id="owner-1",
+        connection_id="connection-1",
+        target_resource_id="resource-1",
+        route_id="route-1",
+        participation_setting_id=None,
+        participation_settings_generation=None,
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        binding_id="binding-1",
         session_id="session-1",
+        preparation_attempt_count=0,
+        preparation_next_attempt_at=None,
         lease_owner=lease_owner,
         lease_generation=lease_generation,
         lease_acquired_at=_NOW if lease_owner is not None else None,
@@ -65,7 +105,7 @@ def _item(index: int) -> SimpleNamespace:
     position = f"{index:020d}"
     return SimpleNamespace(
         id=f"item-{index}",
-        session_id="session-1",
+        owner_id="owner-1",
         queue_key=f"{index:032d}",
         deduplication_key=f"{index:064d}",
         provider_event_id=f"event-{index}",
@@ -84,8 +124,7 @@ def _item(index: int) -> SimpleNamespace:
         provider_thread_key="thread-1",
         delivery_thread_key="thread-1",
         provider_resource_key="resource-1",
-        resource_id="resource-1",
-        binding_id="binding-1",
+        source_resource_id="resource-1",
         conversation_position_id="position-1",
         principal_id="principal-1",
         trigger_provider_message_key=f"message-{index}",
@@ -122,14 +161,14 @@ async def test_claim_due_batch_uses_one_then_ten_item_limits() -> None:
     repository = ExternalChannelIngressQueueRepository()
 
     first_session = _session()
-    first_drain = _drain(first_batch_pending=True)
+    first_drain = _owner(first_batch_pending=True)
     first_row = _item(0)
     first_session.scalar.return_value = first_drain
     first_session.scalars.return_value = [first_row]
 
     first = await repository.claim_due_batch(
         first_session,
-        session_id="session-1",
+        owner_id="owner-1",
         lease_owner="owner-1",
         lease_generation=1,
         now=_NOW,
@@ -144,14 +183,14 @@ async def test_claim_due_batch_uses_one_then_ten_item_limits() -> None:
     assert first_statement._limit_clause.value == 1  # noqa: SLF001
 
     later_session = _session()
-    later_drain = _drain(first_batch_pending=False)
+    later_drain = _owner(first_batch_pending=False)
     later_rows = [_item(index) for index in range(10)]
     later_session.scalar.return_value = later_drain
     later_session.scalars.return_value = later_rows
 
     later = await repository.claim_due_batch(
         later_session,
-        session_id="session-1",
+        owner_id="owner-1",
         lease_owner="owner-1",
         lease_generation=1,
         now=_NOW,
@@ -170,7 +209,7 @@ async def test_claim_due_batch_refreshes_updated_at_before_dto_conversion() -> N
     """A flush-expired onupdate timestamp is loaded before Pydantic reads it."""
     repository = ExternalChannelIngressQueueRepository()
     session = _session()
-    drain = _drain(first_batch_pending=True)
+    drain = _owner(first_batch_pending=True)
     item = _ExpiredUpdatedAtItem(**vars(_item(0)))
     item.updated_at_loaded = False
     session.scalar.return_value = drain
@@ -189,7 +228,7 @@ async def test_claim_due_batch_refreshes_updated_at_before_dto_conversion() -> N
 
     claimed = await repository.claim_due_batch(
         session,
-        session_id="session-1",
+        owner_id="owner-1",
         lease_owner="owner-1",
         lease_generation=1,
         now=_NOW,
@@ -204,7 +243,7 @@ async def test_expired_lease_is_reclaimed_and_current_lease_is_released() -> Non
     """A stale owner is fenced by generation and explicit release clears ownership."""
     repository = ExternalChannelIngressQueueRepository()
     claim_session = _session()
-    drain = _drain(
+    drain = _owner(
         first_batch_pending=False,
         lease_owner="stale-owner",
         lease_generation=4,
@@ -214,15 +253,15 @@ async def test_expired_lease_is_reclaimed_and_current_lease_is_released() -> Non
 
     claim = await repository.claim_lease(
         claim_session,
-        session_id="session-1",
+        owner_id="owner-1",
         lease_owner="owner-2",
         now=_NOW,
         lease_expires_at=_NOW + datetime.timedelta(minutes=5),
     )
 
     assert claim is not None
-    assert claim.session.lease_owner == "owner-2"
-    assert claim.session.lease_generation == 5
+    assert claim.owner.lease_owner == "owner-2"
+    assert claim.owner.lease_generation == 5
     assert drain.current_batch_id is None
     reset_statement = claim_session.execute.await_args.args[0]
     reset_sql = str(
@@ -240,7 +279,7 @@ async def test_expired_lease_is_reclaimed_and_current_lease_is_released() -> Non
 
     released = await repository.release_lease(
         release_session,
-        session_id="session-1",
+        owner_id="owner-1",
         lease_owner="owner-2",
         lease_generation=5,
     )
@@ -293,15 +332,15 @@ async def test_recovery_query_includes_unowned_processing_rows() -> None:
     """Crash recovery can reclaim processing work after lease ownership is cleared."""
     repository = ExternalChannelIngressQueueRepository()
     session = _session()
-    session.scalars.return_value = [_drain(first_batch_pending=False, lease_owner=None)]
+    session.scalars.return_value = [_owner(first_batch_pending=False, lease_owner=None)]
 
-    recovered = await repository.list_recoverable_sessions(
+    recovered = await repository.list_recoverable_owners(
         session,
         now=_NOW,
         limit=100,
     )
 
-    assert [drain.session_id for drain in recovered] == ["session-1"]
+    assert [owner.id for owner in recovered] == ["owner-1"]
     assert recovered[0].created_at == _NOW
     statement = session.scalars.await_args.args[0]
     sql = str(
@@ -311,7 +350,61 @@ async def test_recovery_query_includes_unowned_processing_rows() -> None:
         )
     )
     assert "'processing'" in sql
-    assert "external_channel_ingress_sessions.lease_owner IS NULL" in sql
+    assert "external_channel_ingress_owners.lease_owner IS NULL" in sql
+    assert "external_channel_ingress_owners.session_id IS NOT NULL" in sql
+
+
+def test_ready_owner_is_not_reused_for_an_unready_target() -> None:
+    """A disconnected Binding cannot keep accepting items through its old owner."""
+    repository = ExternalChannelIngressQueueRepository()
+    owner = _owner(first_batch_pending=True)
+
+    compatible = repository._reconcile_owner(  # noqa: SLF001
+        cast(RDBExternalChannelIngressOwner, owner),
+        expected=ExternalChannelIngressOwnerCreate(
+            connection_id="connection-1",
+            target_resource_id="resource-1",
+            route_id="route-1",
+            participation_setting_id="setting-1",
+            participation_settings_generation=2,
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+            binding_id=None,
+            session_id=None,
+        ),
+    )
+
+    assert compatible is False
+
+
+def test_unready_owner_adopts_a_compatible_ready_binding() -> None:
+    """Synchronous replay readiness preserves every retained owner item."""
+    repository = ExternalChannelIngressQueueRepository()
+    owner = _owner(first_batch_pending=True)
+    owner.binding_id = None
+    owner.session_id = None
+    owner.participation_setting_id = "setting-old"
+    owner.participation_settings_generation = 1
+
+    compatible = repository._reconcile_owner(  # noqa: SLF001
+        cast(RDBExternalChannelIngressOwner, owner),
+        expected=ExternalChannelIngressOwnerCreate(
+            connection_id="connection-1",
+            target_resource_id="resource-1",
+            route_id="route-1",
+            participation_setting_id=None,
+            participation_settings_generation=None,
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+            binding_id="binding-2",
+            session_id="session-2",
+        ),
+    )
+
+    assert compatible is True
+    assert owner.binding_id == "binding-2"
+    assert owner.session_id == "session-2"
+    assert owner.response_mode is ExternalChannelResponseMode.MENTION_ONLY
+    assert owner.participation_setting_id is None
+    assert owner.participation_settings_generation is None
 
 
 async def test_active_diagnostics_are_bounded_and_content_free() -> None:
@@ -322,7 +415,7 @@ async def test_active_diagnostics_are_bounded_and_content_free() -> None:
     item.state = ExternalChannelIngressItemState.RETRY_WAITING
     item.attempt_count = 2
     item.next_attempt_at = _NOW + datetime.timedelta(seconds=30)
-    drain = _drain(first_batch_pending=False)
+    drain = _owner(first_batch_pending=False)
     drain.current_batch_id = "batch-1"
     drain.current_batch_started_at = _NOW - datetime.timedelta(seconds=2)
 
@@ -345,7 +438,7 @@ async def test_active_diagnostics_are_bounded_and_content_free() -> None:
         limit=10,
     )
 
-    assert snapshot.session_count == 1
+    assert snapshot.owner_count == 1
     assert snapshot.counts.pending == 0
     assert snapshot.counts.processing == 0
     assert snapshot.counts.retry_waiting == 1
@@ -365,3 +458,206 @@ async def test_active_diagnostics_are_bounded_and_content_free() -> None:
         "principal_id",
     ):
         assert forbidden not in serialized
+
+
+async def test_postgres_pre_session_callbacks_share_one_owner(
+    rdb_session: AsyncSession,
+) -> None:
+    """Two durable callbacks converge without requiring a Binding or Session."""
+    workspace_result = await WorkspaceRepository().create(
+        rdb_session,
+        WorkspaceCreate(
+            name="Ingress owner convergence",
+            handle="ingress-owner-convergence",
+        ),
+    )
+    assert isinstance(workspace_result, Success)
+    workspace_id = await WorkspaceRepository().resolve_id(
+        rdb_session,
+        "ingress-owner-convergence",
+    )
+    assert workspace_id is not None
+    integration = RDBLLMProviderIntegration(
+        workspace_id=workspace_id,
+        provider=LLMProvider.ANTHROPIC,
+        name="ingress-owner-integration",
+        encrypted_credentials="encrypted",
+        config=None,
+    )
+    rdb_session.add(integration)
+    await rdb_session.flush()
+    selection = make_test_model_selection_dict(
+        integration_id=integration.id,
+        provider=LLMProvider.ANTHROPIC,
+        model_identifier="ingress-owner-model",
+    )
+    agent = RDBAgent(
+        workspace_id=workspace_id,
+        name="Ingress owner Agent",
+        model_selection=selection,
+        lightweight_model_selection=selection,
+    )
+    rdb_session.add(agent)
+    await rdb_session.flush()
+    external_repository = ExternalChannelRepository()
+    connection = await external_repository.create_connection(
+        rdb_session,
+        ExternalChannelConnectionCreate(
+            workspace_id=workspace_id,
+            provider=ExternalChannelProvider.SLACK,
+            transport=ExternalChannelTransport.HTTP,
+            app_mode=ExternalChannelAppMode.SINGLE,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+            provider_app_id="ingress-owner-app",
+            provider_tenant_id="ingress-owner-tenant",
+            provider_bot_user_id=None,
+            http_callback_selector_hash=None,
+            encrypted_credentials="ciphertext",
+            capabilities=None,
+            provider_config=None,
+            last_verified_at=None,
+            last_health_at=None,
+            disconnected_at=None,
+            socket_lease_owner=None,
+            socket_lease_until=None,
+            socket_heartbeat_at=None,
+            socket_gap_detected_at=None,
+            socket_gap_reason=None,
+        ),
+    )
+    route = await external_repository.create_agent_route(
+        rdb_session,
+        ExternalChannelAgentRouteCreate(
+            connection_id=connection.id,
+            agent_id=agent.id,
+            agent_id_snapshot=agent.id,
+            route_mode=ExternalChannelRouteMode.DEDICATED,
+            connection_app_mode=ExternalChannelAppMode.SINGLE,
+            catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
+            catalog_removed_at=None,
+            catalog_removed_by_user_id=None,
+        ),
+    )
+    resource = await external_repository.create_resource_idempotent(
+        rdb_session,
+        ExternalChannelResourceCreate(
+            connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.THREAD,
+            provider_resource_key="ingress-owner-thread",
+            labels={"provider": "slack", "channel_id": "C1", "thread_ts": "1.0"},
+            status=ExternalChannelResourceStatus.ACTIVE,
+            latest_activity_at=_NOW,
+            unavailable_at=None,
+            deleted_at=None,
+        ),
+    )
+    position = await external_repository.create_conversation_position_idempotent(
+        rdb_session,
+        ExternalChannelConversationPositionCreate(
+            connection_id=connection.id,
+            scope_kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id="C1",
+            provider_thread_key="1.0",
+            read_through_position=None,
+        ),
+    )
+    principal = await external_repository.create_principal_idempotent(
+        rdb_session,
+        ExternalChannelPrincipalCreate(
+            provider=ExternalChannelProvider.SLACK,
+            provider_tenant_id="ingress-owner-tenant",
+            provider_user_id="U1",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            display_name=None,
+            avatar_url=None,
+            profile=None,
+        ),
+    )
+    owner_create = ExternalChannelIngressOwnerCreate(
+        connection_id=connection.id,
+        target_resource_id=resource.id,
+        route_id=route.id,
+        participation_setting_id=None,
+        participation_settings_generation=None,
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        binding_id=None,
+        session_id=None,
+    )
+
+    def item_create(index: int) -> ExternalChannelIngressItemCreate:
+        return ExternalChannelIngressItemCreate(
+            deduplication_key=f"{index:064d}",
+            provider_event_id=f"event-{index}",
+            connection_id=connection.id,
+            provider=ExternalChannelProvider.SLACK,
+            ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
+            configuration_generation=connection.configuration_generation,
+            authority_kind=ExternalChannelIngressAuthorityKind.CONFIGURATION,
+            authority_lease_owner=None,
+            authority_lease_generation=None,
+            provider_event_type="message",
+            provider_tenant_id="ingress-owner-tenant",
+            scope_kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id="C1",
+            provider_parent_channel_id=None,
+            provider_thread_key="1.0",
+            delivery_thread_key="1.0",
+            provider_resource_key="ingress-owner-thread",
+            source_resource_id=resource.id,
+            conversation_position_id=position.id,
+            principal_id=principal.id,
+            trigger_provider_message_key=f"message-{index}",
+            trigger_provider_message_id=f"{index}.0",
+            trigger_position=f"{index:020d}",
+            provider_user_id="U1",
+            invocation=True,
+            invocation_id=f"invocation-{index}",
+            initial_title_eligible=False,
+        )
+
+    repository = ExternalChannelIngressQueueRepository()
+    first = await repository.admit(
+        rdb_session,
+        owner_create=owner_create,
+        item_create=item_create(1),
+    )
+    second = await repository.admit(
+        rdb_session,
+        owner_create=owner_create,
+        item_create=item_create(2),
+    )
+
+    assert first.owner.id == second.owner.id
+    assert first.owner.ready is False
+    assert first.created is True
+    assert second.created is True
+    assert (
+        await rdb_session.scalar(
+            sa.select(sa.func.count()).select_from(RDBExternalChannelIngressOwner)
+        )
+        == 1
+    )
+    assert (
+        await rdb_session.scalar(
+            sa.select(sa.func.count()).select_from(RDBExternalChannelIngressItem)
+        )
+        == 2
+    )
+    owner_row = await rdb_session.get(
+        RDBExternalChannelIngressOwner,
+        first.owner.id,
+        with_for_update=True,
+    )
+    assert owner_row is not None
+    owner_row.preparation_next_attempt_at = _NOW + datetime.timedelta(seconds=30)
+    await rdb_session.flush()
+    assert (
+        await repository.claim_lease(
+            rdb_session,
+            owner_id=first.owner.id,
+            lease_owner="worker-1",
+            now=_NOW,
+            lease_expires_at=_NOW + datetime.timedelta(minutes=1),
+        )
+        is None
+    )

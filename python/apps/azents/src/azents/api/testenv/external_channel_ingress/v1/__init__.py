@@ -30,8 +30,16 @@ from azents.utils.fastapi.route import RouteMounter
 router = APIRouter()
 
 
+class IngressOwnerRequest(BaseModel):
+    """Exact ingress owner identity for a bounded release action."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    owner_id: str
+
+
 class IngressSessionRequest(BaseModel):
-    """Exact Session identity for a bounded testenv action."""
+    """Exact Session identity for a bounded wake-control action."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -58,7 +66,7 @@ async def inspect_active_ingress(
 
 @router.post("/release")
 async def release_active_ingress(
-    body: IngressSessionRequest,
+    body: IngressOwnerRequest,
     runtime: Annotated[JobRuntime, Depends(get_job_runtime)],
     session_manager: Annotated[
         SessionManager[AsyncSession],
@@ -69,19 +77,19 @@ async def release_active_ingress(
         Depends(ExternalChannelIngressQueueRepository),
     ],
 ) -> IngressReleaseResponse:
-    """Submit one exact active Session drain through the real Job Runtime."""
+    """Submit one exact active owner drain through the real Job Runtime."""
     async with session_manager() as session:
-        drain = await repository.get_active_session(
+        owner = await repository.get_active_owner(
             session,
-            session_id=body.session_id,
+            owner_id=body.owner_id,
         )
         await session.commit()
-    if drain is None:
-        raise HTTPException(status_code=404, detail="Active ingress Session not found.")
+    if owner is None:
+        raise HTTPException(status_code=404, detail="Active ingress owner not found.")
     await runtime.submit(
         build_external_channel_ingress_job_request(
-            session_id=body.session_id,
-            drain_created_at=drain.created_at,
+            owner_id=body.owner_id,
+            drain_created_at=owner.created_at,
             now=datetime.datetime.now(datetime.UTC),
         )
     )

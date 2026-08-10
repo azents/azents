@@ -1483,6 +1483,15 @@ class RDBExternalChannelAccessRequest(RDBModel):
         name="fk_external_channel_access_requests_connection_resource",
         ondelete="RESTRICT",
     )
+    FK_CONNECTION_SOURCE_RESOURCE = sa.ForeignKeyConstraint(
+        ["connection_id", "source_resource_id"],
+        [
+            "external_channel_resources.connection_id",
+            "external_channel_resources.id",
+        ],
+        name="fk_external_channel_access_requests_connection_source_resource",
+        ondelete="RESTRICT",
+    )
     FK_CONNECTION_POSITION = sa.ForeignKeyConstraint(
         ["connection_id", "conversation_position_id"],
         [
@@ -1502,6 +1511,11 @@ class RDBExternalChannelAccessRequest(RDBModel):
     route_id: Mapped[str] = mapped_column(
         sa.String(32),
         sa.ForeignKey("external_channel_agent_routes.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source_resource_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_resources.id", ondelete="RESTRICT"),
         nullable=False,
     )
     resource_id: Mapped[str] = mapped_column(
@@ -1612,6 +1626,7 @@ class RDBExternalChannelAccessRequest(RDBModel):
         IX_SETUP_CLAIM_ID,
         UQ_ROUTE_TRIGGER_MESSAGE,
         FK_CONNECTION_RESOURCE,
+        FK_CONNECTION_SOURCE_RESOURCE,
         FK_CONNECTION_POSITION,
     )
 

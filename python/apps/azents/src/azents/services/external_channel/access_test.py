@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentSessionStatus,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelProvider,
@@ -19,7 +20,14 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelSetupClaimStatus,
 )
-from azents.services.external_channel.access import ExternalChannelAccessService
+from azents.services.external_channel.access import (
+    ExternalChannelAccessDecisionError,
+    ExternalChannelAccessService,
+)
+from azents.services.external_channel.conversation_provisioning import (
+    ExternalChannelConversationPreparation,
+    ExternalChannelConversationProvisioningError,
+)
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
@@ -64,6 +72,7 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
     request = SimpleNamespace(
         id="access-secret",
         route_id="route-1",
+        connection_id="connection-secret",
         resource_id="resource-secret",
         principal_id="principal-secret",
         agent_session_id=None,
@@ -145,6 +154,15 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
             connection_id=None,
         )
     )
+    provisioning = MagicMock()
+    provisioning.prepare = AsyncMock(
+        return_value=ExternalChannelConversationPreparation(
+            target_resource_id=resource.id,
+            delivery_channel_id=None,
+            initial_thread_title=None,
+        )
+    )
+    provisioning.apply = AsyncMock()
     service = ExternalChannelAccessService(
         session_manager=cast(Any, _SessionManager()),
         repository=cast(Any, repository),
@@ -155,7 +173,9 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
             ),
         ),
         agent_repository=cast(Any, agent_repository),
+        agent_session_repository=cast(Any, MagicMock()),
         root_agent_session_creation_service=cast(Any, root_creation),
+        conversation_provisioning=cast(Any, provisioning),
         ingestion_replay_service=cast(Any, replay),
     )
 
@@ -191,6 +211,11 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
     replay_args = replay.replay_access_allow.await_args
     assert replay_args is not None
     assert replay_args.kwargs["initial_title_eligible"] is created
+    provisioning.prepare.assert_awaited_once_with(
+        connection_id=connection.id,
+        target_resource_id=resource.id,
+    )
+    provisioning.apply.assert_awaited_once()
 
 
 async def test_setup_allow_grants_access_without_binding_session_or_replay() -> None:
@@ -249,6 +274,9 @@ async def test_setup_allow_grants_access_without_binding_session_or_replay() -> 
     root_creation.create_root_session = AsyncMock()
     replay = MagicMock()
     replay.replay_access_allow = AsyncMock()
+    provisioning = MagicMock()
+    provisioning.prepare = AsyncMock()
+    provisioning.apply = AsyncMock()
     service = ExternalChannelAccessService(
         session_manager=cast(Any, _SessionManager()),
         repository=cast(Any, repository),
@@ -259,7 +287,9 @@ async def test_setup_allow_grants_access_without_binding_session_or_replay() -> 
             ),
         ),
         agent_repository=cast(Any, MagicMock()),
+        agent_session_repository=cast(Any, MagicMock()),
         root_agent_session_creation_service=cast(Any, root_creation),
+        conversation_provisioning=cast(Any, provisioning),
         ingestion_replay_service=cast(Any, replay),
     )
 
@@ -280,4 +310,157 @@ async def test_setup_allow_grants_access_without_binding_session_or_replay() -> 
     assert result.setup_continuation.route_id == "route-1"
     repository.create_binding_idempotent.assert_not_awaited()
     root_creation.create_root_session.assert_not_awaited()
+    provisioning.prepare.assert_not_awaited()
+    provisioning.apply.assert_not_awaited()
     replay.replay_access_allow.assert_not_awaited()
+
+
+async def test_allow_preparation_failure_creates_no_session_or_decision() -> None:
+    """Provider preparation failure leaves access and Session state unchanged."""
+    now = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+    request = SimpleNamespace(
+        id="access-1",
+        connection_id="connection-1",
+        route_id="route-1",
+        resource_id="resource-1",
+        principal_id="principal-1",
+        agent_session_id=None,
+        setup_claim_id=None,
+        status=ExternalChannelAccessRequestStatus.PENDING,
+        expires_at=now + datetime.timedelta(minutes=5),
+    )
+    route = SimpleNamespace(
+        id="route-1",
+        connection_id="connection-1",
+        require_active_agent_id=lambda: "agent-1",
+    )
+    connection = SimpleNamespace(id="connection-1")
+    resource = SimpleNamespace(
+        id="resource-1",
+        connection_id="connection-1",
+        status=ExternalChannelResourceStatus.ACTIVE,
+    )
+    repository = MagicMock()
+    repository.get_access_request = AsyncMock(return_value=request)
+    repository.get_agent_route = AsyncMock(return_value=route)
+    repository.lock_connection_for_routing = AsyncMock(return_value=connection)
+    repository.get_routable_route_by_id = AsyncMock(return_value=route)
+    repository.lock_resource = AsyncMock(return_value=resource)
+    repository.lock_connected_binding_by_resource = AsyncMock(return_value=None)
+    repository.get_active_block = AsyncMock(return_value=None)
+    repository.decide_access_request = AsyncMock()
+    agent_repository = MagicMock()
+    agent_repository.get_by_id = AsyncMock(
+        return_value=SimpleNamespace(
+            id="agent-1",
+            lifecycle_status=AgentLifecycleStatus.ACTIVE,
+        )
+    )
+    root_creation = MagicMock()
+    root_creation.create_root_session = AsyncMock()
+    provisioning = MagicMock()
+    provisioning.prepare = AsyncMock(
+        side_effect=ExternalChannelConversationProvisioningError(
+            category="temporary_failure",
+            retryable=True,
+        )
+    )
+    provisioning.apply = AsyncMock()
+    service = ExternalChannelAccessService(
+        session_manager=cast(Any, _SessionManager()),
+        repository=cast(Any, repository),
+        work_repository=cast(Any, MagicMock()),
+        agent_repository=cast(Any, agent_repository),
+        agent_session_repository=cast(Any, MagicMock()),
+        root_agent_session_creation_service=cast(Any, root_creation),
+        conversation_provisioning=cast(Any, provisioning),
+        ingestion_replay_service=cast(Any, MagicMock()),
+    )
+
+    with pytest.raises(
+        ExternalChannelAccessDecisionError,
+        match="could not be prepared",
+    ):
+        await service.allow(
+            access_request_id=request.id,
+            scope=ExternalChannelAccessGrantScope.AGENT,
+            decided_by_user_id="approver-1",
+            decision_summary=None,
+            now=now,
+        )
+
+    root_creation.create_root_session.assert_not_awaited()
+    provisioning.apply.assert_not_awaited()
+    repository.decide_access_request.assert_not_awaited()
+
+
+async def test_allow_rejects_existing_binding_with_stopping_session() -> None:
+    """Allow cannot reuse a Binding whose Session is stopping."""
+    now = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+    request = SimpleNamespace(
+        id="access-1",
+        connection_id="connection-1",
+        route_id="route-1",
+        resource_id="resource-1",
+        principal_id="principal-1",
+        agent_session_id="session-1",
+        setup_claim_id=None,
+        status=ExternalChannelAccessRequestStatus.PENDING,
+        expires_at=now + datetime.timedelta(minutes=5),
+    )
+    route = SimpleNamespace(
+        id="route-1",
+        connection_id="connection-1",
+        require_active_agent_id=lambda: "agent-1",
+    )
+    connection = SimpleNamespace(id="connection-1")
+    resource = SimpleNamespace(
+        id="resource-1",
+        connection_id="connection-1",
+        status=ExternalChannelResourceStatus.ACTIVE,
+    )
+    binding = SimpleNamespace(
+        route_id="route-1",
+        agent_session_id="session-1",
+    )
+    repository = MagicMock()
+    repository.get_access_request = AsyncMock(return_value=request)
+    repository.get_agent_route = AsyncMock(return_value=route)
+    repository.lock_connection_for_routing = AsyncMock(return_value=connection)
+    repository.get_routable_route_by_id = AsyncMock(return_value=route)
+    repository.lock_resource = AsyncMock(return_value=resource)
+    repository.lock_connected_binding_by_resource = AsyncMock(return_value=binding)
+    agent_session_repository = MagicMock()
+    agent_session_repository.lock_by_id = AsyncMock(
+        return_value=SimpleNamespace(
+            status=AgentSessionStatus.ACTIVE,
+            stop_requested_at=now,
+        )
+    )
+    provisioning = MagicMock()
+    provisioning.prepare = AsyncMock()
+    service = ExternalChannelAccessService(
+        session_manager=cast(Any, _SessionManager()),
+        repository=cast(Any, repository),
+        work_repository=cast(Any, MagicMock()),
+        agent_repository=cast(Any, MagicMock()),
+        agent_session_repository=cast(Any, agent_session_repository),
+        root_agent_session_creation_service=cast(Any, MagicMock()),
+        conversation_provisioning=cast(Any, provisioning),
+        ingestion_replay_service=cast(Any, MagicMock()),
+    )
+
+    with pytest.raises(
+        ExternalChannelAccessDecisionError,
+        match="not active",
+    ):
+        await service.allow(
+            access_request_id=request.id,
+            scope=ExternalChannelAccessGrantScope.AGENT,
+            decided_by_user_id="approver-1",
+            decision_summary=None,
+            now=now,
+        )
+
+    agent_session_repository.lock_by_id.assert_awaited_once()
+    provisioning.prepare.assert_not_awaited()

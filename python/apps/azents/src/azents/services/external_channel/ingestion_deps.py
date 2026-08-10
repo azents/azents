@@ -8,6 +8,9 @@ from azents.services.external_channel.conversation import (
     ExternalChannelConversationLock,
     ExternalChannelParticipationLock,
 )
+from azents.services.external_channel.conversation_provisioning import (
+    ExternalChannelConversationProvisioningService,
+)
 from azents.services.external_channel.deps import (
     get_external_channel_conversation_lock,
     get_external_channel_participation_lock,
@@ -43,6 +46,10 @@ def get_external_channel_conversation_ingestion_service(
         ExternalChannelMailboxIngestionStore,
         Depends(ExternalChannelMailboxIngestionStore),
     ],
+    conversation_provisioning: Annotated[
+        ExternalChannelConversationProvisioningService,
+        Depends(ExternalChannelConversationProvisioningService),
+    ],
     wake_dispatcher: Annotated[
         ExternalChannelMailboxWakeDispatcher,
         Depends(ExternalChannelMailboxWakeDispatcher),
@@ -54,5 +61,6 @@ def get_external_channel_conversation_ingestion_service(
         participation_lock=participation_lock,
         history_reader=history_reader,
         store=store,
+        conversation_provisioning=conversation_provisioning,
         wake_dispatcher=wake_dispatcher,
     )

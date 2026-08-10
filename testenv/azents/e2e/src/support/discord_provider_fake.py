@@ -406,13 +406,20 @@ class FakeState:
         operation = payload.get("operation")
         occurrence = payload.get("occurrence")
         if (
-            operation not in {"create_message", "get_message", "get_history"}
+            operation
+            not in {
+                "create_message",
+                "create_thread",
+                "get_message",
+                "get_history",
+            }
             or not isinstance(occurrence, int)
             or isinstance(occurrence, bool)
             or occurrence < 1
         ):
             raise ValueError(
-                "Barrier requires an exact/history operation and positive occurrence."
+                "Barrier requires a supported provider operation and positive "
+                "occurrence."
             )
         with self.lock:
             self._delivery_barrier_operation = cast(str, operation)
@@ -1598,7 +1605,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         self.state.record_request(operation, method=self.command, metadata=metadata)
         self._controlled_operation = operation
         scenario = self.state.scenario(operation)
-        if operation in {"get_message", "get_history"} and not (
+        if operation in {"create_thread", "get_message", "get_history"} and not (
             self.state.wait_for_delivery_barrier(operation)
         ):
             return "transport_unknown"

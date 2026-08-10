@@ -24,6 +24,9 @@ from azents.services.external_channel.conversation import (
     ExternalChannelOperationDeadline,
     ExternalChannelParticipationScope,
 )
+from azents.services.external_channel.conversation_provisioning import (
+    ExternalChannelConversationPreparation,
+)
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
     ExternalChannelConversationIngestionService,
@@ -158,8 +161,9 @@ class _Store:
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+        provider_preparation: ExternalChannelConversationPreparation | None,
     ) -> ExternalChannelIngestionAcceptance:
-        del request, history
+        del request, history, provider_preparation
         self.accepted_starts.append(preparation.exclusive_start_position)
         return self.acceptances.pop(0)
 
@@ -214,6 +218,28 @@ class _EventHistory:
 
 
 @dataclass
+class _Provisioning:
+    events: list[str] | None = None
+    calls: list[str] = field(default_factory=list)
+
+    async def prepare(
+        self,
+        *,
+        connection_id: str,
+        target_resource_id: str,
+    ) -> ExternalChannelConversationPreparation:
+        del connection_id
+        self.calls.append(target_resource_id)
+        if self.events is not None:
+            self.events.append(f"provision:{target_resource_id}")
+        return ExternalChannelConversationPreparation(
+            target_resource_id=target_resource_id,
+            delivery_channel_id=None,
+            initial_thread_title=None,
+        )
+
+
+@dataclass
 class _EventStore:
     events: list[str]
     priority_request: ExternalChannelIngestionRequest | None = None
@@ -253,8 +279,9 @@ class _EventStore:
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+        provider_preparation: ExternalChannelConversationPreparation | None,
     ) -> ExternalChannelIngestionAcceptance:
-        del preparation, history
+        del preparation, history, provider_preparation
         self.events.append(f"accept:{request.operation.value}")
         return ExternalChannelIngestionAcceptance(
             status="accepted",
@@ -337,7 +364,8 @@ def _request(
             if operation is ExternalChannelIngestionOperation.CURRENT_TRIGGER
             else ExternalChannelReplayBoundary(
                 connection_id="connection-1",
-                resource_id="resource-1",
+                source_resource_id="resource-1",
+                target_resource_id="resource-1",
                 principal_id="principal-1",
                 trigger_provider_message_key="message-1",
                 conversation_position_id="position-1",
@@ -493,6 +521,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
         participation_lock=lock,
         history_reader=history,
         store=store,
+        conversation_provisioning=_Provisioning(),
         wake_dispatcher=wake,
     )
 
@@ -540,6 +569,7 @@ async def test_duplicate_recovers_pending_wake_without_history_read() -> None:
             ],
             acceptances=[],
         ),
+        conversation_provisioning=_Provisioning(),
         wake_dispatcher=wake,
     )
 
@@ -580,6 +610,7 @@ async def test_provider_control_delivery_does_not_gate_accepted_wake() -> None:
                 )
             ],
         ),
+        conversation_provisioning=_Provisioning(),
         wake_dispatcher=wake,
     )
 
@@ -599,6 +630,7 @@ async def test_parent_history_io_runs_outside_locks() -> None:
         participation_lock=_EventLock("participation", events),
         history_reader=_EventHistory(events),
         store=_EventStore(events),
+        conversation_provisioning=_Provisioning(events),
         wake_dispatcher=_WakeDispatcher(),
     )
 
@@ -632,20 +664,27 @@ async def test_selected_setup_continuation_precedes_newer_parent_ingress() -> No
     """A selected setup source is accepted before the newer top-level trigger."""
     events: list[str] = []
     store = _EventStore(events, priority_request=_setup_request())
+    provisioning = _Provisioning(events)
     wake = _WakeDispatcher(results=["dispatched", "dispatched"])
     service = ExternalChannelConversationIngestionService(
         conversation_lock=_EventLock("conversation", events),
         participation_lock=_EventLock("participation", events),
         history_reader=_EventHistory(events),
         store=store,
+        conversation_provisioning=provisioning,
         wake_dispatcher=wake,
     )
 
     outcome = await service.ingest(_parent_request())
 
     assert outcome.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
-    assert [event for event in events if event.startswith(("history:", "accept:"))] == [
+    assert [
+        event
+        for event in events
+        if event.startswith(("history:", "provision:", "accept:"))
+    ] == [
         "history:message-key-1",
+        "provision:parent-resource-1",
         "accept:setup_continuation",
         "history:message-key-2",
         "accept:current_trigger",
@@ -681,6 +720,7 @@ async def test_concurrent_wake_claim_is_retryable() -> None:
             ],
             acceptances=[],
         ),
+        conversation_provisioning=_Provisioning(),
         wake_dispatcher=wake,
     )
 
@@ -708,6 +748,7 @@ async def test_history_failure_returns_retryable_outcome() -> None:
             ],
             acceptances=[],
         ),
+        conversation_provisioning=_Provisioning(),
         wake_dispatcher=_WakeDispatcher(),
     )
 

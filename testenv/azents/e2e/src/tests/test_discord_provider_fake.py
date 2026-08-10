@@ -672,10 +672,10 @@ def test_discord_fake_controls_confirmed_and_unknown_http_categories(
     assert "nonce-" not in str(evidence)
 
 
-def test_discord_fake_sequences_retry_after_and_blocks_exact_history(
+def test_discord_fake_sequences_retry_after_and_blocks_provider_work(
     discord_fake_urls: tuple[str, str],
 ) -> None:
-    """Sequence provider Retry-After and release an exact-message read barrier."""
+    """Sequence Retry-After and release exact-read and thread-create barriers."""
     discord_fake_url, _ = discord_fake_urls
     channel_id = "400000000000000001"
     message_id = "400000000000000101"
@@ -783,6 +783,59 @@ def test_discord_fake_sequences_retry_after_and_blocks_exact_history(
         timeout=5,
     ).json()
     assert "provider content excluded from evidence" not in str(evidence)
+
+    requests.post(
+        f"{discord_fake_url}/__testenv/barrier",
+        json={"operation": "create_thread", "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    thread_responses: list[requests.Response] = []
+
+    def request_thread_creation() -> None:
+        thread_responses.append(
+            _sdk_call(
+                discord_fake_url,
+                "create_thread",
+                guild_id=STATE.guild_id,
+                parent_channel_id=channel_id,
+                root_message_id=message_id,
+                name="content-free-thread-name",
+                auto_archive_duration=60,
+            )
+        )
+
+    create_thread = threading.Thread(target=request_thread_creation)
+    create_thread.start()
+    for _ in range(50):
+        barrier = requests.get(
+            f"{discord_fake_url}/__testenv/barrier",
+            timeout=5,
+        ).json()
+        if barrier["reached"]:
+            break
+        threading.Event().wait(0.02)
+    else:
+        pytest.fail("Discord thread-create barrier was not reached.")
+    assert thread_responses == []
+    assert barrier == {
+        "operation": "create_thread",
+        "occurrence": 1,
+        "request_count": 1,
+        "reached": True,
+        "released": False,
+    }
+    requests.post(
+        f"{discord_fake_url}/__testenv/barrier/release",
+        timeout=5,
+    ).raise_for_status()
+    create_thread.join(timeout=5)
+    assert not create_thread.is_alive()
+    assert thread_responses[0].status_code == 200
+    evidence = requests.get(
+        f"{discord_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert "content-free-thread-name" not in str(evidence)
 
 
 def test_discord_fake_confirmed_create_failure_does_not_consume_nonce_identity(

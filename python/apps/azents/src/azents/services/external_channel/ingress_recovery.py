@@ -56,27 +56,27 @@ class ExternalChannelIngressRecoveryService:
     async def run_once(self, *, now: datetime.datetime) -> list[str]:
         """Submit one bounded set of due or reclaimable Session identities."""
         async with self.session_manager() as session:
-            drains = await self.queue_repository.list_recoverable_sessions(
+            owners = await self.queue_repository.list_recoverable_owners(
                 session,
                 now=now,
                 limit=_RECOVERY_SCAN_LIMIT,
             )
             await session.commit()
         submitted: list[str] = []
-        for drain in drains:
+        for owner in owners:
             try:
                 await self.job_runtime.submit(
                     build_external_channel_ingress_job_request(
-                        session_id=drain.session_id,
-                        drain_created_at=drain.created_at,
+                        owner_id=owner.id,
+                        drain_created_at=owner.created_at,
                         now=now,
                     )
                 )
             except JobRuntimeClosedError:
                 logger.warning(
                     "External Channel ingress recovery Runtime is unavailable",
-                    extra={"external_channel_session_id": drain.session_id},
+                    extra={"external_channel_ingress_owner_id": owner.id},
                 )
                 break
-            submitted.append(drain.session_id)
+            submitted.append(owner.id)
         return submitted

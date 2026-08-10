@@ -43,6 +43,7 @@ from azents.repos.external_channel.ingress_queue import (
 from azents.repos.external_channel.ingress_queue_data import (
     ExternalChannelIngressBatch,
     ExternalChannelIngressItem,
+    ExternalChannelIngressOwner,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.conversation import (
@@ -74,6 +75,10 @@ from azents.services.external_channel.ingestion_history import (
 from azents.services.external_channel.ingress_metrics import (
     ExternalChannelIngressMetrics,
     get_external_channel_ingress_metrics,
+)
+from azents.services.external_channel.ingress_provisioning import (
+    ExternalChannelIngressProvisioningError,
+    ExternalChannelIngressProvisioningService,
 )
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
@@ -144,9 +149,9 @@ type _PreparedItem = _PreparedSuccess | _PreparedSuppressed | _PreparedFailure
 
 
 class ExternalChannelIngressJobPayload(BaseModel):
-    """JSON-safe Session identity submitted to the common Job Runtime."""
+    """JSON-safe conversation owner submitted to the common Job Runtime."""
 
-    session_id: str
+    owner_id: str
 
 
 @dataclasses.dataclass
@@ -201,6 +206,10 @@ class ExternalChannelIngressDrainService:
         ExternalChannelIngressProviderPolicyRegistry,
         Depends(ExternalChannelIngressProviderPolicyRegistry),
     ]
+    provisioning_service: Annotated[
+        ExternalChannelIngressProvisioningService,
+        Depends(ExternalChannelIngressProvisioningService),
+    ]
     mailbox_service: Annotated[MailboxService, Depends(MailboxService)]
     wake_dispatcher: Annotated[
         ExternalChannelMailboxWakeDispatcher,
@@ -214,16 +223,16 @@ class ExternalChannelIngressDrainService:
     async def drain(
         self,
         *,
-        session_id: str,
+        owner_id: str,
         deadline: datetime.datetime,
     ) -> None:
-        """Acquire one Session lease and process due batches until idle."""
+        """Acquire one conversation-owner lease and process due batches until idle."""
         lease_owner = uuid7().hex
         now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:
             claim = await self.queue_repository.claim_lease(
                 session,
-                session_id=session_id,
+                owner_id=owner_id,
                 lease_owner=lease_owner,
                 now=now,
                 lease_expires_at=min(deadline, now + _LEASE_DURATION),
@@ -231,15 +240,21 @@ class ExternalChannelIngressDrainService:
             await session.commit()
         if claim is None:
             return
+        if not claim.owner.ready and not await self._prepare_owner(
+            owner=claim.owner,
+            lease_owner=lease_owner,
+            lease_generation=claim.owner.lease_generation,
+        ):
+            return
         coordination_retries = 0
         while True:
             now = datetime.datetime.now(datetime.UTC)
             async with self.session_manager() as session:
                 batch = await self.queue_repository.claim_due_batch(
                     session,
-                    session_id=session_id,
+                    owner_id=owner_id,
                     lease_owner=lease_owner,
-                    lease_generation=claim.session.lease_generation,
+                    lease_generation=claim.owner.lease_generation,
                     now=now,
                 )
                 await session.commit()
@@ -247,9 +262,9 @@ class ExternalChannelIngressDrainService:
                 async with self.session_manager() as session:
                     await self.queue_repository.release_lease(
                         session,
-                        session_id=session_id,
+                        owner_id=owner_id,
                         lease_owner=lease_owner,
-                        lease_generation=claim.session.lease_generation,
+                        lease_generation=claim.owner.lease_generation,
                     )
                     await session.commit()
                 return
@@ -266,13 +281,122 @@ class ExternalChannelIngressDrainService:
                 coordination_retries += 1
                 if coordination_retries >= _MAX_COORDINATION_RETRIES:
                     await self._release_lease(
-                        session_id=session_id,
+                        owner_id=owner_id,
                         lease_owner=lease_owner,
-                        lease_generation=claim.session.lease_generation,
+                        lease_generation=claim.owner.lease_generation,
                     )
                     return
                 continue
             coordination_retries = 0
+
+    async def _prepare_owner(
+        self,
+        *,
+        owner: ExternalChannelIngressOwner,
+        lease_owner: str,
+        lease_generation: int,
+    ) -> bool:
+        """Prepare one provider conversation and record its resulting Session."""
+        try:
+            preparation = await self.provisioning_service.prepare(owner=owner)
+            async with self.session_manager() as session:
+                now = datetime.datetime.now(datetime.UTC)
+                connection = await self.repository.lock_connection_for_routing(
+                    session,
+                    connection_id=owner.connection_id,
+                )
+                if connection is None:
+                    await session.rollback()
+                    raise ExternalChannelIngressProvisioningError(
+                        category="ownership_stale",
+                        retryable=False,
+                    )
+                locked = await self.queue_repository.lock_leased_owner(
+                    session,
+                    owner_id=owner.id,
+                    lease_owner=lease_owner,
+                    lease_generation=lease_generation,
+                    now=now,
+                )
+                if locked is None:
+                    await session.rollback()
+                    return False
+                binding = await self.provisioning_service.complete(
+                    session,
+                    owner=ExternalChannelIngressOwner.model_validate(locked),
+                    preparation=preparation,
+                )
+                await self.queue_repository.mark_owner_ready(
+                    session,
+                    owner=locked,
+                    binding_id=binding.id,
+                    session_id=binding.agent_session_id,
+                )
+                await session.commit()
+            return True
+        except ExternalChannelIngressProvisioningError as error:
+            return await self._record_preparation_failure(
+                owner=owner,
+                lease_owner=lease_owner,
+                lease_generation=lease_generation,
+                error=error,
+            )
+
+    async def _record_preparation_failure(
+        self,
+        *,
+        owner: ExternalChannelIngressOwner,
+        lease_owner: str,
+        lease_generation: int,
+        error: ExternalChannelIngressProvisioningError,
+    ) -> bool:
+        """Apply one bounded owner-level retry or terminal deletion."""
+        now = datetime.datetime.now(datetime.UTC)
+        exhausted = (
+            not error.retryable
+            or owner.preparation_attempt_count + 1 >= _MAX_PROVIDER_ATTEMPTS
+            or now - owner.created_at >= _MAX_ITEM_AGE
+        )
+        async with self.session_manager() as session:
+            locked = await self.queue_repository.lock_leased_owner(
+                session,
+                owner_id=owner.id,
+                lease_owner=lease_owner,
+                lease_generation=lease_generation,
+                now=datetime.datetime.now(datetime.UTC),
+            )
+            if locked is None:
+                await session.rollback()
+                return False
+            if exhausted:
+                logger.warning(
+                    "External Channel ingress owner exceeded its active lifecycle",
+                    extra={
+                        "external_channel_ingress_owner_id": owner.id,
+                        "external_channel_failure_category": error.category,
+                        "external_channel_attempt_count": (
+                            owner.preparation_attempt_count + 1
+                        ),
+                        "external_channel_age_seconds": max(
+                            0,
+                            int((now - owner.created_at).total_seconds()),
+                        ),
+                    },
+                )
+                await self.queue_repository.delete_owner(session, owner=locked)
+            else:
+                delay_index = min(
+                    owner.preparation_attempt_count,
+                    len(_DEFAULT_RETRY_DELAYS) - 1,
+                )
+                await self.queue_repository.schedule_preparation_retry(
+                    session,
+                    owner=locked,
+                    next_attempt_at=now
+                    + datetime.timedelta(seconds=_DEFAULT_RETRY_DELAYS[delay_index]),
+                )
+            await session.commit()
+        return False
 
     async def _prepare_batch(
         self,
@@ -406,7 +530,7 @@ class ExternalChannelIngressDrainService:
                 if position is None:
                     await self.queue_repository.reset_batch_for_coordination(
                         session,
-                        drain=drain,
+                        owner=drain,
                         items=items,
                     )
                     await session.commit()
@@ -422,7 +546,7 @@ class ExternalChannelIngressDrainService:
             ):
                 await self.queue_repository.reset_batch_for_coordination(
                     session,
-                    drain=drain,
+                    owner=drain,
                     items=items,
                 )
                 await session.commit()
@@ -434,6 +558,7 @@ class ExternalChannelIngressDrainService:
                 if not await self._ownership_current(
                     session,
                     item=item,
+                    batch=batch,
                     connection=connections[item.connection_id],
                     now=now,
                 ):
@@ -482,11 +607,11 @@ class ExternalChannelIngressDrainService:
                     case _PreparedSuccess() as success:
                         resource = await self.repository.lock_resource(
                             session,
-                            resource_id=item.resource_id,
+                            resource_id=batch.target_resource_id,
                         )
                         binding = await self.repository.lock_binding(
                             session,
-                            binding_id=item.binding_id,
+                            binding_id=batch.binding_id,
                         )
                         if resource is None or binding is None:
                             raise RuntimeError(
@@ -526,7 +651,7 @@ class ExternalChannelIngressDrainService:
                             )
                             enqueues.append(
                                 MailboxEnqueue(
-                                    session_id=item.session_id,
+                                    session_id=batch.session_id,
                                     kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
                                     scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                                     requested_model_target_label=None,
@@ -630,7 +755,7 @@ class ExternalChannelIngressDrainService:
                 )
             await self.queue_repository.finish_batch(
                 session,
-                drain=drain,
+                owner=drain,
                 deleted_items=delete_items,
             )
             await session.commit()
@@ -669,10 +794,10 @@ class ExternalChannelIngressDrainService:
                 now=datetime.datetime.now(datetime.UTC),
             )
             if locked is not None:
-                drain, items = locked
+                owner, items = locked
                 await self.queue_repository.reset_batch_for_coordination(
                     session,
-                    drain=drain,
+                    owner=owner,
                     items=items,
                 )
             await session.commit()
@@ -680,7 +805,7 @@ class ExternalChannelIngressDrainService:
     async def _release_lease(
         self,
         *,
-        session_id: str,
+        owner_id: str,
         lease_owner: str,
         lease_generation: int,
     ) -> None:
@@ -688,7 +813,7 @@ class ExternalChannelIngressDrainService:
         async with self.session_manager() as session:
             await self.queue_repository.release_lease(
                 session,
-                session_id=session_id,
+                owner_id=owner_id,
                 lease_owner=lease_owner,
                 lease_generation=lease_generation,
             )
@@ -699,6 +824,7 @@ class ExternalChannelIngressDrainService:
         session: AsyncSession,
         *,
         item: ExternalChannelIngressItem,
+        batch: ExternalChannelIngressBatch,
         connection: ExternalChannelConnection | None,
         now: datetime.datetime,
     ) -> bool:
@@ -721,25 +847,32 @@ class ExternalChannelIngressDrainService:
             )
         ):
             return False
-        resource = await self.repository.lock_resource(
+        source_resource = await self.repository.lock_resource(
             session,
-            resource_id=item.resource_id,
+            resource_id=item.source_resource_id,
+        )
+        target_resource = await self.repository.lock_resource(
+            session,
+            resource_id=batch.target_resource_id,
         )
         binding = await self.repository.lock_binding(
             session,
-            binding_id=item.binding_id,
+            binding_id=batch.binding_id,
         )
         target_session = await self.agent_session_repository.lock_by_id(
             session,
-            item.session_id,
+            batch.session_id,
         )
         return (
-            resource is not None
-            and resource.connection_id == item.connection_id
-            and resource.status is ExternalChannelResourceStatus.ACTIVE
+            source_resource is not None
+            and source_resource.connection_id == item.connection_id
+            and source_resource.status is ExternalChannelResourceStatus.ACTIVE
+            and target_resource is not None
+            and target_resource.connection_id == item.connection_id
+            and target_resource.status is ExternalChannelResourceStatus.ACTIVE
             and binding is not None
-            and binding.resource_id == item.resource_id
-            and binding.agent_session_id == item.session_id
+            and binding.resource_id == batch.target_resource_id
+            and binding.agent_session_id == batch.session_id
             and binding.disconnected_at is None
             and target_session is not None
             and target_session.status is AgentSessionStatus.ACTIVE
@@ -750,30 +883,30 @@ class ExternalChannelIngressDrainService:
 async def execute_external_channel_ingress_job(
     context: JobExecutionContext,
 ) -> JobPayload:
-    """Resolve and drain one Session queue through task-local dependencies."""
+    """Resolve and drain one conversation owner through task-local dependencies."""
     payload = ExternalChannelIngressJobPayload.model_validate(context.request.payload)
     service = await context.container.solve(ExternalChannelIngressDrainService)
     await service.drain(
-        session_id=payload.session_id,
+        owner_id=payload.owner_id,
         deadline=context.request.deadline,
     )
-    return {"session_id": payload.session_id}
+    return {"owner_id": payload.owner_id}
 
 
 def build_external_channel_ingress_job_request(
     *,
-    session_id: str,
+    owner_id: str,
     drain_created_at: datetime.datetime,
     now: datetime.datetime,
 ) -> JobRequest:
     """Build one coalesced active-drain-lifecycle request."""
-    payload = ExternalChannelIngressJobPayload(session_id=session_id)
+    payload = ExternalChannelIngressJobPayload(owner_id=owner_id)
     lifecycle = drain_created_at.astimezone(datetime.UTC).isoformat(
         timespec="microseconds"
     )
     return JobRequest(
         handler_key=EXTERNAL_CHANNEL_INGRESS_JOB_HANDLER_KEY,
-        execution_key=f"external-channel-ingress:{session_id}:{lifecycle}",
+        execution_key=f"external-channel-ingress:{owner_id}:{lifecycle}",
         deadline=now + _JOB_DURATION,
         payload=payload.model_dump(mode="json"),
     )

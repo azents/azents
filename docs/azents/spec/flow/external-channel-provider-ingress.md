@@ -31,7 +31,11 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/conversation.py
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_history.py
+  - python/apps/azents/src/azents/services/external_channel/ingress_admission.py
+  - python/apps/azents/src/azents/services/external_channel/conversation_provisioning.py
+  - python/apps/azents/src/azents/services/external_channel/ingress_provisioning.py
   - python/apps/azents/src/azents/services/external_channel/ingress_queue.py
+  - python/apps/azents/src/azents/services/external_channel/ingress_recovery.py
   - python/apps/azents/src/azents/services/external_channel/ingress_metrics.py
   - python/apps/azents/src/azents/services/external_channel/ingress_observability.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
@@ -58,7 +62,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-10
-spec_version: 35
+spec_version: 36
 ---
 
 # External Channel Provider Ingress
@@ -115,8 +119,9 @@ Slack sends HTTP callbacks to the single fixed endpoint
    setting. If no setting exists, it creates or replaces one setup claim and setup
    control in the provider parent channel with no Binding, Session, canonical mailbox
    input, wake, or AgentRun.
-   Configured traffic or selected setup replay resolves one immutable target Session
-   and inserts or reuses one content-free active ingress item in PostgreSQL. A new
+   Configured traffic resolves one effective target conversation owner and inserts or
+   reuses one content-free active ingress item even when its Binding and Session do not
+   exist yet. A new
    eligible explicit mention in an existing Binding may additionally create one
    idempotent settings entry point; ordinary traffic, deployment, startup, and the
    drain worker do not create it.
@@ -264,60 +269,74 @@ configuration or lease authority. Raw callback content is neither canonical inpu
 durable queue content.
 
 1. A short transaction revalidates the current connection, route, participation,
-   access, Binding, Resource, and target Session filters. An ordinary non-invocation
-   stops before queue insertion when no connected Binding exists or its response mode
-   is `mention_only`. An eligible top-level invocation with no setting creates or
-   replaces setup state and returns before queue insertion.
-2. Configured traffic and selected setup/access replay lock or create the Session
-   ingress state and insert or reuse one content-free active ingress item. The item
-   retains only provider and routing identities, immutable Session/Binding authority,
-   trigger position, invocation correlation, attempt state, and lease/batch metadata.
-   PostgreSQL is the correctness authority; Redis and in-memory conversation locks are
-   not used for queue ordering, cursor correctness, or recovery.
-3. After commit, the producer submits the active drain lifecycle's Session-scoped
-   execution key to the bounded Local Job Runtime. API and External Channel Gateway
-   producers also scan active ingress sessions at startup and periodically, submitting
-   rows whose lease is absent, expired, or due. Callbacks within one active drain
-   lifecycle coalesce, while an empty-row deletion and recreation starts a distinct
-   lifecycle instead of coalescing into its predecessor's ending task. Submission and
-   scans are wake mechanisms rather than durable job authority.
-4. One drain handler conditionally claims the Session lease. Its first claim contains
-   exactly one due item; later claims contain at most ten due items in queue-key order.
-   Resolution is sequential in that order outside a database transaction. A
-   retry-waiting item does not block later due work.
-5. Before provider I/O, the handler suppresses an item already at or behind the durable
+   access, Resource, and any existing Binding/Session filters. It creates or locks the
+   physical source Resource and resolves the effective target Resource: the parent
+   channel for `location=channel`, or the exact root/thread conversation for
+   `location=threads`. An ordinary non-invocation stops before queue insertion when no
+   connected Binding exists or its response mode is `mention_only`. An eligible
+   top-level invocation with no setting creates or replaces setup state and returns
+   before queue insertion.
+2. Configured traffic locks or creates one active conversation owner unique to the
+   effective target Resource and inserts or reuses one content-free item. A ready owner
+   freezes a connected Binding and active Session; a provisioning owner has neither.
+   Items retain their physical source Resource and position separately from the target,
+   plus provider/routing identity, trigger correlation, queue order, attempt state, and
+   processing fences. PostgreSQL is the correctness authority; Redis and in-memory
+   conversation locks are not used for ordering, cursor correctness, or recovery.
+3. After commit, the producer submits an owner-scoped execution key to the bounded
+   Local Job Runtime. API and External Channel Gateway producers also scan due owners
+   at startup and periodically, honoring owner preparation backoff and submitting rows
+   whose lease is absent or expired. Callbacks within one active owner lifecycle
+   coalesce, while empty-owner deletion and recreation starts a distinct lifecycle.
+   Submission and scans are wake mechanisms rather than durable job authority.
+4. A drain first conditionally claims the owner lease. If the owner is not ready, it
+   prepares the provider conversation outside a database transaction. Discord
+   per-thread mode reconciles or creates the actual delivery thread through the public
+   SDK; Discord parent-channel mode and Slack use their existing provider conversation
+   identity without an artificial mutation.
+5. One short ready transaction re-locks the owner and current routing authority,
+   retains the prepared Discord delivery thread on the target Resource when needed,
+   reuses a compatible connected Binding/active Session or creates one root Session,
+   Binding, Channel Work, and initial controls, then records the Binding/Session on the
+   same owner without moving its items. A stopped Session, disconnected Binding, stale
+   setting, or terminal provider result cannot become ready.
+6. A ready owner's first claim contains exactly one due item; later claims contain at
+   most ten due items in queue-key order. Resolution is sequential in that order
+   outside a database transaction. A retry-waiting item does not block later due work.
+7. Before provider history I/O, the handler suppresses an item already at or behind the durable
    conversation cursor. Otherwise the provider policy reads an exclusive-start,
    inclusive-trigger exact/history range, retaining the current bounded visible
    context and one leading omission marker. A same-batch tentative cursor prevents
    avoidable duplicate reads without reordering admitted callbacks.
-6. The final transaction re-locks the Session drain, claimed items, connection
+8. The final transaction re-locks the owner, claimed items, connection
    authority, and affected conversation positions. It validates the initial cursor
    snapshot, correlates every returned provider message with active admitted trigger
    identities, and assigns `prompt_role = context | invocation`. A stale cursor rolls
    back the complete prepared batch and retries coordination without consuming a
    provider attempt.
-7. Every canonical provider message is admitted as one independent
+9. Every canonical provider message is admitted as one independent
    `external_channel_message` mailbox row. Rows from one processing batch share an
    order group with contiguous sequence values following queue order and per-item
    provider-history order.
-8. In the same transaction, successful cursor advances, mailbox rows, retry-tail
+10. In the same transaction, successful cursor advances, mailbox rows, retry-tail
    transitions, bounded-failure deletions, queue completion, drain-state update, and
    the existing Session runnable transition commit atomically. Retry retains the same
    ingress identity and original age while assigning a fresh tail key. Successful,
    suppressed, and bounded-failure items are deleted; no completed outcome or
    tombstone row is created.
-9. A non-empty processing batch emits one post-commit routing-only
+11. A non-empty processing batch emits one post-commit routing-only
    `SessionWakeUp(session_id)`. Broker failure does not roll back mailbox input.
    Existing pending-mailbox and stuck-Session recovery consume the committed input
    without provider resend or a durable wake row.
 
-One ingress lifecycle has at most five provider attempts and at most five minutes of
-original age. Default backoff is bounded; provider `Retry-After` is honored only when
-it fits the remaining age budget. Attempt/age exhaustion, excessive delay, stale
-ownership, malformed provider data, and terminal provider classifications delete the
-active row after final ownership/cursor checks and emit one sanitized warning keyed
-only by ingress identity, provider, closed failure category, attempt count, and age.
-Raw provider errors and message content are never logged.
+Provisioning and item history each have at most five provider attempts and at most five
+minutes of original owner/item age. Retryable preparation retains every item unchanged,
+sets one bounded owner due time, releases the lease, and is not resubmitted before that
+time. Attempt/age exhaustion, excessive delay, stale authority, malformed provider
+data, stopped Session state, and terminal provider classifications emit one sanitized
+warning and remove the applicable active owner/items or item. Raw provider errors and
+message content are never logged. A later eligible provider redelivery may create a new
+owner only after the terminal owner is gone.
 
 An exact connected thread Binding wins route resolution. Otherwise Single uses its
 sole route, Multi uses one valid channel default, and the active participation setting
@@ -325,7 +344,12 @@ selects parent-channel or addressed-thread behavior. Missing settings return onl
 explicit eligible top-level invocations to setup. Empty, removed, stale, or ambiguous
 catalogs never fall back to an arbitrary Agent. Selected setup replay snapshots the
 Agent's current automatic Project policy through the shared root Session creation
-boundary; an existing Binding keeps its prior snapshot.
+boundary. Before selected setup or allowed-access replay creates a Discord per-thread
+Binding/Session, it uses the same provider conversation preparation service outside
+the creation transaction. The final transaction revalidates the exact target, records
+the prepared delivery thread, and only then creates Session state. Retry reconciles an
+indeterminate provider create before repeating the idempotent transaction; an existing
+Binding keeps its prior snapshot and bypasses provider preparation.
 
 The shared response predicate is provider-neutral: explicit invocations proceed in
 either mode; an ordinary message proceeds only for an existing connected
@@ -437,6 +461,11 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-10** (spec_version 36) — Generalized callback admission to
+  effective-conversation owners that can retain triggers before Binding/Session
+  creation, prepare required Discord threads before the atomic ready transition,
+  preserve source-thread fan-in, bound owner retry/cleanup, and reuse the same
+  preparation boundary for setup/access replay.
 - **2026-08-10** (spec_version 35) — Replaced synchronous normal-message ingestion
   with content-free PostgreSQL admission, first-one/later-ten Session drains,
   per-message mailbox rows and `prompt_role`, cursor-CAS batching, retry-tail recovery,

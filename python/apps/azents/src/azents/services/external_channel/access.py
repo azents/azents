@@ -12,6 +12,7 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionProductMode,
     AgentSessionStartReason,
+    AgentSessionStatus,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelProvider,
@@ -21,6 +22,7 @@ from azents.core.enums import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.external_channel.data import (
     ExternalChannelAccessGrant,
@@ -34,6 +36,11 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.services.external_channel.conversation_provisioning import (
+    ExternalChannelConversationPreparation,
+    ExternalChannelConversationProvisioningError,
+    ExternalChannelConversationProvisioningService,
+)
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcomeKind,
 )
@@ -123,9 +130,17 @@ class ExternalChannelAccessService:
         AgentRepository,
         Depends(AgentRepository),
     ]
+    agent_session_repository: Annotated[
+        AgentSessionRepository,
+        Depends(AgentSessionRepository),
+    ]
     root_agent_session_creation_service: Annotated[
         RootAgentSessionCreationService,
         Depends(RootAgentSessionCreationService),
+    ]
+    conversation_provisioning: Annotated[
+        ExternalChannelConversationProvisioningService,
+        Depends(ExternalChannelConversationProvisioningService),
     ]
     ingestion_replay_service: Annotated[
         ExternalChannelIngestionReplayService,
@@ -142,6 +157,10 @@ class ExternalChannelAccessService:
         now: datetime.datetime,
     ) -> ExternalChannelAllowedAccess:
         """Allow one participant and commit the applicable authorization state."""
+        provider_preparation = await self._prepare_allowed_conversation(
+            access_request_id=access_request_id,
+            now=now,
+        )
         async with self.session_manager() as session:
             created_provider_event_type: str | None = None
             request_snapshot = await self.repository.get_access_request(
@@ -196,6 +215,19 @@ class ExternalChannelAccessService:
                 raise ExternalChannelAccessDecisionError(
                     "The external conversation is already bound to another route."
                 )
+            if binding is not None:
+                target_session = await self.agent_session_repository.lock_by_id(
+                    session,
+                    binding.agent_session_id,
+                )
+                if (
+                    target_session is None
+                    or target_session.status is not AgentSessionStatus.ACTIVE
+                    or target_session.stop_requested_at is not None
+                ):
+                    raise ExternalChannelAccessDecisionError(
+                        "The external conversation is not active."
+                    )
             request = await self._locked_request(
                 session,
                 access_request_id=access_request_id,
@@ -261,6 +293,20 @@ class ExternalChannelAccessService:
                     "The linked External Channel binding is no longer active."
                 )
             else:
+                if provider_preparation is None:
+                    raise ExternalChannelAccessDecisionError(
+                        "The external conversation could not be prepared."
+                    )
+                try:
+                    await self.conversation_provisioning.apply(
+                        session,
+                        target_resource_id=resource.id,
+                        preparation=provider_preparation,
+                    )
+                except ExternalChannelConversationProvisioningError as error:
+                    raise ExternalChannelAccessDecisionError(
+                        "The external conversation could not be prepared."
+                    ) from error
                 root_session = (
                     await self.root_agent_session_creation_service.create_root_session(
                         session,
@@ -346,6 +392,117 @@ class ExternalChannelAccessService:
                 control_delete_plan=delete_plan,
                 setup_continuation=None,
             )
+
+    async def _prepare_allowed_conversation(
+        self,
+        *,
+        access_request_id: str,
+        now: datetime.datetime,
+    ) -> ExternalChannelConversationPreparation | None:
+        """Prepare a pending non-setup target before the decision transaction."""
+        async with self.session_manager() as session:
+            request = await self.repository.get_access_request(
+                session,
+                access_request_id=access_request_id,
+            )
+            if request is None:
+                raise ExternalChannelAccessRequestNotFound(access_request_id)
+            if (
+                request.setup_claim_id is not None
+                or request.status is not ExternalChannelAccessRequestStatus.PENDING
+                or request.expires_at <= now
+            ):
+                return None
+            connection_id = request.connection_id
+            if connection_id is None:
+                raise ExternalChannelAccessDecisionError(
+                    "The external conversation replay boundary is unavailable."
+                )
+            route_snapshot = await self.repository.get_agent_route(
+                session,
+                route_id=request.route_id,
+            )
+            if route_snapshot is None:
+                raise ExternalChannelAccessDecisionError(
+                    "The External Channel route is unavailable."
+                )
+            connection = await self.repository.lock_connection_for_routing(
+                session,
+                connection_id=route_snapshot.connection_id,
+            )
+            route = await self.repository.get_routable_route_by_id(
+                session,
+                route_id=request.route_id,
+            )
+            resource = await self.repository.lock_resource(
+                session,
+                resource_id=request.resource_id,
+            )
+            binding = await self.repository.lock_connected_binding_by_resource(
+                session,
+                resource_id=request.resource_id,
+            )
+            if (
+                connection is None
+                or connection.id != connection_id
+                or route is None
+                or route.connection_id != connection.id
+                or resource is None
+                or resource.connection_id != connection.id
+                or resource.status is not ExternalChannelResourceStatus.ACTIVE
+            ):
+                raise ExternalChannelAccessDecisionError(
+                    "The external conversation is not active."
+                )
+            if binding is not None:
+                if binding.route_id != route.id:
+                    raise ExternalChannelAccessDecisionError(
+                        "The external conversation is already bound to another route."
+                    )
+                target_session = await self.agent_session_repository.lock_by_id(
+                    session,
+                    binding.agent_session_id,
+                )
+                if (
+                    target_session is None
+                    or target_session.status is not AgentSessionStatus.ACTIVE
+                    or target_session.stop_requested_at is not None
+                ):
+                    raise ExternalChannelAccessDecisionError(
+                        "The external conversation is not active."
+                    )
+                return None
+            if request.agent_session_id is not None:
+                raise ExternalChannelAccessDecisionError(
+                    "The linked External Channel binding is no longer active."
+                )
+            active_agent_id = route.require_active_agent_id()
+            agent = await self.agent_repository.get_by_id(session, active_agent_id)
+            if (
+                agent is None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            ):
+                raise ExternalChannelAccessDecisionError("The Agent is not active.")
+            if (
+                await self.repository.get_active_block(
+                    session,
+                    agent_id=active_agent_id,
+                    principal_id=request.principal_id,
+                )
+                is not None
+            ):
+                raise ExternalChannelAccessDecisionError(
+                    "The external participant is blocked."
+                )
+        try:
+            return await self.conversation_provisioning.prepare(
+                connection_id=connection_id,
+                target_resource_id=request.resource_id,
+            )
+        except ExternalChannelConversationProvisioningError as error:
+            raise ExternalChannelAccessDecisionError(
+                "The external conversation could not be prepared."
+            ) from error
 
     async def _allow_setup_request(
         self,

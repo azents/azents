@@ -10,6 +10,7 @@ from azents.core.enums import (
     ExternalChannelIngressItemState,
     ExternalChannelIngressProfile,
     ExternalChannelProvider,
+    ExternalChannelResponseMode,
 )
 
 
@@ -19,10 +20,20 @@ class _Record(BaseModel):
     model_config = ConfigDict(frozen=True, from_attributes=True)
 
 
-class ExternalChannelIngressSession(_Record):
-    """One active Session-scoped drain lifecycle."""
+class ExternalChannelIngressOwner(_Record):
+    """One active effective-conversation drain lifecycle."""
 
-    session_id: str
+    id: str
+    connection_id: str
+    target_resource_id: str
+    route_id: str
+    participation_setting_id: str | None
+    participation_settings_generation: int | None
+    response_mode: ExternalChannelResponseMode
+    binding_id: str | None
+    session_id: str | None
+    preparation_attempt_count: int
+    preparation_next_attempt_at: datetime.datetime | None
     lease_owner: str | None
     lease_generation: int
     lease_acquired_at: datetime.datetime | None
@@ -33,12 +44,30 @@ class ExternalChannelIngressSession(_Record):
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
+    @property
+    def ready(self) -> bool:
+        """Return whether the owner has an immutable Binding and Session."""
+        return self.binding_id is not None and self.session_id is not None
+
+
+class ExternalChannelIngressOwnerCreate(_Record):
+    """Immutable effective-conversation owner admission payload."""
+
+    connection_id: str
+    target_resource_id: str
+    route_id: str
+    participation_setting_id: str | None
+    participation_settings_generation: int | None
+    response_mode: ExternalChannelResponseMode
+    binding_id: str | None
+    session_id: str | None
+
 
 class ExternalChannelIngressItem(_Record):
     """One active content-free provider trigger."""
 
     id: str
-    session_id: str
+    owner_id: str
     queue_key: str
     deduplication_key: str
     provider_event_id: str
@@ -57,8 +86,7 @@ class ExternalChannelIngressItem(_Record):
     provider_thread_key: str | None
     delivery_thread_key: str | None
     provider_resource_key: str
-    resource_id: str
-    binding_id: str
+    source_resource_id: str
     conversation_position_id: str
     principal_id: str
     trigger_provider_message_key: str
@@ -79,9 +107,8 @@ class ExternalChannelIngressItem(_Record):
 
 
 class ExternalChannelIngressItemCreate(_Record):
-    """Content-free queue admission payload."""
+    """Content-free queue item admission payload."""
 
-    session_id: str
     deduplication_key: str
     provider_event_id: str
     connection_id: str
@@ -99,8 +126,7 @@ class ExternalChannelIngressItemCreate(_Record):
     provider_thread_key: str | None
     delivery_thread_key: str | None
     provider_resource_key: str
-    resource_id: str
-    binding_id: str
+    source_resource_id: str
     conversation_position_id: str
     principal_id: str
     trigger_provider_message_key: str
@@ -115,20 +141,24 @@ class ExternalChannelIngressItemCreate(_Record):
 class ExternalChannelIngressAdmission(_Record):
     """Idempotent queue admission result."""
 
-    session: ExternalChannelIngressSession
+    owner: ExternalChannelIngressOwner
     item: ExternalChannelIngressItem
     created: bool
+    replaced_stale_owner: bool
 
 
 class ExternalChannelIngressLeaseClaim(_Record):
-    """One fenced Session drain lease."""
+    """One fenced conversation-owner drain lease."""
 
-    session: ExternalChannelIngressSession
+    owner: ExternalChannelIngressOwner
 
 
 class ExternalChannelIngressBatch(_Record):
-    """One ordered processing claim under a fenced drain lease."""
+    """One ordered processing claim under a fenced owner lease."""
 
+    owner_id: str
+    target_resource_id: str
+    binding_id: str
     session_id: str
     batch_id: str
     lease_owner: str
@@ -160,9 +190,13 @@ class ExternalChannelIngressDiagnosticItem(_Record):
     """Content-free diagnostic projection for one active ingress item."""
 
     id: str
-    session_id: str
+    owner_id: str
+    session_id: str | None
     provider: ExternalChannelProvider
     connection_id: str
+    owner_ready: bool
+    preparation_attempt_count: int
+    preparation_next_attempt_at: datetime.datetime | None
     state: ExternalChannelIngressItemState
     attempt_count: int
     batch_id: str | None
@@ -170,7 +204,7 @@ class ExternalChannelIngressDiagnosticItem(_Record):
     processing_owner: str | None
     processing_generation: int | None
     item_age_seconds: int
-    session_age_seconds: int
+    owner_age_seconds: int
     lease_owner: str | None
     lease_generation: int
     lease_expires_at: datetime.datetime | None
@@ -182,7 +216,7 @@ class ExternalChannelIngressDiagnosticSnapshot(_Record):
     """Read-only active queue snapshot with no provider content."""
 
     observed_at: datetime.datetime
-    session_count: int
+    owner_count: int
     counts: ExternalChannelIngressDiagnosticCounts
     oldest_queue_age_seconds: int | None
     items: tuple[ExternalChannelIngressDiagnosticItem, ...]

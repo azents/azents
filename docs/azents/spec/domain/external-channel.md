@@ -65,7 +65,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-10
-spec_version: 53
+spec_version: 54
 ---
 
 # External Channel
@@ -149,7 +149,7 @@ contain multiple independent bindings.
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
 | Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. Configured parent/thread creation copies the active participation setting; legacy isolated-thread access replay without a setup claim copies the Agent default. Binding, real Session, initial Channel Work, and the first content-free ingress item commit together only after setup selection or for an already configured conversation. |
-| Ingress Session and item | One active ingress-session row owns the Session lease, first-batch flag, and current processing-batch fence. Each active ingress item retains a content-free provider trigger locator, immutable target Session/Binding authority, queue order, attempt/original-age state, and processing ownership. The first claim is one item and later claims are at most ten. Successful, suppressed, and bounded-failure rows are deleted; no completed outcome, tombstone, generic job, or durable wake row exists. |
+| Ingress conversation owner and item | One active owner is unique for the effective target Resource and owns the lease, provider-conversation preparation state, nullable resulting Binding/Session, first-batch flag, and current processing-batch fence. Each active item retains a content-free physical source locator and position, immutable owner authority, queue order, attempt/original-age state, and processing ownership. `location=channel` may fan several source threads into one parent owner, while `location=threads` keeps exact root/thread owners. A required Discord delivery thread is prepared before the owner records a new Binding and Session. The first ready claim is one item and later claims are at most ten. Successful, suppressed, terminal provisioning, and bounded-failure rows are deleted; no completed outcome, tombstone, generic job, or durable wake row exists. |
 | Mailbox item and Session events | Every canonical provider message uses one deterministic `external_channel_message` mailbox row with one `prompt_role = context | invocation`, provider-message idempotency identity, and explicit order group/sequence. PostgreSQL conversation-position compare-and-set is the duplicate-prevention and ordering authority. Pending mailbox state owns wake recovery. Only the exact eligible human `invocation` row created with the root Session may carry transient initial-title eligibility; promotion and mailbox deletion consume it. Promotion creates canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
 | Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, finish timestamp, and ordered current provider projection parts. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
@@ -450,6 +450,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-10** (spec_version 54) — Generalized active ingress from
+  Session-keyed drains to effective-conversation owners with source/target Resource
+  separation, nullable Binding/Session readiness, Discord thread-before-Session
+  preparation, bounded owner failure, and owner-scoped recovery.
 - **2026-08-10** (spec_version 53) — Added active PostgreSQL ingress Session/item
   authority, first-one/later-ten draining, independent per-message mailbox rows,
   `prompt_role`, retry-tail/cursor-CAS recovery, one post-batch wake, and bounded

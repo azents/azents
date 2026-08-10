@@ -29,6 +29,10 @@ from azents.services.external_channel.conversation import (
     ExternalChannelParticipationLock,
     ExternalChannelParticipationScope,
 )
+from azents.services.external_channel.conversation_provisioning import (
+    ExternalChannelConversationPreparation,
+    ExternalChannelConversationProvisioningError,
+)
 from azents.services.external_channel.deps import (
     get_external_channel_conversation_lock,
     get_external_channel_participation_lock,
@@ -223,7 +227,8 @@ class ExternalChannelReplayBoundary:
     """Immutable typed boundary retained for selector or access replay."""
 
     connection_id: str
-    resource_id: str
+    source_resource_id: str
+    target_resource_id: str
     principal_id: str
     trigger_provider_message_key: str
     conversation_position_id: str
@@ -234,7 +239,8 @@ class ExternalChannelReplayBoundary:
         """Require complete relational and inclusive-trigger identities."""
         required = (
             self.connection_id,
-            self.resource_id,
+            self.source_resource_id,
+            self.target_resource_id,
             self.principal_id,
             self.trigger_provider_message_key,
             self.conversation_position_id,
@@ -243,13 +249,19 @@ class ExternalChannelReplayBoundary:
         if any(not value for value in required):
             raise ValueError("External Channel replay boundary is incomplete.")
 
+    @property
+    def resource_id(self) -> str:
+        """Expose the source Resource through the common replay contract."""
+        return self.source_resource_id
+
     def __repr__(self) -> str:
         """Exclude provider and durable row identifiers from diagnostics."""
         digest = hashlib.sha256(
             "\0".join(
                 (
                     self.connection_id,
-                    self.resource_id,
+                    self.source_resource_id,
+                    self.target_resource_id,
                     self.principal_id,
                     self.trigger_provider_message_key,
                     self.conversation_position_id,
@@ -524,8 +536,22 @@ class ExternalChannelIngestionStore(Protocol):
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+        provider_preparation: ExternalChannelConversationPreparation | None,
     ) -> ExternalChannelIngestionAcceptance:
         """Apply one short atomic acceptance transaction."""
+        ...
+
+
+class ExternalChannelConversationProvisioner(Protocol):
+    """Provider conversation preparation outside database transactions."""
+
+    async def prepare(
+        self,
+        *,
+        connection_id: str,
+        target_resource_id: str,
+    ) -> ExternalChannelConversationPreparation:
+        """Prepare one usable provider conversation without Session creation."""
         ...
 
 
@@ -569,6 +595,7 @@ class ExternalChannelConversationIngestionService:
     ]
     history_reader: ExternalChannelIngestionHistoryReader
     store: ExternalChannelIngestionStore
+    conversation_provisioning: ExternalChannelConversationProvisioner
     wake_dispatcher: ExternalChannelWakeDispatcher
     maximum_position_restarts: int = 4
 
@@ -606,10 +633,14 @@ class ExternalChannelConversationIngestionService:
                         control_plans=(),
                         connection_id=None,
                     )
+                provider_preparation = await self._prepare_provider_conversation(
+                    request
+                )
                 acceptance = await self._accept_locked(
                     request=request,
                     preparation=preparation,
                     history=history,
+                    provider_preparation=provider_preparation,
                 )
                 if acceptance.status == "position_mismatch":
                     continue
@@ -639,6 +670,22 @@ class ExternalChannelConversationIngestionService:
             return ExternalChannelIngestionOutcome(
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
+                mailbox_item_id=None,
+                control_plans=(),
+                connection_id=None,
+            )
+        except ExternalChannelConversationProvisioningError as error:
+            return ExternalChannelIngestionOutcome(
+                kind=(
+                    ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
+                    if error.retryable
+                    else ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION
+                ),
+                reason=(
+                    ExternalChannelIngestionReason.HISTORY_UNAVAILABLE
+                    if error.retryable
+                    else ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+                ),
                 mailbox_item_id=None,
                 control_plans=(),
                 connection_id=None,
@@ -679,6 +726,7 @@ class ExternalChannelConversationIngestionService:
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+        provider_preparation: ExternalChannelConversationPreparation | None,
     ) -> ExternalChannelIngestionAcceptance:
         """Accept under conversation then optional parent participation lock."""
         async with self.conversation_lock.acquire(
@@ -692,6 +740,7 @@ class ExternalChannelConversationIngestionService:
                     request=request,
                     preparation=preparation,
                     history=history,
+                    provider_preparation=provider_preparation,
                 )
             async with self.participation_lock.acquire(
                 scope=participation_scope,
@@ -703,7 +752,32 @@ class ExternalChannelConversationIngestionService:
                     request=request,
                     preparation=preparation,
                     history=history,
+                    provider_preparation=provider_preparation,
                 )
+
+    async def _prepare_provider_conversation(
+        self,
+        request: ExternalChannelIngestionRequest,
+    ) -> ExternalChannelConversationPreparation | None:
+        """Prepare replay-created provider conversations outside database locks."""
+        if request.operation not in {
+            ExternalChannelIngestionOperation.ACCESS_ALLOW,
+            ExternalChannelIngestionOperation.SETUP_CONTINUATION,
+        }:
+            return None
+        boundary = request.replay_boundary
+        if isinstance(boundary, ExternalChannelSetupReplayBoundary):
+            target_resource_id = boundary.target_resource_id
+        elif isinstance(boundary, ExternalChannelReplayBoundary):
+            target_resource_id = boundary.target_resource_id
+        else:
+            raise ValueError(
+                "External Channel replay provisioning boundary is unavailable."
+            )
+        return await self.conversation_provisioning.prepare(
+            connection_id=request.locator.connection_id,
+            target_resource_id=target_resource_id,
+        )
 
     async def _finish_prepared(
         self,

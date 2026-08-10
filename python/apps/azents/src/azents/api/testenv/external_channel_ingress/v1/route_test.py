@@ -44,7 +44,7 @@ def _observation() -> ExternalChannelIngressObservation:
     return ExternalChannelIngressObservation(
         queue=ExternalChannelIngressDiagnosticSnapshot(
             observed_at=_NOW,
-            session_count=0,
+            owner_count=0,
             counts=ExternalChannelIngressDiagnosticCounts(
                 pending=0,
                 processing=0,
@@ -131,11 +131,11 @@ def test_active_inspection_returns_only_sanitized_queue_and_metrics() -> None:
     assert "credential" not in serialized
 
 
-def test_release_submits_exact_session_to_real_runtime_contract() -> None:
-    """Release submits a coalesced drain request without mutating queue rows."""
+def test_release_submits_exact_owner_to_real_runtime_contract() -> None:
+    """Release submits a coalesced owner request without mutating queue rows."""
     runtime = SimpleNamespace(submit=AsyncMock())
     repository = SimpleNamespace(
-        get_active_session=AsyncMock(
+        get_active_owner=AsyncMock(
             return_value=SimpleNamespace(created_at=_NOW),
         )
     )
@@ -148,7 +148,7 @@ def test_release_submits_exact_session_to_real_runtime_contract() -> None:
 
     response = TestClient(app).post(
         "/external-channel-ingress/v1/release",
-        json={"session_id": "session-1"},
+        json={"owner_id": "owner-1"},
     )
 
     assert response.status_code == 200
@@ -156,25 +156,25 @@ def test_release_submits_exact_session_to_real_runtime_contract() -> None:
     request = runtime.submit.await_args.args[0]
     assert request.handler_key == "external_channel.ingress"
     assert request.execution_key == (
-        "external-channel-ingress:session-1:2026-08-10T00:00:00.000000+00:00"
+        "external-channel-ingress:owner-1:2026-08-10T00:00:00.000000+00:00"
     )
-    assert request.payload == {"session_id": "session-1"}
-    repository.get_active_session.assert_awaited_once()
+    assert request.payload == {"owner_id": "owner-1"}
+    repository.get_active_owner.assert_awaited_once()
 
 
-def test_release_rejects_missing_active_session() -> None:
-    """Release cannot invent a lifecycle for a Session without active ingress."""
+def test_release_rejects_missing_active_owner() -> None:
+    """Release cannot invent a lifecycle without an active ingress owner."""
     runtime = SimpleNamespace(submit=AsyncMock())
     app = _app(
         service=SimpleNamespace(),
         runtime=cast(JobRuntime, runtime),
         control=ExternalChannelIngressTestControl(),
-        repository=SimpleNamespace(get_active_session=AsyncMock(return_value=None)),
+        repository=SimpleNamespace(get_active_owner=AsyncMock(return_value=None)),
     )
 
     response = TestClient(app).post(
         "/external-channel-ingress/v1/release",
-        json={"session_id": "session-1"},
+        json={"owner_id": "owner-1"},
     )
 
     assert response.status_code == 404

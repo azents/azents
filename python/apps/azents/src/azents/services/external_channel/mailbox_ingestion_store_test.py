@@ -8,11 +8,13 @@ from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock, create_autospec
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentSessionStatus,
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
@@ -50,6 +52,9 @@ from azents.services.external_channel.conversation import (
     ExternalChannelConversationScope,
     ExternalChannelHistoryRange,
     ExternalChannelOperationDeadline,
+)
+from azents.services.external_channel.conversation_provisioning import (
+    ExternalChannelConversationProvisioningService,
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
@@ -227,6 +232,10 @@ def _store(
         repository=repository,
         work_repository=work_repository
         or create_autospec(ExternalChannelWorkRepository, instance=True),
+        conversation_provisioning=create_autospec(
+            ExternalChannelConversationProvisioningService,
+            instance=True,
+        ),
         agent_repository=agent_repository
         or create_autospec(AgentRepository, instance=True),
         agent_session_repository=MagicMock(),
@@ -237,6 +246,54 @@ def _store(
             web_url="https://azents.example/base",
         ),
     )
+
+
+async def test_configured_binding_rejects_a_stopping_session() -> None:
+    """Ready transition cannot retain a connected Binding for a stopping Session."""
+    repository = create_autospec(ExternalChannelRepository, instance=True)
+    resource = ExternalChannelResource.model_construct(
+        id="resource-1",
+        connection_id="connection-1",
+        status=ExternalChannelResourceStatus.ACTIVE,
+    )
+    route = ExternalChannelAgentRoute.model_construct(
+        id="route-1",
+        connection_id="connection-1",
+        agent_id="agent-1",
+    )
+    binding = ExternalChannelBinding.model_construct(
+        id="binding-1",
+        resource_id="resource-1",
+        route_id="route-1",
+        agent_session_id="session-1",
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        disconnected_at=None,
+    )
+    repository.lock_resource = AsyncMock(return_value=resource)
+    repository.get_routable_route_by_id = AsyncMock(return_value=route)
+    repository.lock_connected_binding_by_resource = AsyncMock(return_value=binding)
+    store = _store(repository=repository)
+    store.agent_session_repository.lock_by_id = AsyncMock(
+        return_value=SimpleNamespace(
+            status=AgentSessionStatus.ACTIVE,
+            stop_requested_at=datetime.datetime.now(datetime.UTC),
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="configured Session is unavailable",
+    ):
+        await store.create_configured_binding(
+            cast(AsyncSession, object()),
+            resource_id="resource-1",
+            route_id="route-1",
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        )
+
+    ensure_active_work = store.work_repository.ensure_active_work
+    assert isinstance(ensure_active_work, AsyncMock)
+    ensure_active_work.assert_not_awaited()
 
 
 def _parent_slack_request(
@@ -302,6 +359,9 @@ def _history(
 async def _accepted_control_plan_case(
     *,
     existing_binding: bool,
+    stopping_session: bool = False,
+    access_granted: bool = True,
+    separate_target: bool = False,
 ) -> SimpleNamespace:
     session = cast(
         AsyncSession,
@@ -331,6 +391,14 @@ async def _accepted_control_plan_case(
     store.session_manager = MagicMock(return_value=session_context())
     store.mailbox_service = mailbox_service
     store.agent_session_repository = MagicMock()
+    store.agent_session_repository.lock_by_id = AsyncMock(
+        return_value=SimpleNamespace(
+            status=AgentSessionStatus.ACTIVE,
+            stop_requested_at=(
+                datetime.datetime.now(datetime.UTC) if stopping_session else None
+            ),
+        )
+    )
     store.agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
 
     request = _slack_request()
@@ -343,6 +411,7 @@ async def _accepted_control_plan_case(
     route = ExternalChannelAgentRoute.model_construct(
         id="route-1",
         agent_id="agent-1",
+        open_access_enabled=False,
     )
     resource = ExternalChannelResource.model_construct(
         id="resource-1",
@@ -365,9 +434,25 @@ async def _accepted_control_plan_case(
         response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
         disconnected_at=None,
     )
+    target_resource = (
+        ExternalChannelResource.model_construct(
+            id="target-resource-1",
+            connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+            provider_resource_key="channel-1",
+            labels={
+                "provider": "slack",
+                "tenant_id": "tenant-1",
+                "channel_id": "channel-1",
+            },
+            status=ExternalChannelResourceStatus.ACTIVE,
+        )
+        if separate_target
+        else resource
+    )
     conversation = _Conversation(
         source_resource=resource,
-        resource=resource,
+        resource=target_resource,
         route=route,
         setting=None,
         binding=binding if existing_binding else None,
@@ -389,7 +474,13 @@ async def _accepted_control_plan_case(
     store._replay_source_matches = MagicMock(return_value=True)
     store._resolve_conversation = AsyncMock(return_value=conversation)
     repository.get_active_block = AsyncMock(return_value=None)
-    repository.get_active_access_grant = AsyncMock(return_value=object())
+    repository.get_active_access_grant = AsyncMock(
+        return_value=object() if access_granted else None
+    )
+    repository.create_access_request_idempotent = AsyncMock(
+        return_value=SimpleNamespace(id="access-1")
+    )
+    store._create_access_control_intent = AsyncMock(return_value=None)
     store._create_binding = AsyncMock(
         return_value=SimpleNamespace(binding=binding, session_created=True)
     )
@@ -412,6 +503,7 @@ async def _accepted_control_plan_case(
             priority_request=None,
         ),
         history=_history(),
+        provider_preparation=None,
     )
     return SimpleNamespace(
         acceptance=acceptance,
@@ -421,6 +513,7 @@ async def _accepted_control_plan_case(
         presence_plan=presence_plan,
         settings_plan=settings_plan,
         progress_plan=progress_plan,
+        repository=repository,
     )
 
 
@@ -451,6 +544,37 @@ async def test_existing_binding_admission_excludes_joined_presence() -> None:
     )
     case.presence_intent.assert_not_awaited()
     case.settings_intent.assert_awaited_once()
+
+
+async def test_existing_binding_admission_rejects_a_stopping_session() -> None:
+    """Synchronous replay never enqueues into a Session that is stopping."""
+    case = await _accepted_control_plan_case(
+        existing_binding=True,
+        stopping_session=True,
+    )
+
+    assert case.acceptance.status == "terminal_rejection"
+    assert (
+        case.acceptance.reason
+        is ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+    )
+    case.work_repository.ensure_active_work.assert_not_awaited()
+    case.presence_intent.assert_not_awaited()
+    case.settings_intent.assert_not_awaited()
+
+
+async def test_access_request_retains_source_and_effective_target_resources() -> None:
+    """Channel fan-in access replay freezes independent source and target IDs."""
+    case = await _accepted_control_plan_case(
+        existing_binding=False,
+        access_granted=False,
+        separate_target=True,
+    )
+
+    assert case.acceptance.status == "awaiting_access"
+    create = case.repository.create_access_request_idempotent.await_args.args[1]
+    assert create.source_resource_id == "resource-1"
+    assert create.resource_id == "target-resource-1"
 
 
 async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> None:
