@@ -17,6 +17,7 @@ from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.exceptions import ApiException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
+from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
@@ -232,7 +233,20 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
     assert explicit_profile.capability_revision_id is not None
 
     runtime_api = AgentRuntimeV1Api(public_api_client)
-    initial_runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+    read_only_runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=explicit_agent.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert read_only_runtime.capability == AgentRuntimeCapability.MANAGED
+    assert read_only_runtime.runtime_profile_id == explicit_profile_id
+    assert read_only_runtime.runtime is None
+    assert read_only_runtime.state is None
+    assert read_only_runtime.configuration is None
+    assert read_only_runtime.actions.add is False
+    assert read_only_runtime.actions.start is True
+
+    initial_runtime = runtime_api.agent_runtime_v1_start_agent_runtime(
         agent_id=explicit_agent.id,
         handle=handle,
         _headers=headers,
@@ -258,12 +272,6 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
     assert (
         initial_runtime.configuration.desired.provider_id
         == runtime_provider_resource_id
-    )
-
-    runtime_api.agent_runtime_v1_start_agent_runtime(
-        agent_id=explicit_agent.id,
-        handle=handle,
-        _headers=headers,
     )
 
     applied_runtime: AgentRuntimeResponse | None = None
