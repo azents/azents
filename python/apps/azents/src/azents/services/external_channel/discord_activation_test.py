@@ -1,6 +1,7 @@
 """Discord callback activation tests."""
 
 import datetime
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -505,8 +506,10 @@ async def test_provider_message_command_failure_does_not_activate(
 @pytest.mark.asyncio
 async def test_invalid_command_set_failure_clears_provisional_callback(
     codec: ExternalChannelCredentialsCodec,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A command-set proof failure cannot leave callback authority configured."""
+    caplog.set_level(logging.ERROR)
     configuration = _configuration(codec)
     events: list[str] = []
     repository = _RepositoryDouble(
@@ -531,6 +534,7 @@ async def test_invalid_command_set_failure_clears_provisional_callback(
     assert snapshot.code == "discord_callback_configuration_invalid"
     assert repository.activation_kwargs is None
     assert repository.clear_kwargs is not None
+    assert caplog.records[-1].__dict__["failure_stage"] == "provider_commands"
 
 
 @pytest.mark.asyncio

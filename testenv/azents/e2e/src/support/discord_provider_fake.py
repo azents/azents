@@ -76,7 +76,7 @@ _MAX_GUILD_COMMAND_DESCRIPTION_CHARACTERS = 100
 _GUILD_COMMAND_TYPES = {1, 2, 3}
 _COMMAND_ROLE_CONTRACTS = {
     "message_action": ("Ask an Azents Agent", 3),
-    "azents_settings": ("Azents settings", 1),
+    "azents_settings": ("azents", 1),
     "conversation_settings": ("Conversation settings", 3),
 }
 

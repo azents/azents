@@ -58,6 +58,14 @@ type DiscordActivationFailureCode = Literal[
     "discord_authority_changed",
 ]
 
+type DiscordActivationFailureStage = Literal[
+    "configuration",
+    "provider_api",
+    "provider_authentication",
+    "provider_callback",
+    "provider_commands",
+]
+
 
 def _discord_capabilities() -> ExternalChannelCapabilitySnapshot:
     """Return the capabilities supported by an active Discord connection."""
@@ -183,6 +191,7 @@ class DiscordConnectionActivationService:
                 expected_encrypted_credentials=connection.encrypted_credentials,
                 expected_configuration_generation=connection.configuration_generation,
                 error=error,
+                failure_stage=None,
             )
 
     async def _activate_configured_connection(
@@ -236,11 +245,13 @@ class DiscordConnectionActivationService:
                 raise DiscordActivationConfigurationError("discord_authority_changed")
             await session.commit()
         command_set: DiscordGuildCommandSetCapability
+        failure_stage: DiscordActivationFailureStage = "provider_callback"
         try:
             await self.discord_client.configure_interactions_endpoint(
                 bot_token=credentials.bot_token,
                 endpoint_url=endpoint_url,
             )
+            failure_stage = "provider_commands"
             command_set = await self.discord_client.reconcile_required_guild_commands(
                 bot_token=credentials.bot_token,
                 application_id=metadata.application_id,
@@ -262,6 +273,7 @@ class DiscordConnectionActivationService:
                 expected_encrypted_credentials=encrypted_credentials,
                 expected_configuration_generation=configuration_generation + 1,
                 error=error,
+                failure_stage=failure_stage,
             )
         async with self.session_manager() as session:
             capabilities = _discord_capabilities()
@@ -296,6 +308,7 @@ class DiscordConnectionActivationService:
                 expected_encrypted_credentials=encrypted_credentials,
                 expected_configuration_generation=configuration_generation + 1,
                 error=error,
+                failure_stage=None,
             )
         return ExternalChannelConnectionStatusSnapshot(
             status=activated.status,
@@ -320,6 +333,7 @@ class DiscordConnectionActivationService:
         expected_encrypted_credentials: str,
         expected_configuration_generation: int,
         error: DiscordAPIError | DiscordActivationConfigurationError,
+        failure_stage: DiscordActivationFailureStage | None,
     ) -> ExternalChannelConnectionStatusSnapshot:
         """Fence and retain a safe failure code without retaining exception text."""
         failure_code = discord_activation_failure_code(error)
@@ -343,7 +357,11 @@ class DiscordConnectionActivationService:
             "Discord External Channel activation failed",
             extra={
                 "connection_id": connection_id,
-                "failure_stage": _discord_activation_failure_stage(failure_code),
+                "failure_stage": (
+                    failure_stage
+                    if failure_stage is not None
+                    else _discord_activation_failure_stage(failure_code)
+                ),
                 "failure_code": failure_code,
                 "error_type": type(error).__name__,
             },
@@ -397,7 +415,9 @@ def _target_guild_id(provider_config: dict[str, object] | None) -> str:
     return target_guild_id
 
 
-def _discord_activation_failure_stage(code: DiscordActivationFailureCode) -> str:
+def _discord_activation_failure_stage(
+    code: DiscordActivationFailureCode,
+) -> DiscordActivationFailureStage:
     """Return a stable diagnostic stage for structured observability."""
     if code == "discord_credentials_invalid":
         return "provider_authentication"

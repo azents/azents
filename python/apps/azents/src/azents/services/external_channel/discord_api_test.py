@@ -11,6 +11,7 @@ import pytest
 
 from azents.services.external_channel.discord_api import (
     DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
+    DISCORD_AZENTS_SETTINGS_COMMAND_NAME,
     DiscordAPIClient,
     DiscordAPIConfigurationInvalid,
     DiscordAPICredentialsInvalid,
@@ -21,6 +22,7 @@ from azents.services.external_channel.discord_api import (
     DiscordGuildCommandRole,
     DiscordInteractionEndpointHTTPTransport,
     DiscordInteractionEndpointTransport,
+    discord_required_guild_command,
 )
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKApplication,
@@ -257,6 +259,17 @@ async def test_callback_transport_issues_exact_current_application_patch() -> No
     }
 
 
+def test_settings_command_uses_provider_valid_chat_input_name() -> None:
+    """The settings slash-command payload satisfies Discord's name contract."""
+    definition = discord_required_guild_command(DiscordGuildCommandRole.AZENTS_SETTINGS)
+
+    assert definition.request_payload() == {
+        "name": "azents",
+        "type": 1,
+        "description": "Configure Azents settings.",
+    }
+
+
 @pytest.mark.asyncio
 async def test_reconciles_required_commands_without_touching_customer_command() -> None:
     """SDK listing preserves unrelated Guild commands and returns every role ID."""
@@ -270,7 +283,7 @@ async def test_reconciles_required_commands_without_touching_customer_command() 
             ),
             DiscordSDKCommand(
                 command_id="102",
-                name="Azents settings",
+                name=DISCORD_AZENTS_SETTINGS_COMMAND_NAME,
                 command_type=1,
                 description="Configure Azents settings.",
             ),
@@ -327,7 +340,7 @@ async def test_reconciliation_uses_g1_only_for_missing_command() -> None:
             ),
             DiscordSDKCommand(
                 command_id="200",
-                name="Azents settings",
+                name=DISCORD_AZENTS_SETTINGS_COMMAND_NAME,
                 command_type=1,
                 description="Old settings copy.",
             ),
@@ -373,7 +386,7 @@ async def test_reconciliation_rejects_non_distinct_required_command_ids() -> Non
             ),
             DiscordSDKCommand(
                 command_id="100",
-                name="Azents settings",
+                name=DISCORD_AZENTS_SETTINGS_COMMAND_NAME,
                 command_type=1,
                 description="Configure Azents settings.",
             ),

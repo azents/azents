@@ -122,7 +122,7 @@ _DISCORD_BOT_TOKEN = "discord-e2e-private"
 _RUNTIME_PROVIDER_ID = "system-docker"
 _DISCORD_COMMAND_CONTRACTS = {
     "message_action": ("Ask an Azents Agent", 3),
-    "azents_settings": ("Azents settings", 1),
+    "azents_settings": ("azents", 1),
     "conversation_settings": ("Conversation settings", 3),
 }
 _EXTERNAL_CHANNEL_LARGE_FILE_BYTES = 6 * 1024 * 1024
@@ -4343,7 +4343,7 @@ def test_discord_single_activation_and_interaction_journey(
                 },
                 {
                     "id": "500000000000000103",
-                    "name": "Azents settings",
+                    "name": "azents",
                     "type": 1,
                     "description": "Stale description.",
                 },
