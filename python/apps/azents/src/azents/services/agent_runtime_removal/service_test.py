@@ -29,6 +29,9 @@ from azents.core.enums import (
 )
 from azents.rdb.models.action_execution import RDBActionExecution
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_automatic_project_setting import (
+    RDBAgentAutomaticProjectSetting,
+)
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_runtime_removal import (
@@ -86,6 +89,8 @@ async def _seed_managed_agent(
         shell_enabled=True,
     )
     session.add(agent)
+    await session.flush()
+    session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
     await session.flush()
     return workspace.id, agent.id
 
