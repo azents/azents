@@ -287,6 +287,81 @@ class TestAgentSessionRepository:
             is SessionWorkingFolderBindingState.PENDING
         )
 
+    async def test_root_context_creation_allows_runtime_fk_compatible_locks(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Root context creation remains compatible with Runtime FK locks."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        repository = AgentSessionRepository()
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+            workspace_id = await _create_workspace(
+                setup_session,
+                f"root-context-runtime-locks-{suffix}",
+            )
+            agent_id = await _create_agent(
+                setup_session,
+                workspace_id,
+                f"root-context-runtime-locks-{suffix}",
+                workspace_path=None,
+            )
+            runtime = await AgentRuntimeRepository().get_by_agent_id(
+                setup_session,
+                agent_id,
+            )
+            assert runtime is not None
+            await setup_session.commit()
+
+        async def create_root_context() -> str:
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as create_session:
+                created = await repository.create(
+                    create_session,
+                    AgentSessionCreate(
+                        workspace_id=workspace_id,
+                        product_mode=AgentSessionProductMode.TEAM,
+                        associated_user_id=None,
+                        agent_id=agent_id,
+                        title=None,
+                    ),
+                )
+                await create_session.commit()
+                return created.id
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as runtime_session:
+            locked_agent_id = await runtime_session.scalar(
+                sa.select(RDBAgent.id)
+                .where(RDBAgent.id == agent_id)
+                .with_for_update(read=True, key_share=True)
+            )
+            locked_runtime = await AgentRuntimeRepository().get_by_agent_id_for_update(
+                runtime_session,
+                agent_id,
+            )
+            assert locked_agent_id == agent_id
+            assert locked_runtime is not None
+
+            created_id = await asyncio.wait_for(
+                create_root_context(),
+                timeout=5,
+            )
+
+        async with AsyncSession(rdb_engine) as verification_session:
+            context = await repository.get_working_folder_context_by_session_id(
+                verification_session,
+                session_id=created_id,
+            )
+            assert context is not None
+            assert context.agent_runtime_id == runtime.id
+            assert context.binding_state is SessionWorkingFolderBindingState.PENDING
+
     async def test_root_context_rejects_runtime_removing(
         self,
         rdb_session: AsyncSession,

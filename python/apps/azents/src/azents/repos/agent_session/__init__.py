@@ -2074,7 +2074,9 @@ class AgentSessionRepository:
         capability = await session.scalar(
             sa.select(RDBAgent.runtime_capability)
             .where(RDBAgent.id == agent_id)
-            .with_for_update()
+            # Root admission only validates capability state. FOR NO KEY UPDATE
+            # preserves that fence while allowing Runtime FK KEY SHARE locks.
+            .with_for_update(key_share=True)
         )
         if capability is None:
             raise RuntimeError("Agent is unavailable")
