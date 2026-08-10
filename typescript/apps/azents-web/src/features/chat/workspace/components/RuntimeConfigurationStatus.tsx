@@ -245,7 +245,7 @@ function ContainmentStatus({
 
 export function RuntimeConfigurationStatus({
   state,
-}: RuntimeConfigurationStatusProps): React.ReactElement {
+}: RuntimeConfigurationStatusProps): React.ReactElement | null {
   const t = useTranslations("chat.workspacePanel");
 
   if (state.type === "LOADING") {
@@ -264,6 +264,9 @@ export function RuntimeConfigurationStatus({
   }
 
   const { configuration } = state;
+  if (configuration === null) {
+    return null;
+  }
   const hasTechnicalDetails =
     configuration.desired !== null || configuration.applied !== null;
 

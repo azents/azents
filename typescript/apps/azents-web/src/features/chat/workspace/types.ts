@@ -19,7 +19,7 @@ export type RuntimeConfigurationState =
   | { type: "ERROR"; message: string }
   | {
       type: "LOADED";
-      configuration: AgentRuntimeConfigurationStatusResponse;
+      configuration: AgentRuntimeConfigurationStatusResponse | null;
     };
 
 export type WorkspaceEntryCapabilities = {

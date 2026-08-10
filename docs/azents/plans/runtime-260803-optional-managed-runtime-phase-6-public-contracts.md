@@ -154,8 +154,10 @@ tags: [agent, runtime, api, openapi, client, backend]
   - Focused public Runtime/Agent contract tests: passed.
   - Generated Python client pytest: `648 passed`; changed Runtime API/model files
     pass targeted `ty`.
-  - TypeScript public-client generation and full workspace lint, typecheck, and
-    build: passed.
+  - TypeScript public-client generation, full workspace format/lint/typecheck,
+    and Web production build: passed after correcting nullable Runtime
+    configuration consumption and Runtime-free Storybook fixtures exposed by the
+    initial PR CI run.
   - Testenv and E2E `ty`: passed.
   - Repository pre-commit: passed.
 - Independent review: `hardtack` completed read-only review and targeted re-review;
