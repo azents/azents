@@ -8,7 +8,12 @@ import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from azents.core.enums import AgentSessionProductMode, LLMProvider, RuntimeRunnerState
+from azents.core.enums import (
+    AgentRuntimeCapability,
+    AgentSessionProductMode,
+    LLMProvider,
+    RuntimeRunnerState,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_item import (
     RDBAgentAutomaticProjectItem,
@@ -17,6 +22,7 @@ from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
@@ -54,6 +60,7 @@ async def _create_agent(
     policy_paths: list[str],
     revision: int,
     workspace_path: str | None = "/workspace/agent",
+    runtime_capability: AgentRuntimeCapability = AgentRuntimeCapability.MANAGED,
 ) -> str:
     """Create an Agent and its persisted automatic Project policy."""
     integration = RDBLLMProviderIntegration(
@@ -68,6 +75,7 @@ async def _create_agent(
     agent = RDBAgent(
         workspace_id=workspace_id,
         name="Root Session creation test agent",
+        runtime_capability=runtime_capability,
         model_selection=make_test_model_selection_dict(
             integration_id=integration.id,
             provider=LLMProvider.ANTHROPIC,
@@ -94,17 +102,18 @@ async def _create_agent(
         ]
     )
     await session.flush()
-    runtime_repository = AgentRuntimeRepository()
-    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
-    if workspace_path is not None:
-        await runtime_repository.record_runner_state(
-            session,
-            runtime.id,
-            RuntimeRunnerState.UNKNOWN,
-            1,
-            expected_desired_generation=runtime.desired_generation,
-            workspace_path=workspace_path,
-        )
+    if runtime_capability is AgentRuntimeCapability.MANAGED:
+        runtime_repository = AgentRuntimeRepository()
+        runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+        if workspace_path is not None:
+            await runtime_repository.record_runner_state(
+                session,
+                runtime.id,
+                RuntimeRunnerState.UNKNOWN,
+                1,
+                expected_desired_generation=runtime.desired_generation,
+                workspace_path=workspace_path,
+            )
     return agent.id
 
 
@@ -112,6 +121,7 @@ def _service() -> RootAgentSessionCreationService:
     """Build the shared root Session creation boundary."""
     return RootAgentSessionCreationService(
         agent_session_repository=AgentSessionRepository(),
+        agent_repository=AgentRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
         agent_runtime_repository=AgentRuntimeRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -120,6 +130,95 @@ def _service() -> RootAgentSessionCreationService:
 
 class TestRootAgentSessionCreationService:
     """Root Session Project initialization behavior."""
+
+    async def test_runtime_free_explicit_empty_root_session_is_allowed(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """An explicit empty intent does not require Runtime capability."""
+        workspace_id = await _create_workspace(rdb_session, "root-none-empty")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            slug="root-none-empty",
+            policy_paths=["/workspace/agent/default"],
+            revision=1,
+            runtime_capability=AgentRuntimeCapability.NONE,
+        )
+
+        result = await _service().create_root_session(
+            rdb_session,
+            create=AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+            ),
+            workspace_intent=ExplicitRootWorkspaceIntent(existing_project_paths=[]),
+        )
+
+        assert result.initial_project_paths == ()
+
+    async def test_runtime_free_empty_default_root_session_is_allowed(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """An empty automatic policy does not require managed Runtime."""
+        workspace_id = await _create_workspace(rdb_session, "root-none-default")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            slug="root-none-default",
+            policy_paths=[],
+            revision=1,
+            runtime_capability=AgentRuntimeCapability.NONE,
+        )
+
+        result = await _service().create_root_session(
+            rdb_session,
+            create=AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+            ),
+            workspace_intent=AgentDefaultRootWorkspaceIntent(),
+        )
+
+        assert result.initial_project_paths == ()
+
+    async def test_runtime_free_nonempty_default_root_session_is_rejected(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A non-empty automatic policy requires managed Runtime."""
+        workspace_id = await _create_workspace(rdb_session, "root-none-default-path")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            slug="root-none-default-path",
+            policy_paths=["/workspace/agent/default"],
+            revision=1,
+            runtime_capability=AgentRuntimeCapability.NONE,
+        )
+
+        with pytest.raises(ValueError, match="managed Runtime"):
+            await _service().create_root_session(
+                rdb_session,
+                create=AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                    primary_kind=None,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
+                ),
+                workspace_intent=AgentDefaultRootWorkspaceIntent(),
+            )
 
     async def test_empty_explicit_intent_uses_runner_reported_workspace_path(
         self,
@@ -333,6 +432,67 @@ class TestRootAgentSessionCreationService:
             await SessionWorkspaceProjectRepository().list_projects(
                 rdb_session,
                 session_id=result.agent_session.id,
+            )
+            == []
+        )
+
+    async def test_runtime_free_team_primary_preserves_empty_policy(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Runtime-free team primary creation accepts an empty policy."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "root-primary-none-empty",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            slug="root-primary-none-empty",
+            policy_paths=[],
+            revision=4,
+            runtime_capability=AgentRuntimeCapability.NONE,
+        )
+
+        result = await _service().ensure_team_primary(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+
+        assert result.created is True
+        assert result.initial_project_paths == ()
+        assert result.policy_revision == 4
+
+    async def test_runtime_free_team_primary_rejects_nonempty_policy_before_create(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Runtime-free team primary rejects Runtime-dependent defaults atomically."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "root-primary-none-project",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            slug="root-primary-none-project",
+            policy_paths=["/workspace/agent/project"],
+            revision=4,
+            runtime_capability=AgentRuntimeCapability.NONE,
+        )
+
+        with pytest.raises(ValueError, match="managed Runtime"):
+            await _service().ensure_team_primary(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+
+        assert (
+            await AgentSessionRepository().list_active_by_agent_id(
+                rdb_session,
+                agent_id,
             )
             == []
         )

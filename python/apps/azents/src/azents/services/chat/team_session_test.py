@@ -17,6 +17,7 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
     RuntimeRunnerState,
+    SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
 )
@@ -232,6 +233,7 @@ def _service(
         agent_runtime_repository=(agent_runtime_repository or AgentRuntimeRepository()),
         root_agent_session_creation_service=RootAgentSessionCreationService(
             agent_session_repository=AgentSessionRepository(),
+            agent_repository=AgentRepository(),
             automatic_project_repository=AgentAutomaticProjectRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -453,7 +455,7 @@ class TestChatSessionTeamSessions:
         rdb_session: AsyncSession,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Root Session creation requires a persisted Runner workspace path."""
+        """Managed root creation remains pending without Runner workspace evidence."""
         workspace_id = await _create_workspace(rdb_session, "team-empty-no-runtime")
         user_id = await _create_user(
             rdb_session,
@@ -472,16 +474,27 @@ class TestChatSessionTeamSessions:
         )
         await rdb_session.commit()
 
-        with pytest.raises(
-            RuntimeError,
-            match="Agent Runtime workspace path is unavailable",
-        ):
-            await _service(rdb_session_manager).create_team_session(
-                agent_id=agent_id,
-                user_id=user_id,
-                existing_project_paths=[],
-                setup_actions=[],
+        result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+
+        assert isinstance(result, Success)
+        async with rdb_session_manager() as verify_session:
+            context = await verify_session.scalar(
+                sa.select(RDBSessionAgentContext).where(
+                    RDBSessionAgentContext.agent_id == agent_id,
+                    RDBSessionAgentContext.root_session_agent_id.is_not(None),
+                )
             )
+        assert context is not None
+        assert context.working_folder_path is None
+        assert (
+            context.working_folder_binding_state
+            is SessionWorkingFolderBindingState.PENDING
+        )
 
     async def test_create_team_session_uses_explicit_projects(
         self,

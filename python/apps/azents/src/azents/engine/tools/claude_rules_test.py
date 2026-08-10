@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from azents.core.enums import AgentRuntimeCapability
+from azents.core.runtime_capabilities import RuntimeCapabilityResolver
 from azents.core.tools import TurnContext
 from azents.engine.hooks.types import (
     AfterToolCallHookContext,
@@ -207,12 +209,27 @@ def _make_after_read_context(
     )
 
 
-def _make_toolkit(storage: FakeSharedStorage) -> ClaudeRulesToolkit:
+_MANAGED_RUNTIME_CAPABILITY_RESOLVER = RuntimeCapabilityResolver.from_agent(
+    state=AgentRuntimeCapability.MANAGED,
+    version=1,
+    shell_enabled=True,
+)
+
+
+def _make_toolkit(
+    storage: FakeSharedStorage,
+    *,
+    runtime_capability_resolver: RuntimeCapabilityResolver | None = (
+        _MANAGED_RUNTIME_CAPABILITY_RESOLVER
+    ),
+) -> ClaudeRulesToolkit:
     """Create toolkit with shared runtime instruction context."""
     store = _FakeClaudeRulesAppendixDedupeStateStore()
     toolkit = ClaudeRulesToolkit(
         store=store, agent_id="agent-1", session_id="session-1"
     )
+    if runtime_capability_resolver is not None:
+        toolkit.set_runtime_capability_resolver(runtime_capability_resolver)
     context_store = RuntimeInstructionContextStore()
 
     async def resolve_runtime_target() -> ServerToRuntimeTarget:
@@ -480,6 +497,26 @@ class TestClaudeRuleMatching:
 
 class TestClaudeRulesToolkit:
     """ClaudeRulesToolkit hook behavior tests."""
+
+    async def test_missing_capability_context_skips_filesystem_hook(self) -> None:
+        """Claude rules filesystem reads fail closed without resolver context."""
+        storage = _CountingStorage(
+            {"/runtime/home/.claude/rules/global.md": b"# Global"}
+        )
+        toolkit = _make_toolkit(
+            storage,
+            runtime_capability_resolver=None,
+        )
+
+        result = await _run_after_tool_call_hook(
+            toolkit,
+            _make_after_read_context("/runtime/home/file.py"),
+        )
+
+        assert result is None
+        assert storage.list_calls == []
+        assert storage.stat_calls == []
+        assert storage.get_calls == []
 
     async def test_successful_read_appends_matching_rules_once(self) -> None:
         """Successful reads append matching rules and then dedupe by path."""

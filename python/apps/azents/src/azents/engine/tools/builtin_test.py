@@ -13,11 +13,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from azents.core.enums import (
+    AgentRuntimeCapability,
     EventKind,
     RuntimeDesiredState,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
+)
+from azents.core.runtime_capabilities import (
+    RuntimeCapabilityResolver,
+    RuntimeCapabilitySnapshot,
 )
 from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.core.tools import (
@@ -702,6 +707,13 @@ class _FakeRunnerOperations:
         )
 
 
+_MANAGED_RUNTIME_CAPABILITY_RESOLVER = RuntimeCapabilityResolver.from_agent(
+    state=AgentRuntimeCapability.MANAGED,
+    version=1,
+    shell_enabled=True,
+)
+
+
 def _make_toolkit(
     config: ShellToolkitConfig | None = None,
     *,
@@ -724,6 +736,9 @@ def _make_toolkit(
         RuntimeToProviderDeliveryExecutor | None
     ) = None,
     runtime_image_read_service: RuntimeImageReadService | None = None,
+    runtime_capability_resolver: RuntimeCapabilityResolver | None = (
+        _MANAGED_RUNTIME_CAPABILITY_RESOLVER
+    ),
 ) -> RuntimeToolkit:
     """Create RuntimeToolkit for tests."""
     runner_operations = _FakeRunnerOperations(storage_files)
@@ -859,6 +874,7 @@ def _make_toolkit(
         runtime_to_server_publication_service=runtime_to_server_publication_service,
         runtime_to_provider_delivery_service=runtime_to_provider_delivery_service,
         import_file_staging_configuration=cast(Any, object()),
+        runtime_capability_resolver=runtime_capability_resolver,
     )
     toolkit.set_session_id(session_id)
     toolkit._expected_runtime_authority = RuntimeOperationAuthority(
@@ -973,6 +989,7 @@ class TestBuiltinToolkitProviderResolve:
         )
         assert isinstance(toolkit, RuntimeToolkit)
         toolkit.set_session_id("session-1")
+        toolkit.set_runtime_capability_resolver(_MANAGED_RUNTIME_CAPABILITY_RESOLVER)
         await toolkit.update_context(_make_context())
         toolkit._expected_runtime_authority = RuntimeOperationAuthority(
             configuration_revision_id="revision-1",
@@ -1006,6 +1023,32 @@ class TestBuiltinToolkitProviderResolve:
 
 class TestRuntimeToolkitUpdateContext:
     """RuntimeToolkit.update_context() unit tests."""
+
+    @pytest.mark.asyncio
+    async def test_shell_disabled_runtime_toolkit_is_not_projected(self) -> None:
+        """A managed shell-disabled Agent cannot project Runtime tools."""
+        toolkit = _make_toolkit(
+            runtime_capability_resolver=RuntimeCapabilityResolver.from_agent(
+                state=AgentRuntimeCapability.MANAGED,
+                version=1,
+                shell_enabled=False,
+            )
+        )
+
+        state = await toolkit.update_context(_make_context())
+
+        assert state.status.value == "disabled"
+        assert state.tools == []
+
+    @pytest.mark.asyncio
+    async def test_missing_capability_context_disables_runtime_toolkit(self) -> None:
+        """Runtime Toolkit projection fails closed without resolver context."""
+        toolkit = _make_toolkit(runtime_capability_resolver=None)
+
+        state = await toolkit.update_context(_make_context())
+
+        assert state.status.value == "disabled"
+        assert state.tools == []
 
     @pytest.mark.asyncio
     async def test_returns_toolkit_state(self) -> None:
@@ -2210,6 +2253,51 @@ class TestProcessToolHandler:
         assert runner_operations.process_start_calls[-1]["env"] == {
             "MY_TEST_KEY": marker
         }
+
+    @pytest.mark.asyncio
+    async def test_exec_command_rechecks_before_collecting_peer_credentials(
+        self,
+    ) -> None:
+        """Credential admission is repeated immediately before peer env access."""
+        provider_calls = 0
+
+        async def current_snapshot_provider() -> RuntimeCapabilitySnapshot:
+            nonlocal provider_calls
+            provider_calls += 1
+            return RuntimeCapabilitySnapshot(
+                state=(
+                    AgentRuntimeCapability.MANAGED
+                    if provider_calls < 5
+                    else AgentRuntimeCapability.NONE
+                ),
+                version=1,
+                shell_enabled=True,
+            )
+
+        resolver = RuntimeCapabilityResolver.from_agent(
+            state=AgentRuntimeCapability.MANAGED,
+            version=1,
+            shell_enabled=True,
+            current_snapshot_provider=current_snapshot_provider,
+        )
+        toolkit = _make_toolkit(runtime_capability_resolver=resolver)
+        peer = AsyncMock()
+        toolkit.set_peer_toolkits([peer])
+        state = await toolkit.update_context(_make_context())
+        tool = _find_tool(state.tools, "exec_command")
+
+        with pytest.raises(
+            FunctionToolError,
+            match="Runtime credential capability",
+        ):
+            await tool.handler(json.dumps({"command": "echo denied"}))
+
+        peer.expose_env.assert_not_awaited()
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+        assert runner_operations.process_start_calls == []
 
     @pytest.mark.asyncio
     async def test_write_stdin_calls_runtime_runner_process_write(self) -> None:

@@ -18,6 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import WebSocketBroadcastPublishError
 from azents.core.enums import AgentSessionRunState
+from azents.core.runtime_capabilities import (
+    RuntimeCapability,
+    RuntimeCapabilityDeniedError,
+    RuntimeCapabilityResolver,
+)
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -665,6 +670,7 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         self._session_id = session_id
         self._adopted_run_ids: set[str] = set()
         self._adopt_latest_on_next_turn = False
+        self.runtime_capability_resolver: RuntimeCapabilityResolver | None = None
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id."""
@@ -673,6 +679,13 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
     def set_session_id(self, session_id: str) -> None:
         """Inject session_id."""
         self._session_id = session_id
+
+    def set_runtime_capability_resolver(
+        self,
+        resolver: RuntimeCapabilityResolver,
+    ) -> None:
+        """Set the shared Agent Runtime capability resolver."""
+        self.runtime_capability_resolver = resolver
 
     def hooks(self) -> RuntimeHooks:
         """Return Skill projection lifecycle hooks."""
@@ -688,13 +701,17 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         """Render the combined active Skill index for the current run."""
         state = await self._active_state_for_context(context)
         managed = await self._managed_items(context.run_id, context.workspace_id)
-        return render_skill_items([*state.active.items, *managed])
+        filesystem_skills_allowed = await self._filesystem_skills_allowed()
+        if filesystem_skills_allowed:
+            return render_skill_items([*state.active.items, *managed])
+        return render_skill_items(managed)
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Return load_skill when either Skill projection contains items."""
         state = await self._active_state_for_context(context)
         managed = await self._managed_items(context.run_id, context.workspace_id)
-        if not state.active.items and not managed:
+        filesystem_skills_allowed = await self._filesystem_skills_allowed()
+        if (not filesystem_skills_allowed or not state.active.items) and not managed:
             return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
@@ -706,9 +723,19 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
                     session_id=self._session_id,
                     workspace_id=context.workspace_id,
                     run_id=context.run_id,
+                    runtime_capability_resolver=self.runtime_capability_resolver,
                 )
             ],
         )
+
+    async def _filesystem_skills_allowed(self) -> bool:
+        """Reauthorize filesystem Skill projection for the current turn."""
+        if self.runtime_capability_resolver is None:
+            return False
+        decision = await self.runtime_capability_resolver.decide(
+            RuntimeCapability.FILESYSTEM_SKILLS
+        )
+        return decision.allowed
 
     async def _managed_items(
         self,
@@ -774,6 +801,14 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
         self, agent_id: str, session_id: str, *, reason: SyncReason
     ) -> None:
         if self.projection_service is None:
+            return
+        if self.runtime_capability_resolver is None:
+            return
+        try:
+            await self.runtime_capability_resolver.require(
+                RuntimeCapability.FILESYSTEM_SKILLS
+            )
+        except RuntimeCapabilityDeniedError:
             return
         await self.projection_service.sync_latest(
             agent_id=agent_id,
@@ -897,6 +932,7 @@ def make_load_skill_tool(
     session_id: str,
     workspace_id: str,
     run_id: str,
+    runtime_capability_resolver: RuntimeCapabilityResolver | None,
 ) -> FunctionTool:
     """Create load_skill FunctionTool for filesystem and managed Skills."""
 
@@ -939,6 +975,28 @@ def make_load_skill_tool(
                 "Skill path must be an absolute filesystem path or canonical "
                 "azents:// Skill URI."
             )
+        if runtime_capability_resolver is None:
+            raise FunctionToolError(
+                "Filesystem Skill capability context is unavailable.",
+                metadata={
+                    "kind": "runtime_capability_denied",
+                    "capability": RuntimeCapability.FILESYSTEM_SKILLS.value,
+                    "reason_code": "runtime_capability_context_missing",
+                },
+            )
+        try:
+            await runtime_capability_resolver.require(
+                RuntimeCapability.FILESYSTEM_SKILLS
+            )
+        except RuntimeCapabilityDeniedError as exc:
+            raise FunctionToolError(
+                "Filesystem Skill capability is unavailable.",
+                metadata={
+                    "kind": "runtime_capability_denied",
+                    "capability": RuntimeCapability.FILESYSTEM_SKILLS.value,
+                    "reason_code": exc.reason_code,
+                },
+            ) from None
         state = await store.load(agent_id, session_id)
         matches = [
             item

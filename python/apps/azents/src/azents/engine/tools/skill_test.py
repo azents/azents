@@ -9,7 +9,11 @@ from typing import Any
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentSessionRunState
+from azents.core.enums import AgentRuntimeCapability, AgentSessionRunState
+from azents.core.runtime_capabilities import (
+    RuntimeCapabilityResolver,
+    RuntimeCapabilitySnapshot,
+)
 from azents.core.tools import TurnContext
 from azents.core.vfs import (
     VfsProjection,
@@ -43,6 +47,15 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationTargetResolver,
 )
 from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
+
+
+def _managed_runtime_capability_resolver() -> RuntimeCapabilityResolver:
+    """Return a managed shell-enabled Runtime capability resolver."""
+    return RuntimeCapabilityResolver.from_agent(
+        state=AgentRuntimeCapability.MANAGED,
+        version=1,
+        shell_enabled=True,
+    )
 
 
 def _skill_item(
@@ -482,6 +495,98 @@ class TestSkillToolkit:
         )
         assert service.resolve_calls[-1]["workspace_id"] == "workspace-current"
 
+    @pytest.mark.asyncio
+    async def test_shell_disabled_keeps_managed_and_hides_filesystem_skills(
+        self,
+    ) -> None:
+        """Managed VFS Skills remain while filesystem Skills are denied."""
+        projection = _managed_projection()
+        toolkit = SkillToolkit(
+            store=_SkillStore(
+                SkillProjectionState(
+                    active=SkillProjectionSnapshot(items=[_skill_item()])
+                )
+            ),
+            projection_service=None,
+            vfs_projection_service=_VfsService(projection),
+            agent_id="agent-1",
+            session_id="session-1",
+        )
+        toolkit.set_runtime_capability_resolver(
+            RuntimeCapabilityResolver.from_agent(
+                state=AgentRuntimeCapability.MANAGED,
+                version=1,
+                shell_enabled=False,
+            )
+        )
+        context = TurnContext(
+            workspace_id="workspace-1",
+            model="test-model",
+            run_id="run-1",
+            publish_event=_noop_publish_event,
+        )
+
+        prompt = await toolkit.get_static_prompt(context)
+        state = await toolkit.update_context(context)
+
+        assert "/workspace/agent/project" not in prompt
+        assert "azents://skills/azents/review/SKILL.md" in prompt
+        [load_skill] = state.tools
+        with pytest.raises(FunctionToolError, match="Filesystem Skill capability"):
+            await load_skill.handler(
+                json.dumps({"skill_path": _skill_item().skill_path})
+            )
+
+    @pytest.mark.asyncio
+    async def test_prompt_and_catalog_recheck_filesystem_skill_authority(
+        self,
+    ) -> None:
+        """Each projection surface hides filesystem Skills after a downgrade."""
+        provider_calls = 0
+        current = RuntimeCapabilityResolver.from_agent(
+            state=AgentRuntimeCapability.REMOVING,
+            version=2,
+            shell_enabled=False,
+        )
+
+        async def current_snapshot_provider() -> RuntimeCapabilitySnapshot:
+            nonlocal provider_calls
+            provider_calls += 1
+            return current.snapshot
+
+        toolkit = SkillToolkit(
+            store=_SkillStore(
+                SkillProjectionState(
+                    active=SkillProjectionSnapshot(items=[_skill_item()])
+                )
+            ),
+            projection_service=None,
+            vfs_projection_service=None,
+            agent_id="agent-1",
+            session_id="session-1",
+        )
+        toolkit.set_runtime_capability_resolver(
+            RuntimeCapabilityResolver.from_agent(
+                state=AgentRuntimeCapability.MANAGED,
+                version=1,
+                shell_enabled=True,
+                current_snapshot_provider=current_snapshot_provider,
+            )
+        )
+        context = TurnContext(
+            workspace_id="workspace-1",
+            model="test-model",
+            run_id="run-1",
+            publish_event=_noop_publish_event,
+        )
+
+        prompt = await toolkit.get_static_prompt(context)
+        state = await toolkit.update_context(context)
+
+        assert prompt == ""
+        assert state.tools == []
+        assert provider_calls == 2
+
 
 class TestLoadSkill:
     """load_skill tool behavior."""
@@ -500,6 +605,7 @@ class TestLoadSkill:
             session_id="session-1",
             workspace_id="workspace-1",
             run_id="run-1",
+            runtime_capability_resolver=_managed_runtime_capability_resolver(),
         )
 
         output = await tool.handler(json.dumps({"skill_path": item.skill_path}))
@@ -523,6 +629,7 @@ class TestLoadSkill:
             session_id="session-1",
             workspace_id="workspace-1",
             run_id="run-1",
+            runtime_capability_resolver=None,
         )
 
         output = await tool.handler(json.dumps({"skill_path": skill_uri}))
@@ -544,6 +651,7 @@ class TestLoadSkill:
             session_id="session-1",
             workspace_id="workspace-1",
             run_id="run-1",
+            runtime_capability_resolver=_managed_runtime_capability_resolver(),
         )
 
         with pytest.raises(FunctionToolError, match="Skill not found"):
@@ -566,6 +674,7 @@ class TestLoadSkill:
             session_id="session-1",
             workspace_id="workspace-1",
             run_id="run-1",
+            runtime_capability_resolver=_managed_runtime_capability_resolver(),
         )
 
         output = await tool.handler(json.dumps({"skill_path": item.skill_path}))
@@ -573,6 +682,27 @@ class TestLoadSkill:
         assert isinstance(output, str)
         assert "Skill loaded from the active projection." in output
         assert item.body in output
+
+    @pytest.mark.asyncio
+    async def test_load_skill_denies_filesystem_without_capability_context(
+        self,
+    ) -> None:
+        """Filesystem Skill loading fails closed without resolver context."""
+        item = _skill_item()
+        tool = make_load_skill_tool(
+            store=_SkillStore(
+                SkillProjectionState(active=SkillProjectionSnapshot(items=[item]))
+            ),
+            vfs_projection_service=None,
+            agent_id="agent-1",
+            session_id="session-1",
+            workspace_id="workspace-1",
+            run_id="run-1",
+            runtime_capability_resolver=None,
+        )
+
+        with pytest.raises(FunctionToolError, match="capability context"):
+            await tool.handler(json.dumps({"skill_path": item.skill_path}))
 
 
 class TestSkillProjectionService:

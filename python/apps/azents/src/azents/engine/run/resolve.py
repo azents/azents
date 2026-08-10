@@ -32,6 +32,10 @@ from azents.core.enums import ExchangeFileStatus, LLMProvider
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
 from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
+from azents.core.runtime_capabilities import (
+    RuntimeCapability,
+    RuntimeCapabilityResolver,
+)
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -1250,7 +1254,7 @@ async def resolve_agent_tools(
     skill_toolkit_provider: SkillToolkitProvider | None = None,
     subagent_toolkit_provider: ToolkitProvider[Any] | None = None,
     memory_enabled: bool = True,
-    runtime_tools_enabled: bool = True,
+    runtime_capability_resolver: RuntimeCapabilityResolver,
 ) -> list[ToolkitBinding]:
     """Resolve every Toolkit connected to Agent and return instance list.
 
@@ -1273,9 +1277,7 @@ async def resolve_agent_tools(
     :param goal_toolkit_provider: Goal toolkit provider (None disables goal)
     :param external_channel_toolkit_provider: External Channel root provider
     :param skill_toolkit_provider: Skill toolkit provider (None disables Skill)
-    :param runtime_tools_enabled: Expose builtin shell/file tools only to
-        Agents connected to Runtime settings.
-        Memory tools can be exposed without runtime.
+    :param runtime_capability_resolver: Agent Runtime capability resolver.
     :return: List of (Toolkit, slug) tuples
     """
     async with session_manager() as session:
@@ -1375,6 +1377,7 @@ async def resolve_agent_tools(
         )
 
     instruction_context_store: RuntimeInstructionContextStore | None = None
+    capability_resolver = runtime_capability_resolver
 
     # Auto-bound Toolkit: configure memory and runtime capabilities as separate
     # Toolkit bindings so future execution modes can filter capabilities without
@@ -1473,7 +1476,13 @@ async def resolve_agent_tools(
                     )
                 )
 
-        if runtime_tools_enabled:
+        if capability_resolver.project(
+            (
+                RuntimeCapability.WORKSPACE,
+                RuntimeCapability.RUNTIME_FILESYSTEM,
+                RuntimeCapability.PROCESS_EXECUTION,
+            )
+        ):
             instruction_context_store = RuntimeInstructionContextStore()
             runtime_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
             if _allows_execution_mode(runtime_modes, execution_mode):
@@ -1505,6 +1514,9 @@ async def resolve_agent_tools(
                 if isinstance(runtime_resolved, RuntimeToolkit):
                     runtime_resolved.set_agent_id(agent_id)
                     runtime_resolved.set_session_id(context.session_id)
+                    runtime_resolved.set_runtime_capability_resolver(
+                        capability_resolver
+                    )
                     runtime_resolved.set_instruction_context_store(
                         instruction_context_store
                     )
@@ -1562,6 +1574,9 @@ async def resolve_agent_tools(
                     if isinstance(claude_rules_resolved, ClaudeRulesToolkit):
                         claude_rules_resolved.set_agent_id(agent_id)
                         claude_rules_resolved.set_session_id(context.session_id)
+                        claude_rules_resolved.set_runtime_capability_resolver(
+                            capability_resolver
+                        )
                         claude_rules_resolved.set_instruction_context_store(
                             instruction_context_store
                         )
@@ -1753,6 +1768,7 @@ async def resolve_agent_tools(
         if isinstance(skill_resolved, SkillToolkit):
             skill_resolved.set_agent_id(agent_id)
             skill_resolved.set_session_id(context.session_id)
+            skill_resolved.set_runtime_capability_resolver(capability_resolver)
         pending.append(
             (
                 skill_toolkit_provider,
