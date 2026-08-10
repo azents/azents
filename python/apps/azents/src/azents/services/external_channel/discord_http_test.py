@@ -313,7 +313,7 @@ def _body(
             "token": "interaction-token-must-not-persist",
             "data": {
                 "id": "101",
-                "name": "Azents settings",
+                "name": "azents",
                 "type": 1,
                 "content": "private command content",
                 "attachments": [{"id": "attachment-1"}],

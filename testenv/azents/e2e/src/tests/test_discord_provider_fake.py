@@ -345,7 +345,7 @@ def test_discord_fake_configures_bounded_command_reconciliation_state(
     configured_names = [
         "Ask an Azents Agent",
         "Ask an Azents Agent",
-        "Azents settings",
+        "azents",
         "Private customer command",
     ]
     requests.post(
@@ -385,7 +385,10 @@ def test_discord_fake_configures_bounded_command_reconciliation_state(
         {"role": "message_action", "type": 3},
         {"role": "unrelated", "type": 2},
     ]
-    assert all(name not in str(evidence) for name in configured_names)
+    rendered = str(evidence)
+    assert configured_names[0] not in rendered
+    assert configured_names[3] not in rendered
+    assert "Stale description." not in rendered
 
 
 @pytest.mark.parametrize(

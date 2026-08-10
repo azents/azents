@@ -24,6 +24,7 @@ from azents.services.external_channel.discord_sdk import (
 )
 
 DISCORD_AZENTS_MESSAGE_COMMAND_NAME = "Ask an Azents Agent"
+DISCORD_AZENTS_SETTINGS_COMMAND_NAME = "azents"
 
 
 class DiscordAPIError(RuntimeError):
@@ -107,7 +108,7 @@ DISCORD_REQUIRED_GUILD_COMMANDS = (
     ),
     DiscordGuildCommandDefinition(
         role=DiscordGuildCommandRole.AZENTS_SETTINGS,
-        name="Azents settings",
+        name=DISCORD_AZENTS_SETTINGS_COMMAND_NAME,
         command_type=1,
         description="Configure Azents settings.",
     ),
