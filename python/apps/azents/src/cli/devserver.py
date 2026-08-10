@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import uvicorn
+from azcommon import di
 from azcommon.logging import RuntimeEnvironment, configure_logging_for_runtime
 from fastapi import FastAPI
 
@@ -26,7 +27,9 @@ from azents.app import (
     run_with_container,
 )
 from azents.core.config import Config
+from azents.core.deps import get_appctx
 from azents.scheduler.service import SchedulerService
+from azents.utils.appctx import AppContext
 from azents.worker.worker import AgentWorker
 
 _SRC_DIR = str(Path(__file__).resolve().parent.parent)
@@ -51,6 +54,30 @@ def admin_app() -> FastAPI:
     config = Config.from_env()
     _enforce_production_testenv_guard(config)
     return create_admin_api_app(config)
+
+
+def _create_api_targets(
+    config: Config,
+    *,
+    appctx: AppContext[Config],
+    container: di.Container,
+    reload: bool,
+) -> tuple[str | FastAPI, str | FastAPI]:
+    """Create reload factories or shared-context non-reload API apps."""
+    if reload:
+        return "devserver:public_app", "devserver:admin_app"
+    return (
+        create_public_api_app(
+            config,
+            appctx=appctx,
+            container=container,
+        ),
+        create_admin_api_app(
+            config,
+            appctx=appctx,
+            container=container,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -94,31 +121,6 @@ async def main(*, reload: bool = False) -> None:
     if cli_dir not in sys.path:
         sys.path.insert(0, cli_dir)
 
-    public_server = uvicorn.Server(
-        uvicorn.Config(
-            "devserver:public_app",
-            factory=True,
-            host="0.0.0.0",
-            port=8010,
-            reload=reload,
-            reload_dirs=[_SRC_DIR] if reload else [],
-            log_config=None,  # noqa: S104 # development server
-        )
-    )
-    admin_server = uvicorn.Server(
-        uvicorn.Config(
-            "devserver:admin_app",
-            factory=True,
-            host="0.0.0.0",
-            port=8011,
-            reload=reload,
-            reload_dirs=[_SRC_DIR] if reload else [],
-            log_config=None,  # noqa: S104 # development server
-        )
-    )
-    # testenv_server receives an app instance directly because reload is unsupported.
-    testenv_server: uvicorn.Server | None = None
-
     shutdown_event = asyncio.Event()
 
     def _on_shutdown(sig: signal.Signals) -> None:
@@ -133,11 +135,47 @@ async def main(*, reload: bool = False) -> None:
         loop.add_signal_handler(sig, _on_shutdown, sig)
 
     async with run_with_container(config) as container:
+        appctx = await container.solve(get_appctx)
         worker = await container.solve(AgentWorker)
         scheduler = await container.solve(SchedulerService)
 
+        public_target, admin_target = _create_api_targets(
+            config,
+            appctx=appctx,
+            container=container,
+            reload=reload,
+        )
+
+        public_server = uvicorn.Server(
+            uvicorn.Config(
+                public_target,
+                factory=reload,
+                host="0.0.0.0",
+                port=8010,
+                reload=reload,
+                reload_dirs=[_SRC_DIR] if reload else [],
+                log_config=None,  # noqa: S104 # development server
+            )
+        )
+        admin_server = uvicorn.Server(
+            uvicorn.Config(
+                admin_target,
+                factory=reload,
+                host="0.0.0.0",
+                port=8011,
+                reload=reload,
+                reload_dirs=[_SRC_DIR] if reload else [],
+                log_config=None,  # noqa: S104 # development server
+            )
+        )
+        # Testenv receives an app instance directly because reload is unsupported.
+        testenv_server: uvicorn.Server | None = None
         if config.testenv_api_enabled:
-            testenv_app_instance = create_testenv_api_app(config)
+            testenv_app_instance = create_testenv_api_app(
+                config,
+                appctx=appctx,
+                container=container,
+            )
             testenv_server = uvicorn.Server(
                 uvicorn.Config(
                     testenv_app_instance,

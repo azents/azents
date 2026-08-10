@@ -43,6 +43,7 @@ def test_scheduler_default_on_render_contract() -> None:
     assert "name: scheduler" in rendered
     assert "./bin/scheduler.sh" in rendered
     assert "kind: PodDisruptionBudget" in rendered
+    assert 'AZ_JOB_RUNTIME_BACKEND: "local"' in rendered
 
 
 def test_scheduler_can_be_disabled() -> None:
@@ -50,3 +51,14 @@ def test_scheduler_can_be_disabled() -> None:
     rendered = _helm_template("server.scheduler.enabled=false")
 
     assert "./bin/scheduler.sh" not in rendered
+
+
+def test_job_runtime_backend_is_one_shared_server_selector() -> None:
+    """All producer roles receive the same reserved backend selection."""
+    rendered = _helm_template("server.jobRuntime.backend=temporal")
+
+    assert rendered.count('AZ_JOB_RUNTIME_BACKEND: "temporal"') == 1
+    assert "name: apiserver" in rendered
+    assert "name: external-channel-gateway" in rendered
+    assert "name: scheduler" in rendered
+    assert "name: worker" in rendered

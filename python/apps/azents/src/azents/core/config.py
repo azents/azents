@@ -17,6 +17,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from azents.core.enums import (
     ExternalChannelConversationLockBackend as ConversationLockBackend,
 )
+from azents.core.enums import (
+    JobRuntimeBackend,
+)
 
 RegistrationMode = Literal["closed", "signup_token", "open"]
 
@@ -34,6 +37,7 @@ class Settings(BaseSettings):
 
     # Runtime environment
     runtime_env: RuntimeEnvironment = RuntimeEnvironment.LOCAL
+    job_runtime_backend: JobRuntimeBackend = JobRuntimeBackend.LOCAL
 
     # Sentry
     sentry_dsn: str | None = None
@@ -438,6 +442,7 @@ class Config(BaseModel):
     """Application settings, immutable and type-safe."""
 
     runtime_env: RuntimeEnvironment
+    job_runtime_backend: JobRuntimeBackend = JobRuntimeBackend.LOCAL
     sentry_dsn: str | None
     rdb: PostgreSQLConfig
     auth: AuthConfig
@@ -483,6 +488,7 @@ class Config(BaseModel):
         """Create Config from Settings."""
         return cls(
             runtime_env=settings.runtime_env,
+            job_runtime_backend=settings.job_runtime_backend,
             sentry_dsn=settings.sentry_dsn,
             rdb=PostgreSQLConfig(
                 host=settings.rdb_host,

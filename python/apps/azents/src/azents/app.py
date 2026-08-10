@@ -2,7 +2,7 @@
 
 import json
 import logging
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -14,6 +14,7 @@ from azents.api import admin, internal, public, testenv
 from azents.consts import PROJECT_ROOT
 from azents.core.config import Config
 from azents.core.deps import get_appctx
+from azents.job_runtime.deps import get_job_runtime
 from azents.services.runtime_provider_bootstrap.runner import (
     RuntimeProviderBootstrapRunner,
 )
@@ -66,7 +67,12 @@ def dump_openapi_spec(dest: str | Path, app: FastAPI) -> None:
     dest.write_text(rendered)
 
 
-def create_public_api_app(config: Config) -> FastAPI:
+def create_public_api_app(
+    config: Config,
+    *,
+    appctx: AppContext[Config] | None = None,
+    container: di.Container | None = None,
+) -> FastAPI:
     """Create the Public API app.
 
     The public app is read-only and uses cursor pagination. It also mounts the
@@ -83,6 +89,8 @@ def create_public_api_app(config: Config) -> FastAPI:
         description="Public read-only API server for Azents",
         initialize_system_bootstrap=False,
         initialize_runtime_provider_bootstrap=False,
+        appctx=appctx,
+        container=container,
     )
     public.mount(as_route_mounter(app))
     internal_app = _create_internal_sub_app(app)
@@ -110,7 +118,12 @@ def _create_internal_sub_app(parent: FastAPI) -> FastAPI:
     return sub_app
 
 
-def create_admin_api_app(config: Config) -> FastAPI:
+def create_admin_api_app(
+    config: Config,
+    *,
+    appctx: AppContext[Config] | None = None,
+    container: di.Container | None = None,
+) -> FastAPI:
     """Create the Admin API app (CRUD, offset/limit pagination).
 
     :param config: app settings
@@ -122,12 +135,19 @@ def create_admin_api_app(config: Config) -> FastAPI:
         description="Admin CRUD API server for Azents",
         initialize_system_bootstrap=True,
         initialize_runtime_provider_bootstrap=True,
+        appctx=appctx,
+        container=container,
     )
     admin.mount(as_route_mounter(app))
     return app
 
 
-def create_testenv_api_app(config: Config) -> FastAPI:
+def create_testenv_api_app(
+    config: Config,
+    *,
+    appctx: AppContext[Config] | None = None,
+    container: di.Container | None = None,
+) -> FastAPI:
     """Create the Testenv API app (testenv-only devtools).
 
     This app is not started in production; startup fails when
@@ -142,6 +162,8 @@ def create_testenv_api_app(config: Config) -> FastAPI:
         description="Testenv-only devtools API for Azents",
         initialize_system_bootstrap=False,
         initialize_runtime_provider_bootstrap=False,
+        appctx=appctx,
+        container=container,
     )
     testenv.mount(as_route_mounter(app))
     return app
@@ -154,6 +176,8 @@ def _create_fastapi_instance(
     description: str = "Azents API Server",
     initialize_system_bootstrap: bool,
     initialize_runtime_provider_bootstrap: bool,
+    appctx: AppContext[Config] | None,
+    container: di.Container | None,
 ) -> FastAPI:
     """Create a FastAPI instance.
 
@@ -162,13 +186,21 @@ def _create_fastapi_instance(
     :param description: app description
     :return: FastAPI instance
     """
-    appctx = AppContext(config)
-    container = _create_container(appctx)
+    if (appctx is None) != (container is None):
+        raise ValueError("AppContext and DI container must be supplied together.")
+    owns_resources = appctx is None
+    if appctx is None:
+        appctx = AppContext(config)
+        container = _create_container(appctx)
+    elif appctx.config is not config:
+        raise ValueError("Externally owned AppContext must use the app Config.")
+    assert container is not None
     lifespan = _create_fastapi_lifespan(
         appctx,
         container,
         initialize_system_bootstrap=initialize_system_bootstrap,
         initialize_runtime_provider_bootstrap=(initialize_runtime_provider_bootstrap),
+        owns_resources=owns_resources,
     )
 
     app = FastAPI(
@@ -196,6 +228,7 @@ async def run_with_container(config: Config) -> AsyncIterator[di.Container]:
         AppContext(config) as ctx,
         _create_container(ctx) as container,
     ):
+        await _preload_process_services(container)
         yield container
 
 
@@ -205,12 +238,17 @@ def _create_fastapi_lifespan(
     *,
     initialize_system_bootstrap: bool,
     initialize_runtime_provider_bootstrap: bool,
+    owns_resources: bool,
 ) -> Lifespan[FastAPI]:
-    """Create a lifespan function that binds the app context lifecycle to FastAPI."""
+    """Create a lifespan with either root-owned or externally owned resources."""
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        async with appctx, container:
+        async with AsyncExitStack() as stack:
+            if owns_resources:
+                await stack.enter_async_context(appctx)
+                await stack.enter_async_context(container)
+            await _preload_process_services(container)
             if initialize_system_bootstrap:
                 service = await container.solve(SystemBootstrapService)
                 await service.initialize()
@@ -222,6 +260,11 @@ def _create_fastapi_lifespan(
                 yield
 
     return lifespan
+
+
+async def _preload_process_services(container: di.Container) -> None:
+    """Resolve process singletons whose configuration must fail at startup."""
+    await container.solve(get_job_runtime)
 
 
 def _create_dependency_overrides(appctx: AppContext[Config]) -> di.DependencyOverrides:
