@@ -773,8 +773,8 @@
           "description": "Members who can manage this agent"
         },
         "danger": {
-          "label": "Runtime and deletion",
-          "description": "Reset runtime state or delete this agent"
+          "label": "Delete agent",
+          "description": "Permanently delete this agent and its conversations"
         },
         "projects": {
           "label": "Default projects",
@@ -798,6 +798,15 @@
         "channels": {
           "label": "External channels",
           "description": "Slack and Discord connections, routes, and participant access"
+        },
+        "runtime": {
+          "label": "Runtime",
+          "description": "Managed Runtime capability, Profile, lifecycle, and permanent removal",
+          "values": {
+            "none": "No Runtime",
+            "managed": "Managed",
+            "removing": "Removing"
+          }
         }
       },
       "automaticProjects": {
@@ -828,7 +837,11 @@
           "unavailable": "Unavailable",
           "error": "Error",
           "unchecked": "Unchecked"
-        }
+        },
+        "runtimeFreeTitle": "Managed Runtime required",
+        "runtimeFreeDescription": "Configured paths are retained, but they cannot be inspected or changed until a managed Runtime is added.",
+        "removingTitle": "Runtime removal in progress",
+        "removingDescription": "Default Project inspection and editing remain unavailable until removal completes."
       },
       "settingsLayout": {
         "backToAgent": "Back to agent",
@@ -934,9 +947,7 @@
         "inheritModelBadge": "Inherits model from parent",
         "danger": {
           "title": "Danger Zone",
-          "deleteWarning": "Deleting this agent will remove all its conversations and settings. This action cannot be undone.",
-          "resetRuntime": "Reset runtime",
-          "resetRuntimeConfirm": "This will discard agent workspace files and any preserved runtime state, then start an empty runtime. This action cannot be undone."
+          "deleteWarning": "Deleting this agent will remove all its conversations and settings. This action cannot be undone."
         }
       },
       "open": "Open",
@@ -1325,7 +1336,104 @@
         "workspacePolicyInvalid": "Its Workspace network restrictions are invalid.",
         "profileIncompatible": "Its Provider Profile is incompatible with the Provider's current capabilities.",
         "unknown": "The current Runtime configuration is unavailable."
-      }
+      },
+      "runtimeSettings": {
+        "title": "Runtime",
+        "description": "Manage the isolated environment that provides shell, filesystem, Workspace, Project, Git, build, and test capabilities.",
+        "loadErrorTitle": "Could not load Runtime settings",
+        "actionErrorTitle": "Runtime action failed",
+        "authorityNotice": "Availability and actions are computed by the server from the current capability and Runtime state.",
+        "refresh": "Refresh",
+        "cancel": "Cancel",
+        "profileLabel": "Runtime Profile",
+        "profileDescription": "Choose an available Workspace Runtime Profile.",
+        "profilePlaceholder": "Select a Runtime Profile",
+        "profileUnavailable": "Unavailable",
+        "noProfiles": "No available Runtime Profiles",
+        "selectedProfileUnavailableTitle": "Selected Profile is unavailable",
+        "selectedProfileUnavailableDescription": "Choose another available Profile before applying a configuration change.",
+        "unknownProfile": "selected Profile",
+        "addAction": "Add Runtime",
+        "addConfirmTitle": "Add managed Runtime?",
+        "addConfirmDescription": "Add managed Runtime with {profile}?",
+        "addStoppedNotice": "The Runtime will be configured and stopped. It is created or started only when an authorized operation needs it.",
+        "confirmAdd": "Add Runtime",
+        "capability": {
+          "none": "No Runtime",
+          "managed": "Managed",
+          "removing": "Removing"
+        },
+        "notices": {
+          "added": "Runtime was added.",
+          "profileUpdated": "Runtime Profile configuration was updated."
+        },
+        "none": {
+          "title": "This agent has no managed Runtime",
+          "description": "The agent can still use its model, Memory, external channels, and remote tools. Local shell, files, Workspace, Project, Git, build, and test operations require a managed Runtime.",
+          "retainedTitle": "Runtime-free capabilities remain available",
+          "retainedDescription": "Adding a Runtime is explicit. Selecting a Profile here does not change the agent until you confirm."
+        },
+        "managed": {
+          "profileTitle": "Runtime configuration",
+          "profileDescription": "Changing the Profile updates desired configuration. Recreation occurs only when required by the server.",
+          "saveProfile": "Save Profile"
+        },
+        "lifecycle": {
+          "title": "Temporary Runtime controls",
+          "description": "Start, stop, restart, or reset the current managed Runtime without removing the capability.",
+          "start": "Start",
+          "stop": "Stop",
+          "restart": "Restart",
+          "reset": "Reset",
+          "resetConfirmTitle": "Reset Runtime state?",
+          "resetConfirmDescription": "Reset discards current Runtime workspace files and preserved Runtime state, then prepares an empty Runtime. This cannot be undone.",
+          "confirmReset": "Reset Runtime"
+        },
+        "removal": {
+          "title": "Permanently remove managed Runtime",
+          "description": "Removal deletes Runtime-owned local state and interrupts Runtime-dependent work. It cannot be cancelled or rolled back.",
+          "action": "Remove Runtime",
+          "confirmTitle": "Permanently remove Runtime?",
+          "irreversibleTitle": "This action is irreversible",
+          "irreversibleDescription": "Review the aggregate impact and retained data before confirming.",
+          "deletedTitle": "Deleted",
+          "deletedDescription": "Runtime workspace files, local Runtime state, and Runtime-backed project bindings.",
+          "retainedTitle": "Retained",
+          "retainedDescription": "Agent identity, settings, model access, memories, conversations, and external channel configuration.",
+          "acknowledgement": "I understand that Runtime removal is permanent and may interrupt active work.",
+          "confirmAction": "Permanently remove Runtime"
+        },
+        "impact": {
+          "activeRootSessions": "Active root sessions",
+          "activeSubagents": "Active subagents",
+          "activeRuns": "Active runs",
+          "queuedActions": "Queued Runtime actions"
+        },
+        "removing": {
+          "title": "Runtime removal is in progress",
+          "description": "Runtime-dependent access is fenced while cleanup and physical deletion complete.",
+          "noCancellation": "Removal cannot be cancelled. Runtime-dependent access remains unavailable until it completes.",
+          "cleanupProgress": "Scanned {scanned} contexts · invalidated {invalidated} · attempt {attempts}",
+          "stages": {
+            "fencing": "Fencing new Runtime work",
+            "interrupting_work": "Interrupting active work",
+            "cleaning_product_state": "Cleaning product state",
+            "deleting_runtime": "Deleting physical Runtime",
+            "finalizing": "Finalizing removal",
+            "completed": "Removal completed"
+          },
+          "status": {
+            "pending": "Pending",
+            "running": "Running",
+            "retry_wait": "Waiting to retry",
+            "completed": "Completed"
+          }
+        }
+      },
+      "runtimeFreeDefaultTitle": "No Runtime is the default",
+      "runtimeFreeDefaultDescription": "Without a Runtime, the agent keeps model, Memory, external channel, and remote tool access. Select an available Profile only when local shell, files, Workspace, Project, Git, build, or test capabilities are required.",
+      "shellRuntimeRequiredTitle": "Managed Runtime required",
+      "shellRuntimeRequiredDescription": "Shell settings become available after you <runtimeLink>add a managed Runtime</runtimeLink>."
     },
     "toolkits": {
       "headline": "Toolkits",
@@ -1867,7 +1975,12 @@
       "controlUnavailableTitle": "Workspace control unavailable",
       "restartRuntime": "Restart Runtime",
       "inactiveTitle": "Runtime inactive",
-      "inactiveDescription": "Start the Runtime to browse Agent Workspace folders."
+      "inactiveDescription": "Start the Runtime to browse Agent Workspace folders.",
+      "runtimeFreeTitle": "No managed Runtime",
+      "runtimeFreeDescription": "This agent can continue using model and remote capabilities, but Agent Workspace files and Projects require a managed Runtime.",
+      "addRuntime": "Add Runtime",
+      "removingTitle": "Runtime removal in progress",
+      "removingDescription": "Workspace, Project, Git, and file access remain unavailable until permanent removal completes."
     },
     "projectPickerStartRuntime": "Start Runtime"
   },
@@ -2170,7 +2283,20 @@
         "profileInvalid": "The selected Profile document is invalid.",
         "unknown": "The desired Runtime configuration could not be resolved."
       },
-      "configurationMissingCapabilities": "Missing capabilities: {capabilities}"
+      "configurationMissingCapabilities": "Missing capabilities: {capabilities}",
+      "runtimeFreeTitle": "No managed Runtime",
+      "runtimeFreeDescription": "This agent can continue using model and remote capabilities, but Agent Workspace files and Projects require a managed Runtime.",
+      "addRuntime": "Add Runtime",
+      "removingTitle": "Runtime removal in progress",
+      "removingDescription": "Workspace, Project, Git, and file access remain unavailable until permanent removal completes.",
+      "removalStages": {
+        "fencing": "Fencing new Runtime work",
+        "interrupting_work": "Interrupting active work",
+        "cleaning_product_state": "Cleaning product state",
+        "deleting_runtime": "Deleting physical Runtime",
+        "finalizing": "Finalizing removal",
+        "completed": "Removal completed"
+      }
     },
     "toolCall": {
       "preparing": "Writing command...",
@@ -2602,7 +2728,11 @@
         "invoked": "Invoked",
         "context": "Context"
       }
-    }
+    },
+    "runtimeFreeProjectTitle": "Start without local Projects",
+    "runtimeFreeProjectDescription": "This agent can start a conversation without local Projects. <runtimeLink>Add a managed Runtime</runtimeLink> to select Workspace folders or create Git worktrees.",
+    "runtimeRemovingProjectTitle": "Runtime removal in progress",
+    "runtimeRemovingProjectDescription": "Start the conversation without local Projects while Runtime removal completes."
   },
   "oauth": {
     "title": "Authorization",

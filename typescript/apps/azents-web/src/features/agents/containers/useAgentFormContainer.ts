@@ -231,8 +231,6 @@ export function useAgentFormContainer(
         values.selectable_model_options,
       );
       if (agentId && formState.type === "EDIT") {
-        const runtimeProfileSelectionChanged =
-          values.runtime_profile_id !== formState.agent.runtime_profile_id;
         updateMutation.mutate({
           handle,
           agentId,
@@ -244,13 +242,6 @@ export function useAgentFormContainer(
           model_parameters: modelParameters,
           system_prompt: values.system_prompt ?? null,
           type: values.type,
-          ...(runtimeProfileSelectionChanged
-            ? {
-                runtime_profile_id: values.runtime_profile_id,
-                expected_runtime_profile_selection_version:
-                  formState.agent.runtime_profile_selection_version,
-              }
-            : {}),
           enabled: values.enabled,
           shell_enabled: values.shell_enabled,
           memory_enabled: values.memory_enabled,

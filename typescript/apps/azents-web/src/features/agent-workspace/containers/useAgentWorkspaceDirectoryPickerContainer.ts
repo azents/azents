@@ -50,10 +50,23 @@ export function useAgentWorkspaceDirectoryPickerContainer({
     setCurrentPath(null);
   }, [agentId, handle, sessionId]);
 
+  const runtimeQuery = trpc.chat.getAgentRuntime.useQuery(
+    { handle, agentId },
+    {
+      enabled: enabled && isOpen,
+      refetchInterval: (query): number | false =>
+        query.state.data?.capability === "removing" ||
+        query.state.data?.configuration?.status === "waiting_for_recreation"
+          ? WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS
+          : false,
+    },
+  );
+  const runtimeManaged = runtimeQuery.data?.capability === "managed";
+  const runnerAvailable = runtimeQuery.data?.actions.use_runner === true;
   const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
     { agentId },
     {
-      enabled: enabled && isOpen,
+      enabled: enabled && isOpen && runtimeManaged,
       refetchInterval: (query): number | false =>
         query.state.data?.workspace.type === "CONNECTING" ||
         query.state.data?.workspace.type === "CONTROL_UNAVAILABLE" ||
@@ -82,6 +95,7 @@ export function useAgentWorkspaceDirectoryPickerContainer({
       enabled:
         enabled &&
         isOpen &&
+        runnerAvailable &&
         workspaceQuery.data?.workspace.type === "READY" &&
         activePath !== "",
     },
@@ -95,6 +109,18 @@ export function useAgentWorkspaceDirectoryPickerContainer({
   const state = useMemo<ProjectDirectoryPickerState>(() => {
     if (!isOpen) {
       return { type: "CLOSED" };
+    }
+    if (runtimeQuery.isError) {
+      return { type: "ERROR", message: errorMessage(runtimeQuery.error) };
+    }
+    if (runtimeQuery.isLoading || !runtimeQuery.data) {
+      return { type: "LOADING" };
+    }
+    if (runtimeQuery.data.capability === "none") {
+      return { type: "RUNTIME_FREE", runtime: runtimeQuery.data };
+    }
+    if (runtimeQuery.data.capability === "removing") {
+      return { type: "REMOVING", runtime: runtimeQuery.data };
     }
     if (workspaceQuery.isError) {
       return { type: "ERROR", message: errorMessage(workspaceQuery.error) };
@@ -139,6 +165,10 @@ export function useAgentWorkspaceDirectoryPickerContainer({
     isOpen,
     manifest?.cwd,
     manifest?.entries,
+    runtimeQuery.data,
+    runtimeQuery.error,
+    runtimeQuery.isError,
+    runtimeQuery.isLoading,
     startRuntimeMutation.isPending,
     workspaceQuery.data,
     workspaceQuery.error,
@@ -168,18 +198,24 @@ export function useAgentWorkspaceDirectoryPickerContainer({
       return;
     }
     void Promise.all([
+      utils.chat.getAgentRuntime.invalidate({ handle, agentId }),
       utils.chat.getAgentWorkspace.invalidate({ agentId }),
       utils.chat.readAgentWorkspacePath.invalidate({ agentId }),
     ]);
   }, [
     agentId,
+    handle,
     refreshQueries,
+    utils.chat.getAgentRuntime,
     utils.chat.getAgentWorkspace,
     utils.chat.readAgentWorkspacePath,
   ]);
   const startRuntime = useCallback((): void => {
+    if (runtimeQuery.data?.actions.start !== true) {
+      return;
+    }
     startRuntimeMutation.mutate({ handle, agentId });
-  }, [agentId, handle, startRuntimeMutation]);
+  }, [agentId, handle, runtimeQuery.data?.actions.start, startRuntimeMutation]);
 
   return {
     state,

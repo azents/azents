@@ -335,6 +335,7 @@ const meta = {
     ),
   ],
   args: {
+    runtimeSettingsHref: "/w/engineering/agents/agent_01/settings/runtime",
     onStartRuntime: noop,
     onStopRuntime: noop,
     onRestartRuntime: noop,
@@ -379,6 +380,85 @@ type Story = StoryObj<typeof meta>;
 export const Browser = {
   args: {
     state: readyState,
+  },
+} satisfies Story;
+
+export const RuntimeFree = {
+  args: {
+    state: {
+      type: "RUNTIME_FREE",
+      runtime: {
+        capability: "none",
+        capability_version: 1,
+        runtime_profile_id: null,
+        runtime_profile_selection_version: 1,
+        runtime_profile_status: "not_applicable",
+        runtime_profile_available: false,
+        runtime_profile_availability_reason_code: null,
+        removal_impact: null,
+        removal: null,
+        runtime: null,
+        state: null,
+        configuration: null,
+        actions: {
+          add: true,
+          remove: false,
+          start: false,
+          stop: false,
+          restart: false,
+          reset: false,
+          observe: false,
+          use_runner: false,
+        },
+      },
+    },
+  },
+} satisfies Story;
+
+export const Removing = {
+  args: {
+    state: {
+      type: "REMOVING",
+      runtime: {
+        ...RuntimeFree.args.state.runtime,
+        capability: "removing",
+        capability_version: 2,
+        runtime_profile_id: "runtime_profile_01",
+        runtime_profile_selection_version: 2,
+        runtime_profile_status: "configured",
+        runtime_profile_available: true,
+        removal: {
+          id: "removal_01",
+          status: "running",
+          stage: "deleting_runtime",
+          confirmed_at: "2026-08-10T09:00:00Z",
+          cleanup_scanned_context_count: 8,
+          cleanup_invalidated_context_count: 8,
+          product_cleanup_completed_at: "2026-08-10T09:00:02Z",
+          physical_deletion_required: true,
+          physical_delete_requested_at: "2026-08-10T09:00:03Z",
+          physical_delete_acknowledgement_kind: null,
+          physical_delete_acknowledged_at: null,
+          attempt_count: 1,
+          next_attempt_at: null,
+          last_error_kind: null,
+          last_error_summary: null,
+          started_at: "2026-08-10T09:00:01Z",
+          completed_at: null,
+          updated_at: "2026-08-10T09:00:04Z",
+        },
+        actions: {
+          add: false,
+          remove: false,
+          start: false,
+          stop: false,
+          restart: false,
+          reset: false,
+          observe: false,
+          use_runner: false,
+        },
+      },
+    },
   },
 } satisfies Story;
 

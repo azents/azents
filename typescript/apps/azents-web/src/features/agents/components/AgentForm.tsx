@@ -351,7 +351,13 @@ export function AgentForm({
             />
           )}
 
-          {showProfile && (
+          {showProfile && !isEdit && (
+            <Alert color="blue" title={t("runtimeFreeDefaultTitle")}>
+              {t("runtimeFreeDefaultDescription")}
+            </Alert>
+          )}
+
+          {showProfile && !isEdit && (
             <Select
               label={t("runtimeProfileLabel")}
               description={t("runtimeProfileDescription")}
@@ -373,6 +379,7 @@ export function AgentForm({
           )}
 
           {showProfile &&
+            !isEdit &&
             selectedRuntimeProfile !== null &&
             !selectedRuntimeProfile.available && (
               <Alert color="red" title={t("runtimeProfileUnavailableTitle")}>
@@ -545,10 +552,31 @@ export function AgentForm({
             </Radio.Group>
           )}
 
+          {showCapabilities &&
+            (formState.type === "EDIT" &&
+            formState.agent.runtime_capability !== "managed" ? (
+              <Alert color="blue" title={t("shellRuntimeRequiredTitle")}>
+                {t.rich("shellRuntimeRequiredDescription", {
+                  runtimeLink: (chunks) => (
+                    <Anchor
+                      component={Link}
+                      href={`/w/${handle}/agents/${formState.agent.id}/settings/runtime`}
+                    >
+                      {chunks}
+                    </Anchor>
+                  ),
+                })}
+              </Alert>
+            ) : null)}
+
           {showCapabilities && (
             <Switch
               label={t("shellEnabledLabel")}
               description={t("shellEnabledDescription")}
+              disabled={
+                formState.type === "EDIT" &&
+                formState.agent.runtime_capability !== "managed"
+              }
               checked={form.values.shell_enabled ?? false}
               onChange={(e) =>
                 form.setFieldValue("shell_enabled", e.currentTarget.checked)

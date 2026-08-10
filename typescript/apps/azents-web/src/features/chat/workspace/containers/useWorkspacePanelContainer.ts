@@ -36,6 +36,7 @@ interface UseWorkspacePanelContainerInput {
 export interface WorkspacePanelContainerOutput {
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
+  runtimeSettingsHref: string;
   onStartRuntime: () => void;
   onStopRuntime: () => void;
   onRestartRuntime: () => void;
@@ -202,10 +203,22 @@ export function useWorkspacePanelContainer({
     setRegistrationSubmitError(null);
   }, [agentId, sessionId]);
 
+  const runtimeQuery = trpc.chat.getAgentRuntime.useQuery(
+    { handle, agentId },
+    {
+      refetchInterval: (query): number | false =>
+        query.state.data?.capability === "removing" ||
+        query.state.data?.configuration?.status === "waiting_for_recreation"
+          ? WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS
+          : false,
+    },
+  );
+  const runtimeManaged = runtimeQuery.data?.capability === "managed";
+  const runnerAvailable = runtimeQuery.data?.actions.use_runner === true;
   const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
     { agentId },
     {
-      enabled: true,
+      enabled: runtimeManaged,
       refetchInterval: (query): number | false =>
         query.state.data?.workspace.type === "CONNECTING" ||
         query.state.data?.workspace.type === "CONTROL_UNAVAILABLE" ||
@@ -216,23 +229,16 @@ export function useWorkspacePanelContainer({
           : false,
     },
   );
-  const projectBrowserManifestEnabled = shouldQueryProjectBrowserManifest(
-    workspaceQuery.data?.workspace.type ?? null,
-  );
-  const runtimeQuery = trpc.chat.getAgentRuntime.useQuery(
-    { handle, agentId },
-    {
-      refetchInterval: (query): number | false =>
-        query.state.data?.configuration?.status === "waiting_for_recreation"
-          ? WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS
-          : false,
-    },
-  );
+  const projectBrowserManifestEnabled =
+    runtimeManaged &&
+    shouldQueryProjectBrowserManifest(
+      workspaceQuery.data?.workspace.type ?? null,
+    );
 
-  const projectsQuery = trpc.chat.listAgentProjects.useQuery({
-    agentId,
-    sessionId,
-  });
+  const projectsQuery = trpc.chat.listAgentProjects.useQuery(
+    { agentId, sessionId },
+    { enabled: runtimeManaged },
+  );
   const projectBrowserManifestQuery =
     trpc.chat.getSessionProjectBrowserManifest.useQuery(
       {
@@ -245,6 +251,7 @@ export function useWorkspacePanelContainer({
     { agentId, sourceProjectPath: registrationPath ?? "" },
     {
       enabled:
+        runnerAvailable &&
         registrationPath !== null &&
         registrationRepositoryType === "git" &&
         registrationMode === "git_worktree",
@@ -308,6 +315,7 @@ export function useWorkspacePanelContainer({
     { agentId, sessionId, path: activeDirectoryPath },
     {
       enabled:
+        runnerAvailable &&
         workspaceQuery.data?.workspace.type === "READY" &&
         activeDirectoryPath !== "" &&
         !(
@@ -334,6 +342,7 @@ export function useWorkspacePanelContainer({
     { agentId, sessionId, path: selectedFilePath ?? "" },
     {
       enabled:
+        runnerAvailable &&
         workspaceQuery.data?.workspace.type === "READY" &&
         selectedFilePath !== null &&
         selectedEntry?.kind === "file" &&
@@ -345,6 +354,7 @@ export function useWorkspacePanelContainer({
     { agentId, path: selectedFilePath ?? "" },
     {
       enabled:
+        runnerAvailable &&
         workspaceQuery.data?.workspace.type === "READY" &&
         selectedFilePath !== null &&
         workspaceView === "info",
@@ -585,22 +595,31 @@ export function useWorkspacePanelContainer({
       },
     });
 
-  const onStartRuntime = useCallback(
-    () => startRuntimeMutation.mutate({ handle, agentId }),
-    [agentId, handle, startRuntimeMutation],
-  );
-  const onStopRuntime = useCallback(
-    () => stopRuntimeMutation.mutate({ handle, agentId }),
-    [agentId, handle, stopRuntimeMutation],
-  );
-  const onRestartRuntime = useCallback(
-    () => restartRuntimeMutation.mutate({ handle, agentId }),
-    [agentId, handle, restartRuntimeMutation],
-  );
-  const onResetRuntime = useCallback(
-    () => resetRuntimeMutation.mutate({ handle, agentId }),
-    [agentId, handle, resetRuntimeMutation],
-  );
+  const onStartRuntime = useCallback(() => {
+    if (runtimeQuery.data?.actions.start) {
+      startRuntimeMutation.mutate({ handle, agentId });
+    }
+  }, [agentId, handle, runtimeQuery.data?.actions.start, startRuntimeMutation]);
+  const onStopRuntime = useCallback(() => {
+    if (runtimeQuery.data?.actions.stop) {
+      stopRuntimeMutation.mutate({ handle, agentId });
+    }
+  }, [agentId, handle, runtimeQuery.data?.actions.stop, stopRuntimeMutation]);
+  const onRestartRuntime = useCallback(() => {
+    if (runtimeQuery.data?.actions.restart) {
+      restartRuntimeMutation.mutate({ handle, agentId });
+    }
+  }, [
+    agentId,
+    handle,
+    restartRuntimeMutation,
+    runtimeQuery.data?.actions.restart,
+  ]);
+  const onResetRuntime = useCallback(() => {
+    if (runtimeQuery.data?.actions.reset) {
+      resetRuntimeMutation.mutate({ handle, agentId });
+    }
+  }, [agentId, handle, resetRuntimeMutation, runtimeQuery.data?.actions.reset]);
 
   const onOpenDirectory = useCallback((path: string) => {
     setCurrentDirectoryPath(path);
@@ -904,6 +923,18 @@ export function useWorkspacePanelContainer({
   }, [directoryQuery.data]);
 
   const state = useMemo<WorkspacePanelState>(() => {
+    if (runtimeQuery.isError) {
+      return { type: "ERROR", message: getErrorMessage(runtimeQuery.error) };
+    }
+    if (runtimeQuery.isLoading || !runtimeQuery.data) {
+      return { type: "LOADING" };
+    }
+    if (runtimeQuery.data.capability === "none") {
+      return { type: "RUNTIME_FREE", runtime: runtimeQuery.data };
+    }
+    if (runtimeQuery.data.capability === "removing") {
+      return { type: "REMOVING", runtime: runtimeQuery.data };
+    }
     if (
       workspaceQuery.isLoading ||
       (projectBrowserManifestEnabled && projectBrowserManifestQuery.isLoading)
@@ -971,19 +1002,10 @@ export function useWorkspacePanelContainer({
     return {
       type: "SERVER",
       server: workspaceQuery.data,
-      runtimeConfiguration: runtimeQuery.isLoading
-        ? { type: "LOADING" }
-        : runtimeQuery.isError
-          ? {
-              type: "ERROR",
-              message: getErrorMessage(runtimeQuery.error),
-            }
-          : runtimeQuery.data
-            ? {
-                type: "LOADED",
-                configuration: runtimeQuery.data.configuration,
-              }
-            : { type: "LOADING" },
+      runtimeConfiguration: {
+        type: "LOADED",
+        configuration: runtimeQuery.data.configuration,
+      },
       manifest: browserManifest,
       projectBrowserManifest,
       browserMode,
@@ -1107,6 +1129,17 @@ export function useWorkspacePanelContainer({
   ]);
 
   const projectState = useMemo<WorkspaceProjectPanelState>(() => {
+    if (!runtimeManaged) {
+      return {
+        type: "READY",
+        projects: [],
+        registrationDialog: { type: "CLOSED" },
+        isRegisteringProject: false,
+        isCreatingWorktree: false,
+        registerProjectError: null,
+        pendingDeleteProjectId: null,
+      };
+    }
     if (projectsQuery.isLoading) {
       return { type: "LOADING" };
     }
@@ -1151,11 +1184,13 @@ export function useWorkspacePanelContainer({
     registrationRepositoryType,
     registrationStartingRef,
     registrationSubmitError,
+    runtimeManaged,
   ]);
 
   return {
     state,
     projectState,
+    runtimeSettingsHref: `/w/${handle}/agents/${agentId}/settings/runtime`,
     onStartRuntime,
     onStopRuntime,
     onRestartRuntime,

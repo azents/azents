@@ -306,13 +306,15 @@ export function useAgentDraftChatContainer(
     onSelectDirectory: onSelectProjectPickerDirectory,
   });
 
-  const projectPresetsQuery = trpc.chat.listAgentProjectPresets.useQuery({
-    agentId: agent.id,
-  });
+  const projectPresetsQuery = trpc.chat.listAgentProjectPresets.useQuery(
+    { agentId: agent.id },
+    { enabled: agent.runtime_capability === "managed" },
+  );
   const projectDefaultsQuery =
-    trpc.chat.getAgentSessionProjectDefaults.useQuery({
-      agentId: agent.id,
-    });
+    trpc.chat.getAgentSessionProjectDefaults.useQuery(
+      { agentId: agent.id },
+      { enabled: agent.runtime_capability === "managed" },
+    );
 
   useEffect(() => {
     defaultsAppliedRef.current = false;
@@ -359,7 +361,9 @@ export function useAgentDraftChatContainer(
   const gitRefsQuery = trpc.chat.previewAgentGitRefs.useQuery(
     { agentId: agent.id, sourceProjectPath: activeSourceProjectPath ?? "" },
     {
-      enabled: activeSourceProjectPath !== null,
+      enabled:
+        agent.runtime_capability === "managed" &&
+        activeSourceProjectPath !== null,
       refetchOnMount: "always",
       staleTime: 0,
     },
