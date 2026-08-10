@@ -1,5 +1,6 @@
 """AgentSession repository."""
 
+import asyncio
 import datetime
 import re
 from collections.abc import Sequence
@@ -8,8 +9,10 @@ from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
+from psycopg.errors import LockNotAvailable
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
@@ -55,6 +58,7 @@ _ROOT_SESSION_AGENT_NAME = "root"
 _ROOT_SESSION_AGENT_PATH = "/root"
 _DEFAULT_SESSION_AGENT_TYPE = "default"
 _CHILD_SESSION_AGENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+_OWNER_GENERATION_LOCK_RETRY_SECONDS = 0.01
 
 
 def validate_session_agent_child_name(name: str) -> None:
@@ -1089,7 +1093,31 @@ class AgentSessionRepository:
         session: AsyncSession,
         agent_session_id: str,
     ) -> int:
-        """Claim ownership only while the authoritative root remains active."""
+        """Claim ownership only while the authoritative root remains active.
+
+        Session-owned transactions can already hold an AgentSession row before
+        they reach the root tree lifecycle lock. Use non-blocking Session row
+        locks and roll back the nested attempt so this root-first claim never
+        completes an inverse lock cycle.
+        """
+        while True:
+            try:
+                async with session.begin_nested():
+                    return await self._claim_owner_generation_once(
+                        session,
+                        agent_session_id,
+                    )
+            except OperationalError as exc:
+                if not isinstance(exc.orig, LockNotAvailable):
+                    raise
+                await asyncio.sleep(_OWNER_GENERATION_LOCK_RETRY_SECONDS)
+
+    async def _claim_owner_generation_once(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> int:
+        """Attempt one root-first owner claim without waiting on Session rows."""
         root_session_agent_id = await session.scalar(
             sa.select(RDBSessionAgent.root_session_agent_id).where(
                 RDBSessionAgent.agent_session_id == agent_session_id
@@ -1107,27 +1135,33 @@ class AgentSessionRepository:
         )
         if root_agent is None:
             raise ValueError("Root SessionAgent not found")
-        root_status = await session.scalar(
-            sa.select(RDBAgentSession.status)
+        root_session = await session.scalar(
+            sa.select(RDBAgentSession)
             .where(RDBAgentSession.id == root_agent.agent_session_id)
-            .with_for_update()
+            .with_for_update(nowait=True)
             .execution_options(populate_existing=True)
         )
-        if root_status is not AgentSessionStatus.ACTIVE:
+        if root_session is None or root_session.status is not AgentSessionStatus.ACTIVE:
             raise ValueError("Root AgentSession is not active")
-        generation = await session.scalar(
-            sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == agent_session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+
+        if root_session.id == agent_session_id:
+            claimed_session = root_session
+        else:
+            claimed_session = await session.scalar(
+                sa.select(RDBAgentSession)
+                .where(RDBAgentSession.id == agent_session_id)
+                .with_for_update(nowait=True)
+                .execution_options(populate_existing=True)
             )
-            .values(owner_generation=RDBAgentSession.owner_generation + 1)
-            .returning(RDBAgentSession.owner_generation)
-        )
-        if generation is None:
+        if (
+            claimed_session is None
+            or claimed_session.status is not AgentSessionStatus.ACTIVE
+        ):
             raise ValueError("AgentSession not found")
+
+        claimed_session.owner_generation += 1
         await session.flush()
-        return generation
+        return claimed_session.owner_generation
 
     async def fence_purge_owner_generations(
         self,

@@ -211,6 +211,96 @@ class TestAgentSessionRepository:
         assert refreshed_child.status is AgentSessionStatus.ACTIVE
         assert refreshed_child.owner_generation == 1
 
+    @pytest.mark.parametrize(
+        "locked_session_kind",
+        ["root", "target"],
+    )
+    async def test_claim_owner_generation_avoids_inverse_session_lock_cycle(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+        locked_session_kind: str,
+    ) -> None:
+        """Owner claim yields its tree lock when a Session is already locked."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        repo = AgentSessionRepository()
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+            workspace_id = await _create_workspace(
+                setup_session,
+                f"owner-claim-lock-cycle-{suffix}",
+            )
+            agent_id = await _create_agent(
+                setup_session,
+                workspace_id,
+                f"owner-claim-lock-cycle-{suffix}",
+            )
+            root_session = await repo.create(
+                setup_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            root_agent = await repo.get_session_agent_by_session_id(
+                setup_session,
+                root_session.id,
+            )
+            assert root_agent is not None
+            child = await repo.create_child_session_agent(
+                setup_session,
+                parent_session_agent_id=root_agent.id,
+                name="claim-child",
+                agent_type="default",
+                title=None,
+                last_task_message=None,
+            )
+            await setup_session.commit()
+
+        async def claim_child_owner() -> int:
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as claim_session:
+                generation = await repo.claim_owner_generation(
+                    claim_session,
+                    child.agent_session_id,
+                )
+                await claim_session.commit()
+                return generation
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as session_holder:
+            locked_session_id = (
+                root_session.id
+                if locked_session_kind == "root"
+                else child.agent_session_id
+            )
+            locked_session = await repo.lock_by_id(
+                session_holder,
+                locked_session_id,
+            )
+            assert locked_session is not None
+            claim_task = asyncio.create_task(claim_child_owner())
+            await asyncio.sleep(0.1)
+
+            locked_root_agent = await asyncio.wait_for(
+                repo.lock_session_agent_by_id(
+                    session_holder,
+                    root_agent.id,
+                ),
+                timeout=5,
+            )
+            assert locked_root_agent is not None
+            await session_holder.commit()
+
+            assert await asyncio.wait_for(claim_task, timeout=5) == 1
+
     async def test_fence_purge_owner_generations_covers_entire_root_tree(
         self,
         rdb_session: AsyncSession,
