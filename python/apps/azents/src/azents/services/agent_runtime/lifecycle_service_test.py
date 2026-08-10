@@ -5,8 +5,9 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, AsyncIterator, cast
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
+from azcommon.result import Failure
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -15,10 +16,12 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
     RuntimeSummary,
+    WorkspaceUserRole,
 )
 from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
+from azents.services.agent_runtime.lifecycle_data import RuntimeProviderUnavailable
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.runtime_profile_resolution.data import (
     RuntimeProfileResolutionResult,
@@ -312,3 +315,42 @@ class TestAgentRuntimeLifecycleSummary:
         assert status.containment.applied is False
         assert status.containment.runtime_available is False
         assert status.containment.availability_reason_code == "provider_disabled"
+
+
+async def test_restart_requires_locked_provider_connection_authority() -> None:
+    """Reject restart before storing state when Provider authority is absent."""
+    resolution = _resolution(
+        status=RuntimeConfigurationResolutionStatus.READY,
+        reason_code=None,
+    )
+    connection_check = AsyncMock(return_value=False)
+    set_desired_state = AsyncMock()
+    service = cast(Any, object.__new__(AgentRuntimeService))
+    service._authorize_agent = AsyncMock(return_value=None)
+    service._ensure_runtime_for_agent = AsyncMock(return_value=resolution)
+    service.session_manager = _projection_session_manager
+    service.runtime_provider_control_repository = SimpleNamespace(
+        has_connected_connection=connection_check
+    )
+    service.runtime_repository = SimpleNamespace(
+        set_desired_state_if_ready=set_desired_state
+    )
+
+    result = await service.restart(
+        "agent-id",
+        workspace_id="workspace-id",
+        workspace_user_id="workspace-user-id",
+        role=WorkspaceUserRole.OWNER,
+    )
+
+    assert isinstance(result, Failure)
+    error = result.error
+    assert isinstance(error, RuntimeProviderUnavailable)
+    assert error.code == "provider_disconnected"
+    connection_check.assert_awaited_once_with(
+        ANY,
+        provider_id="provider-resource-id",
+        now=ANY,
+        for_update=True,
+    )
+    set_desired_state.assert_not_awaited()
