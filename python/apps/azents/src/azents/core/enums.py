@@ -788,6 +788,22 @@ class ExternalChannelIngressProfile(enum.StrEnum):
     DISCORD_GATEWAY_HTTP = "discord_gateway_http"
 
 
+class ExternalChannelIngressAuthorityKind(enum.StrEnum):
+    """Durable transport authority proof retained for final validation."""
+
+    CONFIGURATION = "configuration"
+    LEASE = "lease"
+    DURABLE_REPLAY = "durable_replay"
+
+
+class ExternalChannelIngressItemState(enum.StrEnum):
+    """Active lifecycle state of one content-free ingress item."""
+
+    PENDING = "pending"
+    PROCESSING = "processing"
+    RETRY_WAITING = "retry_waiting"
+
+
 class ExternalChannelConversationScopeKind(enum.StrEnum):
     """Canonical provider conversation scope."""
 

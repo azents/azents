@@ -1906,6 +1906,12 @@ def _invocation_projection(
             invocation_id=invocation_id,
             binding_id=binding.id,
             trigger_provider_message_key=(request.locator.trigger_provider_message_key),
+            prompt_role=(
+                "invocation"
+                if message.provider_message_key
+                == request.locator.trigger_provider_message_key
+                else "context"
+            ),
             context_omitted=history.context_omitted,
             sequence=sequence,
             revision_kind=message.revision_kind,

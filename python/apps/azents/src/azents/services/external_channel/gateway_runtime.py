@@ -10,6 +10,9 @@ from fastapi import Depends
 from azents.services.external_channel.discord_gateway_manager import (
     DiscordGatewayManagerService,
 )
+from azents.services.external_channel.ingress_recovery import (
+    ExternalChannelIngressRecoveryService,
+)
 from azents.services.external_channel.socket_manager import (
     SlackSocketManagerService,
 )
@@ -31,6 +34,10 @@ class ExternalChannelGatewayRuntime:
         DiscordGatewayManagerService,
         Depends(DiscordGatewayManagerService),
     ]
+    ingress_recovery_service: Annotated[
+        ExternalChannelIngressRecoveryService,
+        Depends(ExternalChannelIngressRecoveryService),
+    ]
 
     async def run(
         self,
@@ -48,6 +55,9 @@ class ExternalChannelGatewayRuntime:
             ),
             "Discord Gateway": asyncio.create_task(
                 self.discord_gateway_manager.run(shutdown_event)
+            ),
+            "Ingress Recovery": asyncio.create_task(
+                self.ingress_recovery_service.run(shutdown_event)
             ),
         }
         shutdown_task = asyncio.create_task(shutdown_event.wait())

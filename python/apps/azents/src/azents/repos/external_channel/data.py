@@ -1,7 +1,7 @@
 """Provider-generic External Channel repository data records."""
 
 import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -466,6 +466,7 @@ class ExternalChannelMailboxProjectionItem(_Record):
     invocation_id: str
     binding_id: str
     trigger_provider_message_key: str
+    prompt_role: Literal["context", "invocation"]
     context_omitted: bool
     sequence: int
     revision_kind: ExternalChannelMessageRevisionKind

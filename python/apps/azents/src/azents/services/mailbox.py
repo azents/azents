@@ -1431,11 +1431,7 @@ def build_external_channel_mailbox_payload(
         provider_user_id=item.provider_user_id,
         sender_display_name=item.sender_display_name,
         author_type=item.author_type,
-        prompt_role=(
-            "invocation"
-            if item.provider_message_key == item.trigger_provider_message_key
-            else "context"
-        ),
+        prompt_role=item.prompt_role,
         body=item.body,
         attachment_metadata=add_external_channel_file_locators(
             item.attachment_metadata or {},

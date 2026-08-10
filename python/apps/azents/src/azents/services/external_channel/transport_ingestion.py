@@ -1,4 +1,4 @@
-"""Authenticated transport projection for synchronous conversation ingestion."""
+"""Authenticated transport projection for durable conversation ingress."""
 
 import dataclasses
 import datetime
@@ -44,6 +44,9 @@ from azents.services.external_channel.ingestion import (
 from azents.services.external_channel.ingestion_deps import (
     get_external_channel_conversation_ingestion_service,
 )
+from azents.services.external_channel.ingress_admission import (
+    ExternalChannelIngressAdmissionService,
+)
 from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,
     SlackEventExcluded,
@@ -74,6 +77,10 @@ class ExternalChannelTransportIngestionService:
     ingestion_service: Annotated[
         ExternalChannelConversationIngestionService,
         Depends(get_external_channel_conversation_ingestion_service),
+    ]
+    queue_admission_service: Annotated[
+        ExternalChannelIngressAdmissionService,
+        Depends(ExternalChannelIngressAdmissionService),
     ]
 
     async def ingest_slack_event(
@@ -136,6 +143,12 @@ class ExternalChannelTransportIngestionService:
             replay_boundary=None,
             initial_title_eligible=False,
         )
+        queue_outcome = await self.queue_admission_service.admit_current_trigger(
+            provider_event_id=event.provider_event_id,
+            request=request,
+        )
+        if queue_outcome is not None:
+            return queue_outcome
         return await self.ingestion_service.ingest(request)
 
     async def ingest_discord_event(
@@ -260,6 +273,12 @@ class ExternalChannelTransportIngestionService:
             replay_boundary=None,
             initial_title_eligible=False,
         )
+        queue_outcome = await self.queue_admission_service.admit_current_trigger(
+            provider_event_id=event.provider_event_id,
+            request=request,
+        )
+        if queue_outcome is not None:
+            return queue_outcome
         return await self.ingestion_service.ingest(request)
 
     async def _discord_resource(
