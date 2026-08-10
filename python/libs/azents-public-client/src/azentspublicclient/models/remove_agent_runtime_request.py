@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from typing import Any, ClassVar, Dict, List
 from typing_extensions import Annotated
 from typing import Optional, Set
@@ -33,13 +33,6 @@ class RemoveAgentRuntimeRequest(BaseModel):
     confirmed: StrictBool = Field(description="Explicit final destructive confirmation")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["expected_capability_version", "expected_runtime_profile_selection_version", "idempotency_key", "confirmed"]
-
-    @field_validator('confirmed')
-    def confirmed_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['true']):
-            raise ValueError("must be one of enum values ('true')")
-        return value
 
     model_config = ConfigDict(
         populate_by_name=True,

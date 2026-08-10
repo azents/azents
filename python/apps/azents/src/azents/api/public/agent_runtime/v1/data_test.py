@@ -2,9 +2,13 @@
 
 import datetime
 
+import pytest
+from pydantic import ValidationError
+
 from azents.api.public.agent_runtime.v1.data import (
     AgentRuntimeConfigurationStatusResponse,
     AgentRuntimeRemovalProgressResponse,
+    RemoveAgentRuntimeRequest,
 )
 from azents.core.enums import (
     AgentRuntimeRemovalStage,
@@ -88,6 +92,31 @@ def test_configuration_status_exposes_only_safe_revision_evidence() -> None:
             "provider_config",
         }
     )
+
+
+def test_remove_request_requires_true_without_boolean_enum_schema() -> None:
+    """Removal confirmation stays strict without breaking generated clients."""
+    request = RemoveAgentRuntimeRequest(
+        expected_capability_version=1,
+        expected_runtime_profile_selection_version=1,
+        idempotency_key="remove-request",
+        confirmed=True,
+    )
+
+    assert request.confirmed is True
+    with pytest.raises(ValidationError, match="explicitly confirmed"):
+        RemoveAgentRuntimeRequest(
+            expected_capability_version=1,
+            expected_runtime_profile_selection_version=1,
+            idempotency_key="remove-request",
+            confirmed=False,
+        )
+
+    confirmed_schema = RemoveAgentRuntimeRequest.model_json_schema()["properties"][
+        "confirmed"
+    ]
+    assert confirmed_schema["type"] == "boolean"
+    assert "enum" not in confirmed_schema
 
 
 def test_removal_progress_omits_private_and_internal_authority_fields() -> None:

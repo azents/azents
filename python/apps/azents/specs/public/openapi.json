@@ -24807,7 +24807,6 @@
           },
           "confirmed": {
             "type": "boolean",
-            "const": true,
             "title": "Confirmed",
             "description": "Explicit final destructive confirmation"
           }

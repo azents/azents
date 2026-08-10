@@ -38,14 +38,14 @@ class TestRemoveAgentRuntimeRequest(unittest.TestCase):
                 expected_capability_version = 1.0,
                 expected_runtime_profile_selection_version = 1.0,
                 idempotency_key = '0',
-                confirmed = true
+                confirmed = True
             )
         else:
             return RemoveAgentRuntimeRequest(
                 expected_capability_version = 1.0,
                 expected_runtime_profile_selection_version = 1.0,
                 idempotency_key = '0',
-                confirmed = true,
+                confirmed = True,
         )
         """
 

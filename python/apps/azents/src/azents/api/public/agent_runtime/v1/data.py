@@ -3,7 +3,7 @@
 import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing_extensions import Self
 
 from azents.core.enums import (
@@ -424,9 +424,15 @@ class RemoveAgentRuntimeRequest(BaseModel):
     expected_capability_version: int = Field(ge=1)
     expected_runtime_profile_selection_version: int = Field(ge=1)
     idempotency_key: str = Field(min_length=1, max_length=120)
-    confirmed: Literal[True] = Field(
-        description="Explicit final destructive confirmation"
-    )
+    confirmed: bool = Field(description="Explicit final destructive confirmation")
+
+    @field_validator("confirmed")
+    @classmethod
+    def validate_confirmed(cls, value: bool) -> bool:
+        """Require the final destructive confirmation."""
+        if not value:
+            raise ValueError("Runtime removal must be explicitly confirmed.")
+        return value
 
 
 class AgentRuntimeAdditionResponse(BaseModel):
