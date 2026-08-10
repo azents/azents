@@ -45,6 +45,7 @@ code_paths:
   - python/apps/azents/src/azents/services/builtin_capabilities.py
   - python/apps/azents/src/azents/services/workspace_model_settings/**
   - python/apps/azents/src/azents/api/public/agent/**
+  - python/apps/azents/src/azents/api/public/agent_runtime/**
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/**
   - python/apps/azents/src/azents/api/public/workspace_model_settings/**
@@ -69,6 +70,9 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
+  - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime
+  - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add
+  - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/remove
   - /runtime-profile/v1/workspaces/{handle}/profiles
   - /runtime-profile/v1/workspaces/{handle}/default
   - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations
@@ -81,13 +85,13 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-08-03
-spec_version: 63
+last_verified_at: 2026-08-10
+spec_version: 64
 ---
 
 # Agent Domain Spec
 
-Agent is central execution unit of azents. Within Workspace, it bundles an ordered selectable model option list, effective model selection snapshots, system prompt, model parameters, and toolkit access; worker resolves these into `RunRequest` and passes them to `AgentEngine` execution loop. Session-scoped subagents do not create a separate persistent Agent role; they are represented by `SessionAgent` tree nodes linked to hidden child `AgentSession` rows under the same Agent.
+Agent is central execution unit of azents. Within Workspace, it bundles an ordered selectable model option list, effective model selection snapshots, system prompt, model parameters, Toolkit access, and an optional managed Runtime capability; worker resolves these into `RunRequest` and passes them to `AgentEngine` execution loop. Session-scoped subagents do not create a separate persistent Agent role; they are represented by `SessionAgent` tree nodes linked to hidden child `AgentSession` rows under the same Agent.
 
 ## 1. Core Model
 
@@ -109,9 +113,11 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 | `system_prompt` | Agent system prompt |
 | `enabled` | when false, runtime resolve blocks run start with `AgentDisabled` |
 | `type` | `public` or `private` |
-| `runtime_profile_id` | nullable exact Workspace Runtime Profile selection. It is copied from the creation-time Workspace default only when no explicit selection is supplied |
+| `runtime_capability` | `none`, `managed`, or `removing`. New Agents default to `none`; existing Agents were migrated to `managed` |
+| `runtime_capability_version` | positive optimistic version for dedicated Runtime add/remove transitions and stale admission fencing |
+| `runtime_profile_id` | nullable exact Workspace Runtime Profile selection for a managed Agent. Null does not imply Runtime-free state |
 | `runtime_profile_selection_version` | positive optimistic version for replacing or clearing the Agent selection |
-| `shell_enabled` | whether builtin shell toolkit is exposed |
+| `shell_enabled` | administrator setting for shell exposure; effective shell authority additionally requires managed Runtime capability |
 | `memory_enabled` | whether memory prompt/tool is exposed |
 | `max_turns` | run turn limit. null means unlimited |
 | `auto_archive_ttl_days` | positive whole-day inactivity TTL for automatic archive of this Agent's non-primary root Sessions. Defaults to `30` and applies dynamically to existing active Sessions |
@@ -133,26 +139,24 @@ never rewrite an active setting or existing Binding.
 
 ### 1.2 Runtime Profile selection
 
-Each Agent stores either one exact Runtime Profile owned by its Workspace or no selection. Agents do
-not store a Provider preference, infrastructure override, or restrictive execution-policy overlay.
+Each Agent stores a Runtime capability independently from its optional exact Workspace Runtime
+Profile selection. Agents do not store a Provider preference, infrastructure override, or
+restrictive execution-policy overlay.
 
-Creation-time precedence is:
+New Agent creation defaults to `runtime_capability=none`. An omitted or explicit-null Runtime Profile
+does not consult or copy the Workspace default and creates no logical `AgentRuntime`. Supplying an
+explicit available Workspace Runtime Profile grants `managed` capability in the creation
+transaction. The Workspace default remains picker assistance only. Existing Agents were migrated to
+`managed` without changing their stored Profile selection, so `managed` with a null Profile is the
+valid managed-unconfigured state.
 
-1. an explicit `runtime_profile_id`;
-2. the Workspace default Runtime Profile copied into the Agent row; or
-3. an unconfigured null selection.
-
-The Workspace default is not inherited dynamically. Changing it affects only later Agent creation
-and never moves an existing Agent. An unavailable selected Profile remains visible and stored; the
-server does not substitute another Profile or Provider. An Agent with no selection may still be
-created and edited, but Runtime create/start/restart/reset/recreate actions are blocked until an
-authorized actor selects an available Profile.
-
-Agent responses expose the selection ID, optimistic selection version, server-computed availability,
-and a bounded availability reason code. Updating the selection requires the expected version.
-Explicit null clears the selection. A non-null replacement must identify a Profile in the same
-Workspace. Selection changes enqueue authoritative Runtime configuration reconciliation; there is no
-Agent Apply action.
+Only the dedicated add action changes `none` to `managed`, and only the irreversible remove action
+changes `managed` to `removing`. Generic Agent patch cannot change capability. While managed,
+`runtime_profile_id` remains a partial update: omission leaves it unchanged, explicit null clears
+the selection, and a non-null replacement must identify a Profile in the same Workspace. Selection
+changes enqueue authoritative Runtime configuration reconciliation; there is no Agent Apply action.
+An unavailable selected Profile remains visible and stored, and the server never substitutes
+another Profile or Provider.
 
 `selectable_model_options` is a JSONB array rather than a separate table because option order is part of the fallback contract. The list invariants are:
 
@@ -232,6 +236,9 @@ The policy is administrator-managed configuration for automatic root Session
 creation. It is distinct from `agent_project_defaults`, presets, and catalog
 projections used by the explicit new-Session draft UI. Replacing the policy does
 not mutate existing root Sessions or their shared context Projects.
+Permanent Runtime removal clears the ordered items and advances the policy revision once when a
+non-empty policy is cleared. It preserves the settings row as the required empty-policy concurrency
+authority so Runtime-free and later re-added Agents can continue creating automatic root Sessions.
 
 ## 2. API Contract
 
@@ -295,11 +302,11 @@ Create/update requests accept selectable model options as the current model cont
 - During transition, legacy direct `model_selection` and `lightweight_model_selection` inputs remain accepted. They are converted into compatible selectable model options and effective snapshots. These fields are compatibility for the direct snapshot API, not the removed `ModelConfig` API.
 - `model_parameters` is whole-object replace for the remaining Agent-global inference parameters such as temperature and default reasoning effort. Unknown keys are rejected; context, output, and built-in tool settings do not exist at Agent scope.
 - `subagent_settings` is a whole-object replace when supplied. Omitted create requests use the default `{ "max_subagents": 3, "max_depth": 1 }`; omitted update requests leave the stored settings unchanged.
-- `runtime_profile_id` on create uses explicit selection → Workspace default → unconfigured
-  precedence. An explicit ID must be an available Profile owned by the same Workspace.
-- `runtime_profile_id` on update is a partial-update field: omission leaves the selection unchanged,
-  explicit null clears it, and a non-null value replaces it. The request must include
-  `expected_runtime_profile_selection_version`.
+- `runtime_profile_id` omitted or null on create produces a Runtime-free Agent and does not copy the
+  Workspace default. An explicit available Profile produces a managed Agent.
+- `runtime_profile_id` on generic update is managed-only and remains a partial-update field:
+  omission leaves the selection unchanged, explicit null clears it, and a non-null value replaces
+  it. The request must include `expected_runtime_profile_selection_version`.
 - Runtime Profile selection changes do not directly issue a lifecycle command or recreate physical
   compute. They reconcile the authoritative desired configuration, and current lifecycle guards
   decide whether explicit recreation is required.
@@ -451,6 +458,26 @@ scoped parent/thread conversation setting through provider-native controls. Shar
 repository mutation units preserve the distinct provider-principal and Web User actor
 provenance; no synthetic User or AgentAdmin bypass is created.
 
+### 2.8 Managed Runtime capability
+
+`GET /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime` is read-only and never
+ensures, configures, or starts a Runtime. It returns the Agent capability/version, Profile
+selection/version and availability, optional logical/physical Runtime state, privacy-safe aggregate
+removal impact, optional durable removal progress, and server-computed actions.
+
+`POST .../runtime/add` requires Agent-management permission, expected capability and Profile
+selection versions, an explicit available Workspace Runtime Profile, and an idempotency key. It
+creates a stopped logical Runtime when none exists or rearms the retained terminally deleted logical
+identity at a higher desired generation after exact deletion acknowledgement. Add does not allocate
+active compute.
+
+`POST .../runtime/remove` requires the same management boundary, optimistic versions, an idempotency
+key, and semantic `confirmed=true`. The commit changes capability to `removing` and immediately
+fences ordinary Agent work. The durable coordinator interrupts Team and private User Session trees,
+clears Runtime-owned product state, waits for exact physical terminal-delete acknowledgement, then
+finalizes capability to `none`. The operation cannot be cancelled, and add remains unavailable
+until completion.
+
 ## 3. Runtime Resolve
 
 Every inference-bearing input has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
@@ -506,6 +533,10 @@ Following contracts do not exist in current system.
 - legacy persistent subagent-Agent model inheritance
 
 ## 8. Change History
+
+- **2026-08-10** (spec_version 64) — Added optional Agent Runtime capability, Runtime-free creation,
+  dedicated add/remove and higher-generation rearm, read-only unified Runtime projection, and
+  automatic Project policy preservation across destructive removal.
 
 | Date | Version | Change |
 |---|---:|---|

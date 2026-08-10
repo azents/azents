@@ -111,8 +111,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-08-07
-spec_version: 145
+last_verified_at: 2026-08-10
+spec_version: 146
 ---
 
 # Conversation & Events
@@ -137,7 +137,7 @@ fallback.
 
 ```mermaid
 erDiagram
-    Agent ||--|| AgentRuntime : "has runtime"
+    Agent ||--o| AgentRuntime : "may have runtime"
     Agent ||--o{ AgentSession : "has sessions"
     AgentRuntime }o--|| Workspace : "scoped to"
     AgentSession ||--|| SessionAgent : "linked participant"
@@ -158,10 +158,11 @@ The default team conversation is the agent's team primary session, represented b
 `agent_sessions.primary_kind = 'team_primary'`. Runtime current/active session lookup must not
 redirect direct session writes or default team session lookup to another session.
 
-`AgentRuntime` remains the long-lived shared runtime identity and sandbox lifecycle owner. Session
-execution control state is stored on `AgentSession`; detailed run phase/tool state is stored in
-`agent_runs`. Runtime lifecycle state must not be used as the authority for a session run, pending
-command, stop intent, or run heartbeat.
+`AgentRuntime` is an optional long-lived shared managed-execution identity and lifecycle owner.
+Runtime-free Agents execute model and compatible server/remote work without creating this row.
+Session execution control state is stored on `AgentSession`; detailed run phase/tool state is stored
+in `agent_runs`. Runtime lifecycle state must not be used as the authority for a session run,
+pending command, stop intent, or run heartbeat.
 
 `SessionAgent` is the session-scoped participant tree used by subagents. It does not replace
 `AgentSession`; every participant links one-to-one to an `AgentSession`, and the linked session owns
@@ -174,6 +175,16 @@ ModelFiles, artifacts, and exchange files.
 the Session-scoped Project APIs resolve the selected Session to that context and
 return compatibility projections. A subagent never reapplies Agent defaults or
 creates duplicate Project rows independently.
+
+Its managed working-folder binding is an independent lifecycle:
+
+- `none` — the root was created while Runtime-free and has no path;
+- `pending` — the root was created while managed but has not yet bound to current Runner evidence;
+- `bound` — the context owns one exact path under the current Runner-reported Agent Workspace; and
+- `invalidated` — permanent Runtime removal terminally revoked the historical binding.
+
+Only `pending` may become `bound`, using current-generation Runner evidence. `none` and
+`invalidated` never bind after a later Runtime add.
 
 ## 2. AgentSession
 
@@ -230,12 +241,14 @@ worktree as a session Project. Legacy `workspace_items`, `workspace_mode`, and `
 fields are not part of the current contract.
 
 Every root creation call selects exactly one workspace intent. Explicit intent uses
-the caller's `existing_project_paths` normalized under the current Runner-reported
-Agent Workspace root, including an explicitly empty list, and never merges the
-Agent policy. Agent-default intent reads the current
+the caller's `existing_project_paths`, including an explicitly empty list, and never merges the
+Agent policy. Non-empty paths and setup actions require managed Runtime authority and are normalized
+under the current Runner-reported Agent Workspace root. Agent-default intent reads the current
 ordered automatic Project policy and snapshots it into the new
 `SessionAgentContext`. Root creation writes the AgentSession, root SessionAgent,
-context, and context Projects in the caller-owned transaction without Runtime I/O.
+context, and context Projects in the caller-owned transaction without Runtime I/O. A Runtime-free
+root with empty intent receives binding state `none`; a managed root receives `pending` until an
+authorized Runtime-dependent operation binds it.
 The creation result may report the source policy revision for transaction-local
 provenance; the durable authority is the context Project snapshot.
 
@@ -257,6 +270,13 @@ continues to the first user message.
 Public Session read, write, control, live/history subscription, archive/restore, tree, and download
 boundaries authorize Team Sessions by Workspace membership and User Sessions by owner match. Denied
 User Session identifiers return not-found-safe responses without revealing private metadata.
+
+While Agent capability is `removing`, new input, Session creation/recovery, subagent work, queued
+Runtime actions, and ordinary execution fail closed across Team and private User trees. Permanent
+removal retains conversations, product mode, owner privacy, pin/archive state, Memory, Goals, Todos,
+Exchange files, ModelFiles, and Artifacts. It deletes context Project/worktree metadata and changes
+every pre-removal `pending` or `bound` folder binding to `invalidated`; retained contexts never
+regain Workspace authority after re-add.
 
 azents-web Agent detail routes surface Team and My Sessions tabs in the Agent rail. The Team tab uses the
 bounded pinned/recent sidebar summary and exposes an All sessions link to the paginated active/archived
@@ -1129,6 +1149,10 @@ and other Session-owned projection state follow the External Channel lifecycle
 participant.
 
 ## 12. Changelog
+
+- **2026-08-10** — v146. Made AgentRuntime optional for conversation execution, added nullable
+  Session working-folder binding states, Runtime-free root creation, irreversible removal fencing
+  across Team/User trees, and permanent stale-context invalidation after re-add.
 
 - **2026-08-07** — v145. Added explicit Team/My selection to the new-session draft
   while retaining URL-backed default Team behavior, and ordered active Team directory

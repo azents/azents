@@ -27,8 +27,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/cli/team_session_cutover.py
-last_verified_at: 2026-07-24
-spec_version: 25
+last_verified_at: 2026-08-10
+spec_version: 26
 ---
 
 # Run Resume
@@ -88,8 +88,13 @@ The sticky lease and heartbeat timeout intentionally have different meanings:
 
 `AgentSession.run_state` remains a coarse session execution recovery signal (`idle` / `running`).
 Detailed execution state lives in `agent_runs.phase`, `active_tool_calls`, and nullable
-`retry_state` and `vfs_projection`. `AgentRuntime` owns shared sandbox lifecycle and runner/provider state, not session
-run ownership.
+`retry_state` and `vfs_projection`. Optional `AgentRuntime` owns shared managed-execution lifecycle
+and Runner/Provider state when present, not Session run ownership.
+
+Canonical recovery snapshots include Agent Runtime capability/version and the root context binding
+state. Runtime-free Runs may resume model, transcript, managed VFS, Memory, Goal, Todo, subagent, and
+compatible remote work without ensuring a Runtime. Runtime-dependent recovery requires the captured
+managed capability and an eligible binding, then rechecks current state/version before dispatch.
 
 Before recovery promotes any pending input, `RunExecutor` ensures the selected run's VFS projection. A projection already stored on the run is returned unchanged, so package deployment changes and Toolkit attachment changes cannot alter managed Skill or import bytes during takeover. A pre-migration run with a null projection receives one at this boundary before its first post-deployment promotion.
 
@@ -197,6 +202,10 @@ The takeover path must preserve single-session execution:
 - Wake-up signals remain in the per-session Redis list until a worker with valid ownership drains
   them. Model input payloads, operation action inputs, and control state remain durable in Postgres. Before an operation input buffer is deleted, its pending `ActionExecution`, typed action payload, and admitting `owner_generation` are committed under the source `input_buffer_id`. A takeover converts any surviving execution from an older processing boundary into a cancelled durable snapshot before consuming new input.
 - Durable transcript and `agent_runs`, including the run's immutable VFS projection, remain the execution source of truth after takeover.
+- Capability `removing` and its incremented version prevent takeover, stale wake-ups, retry state,
+  or idle continuation from reviving ordinary Agent work. The removal coordinator requests stop,
+  terminalizes queued Runtime actions, and waits for active Runs/Sessions to become inactive before
+  destructive cleanup.
 
 ## Operation Action Recovery
 
@@ -292,6 +301,10 @@ run to observe `check_stop()` as true.
 
 
 ## Changelog
+
+- **2026-08-10** (spec_version 26) — Made Runtime identity optional during recovery, added
+  capability/version and Session-binding revalidation for Runtime-dependent resume, and prevented
+  removing-state takeover or retry from reviving fenced Agent work.
 
 - **2026-07-24** (spec_version 25) — Added Userless canonical recovery and bounded
   PostgreSQL-derived cutover preflight/replay with pure broker notifications.

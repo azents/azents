@@ -15,25 +15,25 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-03 | 63 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-07 | 145 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-10 | 64 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-10 | 146 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-10 | 55 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-09 | 20 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-10 | 21 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-09 | 87 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-10 | 88 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-06 | 10 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-09 | 61 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-10 | 62 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-09 | 151 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-09 | 56 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-09 | 20 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-10 | 152 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-10 | 57 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-10 | 21 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-03 | 33 |
@@ -41,14 +41,14 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-09 | 39 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-09 | 35 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-10 | 37 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-04 | 40 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-10 | 41 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-01 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-10 | 26 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-10 | 25 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-10 | 26 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-01 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-01 | 6 |
 
@@ -325,7 +325,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Hierarchical Runtime Execution Profiles Requirements](requirements/runtime-260726-hierarchical-execution-profiles.md) | runtime-260726 | 2026-07-26 | - |
 | [Profile-Only Runtime Execution Policy Requirements](requirements/runtime-260727-profile-only-execution-policy.md) | runtime-260727 | 2026-07-27 | 2026-07-27 |
 | [Workspace-Owned Runtime Profiles Requirements](requirements/runtime-260730-workspace-owned-runtime-profiles.md) | runtime-260730 | 2026-07-30 | 2026-07-31 |
-| [Optional Managed Runtime for Agents Requirements](requirements/runtime-260803-optional-managed-runtime.md) | runtime-260803 | 2026-08-03 | - |
+| [Optional Managed Runtime for Agents Requirements](requirements/runtime-260803-optional-managed-runtime.md) | runtime-260803 | 2026-08-03 | 2026-08-10 |
 | [Runtime Deployment Continuity Requirements](requirements/runtime-260804-deployment-continuity.md) | runtime-260804 | 2026-08-04 | 2026-08-04 |
 | [Runtime Bounded Drift Re-observation Requirements](requirements/runtime-260805-bounded-drift-reobservation.md) | runtime-260805 | 2026-08-05 | 2026-08-05 |
 | [Provider-Owned Runtime Process Containment Requirements](requirements/runtime-260808-provider-process-containment.md) | runtime-260808 | 2026-08-08 | 2026-08-09 |

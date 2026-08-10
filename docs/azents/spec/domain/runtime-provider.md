@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
-last_verified_at: 2026-08-09
-spec_version: 20
+last_verified_at: 2026-08-10
+spec_version: 21
 ---
 
 # Runtime Provider
@@ -106,7 +106,14 @@ Admin routes expose inventory and mutable policy/availability operations under `
 
 ## Runtime binding
 
-An Agent selection points to one Workspace Runtime Profile. That Profile names one exact Provider
+An Agent may be Runtime-free and have no logical Runtime row or Provider binding. Explicit Runtime
+addition selects one available Workspace Runtime Profile, creates or rearms the one logical Runtime
+in stopped desired state, and does not allocate compute. A retained terminally deleted logical
+Runtime may be rearmed only after exact deletion acknowledgement; rearm advances desired generation,
+clears incarnation-scoped Provider/Runner observation and Workspace evidence, and preserves no old
+physical resource authority.
+
+A managed Agent selection points to one Workspace Runtime Profile. That Profile names one exact Provider
 resource and one infrastructure Profile owned by that Provider. The resolver does not evaluate an
 Agent Provider preference, Platform default, environment default, or fallback Provider. It checks
 the exact Profile ownership, lifecycle, Provider lifecycle/enablement/scope/Workspace eligibility,
@@ -127,6 +134,11 @@ is the metadata authority for the effective absolute path.
 When the exact selection is missing or unavailable, Public Runtime creation/start/restart/reset/
 recreate returns a bounded `409` conflict instead of persisting a substitute target. Stop and
 terminal delete remain available where required to reduce authority or finalize decommissioning.
+
+Permanent Runtime removal may request terminal delete while the Provider is disconnected. The
+operation remains pending until a current authoritative Provider report acknowledges the exact
+requested desired generation; an already-absent backend resource may acknowledge success.
+Disconnection, an ambiguous outcome, or a stale Provider generation never proves deletion.
 
 ## Infrastructure Profile compatibility and customer authority
 
@@ -240,6 +252,10 @@ values. A direct Profile rollback recreates compute with the direct backend whil
 Agent Workspace.
 
 ## Version history
+
+- **21 (2026-08-10):** Added optional logical Runtime binding, explicit stopped add and
+  higher-generation rearm, and reconnect-safe exact-generation terminal deletion for permanent
+  Agent Runtime removal.
 
 - **20 (2026-08-09):** Separated durable Runtime configuration identity from live Provider
   connectivity so transient rollout reconnect gaps retain ready revisions while dispatch and

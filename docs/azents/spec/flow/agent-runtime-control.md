@@ -10,7 +10,9 @@ code_paths:
   - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
+  - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/agent_runtime_removal/**
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/repos/runtime_profile/**
@@ -34,8 +36,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-09
-spec_version: 56
+last_verified_at: 2026-08-10
+spec_version: 57
 ---
 
 # Agent Runtime Control
@@ -339,13 +341,13 @@ Missing or non-absolute current Runner workspace evidence records `RUNNER_WORKSP
 
 Kubernetes and Docker Providers are external components. They must not import Azents server modules, DB sessions, repositories, or in-process managers. They communicate with Control only via the runtime-control protocol and their backend APIs.
 
-Terminal delete is an internal-only command used by Agent decommission finalization. Control
-dispatches it until the Provider reports a matching terminal-delete acknowledgement. Docker removes
-the Runtime container and provider-owned root; Kubernetes removes the Runtime Pod and PVC.
-Already-absent resources acknowledge successfully, so repeated delivery is idempotent. A stale
-report cannot satisfy the request: Control persists acknowledgement only when the observed desired
-generation equals the currently requested generation. Terminal delete is not a public lifecycle
-action and does not create a user-facing permanent-delete control.
+Terminal delete is an internal-only command used by Agent decommission and permanent managed
+Runtime removal. Control dispatches it until the Provider reports a matching terminal-delete
+acknowledgement. Docker removes the Runtime container and provider-owned root; Kubernetes removes
+the Runtime Pod and PVC. Already-absent resources acknowledge successfully, so repeated delivery is
+idempotent. A stale report cannot satisfy the request: Control persists acknowledgement only when
+the observed desired generation equals the currently requested generation. Product APIs expose a
+durable removal operation, not terminal delete as a direct lifecycle action.
 
 ## Runner Contract
 
@@ -487,6 +489,18 @@ For `file.apply_patch`, cancellation is cooperative through parse, preflight, st
 
 Lifecycle APIs are desired-state declarations. Repeating the same request must converge to the same state and must not delete Agent Workspace data.
 
+`AgentRuntime` is optional. Runtime GET is read-only and never creates a row. The dedicated add
+transition creates or rearms one logical Runtime in stopped desired state and attaches an exact
+desired configuration revision without dispatching compute. A later start or authorized
+Runtime-dependent operation performs ordinary lazy provisioning.
+
+Permanent removal is a separate irreversible product transition. Its PostgreSQL coordinator fences
+Agent work, interrupts active Session trees, clears Runtime-owned product state, requests terminal
+delete, and remains pending through Provider outage or ambiguous dispatch. Finalization requires
+exact requested/desired/acknowledged generation equality. After completion, rearm preserves the
+logical Runtime ID but advances desired generation and clears Provider/Runner observation,
+Workspace path, applied revision, failure, terminal-request, and incarnation-scoped dispatch state.
+
 - `start` sets desired state to running.
 - `stop` sets desired state to stopped and must preserve workspace data.
 - `restart` restarts compute but must preserve workspace data.
@@ -588,6 +602,10 @@ Required deterministic coverage:
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
+
+- **2026-08-10** (spec_version 57) — Made logical Runtime creation explicit and lazy, added durable
+  irreversible Runtime removal with reconnect-safe exact-generation terminal acknowledgement, and
+  documented higher-generation rearm after deletion.
 
 - **2026-08-09** (spec_version 56) — Made filesystem access permissions one common Runtime policy,
   retained bwrap enforcement for shell and managed processes, and moved every typed non-shell path

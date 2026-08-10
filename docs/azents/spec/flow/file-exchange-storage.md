@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-04
-spec_version: 40
+last_verified_at: 2026-08-10
+spec_version: 41
 ---
 
 # File Exchange Storage
@@ -63,6 +63,11 @@ File Exchange Storage is the flow that separately stores and retrieves user-faci
 
 External Channel file transfer is a separate explicit Runtime/provider path. It does not
 create ExchangeFile, Artifact, ModelFile, FilePart, or another durable file-body object.
+
+ExchangeFile, Artifact, ModelFile, FilePart, preview, download, retention, and model-input
+materialization are product storage capabilities and do not require a managed Runtime. Permanent
+Runtime removal retains those resources. Only copying bytes into or out of a Runtime Workspace,
+reading Runtime paths, and provider delivery from Runtime paths require managed Runtime capability.
 
 ### Team Session resource authority and provenance
 
@@ -110,6 +115,11 @@ not.
 ### Agent imports user or internal file
 
 `import_file` tool uses resolver registry by scheme. Supported schemes are `exchange://{object_key}`, `artifact://{storage_key}`, and canonical `azents://` paths present in the current AgentRun projection. URI is storage location, not entity reference. Do not put business logic that extracts entity id from URI string. Default destination is `/tmp/agent/imports/`, and default destination collisions are deduped with numeric suffix. If explicit destination already exists, fail by default and overwrite only when `overwrite=true`.
+
+The tool is projected only when the Agent grants Runtime transfer/filesystem capability. Execution
+rechecks the captured capability version before Runtime ensure/start or transfer dispatch, so
+Runtime-free, removing, and stale pre-removal calls fail without creating compute or materializing
+bytes.
 
 `exchange://{object_key}` materializes a user-visible attachment into a Runtime file.
 `artifact://{storage_key}` materializes an agent/tool internal output Artifact into a
@@ -226,6 +236,11 @@ independently scans its transfer prefix in bounded pages and cleans objects and
 incomplete multipart uploads whose storage age is at least the fixed one-hour transfer
 lifetime. Object existence alone never creates Exchange publication authority.
 
+Permanent Runtime removal may delete the physical Workspace copy but does not delete an already
+published Exchange attachment, retained Artifact, ModelFile, or transcript FilePart. Re-add starts
+with a fresh Workspace and never rematerializes retained product files automatically; an authorized
+later `import_file` must explicitly copy them into the new Runtime.
+
 ## Storage Boundaries
 
 - Event store does not store file body. Event has only attachment/artifact metadata and URI reference, or FilePart `model_file_id`.
@@ -269,6 +284,10 @@ lifetime. Object existence alone never creates Exchange publication authority.
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
 
 ## Changelog
+
+- **2026-08-10** — v41. Separated Runtime-independent product file retention and model input from
+  Runtime transfer/materialization authority, added capability/version fencing, and preserved
+  Exchange/Artifact/ModelFile resources across permanent Runtime removal and fresh re-add.
 
 - **2026-08-04** — v40. Removed caller-selected and provider-metadata size gating
   from External Channel downloads. The authenticated final URL `Content-Length` is the
