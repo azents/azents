@@ -1057,9 +1057,10 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
         assert connected is not None
 
     store = InMemoryRuntimeCoordinationStore()
+    request_ids = iter(("terminal-request-1", "terminal-request-2"))
     control_protocol = RuntimeControlProtocolService(
         store,
-        request_id_factory=lambda: "terminal-request",
+        request_id_factory=lambda: next(request_ids),
     )
     accepted = await control_protocol.register_provider(
         _provider_registration(),
@@ -1078,6 +1079,7 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
             runner_credential_identifier=_runner_credential_verifier(),
             runner_control_tls_ca_pem=None,
             allow_insecure_runner_control=True,
+            lifecycle_retry_delay=datetime.timedelta(0),
         ),
     )
 
@@ -1088,12 +1090,36 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
         consumer_id="provider-worker",
         block_ms=0,
     )
+    async with rdb_session_manager() as session:
+        disconnected = await runtime_repository.record_provider_connection_state(
+            session,
+            runtime.id,
+            RuntimeProviderConnectionState.DISCONNECTED,
+        )
+        assert disconnected is not None
+    reconnected = await control_protocol.register_provider(
+        _provider_registration(connection_id="provider-connection-2"),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    redispatched = await reconciler.reconcile_once(limit=10)
+    reclaimed = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=reconnected.generation,
+        consumer_id="provider-worker-2",
+        block_ms=0,
+    )
 
     assert dispatched == 1
     assert claimed is not None
     assert claimed.operation_type == "provider.terminal_delete"
     assert claimed.payload["command_type"] == "terminal_delete"
     assert claimed.payload["desired_generation"] == requested.desired_generation
+    assert reconnected.generation > accepted.generation
+    assert redispatched == 1
+    assert reclaimed is not None
+    assert reclaimed.operation_type == "provider.terminal_delete"
+    assert reclaimed.payload["desired_generation"] == requested.desired_generation
+    assert reclaimed.generation == reconnected.generation
 
 
 def _network_policy_drift_report(

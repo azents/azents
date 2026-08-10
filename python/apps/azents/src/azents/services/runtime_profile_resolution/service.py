@@ -29,8 +29,9 @@ from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContr
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntimeCreate
+from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeCreate
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationRevisionCreate,
     RuntimeInfrastructureProfile,
@@ -51,7 +52,7 @@ from .data import (
 
 
 @dataclasses.dataclass(frozen=True)
-class _PreparedResolution:
+class PreparedRuntimeProfileResolution:
     """One deterministic ready or blocked desired configuration."""
 
     status: RuntimeConfigurationResolutionStatus
@@ -61,6 +62,16 @@ class _PreparedResolution:
     resolved_configuration: dict[str, Any] | None
     source_trace: dict[str, Any]
     digest: str
+
+
+@dataclasses.dataclass(frozen=True)
+class PreparedRuntimeProfileSelection:
+    """Exact versioned sources for one explicit Runtime Profile selection."""
+
+    provider: RuntimeProvider
+    infrastructure: RuntimeInfrastructureProfile
+    profile: WorkspaceRuntimeProfile
+    resolution: PreparedRuntimeProfileResolution
 
 
 @dataclasses.dataclass
@@ -84,6 +95,144 @@ class RuntimeProfileResolutionService:
         RuntimeProviderPolicyRepository,
         Depends(RuntimeProviderPolicyRepository),
     ]
+
+    async def prepare_explicit_selection(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        profile_id: str,
+        agent_selection_version: int,
+    ) -> PreparedRuntimeProfileSelection:
+        """Resolve one explicit Profile from exact versioned source rows."""
+        profile = await self.profile_repository.get_workspace_runtime_profile(
+            session,
+            workspace_id=workspace_id,
+            profile_id=profile_id,
+            for_update=False,
+        )
+        if profile is None:
+            raise RuntimeProfileResolutionUnavailable(
+                code="runtime_profile_not_found",
+                provider_id=None,
+                message="The selected Workspace Runtime Profile was not found.",
+            )
+        infrastructure = await self.profile_repository.get_infrastructure_profile(
+            session,
+            profile_id=profile.infrastructure_profile_id,
+            for_update=False,
+        )
+        if infrastructure is None:
+            raise RuntimeProfileResolutionUnavailable(
+                code="infrastructure_profile_not_found",
+                provider_id=None,
+                message="The selected infrastructure Profile was not found.",
+            )
+        provider = await self.provider_repository.get_by_id(
+            session,
+            provider_id=profile.provider_id,
+            for_update=False,
+        )
+        if provider is None:
+            raise RuntimeProfileResolutionUnavailable(
+                code="provider_not_found",
+                provider_id=None,
+                message="The selected Runtime Provider was not found.",
+            )
+        resolution = await self._prepare_resolution(
+            session,
+            agent_selection_version=agent_selection_version,
+            workspace_id=workspace_id,
+            provider=provider,
+            infrastructure=infrastructure,
+            profile=profile,
+        )
+        return PreparedRuntimeProfileSelection(
+            provider=provider,
+            infrastructure=infrastructure,
+            profile=profile,
+            resolution=resolution,
+        )
+
+    async def attach_prepared_selection(
+        self,
+        session: AsyncSession,
+        *,
+        agent: Agent,
+        runtime: AgentRuntime,
+        prepared: PreparedRuntimeProfileSelection,
+        runtime_created: bool,
+    ) -> RuntimeProfileResolutionResult | None:
+        """Attach one prepared selection through the exact source CAS."""
+        resolution = prepared.resolution
+        provider = prepared.provider
+        infrastructure = prepared.infrastructure
+        profile = prepared.profile
+        revision = await self.profile_repository.create_or_get_configuration_revision(
+            session,
+            create=RuntimeConfigurationRevisionCreate(
+                runtime_id=runtime.id,
+                provider_id=provider.id,
+                provider_capability_revision_id=(
+                    resolution.capability_revision.id
+                    if resolution.capability_revision is not None
+                    else None
+                ),
+                infrastructure_profile_id=infrastructure.id,
+                infrastructure_profile_version=infrastructure.version,
+                workspace_runtime_profile_id=profile.id,
+                workspace_runtime_profile_version=profile.version,
+                agent_selection_version=agent.runtime_profile_selection_version,
+                resolution_status=resolution.status,
+                reason_code=resolution.reason_code,
+                required_capabilities=infrastructure.required_capabilities,
+                missing_capabilities=resolution.missing_capabilities,
+                resolved_configuration=resolution.resolved_configuration,
+                source_trace=resolution.source_trace,
+                digest=resolution.digest,
+                target_desired_generation=runtime.desired_generation,
+            ),
+        )
+        attached = await self.runtime_repository.attach_desired_configuration_revision(
+            session,
+            runtime_id=runtime.id,
+            expected_revision_id=runtime.desired_runtime_configuration_revision_id,
+            expected_desired_generation=runtime.desired_generation,
+            agent_id=agent.id,
+            workspace_id=agent.workspace_id,
+            agent_selection_version=agent.runtime_profile_selection_version,
+            provider_logical_id=provider.provider_id,
+            provider_resource_id=provider.id,
+            provider_admin_version=provider.admin_version,
+            provider_capability_revision_id=provider.current_contract_revision_id,
+            binding_origin=RuntimeProviderBindingOrigin.AGENT_EXPLICIT,
+            binding_evidence={
+                "workspace_id": agent.workspace_id,
+                "agent_selection_version": agent.runtime_profile_selection_version,
+                "workspace_runtime_profile_id": profile.id,
+                "workspace_runtime_profile_version": profile.version,
+                "infrastructure_profile_id": infrastructure.id,
+                "infrastructure_profile_version": infrastructure.version,
+                "provider_capability_revision_id": (
+                    resolution.capability_revision.id
+                    if resolution.capability_revision is not None
+                    else None
+                ),
+            },
+            infrastructure_profile_id=infrastructure.id,
+            infrastructure_profile_version=infrastructure.version,
+            workspace_runtime_profile_id=profile.id,
+            workspace_runtime_profile_version=profile.version,
+            configuration_revision_id=revision.id,
+        )
+        if attached is None:
+            return None
+        return RuntimeProfileResolutionResult(
+            runtime=attached,
+            desired_revision=revision,
+            applied_revision=None,
+            runtime_created=runtime_created,
+        )
 
     async def ensure_for_agent(
         self,
@@ -339,7 +488,7 @@ class RuntimeProfileResolutionService:
         provider: RuntimeProvider,
         infrastructure: RuntimeInfrastructureProfile,
         profile: WorkspaceRuntimeProfile,
-    ) -> _PreparedResolution:
+    ) -> PreparedRuntimeProfileResolution:
         """Validate current exact sources and build deterministic evidence."""
         capability_revision = None
         capability_digest = None
@@ -465,7 +614,7 @@ class RuntimeProfileResolutionService:
             resolved_configuration=resolved_configuration,
             source_trace=source_trace,
         )
-        return _PreparedResolution(
+        return PreparedRuntimeProfileResolution(
             status=status,
             reason_code=reason_code,
             missing_capabilities=missing_capabilities,

@@ -264,6 +264,15 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.id == runtime_id,
                 prior_matches,
                 RDBAgentRuntime.desired_generation == expected_desired_generation,
+                sa.or_(
+                    RDBAgentRuntime.runtime_provider_id.is_(None),
+                    RDBAgentRuntime.runtime_provider_id == provider_logical_id,
+                ),
+                sa.or_(
+                    RDBAgentRuntime.runtime_provider_resource_id.is_(None),
+                    RDBAgentRuntime.runtime_provider_resource_id
+                    == provider_resource_id,
+                ),
                 agent_snapshot_matches,
                 profile_snapshot_matches,
                 infrastructure_snapshot_matches,
@@ -715,6 +724,155 @@ class AgentRuntimeRepository:
         await session.flush()
         return self._build(rdb)
 
+    async def request_terminal_delete_without_physical_binding(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+    ) -> AgentRuntime | None:
+        """Request and acknowledge deletion after proof of no physical binding."""
+        result = await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.runtime_provider_id.is_(None),
+                RDBAgentRuntime.runtime_provider_resource_id.is_(None),
+                RDBAgentRuntime.provider_binding_origin.is_(None),
+                RDBAgentRuntime.provider_binding_evidence.is_(None),
+                RDBAgentRuntime.infrastructure_profile_id.is_(None),
+                RDBAgentRuntime.workspace_runtime_profile_id.is_(None),
+                RDBAgentRuntime.desired_runtime_configuration_revision_id.is_(None),
+                RDBAgentRuntime.applied_runtime_configuration_revision_id.is_(None),
+                RDBAgentRuntime.provider_generation == 0,
+                RDBAgentRuntime.provider_observed_state
+                == RuntimeProviderObservedState.UNKNOWN,
+                RDBAgentRuntime.provider_observed_generation == 0,
+                RDBAgentRuntime.provider_observed_at.is_(None),
+                RDBAgentRuntime.provider_observe_requested_at.is_(None),
+                RDBAgentRuntime.last_lifecycle_dispatch_generation == 0,
+                RDBAgentRuntime.provider_connection_state
+                == RuntimeProviderConnectionState.DISCONNECTED,
+                RDBAgentRuntime.runner_state == RuntimeRunnerState.UNKNOWN,
+                RDBAgentRuntime.runner_generation == 0,
+                RDBAgentRuntime.workspace_path.is_(None),
+                RDBAgentRuntime.failure_generation.is_(None),
+                RDBAgentRuntime.failure_code.is_(None),
+                RDBAgentRuntime.failure_message.is_(None),
+                RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
+                RDBAgentRuntime.terminal_delete_acknowledged_generation.is_(None),
+                RDBAgentRuntime.terminal_delete_acknowledged_at.is_(None),
+                RDBAgentRuntime.terminal_delete_acknowledgement_kind.is_(None),
+            )
+            .values(
+                desired_state=RuntimeDesiredState.STOPPED,
+                desired_generation=RDBAgentRuntime.desired_generation + 1,
+                last_lifecycle_command=None,
+                reset_final_desired_state=None,
+                last_lifecycle_dispatch_generation=(
+                    RDBAgentRuntime.desired_generation + 1
+                ),
+                provider_observe_requested_at=None,
+                provider_connection_state=(RuntimeProviderConnectionState.DISCONNECTED),
+                workspace_path=None,
+                failure_generation=None,
+                failure_code=None,
+                failure_message=None,
+                terminal_delete_requested_generation=(
+                    RDBAgentRuntime.desired_generation + 1
+                ),
+                terminal_delete_acknowledged_generation=(
+                    RDBAgentRuntime.desired_generation + 1
+                ),
+                terminal_delete_acknowledged_at=sa.func.now(),
+                terminal_delete_acknowledgement_kind=(
+                    RuntimeTerminalDeleteAcknowledgementKind.NO_PHYSICAL_BINDING
+                ),
+                last_state_change_at=sa.func.now(),
+            )
+            .returning(RDBAgentRuntime)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            current = await self.get_by_id(session, runtime_id)
+            if (
+                current is not None
+                and current.terminal_delete_requested_generation
+                == current.desired_generation
+                and current.terminal_delete_acknowledged_generation
+                == current.desired_generation
+                and current.terminal_delete_acknowledgement_kind
+                is RuntimeTerminalDeleteAcknowledgementKind.NO_PHYSICAL_BINDING
+            ):
+                return current
+            return None
+        await session.flush()
+        return self._build(rdb)
+
+    async def rearm_terminally_deleted(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        expected_terminal_generation: int,
+        provider_logical_id: str,
+        provider_resource_id: str,
+    ) -> AgentRuntime | None:
+        """Start one stopped higher-generation incarnation after exact deletion."""
+        next_generation = RDBAgentRuntime.desired_generation + 1
+        result = await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.desired_generation == expected_terminal_generation,
+                RDBAgentRuntime.terminal_delete_requested_generation
+                == expected_terminal_generation,
+                RDBAgentRuntime.terminal_delete_acknowledged_generation
+                == expected_terminal_generation,
+                RDBAgentRuntime.terminal_delete_acknowledged_at.is_not(None),
+                RDBAgentRuntime.terminal_delete_acknowledgement_kind.is_not(None),
+                sa.or_(
+                    RDBAgentRuntime.runtime_provider_id.is_(None),
+                    RDBAgentRuntime.runtime_provider_id == provider_logical_id,
+                ),
+                sa.or_(
+                    RDBAgentRuntime.runtime_provider_resource_id.is_(None),
+                    RDBAgentRuntime.runtime_provider_resource_id
+                    == provider_resource_id,
+                ),
+            )
+            .values(
+                desired_state=RuntimeDesiredState.STOPPED,
+                desired_generation=next_generation,
+                last_lifecycle_command=None,
+                reset_final_desired_state=None,
+                infrastructure_profile_id=None,
+                workspace_runtime_profile_id=None,
+                desired_runtime_configuration_revision_id=None,
+                applied_runtime_configuration_revision_id=None,
+                terminal_delete_requested_generation=None,
+                terminal_delete_acknowledged_generation=None,
+                terminal_delete_acknowledged_at=None,
+                terminal_delete_acknowledgement_kind=None,
+                provider_observed_state=RuntimeProviderObservedState.UNKNOWN,
+                provider_observed_generation=0,
+                provider_observed_at=None,
+                provider_observe_requested_at=None,
+                last_lifecycle_dispatch_generation=next_generation,
+                provider_connection_state=(RuntimeProviderConnectionState.DISCONNECTED),
+                runner_state=RuntimeRunnerState.UNKNOWN,
+                workspace_path=None,
+                failure_generation=None,
+                failure_code=None,
+                failure_message=None,
+                last_state_change_at=sa.func.now(),
+            )
+            .returning(RDBAgentRuntime)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build(rdb)
+
     async def get_terminal_delete_acknowledged(
         self,
         session: AsyncSession,
@@ -1011,8 +1169,6 @@ class AgentRuntimeRepository:
             RDBAgentRuntime.terminal_delete_acknowledged_generation.is_distinct_from(
                 RDBAgentRuntime.desired_generation
             ),
-            RDBAgentRuntime.provider_connection_state
-            == RuntimeProviderConnectionState.CONNECTED,
             sa.or_(
                 RDBAgentRuntime.last_state_change_at.is_(None),
                 RDBAgentRuntime.last_state_change_at < retry_cutoff,
@@ -1174,8 +1330,6 @@ class AgentRuntimeRepository:
             RDBAgentRuntime.terminal_delete_acknowledged_generation.is_distinct_from(
                 RDBAgentRuntime.desired_generation
             ),
-            RDBAgentRuntime.provider_connection_state
-            == RuntimeProviderConnectionState.CONNECTED,
             sa.or_(
                 RDBAgentRuntime.last_state_change_at.is_(None),
                 RDBAgentRuntime.last_state_change_at < retry_cutoff,

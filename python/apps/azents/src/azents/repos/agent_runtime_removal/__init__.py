@@ -115,6 +115,27 @@ class AgentRuntimeRemovalRepository:
         )
         return None if row is None else self._build(row)
 
+    async def get_latest_completed_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> AgentRuntimeRemovalOperation | None:
+        """Fetch the Agent's most recently completed removal operation."""
+        row = await session.scalar(
+            sa.select(RDBAgentRuntimeRemovalOperation)
+            .where(
+                RDBAgentRuntimeRemovalOperation.agent_id == agent_id,
+                RDBAgentRuntimeRemovalOperation.status
+                == AgentRuntimeRemovalStatus.COMPLETED,
+            )
+            .order_by(
+                RDBAgentRuntimeRemovalOperation.completed_at.desc(),
+                RDBAgentRuntimeRemovalOperation.id.desc(),
+            )
+            .limit(1)
+        )
+        return None if row is None else self._build(row)
+
     async def lock_by_id(
         self,
         session: AsyncSession,
