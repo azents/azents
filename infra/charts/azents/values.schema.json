@@ -803,6 +803,22 @@
         "env": {
           "type": "object"
         },
+        "jobRuntime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "backend"
+          ],
+          "properties": {
+            "backend": {
+              "type": "string",
+              "enum": [
+                "local",
+                "temporal"
+              ]
+            }
+          }
+        },
         "systemBootstrap": {
           "$ref": "#/definitions/systemBootstrap"
         },

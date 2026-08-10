@@ -37,6 +37,8 @@ server:
     pullPolicy: IfNotPresent
   env:
     AZ_RUNTIME_ENV: deployed
+  jobRuntime:
+    backend: local
   systemBootstrap:
     existingSecret: ""
     tokenKey: setup-token

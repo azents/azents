@@ -267,6 +267,13 @@ class ScheduledTaskStatus(enum.StrEnum):
     FAILED = "failed"
 
 
+class JobRuntimeBackend(enum.StrEnum):
+    """Configured application background execution backend."""
+
+    LOCAL = "local"
+    TEMPORAL = "temporal"
+
+
 class ArchivedSessionRetentionApplicationStatus(enum.StrEnum):
     """Durable existing-archive retention application status."""
 

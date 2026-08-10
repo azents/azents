@@ -10,6 +10,7 @@ data:
   {{- range $key, $value := .Values.server.env }}
   {{ $key }}: {{ $value | quote }}
   {{- end }}
+  AZ_JOB_RUNTIME_BACKEND: {{ .Values.server.jobRuntime.backend | quote }}
   AZ_RDB_HOST: {{ include "azents.databaseHost" . | quote }}
   AZ_RDB_PORT: {{ .Values.database.external.port | quote }}
   AZ_RDB_USER: {{ .Values.database.external.user | quote }}

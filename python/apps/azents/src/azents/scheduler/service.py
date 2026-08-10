@@ -7,26 +7,25 @@ import logging
 from typing import Annotated
 from uuid import uuid4
 
-from azcommon import di
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.job_runtime.deps import get_job_runtime
+from azents.job_runtime.types import JobOutcomeStatus, JobRequest, JobRuntime
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.scheduled_task_state import ScheduledTaskStateRepository
 from azents.repos.scheduled_task_state.data import ScheduledTaskState
-from azents.scheduler.executor import LocalTaskExecutor, TaskExecutor
+from azents.scheduler.executor import (
+    SCHEDULER_JOB_HANDLER_KEY,
+    ScheduledTaskJobPayload,
+)
 from azents.scheduler.registry import get_task_definitions
-from azents.scheduler.types import RetryPolicy, ScheduledTaskDefinition, TaskContext
+from azents.scheduler.types import RetryPolicy, ScheduledTaskDefinition, TaskResult
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_POLL_INTERVAL = datetime.timedelta(seconds=10)
-
-
-def get_task_executor() -> TaskExecutor:
-    """Scheduler TaskExecutor dependency."""
-    return LocalTaskExecutor()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -39,8 +38,7 @@ class SchedulerService:
     state_repository: Annotated[
         ScheduledTaskStateRepository, Depends(ScheduledTaskStateRepository)
     ]
-    executor: Annotated[TaskExecutor, Depends(get_task_executor)]
-    container: Annotated[di.Container, Depends(di.get_container)]
+    job_runtime: Annotated[JobRuntime, Depends(get_job_runtime)]
     scheduler_id: str = dataclasses.field(default_factory=lambda: uuid4().hex)
     poll_interval: datetime.timedelta = _DEFAULT_POLL_INTERVAL
 
@@ -156,17 +154,35 @@ class SchedulerService:
         definition: ScheduledTaskDefinition,
         state: ScheduledTaskState,
     ) -> None:
-        now = _utcnow()
-        context = TaskContext(
+        attempt_started_at = state.last_started_at
+        if attempt_started_at is None:
+            raise RuntimeError("Claimed scheduled task is missing its start timestamp.")
+        payload = ScheduledTaskJobPayload(
             task_key=definition.key,
-            attempt_started_at=now,
+            attempt_started_at=attempt_started_at,
             lease_owner=self.scheduler_id,
-            deadline=now + definition.timeout,
             manual_triggered=state.manual_requested_at is not None,
-            container=self.container,
         )
         try:
-            result = await self.executor.execute(definition, context)
+            handle = await self.job_runtime.submit(
+                JobRequest(
+                    handler_key=SCHEDULER_JOB_HANDLER_KEY,
+                    execution_key=_scheduler_execution_key(
+                        task_key=definition.key,
+                        lease_owner=self.scheduler_id,
+                        attempt_started_at=attempt_started_at,
+                    ),
+                    deadline=attempt_started_at + definition.timeout,
+                    payload=payload.model_dump(mode="json"),
+                )
+            )
+            outcome = await handle.wait()
+            if outcome.status is not JobOutcomeStatus.SUCCEEDED:
+                raise ScheduledTaskJobFailure(
+                    error_code=outcome.error_code or outcome.status.value,
+                    message=outcome.error_message or "Scheduled task execution failed.",
+                )
+            result = TaskResult(summary=outcome.result)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -208,7 +224,11 @@ class SchedulerService:
                 lease_owner=self.scheduler_id,
                 finished_at=finished_at,
                 next_run_at=next_run_at,
-                error_code=type(exc).__name__,
+                error_code=(
+                    exc.error_code
+                    if isinstance(exc, ScheduledTaskJobFailure)
+                    else type(exc).__name__
+                ),
                 error_message=str(exc),
             )
         logger.exception(
@@ -222,6 +242,25 @@ def _get_definition(task_key: str) -> ScheduledTaskDefinition | None:
         if definition.key == task_key:
             return definition
     return None
+
+
+class ScheduledTaskJobFailure(Exception):
+    """Structured Scheduler failure reconstructed from a Runtime outcome."""
+
+    def __init__(self, *, error_code: str, message: str) -> None:
+        """Retain the original handler error code for current-state recording."""
+        super().__init__(message)
+        self.error_code = error_code
+
+
+def _scheduler_execution_key(
+    *,
+    task_key: str,
+    lease_owner: str,
+    attempt_started_at: datetime.datetime,
+) -> str:
+    """Return one stable identity for one database Scheduler claim."""
+    return f"scheduler:{task_key}:{lease_owner}:{attempt_started_at.isoformat()}"
 
 
 def compute_failure_next_run_at(

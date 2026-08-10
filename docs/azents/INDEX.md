@@ -95,6 +95,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Immediate External Channel Provider Delivery Requirements](requirements/channel-260802-immediate-provider-delivery.md) | channel-260802 | 2026-08-02 | 2026-08-02 |
 | [Selective External Channel Response Requirements](requirements/channel-260803-selective-response.md) | channel-260803 | 2026-08-03 | - |
 | [External Channel Silent Work Completion Requirements](requirements/channel-260809-silent-work-completion.md) | channel-260809 | 2026-08-09 | 2026-08-09 |
+| [Batched External Channel Conversation Ingress Requirements](requirements/channel-260810-batched-conversation-ingress.md) | channel-260810 | 2026-08-10 | - |
 | [Split Chat Input Buffer into Separate RDB Table Historical Requirements Reconstruction](requirements/chat-260519-chat-input-buffer.md) | chat-260519 | 2026-05-19 | - |
 | [Chat Protocol Uses Canonical Event History/Live API Historical Requirements Reconstruction](requirements/chat-260604-chat-protocol-history-live.md) | chat-260604 | 2026-06-04 | 2026-06-04 |
 | [Chat Session Resync Converges to History/Live State After Subscribe Ack Historical Requirements Reconstruction](requirements/chat-260609-chat-resync-scroll.md) | chat-260609 | 2026-06-09 | - |
@@ -476,6 +477,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Immediate External Channel Provider Delivery](adr/channel-260802-immediate-provider-delivery.md)
 - [Selective External Channel Response](adr/channel-260803-selective-response.md)
 - [External Channel Silent Work Completion](adr/channel-260809-silent-work-completion.md)
+- [Batched External Channel Conversation Ingress Decisions](adr/channel-260810-batched-conversation-ingress.md)
 - [Split Chat Input Buffer into Separate RDB Table](adr/chat-260519-chat-input-buffer.md)
 - [Chat Protocol Uses Canonical Event History/Live API](adr/chat-260604-chat-protocol-history-live.md)
 - [Chat Session Resync Converges to History/Live State After Subscribe Ack](adr/chat-260609-chat-resync-scroll.md)
