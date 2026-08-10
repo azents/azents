@@ -50,6 +50,9 @@ from azents.services.external_channel.conversation import (
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
 )
+from azents.services.external_channel.ingress_metrics import (
+    ExternalChannelIngressMetrics,
+)
 from azents.services.external_channel.ingress_queue import (
     ExternalChannelIngressDrainService,
     ExternalChannelIngressFailureCategory,
@@ -293,6 +296,7 @@ def _service(
             ExternalChannelMailboxWakeDispatcher,
             wake_dispatcher,
         ),
+        metrics=ExternalChannelIngressMetrics(),
     )
 
 
@@ -740,11 +744,25 @@ async def test_stale_ownership_does_not_enqueue_or_advance_cursor_and_logs_safel
     agent_session_repository.mark_running_for_input_wakeup.assert_not_awaited()
     wake_dispatcher.dispatch.assert_not_awaited()
     assert private_body not in caplog.text
-    assert any(
-        getattr(record, "external_channel_failure_category", None)
-        == ExternalChannelIngressFailureCategory.OWNERSHIP_STALE.value
+    record = next(
+        record
         for record in caplog.records
+        if getattr(record, "external_channel_failure_category", None)
+        == ExternalChannelIngressFailureCategory.OWNERSHIP_STALE.value
     )
+    assert {key for key in record.__dict__ if key.startswith("external_channel_")} == {
+        "external_channel_ingress_id",
+        "external_channel_provider",
+        "external_channel_failure_category",
+        "external_channel_attempt_count",
+        "external_channel_age_seconds",
+    }
+    assert record.__dict__["external_channel_ingress_id"] == "item-1"
+    assert record.__dict__["external_channel_provider"] == "slack"
+    assert record.__dict__["external_channel_attempt_count"] == 1
+    age_seconds = record.__dict__["external_channel_age_seconds"]
+    assert isinstance(age_seconds, int)
+    assert age_seconds >= 0
 
 
 def test_retry_transition_bounds_attempt_age_and_provider_delay() -> None:

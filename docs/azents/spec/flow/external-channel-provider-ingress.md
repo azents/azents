@@ -29,12 +29,18 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/services/external_channel/conversation.py
-  - python/apps/azents/src/azents/services/external_channel/conversation_lock.py
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_history.py
+  - python/apps/azents/src/azents/services/external_channel/ingress_queue.py
+  - python/apps/azents/src/azents/services/external_channel/ingress_metrics.py
+  - python/apps/azents/src/azents/services/external_channel/ingress_observability.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_wake.py
+  - python/apps/azents/src/azents/repos/external_channel/ingress_queue.py
+  - python/apps/azents/src/azents/rdb/models/external_channel_ingress.py
+  - python/apps/azents/src/azents/api/testenv/external_channel_ingress/**
+  - python/apps/azents/src/azents/cli/external_channel_ingress.py
   - python/apps/azents/src/azents/services/external_channel/selector_state.py
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
@@ -51,8 +57,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-09
-spec_version: 34
+last_verified_at: 2026-08-10
+spec_version: 35
 ---
 
 # External Channel Provider Ingress
@@ -104,30 +110,28 @@ Slack sends HTTP callbacks to the single fixed endpoint
    and the raw-body HMAC signature against that candidate's encrypted Signing Secret.
 5. The fully parsed event identity must match the selected connection before the
    authenticated request is projected into a typed, content-free trigger locator.
-6. Original message triggers enter synchronous conversation ingestion. An explicit
+6. Original message triggers enter DB-only durable admission. An explicit
    eligible top-level trigger first resolves the selected route and participation
    setting. If no setting exists, it creates or replaces one setup claim and setup
    control in the provider parent channel with no Binding, Session, canonical mailbox
    input, wake, or AgentRun.
-   Configured traffic or selected setup replay reads provider history and commits the
-   real Session, Binding, canonical mailbox input, conversation-position advance,
-   running transition, and zero or more process-local provider-control plans. A new eligible
-   explicit mention in an existing Binding may additionally create one idempotent
-   settings entry point; ordinary traffic, deployment, startup, and the background
-   worker do not create it. The mailbox item is also the pending wake-recovery
-   identity. After the response is acknowledged, the caller attempts each plan once;
-   controls never gate execution and create no recovery work.
-7. Success is acknowledged only for a completed non-retryable outcome. A retryable
-   coordination, history, position, or wake failure remains unacknowledged so the
-   provider may retry.
+   Configured traffic or selected setup replay resolves one immutable target Session
+   and inserts or reuses one content-free active ingress item in PostgreSQL. A new
+   eligible explicit mention in an existing Binding may additionally create one
+   idempotent settings entry point; ordinary traffic, deployment, startup, and the
+   drain worker do not create it.
+7. The callback acknowledges after the ingress transaction commits. It does not wait
+   for Local Job Runtime submission, provider exact/history I/O, mailbox admission,
+   conversation-position advancement, Session wake, or provider-control delivery.
+   Provider-resolution and wake failures are recovered from the durable active queue
+   and canonical mailbox state rather than by withholding the transport response.
 
 Payload App/Team identity is an index key, not authentication. Missing, unknown, or
 ambiguous candidates fail closed, and ordinary events never pass admission without
 successful HMAC verification.
 
-Duplicate callbacks converge through conversation position and deterministic mailbox
-identity and still receive a successful acknowledgement after any pending wake is
-recovered.
+Duplicate callbacks converge through the active-ingress deduplication key,
+conversation position, and deterministic per-message mailbox identities.
 
 ## Discord Interaction Admission
 
@@ -194,13 +198,14 @@ one public aiohttp `SocketModeClient` with SDK automatic reconnect enabled. The 
 establishment, Ping/Pong, stale-session detection, frame receipt, queue dispatch, and
 recoverable reconnect for that lease lifetime.
 
-The SDK direct message callback remains the serial admission boundary. It passes bounded
+The SDK direct message callback remains the serial transport admission boundary. It passes bounded
 text envelopes to Azents, where public `SocketModeRequest` and `SocketModeResponse`
 types validate structure and construct the acknowledgement. Events API and interaction
-envelopes enter the same synchronous durable services as HTTP, and the exact envelope
-acknowledgement is sent only after a non-retryable outcome. Retryable ingestion remains
-unacknowledged. The SDK queue remains enabled without Azents message listeners so it
-can process provider `disconnect` controls and perform endpoint replacement.
+envelopes enter the same DB-only durable admission service as HTTP. The exact envelope
+acknowledgement is sent after the active ingress item commits and before provider
+history, mailbox, or wake work. The SDK queue remains enabled without Azents message
+listeners so it can process provider `disconnect` controls and perform endpoint
+replacement.
 
 An SDK connection establishment marks the current fenced lease active and clears its
 gap. Endpoint replacement entry and transient endpoint acquisition failure record a
@@ -229,10 +234,11 @@ SDK Resume checkpoint across processes.
 
 Ingress consumes eligible target-Guild typed `Message` callbacks for normal
 conversation ingestion. Message identity derives from Guild, channel, thread, and
-message identity; the current lease/configuration/App-claim fence protects synchronous
-admission without exposing Gateway transport state. Message and lifecycle callbacks
-are serialized per connection, and a callback failure closes the high-level client so
-it cannot be logged and ignored while the lease continues.
+message identity; the current lease/configuration/App-claim fence protects DB-only
+admission without exposing Gateway transport state. Each delivered callback attempts
+durable admission independently. A failure for one callback does not discard later
+callbacks already delivered by the SDK; transport lifecycle failures remain owned by
+the high-level client and fenced lease manager.
 
 Typed `on_disconnect` records a fenced degraded gap. Typed `on_ready` and `on_resumed`
 mark the same current lease active and clear its gap. A stale callback fails the client
@@ -249,63 +255,69 @@ not change SDK endpoint state in production. Deterministic provider tests may ap
 explicit test-only endpoint context and must restore the SDK globals when the client
 closes.
 
-## Synchronous Conversation Ingestion
+## Durable Batched Conversation Ingress
 
 Normal Slack HTTP, Slack Socket Mode, and Discord Gateway message-create callbacks use
-one provider-neutral synchronous service under a shared absolute transport deadline.
-The authenticated callback contributes only a typed trigger locator, conversation
-scope, and current configuration or lease authority. Raw callback content is neither
-the canonical message source nor a durable queue item.
+one provider-neutral admission and drain contract. The authenticated callback
+contributes only a bounded typed trigger locator, conversation scope, and current
+configuration or lease authority. Raw callback content is neither canonical input nor
+durable queue content.
 
-1. The service acquires the configured ephemeral lock for the parent-channel or thread
-   scope. In-memory locks coordinate one process. Redis locks coordinate replicas and
-   use owner-token fencing; Redis unavailability is a retryable failure and never
-   switches implicitly to memory.
-2. A short preparation transaction revalidates ingress authority, creates or reads the
-   PostgreSQL conversation position, and resolves an exact connected thread Binding
-   before the selected route, participation setting, configured location, Resource,
-   and connected Binding.
-   An ordinary non-invocation stops here when no binding exists or when the connected
-   binding is `mention_only`; this creates no principal, selector, access request,
-   mailbox input, wake, provider control, or position advance. Other requests resolve
-   the remaining route/selector/access state. An explicit eligible top-level invocation
-   with no setting creates or replaces the latest-source setup claim and returns before
-   provider-history I/O or canonical side effects. Configured or replay operations
-   return the exclusive provider-history start position. Preparation performs no
-   provider I/O.
-3. The provider adapter reads an exclusive-start, inclusive-trigger history range
-   outside any database transaction. It retains the newest 20 eligible visible
-   messages and records one leading omission reminder when earlier eligible context
-   was omitted. The connected Azents App/Bot is excluded; raw REST pages, callbacks,
-   tokens, private URLs, and attachment bodies are not retained.
-   Slack display-name and permalink enrichment is optional and starts only while a
-   fixed reserve remains for durable acceptance and wake dispatch.
-4. A short admission transaction locks and revalidates the same authority,
-   conversation position, selected route, participation-setting generation and
-   location, active Resource, current connected Binding response mode,
-   selector/setup replay revision, and access boundary. A location, selected-Agent, or
-   mode change during provider-history I/O discards the fetched range without side
-   effects or position advancement. An admitted request creates or reuses the connected
-   Binding, real root Session, initial Channel Work, deterministic canonical mailbox
-   input, and versioned joined-presence and progress state. The same transaction
-   marks the Session running, initializes thread position, and compare-and-set advances
-   the conversation position, then returns any joined-presence and progress plans to
-   the transport caller. Only when this transaction creates the root Session does the
-   canonical mailbox carry one transient initial-title eligibility marker.
-   PostgreSQL conversation position is the sole duplicate-prevention and ordering
-   authority; a mismatch restarts provider-history preparation.
-5. After commit, the service claims the pending mailbox item and sends routing-only
-   `SessionWakeUp(session_id)`. A crash or broker failure leaves that item recoverable,
-   so duplicate transport delivery can complete the same logical wake without creating
-   another Session input. Promotion may consume the creation marker only for the exact
-   human `authorized_invocation` event and stores the existing deterministic initial
-   Session title without delaying wake or execution. Context-only messages, nonhuman
-   authors, later invocations, continuation, and duplicate admission cannot re-arm it.
-6. After the HTTP response, Socket acknowledgement, or Gateway admission boundary,
-   the transport caller attempts every returned control plan once. Failure, ambiguity,
-   cancellation, or process termination is recorded only through safe logs and metrics;
-   none gates mailbox promotion, Session wake, or AgentRun creation, and no Worker
-   later drains or reconstructs the control.
+1. A short transaction revalidates the current connection, route, participation,
+   access, Binding, Resource, and target Session filters. An ordinary non-invocation
+   stops before queue insertion when no connected Binding exists or its response mode
+   is `mention_only`. An eligible top-level invocation with no setting creates or
+   replaces setup state and returns before queue insertion.
+2. Configured traffic and selected setup/access replay lock or create the Session
+   ingress state and insert or reuse one content-free active ingress item. The item
+   retains only provider and routing identities, immutable Session/Binding authority,
+   trigger position, invocation correlation, attempt state, and lease/batch metadata.
+   PostgreSQL is the correctness authority; Redis and in-memory conversation locks are
+   not used for queue ordering, cursor correctness, or recovery.
+3. After commit, the producer submits the active drain lifecycle's Session-scoped
+   execution key to the bounded Local Job Runtime. API and External Channel Gateway
+   producers also scan active ingress sessions at startup and periodically, submitting
+   rows whose lease is absent, expired, or due. Callbacks within one active drain
+   lifecycle coalesce, while an empty-row deletion and recreation starts a distinct
+   lifecycle instead of coalescing into its predecessor's ending task. Submission and
+   scans are wake mechanisms rather than durable job authority.
+4. One drain handler conditionally claims the Session lease. Its first claim contains
+   exactly one due item; later claims contain at most ten due items in queue-key order.
+   Resolution is sequential in that order outside a database transaction. A
+   retry-waiting item does not block later due work.
+5. Before provider I/O, the handler suppresses an item already at or behind the durable
+   conversation cursor. Otherwise the provider policy reads an exclusive-start,
+   inclusive-trigger exact/history range, retaining the current bounded visible
+   context and one leading omission marker. A same-batch tentative cursor prevents
+   avoidable duplicate reads without reordering admitted callbacks.
+6. The final transaction re-locks the Session drain, claimed items, connection
+   authority, and affected conversation positions. It validates the initial cursor
+   snapshot, correlates every returned provider message with active admitted trigger
+   identities, and assigns `prompt_role = context | invocation`. A stale cursor rolls
+   back the complete prepared batch and retries coordination without consuming a
+   provider attempt.
+7. Every canonical provider message is admitted as one independent
+   `external_channel_message` mailbox row. Rows from one processing batch share an
+   order group with contiguous sequence values following queue order and per-item
+   provider-history order.
+8. In the same transaction, successful cursor advances, mailbox rows, retry-tail
+   transitions, bounded-failure deletions, queue completion, drain-state update, and
+   the existing Session runnable transition commit atomically. Retry retains the same
+   ingress identity and original age while assigning a fresh tail key. Successful,
+   suppressed, and bounded-failure items are deleted; no completed outcome or
+   tombstone row is created.
+9. A non-empty processing batch emits one post-commit routing-only
+   `SessionWakeUp(session_id)`. Broker failure does not roll back mailbox input.
+   Existing pending-mailbox and stuck-Session recovery consume the committed input
+   without provider resend or a durable wake row.
+
+One ingress lifecycle has at most five provider attempts and at most five minutes of
+original age. Default backoff is bounded; provider `Retry-After` is honored only when
+it fits the remaining age budget. Attempt/age exhaustion, excessive delay, stale
+ownership, malformed provider data, and terminal provider classifications delete the
+active row after final ownership/cursor checks and emit one sanitized warning keyed
+only by ingress identity, provider, closed failure category, attempt count, and age.
+Raw provider errors and message content are never logged.
 
 An exact connected thread Binding wins route resolution. Otherwise Single uses its
 sole route, Multi uses one valid channel default, and the active participation setting
@@ -327,9 +339,10 @@ Restricted access persists the trigger source plus immutable conversation-positi
 range-start, and trigger-position replay authority and returns one immediate
 approval-control plan without waking a Session. For a setup-linked request, Allow commits the grant
 and resumes `pending_location` setup without creating a Binding or entering access
-replay. Legacy configured-thread Allow invokes the same synchronous ingestion service
-with its durable replay boundary. Replay works whether the shared position is still
-before the trigger or has advanced, and converges on one mailbox identity.
+replay. Legacy configured-thread Allow invokes the same DB-only admission service with
+its durable replay boundary. Replay works whether the shared position is still before
+the trigger or has advanced, and converges on active-ingress and per-message mailbox
+identities.
 Deny, block, revocation, malformed triggers, and non-invoking edit/delete callbacks
 never release new Session input.
 
@@ -346,15 +359,32 @@ moves the current connection to `reconnect_required` without terminating binding
 App uninstall terminally disconnects the connection, creates one leave-presence
 control for each newly disconnected binding, captures its provider target before
 credential purge, and attempts that target only after the terminal commit. Repeated
-uninstall handling returns no additional cleanup plan. Provider-history, coordination, position, or wake
-failures return a retryable transport outcome. Invalid or stale authority and
-malformed replay boundaries fail closed. Committed selector, approval,
+uninstall handling returns no additional cleanup plan. Invalid or stale admission
+authority and malformed replay boundaries fail closed. Provider-history, cursor,
+retry, and wake failures occur after durable admission and are recovered by the
+Session drain lifecycle. Committed selector, approval,
 joined-presence, leave-presence, and progress controls are attempted after their
 commit without gating accepted input or terminal lifecycle state and without durable
 provider work or recovery. Presence-control
 Session links use only
 `/w/{workspace}/agents/{agent}/sessions/{session}` and target the same durable Session
 exposed by existing Agent Session list and detail APIs.
+
+## Active Ingress Diagnostics
+
+The read-only `external_channel_ingress status` operator CLI and guarded Testenv API
+expose bounded active-state snapshots: queue counts, provider/connection identity,
+Session and item age, attempt count, current batch and retry timing, lease
+owner/generation/expiry, oldest queue age, and process-local aggregate metrics.
+Metrics include claimed batch/item counts and size, processing duration, retry and
+bounded-failure counts, cursor suppressions, mailbox rows committed, post-commit wake
+attempts/failures, active Runtime tasks, and shutdown drain time.
+
+The operator surface has no release, retry, delete, or other mutation command. The
+guarded credential-free Testenv API may submit one exact Session through the real Job
+Runtime and inject one exact one-shot wake failure. Neither surface exposes callback
+bodies, message text, participant data, credentials, tokens, signatures, private URLs,
+or raw provider errors.
 
 ## File Metadata Projection
 
@@ -407,6 +437,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-10** (spec_version 35) — Replaced synchronous normal-message ingestion
+  with content-free PostgreSQL admission, first-one/later-ten Session drains,
+  per-message mailbox rows and `prompt_role`, cursor-CAS batching, retry-tail recovery,
+  one post-batch wake, and bounded read-only ingress diagnostics.
 - **2026-08-04** (spec_version 33) — Made provider metadata size advisory for Slack
   and Discord attachments. Download eligibility now relies on identity and provider
   support, while the final authenticated URL `Content-Length` exclusively declares

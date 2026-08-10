@@ -34,8 +34,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-08-03
-spec_version: 21
+last_verified_at: 2026-08-10
+spec_version: 22
 ---
 
 # External Channel Authorization
@@ -81,7 +81,7 @@ When `open_access_enabled` is disabled, an unknown human invocation cannot creat
 AgentSession, binding invocation, or Agent wake-up until a grant is created. The
 request retains an immutable provider-history replay boundary instead of a mutable
 pending-context buffer. With the default open-human policy, an eligible unblocked
-human follows synchronous authorized ingestion directly.
+human follows durable DB-only admission directly.
 
 When a restricted participant invokes the Agent:
 
@@ -90,8 +90,8 @@ When a restricted participant invokes the Agent:
    An unresolved Multi App invocation first requires one explicit selector interaction
    and validates the chosen route. Slack presents its selector through Block Kit;
    Discord uses a verified command or component interaction.
-2. Synchronous ingestion creates one idempotent access request for the selected route
-   and metadata-only provider-history source identity.
+2. Admission creates one idempotent access request for the selected route and
+   metadata-only provider-history source identity.
 3. The request snapshots the connection, conversation position, exclusive range start,
    and inclusive trigger position, expires after seven days, and contains an opaque ID.
 4. The access request conservatively preclaims its current control projection as
@@ -148,39 +148,44 @@ decision commits. Failed or ambiguous deletion updates only the request's curren
 control projection, never rolls back the authorization result, and creates no retry or
 recovery work.
 
-## Synchronous Replay and Context Release
+## Durable Replay and Context Release
 
 Legacy configured-thread Allow commits authorization before replay and then calls the
-shared synchronous ingestion service with the request's immutable conversation-position boundary. The
-service re-reads provider history outside a database transaction. If the shared
-position is still before the trigger, it reads forward normally; if another accepted
-invocation advanced past the trigger, it reuses the saved range start and exact trigger
-boundary. It then reuses the committed binding and atomically commits the deterministic
-canonical mailbox item, conversation-position advance, Session running transition, and
-deterministic joined-presence and initial-progress plans. Both position
-cases converge on one mailbox item and logical wake.
-When that decision transaction created the root Session and Binding, only the first
-post-decision replay may mark the canonical mailbox as eligible for initial automatic
-title generation from its exact human `authorized_invocation`. A repeated compatible
-decision, an existing Binding, or a replay recovery does not re-arm eligibility.
-Repeating a compatible Allow may perform the same provider-history replay to recover a
-post-commit failure, but mailbox identity prevents another Session input or execution.
-Replay failure never reverts the already committed access decision or binding, and it
+shared DB-only ingress admission service with the request's immutable
+conversation-position boundary. The decision may create the root Session and Binding,
+then inserts or reuses one content-free active ingress item for that exact Session.
+Provider history, cursor advancement, per-message mailbox admission, and Session wake
+occur later in the leased Session drain.
+
+If the shared position is still before the trigger, the drain reads forward normally;
+if another accepted invocation advanced past the trigger, the provider policy uses the
+saved range start and exact trigger boundary. Both position cases converge through the
+active-ingress deduplication key, conversation-position CAS, and deterministic
+provider-message mailbox identities.
+
+When the decision created the root Session and Binding, only the exact eligible human
+mailbox row whose `prompt_role` is `invocation` may carry initial automatic-title
+eligibility. A repeated compatible decision, an existing Binding, or replay recovery
+does not re-arm eligibility. Repeating a compatible Allow may resubmit the same Session
+execution key to recover a post-commit submission or provider-resolution failure, but
+active-ingress and mailbox identities prevent another logical input or execution.
+Replay failure never reverts the already committed access decision or Binding, and it
 does not couple provider-control success to accepted mailbox execution.
 This durable replay remains available while connection ingress health is `active`,
 `degraded`, or `reconnect_required`; `configuring`, `disconnecting`, and `disconnected`
 connections cannot start it. Transient Gateway or Socket recovery therefore does not
 revoke already committed replay and outbound REST authority.
 
-The resulting mailbox item uses `wake_session` scheduling and contains the immutable
-ordered provider-history projection rather than a raw callback or mutable
-pending-context reference. At promotion, it becomes contiguous
-`external_channel_message` events with
-provider source attribution, trigger identity, authorization state, and one optional
-leading omission reminder.
+The resulting canonical messages each use one `external_channel_message` mailbox row
+with `wake_session` scheduling, explicit FIFO group/sequence, provider source
+attribution, trigger identity, `prompt_role`, and one optional leading omission
+reminder on the first retained context row. A non-empty processing batch sends one
+post-commit routing wake; pending mailbox state remains recoverable when that wake
+fails.
 
 Later authorized original messages on a connected `all_messages` binding create
-another canonical mailbox item and wake the same Session. A `mention_only` binding
+another active ingress item and later one mailbox row per canonical provider message
+before waking the same Session. A `mention_only` binding
 requires an explicit invocation; ordinary messages remain provider-history context
 without independent admission. Edit and delete callbacks are excluded in either mode;
 they do not independently invoke the Agent or create a lifecycle/revision correction.
@@ -212,6 +217,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-08-10** (spec_version 22) — Replaced synchronous access replay and one
+  batch-shaped mailbox item with DB-only ingress admission, leased provider-history
+  drain, per-message `prompt_role` mailbox rows, cursor CAS, and one post-batch wake.
 - **2026-08-03** (spec_version 21) — Allowed only the root-Session-creating legacy
   Allow path to pass one-time automatic-title eligibility into canonical replay;
   compatible repeats and existing Bindings remain ineligible.

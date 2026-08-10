@@ -1318,6 +1318,17 @@ def test_http_admission_unknown_participant_and_approval_journey(
         },
         timeout=5,
     ).raise_for_status()
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/barrier",
+        json={"operation": "conversations.replies", "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    request.addfinalizer(
+        lambda: requests.post(
+            f"{slack_provider_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+    )
     follow_up_event_body = json.dumps(
         {
             "type": "event_callback",
@@ -1337,6 +1348,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         },
         separators=(",", ":"),
     ).encode()
+    started = time.monotonic()
     follow_up = requests.post(
         callback_url,
         data=follow_up_event_body,
@@ -1344,6 +1356,48 @@ def test_http_admission_unknown_participant_and_approval_journey(
         timeout=5,
     )
     assert follow_up.status_code == 200
+    assert time.monotonic() - started < 2
+    barrier_state = cast(
+        dict[str, object],
+        wait_until(
+            lambda: (
+                state
+                if (
+                    state := requests.get(
+                        f"{slack_provider_fake_url}/__testenv/barrier",
+                        timeout=5,
+                    ).json()
+                ).get("reached")
+                is True
+                else None
+            ),
+            timeout=15,
+            interval=0.1,
+            message="Slack callback did not reach the blocked provider history read",
+        ),
+    )
+    assert barrier_state == {
+        "operation": "conversations.replies",
+        "occurrence": 1,
+        "request_count": 1,
+        "reached": True,
+        "released": False,
+    }
+    assert (
+        len(
+            _external_channel_input_evidence(
+                public_server_url=azents_public_server_url,
+                token=token,
+                session_id=approved_session_id,
+                include_pending=False,
+            )
+        )
+        == 1
+    )
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/barrier/release",
+        timeout=5,
+    ).raise_for_status()
     follow_up_evidence = cast(
         list[dict[str, object]],
         wait_until(

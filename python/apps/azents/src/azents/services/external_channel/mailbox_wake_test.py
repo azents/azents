@@ -5,12 +5,19 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import cast
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.repos.mailbox.data import MailboxItem
 from azents.services.external_channel.conversation import (
     ExternalChannelOperationDeadline,
+)
+from azents.services.external_channel.ingestion import (
+    ExternalChannelWakeDispatchUnavailable,
+)
+from azents.services.external_channel.ingress_test_control import (
+    ExternalChannelIngressTestControl,
 )
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
@@ -76,6 +83,7 @@ async def test_dispatch_sends_routing_only_wake_after_mailbox_commit() -> None:
             _MailboxService(calls, _mailbox_item()),
         ),
         broker=cast(SessionBroker, broker),
+        test_control=ExternalChannelIngressTestControl(),
     )
 
     result = await dispatcher.dispatch(
@@ -106,6 +114,7 @@ async def test_missing_mailbox_item_does_not_send_duplicate_wake() -> None:
         session_manager=session_manager,
         mailbox_service=cast(MailboxService, _MailboxService(calls, None)),
         broker=cast(SessionBroker, broker),
+        test_control=ExternalChannelIngressTestControl(),
     )
 
     result = await dispatcher.dispatch(
@@ -120,3 +129,48 @@ async def test_missing_mailbox_item_does_not_send_duplicate_wake() -> None:
     assert result == "already_dispatched"
     assert calls == ["load_mailbox", "commit"]
     assert broker.messages == []
+
+
+async def test_injected_wake_failure_is_one_shot_and_precedes_broker_io() -> None:
+    """Testenv failure injection cannot expose or erase canonical mailbox input."""
+    calls: list[str] = []
+    session = _Session(calls)
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[AsyncSession]:
+        yield cast(AsyncSession, session)
+
+    control = ExternalChannelIngressTestControl()
+    control.fail_next_wake(session_id="session-1")
+    broker = _Broker(calls)
+    dispatcher = ExternalChannelMailboxWakeDispatcher(
+        session_manager=session_manager,
+        mailbox_service=cast(
+            MailboxService,
+            _MailboxService(calls, _mailbox_item()),
+        ),
+        broker=cast(SessionBroker, broker),
+        test_control=control,
+    )
+
+    with pytest.raises(ExternalChannelWakeDispatchUnavailable):
+        await dispatcher.dispatch(
+            mailbox_item_id="mailbox-1",
+            session_id="session-1",
+            now=datetime.datetime.now(datetime.UTC),
+            deadline=ExternalChannelOperationDeadline(
+                datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+            ),
+        )
+
+    result = await dispatcher.dispatch(
+        mailbox_item_id="mailbox-1",
+        session_id="session-1",
+        now=datetime.datetime.now(datetime.UTC),
+        deadline=ExternalChannelOperationDeadline(
+            datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+        ),
+    )
+
+    assert result == "dispatched"
+    assert calls == ["load_mailbox", "commit", "send_wake"]

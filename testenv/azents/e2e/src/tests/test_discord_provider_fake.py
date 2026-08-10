@@ -672,6 +672,119 @@ def test_discord_fake_controls_confirmed_and_unknown_http_categories(
     assert "nonce-" not in str(evidence)
 
 
+def test_discord_fake_sequences_retry_after_and_blocks_exact_history(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Sequence provider Retry-After and release an exact-message read barrier."""
+    discord_fake_url, _ = discord_fake_urls
+    channel_id = "400000000000000001"
+    message_id = "400000000000000101"
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "api_scenario_sequences": {
+                "get_history": ["rate_limited", "rate_limited", "ok"]
+            },
+            "retry_after_sequences": {"get_history": [4, 8]},
+            "history_pages": [
+                [
+                    {
+                        "id": message_id,
+                        "channel_id": channel_id,
+                        "content": "provider content excluded from evidence",
+                    }
+                ]
+            ],
+            "root_messages": [
+                {
+                    "id": message_id,
+                    "channel_id": channel_id,
+                    "content": "provider content excluded from evidence",
+                }
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    history_arguments = {
+        "guild_id": STATE.guild_id,
+        "channel_id": channel_id,
+        "before_message_id": "999999999999999999",
+        "limit": 100,
+    }
+    first = _sdk_call(
+        discord_fake_url,
+        "fetch_history_projections",
+        **history_arguments,
+    )
+    second = _sdk_call(
+        discord_fake_url,
+        "fetch_history_projections",
+        **history_arguments,
+    )
+    third = _sdk_call(
+        discord_fake_url,
+        "fetch_history_projections",
+        **history_arguments,
+    )
+    assert first.status_code == 429
+    assert first.headers["Retry-After"] == "4"
+    assert second.status_code == 429
+    assert second.headers["Retry-After"] == "8"
+    assert third.status_code == 200
+
+    requests.post(
+        f"{discord_fake_url}/__testenv/barrier",
+        json={"operation": "get_message", "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    responses: list[requests.Response] = []
+
+    def request_message() -> None:
+        responses.append(
+            _sdk_call(
+                discord_fake_url,
+                "fetch_message_projection",
+                guild_id=STATE.guild_id,
+                channel_id=channel_id,
+                message_id=message_id,
+            )
+        )
+
+    thread = threading.Thread(target=request_message)
+    thread.start()
+    for _ in range(50):
+        barrier = requests.get(
+            f"{discord_fake_url}/__testenv/barrier",
+            timeout=5,
+        ).json()
+        if barrier["reached"]:
+            break
+        threading.Event().wait(0.02)
+    else:
+        pytest.fail("Discord exact-message barrier was not reached.")
+    assert responses == []
+    assert barrier == {
+        "operation": "get_message",
+        "occurrence": 1,
+        "request_count": 1,
+        "reached": True,
+        "released": False,
+    }
+    requests.post(
+        f"{discord_fake_url}/__testenv/barrier/release",
+        timeout=5,
+    ).raise_for_status()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert responses[0].status_code == 200
+    evidence = requests.get(
+        f"{discord_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    assert "provider content excluded from evidence" not in str(evidence)
+
+
 def test_discord_fake_confirmed_create_failure_does_not_consume_nonce_identity(
     discord_fake_urls: tuple[str, str],
 ) -> None:

@@ -19,6 +19,8 @@ from urllib.parse import parse_qs, urlparse
 _HTTP_PORT = 8083
 _WEBSOCKET_PORT = 8084
 _MAX_CONFIGURED_FILE_BYTES = 8 * 1024 * 1024
+_MAX_SCENARIO_SEQUENCE_LENGTH = 10
+_MAX_RETRY_AFTER_SECONDS = 300
 _APPROVAL_PATH = re.compile(r"/external-channel/access/([^/?\s]+)")
 
 
@@ -35,6 +37,8 @@ class FakeState:
             self.auth_scenario = "valid"
             self.membership_scenario = "member"
             self.history_scenario = "ok"
+            self.history_scenario_sequence: list[str] = []
+            self.history_retry_after_seconds: list[int] = []
             self.permalink_scenario = "ok"
             self.provider_app_id = "A-E2E"
             self.provider_team_id = "T-E2E"
@@ -85,6 +89,10 @@ class FakeState:
             self._message_sequence = 0
             self._upload_sequence = 0
             self._view_sequence = 0
+            self._operation_barrier_operation: str | None = None
+            self._operation_barrier_occurrence: int | None = None
+            self._operation_barrier_reached = threading.Event()
+            self._operation_barrier_release = threading.Event()
 
     def configure(self, payload: dict[str, object]) -> None:
         """Apply one bounded deterministic provider scenario."""
@@ -92,6 +100,8 @@ class FakeState:
             "auth_scenario",
             "membership_scenario",
             "history_scenario",
+            "history_scenario_sequence",
+            "history_retry_after_seconds",
             "permalink_scenario",
             "provider_app_id",
             "provider_team_id",
@@ -190,6 +200,45 @@ class FakeState:
             history_pages = payload.get("history_pages")
             if history_pages is not None:
                 self.history_pages = _object_pages(history_pages)
+            history_scenario_sequence = payload.get("history_scenario_sequence")
+            if history_scenario_sequence is not None:
+                if not isinstance(history_scenario_sequence, list):
+                    raise ValueError(
+                        "history_scenario_sequence must contain 1-10 strings."
+                    )
+                scenario_items = cast(list[object], history_scenario_sequence)
+                if (
+                    not scenario_items
+                    or len(scenario_items) > _MAX_SCENARIO_SEQUENCE_LENGTH
+                    or not all(isinstance(item, str) for item in scenario_items)
+                ):
+                    raise ValueError(
+                        "history_scenario_sequence must contain 1-10 strings."
+                    )
+                self.history_scenario_sequence = list(cast(list[str], scenario_items))
+            retry_after_seconds = payload.get("history_retry_after_seconds")
+            if retry_after_seconds is not None:
+                if not isinstance(retry_after_seconds, list):
+                    raise ValueError(
+                        "history_retry_after_seconds must contain 1-10 integers "
+                        "from 1 to 300."
+                    )
+                retry_items = cast(list[object], retry_after_seconds)
+                if (
+                    not retry_items
+                    or len(retry_items) > _MAX_SCENARIO_SEQUENCE_LENGTH
+                    or not all(
+                        isinstance(item, int)
+                        and not isinstance(item, bool)
+                        and 0 < item <= _MAX_RETRY_AFTER_SECONDS
+                        for item in retry_items
+                    )
+                ):
+                    raise ValueError(
+                        "history_retry_after_seconds must contain 1-10 integers "
+                        "from 1 to 300."
+                    )
+                self.history_retry_after_seconds = list(cast(list[int], retry_items))
             socket_sessions = payload.get("socket_sessions")
             if socket_sessions is not None:
                 self.socket_sessions = _socket_sessions(socket_sessions)
@@ -204,6 +253,10 @@ class FakeState:
             self.socket_acknowledgements = []
             self._upload_sequence = 0
             self._view_sequence = 0
+            self._operation_barrier_operation = None
+            self._operation_barrier_occurrence = None
+            self._operation_barrier_reached.clear()
+            self._operation_barrier_release.clear()
 
     def record_request(
         self,
@@ -222,6 +275,72 @@ class FakeState:
                     **metadata,
                 }
             )
+
+    def next_history_scenario(self) -> str:
+        """Return and consume one configured history outcome."""
+        with self.lock:
+            if self.history_scenario_sequence:
+                return self.history_scenario_sequence.pop(0)
+            return self.history_scenario
+
+    def next_history_retry_after(self) -> int:
+        """Return and consume one bounded provider Retry-After value."""
+        with self.lock:
+            if self.history_retry_after_seconds:
+                return self.history_retry_after_seconds.pop(0)
+            return 1
+
+    def configure_operation_barrier(self, payload: Mapping[str, object]) -> None:
+        """Arm one exact/history provider operation barrier."""
+        operation = payload.get("operation")
+        occurrence = payload.get("occurrence")
+        if (
+            operation not in {"conversations.history", "conversations.replies"}
+            or not isinstance(occurrence, int)
+            or isinstance(occurrence, bool)
+            or occurrence < 1
+        ):
+            raise ValueError(
+                "Barrier requires a Slack history operation and positive occurrence."
+            )
+        with self.lock:
+            self._operation_barrier_operation = cast(str, operation)
+            self._operation_barrier_occurrence = occurrence
+            self._operation_barrier_reached.clear()
+            self._operation_barrier_release.clear()
+
+    def operation_barrier_evidence(self) -> dict[str, object]:
+        """Return safe barrier evidence without provider payloads."""
+        with self.lock:
+            operation = self._operation_barrier_operation
+            occurrence = self._operation_barrier_occurrence
+            request_count = (
+                self.request_counts.get(operation, 0) if operation is not None else 0
+            )
+        return {
+            "operation": operation,
+            "occurrence": occurrence,
+            "request_count": request_count,
+            "reached": self._operation_barrier_reached.is_set(),
+            "released": self._operation_barrier_release.is_set(),
+        }
+
+    def release_operation_barrier(self) -> None:
+        """Release one armed provider operation."""
+        self._operation_barrier_release.set()
+
+    def wait_for_operation_barrier(self, operation: str) -> bool:
+        """Hold one targeted history operation until explicitly released."""
+        with self.lock:
+            if (
+                self._operation_barrier_operation != operation
+                or self._operation_barrier_occurrence is None
+                or self.request_counts.get(operation, 0)
+                != self._operation_barrier_occurrence
+            ):
+                return True
+        self._operation_barrier_reached.set()
+        return self._operation_barrier_release.wait(timeout=60)
 
     def next_message_timestamp(self) -> str:
         """Return one deterministic provider message identity."""
@@ -351,6 +470,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if parsed.path == "/__testenv/state":
             self._json_response(200, self.state.evidence())
             return
+        if parsed.path == "/__testenv/barrier":
+            self._json_response(200, self.state.operation_barrier_evidence())
+            return
         if parsed.path == "/__testenv/transient-view":
             scope = parse_qs(parsed.query).get("scope", [""])[0]
             self._json_response(200, self.state.transient_view(scope) or {})
@@ -368,6 +490,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         query = parse_qs(parsed.query)
         metadata = _query_metadata(query)
         self.state.record_request(operation, method="GET", metadata=metadata)
+        if not self.state.wait_for_operation_barrier(operation):
+            self._close_connection()
+            return
         if operation == "conversations.info":
             self._conversation_info()
             return
@@ -401,6 +526,18 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
                 self._json_response(422, {"error": "invalid_configuration"})
                 return
             self._json_response(200, {"status": "configured"})
+            return
+        if self.path == "/__testenv/barrier":
+            try:
+                self.state.configure_operation_barrier(self._json_body())
+            except ValueError:
+                self._json_response(422, {"error": "invalid_barrier"})
+                return
+            self._json_response(200, {"status": "configured"})
+            return
+        if self.path == "/__testenv/barrier/release":
+            self.state.release_operation_barrier()
+            self._json_response(200, {"status": "released"})
             return
         if self.path.startswith("/upload/"):
             file_id = urlparse(self.path).path.removeprefix("/upload/")
@@ -559,8 +696,14 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         )
 
     def _conversation_history(self, query: dict[str, list[str]]) -> None:
-        scenario = self.state.history_scenario
-        if self._common_failure(scenario):
+        scenario = self.state.next_history_scenario()
+        retry_after_seconds = (
+            self.state.next_history_retry_after() if scenario == "rate_limited" else 1
+        )
+        if self._common_failure(
+            scenario,
+            retry_after_seconds=retry_after_seconds,
+        ):
             return
         cursor = query.get("cursor", [None])[0]
         try:
@@ -856,7 +999,12 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             pass
         self.connection.close()
 
-    def _common_failure(self, scenario: str) -> bool:
+    def _common_failure(
+        self,
+        scenario: str,
+        *,
+        retry_after_seconds: int = 1,
+    ) -> bool:
         if scenario == "invalid":
             self._json_response(200, {"ok": False, "error": "invalid_auth"})
             return True
@@ -867,7 +1015,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             self._json_response(
                 429,
                 {"ok": False, "error": "ratelimited"},
-                headers={"Retry-After": "1"},
+                headers={"Retry-After": str(retry_after_seconds)},
             )
             return True
         if scenario in {"unavailable", "failed"}:

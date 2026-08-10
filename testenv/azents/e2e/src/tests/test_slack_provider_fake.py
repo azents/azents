@@ -136,6 +136,106 @@ def test_slack_fake_controls_membership_history_and_delivery_failure(
     assert update == {"ok": False, "error": "token_revoked"}
 
 
+def test_slack_fake_sequences_retry_after_and_blocks_exact_history(
+    slack_fake_url: str,
+) -> None:
+    """Sequence bounded rate limits and release one exact provider operation."""
+    requests.post(
+        f"{slack_fake_url}/__testenv/configure",
+        json={
+            "history_scenario_sequence": ["rate_limited", "rate_limited", "ok"],
+            "history_retry_after_seconds": [3, 7],
+            "history_pages": [[]],
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    first = requests.get(
+        f"{slack_fake_url}/api/conversations.history",
+        params={"channel": "C-E2E"},
+        timeout=5,
+    )
+    second = requests.get(
+        f"{slack_fake_url}/api/conversations.history",
+        params={"channel": "C-E2E"},
+        timeout=5,
+    )
+    third = requests.get(
+        f"{slack_fake_url}/api/conversations.history",
+        params={"channel": "C-E2E"},
+        timeout=5,
+    )
+
+    assert first.status_code == 429
+    assert first.headers["Retry-After"] == "3"
+    assert second.status_code == 429
+    assert second.headers["Retry-After"] == "7"
+    assert third.status_code == 200
+
+    requests.post(
+        f"{slack_fake_url}/__testenv/barrier",
+        json={"operation": "conversations.replies", "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    responses: list[requests.Response] = []
+
+    def request_history() -> None:
+        responses.append(
+            requests.get(
+                f"{slack_fake_url}/api/conversations.replies",
+                params={"channel": "C-E2E", "ts": "1721600000.000100"},
+                timeout=10,
+            )
+        )
+
+    thread = threading.Thread(target=request_history)
+    thread.start()
+    for _ in range(50):
+        barrier = requests.get(
+            f"{slack_fake_url}/__testenv/barrier",
+            timeout=5,
+        ).json()
+        if barrier["reached"]:
+            break
+        time.sleep(0.02)
+    else:
+        pytest.fail("Slack history barrier was not reached.")
+    assert responses == []
+    assert barrier == {
+        "operation": "conversations.replies",
+        "occurrence": 1,
+        "request_count": 1,
+        "reached": True,
+        "released": False,
+    }
+    requests.post(
+        f"{slack_fake_url}/__testenv/barrier/release",
+        timeout=5,
+    ).raise_for_status()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert responses[0].status_code == 200
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"history_scenario_sequence": []},
+        {"history_scenario_sequence": ["ok"] * 11},
+        {"history_retry_after_seconds": []},
+        {"history_retry_after_seconds": [1] * 11},
+        {"history_retry_after_seconds": [0]},
+        {"history_retry_after_seconds": [301]},
+    ],
+)
+def test_slack_fake_rejects_unbounded_history_sequences(
+    payload: dict[str, object],
+) -> None:
+    """Reject fixture sequences that exceed deterministic test bounds."""
+    with pytest.raises(ValueError):
+        FakeState().configure(payload)
+
+
 def test_slack_fake_serves_bounded_parent_and_thread_history_pages(
     slack_fake_url: str,
 ) -> None:

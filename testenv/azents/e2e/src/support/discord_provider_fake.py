@@ -97,6 +97,7 @@ class FakeState:
             self.verify_key = _VERIFY_KEY
             self.api_scenarios: dict[str, str] = {}
             self.api_scenario_sequences: dict[str, list[str]] = {}
+            self.retry_after_sequences: dict[str, list[int]] = {}
             self.history_scenario = "ok"
             self.history_pages: dict[str, list[list[dict[str, object]]]] = {}
             self.root_messages: dict[tuple[str, str], dict[str, object]] = {}
@@ -142,6 +143,7 @@ class FakeState:
             "bot_user_id",
             "api_scenarios",
             "api_scenario_sequences",
+            "retry_after_sequences",
             "guild_commands",
             "history_scenario",
             "history_pages",
@@ -180,6 +182,11 @@ class FakeState:
             sequences = payload.get("api_scenario_sequences")
             if sequences is not None:
                 self.api_scenario_sequences = _scenario_sequences(sequences)
+            retry_after_sequences = payload.get("retry_after_sequences")
+            if retry_after_sequences is not None:
+                self.retry_after_sequences = _retry_after_sequences(
+                    retry_after_sequences
+                )
             history_scenario = payload.get("history_scenario")
             if history_scenario is not None:
                 if not isinstance(history_scenario, str):
@@ -243,7 +250,12 @@ class FakeState:
 
     def configure_scenarios(self, payload: dict[str, object]) -> None:
         """Change failure controls without resetting provider identities or evidence."""
-        allowed = {"api_scenarios", "api_scenario_sequences", "history_scenario"}
+        allowed = {
+            "api_scenarios",
+            "api_scenario_sequences",
+            "retry_after_sequences",
+            "history_scenario",
+        }
         if set(payload) - allowed:
             raise ValueError("Unsupported Discord fake scenario field.")
         with self.lock:
@@ -266,6 +278,11 @@ class FakeState:
             sequences = payload.get("api_scenario_sequences")
             if sequences is not None:
                 self.api_scenario_sequences.update(_scenario_sequences(sequences))
+            retry_after_sequences = payload.get("retry_after_sequences")
+            if retry_after_sequences is not None:
+                self.retry_after_sequences.update(
+                    _retry_after_sequences(retry_after_sequences)
+                )
             history_scenario = payload.get("history_scenario")
             if history_scenario is not None:
                 if not isinstance(history_scenario, str):
@@ -302,6 +319,17 @@ class FakeState:
                     self.api_scenario_sequences.pop(operation, None)
                 return scenario
             return self.api_scenarios.get(operation, "ok")
+
+    def next_retry_after(self, operation: str) -> int:
+        """Return and consume one bounded provider Retry-After value."""
+        with self.lock:
+            sequence = self.retry_after_sequences.get(operation)
+            if sequence:
+                value = sequence.pop(0)
+                if not sequence:
+                    self.retry_after_sequences.pop(operation, None)
+                return value
+            return 1
 
     def list_guild_commands(self) -> list[dict[str, object]]:
         """Return current fake commands to the Discord adapter."""
@@ -378,16 +406,16 @@ class FakeState:
         operation = payload.get("operation")
         occurrence = payload.get("occurrence")
         if (
-            operation != "create_message"
+            operation not in {"create_message", "get_message", "get_history"}
             or not isinstance(occurrence, int)
             or isinstance(occurrence, bool)
             or occurrence < 1
         ):
             raise ValueError(
-                "Barrier requires create_message and a positive occurrence."
+                "Barrier requires an exact/history operation and positive occurrence."
             )
         with self.lock:
-            self._delivery_barrier_operation = "create_message"
+            self._delivery_barrier_operation = cast(str, operation)
             self._delivery_barrier_occurrence = occurrence
             self._delivery_barrier_reached.clear()
             self._delivery_barrier_release.clear()
@@ -1568,15 +1596,24 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         metadata: Mapping[str, object] | None = None,
     ) -> str:
         self.state.record_request(operation, method=self.command, metadata=metadata)
-        return self.state.scenario(operation)
+        self._controlled_operation = operation
+        scenario = self.state.scenario(operation)
+        if operation in {"get_message", "get_history"} and not (
+            self.state.wait_for_delivery_barrier(operation)
+        ):
+            return "transport_unknown"
+        return scenario
 
     def _controlled_response(self, scenario: str) -> bool:
         """Respond to one configured provider failure and stop the handler path."""
         if scenario == "rate_limited":
+            retry_after = self.state.next_retry_after(
+                getattr(self, "_controlled_operation", "")
+            )
             self._json_response(
                 429,
-                {"message": "Rate limited.", "retry_after": 1},
-                {"Retry-After": "1"},
+                {"message": "Rate limited.", "retry_after": retry_after},
+                {"Retry-After": str(retry_after)},
             )
         elif scenario in {"credentials_invalid", "unauthorized"}:
             self._json_response(401, {"message": "Unauthorized."})
@@ -1718,6 +1755,30 @@ def _scenario_sequences(value: object) -> dict[str, list[str]]:
             {str(index): item for index, item in enumerate(sequence)}
         )
         result[key] = sequence
+    return result
+
+
+def _retry_after_sequences(value: object) -> dict[str, list[int]]:
+    """Validate bounded positive Retry-After sequences by provider operation."""
+    if not isinstance(value, dict):
+        raise ValueError("retry_after_sequences must be an object.")
+    result: dict[str, list[int]] = {}
+    for key, sequence in cast(dict[object, object], value).items():
+        if not isinstance(key, str) or not isinstance(sequence, list):
+            raise ValueError("retry_after_sequences must contain integer lists.")
+        items = cast(list[object], sequence)
+        if (
+            not items
+            or len(items) > 10
+            or not all(
+                isinstance(item, int) and not isinstance(item, bool) and 0 < item <= 300
+                for item in items
+            )
+        ):
+            raise ValueError(
+                "retry_after_sequences values must be 1-10 integers from 1 to 300."
+            )
+        result[key] = list(cast(list[int], items))
     return result
 
 

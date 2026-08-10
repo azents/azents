@@ -16,6 +16,9 @@ from azents.repos.external_channel.ingress_queue_data import (
     ExternalChannelIngressAdmission,
     ExternalChannelIngressBatch,
     ExternalChannelIngressCorrelation,
+    ExternalChannelIngressDiagnosticCounts,
+    ExternalChannelIngressDiagnosticItem,
+    ExternalChannelIngressDiagnosticSnapshot,
     ExternalChannelIngressItem,
     ExternalChannelIngressItemCreate,
     ExternalChannelIngressLeaseClaim,
@@ -410,3 +413,103 @@ class ExternalChannelIngressQueueRepository:
             .limit(limit)
         )
         return [ExternalChannelIngressSession.model_validate(drain) for drain in result]
+
+    async def inspect_active(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime.datetime,
+        limit: int,
+    ) -> ExternalChannelIngressDiagnosticSnapshot:
+        """Return bounded content-free diagnostics for active ingress state."""
+        if limit < 1 or limit > 1000:
+            raise ValueError("Active ingress diagnostic limit must be from 1 to 1000.")
+        summary = (
+            await session.execute(
+                sa.select(
+                    sa.func.count(
+                        sa.distinct(RDBExternalChannelIngressItem.session_id)
+                    ),
+                    sa.func.count().filter(
+                        RDBExternalChannelIngressItem.state
+                        == ExternalChannelIngressItemState.PENDING
+                    ),
+                    sa.func.count().filter(
+                        RDBExternalChannelIngressItem.state
+                        == ExternalChannelIngressItemState.PROCESSING
+                    ),
+                    sa.func.count().filter(
+                        RDBExternalChannelIngressItem.state
+                        == ExternalChannelIngressItemState.RETRY_WAITING
+                    ),
+                    sa.func.min(RDBExternalChannelIngressItem.created_at),
+                    sa.func.count(),
+                )
+            )
+        ).one()
+        (
+            session_count,
+            pending,
+            processing,
+            retry_waiting,
+            oldest_created_at,
+            total,
+        ) = summary
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelIngressItem,
+                    RDBExternalChannelIngressSession,
+                )
+                .join(
+                    RDBExternalChannelIngressSession,
+                    RDBExternalChannelIngressSession.session_id
+                    == RDBExternalChannelIngressItem.session_id,
+                )
+                .order_by(RDBExternalChannelIngressItem.queue_key)
+                .limit(limit)
+            )
+        ).tuples()
+        return ExternalChannelIngressDiagnosticSnapshot(
+            observed_at=now,
+            session_count=int(session_count or 0),
+            counts=ExternalChannelIngressDiagnosticCounts(
+                pending=int(pending or 0),
+                processing=int(processing or 0),
+                retry_waiting=int(retry_waiting or 0),
+            ),
+            oldest_queue_age_seconds=(
+                None
+                if oldest_created_at is None
+                else max(0, int((now - oldest_created_at).total_seconds()))
+            ),
+            items=tuple(
+                ExternalChannelIngressDiagnosticItem(
+                    id=item.id,
+                    session_id=item.session_id,
+                    provider=item.provider,
+                    connection_id=item.connection_id,
+                    state=item.state,
+                    attempt_count=item.attempt_count,
+                    batch_id=item.batch_id,
+                    next_attempt_at=item.next_attempt_at,
+                    processing_owner=item.processing_owner,
+                    processing_generation=item.processing_generation,
+                    item_age_seconds=max(
+                        0,
+                        int((now - item.created_at).total_seconds()),
+                    ),
+                    session_age_seconds=max(
+                        0,
+                        int((now - drain.created_at).total_seconds()),
+                    ),
+                    lease_owner=drain.lease_owner,
+                    lease_generation=drain.lease_generation,
+                    lease_expires_at=drain.lease_expires_at,
+                    current_batch_id=drain.current_batch_id,
+                    current_batch_started_at=drain.current_batch_started_at,
+                )
+                for item, drain in rows
+            ),
+            truncated=int(total or 0) > limit,
+        )

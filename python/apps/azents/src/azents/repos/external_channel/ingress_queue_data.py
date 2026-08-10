@@ -141,3 +141,49 @@ class ExternalChannelIngressCorrelation(_Record):
 
     invocation_id: str
     principal_id: str
+
+
+class ExternalChannelIngressDiagnosticCounts(_Record):
+    """Bounded active-item counts by queue state."""
+
+    pending: int
+    processing: int
+    retry_waiting: int
+
+    @property
+    def total(self) -> int:
+        """Return the total active backlog."""
+        return self.pending + self.processing + self.retry_waiting
+
+
+class ExternalChannelIngressDiagnosticItem(_Record):
+    """Content-free diagnostic projection for one active ingress item."""
+
+    id: str
+    session_id: str
+    provider: ExternalChannelProvider
+    connection_id: str
+    state: ExternalChannelIngressItemState
+    attempt_count: int
+    batch_id: str | None
+    next_attempt_at: datetime.datetime | None
+    processing_owner: str | None
+    processing_generation: int | None
+    item_age_seconds: int
+    session_age_seconds: int
+    lease_owner: str | None
+    lease_generation: int
+    lease_expires_at: datetime.datetime | None
+    current_batch_id: str | None
+    current_batch_started_at: datetime.datetime | None
+
+
+class ExternalChannelIngressDiagnosticSnapshot(_Record):
+    """Read-only active queue snapshot with no provider content."""
+
+    observed_at: datetime.datetime
+    session_count: int
+    counts: ExternalChannelIngressDiagnosticCounts
+    oldest_queue_age_seconds: int | None
+    items: tuple[ExternalChannelIngressDiagnosticItem, ...]
+    truncated: bool
