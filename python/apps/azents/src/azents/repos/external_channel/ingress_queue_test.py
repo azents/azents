@@ -25,6 +25,17 @@ from azents.repos.external_channel.ingress_queue import (
 _NOW = datetime.datetime(2026, 8, 10, 1, tzinfo=datetime.UTC)
 
 
+class _ExpiredUpdatedAtItem(SimpleNamespace):
+    """Raise when DTO conversion reads updated_at before an explicit refresh."""
+
+    updated_at_loaded: bool = True
+
+    def __getattribute__(self, name: str) -> object:
+        if name == "updated_at" and not super().__getattribute__("updated_at_loaded"):
+            raise RuntimeError("updated_at remains expired")
+        return super().__getattribute__(name)
+
+
 def _drain(
     *,
     first_batch_pending: bool,
@@ -153,6 +164,40 @@ async def test_claim_due_batch_uses_one_then_ten_item_limits() -> None:
     )
     later_statement = later_session.scalars.await_args.args[0]
     assert later_statement._limit_clause.value == 10  # noqa: SLF001
+
+
+async def test_claim_due_batch_refreshes_updated_at_before_dto_conversion() -> None:
+    """A flush-expired onupdate timestamp is loaded before Pydantic reads it."""
+    repository = ExternalChannelIngressQueueRepository()
+    session = _session()
+    drain = _drain(first_batch_pending=True)
+    item = _ExpiredUpdatedAtItem(**vars(_item(0)))
+    item.updated_at_loaded = False
+    session.scalar.return_value = drain
+    session.scalars.return_value = [item]
+
+    async def refresh_updated_at(
+        refreshed: _ExpiredUpdatedAtItem,
+        *,
+        attribute_names: list[str],
+    ) -> None:
+        assert refreshed is item
+        assert attribute_names == ["updated_at"]
+        refreshed.updated_at_loaded = True
+
+    session.refresh.side_effect = refresh_updated_at
+
+    claimed = await repository.claim_due_batch(
+        session,
+        session_id="session-1",
+        lease_owner="owner-1",
+        lease_generation=1,
+        now=_NOW,
+    )
+
+    assert claimed is not None
+    assert claimed.items[0].updated_at == _NOW
+    session.refresh.assert_awaited_once_with(item, attribute_names=["updated_at"])
 
 
 async def test_expired_lease_is_reclaimed_and_current_lease_is_released() -> None:

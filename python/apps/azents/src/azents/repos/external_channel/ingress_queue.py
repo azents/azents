@@ -192,6 +192,8 @@ class ExternalChannelIngressQueueRepository:
         drain.current_batch_id = batch_id
         drain.current_batch_started_at = now
         await session.flush()
+        for item in items:
+            await session.refresh(item, attribute_names=["updated_at"])
         return ExternalChannelIngressBatch(
             session_id=session_id,
             batch_id=batch_id,
