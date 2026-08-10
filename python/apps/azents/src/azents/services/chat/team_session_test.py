@@ -21,6 +21,7 @@ from azents.core.enums import (
     SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
 )
+from azents.core.session_working_folder import build_session_working_folder_path
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
@@ -80,6 +81,11 @@ from azents.services.root_agent_session_creation import (
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
+)
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderAuthority,
+    SessionWorkingFolderBindingError,
+    SessionWorkingFolderBindingService,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
 
@@ -178,8 +184,40 @@ async def _create_agent(
     return agent.id
 
 
+async def _bind_session_working_folder(
+    session_manager: SessionManager[AsyncSession],
+    *,
+    agent_id: str,
+    session_id: str,
+) -> None:
+    """Bind one pending Session context for bound-only archive cleanup tests."""
+    async with session_manager() as session:
+        repository = AgentSessionRepository()
+        runtime = await AgentRuntimeRepository().get_by_agent_id(session, agent_id)
+        locked = await repository.lock_working_folder_binding_by_session_id(
+            session,
+            session_id=session_id,
+        )
+        assert runtime is not None
+        assert locked is not None
+        bound = await repository.bind_pending_working_folder(
+            session,
+            context_id=locked.context.id,
+            expected_agent_id=agent_id,
+            expected_agent_runtime_id=runtime.id,
+            working_folder_path=build_session_working_folder_path(
+                locked.root_session_handle,
+                workspace_root="/workspace/agent",
+            ),
+        )
+        assert bound is not None
+
+
 class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
     """Return one deterministic Runtime target for archive cleanup tests."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
 
     async def resolve_operation_target(
         self,
@@ -191,20 +229,74 @@ class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
         start_if_stopped: bool = True,
     ) -> RuntimeOperationTarget:
         """Return exact fixture evidence."""
+        self.calls.append(
+            {
+                "agent_id": agent_id,
+                "expected_authority": expected_authority,
+                "start_if_stopped": start_if_stopped,
+            }
+        )
         del (
-            agent_id,
             wait_timeout_seconds,
             poll_interval_seconds,
-            expected_authority,
-            start_if_stopped,
         )
         return RuntimeOperationTarget(
             id="runtime-1",
+            runtime_capability_version=1,
             desired_generation=1,
             runner_generation=1,
             configuration_revision_id="revision-1",
             configuration_digest="a" * 64,
             workspace_path="/workspace/agent",
+        )
+
+
+class _SessionWorkingFolderBindingService(SessionWorkingFolderBindingService):
+    """Resolve the fixture's existing bound folder for archive cleanup."""
+
+    def __init__(
+        self,
+        session_manager: SessionManager[AsyncSession],
+        *,
+        preflight_error: SessionWorkingFolderBindingError | None = None,
+    ) -> None:
+        self.session_manager = session_manager
+        self.preflight_error = preflight_error
+
+    async def require_bound_context(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+    ) -> None:
+        """Accept the fixture's explicitly bound archive-cleanup context."""
+        del agent_id, session_id
+        if self.preflight_error is not None:
+            raise self.preflight_error
+
+    async def resolve_bound_authority_for_target(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        runtime_target: RuntimeOperationTarget,
+    ) -> SessionWorkingFolderAuthority:
+        """Return exact stored fixture evidence after the production state gate."""
+        async with self.session_manager() as session:
+            context = (
+                await AgentSessionRepository().get_working_folder_context_by_session_id(
+                    session,
+                    session_id=session_id,
+                )
+            )
+        assert context is not None
+        assert context.working_folder_path is not None
+        return SessionWorkingFolderAuthority(
+            context_id=context.id,
+            agent_id=agent_id,
+            agent_runtime_id=runtime_target.id,
+            working_folder_path=context.working_folder_path,
+            runtime_capability_version=runtime_target.runtime_capability_version,
         )
 
 
@@ -215,6 +307,8 @@ def _service(
     session_git_worktree_service: SessionGitWorktreeService | None = None,
     agent_runtime_repository: AgentRuntimeRepository | None = None,
     runner_operations: RuntimeRunnerOperationClient | None = None,
+    runtime_target_resolver: RuntimeOperationTargetResolver | None = None,
+    binding_preflight_error: SessionWorkingFolderBindingError | None = None,
 ) -> ChatSessionService:
     """Create ChatSessionService for tests."""
     return ChatSessionService(
@@ -237,6 +331,7 @@ def _service(
             automatic_project_repository=AgentAutomaticProjectRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            runtime_target_resolver=_RuntimeTargetResolver(),
         ),
         archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
@@ -266,7 +361,13 @@ def _service(
             action_service=cast(ExternalChannelActionService, _ChannelActionService()),
         ),
         session_manager=rdb_session_manager,
-        runtime_target_resolver=_RuntimeTargetResolver(),
+        runtime_target_resolver=(runtime_target_resolver or _RuntimeTargetResolver()),
+        session_working_folder_binding_service=(
+            _SessionWorkingFolderBindingService(
+                rdb_session_manager,
+                preflight_error=binding_preflight_error,
+            )
+        ),
         runner_operations=runner_operations,
     )
 
@@ -1336,21 +1437,17 @@ class TestChatSessionTeamSessions:
             )
             assert context_row is not None
             assert (
+                context_row.working_folder_binding_state
+                is SessionWorkingFolderBindingState.PENDING
+            )
+            assert (
                 context_row.working_folder_cleanup_status
-                is SessionWorkingFolderCleanupStatus.SUCCEEDED
+                is SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
             )
-            assert context_row.working_folder_cleanup_summary == (
-                "Session working-folder cleanup completed: deleted."
-            )
-            assert context_row.working_folder_cleanup_completed_at is not None
-        assert len(folder_delete_runner.calls) == 1
-        assert (
-            folder_delete_runner.calls[0]["owner_session_id"] == create_result.value.id
-        )
-        assert folder_delete_runner.calls[0]["path"] == (
-            f"/workspace/agent/.azents/sessions/{create_result.value.handle}"
-        )
-        assert folder_delete_runner.calls[0]["recursive"] is True
+            assert context_row.working_folder_cleanup_summary is None
+            assert context_row.working_folder_cleanup_completed_at is None
+        assert folder_delete_runner.stat_calls == []
+        assert folder_delete_runner.calls == []
 
         archived_list = await _service(
             rdb_session_manager
@@ -1393,7 +1490,8 @@ class TestChatSessionTeamSessions:
             user_id=user_id,
         )
         assert isinstance(rearchive_result, Success)
-        assert len(folder_delete_runner.calls) == 2
+        assert folder_delete_runner.stat_calls == []
+        assert folder_delete_runner.calls == []
 
     async def test_archive_worktree_cleanup_failure_keeps_archive_successful(
         self,
@@ -1433,6 +1531,11 @@ class TestChatSessionTeamSessions:
             setup_actions=[],
         )
         assert isinstance(create_result, Success)
+        await _bind_session_working_folder(
+            rdb_session_manager,
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+        )
         cleanup_service = _ArchiveCleanupService(
             rdb_session_manager,
             failure=RuntimeError("Runtime runner is unavailable."),
@@ -1482,6 +1585,69 @@ class TestChatSessionTeamSessions:
         assert archived is not None
         assert archived.status is AgentSessionStatus.ARCHIVED
         assert archived.archived_at is not None
+
+    async def test_archive_folder_cleanup_preflight_prevents_runtime_resolution(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A lost binding blocks Runtime resolution before archive folder I/O."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "team-session-folder-cleanup-preflight",
+        )
+        user_id = await _create_user(
+            rdb_session,
+            "team-session-folder-cleanup-preflight@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-folder-cleanup-preflight-agent",
+        )
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+        create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+        assert isinstance(create_result, Success)
+        await _bind_session_working_folder(
+            rdb_session_manager,
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+        )
+        runtime_target_resolver = _RuntimeTargetResolver()
+        runner = _FolderDeleteRunner()
+
+        archive_result = await _service(
+            rdb_session_manager,
+            runner_operations=runner,
+            runtime_target_resolver=runtime_target_resolver,
+            binding_preflight_error=SessionWorkingFolderBindingError(
+                "binding_invalidated"
+            ),
+        ).archive_agent_session(
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+            user_id=user_id,
+        )
+
+        assert isinstance(archive_result, Success)
+        assert runtime_target_resolver.calls == []
+        assert runner.stat_calls == []
+        assert runner.calls == []
 
     @pytest.mark.parametrize(
         (
@@ -1584,15 +1750,22 @@ class TestChatSessionTeamSessions:
             setup_actions=[],
         )
         assert isinstance(create_result, Success)
+        await _bind_session_working_folder(
+            rdb_session_manager,
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+        )
         folder_delete_runner = _FolderDeleteRunner(
             failure=failure,
             target_kind=target_kind,
         )
+        runtime_target_resolver = _RuntimeTargetResolver()
 
         archive_result = await _service(
             rdb_session_manager,
             agent_runtime_repository=_ReadyRuntimeRepository(),
             runner_operations=folder_delete_runner,
+            runtime_target_resolver=runtime_target_resolver,
         ).archive_agent_session(
             agent_id=agent_id,
             session_id=create_result.value.id,
@@ -1600,6 +1773,8 @@ class TestChatSessionTeamSessions:
         )
 
         assert isinstance(archive_result, Success)
+        assert len(runtime_target_resolver.calls) == 1
+        assert runtime_target_resolver.calls[0]["start_if_stopped"] is False
         assert len(folder_delete_runner.stat_calls) == 1
         assert len(folder_delete_runner.calls) == expected_delete_count
         async with rdb_session_manager() as verify_session:

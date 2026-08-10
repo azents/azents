@@ -1,6 +1,7 @@
 """Root AgentSession creation service tests."""
 
 import asyncio
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -33,6 +34,10 @@ from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationTarget,
+    RuntimeOperationTargetResolver,
+)
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import RootAgentSessionCreationService
@@ -119,12 +124,25 @@ async def _create_agent(
 
 def _service() -> RootAgentSessionCreationService:
     """Build the shared root Session creation boundary."""
+    runtime_target_resolver = AsyncMock(spec=RuntimeOperationTargetResolver)
+    runtime_target_resolver.resolve_operation_target.return_value = (
+        RuntimeOperationTarget(
+            id="runtime-1",
+            runtime_capability_version=1,
+            desired_generation=1,
+            runner_generation=1,
+            configuration_revision_id="revision-1",
+            configuration_digest="a" * 64,
+            workspace_path="/workspace/agent",
+        )
+    )
     return RootAgentSessionCreationService(
         agent_session_repository=AgentSessionRepository(),
         agent_repository=AgentRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
         agent_runtime_repository=AgentRuntimeRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+        runtime_target_resolver=runtime_target_resolver,
     )
 
 

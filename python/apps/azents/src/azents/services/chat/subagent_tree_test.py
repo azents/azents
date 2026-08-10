@@ -48,6 +48,9 @@ from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderBindingService,
+)
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import (
@@ -175,6 +178,7 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
             automatic_project_repository=AgentAutomaticProjectRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),
         ),
         archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
@@ -188,6 +192,10 @@ def _service(rdb_session_manager: SessionManager[AsyncSession]) -> ChatSessionSe
         ),
         session_manager=rdb_session_manager,
         runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),
+        session_working_folder_binding_service=cast(
+            SessionWorkingFolderBindingService,
+            object(),
+        ),
     )
 
 

@@ -18,13 +18,15 @@ from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient,
 )
 from azents.runtime.deps import get_runtime_runner_operation_client
 from azents.services.agent.data import NotAdmin, NotBelongToWorkspace
-from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
+from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationTarget,
+    RuntimeOperationTargetResolver,
+)
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.runtime_directory_validation import (
     RuntimeDirectoryNotDirectory,
@@ -71,10 +73,6 @@ class AgentAutomaticProjectService:
     catalog_repository: Annotated[
         AgentProjectCatalogRepository,
         Depends(AgentProjectCatalogRepository),
-    ]
-    runtime_repository: Annotated[
-        AgentRuntimeRepository,
-        Depends(AgentRuntimeRepository),
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession],
@@ -152,18 +150,36 @@ class AgentAutomaticProjectService:
                 return Failure(error)
             case _:
                 assert_never(authorization)
+        early_policy = await self._get_policy(agent_id)
+        match early_policy:
+            case Success(policy):
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(early_policy)
+        if policy.revision != expected_revision:
+            return Failure(
+                AutomaticSessionProjectsRevisionConflict(
+                    expected_revision=expected_revision,
+                )
+            )
         normalized_paths: list[str] = []
         seen_paths: set[str] = set()
         workspace_root: str | None = None
+        runtime: RuntimeOperationTarget | None = None
         if project_paths:
-            async with self.session_manager() as session:
-                runtime = await self.runtime_repository.get_by_agent_id(
-                    session,
-                    agent_id,
+            try:
+                runtime = await self.runtime_target_resolver.resolve_operation_target(
+                    agent_id
+                )
+            except RuntimeStorageError as error:
+                return Failure(
+                    AutomaticSessionProjectsRuntimeUnavailable(message=str(error))
                 )
             try:
                 workspace_root = normalize_agent_workspace_root(
-                    runtime.workspace_path if runtime is not None else None
+                    runtime.workspace_path
                 ).as_posix()
             except ValueError as error:
                 return Failure(InvalidProjectPath(path="", reason=str(error)))
@@ -181,24 +197,10 @@ class AgentAutomaticProjectService:
             seen_paths.add(normalized_path)
             normalized_paths.append(normalized_path)
 
-        early_policy = await self._get_policy(agent_id)
-        match early_policy:
-            case Success(policy):
-                pass
-            case Failure(error):
-                return Failure(error)
-            case _:
-                assert_never(early_policy)
-        if policy.revision != expected_revision:
-            return Failure(
-                AutomaticSessionProjectsRevisionConflict(
-                    expected_revision=expected_revision,
-                )
-            )
-
         if normalized_paths:
+            assert runtime is not None
             validation = await self._validate_directories(
-                agent_id=agent_id,
+                runtime=runtime,
                 project_paths=normalized_paths,
             )
             match validation:
@@ -290,21 +292,13 @@ class AgentAutomaticProjectService:
     async def _validate_directories(
         self,
         *,
-        agent_id: str,
+        runtime: RuntimeOperationTarget,
         project_paths: list[str],
     ) -> Result[
         None,
         InvalidProjectPath | AutomaticSessionProjectsRuntimeUnavailable,
     ]:
         """Validate every replacement path with no database transaction held."""
-        try:
-            runtime = await self.runtime_target_resolver.resolve_operation_target(
-                agent_id
-            )
-        except RuntimeStorageError as error:
-            return Failure(
-                AutomaticSessionProjectsRuntimeUnavailable(message=str(error))
-            )
         for path in project_paths:
             try:
                 normalized_path = normalize_session_workspace_path(

@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.enums import (
@@ -33,7 +34,6 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.session_handle import generate_session_handle
-from azents.core.session_working_folder import build_session_working_folder_path
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -86,6 +86,14 @@ class ModelFileGCLaggingSession:
     head_event_id: str
     head_model_order: int
     cursor_model_order: int
+
+
+@dataclass(frozen=True)
+class LockedSessionWorkingFolderBinding:
+    """Locked root context plus the path-owning root Session handle."""
+
+    context: SessionWorkingFolderContext
+    root_session_handle: str
 
 
 class AgentSessionRepository:
@@ -198,6 +206,79 @@ class AgentSessionRepository:
             return None
         return self._build_working_folder_context(context)
 
+    async def lock_working_folder_binding_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> LockedSessionWorkingFolderBinding | None:
+        """Lock one shared root context and load its root Session handle."""
+        current_agent = aliased(RDBSessionAgent)
+        root_agent = aliased(RDBSessionAgent)
+        root_session = aliased(RDBAgentSession)
+        result = await session.execute(
+            sa.select(RDBSessionAgentContext, root_session.handle)
+            .join(
+                current_agent,
+                current_agent.context_id == RDBSessionAgentContext.id,
+            )
+            .join(
+                root_agent,
+                root_agent.id == RDBSessionAgentContext.root_session_agent_id,
+            )
+            .join(
+                root_session,
+                root_session.id == root_agent.agent_session_id,
+            )
+            .where(current_agent.agent_session_id == session_id)
+            .with_for_update(of=RDBSessionAgentContext)
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        context, root_session_handle = row
+        return LockedSessionWorkingFolderBinding(
+            context=self._build_working_folder_context(context),
+            root_session_handle=root_session_handle,
+        )
+
+    async def bind_pending_working_folder(
+        self,
+        session: AsyncSession,
+        *,
+        context_id: str,
+        expected_agent_id: str,
+        expected_agent_runtime_id: str,
+        working_folder_path: str,
+    ) -> SessionWorkingFolderContext | None:
+        """Bind one exact pending root context without reopening terminal states."""
+        result = await session.execute(
+            sa.update(RDBSessionAgentContext)
+            .where(
+                RDBSessionAgentContext.id == context_id,
+                RDBSessionAgentContext.agent_id == expected_agent_id,
+                RDBSessionAgentContext.agent_runtime_id == expected_agent_runtime_id,
+                RDBSessionAgentContext.working_folder_binding_state
+                == SessionWorkingFolderBindingState.PENDING,
+                RDBSessionAgentContext.working_folder_path.is_(None),
+                RDBSessionAgentContext.working_folder_invalidated_by_removal_id.is_(
+                    None
+                ),
+                RDBSessionAgentContext.working_folder_invalidated_at.is_(None),
+            )
+            .values(
+                working_folder_binding_state=SessionWorkingFolderBindingState.BOUND,
+                working_folder_path=working_folder_path,
+                updated_at=sa.func.now(),
+            )
+            .returning(RDBSessionAgentContext)
+        )
+        context = result.scalar_one_or_none()
+        await session.flush()
+        if context is None:
+            return None
+        return self._build_working_folder_context(context)
+
     async def mark_working_folder_cleanup_pending(
         self,
         session: AsyncSession,
@@ -215,12 +296,15 @@ class AgentSessionRepository:
             .with_for_update()
         )
         context = result.scalar_one_or_none()
+        if context is None:
+            return None
         if (
-            context is None
+            context.working_folder_binding_state
+            is not SessionWorkingFolderBindingState.BOUND
             or context.working_folder_cleanup_status
             is not SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
         ):
-            return None
+            return self._build_working_folder_context(context)
         context.working_folder_cleanup_status = (
             SessionWorkingFolderCleanupStatus.PENDING
         )
@@ -2003,25 +2087,15 @@ class AgentSessionRepository:
             agent_runtime_id = None
             working_folder_path = None
             working_folder_binding_state = SessionWorkingFolderBindingState.NONE
-        elif runtime is None:
-            ensured_runtime = await AgentRuntimeRepository().ensure_for_agent(
-                session,
-                agent_id,
-            )
-            agent_runtime_id = ensured_runtime.id
-            working_folder_path = None
-            working_folder_binding_state = SessionWorkingFolderBindingState.PENDING
-        elif runtime.workspace_path is None:
-            agent_runtime_id = runtime.id
-            working_folder_path = None
-            working_folder_binding_state = SessionWorkingFolderBindingState.PENDING
         else:
+            if runtime is None:
+                runtime = await AgentRuntimeRepository().ensure_for_agent(
+                    session,
+                    agent_id,
+                )
             agent_runtime_id = runtime.id
-            working_folder_path = build_session_working_folder_path(
-                root_session_handle,
-                workspace_root=runtime.workspace_path,
-            )
-            working_folder_binding_state = SessionWorkingFolderBindingState.BOUND
+            working_folder_path = None
+            working_folder_binding_state = SessionWorkingFolderBindingState.PENDING
         context = RDBSessionAgentContext(
             agent_id=agent_id,
             workspace_id=workspace_id,

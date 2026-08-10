@@ -15,6 +15,9 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
+from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
+from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_workspace_project import (
     normalize_agent_workspace_root,
     normalize_session_workspace_project_paths,
@@ -56,6 +59,10 @@ class RootAgentSessionCreationService:
     session_workspace_project_repository: Annotated[
         SessionWorkspaceProjectRepository,
         Depends(SessionWorkspaceProjectRepository),
+    ]
+    runtime_target_resolver: Annotated[
+        RuntimeOperationTargetResolver,
+        Depends(AgentRuntimeService),
     ]
 
     async def create_root_session(
@@ -233,14 +240,15 @@ class RootAgentSessionCreationService:
         session: AsyncSession,
         agent_id: str,
     ) -> str:
-        """Return the current Runner-reported Agent Workspace root."""
-        runtime = await self.agent_runtime_repository.get_by_agent_id(
-            session,
-            agent_id,
-        )
-        return normalize_agent_workspace_root(
-            runtime.workspace_path if runtime is not None else None
-        ).as_posix()
+        """Return the exact current Runner-reported Agent Workspace root."""
+        del session
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
+            )
+        except RuntimeStorageError as exc:
+            raise ValueError(str(exc)) from exc
+        return normalize_agent_workspace_root(runtime.workspace_path).as_posix()
 
     @staticmethod
     def _require_runtime_capability(

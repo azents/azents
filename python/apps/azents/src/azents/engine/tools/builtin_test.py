@@ -106,6 +106,10 @@ from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderAuthority,
+    SessionWorkingFolderBindingService,
+)
 from azents.testing.types import is_string_object_dict
 
 # ---------------------------------------------------------------------------
@@ -118,6 +122,7 @@ async def test_ready_runtime_for_agent_forwards_shared_wait_options() -> None:
     service = AsyncMock()
     target = RuntimeOperationTarget(
         id="runtime-1",
+        runtime_capability_version=1,
         desired_generation=2,
         runner_generation=3,
         configuration_revision_id="revision-2",
@@ -795,6 +800,8 @@ def _make_toolkit(
         ):
             raise RuntimeStorageError("Runtime Provider is disconnected")
         if runtime.desired_state is not RuntimeDesiredState.RUNNING:
+            if options.get("start_if_stopped", True) is False:
+                raise RuntimeStorageError("Runtime is not running")
             await agent_runtime_service.ensure_started_for_agent(requested_agent_id)
         if (
             runtime.provider_observed_state is not RuntimeProviderObservedState.RUNNING
@@ -814,6 +821,7 @@ def _make_toolkit(
             raise RuntimeStorageError("Runtime runner is not ready")
         return RuntimeOperationTarget(
             id=runtime.id,
+            runtime_capability_version=1,
             desired_generation=getattr(runtime, "desired_generation", 7),
             runner_generation=runtime.runner_generation,
             configuration_revision_id=(
@@ -837,6 +845,34 @@ def _make_toolkit(
         SimpleNamespace(
             working_folder_path="/workspace/agent/.azents/sessions/session-1"
         )
+    )
+    session_working_folder_binding_service = AsyncMock(
+        spec=SessionWorkingFolderBindingService
+    )
+
+    async def resolve_binding(
+        *,
+        agent_id: str,
+        session_id: str,
+        capability_snapshot: RuntimeCapabilitySnapshot,
+        runtime_target: RuntimeOperationTarget,
+    ) -> SessionWorkingFolderAuthority:
+        del capability_snapshot
+        return SessionWorkingFolderAuthority(
+            context_id="context-1",
+            agent_id=agent_id,
+            agent_runtime_id=runtime_target.id,
+            working_folder_path=(
+                f"{runtime_target.workspace_path}/.azents/sessions/{session_id}"
+            ),
+            runtime_capability_version=runtime_target.runtime_capability_version,
+        )
+
+    session_working_folder_binding_service.resolve_authority.side_effect = (
+        resolve_binding
+    )
+    session_working_folder_binding_service.resolve_bound_authority.side_effect = (
+        resolve_binding
     )
     if agents_store is None:
         agents_store = _FakeAgentsAppendixDedupeStateStore()
@@ -868,6 +904,7 @@ def _make_toolkit(
         agent_runtime_repo=agent_runtime_repo,
         agent_runtime_service=agent_runtime_service,
         agent_session_repository=agent_session_repository,
+        session_working_folder_binding_service=(session_working_folder_binding_service),
         project_repo=project_repo,
         agents_store=cast(Any, agents_store),
         server_to_runtime_transfer_service=server_to_runtime_transfer_service,
@@ -947,6 +984,26 @@ class TestBuiltinToolkitProviderResolve:
             runner_generation=1,
             workspace_path="/workspace/agent",
         )
+        runtime_service = AsyncMock()
+        runtime_service.resolve_operation_target.return_value = RuntimeOperationTarget(
+            id="runtime-1",
+            runtime_capability_version=1,
+            desired_generation=1,
+            runner_generation=1,
+            configuration_revision_id="revision-1",
+            configuration_digest="a" * 64,
+            workspace_path="/workspace/agent",
+        )
+        binding_service = AsyncMock(spec=SessionWorkingFolderBindingService)
+        binding_service.resolve_bound_authority.return_value = (
+            SessionWorkingFolderAuthority(
+                context_id="context-1",
+                agent_id="agent-1",
+                agent_runtime_id="runtime-1",
+                working_folder_path="/workspace/agent/.azents/sessions/session-1",
+                runtime_capability_version=1,
+            )
+        )
         provider = BuiltinToolkitProvider(
             exchange_file_service=AsyncMock(spec=ExchangeFileService),
             artifact_service=AsyncMock(spec=ArtifactService),
@@ -956,8 +1013,9 @@ class TestBuiltinToolkitProviderResolve:
             session_manager=_make_mock_session_manager(),
             memory_repo=_make_mock_memory_repo(),
             agent_runtime_repo=agent_runtime_repo,
-            agent_runtime_service=AsyncMock(),
+            agent_runtime_service=runtime_service,
             agent_session_repository=AsyncMock(spec=AgentSessionRepository),
+            session_working_folder_binding_service=binding_service,
             runner_operations=cast(
                 Any,
                 _FakeRunnerOperations(
@@ -1516,11 +1574,11 @@ class TestRuntimeToolkitUpdateContext:
         await toolkit.update_context(ctx)
         prompt = await toolkit.get_static_prompt(_make_context())
         assert "/runtime/home/" in prompt
-        assert "/workspace/agent/" in prompt
-        assert "/workspace/agent/.azents/sessions/session-1" in prompt
+        assert "/workspace/agent/" not in prompt
+        assert "/runtime/home/.azents/sessions/session-1" in prompt
         assert "Project directories" in prompt
         assert "Temporary scratch space" in prompt
-        assert "mkdir -p /workspace/agent/.azents/sessions/session-1" in prompt
+        assert "mkdir -p /runtime/home/.azents/sessions/session-1" in prompt
         assert "workdir` set explicitly to `/runtime/home`" in prompt
 
     @pytest.mark.asyncio
@@ -1898,6 +1956,7 @@ async def test_runtime_file_storage_revalidates_authority_for_each_operation() -
     )
     target = RuntimeOperationTarget(
         id="runtime-1",
+        runtime_capability_version=1,
         desired_generation=7,
         runner_generation=1,
         configuration_revision_id="revision-1",
@@ -2321,7 +2380,7 @@ class TestProcessToolHandler:
             return RuntimeCapabilitySnapshot(
                 state=(
                     AgentRuntimeCapability.MANAGED
-                    if provider_calls < 5
+                    if provider_calls < 7
                     else AgentRuntimeCapability.NONE
                 ),
                 version=1,

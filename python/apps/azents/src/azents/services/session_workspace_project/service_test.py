@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import pytest
 import sqlalchemy as sa
@@ -47,6 +48,11 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationAuthority,
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
+)
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderAuthority,
+    SessionWorkingFolderBindingError,
+    SessionWorkingFolderBindingService,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
 
@@ -137,6 +143,9 @@ class _FakeRunnerOperations(RuntimeRunnerOperationClient):
 class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
     """Return one qualified Runtime target without lifecycle I/O."""
 
+    def __init__(self) -> None:
+        self.start_if_stopped_calls: list[bool] = []
+
     async def resolve_operation_target(
         self,
         agent_id: str,
@@ -147,15 +156,16 @@ class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
         start_if_stopped: bool = True,
     ) -> RuntimeOperationTarget:
         """Return deterministic exact Runtime evidence."""
+        self.start_if_stopped_calls.append(start_if_stopped)
         del (
             agent_id,
             wait_timeout_seconds,
             poll_interval_seconds,
             expected_authority,
-            start_if_stopped,
         )
         return RuntimeOperationTarget(
             id="runtime-1",
+            runtime_capability_version=1,
             desired_generation=1,
             runner_generation=1,
             configuration_revision_id="revision-1",
@@ -260,17 +270,69 @@ def _service(
     session: AsyncSession,
     *,
     runner_operations: RuntimeRunnerOperationClient | None = None,
+    binding_error: SessionWorkingFolderBindingError | None = None,
+    runtime_target_resolver: RuntimeOperationTargetResolver | None = None,
 ) -> SessionWorkspaceProjectService:
     """Create service for tests."""
+    binding_service = AsyncMock(spec=SessionWorkingFolderBindingService)
+
+    async def resolve_binding(
+        *,
+        agent_id: str,
+        session_id: str,
+        runtime_target: RuntimeOperationTarget,
+    ) -> SessionWorkingFolderAuthority:
+        return SessionWorkingFolderAuthority(
+            context_id="context-1",
+            agent_id=agent_id,
+            agent_runtime_id=runtime_target.id,
+            working_folder_path=(
+                f"{runtime_target.workspace_path}/.azents/sessions/{session_id}"
+            ),
+            runtime_capability_version=runtime_target.runtime_capability_version,
+        )
+
+    binding_service.resolve_authority_for_target.side_effect = resolve_binding
+
+    async def resolve_binding_in_transaction(
+        transaction: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        runtime_target: RuntimeOperationTarget,
+    ) -> SessionWorkingFolderAuthority:
+        del transaction
+        return await resolve_binding(
+            agent_id=agent_id,
+            session_id=session_id,
+            runtime_target=runtime_target,
+        )
+
+    binding_service.resolve_authority_in_transaction.side_effect = (
+        resolve_binding_in_transaction
+    )
+    binding_service.resolve_bound_authority_in_transaction.side_effect = (
+        resolve_binding_in_transaction
+    )
+    if binding_error is not None:
+        binding_service.require_bindable_context.side_effect = binding_error
+        binding_service.require_bound_context.side_effect = binding_error
+        binding_service.resolve_authority_for_target.side_effect = binding_error
+        binding_service.resolve_authority_in_transaction.side_effect = binding_error
+        binding_service.resolve_bound_authority_in_transaction.side_effect = (
+            binding_error
+        )
     return SessionWorkspaceProjectService(
         repository=SessionWorkspaceProjectRepository(),
         agent_project_preset_repository=AgentProjectPresetRepository(),
         agent_project_catalog_repository=AgentProjectCatalogRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
         agent_session_repository=AgentSessionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         session_manager=_SessionManager(session),
-        runtime_target_resolver=_FakeRuntimeTargetResolver(),
+        runtime_target_resolver=(
+            runtime_target_resolver or _FakeRuntimeTargetResolver()
+        ),
+        session_working_folder_binding_service=binding_service,
         runner_operations=runner_operations,
     )
 
@@ -841,7 +903,11 @@ class TestSessionWorkspaceProjectService:
             workspace_id=workspace_id,
             email="swp-svc-access-list@example.com",
         )
-        service = _service(rdb_session)
+        runtime_target_resolver = _FakeRuntimeTargetResolver()
+        service = _service(
+            rdb_session,
+            runtime_target_resolver=runtime_target_resolver,
+        )
         created = await service.create_project(
             session_id=fixture.session_id,
             path="/workspace/agent/app",
@@ -856,3 +922,86 @@ class TestSessionWorkspaceProjectService:
 
         assert isinstance(result, Success)
         assert [project.path for project in result.value] == ["/workspace/agent/app"]
+        assert runtime_target_resolver.start_if_stopped_calls == [True, False]
+
+    async def test_list_projects_for_session_requires_bound_context(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Persisted Project paths remain hidden without current bound authority."""
+        workspace_id = await _create_workspace(rdb_session, "swp-svc-bound-list")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-svc-bound-list",
+        )
+        user_id = await _create_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            email="swp-svc-bound-list@example.com",
+        )
+        created = await _service(rdb_session).create_project(
+            session_id=fixture.session_id,
+            path="/workspace/agent/app",
+        )
+        assert isinstance(created, Success)
+        runtime_target_resolver = _FakeRuntimeTargetResolver()
+        service = _service(
+            rdb_session,
+            binding_error=SessionWorkingFolderBindingError("binding_invalidated"),
+            runtime_target_resolver=runtime_target_resolver,
+        )
+
+        result = await service.list_projects_for_session(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            user_id=user_id,
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, ProjectAccessDenied)
+        assert runtime_target_resolver.start_if_stopped_calls == []
+
+    async def test_delete_project_for_session_requires_bound_context(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Project registry mutation is denied after binding authority is lost."""
+        workspace_id = await _create_workspace(rdb_session, "swp-svc-bound-delete")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-svc-bound-delete",
+        )
+        user_id = await _create_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            email="swp-svc-bound-delete@example.com",
+        )
+        created = await _service(rdb_session).create_project(
+            session_id=fixture.session_id,
+            path="/workspace/agent/app",
+        )
+        assert isinstance(created, Success)
+        runtime_target_resolver = _FakeRuntimeTargetResolver()
+        service = _service(
+            rdb_session,
+            binding_error=SessionWorkingFolderBindingError("binding_invalidated"),
+            runtime_target_resolver=runtime_target_resolver,
+        )
+
+        result = await service.delete_project_for_session(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            user_id=user_id,
+            project_id=created.value.id,
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, ProjectAccessDenied)
+        assert runtime_target_resolver.start_if_stopped_calls == []
+        stored = await SessionWorkspaceProjectRepository().get_project_by_id(
+            rdb_session,
+            created.value.id,
+        )
+        assert stored is not None

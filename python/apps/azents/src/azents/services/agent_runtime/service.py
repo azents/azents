@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRuntimeCapability,
     AgentType,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
@@ -334,6 +335,7 @@ class AgentRuntimeService:
 
     async def ensure_started_for_agent(self, agent_id: str) -> AgentRuntime:
         """Ensure an internal Runtime consumer has targeted the current Profile."""
+        capability_version = await self._require_runtime_operation_capability(agent_id)
         resolution = await self._ensure_runtime_for_agent(agent_id)
         runtime = resolution.runtime
         if runtime.desired_state is RuntimeDesiredState.RUNNING:
@@ -345,6 +347,10 @@ class AgentRuntimeService:
                 provider_id=blocked.provider_id,
                 message=blocked.message,
             )
+        await self._require_runtime_operation_capability(
+            agent_id,
+            expected_version=capability_version,
+        )
         async with self.session_manager() as session:
             command = await self.runtime_repository.set_desired_state_if_ready(
                 session,
@@ -371,11 +377,16 @@ class AgentRuntimeService:
         start_if_stopped: bool = True,
     ) -> RuntimeOperationTarget:
         """Wait for the exact desired configuration and qualified Runner."""
+        capability_version = await self._require_runtime_operation_capability(agent_id)
         deadline = time.monotonic() + max(wait_timeout_seconds, 0.0)
         last_resolution: RuntimeProfileResolutionResult | None = None
         expected_desired_generation: int | None = None
         expected_revision_id: str | None = None
         while True:
+            await self._require_runtime_operation_capability(
+                agent_id,
+                expected_version=capability_version,
+            )
             try:
                 resolution = await self._ensure_runtime_for_agent(agent_id)
             except RuntimeProfileResolutionUnavailable as error:
@@ -401,6 +412,10 @@ class AgentRuntimeService:
                 if not start_if_stopped:
                     raise RuntimeStorageError("Runtime is not running.")
                 try:
+                    await self._require_runtime_operation_capability(
+                        agent_id,
+                        expected_version=capability_version,
+                    )
                     await self.ensure_started_for_agent(agent_id)
                 except RuntimeProfileResolutionUnavailable as error:
                     raise RuntimeStorageError(
@@ -446,8 +461,15 @@ class AgentRuntimeService:
                 if detail:
                     message = f"{message}: {detail}"
                 raise RuntimeStorageError(message)
-            target = self._qualified_operation_target(resolution)
+            target = self._qualified_operation_target(
+                resolution,
+                runtime_capability_version=capability_version,
+            )
             if target is not None:
+                await self._require_runtime_operation_capability(
+                    agent_id,
+                    expected_version=capability_version,
+                )
                 return target
             remaining_wait_seconds = deadline - time.monotonic()
             if remaining_wait_seconds <= 0:
@@ -486,8 +508,31 @@ class AgentRuntimeService:
     @staticmethod
     def _qualified_operation_target(
         resolution: RuntimeProfileResolutionResult,
+        *,
+        runtime_capability_version: int,
     ) -> RuntimeOperationTarget | None:
         """Return exact operation authority only from complete current evidence."""
+        if not AgentRuntimeService._operation_target_evidence_ready(resolution):
+            return None
+        runtime = resolution.runtime
+        desired = resolution.desired_revision
+        workspace_path = runtime.workspace_path
+        assert workspace_path is not None
+        return RuntimeOperationTarget(
+            id=runtime.id,
+            runtime_capability_version=runtime_capability_version,
+            desired_generation=runtime.desired_generation,
+            runner_generation=runtime.runner_generation,
+            configuration_revision_id=desired.id,
+            configuration_digest=desired.digest,
+            workspace_path=workspace_path,
+        )
+
+    @staticmethod
+    def _operation_target_evidence_ready(
+        resolution: RuntimeProfileResolutionResult,
+    ) -> bool:
+        """Return whether current Runtime evidence can support an operation."""
         runtime = resolution.runtime
         desired = resolution.desired_revision
         applied = resolution.applied_revision
@@ -513,15 +558,32 @@ class AgentRuntimeService:
             or runtime.runner_generation <= 0
             or runtime.workspace_path is None
         ):
-            return None
-        return RuntimeOperationTarget(
-            id=runtime.id,
-            desired_generation=runtime.desired_generation,
-            runner_generation=runtime.runner_generation,
-            configuration_revision_id=desired.id,
-            configuration_digest=desired.digest,
-            workspace_path=runtime.workspace_path,
-        )
+            return False
+        return True
+
+    async def _require_runtime_operation_capability(
+        self,
+        agent_id: str,
+        *,
+        expected_version: int | None = None,
+    ) -> int:
+        """Require one current managed Agent capability before Runtime work."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+        if (
+            agent is None
+            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+            or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+        ):
+            raise RuntimeStorageError("Agent Runtime capability is unavailable.")
+        if (
+            expected_version is not None
+            and agent.runtime_capability_version != expected_version
+        ):
+            raise RuntimeStorageError(
+                "Agent Runtime capability changed during the operation."
+            )
+        return agent.runtime_capability_version
 
     @staticmethod
     def _matches_expected_authority(
@@ -827,8 +889,7 @@ class AgentRuntimeService:
         enabled = profile_containment.enabled
         applied = enabled and status == "applied"
         runtime_available = (
-            status == "applied"
-            and self._qualified_operation_target(resolution) is not None
+            status == "applied" and self._operation_target_evidence_ready(resolution)
         )
         reason_code = None
         if desired.resolution_status is RuntimeConfigurationResolutionStatus.BLOCKED:

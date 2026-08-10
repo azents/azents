@@ -18,6 +18,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     MailboxItemKind,
     MailboxSchedulingMode,
+    SessionWorkingFolderBindingState,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import (
@@ -1032,6 +1033,11 @@ class AgentSessionInputService:
         )
         if context is None:
             raise RuntimeError("Active root Session is missing working-folder context")
+        if context.binding_state not in {
+            SessionWorkingFolderBindingState.PENDING,
+            SessionWorkingFolderBindingState.BOUND,
+        }:
+            return
         await self.mailbox_item_service.enqueue(
             session,
             MailboxEnqueue(

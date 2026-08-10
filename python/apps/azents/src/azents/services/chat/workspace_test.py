@@ -143,6 +143,7 @@ class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
             raise RuntimeStorageError("Runtime runner is not ready.")
         return RuntimeOperationTarget(
             id=runtime.id,
+            runtime_capability_version=1,
             desired_generation=runtime.desired_generation,
             runner_generation=runtime.runner_generation,
             configuration_revision_id="revision-1",

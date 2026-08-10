@@ -92,6 +92,7 @@ class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
         )
         return RuntimeOperationTarget(
             id="runtime-1",
+            runtime_capability_version=1,
             desired_generation=1,
             runner_generation=1,
             configuration_revision_id="revision-1",
@@ -162,7 +163,6 @@ def _service(
     """Create service for tests."""
     return AgentProjectCatalogService(
         catalog_repository=AgentProjectCatalogRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
         session_manager=rdb_session_manager,
         runtime_target_resolver=_FakeRuntimeTargetResolver(),
         runner_operations=runner_operations,
