@@ -773,8 +773,8 @@
           "description": "이 에이전트를 관리할 수 있는 멤버"
         },
         "danger": {
-          "label": "Runtime 및 삭제",
-          "description": "Runtime 상태를 초기화하거나 에이전트를 삭제"
+          "label": "Agent 삭제",
+          "description": "이 Agent와 대화를 영구 삭제"
         },
         "projects": {
           "label": "기본 프로젝트",
@@ -798,6 +798,15 @@
         "channels": {
           "label": "외부 채널",
           "description": "Slack·Discord 연결, 라우트, 참여자 접근 권한"
+        },
+        "runtime": {
+          "label": "Runtime",
+          "description": "관리형 Runtime capability, Profile, lifecycle, 영구 제거",
+          "values": {
+            "none": "없음",
+            "managed": "관리형",
+            "removing": "제거 중"
+          }
         }
       },
       "automaticProjects": {
@@ -828,7 +837,11 @@
           "unavailable": "사용 불가",
           "error": "오류",
           "unchecked": "확인되지 않음"
-        }
+        },
+        "runtimeFreeTitle": "관리형 Runtime이 필요합니다",
+        "runtimeFreeDescription": "설정된 경로는 유지되지만 관리형 Runtime을 추가할 때까지 확인하거나 변경할 수 없습니다.",
+        "removingTitle": "Runtime 제거 진행 중",
+        "removingDescription": "제거가 완료될 때까지 기본 Project 확인과 편집을 사용할 수 없습니다."
       },
       "settingsLayout": {
         "backToAgent": "에이전트로 돌아가기",
@@ -934,9 +947,7 @@
         "inheritModelBadge": "상위 모델 상속",
         "danger": {
           "title": "위험한 작업",
-          "deleteWarning": "이 에이전트를 삭제하면 모든 대화 기록과 설정이 함께 삭제됩니다. 되돌릴 수 없습니다.",
-          "resetRuntime": "Runtime 초기화",
-          "resetRuntimeConfirm": "Agent Workspace 파일과 보존된 runtime 상태를 버리고 빈 runtime을 새로 시작합니다. 이 작업은 되돌릴 수 없습니다."
+          "deleteWarning": "이 에이전트를 삭제하면 모든 대화 기록과 설정이 함께 삭제됩니다. 되돌릴 수 없습니다."
         }
       },
       "open": "열기",
@@ -1325,7 +1336,104 @@
         "workspacePolicyInvalid": "워크스페이스 네트워크 제한이 유효하지 않습니다.",
         "profileIncompatible": "Provider Profile이 Provider의 현재 capability와 호환되지 않습니다.",
         "unknown": "현재 Runtime 구성을 사용할 수 없습니다."
-      }
+      },
+      "runtimeSettings": {
+        "title": "Runtime",
+        "description": "Shell, 파일시스템, Workspace, Project, Git, 빌드, 테스트 기능을 제공하는 격리 환경을 관리합니다.",
+        "loadErrorTitle": "Runtime 설정을 불러오지 못했습니다",
+        "actionErrorTitle": "Runtime 작업에 실패했습니다",
+        "authorityNotice": "사용 가능 여부와 작업 권한은 현재 capability와 Runtime 상태를 기준으로 서버가 계산합니다.",
+        "refresh": "새로고침",
+        "cancel": "취소",
+        "profileLabel": "Runtime Profile",
+        "profileDescription": "Workspace에서 사용 가능한 Runtime Profile을 선택합니다.",
+        "profilePlaceholder": "Runtime Profile 선택",
+        "profileUnavailable": "사용 불가",
+        "noProfiles": "사용 가능한 Runtime Profile이 없습니다",
+        "selectedProfileUnavailableTitle": "선택된 Profile을 사용할 수 없습니다",
+        "selectedProfileUnavailableDescription": "구성을 변경하기 전에 사용 가능한 다른 Profile을 선택하세요.",
+        "unknownProfile": "선택한 Profile",
+        "addAction": "Runtime 추가",
+        "addConfirmTitle": "관리형 Runtime을 추가할까요?",
+        "addConfirmDescription": "{profile}(으)로 관리형 Runtime을 추가할까요?",
+        "addStoppedNotice": "Runtime은 구성된 정지 상태로 추가됩니다. 권한이 있는 작업에서 필요할 때만 생성되거나 시작됩니다.",
+        "confirmAdd": "Runtime 추가",
+        "capability": {
+          "none": "Runtime 없음",
+          "managed": "관리형",
+          "removing": "제거 중"
+        },
+        "notices": {
+          "added": "Runtime을 추가했습니다.",
+          "profileUpdated": "Runtime Profile 구성을 업데이트했습니다."
+        },
+        "none": {
+          "title": "이 Agent에는 관리형 Runtime이 없습니다",
+          "description": "모델, Memory, 외부 채널, 원격 도구는 계속 사용할 수 있습니다. 로컬 Shell, 파일, Workspace, Project, Git, 빌드, 테스트 작업에는 관리형 Runtime이 필요합니다.",
+          "retainedTitle": "Runtime이 필요 없는 기능은 유지됩니다",
+          "retainedDescription": "Runtime 추가는 명시적으로 확인해야 합니다. 여기서 Profile을 선택하는 것만으로는 Agent가 변경되지 않습니다."
+        },
+        "managed": {
+          "profileTitle": "Runtime 구성",
+          "profileDescription": "Profile을 바꾸면 원하는 구성이 업데이트됩니다. 서버가 필요하다고 판단할 때만 재생성됩니다.",
+          "saveProfile": "Profile 저장"
+        },
+        "lifecycle": {
+          "title": "일시적 Runtime 제어",
+          "description": "capability를 제거하지 않고 현재 관리형 Runtime을 시작, 정지, 재시작, 초기화합니다.",
+          "start": "시작",
+          "stop": "정지",
+          "restart": "재시작",
+          "reset": "초기화",
+          "resetConfirmTitle": "Runtime 상태를 초기화할까요?",
+          "resetConfirmDescription": "현재 Workspace 파일과 보존된 Runtime 상태를 삭제하고 빈 Runtime을 준비합니다. 되돌릴 수 없습니다.",
+          "confirmReset": "Runtime 초기화"
+        },
+        "removal": {
+          "title": "관리형 Runtime 영구 제거",
+          "description": "Runtime 소유 로컬 상태를 삭제하고 Runtime 의존 작업을 중단합니다. 취소하거나 되돌릴 수 없습니다.",
+          "action": "Runtime 제거",
+          "confirmTitle": "Runtime을 영구 제거할까요?",
+          "irreversibleTitle": "이 작업은 되돌릴 수 없습니다",
+          "irreversibleDescription": "확인하기 전에 집계된 영향과 유지되는 데이터를 검토하세요.",
+          "deletedTitle": "삭제되는 항목",
+          "deletedDescription": "Runtime Workspace 파일, 로컬 Runtime 상태, Runtime 기반 Project 연결.",
+          "retainedTitle": "유지되는 항목",
+          "retainedDescription": "Agent 식별 정보와 설정, 모델 접근, Memory, 대화, 외부 채널 구성.",
+          "acknowledgement": "Runtime 제거가 영구적이며 진행 중인 작업을 중단할 수 있음을 이해했습니다.",
+          "confirmAction": "Runtime 영구 제거"
+        },
+        "impact": {
+          "activeRootSessions": "활성 루트 Session",
+          "activeSubagents": "활성 Subagent",
+          "activeRuns": "실행 중인 Run",
+          "queuedActions": "대기 중인 Runtime 작업"
+        },
+        "removing": {
+          "title": "Runtime을 제거하고 있습니다",
+          "description": "정리와 물리적 삭제가 완료될 때까지 Runtime 의존 접근이 차단됩니다.",
+          "noCancellation": "제거는 취소할 수 없습니다. 완료될 때까지 Runtime 의존 접근을 사용할 수 없습니다.",
+          "cleanupProgress": "확인한 context {scanned}개 · 무효화 {invalidated}개 · 시도 {attempts}회",
+          "stages": {
+            "fencing": "새 Runtime 작업 차단 중",
+            "interrupting_work": "진행 중인 작업 중단 중",
+            "cleaning_product_state": "제품 상태 정리 중",
+            "deleting_runtime": "물리 Runtime 삭제 중",
+            "finalizing": "제거 마무리 중",
+            "completed": "제거 완료"
+          },
+          "status": {
+            "pending": "대기 중",
+            "running": "진행 중",
+            "retry_wait": "재시도 대기 중",
+            "completed": "완료"
+          }
+        }
+      },
+      "runtimeFreeDefaultTitle": "기본값은 Runtime 없음입니다",
+      "runtimeFreeDefaultDescription": "Runtime이 없어도 모델, Memory, 외부 채널, 원격 도구는 사용할 수 있습니다. 로컬 Shell, 파일, Workspace, Project, Git, 빌드, 테스트가 필요할 때만 사용 가능한 Profile을 선택하세요.",
+      "shellRuntimeRequiredTitle": "관리형 Runtime이 필요합니다",
+      "shellRuntimeRequiredDescription": "<runtimeLink>관리형 Runtime을 추가</runtimeLink>한 뒤 Shell 설정을 변경할 수 있습니다."
     },
     "toolkits": {
       "headline": "툴킷",
@@ -1867,7 +1975,12 @@
       "controlUnavailableTitle": "Workspace 제어를 사용할 수 없습니다",
       "restartRuntime": "Runtime 재시작",
       "inactiveTitle": "Runtime이 비활성 상태입니다",
-      "inactiveDescription": "Agent Workspace 폴더를 탐색하려면 Runtime을 시작하세요."
+      "inactiveDescription": "Agent Workspace 폴더를 탐색하려면 Runtime을 시작하세요.",
+      "runtimeFreeTitle": "관리형 Runtime이 없습니다",
+      "runtimeFreeDescription": "모델과 원격 기능은 계속 사용할 수 있지만 Agent Workspace 파일과 Project에는 관리형 Runtime이 필요합니다.",
+      "addRuntime": "Runtime 추가",
+      "removingTitle": "Runtime 제거 진행 중",
+      "removingDescription": "영구 제거가 완료될 때까지 Workspace, Project, Git, 파일 접근을 사용할 수 없습니다."
     },
     "projectPickerStartRuntime": "Runtime 시작"
   },
@@ -2170,7 +2283,20 @@
         "profileInvalid": "선택한 Profile 문서가 유효하지 않습니다.",
         "unknown": "원하는 Runtime 구성을 확정할 수 없습니다."
       },
-      "configurationMissingCapabilities": "누락된 capability: {capabilities}"
+      "configurationMissingCapabilities": "누락된 capability: {capabilities}",
+      "runtimeFreeTitle": "관리형 Runtime이 없습니다",
+      "runtimeFreeDescription": "모델과 원격 기능은 계속 사용할 수 있지만 Agent Workspace 파일과 Project에는 관리형 Runtime이 필요합니다.",
+      "addRuntime": "Runtime 추가",
+      "removingTitle": "Runtime 제거 진행 중",
+      "removingDescription": "영구 제거가 완료될 때까지 Workspace, Project, Git, 파일 접근을 사용할 수 없습니다.",
+      "removalStages": {
+        "fencing": "새 Runtime 작업 차단 중",
+        "interrupting_work": "진행 중인 작업 중단 중",
+        "cleaning_product_state": "제품 상태 정리 중",
+        "deleting_runtime": "물리 Runtime 삭제 중",
+        "finalizing": "제거 마무리 중",
+        "completed": "제거 완료"
+      }
     },
     "toolCall": {
       "preparing": "명령어 작성 중...",
@@ -2602,7 +2728,11 @@
         "invoked": "호출",
         "context": "컨텍스트"
       }
-    }
+    },
+    "runtimeFreeProjectTitle": "로컬 Project 없이 시작",
+    "runtimeFreeProjectDescription": "로컬 Project 없이도 대화를 시작할 수 있습니다. Workspace 폴더를 선택하거나 Git worktree를 만들려면 <runtimeLink>관리형 Runtime을 추가</runtimeLink>하세요.",
+    "runtimeRemovingProjectTitle": "Runtime 제거 진행 중",
+    "runtimeRemovingProjectDescription": "Runtime 제거가 완료되는 동안 로컬 Project 없이 대화를 시작할 수 있습니다."
   },
   "oauth": {
     "title": "인증",

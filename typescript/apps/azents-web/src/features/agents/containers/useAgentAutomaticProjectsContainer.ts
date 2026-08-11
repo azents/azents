@@ -29,6 +29,7 @@ interface AgentAutomaticProjectsContainerProps {
 export interface AgentAutomaticProjectsContainerOutput {
   handle: string;
   agent: AgentResponse;
+  runtimeCapability: AgentResponse["runtime_capability"];
   state: AutomaticProjectsState;
   projectPaths: string[];
   isProjectPickerOpen: boolean;
@@ -88,7 +89,9 @@ export function useAgentAutomaticProjectsContainer({
     trpc.agent.replaceAutomaticSessionProjects.useMutation();
   const previewQuery = trpc.chat.previewProjectBrowserManifest.useQuery(
     { agentId: agent.id, projectPaths: draftPaths },
-    { enabled: draftPaths.length > 0 },
+    {
+      enabled: agent.runtime_capability === "managed" && draftPaths.length > 0,
+    },
   );
   const normalizedDraftPaths = useMemo(
     () => dedupeProjectPaths(draftPaths),
@@ -206,7 +209,12 @@ export function useAgentAutomaticProjectsContainer({
   );
 
   const onSave = useCallback(async (): Promise<void> => {
-    if (baseline === null || policyMutation.isPending || !dirty) {
+    if (
+      agent.runtime_capability !== "managed" ||
+      baseline === null ||
+      policyMutation.isPending ||
+      !dirty
+    ) {
       return;
     }
     setSaveError(null);
@@ -251,6 +259,7 @@ export function useAgentAutomaticProjectsContainer({
     }
   }, [
     agent.id,
+    agent.runtime_capability,
     baseline,
     dirty,
     handle,
@@ -310,6 +319,7 @@ export function useAgentAutomaticProjectsContainer({
   return {
     handle,
     agent,
+    runtimeCapability: agent.runtime_capability,
     state,
     projectPaths: normalizedDraftPaths,
     isProjectPickerOpen: picker.isOpen,

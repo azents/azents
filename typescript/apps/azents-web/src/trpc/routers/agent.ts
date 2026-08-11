@@ -281,6 +281,7 @@ export const agentRouter = router({
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",
+          409: "CONFLICT",
           422: "BAD_REQUEST",
         });
       }

@@ -1,5 +1,6 @@
 import type {
   AgentRuntimeConfigurationStatusResponse,
+  AgentRuntimeResponse,
   AgentWorkspaceDirectoryResponse,
   AgentWorkspaceEntryResponse,
   AgentWorkspaceFileResponse,
@@ -146,6 +147,8 @@ export type WorkspaceProjectPanelState =
 export type WorkspacePanelState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }
+  | { type: "RUNTIME_FREE"; runtime: AgentRuntimeResponse }
+  | { type: "REMOVING"; runtime: AgentRuntimeResponse }
   | {
       type: "SERVER";
       server: AgentWorkspaceServerState;

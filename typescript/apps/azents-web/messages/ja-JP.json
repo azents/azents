@@ -773,8 +773,8 @@
           "description": "Members who can manage this agent"
         },
         "danger": {
-          "label": "Runtime and deletion",
-          "description": "Reset runtime state or delete this agent"
+          "label": "エージェントを削除",
+          "description": "このエージェントと会話を完全に削除"
         },
         "projects": {
           "label": "デフォルトプロジェクト",
@@ -798,6 +798,15 @@
         "channels": {
           "label": "外部チャンネル",
           "description": "Slack・Discord 接続、ルート、参加者アクセス"
+        },
+        "runtime": {
+          "label": "ランタイム",
+          "description": "管理対象ケイパビリティ、プロファイル、ライフサイクル、完全削除",
+          "values": {
+            "none": "なし",
+            "managed": "管理対象",
+            "removing": "削除中"
+          }
         }
       },
       "automaticProjects": {
@@ -828,7 +837,11 @@
           "unavailable": "利用不可",
           "error": "エラー",
           "unchecked": "未確認"
-        }
+        },
+        "runtimeFreeTitle": "管理対象ランタイムが必要です",
+        "runtimeFreeDescription": "設定済みのパスは保持されますが、管理対象ランタイムを追加するまで確認や変更はできません。",
+        "removingTitle": "ランタイムを削除しています",
+        "removingDescription": "削除が完了するまで、デフォルトプロジェクトの確認と編集は利用できません。"
       },
       "settingsLayout": {
         "backToAgent": "エージェントに戻る",
@@ -934,9 +947,7 @@
         "inheritModelBadge": "親のモデルを継承",
         "danger": {
           "title": "危険ゾーン",
-          "deleteWarning": "このエージェントを削除すると、すべての会話と設定が削除されます。この操作は取り消せません。",
-          "resetRuntime": "Runtimeを初期化",
-          "resetRuntimeConfirm": "Agent Workspaceのファイルと保存済みRuntime状態を破棄し、空のRuntimeを開始します。この操作は取り消せません。"
+          "deleteWarning": "このエージェントを削除すると、すべての会話と設定が削除されます。この操作は取り消せません。"
         }
       },
       "open": "開く",
@@ -1325,7 +1336,104 @@
         "workspacePolicyInvalid": "ワークスペースのネットワーク制限が無効です。",
         "profileIncompatible": "Provider ProfileがProviderの現在のcapabilityと互換性がありません。",
         "unknown": "現在のRuntime構成は利用できません。"
-      }
+      },
+      "runtimeSettings": {
+        "title": "ランタイム",
+        "description": "シェル、ファイルシステム、ワークスペース、プロジェクト、Git、ビルド、テスト機能を提供する分離環境を管理します。",
+        "loadErrorTitle": "ランタイム設定を読み込めませんでした",
+        "actionErrorTitle": "ランタイム操作に失敗しました",
+        "authorityNotice": "利用可否と操作は、現在のケイパビリティとランタイム状態に基づいてサーバーが算出します。",
+        "refresh": "更新",
+        "cancel": "キャンセル",
+        "profileLabel": "ランタイムプロファイル",
+        "profileDescription": "ワークスペースで利用可能なランタイムプロファイルを選択します。",
+        "profilePlaceholder": "ランタイムプロファイルを選択",
+        "profileUnavailable": "利用不可",
+        "noProfiles": "利用可能なランタイムプロファイルがありません",
+        "selectedProfileUnavailableTitle": "選択中のプロファイルは利用できません",
+        "selectedProfileUnavailableDescription": "設定を変更する前に、利用可能な別のプロファイルを選択してください。",
+        "unknownProfile": "選択したプロファイル",
+        "addAction": "ランタイムを追加",
+        "addConfirmTitle": "管理対象ランタイムを追加しますか？",
+        "addConfirmDescription": "{profile} で管理対象ランタイムを追加しますか？",
+        "addStoppedNotice": "ランタイムは構成済み・停止状態になります。許可された操作で必要になるまで作成または起動されません。",
+        "confirmAdd": "ランタイムを追加",
+        "capability": {
+          "none": "ランタイムなし",
+          "managed": "管理対象",
+          "removing": "削除中"
+        },
+        "notices": {
+          "added": "ランタイムを追加しました。",
+          "profileUpdated": "ランタイムプロファイル設定を更新しました。"
+        },
+        "none": {
+          "title": "このエージェントには管理対象ランタイムがありません",
+          "description": "モデル、メモリ、外部チャネル、リモートツールは引き続き利用できます。ローカルシェル、ファイル、ワークスペース、プロジェクト、Git、ビルド、テスト操作には管理対象ランタイムが必要です。",
+          "retainedTitle": "ランタイム不要の機能は引き続き利用できます",
+          "retainedDescription": "ランタイムの追加には明示的な確認が必要です。ここでプロファイルを選択しただけではエージェントは変更されません。"
+        },
+        "managed": {
+          "profileTitle": "ランタイム構成",
+          "profileDescription": "プロファイルを変更すると希望構成が更新されます。再作成はサーバーが必要と判断した場合にのみ行われます。",
+          "saveProfile": "プロファイルを保存"
+        },
+        "lifecycle": {
+          "title": "一時的なランタイム操作",
+          "description": "ケイパビリティを削除せず、現在のランタイムを起動、停止、再起動、リセットします。",
+          "start": "起動",
+          "stop": "停止",
+          "restart": "再起動",
+          "reset": "リセット",
+          "resetConfirmTitle": "ランタイム状態をリセットしますか？",
+          "resetConfirmDescription": "現在のワークスペースファイルと保持されたランタイム状態を破棄し、空のランタイムを準備します。元に戻せません。",
+          "confirmReset": "リセット"
+        },
+        "removal": {
+          "title": "管理対象ランタイムを完全に削除",
+          "description": "ランタイム所有のローカル状態を削除し、ランタイム依存の作業を中断します。キャンセルやロールバックはできません。",
+          "action": "ランタイムを削除",
+          "confirmTitle": "ランタイムを完全に削除しますか？",
+          "irreversibleTitle": "この操作は元に戻せません",
+          "irreversibleDescription": "確認前に集計された影響と保持されるデータを確認してください。",
+          "deletedTitle": "削除されるもの",
+          "deletedDescription": "ランタイムのワークスペースファイル、ローカル状態、ランタイムに依存するプロジェクト関連付け。",
+          "retainedTitle": "保持されるもの",
+          "retainedDescription": "エージェントの識別情報と設定、モデルアクセス、メモリ、会話、外部チャネル設定。",
+          "acknowledgement": "ランタイムの削除が恒久的で、実行中の作業を中断する可能性があることを理解しました。",
+          "confirmAction": "完全に削除"
+        },
+        "impact": {
+          "activeRootSessions": "アクティブなルートセッション",
+          "activeSubagents": "アクティブなサブエージェント",
+          "activeRuns": "実行中の処理",
+          "queuedActions": "待機中のランタイム操作"
+        },
+        "removing": {
+          "title": "ランタイムを削除しています",
+          "description": "クリーンアップと物理削除が完了するまで、ランタイム依存のアクセスは遮断されます。",
+          "noCancellation": "削除はキャンセルできません。完了するまでランタイム依存のアクセスは利用できません。",
+          "cleanupProgress": "確認済み {scanned} コンテキスト · 無効化 {invalidated} · 試行 {attempts} 回",
+          "stages": {
+            "fencing": "新しいランタイム作業を遮断中",
+            "interrupting_work": "実行中の作業を中断中",
+            "cleaning_product_state": "製品状態をクリーンアップ中",
+            "deleting_runtime": "物理ランタイムを削除中",
+            "finalizing": "削除を完了処理中",
+            "completed": "削除完了"
+          },
+          "status": {
+            "pending": "待機中",
+            "running": "実行中",
+            "retry_wait": "再試行待ち",
+            "completed": "完了"
+          }
+        }
+      },
+      "runtimeFreeDefaultTitle": "デフォルトはランタイムなしです",
+      "runtimeFreeDefaultDescription": "ランタイムがなくても、モデル、メモリ、外部チャネル、リモートツールは利用できます。ローカルシェル、ファイル、ワークスペース、プロジェクト、Git、ビルド、テストが必要な場合のみプロファイルを選択してください。",
+      "shellRuntimeRequiredTitle": "管理対象ランタイムが必要です",
+      "shellRuntimeRequiredDescription": "<runtimeLink>管理対象ランタイムを追加</runtimeLink>すると、シェル設定を変更できます。"
     },
     "toolkits": {
       "headline": "ツールキット",
@@ -1867,7 +1975,12 @@
       "controlUnavailableTitle": "Workspace を操作できません",
       "restartRuntime": "Runtime を再起動",
       "inactiveTitle": "Runtime が停止しています",
-      "inactiveDescription": "Agent Workspace のフォルダーを参照するには Runtime を開始してください。"
+      "inactiveDescription": "Agent Workspace のフォルダーを参照するには Runtime を開始してください。",
+      "runtimeFreeTitle": "管理対象ランタイムがありません",
+      "runtimeFreeDescription": "モデルとリモート機能は引き続き利用できますが、エージェントワークスペースのファイルとプロジェクトには管理対象ランタイムが必要です。",
+      "addRuntime": "ランタイムを追加",
+      "removingTitle": "ランタイムを削除しています",
+      "removingDescription": "完全な削除が完了するまで、ワークスペース、プロジェクト、Git、ファイルへのアクセスは利用できません。"
     },
     "projectPickerStartRuntime": "Runtime を開始"
   },
@@ -2170,7 +2283,20 @@
         "profileInvalid": "選択したProfileの定義が無効です。",
         "unknown": "目的のRuntime構成を解決できませんでした。"
       },
-      "configurationMissingCapabilities": "不足しているcapability: {capabilities}"
+      "configurationMissingCapabilities": "不足しているcapability: {capabilities}",
+      "runtimeFreeTitle": "管理対象ランタイムがありません",
+      "runtimeFreeDescription": "モデルとリモート機能は引き続き利用できますが、エージェントワークスペースのファイルとプロジェクトには管理対象ランタイムが必要です。",
+      "addRuntime": "ランタイムを追加",
+      "removingTitle": "ランタイムを削除しています",
+      "removingDescription": "完全な削除が完了するまで、ワークスペース、プロジェクト、Git、ファイルへのアクセスは利用できません。",
+      "removalStages": {
+        "fencing": "新しいランタイム作業を遮断中",
+        "interrupting_work": "実行中の作業を中断中",
+        "cleaning_product_state": "製品状態をクリーンアップ中",
+        "deleting_runtime": "物理ランタイムを削除中",
+        "finalizing": "削除を完了処理中",
+        "completed": "削除完了"
+      }
     },
     "toolCall": {
       "preparing": "コマンドを作成中…",
@@ -2602,7 +2728,11 @@
         "invoked": "呼び出し",
         "context": "コンテキスト"
       }
-    }
+    },
+    "runtimeFreeProjectTitle": "ローカルプロジェクトなしで開始",
+    "runtimeFreeProjectDescription": "ローカルプロジェクトなしでも会話を開始できます。ワークスペースフォルダーの選択や Git worktree の作成には、<runtimeLink>管理対象ランタイムを追加</runtimeLink>してください。",
+    "runtimeRemovingProjectTitle": "ランタイムを削除しています",
+    "runtimeRemovingProjectDescription": "ランタイムの削除が完了するまで、ローカルプロジェクトなしで会話を開始できます。"
   },
   "oauth": {
     "title": "認証",

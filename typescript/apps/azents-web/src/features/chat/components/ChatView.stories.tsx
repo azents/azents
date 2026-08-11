@@ -173,6 +173,7 @@ const readyWorkspaceState: WorkspacePanelState = {
 
 const workspacePanel: WorkspacePanelContainerOutput = {
   state: readyWorkspaceState,
+  runtimeSettingsHref: "/w/engineering/agents/agent_01/settings/runtime",
   projectState: {
     type: "READY",
     projects: [],

@@ -773,8 +773,8 @@
           "description": "Members who can manage this agent"
         },
         "danger": {
-          "label": "Runtime and deletion",
-          "description": "Reset runtime state or delete this agent"
+          "label": "Supprimer l’agent",
+          "description": "Supprimer définitivement cet agent et ses conversations"
         },
         "projects": {
           "label": "Projets par défaut",
@@ -798,6 +798,15 @@
         "channels": {
           "label": "Canaux externes",
           "description": "Connexions Slack et Discord, routes et accès des participants"
+        },
+        "runtime": {
+          "label": "Environnement",
+          "description": "Capacité gérée, profil, cycle de vie et suppression définitive",
+          "values": {
+            "none": "Aucun",
+            "managed": "Géré",
+            "removing": "Suppression"
+          }
         }
       },
       "automaticProjects": {
@@ -828,7 +837,11 @@
           "unavailable": "Indisponible",
           "error": "Erreur",
           "unchecked": "Non vérifié"
-        }
+        },
+        "runtimeFreeTitle": "Environnement géré requis",
+        "runtimeFreeDescription": "Les chemins configurés sont conservés, mais ils ne peuvent être ni vérifiés ni modifiés avant l’ajout d’un environnement géré.",
+        "removingTitle": "Suppression de l’environnement en cours",
+        "removingDescription": "La vérification et la modification des projets par défaut restent indisponibles jusqu’à la fin de la suppression."
       },
       "settingsLayout": {
         "backToAgent": "Retour à l’agent",
@@ -934,9 +947,7 @@
         "inheritModelBadge": "Hérite du parent",
         "danger": {
           "title": "Zone dangereuse",
-          "deleteWarning": "La suppression de cet agent entraînera la perte de toutes ses conversations et paramètres. Cette action est irréversible.",
-          "resetRuntime": "Réinitialiser le runtime",
-          "resetRuntimeConfirm": "Cette action supprimera les fichiers de l'agent workspace et l'état runtime conservé, puis démarrera un runtime vide. Elle est irréversible."
+          "deleteWarning": "La suppression de cet agent entraînera la perte de toutes ses conversations et paramètres. Cette action est irréversible."
         }
       },
       "open": "Ouvrir",
@@ -1325,7 +1336,104 @@
         "workspacePolicyInvalid": "Ses restrictions réseau d’espace de travail sont invalides.",
         "profileIncompatible": "Son profil fournisseur est incompatible avec les capacités actuelles du fournisseur.",
         "unknown": "La configuration d’exécution actuelle est indisponible."
-      }
+      },
+      "runtimeSettings": {
+        "title": "Environnement d’exécution",
+        "description": "Gérez l’environnement isolé qui fournit le shell, le système de fichiers, l’espace de travail, les projets, Git, la compilation et les tests.",
+        "loadErrorTitle": "Impossible de charger les paramètres de l’environnement",
+        "actionErrorTitle": "L’action sur l’environnement a échoué",
+        "authorityNotice": "La disponibilité et les actions sont calculées par le serveur selon la capacité et l’état actuels.",
+        "refresh": "Actualiser",
+        "cancel": "Annuler",
+        "profileLabel": "Profil d’environnement",
+        "profileDescription": "Choisissez un profil d’environnement disponible dans l’espace de travail.",
+        "profilePlaceholder": "Sélectionner un profil",
+        "profileUnavailable": "Indisponible",
+        "noProfiles": "Aucun profil disponible",
+        "selectedProfileUnavailableTitle": "Le profil sélectionné est indisponible",
+        "selectedProfileUnavailableDescription": "Choisissez un autre profil disponible avant d’appliquer la modification.",
+        "unknownProfile": "le profil sélectionné",
+        "addAction": "Ajouter un environnement",
+        "addConfirmTitle": "Ajouter un environnement géré ?",
+        "addConfirmDescription": "Ajouter un environnement géré avec {profile} ?",
+        "addStoppedNotice": "L’environnement sera configuré et arrêté. Il ne sera créé ou démarré que lorsqu’une opération autorisée l’exigera.",
+        "confirmAdd": "Ajouter",
+        "capability": {
+          "none": "Aucun environnement",
+          "managed": "Géré",
+          "removing": "Suppression"
+        },
+        "notices": {
+          "added": "L’environnement a été ajouté.",
+          "profileUpdated": "La configuration du profil a été mise à jour."
+        },
+        "none": {
+          "title": "Cet agent n’a pas d’environnement géré",
+          "description": "L’agent peut toujours utiliser son modèle, la mémoire, les canaux externes et les outils distants. Le shell local, les fichiers, l’espace de travail, les projets, Git, la compilation et les tests nécessitent un environnement géré.",
+          "retainedTitle": "Les capacités sans environnement restent disponibles",
+          "retainedDescription": "L’ajout est explicite. La sélection d’un profil ne modifie pas l’agent avant confirmation."
+        },
+        "managed": {
+          "profileTitle": "Configuration de l’environnement",
+          "profileDescription": "Changer de profil met à jour la configuration souhaitée. La recréation n’a lieu que si le serveur l’exige.",
+          "saveProfile": "Enregistrer le profil"
+        },
+        "lifecycle": {
+          "title": "Contrôles temporaires",
+          "description": "Démarrez, arrêtez, redémarrez ou réinitialisez l’environnement actuel sans supprimer la capacité.",
+          "start": "Démarrer",
+          "stop": "Arrêter",
+          "restart": "Redémarrer",
+          "reset": "Réinitialiser",
+          "resetConfirmTitle": "Réinitialiser l’environnement ?",
+          "resetConfirmDescription": "La réinitialisation supprime les fichiers de l’espace de travail et l’état conservé, puis prépare un environnement vide. Cette action est irréversible.",
+          "confirmReset": "Réinitialiser"
+        },
+        "removal": {
+          "title": "Supprimer définitivement l’environnement géré",
+          "description": "La suppression efface l’état local appartenant à l’environnement et interrompt le travail qui en dépend. Elle ne peut être ni annulée ni restaurée.",
+          "action": "Supprimer l’environnement",
+          "confirmTitle": "Supprimer définitivement l’environnement ?",
+          "irreversibleTitle": "Cette action est irréversible",
+          "irreversibleDescription": "Vérifiez l’impact agrégé et les données conservées avant de confirmer.",
+          "deletedTitle": "Supprimé",
+          "deletedDescription": "Fichiers de l’espace de travail, état local et liaisons de projet reposant sur l’environnement.",
+          "retainedTitle": "Conservé",
+          "retainedDescription": "Identité et paramètres de l’agent, accès au modèle, mémoires, conversations et configuration des canaux externes.",
+          "acknowledgement": "Je comprends que la suppression est définitive et peut interrompre le travail actif.",
+          "confirmAction": "Supprimer définitivement"
+        },
+        "impact": {
+          "activeRootSessions": "Sessions racines actives",
+          "activeSubagents": "Sous-agents actifs",
+          "activeRuns": "Exécutions actives",
+          "queuedActions": "Actions en attente"
+        },
+        "removing": {
+          "title": "Suppression de l’environnement en cours",
+          "description": "L’accès dépendant de l’environnement est bloqué pendant le nettoyage et la suppression physique.",
+          "noCancellation": "La suppression ne peut pas être annulée. L’accès dépendant de l’environnement reste indisponible jusqu’à sa fin.",
+          "cleanupProgress": "{scanned} contextes analysés · {invalidated} invalidés · tentative {attempts}",
+          "stages": {
+            "fencing": "Blocage des nouveaux travaux",
+            "interrupting_work": "Interruption du travail actif",
+            "cleaning_product_state": "Nettoyage de l’état produit",
+            "deleting_runtime": "Suppression physique",
+            "finalizing": "Finalisation",
+            "completed": "Suppression terminée"
+          },
+          "status": {
+            "pending": "En attente",
+            "running": "En cours",
+            "retry_wait": "Nouvelle tentative en attente",
+            "completed": "Terminé"
+          }
+        }
+      },
+      "runtimeFreeDefaultTitle": "Aucun environnement par défaut",
+      "runtimeFreeDefaultDescription": "Sans environnement, l’agent conserve l’accès au modèle, à la mémoire, aux canaux externes et aux outils distants. Sélectionnez un profil uniquement si le shell local, les fichiers, l’espace de travail, les projets, Git, la compilation ou les tests sont nécessaires.",
+      "shellRuntimeRequiredTitle": "Environnement géré requis",
+      "shellRuntimeRequiredDescription": "Les paramètres du shell deviennent disponibles après avoir <runtimeLink>ajouté un environnement géré</runtimeLink>."
     },
     "toolkits": {
       "headline": "Toolkits",
@@ -1867,7 +1975,12 @@
       "controlUnavailableTitle": "Contrôle du Workspace indisponible",
       "restartRuntime": "Redémarrer le Runtime",
       "inactiveTitle": "Runtime inactif",
-      "inactiveDescription": "Démarrez le Runtime pour parcourir les dossiers Agent Workspace."
+      "inactiveDescription": "Démarrez le Runtime pour parcourir les dossiers Agent Workspace.",
+      "runtimeFreeTitle": "Aucun environnement géré",
+      "runtimeFreeDescription": "Cet agent peut continuer à utiliser le modèle et les capacités distantes, mais les fichiers et projets de l’espace de travail nécessitent un environnement géré.",
+      "addRuntime": "Ajouter un environnement",
+      "removingTitle": "Suppression de l’environnement en cours",
+      "removingDescription": "L’accès à l’espace de travail, aux projets, à Git et aux fichiers reste indisponible jusqu’à la fin de la suppression définitive."
     },
     "projectPickerStartRuntime": "Démarrer le Runtime"
   },
@@ -2170,7 +2283,20 @@
         "profileInvalid": "Le document du profil sélectionné est invalide.",
         "unknown": "La configuration d’exécution souhaitée n’a pas pu être résolue."
       },
-      "configurationMissingCapabilities": "Capacités manquantes : {capabilities}"
+      "configurationMissingCapabilities": "Capacités manquantes : {capabilities}",
+      "runtimeFreeTitle": "Aucun environnement géré",
+      "runtimeFreeDescription": "Cet agent peut continuer à utiliser le modèle et les capacités distantes, mais les fichiers et projets de l’espace de travail nécessitent un environnement géré.",
+      "addRuntime": "Ajouter un environnement",
+      "removingTitle": "Suppression de l’environnement en cours",
+      "removingDescription": "L’accès à l’espace de travail, aux projets, à Git et aux fichiers reste indisponible jusqu’à la fin de la suppression définitive.",
+      "removalStages": {
+        "fencing": "Blocage des nouveaux travaux",
+        "interrupting_work": "Interruption du travail actif",
+        "cleaning_product_state": "Nettoyage de l’état produit",
+        "deleting_runtime": "Suppression physique",
+        "finalizing": "Finalisation",
+        "completed": "Suppression terminée"
+      }
     },
     "toolCall": {
       "preparing": "Rédaction de la commande...",
@@ -2602,7 +2728,11 @@
         "invoked": "Invocation",
         "context": "Contexte"
       }
-    }
+    },
+    "runtimeFreeProjectTitle": "Démarrer sans projets locaux",
+    "runtimeFreeProjectDescription": "Cet agent peut démarrer une conversation sans projets locaux. <runtimeLink>Ajoutez un environnement géré</runtimeLink> pour sélectionner des dossiers ou créer des worktrees Git.",
+    "runtimeRemovingProjectTitle": "Suppression de l’environnement en cours",
+    "runtimeRemovingProjectDescription": "Démarrez la conversation sans projets locaux pendant la suppression de l’environnement."
   },
   "oauth": {
     "title": "Autorisation",

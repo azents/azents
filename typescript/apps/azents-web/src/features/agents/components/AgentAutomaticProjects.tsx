@@ -38,6 +38,9 @@ import type {
 import type { ProjectDirectoryPickerEntry } from "@/features/agent-workspace/types";
 
 interface AgentAutomaticProjectsProps {
+  handle: string;
+  agent: { id: string };
+  runtimeCapability: "none" | "managed" | "removing";
   state: AutomaticProjectsState;
   isProjectPickerOpen: boolean;
   pickerState: Parameters<
@@ -143,6 +146,9 @@ function hasUnsavedDraft(state: AutomaticProjectsState): boolean {
 }
 
 export function AgentAutomaticProjects({
+  handle,
+  agent,
+  runtimeCapability,
   state,
   isProjectPickerOpen,
   pickerState,
@@ -162,9 +168,11 @@ export function AgentAutomaticProjects({
   const rows = rowsFromState(state);
   const message =
     state.type === "MISSING" ? t("missingDescription") : stateMessage(state);
-  const saveEnabled = automaticProjectsSaveEnabled(state);
+  const saveEnabled =
+    runtimeCapability === "managed" && automaticProjectsSaveEnabled(state);
   const reloadVisible = isReloadVisible(state);
-  const editingDisabled = automaticProjectsEditingDisabled(state);
+  const editingDisabled =
+    runtimeCapability !== "managed" || automaticProjectsEditingDisabled(state);
 
   if (state.type === "LOADING") {
     return (
@@ -214,6 +222,21 @@ export function AgentAutomaticProjects({
             {t("description")}
           </Text>
         </Stack>
+
+        {runtimeCapability !== "managed" ? (
+          <Alert
+            color={runtimeCapability === "removing" ? "yellow" : "blue"}
+            title={
+              runtimeCapability === "removing"
+                ? t("removingTitle")
+                : t("runtimeFreeTitle")
+            }
+          >
+            {runtimeCapability === "removing"
+              ? t("removingDescription")
+              : t("runtimeFreeDescription")}
+          </Alert>
+        ) : null}
 
         {message ? (
           <Alert
@@ -400,6 +423,7 @@ export function AgentAutomaticProjects({
       <AgentWorkspaceDirectoryPickerModal
         opened={isProjectPickerOpen}
         state={pickerState}
+        runtimeSettingsHref={`/w/${handle}/agents/${agent.id}/settings/runtime`}
         translationNamespace="agentWorkspacePicker"
         onClose={onCloseProjectPicker}
         onOpenDirectory={onOpenProjectPickerDirectory}

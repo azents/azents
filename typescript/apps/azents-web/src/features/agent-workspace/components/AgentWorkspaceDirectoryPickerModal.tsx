@@ -24,6 +24,7 @@ import {
   IconRefresh,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
@@ -37,6 +38,7 @@ export interface AgentWorkspaceDirectoryPickerModalProps {
   onSelectDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefresh: () => void;
   onStartRuntime: () => void;
+  runtimeSettingsHref?: string;
   translationNamespace?: "chat" | "agentWorkspacePicker";
 }
 
@@ -62,9 +64,40 @@ export function AgentWorkspaceDirectoryPickerModal({
   onSelectDirectory,
   onRefresh,
   onStartRuntime,
+  runtimeSettingsHref,
   translationNamespace = "agentWorkspacePicker",
 }: AgentWorkspaceDirectoryPickerModalProps): React.ReactElement {
   const t = useTranslations(translationNamespace);
+
+  const renderCapabilityContent = (): React.ReactElement | null => {
+    if (state.type === "RUNTIME_FREE") {
+      return (
+        <Alert color="blue" title={t("workspacePanel.runtimeFreeTitle")}>
+          <Stack gap="sm">
+            <Text size="sm">{t("workspacePanel.runtimeFreeDescription")}</Text>
+            {state.runtime.actions.add && runtimeSettingsHref ? (
+              <Button
+                component={Link}
+                href={runtimeSettingsHref}
+                size="xs"
+                onClick={onClose}
+              >
+                {t("workspacePanel.addRuntime")}
+              </Button>
+            ) : null}
+          </Stack>
+        </Alert>
+      );
+    }
+    if (state.type === "REMOVING") {
+      return (
+        <Alert color="yellow" title={t("workspacePanel.removingTitle")}>
+          {t("workspacePanel.removingDescription")}
+        </Alert>
+      );
+    }
+    return null;
+  };
 
   const renderServerContent = (): React.ReactElement | null => {
     if (state.type !== "SERVER") {
@@ -310,6 +343,7 @@ export function AgentWorkspaceDirectoryPickerModal({
         {state.type === "ERROR" ? (
           <Alert color="red">{state.message}</Alert>
         ) : null}
+        {renderCapabilityContent()}
         {renderServerContent()}
       </Stack>
     </Modal>

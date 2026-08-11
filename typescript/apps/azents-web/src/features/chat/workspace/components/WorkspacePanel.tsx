@@ -15,6 +15,7 @@ import {
   Stack,
   Tabs,
   Text,
+  ThemeIcon,
 } from "@mantine/core";
 import { useModals } from "@mantine/modals";
 import {
@@ -23,8 +24,10 @@ import {
   IconFolderOpen,
   IconPower,
   IconSettings,
+  IconTerminal2,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { useState } from "react";
 import { FileBrowser } from "./FileBrowser";
 import { FileInfo } from "./FileInfo";
@@ -55,6 +58,7 @@ interface WorkspacePanelProps {
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
   defaultTab?: WorkspacePanelTab;
+  runtimeSettingsHref: string;
   onStartRuntime: () => void;
   onStopRuntime: () => void;
   onRestartRuntime: () => void;
@@ -94,6 +98,7 @@ export function WorkspacePanel({
   state,
   projectState,
   defaultTab = "workspace",
+  runtimeSettingsHref,
   onStartRuntime,
   onStopRuntime,
   onRestartRuntime,
@@ -212,6 +217,50 @@ export function WorkspacePanel({
     });
   };
 
+  const renderCapabilityView = (
+    capabilityState: Extract<
+      WorkspacePanelState,
+      { type: "RUNTIME_FREE" } | { type: "REMOVING" }
+    >,
+  ): React.ReactElement => (
+    <Center h="100%" p="lg">
+      <Stack align="center" gap="md" maw={rem(440)} ta="center">
+        <ThemeIcon
+          color={capabilityState.type === "REMOVING" ? "yellow" : "blue"}
+          radius="xl"
+          size="xl"
+          variant="light"
+        >
+          <IconTerminal2 size={rem(22)} />
+        </ThemeIcon>
+        <Stack gap="xs">
+          <Text fw={700}>
+            {capabilityState.type === "REMOVING"
+              ? t("removingTitle")
+              : t("runtimeFreeTitle")}
+          </Text>
+          <Text c="dimmed" size="sm">
+            {capabilityState.type === "REMOVING"
+              ? t("removingDescription")
+              : t("runtimeFreeDescription")}
+          </Text>
+          {capabilityState.type === "REMOVING" &&
+          capabilityState.runtime.removal ? (
+            <Text c="dimmed" size="xs">
+              {t(`removalStages.${capabilityState.runtime.removal.stage}`)}
+            </Text>
+          ) : null}
+        </Stack>
+        {capabilityState.type === "RUNTIME_FREE" &&
+        capabilityState.runtime.actions.add ? (
+          <Button component={Link} href={runtimeSettingsHref}>
+            {t("addRuntime")}
+          </Button>
+        ) : null}
+      </Stack>
+    </Center>
+  );
+
   const renderSettingsPanel = (): React.ReactElement => {
     if (state.type === "LOADING") {
       return (
@@ -230,6 +279,9 @@ export function WorkspacePanel({
           {state.message}
         </Alert>
       );
+    }
+    if (state.type === "RUNTIME_FREE" || state.type === "REMOVING") {
+      return renderCapabilityView(state);
     }
 
     const { actions, runtime } = state.server;
@@ -313,6 +365,13 @@ export function WorkspacePanel({
           <Alert color="red" icon={<IconAlertCircle size="1rem" />}>
             {state.message}
           </Alert>
+        </Box>
+      );
+    }
+    if (state.type === "RUNTIME_FREE" || state.type === "REMOVING") {
+      return (
+        <Box flex={1} mih={0} w="100%" style={{ overflow: "hidden" }}>
+          {renderCapabilityView(state)}
         </Box>
       );
     }
@@ -733,6 +792,7 @@ export function WorkspacePanel({
         onSelectDirectory={onSelectProjectPickerDirectory}
         onRefresh={onRefreshProjectPicker}
         onStartRuntime={onStartRuntimeForProjectPicker}
+        runtimeSettingsHref={runtimeSettingsHref}
       />
       <Modal
         centered

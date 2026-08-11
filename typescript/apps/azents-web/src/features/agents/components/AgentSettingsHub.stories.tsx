@@ -61,6 +61,34 @@ type Story = StoryObj<typeof meta>;
 
 export const Loaded = {} satisfies Story;
 
+export const ManagedRuntime = {
+  args: {
+    agent: {
+      ...agent,
+      runtime_profile_id: "runtime_profile_01",
+      runtime_profile_available: true,
+      runtime_profile_availability_reason_code: null,
+      runtime_capability: "managed",
+      runtime_capability_version: 2,
+      runtime_profile_configuration_status: "configured",
+      runtime_add_available: false,
+      runtime_remove_available: true,
+    },
+  },
+} satisfies Story;
+
+export const RemovingRuntime = {
+  args: {
+    agent: {
+      ...ManagedRuntime.args.agent,
+      runtime_capability: "removing",
+      runtime_capability_version: 3,
+      runtime_add_available: false,
+      runtime_remove_available: false,
+    },
+  },
+} satisfies Story;
+
 export const DisabledAgent = {
   args: {
     agent: {

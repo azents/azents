@@ -4,7 +4,9 @@
  * WebSocket for attachment ticket issue, message history fetch.
  */
 import {
+  agentRuntimeV1AddAgentRuntime,
   agentRuntimeV1GetAgentRuntime,
+  agentRuntimeV1RemoveAgentRuntime,
   agentRuntimeV1ResetAgentRuntime,
   agentRuntimeV1RestartAgentRuntime,
   agentRuntimeV1StartAgentRuntime,
@@ -1027,6 +1029,78 @@ export const chatRouter = router({
           403: "FORBIDDEN",
           404: "NOT_FOUND",
           409: "CONFLICT",
+        });
+      }
+    }),
+
+  addAgentRuntime: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        workspaceRuntimeProfileId: z.string().min(1),
+        expectedCapabilityVersion: z.number().int().positive(),
+        expectedRuntimeProfileSelectionVersion: z.number().int().positive(),
+        idempotencyKey: z.string().min(1).max(128),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentRuntimeV1AddAgentRuntime({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          body: {
+            workspace_runtime_profile_id: input.workspaceRuntimeProfileId,
+            expected_capability_version: input.expectedCapabilityVersion,
+            expected_runtime_profile_selection_version:
+              input.expectedRuntimeProfileSelectionVersion,
+            idempotency_key: input.idempotencyKey,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  removeAgentRuntime: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        expectedCapabilityVersion: z.number().int().positive(),
+        expectedRuntimeProfileSelectionVersion: z.number().int().positive(),
+        idempotencyKey: z.string().min(1).max(128),
+        confirmed: z.literal(true),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentRuntimeV1RemoveAgentRuntime({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          body: {
+            expected_capability_version: input.expectedCapabilityVersion,
+            expected_runtime_profile_selection_version:
+              input.expectedRuntimeProfileSelectionVersion,
+            idempotency_key: input.idempotencyKey,
+            confirmed: input.confirmed,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
         });
       }
     }),

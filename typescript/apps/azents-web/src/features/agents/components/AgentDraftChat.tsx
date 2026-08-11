@@ -4,9 +4,19 @@
  * Chat-only draft screen shown before the first message creates an AgentSession.
  */
 
-import { Box, Center, Group, rem, Stack, Text } from "@mantine/core";
+import {
+  Alert,
+  Anchor,
+  Box,
+  Center,
+  Group,
+  rem,
+  Stack,
+  Text,
+} from "@mantine/core";
 import { IconMessageCircle } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChatInput } from "@/features/chat/components/ChatInput";
 import { resolveComposerSubscriptionSelection } from "@/features/chat/composerSubscriptionUsage";
@@ -189,18 +199,47 @@ export function AgentDraftChat(
       </Center>
       <Box px="md" py="sm" style={{ flexShrink: 0 }}>
         <Box maw={rem(920)} mx="auto">
-          <NewSessionProjectSelector
-            activeWorktreeItemId={activeWorktreeItemId}
-            gitRefPreviewState={gitRefPreviewState}
-            projectPresetState={projectPresetState}
-            workspaceItems={workspaceItems}
-            onActivateWorktreeItem={onActivateWorktreeItem}
-            onAddPresetProject={onAddPresetProject}
-            onOpenProjectPicker={onOpenProjectPicker}
-            onSetWorkspaceItemKind={onSetWorkspaceItemKind}
-            onRemoveWorkspaceItem={onRemoveWorkspaceItem}
-            onSetWorktreeStartingRef={onSetWorktreeStartingRef}
-          />
+          {agent.runtime_capability === "managed" ? (
+            <NewSessionProjectSelector
+              activeWorktreeItemId={activeWorktreeItemId}
+              gitRefPreviewState={gitRefPreviewState}
+              projectPresetState={projectPresetState}
+              workspaceItems={workspaceItems}
+              onActivateWorktreeItem={onActivateWorktreeItem}
+              onAddPresetProject={onAddPresetProject}
+              onOpenProjectPicker={onOpenProjectPicker}
+              onSetWorkspaceItemKind={onSetWorkspaceItemKind}
+              onRemoveWorkspaceItem={onRemoveWorkspaceItem}
+              onSetWorktreeStartingRef={onSetWorktreeStartingRef}
+            />
+          ) : (
+            <Alert
+              color={
+                agent.runtime_capability === "removing" ? "yellow" : "blue"
+              }
+              mb="sm"
+              title={
+                agent.runtime_capability === "removing"
+                  ? t("runtimeRemovingProjectTitle")
+                  : t("runtimeFreeProjectTitle")
+              }
+            >
+              <Text size="sm">
+                {agent.runtime_capability === "removing"
+                  ? t("runtimeRemovingProjectDescription")
+                  : t.rich("runtimeFreeProjectDescription", {
+                      runtimeLink: (chunks) => (
+                        <Anchor
+                          component={Link}
+                          href={`/w/${handle}/agents/${agent.id}/settings/runtime`}
+                        >
+                          {chunks}
+                        </Anchor>
+                      ),
+                    })}
+              </Text>
+            </Alert>
+          )}
           <ChatInput
             agentId={agent.id}
             sessionId={null}
@@ -235,6 +274,7 @@ export function AgentDraftChat(
       <WorkspaceDirectoryPickerModal
         opened={isProjectPickerOpen}
         state={projectPickerState}
+        runtimeSettingsHref={`/w/${handle}/agents/${agent.id}/settings/runtime`}
         onClose={onCloseProjectPicker}
         onOpenDirectory={onOpenProjectPickerDirectory}
         onRefresh={onRefreshProjectPicker}

@@ -66,6 +66,9 @@ const readyPickerState: ProjectDirectoryPickerState = {
 };
 
 const commonArgs = {
+  handle: "engineering",
+  agent: { id: "agent_01" },
+  runtimeCapability: "managed",
   isProjectPickerOpen: false,
   pickerState: closedPickerState,
   onAddProject: () => {},
@@ -79,7 +82,7 @@ const commonArgs = {
   onSave: () => Promise.resolve(),
   onRetrySave: () => Promise.resolve(),
   onReloadLatest: () => Promise.resolve(),
-};
+} satisfies Omit<React.ComponentProps<typeof AgentAutomaticProjects>, "state">;
 
 const meta = {
   component: AgentAutomaticProjects,

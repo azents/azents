@@ -23,6 +23,7 @@ import {
   IconSettings,
   IconShield,
   IconSitemap,
+  IconTerminal2,
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
@@ -168,6 +169,13 @@ export function AgentSettingsHub({
     {
       title: t("sections.capabilities"),
       rows: [
+        {
+          href: `${basePath}/runtime`,
+          icon: <IconTerminal2 size={rem(18)} />,
+          label: t("runtime.label"),
+          description: t("runtime.description"),
+          value: t(`runtime.values.${agent.runtime_capability}`),
+        },
         {
           href: `${basePath}/capabilities`,
           icon: <IconSettings size={rem(18)} />,
