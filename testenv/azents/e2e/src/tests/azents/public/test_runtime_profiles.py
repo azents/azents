@@ -43,9 +43,17 @@ from azentspublicclient.models.workspace_runtime_profile_default_replace_request
 from azentspublicclient.models.workspace_runtime_profile_response import (
     WorkspaceRuntimeProfileResponse,
 )
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.remote.webdriver import WebDriver
+from selenium.webdriver.support import expected_conditions as ec
+from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
 
-from support.runtime_profiles import create_workspace_runtime_profile
+from support.runtime_profiles import (
+    create_workspace_runtime_profile,
+    start_and_wait_for_agent_runtime,
+)
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -54,11 +62,43 @@ from support.utils import (
 )
 
 _RUNTIME_PROVIDER_ID = "system-docker"
+_SIGNUP_PASSWORD = "TestPass123!"
 
 
 def _headers(token: str) -> dict[str, str]:
     """Return bearer authentication headers."""
     return {"Authorization": f"Bearer {token}"}
+
+
+def _wait(driver: WebDriver) -> WebDriverWait[WebDriver]:
+    """Return the bounded browser wait used by this surface."""
+    return WebDriverWait(driver, 20)
+
+
+def _login_main_web(
+    driver: WebDriver,
+    *,
+    base_url: str,
+    email: str,
+) -> None:
+    """Authenticate through the deployed Main Web login flow."""
+    driver.delete_all_cookies()
+    driver.get(f"{base_url}/login")
+    email_input = _wait(driver).until(ec.element_to_be_clickable((By.NAME, "email")))
+    email_input.send_keys(email, Keys.ENTER)
+    _wait(driver).until(ec.url_contains("/login/password"))
+    password_input = _wait(driver).until(
+        ec.element_to_be_clickable((By.NAME, "password"))
+    )
+    password_input.send_keys(_SIGNUP_PASSWORD, Keys.ENTER)
+    _wait(driver).until(ec.url_contains("/workspaces"))
+
+
+def _assert_visible_text(driver: WebDriver, text: str) -> None:
+    """Wait for exact visible text."""
+    _wait(driver).until(
+        ec.visibility_of_element_located((By.XPATH, f"//*[normalize-space()={text!r}]"))
+    )
 
 
 def _stop_runtime_provider(container: DockerContainer) -> None:
@@ -429,3 +469,242 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
         interval=1,
         message="Selected Runtime Profile did not recover with its Provider",
     )
+
+
+@pytest.mark.web_surface
+def test_owner_deletes_runtime_profile_in_web_and_running_runtime_is_retained(
+    browser_driver: WebDriver,
+    azents_main_web_url: str,
+    azents_public_server_url: str,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_runtime_provider_docker_container: DockerContainer,
+    azents_engine_worker_container: DockerContainer,
+) -> None:
+    """Delete a selected/default Profile in Web and verify retained Runtime state."""
+    del azents_runtime_provider_docker_container, azents_engine_worker_container
+    suffix = unique()
+    token, _, email = authenticate_user(
+        public_api_client,
+        admin_api_client,
+        email=f"runtime-profile-delete-web-{suffix}@example.com",
+    )
+    handle = f"runtime-profile-delete-web-{suffix}"
+    headers = _headers(token)
+    WorkspaceV1Api(public_api_client).workspace_v1_create_workspace(
+        CreateWorkspaceRequest(
+            workspace_name=f"Runtime Profile Delete Web {suffix}",
+            workspace_handle=handle,
+            owner_name=f"Owner {suffix}",
+        ),
+        _headers=headers,
+    )
+    integration = LLMProviderIntegrationV1Api(
+        public_api_client
+    ).llm_provider_integration_v1_create_integration(
+        handle=handle,
+        llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+            provider=LLMProvider.OPENAI,
+            name="__testenv_model_listing:deterministic-success",
+            secrets=Secrets(ApiKeySecrets(api_key="sk-runtime-profile-delete-web")),
+        ),
+        _headers=headers,
+    )
+    model_selection = model_selection_from_first_candidate(
+        azents_public_server_url,
+        token,
+        handle,
+        integration.id,
+    )
+    profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        provider_id=_RUNTIME_PROVIDER_ID,
+    )
+    profile_api = RuntimeProfileV1Api(public_api_client)
+    profile = profile_api.runtime_profile_v1_get_workspace_runtime_profile(
+        profile_id=profile_id,
+        handle=handle,
+        _headers=headers,
+    )
+    default_state = (
+        profile_api.runtime_profile_v1_get_workspace_runtime_profile_default(
+            handle=handle,
+            _headers=headers,
+        )
+    )
+    profile_api.runtime_profile_v1_replace_workspace_runtime_profile_default(
+        handle=handle,
+        workspace_runtime_profile_default_replace_request=(
+            WorkspaceRuntimeProfileDefaultReplaceRequest(
+                expected_version=default_state.version,
+                runtime_profile_id=profile.id,
+            )
+        ),
+        _headers=headers,
+    )
+    agent_api = AgentV1Api(public_api_client)
+    agent = agent_api.agent_v1_create_agent(
+        handle=handle,
+        agent_create_request=AgentCreateRequest(
+            name=f"Runtime Profile Delete Agent {suffix}",
+            model_selection=model_selection,
+            lightweight_model_selection=model_selection,
+            type=AgentType.PUBLIC,
+            runtime_profile_id=profile.id,
+        ),
+        _headers=headers,
+    )
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        agent_id=agent.id,
+    )
+    runtime_api = AgentRuntimeV1Api(public_api_client)
+    runtime_before = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert runtime_before.runtime is not None
+    assert runtime_before.runtime.workspace_path
+    assert runtime_before.configuration is not None
+    assert runtime_before.configuration.status == "applied"
+    assert runtime_before.configuration.applied is not None
+    assert (
+        runtime_before.configuration.applied.workspace_runtime_profile_id == profile.id
+    )
+    prior_runtime_id = runtime_before.runtime.id
+    prior_workspace_path = runtime_before.runtime.workspace_path
+    prior_applied_sequence = runtime_before.configuration.applied.sequence
+    prior_applied_digest = runtime_before.configuration.applied.digest
+
+    _login_main_web(
+        browser_driver,
+        base_url=azents_main_web_url,
+        email=email,
+    )
+    browser_driver.get(f"{azents_main_web_url}/w/{handle}/settings/runtime-profiles")
+    _assert_visible_text(browser_driver, "Runtime profiles")
+    _assert_visible_text(browser_driver, profile.display_name)
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                f"//button[@aria-label={'Delete ' + profile.display_name!r}]",
+            )
+        )
+    ).click()
+    _assert_visible_text(browser_driver, "Permanently delete runtime profile")
+    confirmation_input = _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//label[normalize-space()='Runtime profile name']/following::input[1]",
+            )
+        )
+    )
+    confirmation_input.send_keys(profile.display_name)
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//*[@role='dialog']//label[contains(normalize-space(), "
+                "'I understand that this deletion is permanent')]",
+            )
+        )
+    ).click()
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//button[normalize-space()='Delete profile permanently']",
+            )
+        )
+    ).click()
+    _assert_visible_text(
+        browser_driver,
+        f"{profile.display_name} was permanently deleted",
+    )
+    _assert_visible_text(browser_driver, "The workspace default was cleared.")
+    _assert_visible_text(browser_driver, "1 agent selection was cleared.")
+    _assert_visible_text(
+        browser_driver,
+        "1 running runtime kept its applied configuration and storage.",
+    )
+    _assert_visible_text(
+        browser_driver,
+        "No active recreation operations were superseded.",
+    )
+    _wait(browser_driver).until(
+        ec.invisibility_of_element_located(
+            (
+                By.XPATH,
+                f"//tr[.//*[normalize-space()={profile.display_name!r}]]",
+            )
+        )
+    )
+
+    profiles = profile_api.runtime_profile_v1_list_workspace_runtime_profiles(
+        handle=handle,
+        include_disabled=True,
+        _headers=headers,
+    )
+    assert all(item.id != profile.id for item in profiles.items)
+    with pytest.raises(ApiException) as deleted_profile_error:
+        profile_api.runtime_profile_v1_get_workspace_runtime_profile(
+            profile_id=profile.id,
+            handle=handle,
+            _headers=headers,
+        )
+    assert cast(Any, deleted_profile_error.value).status == 404
+    default_after = (
+        profile_api.runtime_profile_v1_get_workspace_runtime_profile_default(
+            handle=handle,
+            _headers=headers,
+        )
+    )
+    assert default_after.runtime_profile_id is None
+    agent_after = agent_api.agent_v1_get_agent(
+        agent_id=agent.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert agent_after.runtime_profile_id is None
+    assert agent_after.runtime_profile_available is False
+    assert (
+        agent_after.runtime_profile_availability_reason_code
+        == "runtime_profile_unconfigured"
+    )
+
+    runtime_after = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert runtime_after.runtime_profile_id is None
+    assert runtime_after.runtime_profile_status == "profile_required"
+    assert runtime_after.runtime is not None
+    assert runtime_after.runtime.id == prior_runtime_id
+    assert runtime_after.runtime.workspace_path == prior_workspace_path
+    assert runtime_after.state is not None
+    assert runtime_after.state.summary == RuntimeSummary.RUNNING
+    assert runtime_after.configuration is not None
+    assert runtime_after.configuration.status == "profile_required"
+    assert runtime_after.configuration.desired is not None
+    assert runtime_after.configuration.desired.status == "unconfigured"
+    assert runtime_after.configuration.desired.reason_code == "runtime_profile_required"
+    assert runtime_after.configuration.applied is not None
+    assert runtime_after.configuration.applied.sequence == prior_applied_sequence
+    assert runtime_after.configuration.applied.digest == prior_applied_digest
+    assert (
+        runtime_after.configuration.applied.workspace_runtime_profile_id == profile.id
+    )
+    assert runtime_after.actions.start is False
+    assert runtime_after.actions.restart is False
+    assert runtime_after.actions.reset is False
+    assert runtime_after.actions.use_runner is False
+    assert runtime_after.actions.stop is True
+    assert runtime_after.actions.observe is True

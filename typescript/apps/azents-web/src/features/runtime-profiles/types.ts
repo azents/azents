@@ -2,6 +2,7 @@ import type {
   RuntimeRecreationOperationResponse,
   SelectableInfrastructureProfileResponse,
   WorkspaceRuntimeProfileDefaultResponse,
+  WorkspaceRuntimeProfileDeleteResponse,
   WorkspaceRuntimeProfileResponse,
 } from "@azents/public-client";
 
@@ -29,3 +30,34 @@ export type RuntimeProfileOperationState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }
   | { type: "LOADED"; operation: RuntimeRecreationOperationResponse };
+
+export type RuntimeProfileDeletionErrorKind =
+  | "CONFLICT"
+  | "NOT_FOUND"
+  | "FORBIDDEN"
+  | "UNAUTHORIZED"
+  | "BAD_REQUEST"
+  | "UNKNOWN";
+
+export type RuntimeProfileDeletionState =
+  | { type: "CLOSED" }
+  | {
+      type: "CONFIRMING";
+      profile: WorkspaceRuntimeProfileResponse;
+      error: {
+        kind: RuntimeProfileDeletionErrorKind;
+        message: string;
+      } | null;
+    }
+  | {
+      type: "SUBMITTING";
+      profile: WorkspaceRuntimeProfileResponse;
+    };
+
+export type RuntimeProfileDeletionFeedbackState =
+  | { type: "NONE" }
+  | {
+      type: "SUCCESS";
+      profileName: string;
+      result: WorkspaceRuntimeProfileDeleteResponse;
+    };

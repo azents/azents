@@ -1,5 +1,5 @@
 import { rem } from "@mantine/core";
-import { expect, within } from "storybook/test";
+import { expect, userEvent, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { RuntimeProfiles } from "./RuntimeProfiles";
 import type { RuntimeProfilesContainerOutput } from "../containers/useRuntimeProfilesContainer";
@@ -122,13 +122,20 @@ const baseArgs: RuntimeProfilesContainerOutput = {
   editorState: { type: "CLOSED" },
   mutationState: { type: "IDLE", error: null },
   operationState: { type: "IDLE" },
+  deletionState: { type: "CLOSED" },
+  deletionFeedbackState: { type: "NONE" },
   canManage: true,
+  canDelete: true,
   onOpenCreate: noop,
   onOpenEdit: noop,
   onCloseEditor: noop,
   onSubmit: noop,
   onSetDefault: noop,
   onRecreate: noop,
+  onOpenDelete: noop,
+  onCloseDelete: noop,
+  onConfirmDelete: noop,
+  onDismissDeletionFeedback: noop,
 };
 
 const meta = {
@@ -211,6 +218,137 @@ export const RecreationRunning = {
 export const CreateModal = {
   args: {
     editorState: { type: "CREATE" },
+  },
+} satisfies Story;
+
+export const ManagerCannotDelete = {
+  args: {
+    canManage: true,
+    canDelete: false,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getAllByRole("button", { name: "Edit" })[0],
+    ).toBeVisible();
+    await expect(
+      canvas.queryByRole("button", { name: "Delete Standard runtime" }),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
+
+export const DeleteConfirmation = {
+  args: {
+    deletionState: {
+      type: "CONFIRMING",
+      profile: availableProfile,
+      error: null,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const confirmButton = page.getByRole("button", {
+      name: "Delete profile permanently",
+    });
+    await expect(confirmButton).toBeDisabled();
+    await userEvent.type(
+      page.getByRole("textbox", { name: "Runtime profile name" }),
+      availableProfile.display_name,
+    );
+    await userEvent.click(
+      page.getByRole("checkbox", {
+        name: /I understand that this deletion is permanent/,
+      }),
+    );
+    await expect(confirmButton).toBeEnabled();
+  },
+} satisfies Story;
+
+export const DeleteConflict = {
+  args: {
+    deletionState: {
+      type: "CONFIRMING",
+      profile: availableProfile,
+      error: {
+        kind: "CONFLICT",
+        message: "Runtime Profile version conflict.",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(page.getByText("The profile changed")).toBeVisible();
+    await expect(
+      page.getByText(/This deletion used a stale profile version/),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const DeleteFailure = {
+  args: {
+    deletionState: {
+      type: "CONFIRMING",
+      profile: availableProfile,
+      error: {
+        kind: "UNKNOWN",
+        message: "The Runtime Profile service is unavailable.",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await expect(
+      page.getByText("Runtime profile deletion failed"),
+    ).toBeVisible();
+    await expect(
+      page.getByText("The Runtime Profile service is unavailable."),
+    ).toBeVisible();
+  },
+} satisfies Story;
+
+export const DeleteSuccess = {
+  args: {
+    state: {
+      type: "READY",
+      profiles: [unavailableProfile],
+      infrastructureProfiles: [infrastructureProfile],
+      defaultProfile: {
+        runtime_profile_id: null,
+        version: 6,
+        profile: null,
+      },
+    },
+    deletionFeedbackState: {
+      type: "SUCCESS",
+      profileName: availableProfile.display_name,
+      result: {
+        profile_id: availableProfile.id,
+        cleared_workspace_default: true,
+        cleared_agent_count: 2,
+        affected_running_runtime_count: 1,
+        superseded_recreation_operation_count: 1,
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText("Standard runtime was permanently deleted"),
+    ).toBeVisible();
+    await expect(
+      canvas.getByText("The workspace default was cleared."),
+    ).toBeVisible();
+    await expect(
+      canvas.getByText("2 agent selections were cleared."),
+    ).toBeVisible();
+    await expect(
+      canvas.getByText(
+        "1 running runtime kept its applied configuration and storage.",
+      ),
+    ).toBeVisible();
+    await expect(
+      canvas.getByText("1 active recreation operation was superseded."),
+    ).toBeVisible();
   },
 } satisfies Story;
 

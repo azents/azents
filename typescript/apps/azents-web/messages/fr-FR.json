@@ -608,6 +608,51 @@
       "disabled": "Désactivé",
       "edit": "Modifier",
       "recreate": "Recréer les environnements",
+      "delete": "Supprimer",
+      "deleteActionLabel": "Supprimer {name}",
+      "deleteTitle": "Supprimer définitivement le profil d’exécution",
+      "deleteIrreversibleTitle": "Cette action est irréversible",
+      "deleteIrreversibleDescription": "{name} sera supprimé définitivement et son nom pourra être réutilisé pour un nouveau profil.",
+      "deleteSelectionsTitle": "Les sélections seront effacées",
+      "deleteSelectionsDescription": "Si ce profil est le profil par défaut de l’espace de travail ou celui d’agents, ces sélections deviendront non configurées. Aucun profil de remplacement ne sera choisi.",
+      "deleteRetainedTitle": "Les exécutions en cours sont conservées",
+      "deleteRetainedDescription": "Les environnements d’exécution déjà actifs conservent leur configuration appliquée et le stockage de l’espace de travail de l’agent. Les actions dépendant de la configuration nécessitent un profil de remplacement explicite.",
+      "deleteNameInstruction": "Saisissez <name></name> pour confirmer.",
+      "deleteNameLabel": "Nom du profil d’exécution",
+      "deleteAcknowledgement": "Je comprends que cette suppression est définitive et qu’aucun profil de remplacement ne sera sélectionné.",
+      "deleteConfirm": "Supprimer définitivement le profil",
+      "deleteSuccessTitle": "{name} a été supprimé définitivement",
+      "deleteSuccessDefaultCleared": "Le profil par défaut de l’espace de travail a été effacé.",
+      "deleteSuccessDefaultUnchanged": "Le profil par défaut de l’espace de travail ne référençait pas ce profil.",
+      "deleteSuccessAgents": "{count, plural, =0 {Aucune sélection d’agent n’a été effacée.} =1 {1 sélection d’agent a été effacée.} other {# sélections d’agents ont été effacées.}}",
+      "deleteSuccessRunningRuntimes": "{count, plural, =0 {Aucun environnement d’exécution actif n’a été affecté.} =1 {1 environnement d’exécution actif a conservé sa configuration appliquée et son stockage.} other {# environnements d’exécution actifs ont conservé leur configuration appliquée et leur stockage.}}",
+      "deleteSuccessRecreationOperations": "{count, plural, =0 {Aucune opération de recréation active n’a été remplacée.} =1 {1 opération de recréation active a été remplacée.} other {# opérations de recréation actives ont été remplacées.}}",
+      "deleteErrors": {
+        "CONFLICT": {
+          "title": "Le profil a changé",
+          "description": "Cette suppression utilisait une version obsolète du profil. Fermez cette boîte de dialogue, vérifiez le profil actualisé, puis réessayez."
+        },
+        "NOT_FOUND": {
+          "title": "Le profil n’existe plus",
+          "description": "Il a peut-être déjà été supprimé. Fermez cette boîte de dialogue pour revenir à la liste actualisée."
+        },
+        "FORBIDDEN": {
+          "title": "Autorisation du propriétaire requise",
+          "description": "Seul un propriétaire de l’espace de travail peut supprimer définitivement un profil d’exécution."
+        },
+        "UNAUTHORIZED": {
+          "title": "Connexion requise",
+          "description": "Reconnectez-vous avant de réessayer cette suppression."
+        },
+        "BAD_REQUEST": {
+          "title": "Demande de suppression refusée",
+          "description": "Le profil n’a pas pu être supprimé avec la demande actuelle. Fermez cette boîte de dialogue, vérifiez le profil actualisé, puis réessayez."
+        },
+        "UNKNOWN": {
+          "title": "Échec de la suppression du profil d’exécution",
+          "description": "Le profil d’exécution n’a pas pu être supprimé."
+        }
+      },
       "operationLoading": "Chargement de la progression de la recréation…",
       "operationTitle": "Recréation des environnements",
       "operationCounts": "{succeeded} réussis · {running} en cours · {failed} échoués · {skipped} ignorés · {total} au total",

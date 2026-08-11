@@ -4,6 +4,9 @@ import { useCallback, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import type { RuntimeProfileFormValues } from "../schemas";
 import type {
+  RuntimeProfileDeletionErrorKind,
+  RuntimeProfileDeletionFeedbackState,
+  RuntimeProfileDeletionState,
   RuntimeProfileEditorState,
   RuntimeProfileMutationState,
   RuntimeProfileOperationState,
@@ -21,13 +24,20 @@ export interface RuntimeProfilesContainerOutput {
   editorState: RuntimeProfileEditorState;
   mutationState: RuntimeProfileMutationState;
   operationState: RuntimeProfileOperationState;
+  deletionState: RuntimeProfileDeletionState;
+  deletionFeedbackState: RuntimeProfileDeletionFeedbackState;
   canManage: boolean;
+  canDelete: boolean;
   onOpenCreate: () => void;
   onOpenEdit: (profile: WorkspaceRuntimeProfileResponse) => void;
   onCloseEditor: () => void;
   onSubmit: (values: RuntimeProfileFormValues) => void;
   onSetDefault: (profileId: string | null) => void;
   onRecreate: (profile: WorkspaceRuntimeProfileResponse) => void;
+  onOpenDelete: (profile: WorkspaceRuntimeProfileResponse) => void;
+  onCloseDelete: () => void;
+  onConfirmDelete: (profile: WorkspaceRuntimeProfileResponse) => void;
+  onDismissDeletionFeedback: () => void;
 }
 
 function parseCidrs(value: string): string[] {
@@ -35,6 +45,35 @@ function parseCidrs(value: string): string[] {
     .split(/\r?\n|,/)
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function errorCode(error: unknown): string | null {
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    !("data" in error) ||
+    typeof error.data !== "object" ||
+    error.data === null ||
+    !("code" in error.data) ||
+    typeof error.data.code !== "string"
+  ) {
+    return null;
+  }
+  return error.data.code;
+}
+
+function deletionErrorKind(error: unknown): RuntimeProfileDeletionErrorKind {
+  const code = errorCode(error);
+  if (
+    code === "CONFLICT" ||
+    code === "NOT_FOUND" ||
+    code === "FORBIDDEN" ||
+    code === "UNAUTHORIZED" ||
+    code === "BAD_REQUEST"
+  ) {
+    return code;
+  }
+  return "UNKNOWN";
 }
 
 export function useRuntimeProfilesContainer(
@@ -50,6 +89,12 @@ export function useRuntimeProfilesContainer(
       type: "IDLE",
       error: null,
     });
+  const [deletionState, setDeletionState] =
+    useState<RuntimeProfileDeletionState>({
+      type: "CLOSED",
+    });
+  const [deletionFeedbackState, setDeletionFeedbackState] =
+    useState<RuntimeProfileDeletionFeedbackState>({ type: "NONE" });
   const [operationId, setOperationId] = useState<string | null>(null);
 
   const memberQuery = trpc.workspaceMember.me.useQuery({ handle });
@@ -76,6 +121,7 @@ export function useRuntimeProfilesContainer(
 
   const canManage =
     memberQuery.data?.role === "owner" || memberQuery.data?.role === "manager";
+  const canDelete = memberQuery.data?.role === "owner";
 
   const state: RuntimeProfilesState = useMemo(() => {
     if (
@@ -184,6 +230,7 @@ export function useRuntimeProfilesContainer(
       setMutationState({ type: "IDLE", error: error.message });
     },
   });
+  const deleteMutation = trpc.runtimeProfile.delete.useMutation();
 
   const onOpenCreate = useCallback((): void => {
     setEditorState({ type: "CREATE" });
@@ -260,6 +307,65 @@ export function useRuntimeProfilesContainer(
     },
     [handle, recreationMutation],
   );
+  const onOpenDelete = useCallback(
+    (profile: WorkspaceRuntimeProfileResponse): void => {
+      if (!canDelete) {
+        return;
+      }
+      setDeletionFeedbackState({ type: "NONE" });
+      setDeletionState({ type: "CONFIRMING", profile, error: null });
+    },
+    [canDelete],
+  );
+  const onCloseDelete = useCallback((): void => {
+    setDeletionState((current) =>
+      current.type === "SUBMITTING" ? current : { type: "CLOSED" },
+    );
+  }, []);
+  const onConfirmDelete = useCallback(
+    (profile: WorkspaceRuntimeProfileResponse): void => {
+      if (!canDelete) {
+        return;
+      }
+      setDeletionState({ type: "SUBMITTING", profile });
+      deleteMutation.mutate(
+        {
+          handle,
+          profileId: profile.id,
+          expectedVersion: profile.version,
+        },
+        {
+          onSuccess: (result): void => {
+            setDeletionFeedbackState({
+              type: "SUCCESS",
+              profileName: profile.display_name,
+              result,
+            });
+            setDeletionState({ type: "CLOSED" });
+            void invalidateProfiles();
+          },
+          onError: (error): void => {
+            const kind = deletionErrorKind(error);
+            setDeletionState({
+              type: "CONFIRMING",
+              profile,
+              error: {
+                kind,
+                message: error.message,
+              },
+            });
+            if (kind === "CONFLICT" || kind === "NOT_FOUND") {
+              void invalidateProfiles();
+            }
+          },
+        },
+      );
+    },
+    [canDelete, deleteMutation, handle, invalidateProfiles],
+  );
+  const onDismissDeletionFeedback = useCallback((): void => {
+    setDeletionFeedbackState({ type: "NONE" });
+  }, []);
 
   return {
     handle,
@@ -267,12 +373,19 @@ export function useRuntimeProfilesContainer(
     editorState,
     mutationState,
     operationState,
+    deletionState,
+    deletionFeedbackState,
     canManage,
+    canDelete,
     onOpenCreate,
     onOpenEdit,
     onCloseEditor,
     onSubmit,
     onSetDefault,
     onRecreate,
+    onOpenDelete,
+    onCloseDelete,
+    onConfirmDelete,
+    onDismissDeletionFeedback,
   };
 }
