@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelConversationScopeKind,
+    ExternalChannelDeliveryOperation,
     ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressItemState,
     ExternalChannelIngressProfile,
@@ -136,6 +137,8 @@ def _item(
     trigger_position: str,
     attempt_count: int = 1,
     created_at: datetime.datetime = _NOW,
+    invocation: bool = True,
+    initial_title_eligible: bool = False,
 ) -> ExternalChannelIngressItem:
     """Build one complete content-free active queue item."""
     return ExternalChannelIngressItem.model_construct(
@@ -166,9 +169,9 @@ def _item(
         trigger_provider_message_id=trigger_position,
         trigger_position=trigger_position,
         provider_user_id="user-1",
-        invocation=True,
+        invocation=invocation,
         invocation_id=f"invocation-{item_id}",
-        initial_title_eligible=False,
+        initial_title_eligible=initial_title_eligible,
         state=ExternalChannelIngressItemState.PROCESSING,
         attempt_count=attempt_count,
         next_attempt_at=None,
@@ -263,7 +266,12 @@ def _resource() -> ExternalChannelResource:
         connection_id="connection-1",
         resource_type=ExternalChannelResourceType.THREAD,
         provider_resource_key="resource-1",
-        labels={"channel_id": "channel-1"},
+        labels={
+            "provider": "slack",
+            "tenant_id": "tenant-1",
+            "channel_id": "channel-1",
+            "thread_ts": "thread-1",
+        },
         status=ExternalChannelResourceStatus.ACTIVE,
     )
 
@@ -296,6 +304,7 @@ def _service(
         work.ensure_active_work = AsyncMock(
             return_value=SimpleNamespace(work_cycle_id="work-1")
         )
+        work.prepare_direct_control = AsyncMock(return_value=None)
         work.prepare_initial_progress = AsyncMock(return_value=None)
     control = provider_control or MagicMock()
     if provider_control is None:
@@ -333,6 +342,7 @@ def _service(
 def _collaborators(
     *,
     locked_rows: list[SimpleNamespace],
+    mailbox_created: bool = True,
 ) -> tuple[MagicMock, MagicMock, MagicMock, MagicMock, MagicMock, SimpleNamespace]:
     """Build successful finalization collaborators for one claimed batch."""
     drain = SimpleNamespace(session_id="session-1")
@@ -372,7 +382,7 @@ def _collaborators(
                     id=f"mailbox-{index}",
                     session_id="session-1",
                 ),
-                created=True,
+                created=mailbox_created,
             )
             for index, _enqueue in enumerate(enqueues)
         ]
@@ -809,10 +819,10 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
     wake_dispatcher.dispatch.assert_awaited_once()
 
 
-async def test_followup_work_tracker_is_attempted_after_commit_before_wake(
+async def test_explicit_followup_settings_and_tracker_precede_wake(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A bound follow-up starts a Work Tracker before waking the Session."""
+    """An explicit bound follow-up attempts settings then Tracker before wake."""
     item = _item(
         item_id="item-1",
         trigger_key="message-1",
@@ -832,15 +842,17 @@ async def test_followup_work_tracker_is_attempted_after_commit_before_wake(
     work_repository.ensure_active_work = AsyncMock(
         return_value=SimpleNamespace(work_cycle_id="work-followup")
     )
+    settings_plan = make_provider_effect_plan("followup-settings")
+    work_repository.prepare_direct_control = AsyncMock(return_value=settings_plan)
     progress_plan = make_provider_effect_plan("followup-progress")
     work_repository.prepare_initial_progress = AsyncMock(return_value=progress_plan)
     provider_control = MagicMock()
 
-    async def attempt_progress(_plan: object) -> None:
+    async def attempt_control(_plan: object) -> None:
         transaction.commit.assert_awaited_once()
         wake_dispatcher.dispatch.assert_not_awaited()
 
-    provider_control.attempt = AsyncMock(side_effect=attempt_progress)
+    provider_control.attempt = AsyncMock(side_effect=attempt_control)
     service = _service(
         session_manager=_session_manager(transaction),
         repository=repository,
@@ -873,6 +885,22 @@ async def test_followup_work_tracker_is_attempted_after_commit_before_wake(
     assert ensure_call is not None
     desired_progress = ensure_call.kwargs["desired_progress"]
     assert desired_progress.state == "checking"
+    work_repository.prepare_direct_control.assert_awaited_once_with(
+        transaction,
+        connection_id="connection-1",
+        resource_id="resource-1",
+        route_id="route-1",
+        binding_id="binding-1",
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        request_payload={
+            "tenant_id": "tenant-1",
+            "channel_id": "channel-1",
+            "thread_ts": "thread-1",
+            "control_kind": "binding_settings_on_demand",
+            "control_version": 3,
+        },
+        operation_seed="binding-settings:binding-1",
+    )
     work_repository.prepare_initial_progress.assert_awaited_once_with(
         transaction,
         agent_id="agent-1",
@@ -880,7 +908,197 @@ async def test_followup_work_tracker_is_attempted_after_commit_before_wake(
         binding_id="binding-1",
         work_cycle_id="work-followup",
     )
-    provider_control.attempt.assert_awaited_once_with(progress_plan)
+    assert provider_control.attempt.await_args_list == [
+        ((settings_plan,), {}),
+        ((progress_plan,), {}),
+    ]
+    wake_dispatcher.dispatch.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("invocation", "initial_title_eligible"),
+    [
+        (False, False),
+        (True, True),
+    ],
+)
+async def test_non_invocation_or_new_binding_does_not_repeat_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    invocation: bool,
+    initial_title_eligible: bool,
+) -> None:
+    """Continuation and new-Binding ingress retain their existing controls."""
+    item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+        invocation=invocation,
+        initial_title_eligible=initial_title_eligible,
+    )
+    row = SimpleNamespace(id=item.id)
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=[row])
+    transaction = _Session()
+    work_repository = MagicMock()
+    work_repository.ensure_active_work = AsyncMock(
+        return_value=SimpleNamespace(work_cycle_id="work-followup")
+    )
+    work_repository.prepare_direct_control = AsyncMock()
+    work_repository.prepare_initial_progress = AsyncMock(return_value=None)
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+        work_repository=work_repository,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    stale = await service._finalize_batch(  # noqa: SLF001
+        _batch(item),
+        prepared=[
+            _PreparedSuccess(
+                item=item,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=item.trigger_provider_message_key,
+                    trigger_position=item.trigger_position,
+                ),
+            )
+        ],
+    )
+
+    assert stale is False
+    work_repository.prepare_direct_control.assert_not_awaited()
+    wake_dispatcher.dispatch.assert_awaited_once()
+
+
+async def test_duplicate_explicit_invocation_does_not_repeat_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A duplicate mailbox admission cannot repeat the settings control."""
+    item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+    )
+    row = SimpleNamespace(id=item.id)
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=[row], mailbox_created=False)
+    transaction = _Session()
+    work_repository = MagicMock()
+    work_repository.prepare_direct_control = AsyncMock()
+    work_repository.ensure_active_work = AsyncMock()
+    work_repository.prepare_initial_progress = AsyncMock()
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+        work_repository=work_repository,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    stale = await service._finalize_batch(  # noqa: SLF001
+        _batch(item),
+        prepared=[
+            _PreparedSuccess(
+                item=item,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=item.trigger_provider_message_key,
+                    trigger_position=item.trigger_position,
+                ),
+            )
+        ],
+    )
+
+    assert stale is False
+    work_repository.prepare_direct_control.assert_not_awaited()
+    work_repository.ensure_active_work.assert_not_awaited()
+    work_repository.prepare_initial_progress.assert_not_awaited()
+    wake_dispatcher.dispatch.assert_awaited_once()
+
+
+async def test_settings_control_failure_does_not_gate_tracker_or_wake(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed settings effect remains post-commit and non-blocking."""
+    item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+    )
+    row = SimpleNamespace(id=item.id)
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=[row])
+    transaction = _Session()
+    work_repository = MagicMock()
+    work_repository.ensure_active_work = AsyncMock(
+        return_value=SimpleNamespace(work_cycle_id="work-followup")
+    )
+    settings_plan = make_provider_effect_plan("followup-settings")
+    progress_plan = make_provider_effect_plan("followup-progress")
+    work_repository.prepare_direct_control = AsyncMock(return_value=settings_plan)
+    work_repository.prepare_initial_progress = AsyncMock(return_value=progress_plan)
+    provider_control = MagicMock()
+    provider_control.attempt = AsyncMock(
+        side_effect=[RuntimeError("provider unavailable"), None]
+    )
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+        work_repository=work_repository,
+        provider_control=provider_control,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    stale = await service._finalize_batch(  # noqa: SLF001
+        _batch(item),
+        prepared=[
+            _PreparedSuccess(
+                item=item,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=item.trigger_provider_message_key,
+                    trigger_position=item.trigger_position,
+                ),
+            )
+        ],
+    )
+
+    assert stale is False
+    transaction.commit.assert_awaited_once()
+    assert provider_control.attempt.await_args_list == [
+        ((settings_plan,), {}),
+        ((progress_plan,), {}),
+    ]
     wake_dispatcher.dispatch.assert_awaited_once()
 
 
