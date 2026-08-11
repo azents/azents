@@ -1,6 +1,7 @@
 import {
   runtimeProfileV1CreateProfileRecreation,
   runtimeProfileV1CreateWorkspaceRuntimeProfile,
+  runtimeProfileV1DeleteWorkspaceRuntimeProfile,
   runtimeProfileV1GetWorkspaceRuntimeProfileDefault,
   runtimeProfileV1GetWorkspaceRuntimeProfileRecreation,
   runtimeProfileV1ListSelectableInfrastructureProfiles,
@@ -163,6 +164,39 @@ export const runtimeProfileRouter = router({
                       denied_cidrs: input.networkPolicy.deniedCidrs,
                     },
             },
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  delete: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        profileId: z.string().min(1),
+        expectedVersion: z.number().int().positive(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await runtimeProfileV1DeleteWorkspaceRuntimeProfile({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            profile_id: input.profileId,
+          },
+          body: {
+            expected_version: input.expectedVersion,
           },
           throwOnError: true,
         });

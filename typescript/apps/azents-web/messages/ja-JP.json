@@ -608,6 +608,51 @@
       "disabled": "無効",
       "edit": "編集",
       "recreate": "ランタイムを再作成",
+      "delete": "削除",
+      "deleteActionLabel": "{name} を削除",
+      "deleteTitle": "ランタイムプロファイルを完全に削除",
+      "deleteIrreversibleTitle": "この操作は元に戻せません",
+      "deleteIrreversibleDescription": "{name} は完全に削除され、その名前は新しいプロファイルで再利用できるようになります。",
+      "deleteSelectionsTitle": "選択は解除されます",
+      "deleteSelectionsDescription": "このプロファイルがワークスペースの既定値またはエージェントで選択されている場合、それらは未設定になります。代替プロファイルは自動選択されません。",
+      "deleteRetainedTitle": "実行中の作業は保持されます",
+      "deleteRetainedDescription": "実行中のランタイムは、適用済み設定とエージェントワークスペースのストレージを保持します。設定が必要な操作を再開するには、代替プロファイルを明示的に選択する必要があります。",
+      "deleteNameInstruction": "確認のため <name></name> と入力してください。",
+      "deleteNameLabel": "ランタイムプロファイル名",
+      "deleteAcknowledgement": "この削除が永続的であり、代替プロファイルが選択されないことを理解しました。",
+      "deleteConfirm": "プロファイルを完全に削除",
+      "deleteSuccessTitle": "{name} を完全に削除しました",
+      "deleteSuccessDefaultCleared": "ワークスペースの既定値を解除しました。",
+      "deleteSuccessDefaultUnchanged": "ワークスペースの既定値はこのプロファイルを参照していませんでした。",
+      "deleteSuccessAgents": "{count} 件のエージェント選択を解除しました。",
+      "deleteSuccessRunningRuntimes": "{count} 件の実行中ランタイムが適用済み設定とストレージを保持しました。",
+      "deleteSuccessRecreationOperations": "{count} 件の実行中の再作成操作を終了対象にしました。",
+      "deleteErrors": {
+        "CONFLICT": {
+          "title": "プロファイルが変更されています",
+          "description": "古いバージョンのプロファイルで削除を試みました。このダイアログを閉じ、更新されたプロファイルを確認してから再試行してください。"
+        },
+        "NOT_FOUND": {
+          "title": "プロファイルは既に存在しません",
+          "description": "既に削除されている可能性があります。このダイアログを閉じると、更新された一覧に戻ります。"
+        },
+        "FORBIDDEN": {
+          "title": "オーナー権限が必要です",
+          "description": "ランタイムプロファイルを完全に削除できるのはワークスペースオーナーだけです。"
+        },
+        "UNAUTHORIZED": {
+          "title": "再ログインが必要です",
+          "description": "再度ログインしてから削除をやり直してください。"
+        },
+        "BAD_REQUEST": {
+          "title": "削除リクエストが拒否されました",
+          "description": "現在のリクエストではプロファイルを削除できませんでした。このダイアログを閉じ、更新されたプロファイルを確認してから再試行してください。"
+        },
+        "UNKNOWN": {
+          "title": "ランタイムプロファイルを削除できませんでした",
+          "description": "ランタイムプロファイルを削除できませんでした。"
+        }
+      },
       "operationLoading": "再作成の進行状況を読み込んでいます…",
       "operationTitle": "ランタイムの再作成",
       "operationCounts": "成功 {succeeded} · 実行中 {running} · 失敗 {failed} · スキップ {skipped} · 合計 {total}",

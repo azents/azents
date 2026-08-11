@@ -17,9 +17,10 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { IconPlus, IconRefresh } from "@tabler/icons-react";
+import { IconPlus, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { runtimeProfileAvailabilityReason } from "../runtimeProfilePresentation";
+import { RuntimeProfileDeleteModal } from "./RuntimeProfileDeleteModal";
 import { RuntimeProfileFormModal } from "./RuntimeProfileFormModal";
 import type { RuntimeProfilesContainerOutput } from "../containers/useRuntimeProfilesContainer";
 import type {
@@ -48,13 +49,20 @@ export function RuntimeProfiles(
     editorState,
     mutationState,
     operationState,
+    deletionState,
+    deletionFeedbackState,
     canManage,
+    canDelete,
     onOpenCreate,
     onOpenEdit,
     onCloseEditor,
     onSubmit,
     onSetDefault,
     onRecreate,
+    onOpenDelete,
+    onCloseDelete,
+    onConfirmDelete,
+    onDismissDeletionFeedback,
   } = props;
   const t = useTranslations("workspace.runtimeProfiles");
 
@@ -108,6 +116,43 @@ export function RuntimeProfiles(
         {state.infrastructureProfiles.length === 0 && (
           <Alert color="yellow" title={t("noInfrastructureTitle")}>
             {t("noInfrastructureDescription")}
+          </Alert>
+        )}
+
+        {deletionFeedbackState.type === "SUCCESS" && (
+          <Alert
+            color="green"
+            title={t("deleteSuccessTitle", {
+              name: deletionFeedbackState.profileName,
+            })}
+            withCloseButton
+            onClose={onDismissDeletionFeedback}
+          >
+            <Stack gap={2}>
+              <Text size="sm">
+                {deletionFeedbackState.result.cleared_workspace_default
+                  ? t("deleteSuccessDefaultCleared")
+                  : t("deleteSuccessDefaultUnchanged")}
+              </Text>
+              <Text size="sm">
+                {t("deleteSuccessAgents", {
+                  count: deletionFeedbackState.result.cleared_agent_count,
+                })}
+              </Text>
+              <Text size="sm">
+                {t("deleteSuccessRunningRuntimes", {
+                  count:
+                    deletionFeedbackState.result.affected_running_runtime_count,
+                })}
+              </Text>
+              <Text size="sm">
+                {t("deleteSuccessRecreationOperations", {
+                  count:
+                    deletionFeedbackState.result
+                      .superseded_recreation_operation_count,
+                })}
+              </Text>
+            </Stack>
           </Alert>
         )}
 
@@ -245,6 +290,24 @@ export function RuntimeProfiles(
                           >
                             {t("recreate")}
                           </Button>
+                          {canDelete && (
+                            <Button
+                              aria-label={t("deleteActionLabel", {
+                                name: profile.display_name,
+                              })}
+                              color="red"
+                              leftSection={<IconTrash size={rem(14)} />}
+                              size="xs"
+                              variant="subtle"
+                              onClick={() => onOpenDelete(profile)}
+                              disabled={
+                                mutationState.type === "SUBMITTING" ||
+                                deletionState.type === "SUBMITTING"
+                              }
+                            >
+                              {t("delete")}
+                            </Button>
+                          )}
                         </Group>
                       </Table.Td>
                     </Table.Tr>
@@ -346,6 +409,11 @@ export function RuntimeProfiles(
         infrastructureProfiles={state.infrastructureProfiles}
         onClose={onCloseEditor}
         onSubmit={onSubmit}
+      />
+      <RuntimeProfileDeleteModal
+        state={deletionState}
+        onClose={onCloseDelete}
+        onConfirm={onConfirmDelete}
       />
     </Box>
   );

@@ -608,6 +608,51 @@
       "disabled": "Disabled",
       "edit": "Edit",
       "recreate": "Recreate runtimes",
+      "delete": "Delete",
+      "deleteActionLabel": "Delete {name}",
+      "deleteTitle": "Permanently delete runtime profile",
+      "deleteIrreversibleTitle": "This action cannot be undone",
+      "deleteIrreversibleDescription": "{name} will be permanently removed and its name can be reused for a new profile.",
+      "deleteSelectionsTitle": "Selections will be cleared",
+      "deleteSelectionsDescription": "If this profile is the workspace default or selected by agents, those selections become unconfigured. No replacement profile is chosen.",
+      "deleteRetainedTitle": "Running work is retained",
+      "deleteRetainedDescription": "Existing running runtimes keep their applied configuration and Agent Workspace storage. Configuration-dependent actions require an explicit replacement profile.",
+      "deleteNameInstruction": "Type <name></name> to confirm.",
+      "deleteNameLabel": "Runtime profile name",
+      "deleteAcknowledgement": "I understand that this deletion is permanent and does not select a replacement profile.",
+      "deleteConfirm": "Delete profile permanently",
+      "deleteSuccessTitle": "{name} was permanently deleted",
+      "deleteSuccessDefaultCleared": "The workspace default was cleared.",
+      "deleteSuccessDefaultUnchanged": "The workspace default did not reference this profile.",
+      "deleteSuccessAgents": "{count, plural, =0 {No agent selections were cleared.} =1 {1 agent selection was cleared.} other {# agent selections were cleared.}}",
+      "deleteSuccessRunningRuntimes": "{count, plural, =0 {No running runtimes were affected.} =1 {1 running runtime kept its applied configuration and storage.} other {# running runtimes kept their applied configuration and storage.}}",
+      "deleteSuccessRecreationOperations": "{count, plural, =0 {No active recreation operations were superseded.} =1 {1 active recreation operation was superseded.} other {# active recreation operations were superseded.}}",
+      "deleteErrors": {
+        "CONFLICT": {
+          "title": "The profile changed",
+          "description": "This deletion used a stale profile version. Close this dialog, review the refreshed profile, and try again."
+        },
+        "NOT_FOUND": {
+          "title": "The profile no longer exists",
+          "description": "It may already have been deleted. Close this dialog to return to the refreshed list."
+        },
+        "FORBIDDEN": {
+          "title": "Owner permission required",
+          "description": "Only a workspace owner can permanently delete a runtime profile."
+        },
+        "UNAUTHORIZED": {
+          "title": "Sign-in required",
+          "description": "Sign in again before retrying this deletion."
+        },
+        "BAD_REQUEST": {
+          "title": "Deletion request rejected",
+          "description": "The profile could not be deleted with the current request. Close this dialog, review the refreshed profile, and try again."
+        },
+        "UNKNOWN": {
+          "title": "Runtime profile deletion failed",
+          "description": "The runtime profile could not be deleted."
+        }
+      },
       "operationLoading": "Loading recreation progress…",
       "operationTitle": "Runtime recreation",
       "operationCounts": "{succeeded} succeeded · {running} running · {failed} failed · {skipped} skipped · {total} total",

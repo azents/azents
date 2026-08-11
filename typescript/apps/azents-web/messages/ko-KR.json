@@ -608,6 +608,51 @@
       "disabled": "비활성",
       "edit": "수정",
       "recreate": "런타임 재생성",
+      "delete": "삭제",
+      "deleteActionLabel": "{name} 삭제",
+      "deleteTitle": "런타임 프로필 영구 삭제",
+      "deleteIrreversibleTitle": "이 작업은 되돌릴 수 없습니다",
+      "deleteIrreversibleDescription": "{name} 프로필이 영구적으로 삭제되며, 해당 이름은 새 프로필에 다시 사용할 수 있습니다.",
+      "deleteSelectionsTitle": "선택이 해제됩니다",
+      "deleteSelectionsDescription": "이 프로필이 워크스페이스 기본값이거나 에이전트에 선택되어 있으면 해당 선택은 미설정 상태가 됩니다. 대체 프로필은 자동으로 선택되지 않습니다.",
+      "deleteRetainedTitle": "실행 중인 작업은 유지됩니다",
+      "deleteRetainedDescription": "이미 실행 중인 런타임은 적용된 설정과 에이전트 워크스페이스 스토리지를 유지합니다. 설정이 필요한 작업을 복구하려면 대체 프로필을 명시적으로 선택해야 합니다.",
+      "deleteNameInstruction": "확인하려면 <name></name>을(를) 입력하세요.",
+      "deleteNameLabel": "런타임 프로필 이름",
+      "deleteAcknowledgement": "이 삭제가 영구적이며 대체 프로필이 선택되지 않는다는 점을 이해했습니다.",
+      "deleteConfirm": "프로필 영구 삭제",
+      "deleteSuccessTitle": "{name} 프로필을 영구 삭제했습니다",
+      "deleteSuccessDefaultCleared": "워크스페이스 기본 프로필 선택을 해제했습니다.",
+      "deleteSuccessDefaultUnchanged": "워크스페이스 기본값은 이 프로필을 참조하지 않았습니다.",
+      "deleteSuccessAgents": "에이전트 선택 {count}개를 해제했습니다.",
+      "deleteSuccessRunningRuntimes": "실행 중인 런타임 {count}개가 적용된 설정과 스토리지를 유지했습니다.",
+      "deleteSuccessRecreationOperations": "진행 중인 런타임 재생성 작업 {count}개를 종료 처리했습니다.",
+      "deleteErrors": {
+        "CONFLICT": {
+          "title": "프로필이 변경되었습니다",
+          "description": "이 삭제 요청은 이전 프로필 버전을 사용했습니다. 창을 닫고 새로 고쳐진 프로필을 확인한 후 다시 시도하세요."
+        },
+        "NOT_FOUND": {
+          "title": "프로필이 더 이상 존재하지 않습니다",
+          "description": "이미 삭제되었을 수 있습니다. 창을 닫으면 새로 고쳐진 목록으로 돌아갑니다."
+        },
+        "FORBIDDEN": {
+          "title": "소유자 권한이 필요합니다",
+          "description": "워크스페이스 소유자만 런타임 프로필을 영구 삭제할 수 있습니다."
+        },
+        "UNAUTHORIZED": {
+          "title": "다시 로그인해야 합니다",
+          "description": "다시 로그인한 후 삭제를 재시도하세요."
+        },
+        "BAD_REQUEST": {
+          "title": "삭제 요청이 거부되었습니다",
+          "description": "현재 요청으로 프로필을 삭제할 수 없습니다. 창을 닫고 새로 고쳐진 프로필을 확인한 후 다시 시도하세요."
+        },
+        "UNKNOWN": {
+          "title": "런타임 프로필 삭제에 실패했습니다",
+          "description": "런타임 프로필을 삭제할 수 없습니다."
+        }
+      },
       "operationLoading": "재생성 진행 상태를 불러오는 중…",
       "operationTitle": "런타임 재생성",
       "operationCounts": "성공 {succeeded} · 실행 중 {running} · 실패 {failed} · 건너뜀 {skipped} · 전체 {total}",
