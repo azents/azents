@@ -66,6 +66,9 @@ from azents.services.external_channel.ingress_queue import (
     _retry_transition,
     build_external_channel_ingress_job_request,
 )
+from azents.services.external_channel.mailbox_ingestion_store import (
+    ExternalChannelConfiguredBindingResult,
+)
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
 )
@@ -76,6 +79,7 @@ from azents.services.mailbox import (
     MailboxAdmissionResult,
     MailboxService,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 8, 10, 2, tzinfo=datetime.UTC)
 
@@ -282,8 +286,12 @@ def _service(
     mailbox_service: MagicMock,
     agent_session_repository: MagicMock,
     wake_dispatcher: MagicMock,
+    provider_control: MagicMock | None = None,
 ) -> ExternalChannelIngressDrainService:
     """Construct the drain with isolated collaborators."""
+    control = provider_control or MagicMock()
+    if provider_control is None:
+        control.attempt = AsyncMock()
     return ExternalChannelIngressDrainService(
         session_manager=session_manager,
         repository=cast(ExternalChannelRepository, repository),
@@ -308,10 +316,7 @@ def _service(
             ExternalChannelMailboxWakeDispatcher,
             wake_dispatcher,
         ),
-        provider_control=cast(
-            ExternalChannelProviderControlService,
-            MagicMock(),
-        ),
+        provider_control=cast(ExternalChannelProviderControlService, control),
         metrics=ExternalChannelIngressMetrics(),
     )
 
@@ -668,6 +673,14 @@ async def test_preparation_locks_connection_before_owner() -> None:
 
     queue_repository.lock_leased_owner = AsyncMock(side_effect=lock_owner)
     queue_repository.mark_owner_ready = AsyncMock()
+    provider_control = MagicMock()
+    presence_plan = make_provider_effect_plan("joined-presence")
+    progress_plan = make_provider_effect_plan("initial-progress")
+
+    async def attempt_control(_plan: object) -> None:
+        transaction.commit.assert_awaited_once()
+
+    provider_control.attempt = AsyncMock(side_effect=attempt_control)
     service = _service(
         session_manager=_session_manager(transaction),
         repository=repository,
@@ -675,12 +688,17 @@ async def test_preparation_locks_connection_before_owner() -> None:
         mailbox_service=MagicMock(),
         agent_session_repository=MagicMock(),
         wake_dispatcher=MagicMock(),
+        provider_control=provider_control,
     )
     service.provisioning_service.prepare = AsyncMock(return_value=object())
     service.provisioning_service.complete = AsyncMock(
-        return_value=ExternalChannelBinding.model_construct(
-            id="binding-1",
-            agent_session_id="session-1",
+        return_value=ExternalChannelConfiguredBindingResult(
+            binding=ExternalChannelBinding.model_construct(
+                id="binding-1",
+                agent_session_id="session-1",
+            ),
+            session_created=True,
+            control_plans=(presence_plan, progress_plan),
         )
     )
 
@@ -693,6 +711,17 @@ async def test_preparation_locks_connection_before_owner() -> None:
     assert prepared
     assert calls == ["connection", "owner"]
     transaction.commit.assert_awaited_once()
+    queue_repository.mark_owner_ready.assert_awaited_once_with(
+        transaction,
+        owner=owner,
+        binding_id="binding-1",
+        session_id="session-1",
+        initial_title_eligible=True,
+    )
+    assert provider_control.attempt.await_args_list == [
+        ((presence_plan,), {}),
+        ((progress_plan,), {}),
+    ]
 
 
 async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(

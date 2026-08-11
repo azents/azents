@@ -450,7 +450,7 @@ async def test_discord_history_preserves_reference_mappings() -> None:
         provider=ExternalChannelProvider.DISCORD,
         provider_event_type="discord_message_create",
         provider_tenant_id="100",
-        provider_channel_id="200",
+        provider_channel_id="300",
         provider_parent_channel_id="200",
         provider_thread_key="300",
         delivery_thread_key="300",
@@ -469,6 +469,7 @@ async def test_discord_history_preserves_reference_mappings() -> None:
     )
 
     read_range_call = discord_client.read_range.await_args.kwargs
+    assert read_range_call["trigger"].source_channel_id == "200"
     assert read_range_call["trigger"].conversation_channel_id == "300"
     assert read_range_call["trigger"].trigger_message_id == "2"
     assert history.context_omitted is True
