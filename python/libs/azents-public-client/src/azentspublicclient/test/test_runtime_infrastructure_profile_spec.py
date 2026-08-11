@@ -44,7 +44,6 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
                 service_account_name = '',
                 scheduling = { },
                 dind = { },
-                process_containment = { },
                 network_name = ''
             )
         else:
@@ -58,7 +57,6 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
                 service_account_name = '',
                 scheduling = { },
                 dind = { },
-                process_containment = { },
                 network_name = '',
         )
         """

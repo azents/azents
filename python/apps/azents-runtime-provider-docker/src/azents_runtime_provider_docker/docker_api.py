@@ -76,10 +76,6 @@ class DockerContainerSpec:
 class DockerApi(Protocol):
     """Docker operations required by the Provider lifecycle."""
 
-    async def security_options(self) -> Sequence[str]:
-        """Return Docker daemon security-option evidence."""
-        ...
-
     async def ensure_network(self, name: str) -> None:
         """Create the Docker network when missing."""
         ...

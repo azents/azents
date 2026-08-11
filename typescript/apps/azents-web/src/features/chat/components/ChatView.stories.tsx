@@ -85,14 +85,6 @@ const readyWorkspaceState: WorkspacePanelState = {
       status: "applied",
       desired: null,
       applied: null,
-      containment: {
-        enabled: true,
-        applied: true,
-        recreation_required: false,
-        nested_docker_available: false,
-        runtime_available: true,
-        availability_reason_code: null,
-      },
     },
   },
   manifest: {

@@ -2,18 +2,10 @@
 
 import json
 import logging
-from collections.abc import Mapping
-from pathlib import Path
 
 import pytest
 from pytest import MonkeyPatch
 
-from azents_runtime_runner.containment import (
-    ContainmentQualificationError,
-    ExecutionBackend,
-    ExecutionProcess,
-    ExecutionSpec,
-)
 from azents_runtime_runner.main import (
     RunnerLimitConfig,
     StructuredLogFormatter,
@@ -22,7 +14,6 @@ from azents_runtime_runner.main import (
     run_runtime_runner,
     runner_limit_config_from_env,
 )
-from azents_runtime_runner.workspace import FilesystemAccessPolicy
 
 
 @pytest.mark.asyncio
@@ -38,6 +29,16 @@ async def test_runner_requires_auth_credential_id(
     monkeypatch.delenv("AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID", raising=False)
 
     with pytest.raises(SystemExit, match="AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"):
+        await run_runtime_runner()
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_removed_containment_bootstrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG", "")
+
+    with pytest.raises(SystemExit, match="AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"):
         await run_runtime_runner()
 
 
@@ -105,128 +106,6 @@ def test_runner_reads_provider_injected_configuration_evidence(
     assert evidence.revision_id == "revision-1"
     assert evidence.digest == "a" * 64
     assert evidence.desired_generation == 3
-
-
-class _FakeExecutionBackend:
-    def __init__(self, *, qualification_error: str | None = None) -> None:
-        self.qualification_error = qualification_error
-        self.qualified = 0
-        self.closed = 0
-
-    @property
-    def kind(self) -> str:
-        return "fake"
-
-    @property
-    def filesystem_access_policy(self) -> FilesystemAccessPolicy:
-        return FilesystemAccessPolicy.unrestricted()
-
-    def agent_environment(
-        self,
-        *,
-        workspace_path: str,
-        operation_environment: Mapping[str, str],
-    ) -> Mapping[str, str]:
-        del workspace_path
-        return dict(operation_environment)
-
-    async def qualify(self) -> None:
-        self.qualified += 1
-        if self.qualification_error is not None:
-            raise ContainmentQualificationError(self.qualification_error)
-
-    async def start(self, spec: ExecutionSpec) -> ExecutionProcess:
-        del spec
-        raise AssertionError("startup tests do not execute Agent processes")
-
-    async def close(self) -> None:
-        self.closed += 1
-
-
-def _set_required_runner_env(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    workspace_path: Path,
-) -> None:
-    values: Mapping[str, str] = {
-        "AZ_RUNTIME_CONTROL_ENDPOINT": "runtime-control:8030",
-        "AZ_RUNTIME_TRANSFER_ENDPOINT": "runtime-transfer:8031",
-        "AZ_RUNTIME_CONTROL_ALLOW_INSECURE": "true",
-        "AZ_RUNTIME_ID": "runtime-1",
-        "HOME": str(workspace_path),
-        "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID": "credential-1",
-        "AZ_RUNTIME_RUNNER_AUTH_TOKEN": "runner-token",
-        "AZ_RUNTIME_CONFIGURATION_REVISION_ID": "revision-1",
-        "AZ_RUNTIME_CONFIGURATION_DIGEST": "a" * 64,
-        "AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION": "3",
-    }
-    for name, value in values.items():
-        monkeypatch.setenv(name, value)
-
-
-@pytest.mark.asyncio
-async def test_containment_qualification_failure_prevents_control_client_creation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _set_required_runner_env(monkeypatch, workspace_path=tmp_path)
-    backend = _FakeExecutionBackend(qualification_error="probe_failed")
-
-    def select_backend(*, workspace_path: str) -> ExecutionBackend:
-        del workspace_path
-        return backend
-
-    monkeypatch.setattr(
-        "azents_runtime_runner.main.execution_backend_from_environment",
-        select_backend,
-    )
-
-    def fail_control_client(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("Control client must not be constructed before qualification")
-
-    monkeypatch.setattr(
-        "azents_runtime_runner.main.GrpcRunnerControlClient.from_endpoint",
-        fail_control_client,
-    )
-
-    with pytest.raises(SystemExit, match="probe_failed"):
-        await run_runtime_runner()
-
-    assert backend.qualified == 1
-    assert backend.closed == 1
-
-
-@pytest.mark.asyncio
-async def test_successful_qualification_precedes_control_client_creation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _set_required_runner_env(monkeypatch, workspace_path=tmp_path)
-    backend = _FakeExecutionBackend()
-
-    def select_backend(*, workspace_path: str) -> ExecutionBackend:
-        del workspace_path
-        return backend
-
-    monkeypatch.setattr(
-        "azents_runtime_runner.main.execution_backend_from_environment",
-        select_backend,
-    )
-
-    def stop_after_qualification(*_args: object, **_kwargs: object) -> None:
-        assert backend.qualified == 1
-        raise RuntimeError("stop after qualification")
-
-    monkeypatch.setattr(
-        "azents_runtime_runner.main.GrpcRunnerControlClient.from_endpoint",
-        stop_after_qualification,
-    )
-
-    with pytest.raises(RuntimeError, match="stop after qualification"):
-        await run_runtime_runner()
-
-    assert backend.qualified == 1
-    assert backend.closed == 1
 
 
 @pytest.mark.asyncio

@@ -606,10 +606,6 @@
       "unavailable": "Unavailable",
       "active": "Active",
       "disabled": "Disabled",
-      "containmentEnabled": "Process isolation",
-      "containmentDisabled": "Direct execution",
-      "nestedDockerAvailable": "Nested Docker available",
-      "nestedDockerUnavailable": "Nested Docker unavailable",
       "edit": "Edit",
       "recreate": "Recreate runtimes",
       "operationLoading": "Loading recreation progress…",
@@ -2109,34 +2105,6 @@
       "configurationApplied": "Currently applied configuration",
       "configurationNoDesired": "No desired configuration has been resolved.",
       "configurationNoApplied": "No configuration has been applied to a runtime.",
-      "containment": {
-        "title": "Process containment",
-        "enabled": {
-          "label": "Isolation policy",
-          "enabled": "Enabled",
-          "disabled": "Disabled"
-        },
-        "applied": {
-          "label": "Current runtime",
-          "applied": "Applied",
-          "pending": "Pending",
-          "notEnabled": "Not enabled"
-        },
-        "recreation": {
-          "label": "Recreation",
-          "required": "Required",
-          "notRequired": "Not required"
-        },
-        "availability": {
-          "label": "Runtime operations",
-          "available": "Available",
-          "unavailable": "Unavailable",
-          "availableDescription": "Runtime operations are available for the current configuration.",
-          "recreationDescription": "Recreate the runtime before running workspace operations with the new configuration.",
-          "blockedDescription": "Runtime operations are unavailable because the selected configuration is blocked.",
-          "unavailableDescription": "Runtime operations are unavailable until the runtime is ready with the current configuration."
-        }
-      },
       "configurationEvidence": {
         "revision": "Revision",
         "profile": "Runtime profile",

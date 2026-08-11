@@ -4,6 +4,7 @@ import enum
 import hashlib
 import ipaddress
 import json
+from collections.abc import Mapping
 from typing import Annotated, Literal, assert_never
 
 from pydantic import (
@@ -131,6 +132,24 @@ class _FrozenProfileModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class _DirectProfileSpecV2(_FrozenProfileModel):
+    """Profile v2 compatibility for the removed containment field."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_removed_process_containment(cls, value: object) -> object:
+        """Ignore only the historical null serialization of the removed field."""
+        if (
+            not isinstance(value, Mapping)
+            or "process_containment" not in value
+            or value.get("process_containment") is not None
+        ):
+            return value
+        normalized = dict(value)
+        normalized.pop("process_containment")
+        return normalized
+
+
 class KubernetesContainerResources(_FrozenProfileModel):
     """Explicit Kubernetes resources for one known Runtime component."""
 
@@ -241,13 +260,7 @@ class KubernetesPodProfileSpecV1(_FrozenProfileModel):
     dind: KubernetesDinDModule | None
 
 
-class RuntimeProcessContainmentModuleV1(_FrozenProfileModel):
-    """Portable Provider-owned process containment contract version 1."""
-
-    schema_version: Literal[1]
-
-
-class KubernetesPodProfileSpecV2(_FrozenProfileModel):
+class KubernetesPodProfileSpecV2(_DirectProfileSpecV2):
     """Kubernetes Pod Profile contract version 2."""
 
     profile_kind: Literal[RuntimeInfrastructureProfileKind.KUBERNETES_POD]
@@ -259,16 +272,6 @@ class KubernetesPodProfileSpecV2(_FrozenProfileModel):
     service_account_name: Annotated[str | None, Field(max_length=253)]
     scheduling: KubernetesSchedulingModule
     dind: KubernetesDinDModule | None
-    process_containment: RuntimeProcessContainmentModuleV1 | None
-
-    @model_validator(mode="after")
-    def validate_containment(self) -> "KubernetesPodProfileSpecV2":
-        """Reject mutually exclusive containment and nested Docker authority."""
-        if self.process_containment is not None and self.dind is not None:
-            raise ValueError(
-                "Process containment cannot be combined with nested Docker."
-            )
-        return self
 
 
 class DockerContainerResources(_FrozenProfileModel):
@@ -307,7 +310,7 @@ class DockerContainerProfileSpecV1(_FrozenProfileModel):
     network_name: Annotated[str | None, Field(max_length=255)]
 
 
-class DockerContainerProfileSpecV2(_FrozenProfileModel):
+class DockerContainerProfileSpecV2(_DirectProfileSpecV2):
     """Docker Container Profile contract version 2."""
 
     profile_kind: Literal[RuntimeInfrastructureProfileKind.DOCKER_CONTAINER]
@@ -315,7 +318,6 @@ class DockerContainerProfileSpecV2(_FrozenProfileModel):
     schema_version: Literal[2]
     runner_resources: DockerContainerResources
     network_name: Annotated[str | None, Field(max_length=255)]
-    process_containment: RuntimeProcessContainmentModuleV1 | None
 
 
 def _runtime_profile_discriminator(value: object) -> str | None:
@@ -360,43 +362,6 @@ type RuntimeInfrastructureProfileSpec = Annotated[
     ],
     Discriminator(_runtime_profile_discriminator),
 ]
-
-
-class RuntimeProfileContainmentStatus(_FrozenProfileModel):
-    """Safe containment capabilities derived from one typed Profile."""
-
-    enabled: bool
-    nested_docker_available: bool
-
-
-def derive_runtime_profile_containment_status(
-    spec: RuntimeInfrastructureProfileSpec,
-) -> RuntimeProfileContainmentStatus:
-    """Derive product-facing containment capabilities from a typed Profile."""
-    match spec:
-        case KubernetesPodProfileSpecV1():
-            return RuntimeProfileContainmentStatus(
-                enabled=False,
-                nested_docker_available=spec.dind is not None,
-            )
-        case KubernetesPodProfileSpecV2():
-            enabled = spec.process_containment is not None
-            return RuntimeProfileContainmentStatus(
-                enabled=enabled,
-                nested_docker_available=spec.dind is not None and not enabled,
-            )
-        case DockerContainerProfileSpecV1():
-            return RuntimeProfileContainmentStatus(
-                enabled=False,
-                nested_docker_available=False,
-            )
-        case DockerContainerProfileSpecV2():
-            return RuntimeProfileContainmentStatus(
-                enabled=spec.process_containment is not None,
-                nested_docker_available=False,
-            )
-        case _:
-            assert_never(spec)
 
 
 class WorkspaceRuntimeProfilePolicyV1(_FrozenProfileModel):
@@ -609,11 +574,6 @@ def required_runtime_profile_capabilities(
                 required.add("kubernetes.scheduling")
             if spec.dind is not None:
                 required.update({"docker.dind", "docker.storage.ephemeral"})
-            if (
-                isinstance(spec, KubernetesPodProfileSpecV2)
-                and spec.process_containment is not None
-            ):
-                required.add("runtime.process-containment")
             return frozenset(required)
         case DockerContainerProfileSpecV1() | DockerContainerProfileSpecV2():
             required = {
@@ -621,11 +581,6 @@ def required_runtime_profile_capabilities(
                 "runtime.resources",
                 "workspace.host-directory",
             }
-            if (
-                isinstance(spec, DockerContainerProfileSpecV2)
-                and spec.process_containment is not None
-            ):
-                required.add("runtime.process-containment")
             return frozenset(required)
         case _:
             assert_never(spec)

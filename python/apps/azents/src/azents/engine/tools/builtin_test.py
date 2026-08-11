@@ -1489,10 +1489,10 @@ class TestRuntimeToolkitUpdateContext:
         assert "Runtime Workspace" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
-    async def test_prompt_renders_contained_desired_profile_without_readiness(
+    async def test_prompt_rejects_removed_containment_profile_without_downgrade(
         self,
     ) -> None:
-        """Desired Profile behavior is available without physical Runtime readiness."""
+        """Historical enabled containment does not become direct execution."""
         toolkit = _make_toolkit(
             provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
             runner_state=RuntimeRunnerState.STARTING,
@@ -1536,10 +1536,8 @@ class TestRuntimeToolkitUpdateContext:
 
         prompt = await toolkit.get_static_prompt(_make_context())
 
-        assert "## Runtime Behavior" in prompt
-        assert "Commands and native file operations run as a non-root user." in prompt
-        assert "Nested Docker execution is unavailable." in prompt
-        assert "not current Runtime readiness" in prompt
+        assert "Runtime-dependent operations are currently unavailable." in prompt
+        assert "## Runtime Behavior" not in prompt
         runtime_service.ensure_started_for_agent.assert_not_awaited()
 
     @pytest.mark.asyncio

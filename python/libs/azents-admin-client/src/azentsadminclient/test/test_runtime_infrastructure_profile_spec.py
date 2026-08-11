@@ -74,8 +74,6 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
                         memory_limit_bytes = 1.0, ), 
                     docker_storage_bytes = 1.0, 
                     shared_temporary_storage_bytes = 1.0, ),
-                process_containment = azentsadminclient.models.runtime_process_containment_module_v1.RuntimeProcessContainmentModuleV1(
-                    schema_version = 1, ),
                 network_name = ''
             )
         else:
@@ -119,8 +117,6 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
                         memory_limit_bytes = 1.0, ), 
                     docker_storage_bytes = 1.0, 
                     shared_temporary_storage_bytes = 1.0, ),
-                process_containment = azentsadminclient.models.runtime_process_containment_module_v1.RuntimeProcessContainmentModuleV1(
-                    schema_version = 1, ),
                 network_name = '',
         )
         """

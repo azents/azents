@@ -31,11 +31,6 @@ class AioDockerApi(DockerApi):
             await self._docker.close()
             self._docker = None
 
-    async def security_options(self) -> Sequence[str]:
-        """Return Docker daemon security-option evidence."""
-        docker = await self._get_docker()
-        return _system_security_options(await docker.system.info())
-
     async def ensure_network(self, name: str) -> None:
         """Create the Docker network when missing."""
         docker = await self._get_docker()
@@ -191,10 +186,6 @@ def _container_info(name: str, raw_info: object) -> DockerContainerInfo:
             oom_killed=_required_bool(state.get("OOMKilled"), "OOMKilled"),
         ),
     )
-
-
-def _system_security_options(raw_info: object) -> tuple[str, ...]:
-    return _string_sequence(_mapping(raw_info).get("SecurityOptions"))
 
 
 def _container_name_from_object(container: DockerContainer) -> str:

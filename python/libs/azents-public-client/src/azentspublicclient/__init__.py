@@ -369,13 +369,10 @@ __all__ = [
     "ResponseModeRequest",
     "RuntimeConfigurationResolutionStatus",
     "RuntimeConfigurationRevisionResponse",
-    "RuntimeContainmentStatus",
     "RuntimeDesiredState",
     "RuntimeInfrastructureProfileSpec",
     "RuntimeLifecycleCommandType",
     "RuntimeNetworkPolicyModule",
-    "RuntimeProcessContainmentModuleV1",
-    "RuntimeProfileContainmentStatus",
     "RuntimeProfileLifecycle",
     "RuntimeProviderConnectionState",
     "RuntimeProviderCredentialExchangeRequest",
@@ -831,13 +828,10 @@ from azentspublicclient.models.response_llm_provider_integration_v1_get_subscrip
 from azentspublicclient.models.response_mode_request import ResponseModeRequest as ResponseModeRequest
 from azentspublicclient.models.runtime_configuration_resolution_status import RuntimeConfigurationResolutionStatus as RuntimeConfigurationResolutionStatus
 from azentspublicclient.models.runtime_configuration_revision_response import RuntimeConfigurationRevisionResponse as RuntimeConfigurationRevisionResponse
-from azentspublicclient.models.runtime_containment_status import RuntimeContainmentStatus as RuntimeContainmentStatus
 from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState as RuntimeDesiredState
 from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec as RuntimeInfrastructureProfileSpec
 from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLifecycleCommandType as RuntimeLifecycleCommandType
 from azentspublicclient.models.runtime_network_policy_module import RuntimeNetworkPolicyModule as RuntimeNetworkPolicyModule
-from azentspublicclient.models.runtime_process_containment_module_v1 import RuntimeProcessContainmentModuleV1 as RuntimeProcessContainmentModuleV1
-from azentspublicclient.models.runtime_profile_containment_status import RuntimeProfileContainmentStatus as RuntimeProfileContainmentStatus
 from azentspublicclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle as RuntimeProfileLifecycle
 from azentspublicclient.models.runtime_provider_connection_state import RuntimeProviderConnectionState as RuntimeProviderConnectionState
 from azentspublicclient.models.runtime_provider_credential_exchange_request import RuntimeProviderCredentialExchangeRequest as RuntimeProviderCredentialExchangeRequest

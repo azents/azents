@@ -27,7 +27,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2,<3" },
     { name = "python-dateutil", specifier = ">=2.8.2,<3" },
     { name = "typing-extensions", specifier = ">=4.7.1,<5" },
-    { name = "urllib3", specifier = ">=2.6.3,<3" },
+    { name = "urllib3", specifier = ">=2.7.0,<3" },
 ]
 
 [[package]]

@@ -17,10 +17,7 @@ from azents.core.enums import (
 from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.repos.agent_runtime_removal.data import AgentRuntimeRemovalOperation
 from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
-from azents.services.agent_runtime.lifecycle_data import (
-    AgentRuntimeConfigurationStatus,
-    RuntimeContainmentStatus,
-)
+from azents.services.agent_runtime.lifecycle_data import AgentRuntimeConfigurationStatus
 from azents.services.agent_runtime.service import AgentRuntimeService
 
 
@@ -69,14 +66,6 @@ def test_configuration_status_exposes_only_safe_revision_evidence() -> None:
             status="applied",
             desired=revision,
             applied=revision,
-            containment=RuntimeContainmentStatus(
-                enabled=True,
-                applied=True,
-                recreation_required=False,
-                nested_docker_available=False,
-                runtime_available=True,
-                availability_reason_code=None,
-            ),
         )
     ).model_dump(mode="json")
 

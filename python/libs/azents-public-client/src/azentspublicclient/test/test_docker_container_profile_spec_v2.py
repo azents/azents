@@ -39,8 +39,7 @@ class TestDockerContainerProfileSpecV2(unittest.TestCase):
                 contract_family = 'docker.container-profile',
                 schema_version = 2,
                 runner_resources = { },
-                network_name = '',
-                process_containment = { }
+                network_name = ''
             )
         else:
             return DockerContainerProfileSpecV2(
@@ -49,7 +48,6 @@ class TestDockerContainerProfileSpecV2(unittest.TestCase):
                 schema_version = 2,
                 runner_resources = { },
                 network_name = '',
-                process_containment = { },
         )
         """
 

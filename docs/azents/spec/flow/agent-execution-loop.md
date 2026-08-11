@@ -78,8 +78,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-10
-spec_version: 152
+last_verified_at: 2026-08-11
+spec_version: 153
 ---
 
 # Agent Execution Loop
@@ -749,15 +749,13 @@ caller's bounded timeout while retaining the initially selected revision and des
 both paths, a configuration or generation change during wait or execution fails closed rather than
 dispatching against a substituted Runtime.
 
-When the selected Profile enables containment, every Runtime-backed Tool uses the same filesystem
-access policy and logical path namespace. Shell and managed process Tools have that policy enforced
-by the Runner's bwrap process backend. Typed non-shell
-file/edit/patch/search/Git/import/presentation/image/transfer operations execute directly in Python
-inside the trusted Runner and have the same readable, writable, temporary, denied-path, and
-symlink/path-escape rules enforced before native I/O. Non-shell operations do not launch a helper
-process or enter bwrap. The execution loop retains the existing tool call/result, deadline,
-cancellation, metadata, and model-visible path contracts; policy enforcement failure never creates
-an automatic unrestricted retry.
+Runtime-backed process Tools execute directly through the Runner process service. Native
+file/edit/patch/search/Git/import/image/transfer operations execute directly in the Runner without a
+helper process. Relative paths resolve from the Agent Workspace, while absolute paths and native
+I/O are governed by the Runtime operating-system user's ordinary filesystem permissions.
+Service-owned boundaries such as user-visible file presentation remain separate. The execution
+loop retains the existing tool call/result, deadline, cancellation, metadata, and model-visible
+path contracts without describing these behaviors as process or infrastructure isolation.
 
 An active root External Channel binding may additionally expose
 `download_external_file` and file-bearing `channel_action`. The download Tool accepts one
@@ -1246,6 +1244,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-11** (spec_version 153) — Removed the contained execution branch and bwrap policy
+  enforcement; process and native file Tools now use direct Runner execution under the Runtime
+  operating-system user's ordinary filesystem permissions.
 - **2026-08-10** (spec_version 152) — Made AgentRuntime optional for model execution, added
   capability/version and Session-binding admission for Runtime-dependent work, preserved
   Runtime-independent execution, and added the irreversible removing fence across Team/User trees.

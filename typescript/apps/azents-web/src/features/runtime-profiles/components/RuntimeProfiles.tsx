@@ -195,28 +195,6 @@ export function RuntimeProfiles(
                               {t("disabled")}
                             </Badge>
                           )}
-                          <Badge
-                            color={
-                              profile.containment.enabled ? "green" : "gray"
-                            }
-                            variant="light"
-                          >
-                            {profile.containment.enabled
-                              ? t("containmentEnabled")
-                              : t("containmentDisabled")}
-                          </Badge>
-                          <Badge
-                            color={
-                              profile.containment.nested_docker_available
-                                ? "blue"
-                                : "gray"
-                            }
-                            variant="light"
-                          >
-                            {profile.containment.nested_docker_available
-                              ? t("nestedDockerAvailable")
-                              : t("nestedDockerUnavailable")}
-                          </Badge>
                         </Group>
                         {!profile.available && (
                           <Stack gap={2} mt="xs">

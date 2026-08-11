@@ -60,10 +60,6 @@ const profile: WorkspaceRuntimeProfileResponse = {
   compatible: true,
   missing_capabilities: [],
   incompatible_constraints: [],
-  containment: {
-    enabled: true,
-    nested_docker_available: true,
-  },
   created_at: "2026-06-25T08:00:00Z",
   updated_at: "2026-06-25T08:00:00Z",
 };
@@ -113,14 +109,6 @@ const managed: AgentRuntimeResponse = {
     status: "configured_not_created",
     desired: null,
     applied: null,
-    containment: {
-      enabled: true,
-      applied: true,
-      recreation_required: false,
-      nested_docker_available: true,
-      runtime_available: true,
-      availability_reason_code: null,
-    },
   },
   actions: { ...actions, remove: true, start: true },
 };

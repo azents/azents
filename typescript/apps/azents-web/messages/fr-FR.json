@@ -606,10 +606,6 @@
       "unavailable": "Indisponible",
       "active": "Actif",
       "disabled": "Désactivé",
-      "containmentEnabled": "Isolation des processus",
-      "containmentDisabled": "Exécution directe",
-      "nestedDockerAvailable": "Docker imbriqué disponible",
-      "nestedDockerUnavailable": "Docker imbriqué indisponible",
       "edit": "Modifier",
       "recreate": "Recréer les environnements",
       "operationLoading": "Chargement de la progression de la recréation…",
@@ -2109,34 +2105,6 @@
       "configurationApplied": "Configuration actuellement appliquée",
       "configurationNoDesired": "Aucune configuration souhaitée n’a été résolue.",
       "configurationNoApplied": "Aucune configuration n’a été appliquée à un runtime.",
-      "containment": {
-        "title": "Confinement des processus",
-        "enabled": {
-          "label": "Politique d’isolation",
-          "enabled": "Activée",
-          "disabled": "Désactivée"
-        },
-        "applied": {
-          "label": "Runtime actuel",
-          "applied": "Appliqué",
-          "pending": "En attente",
-          "notEnabled": "Non activé"
-        },
-        "recreation": {
-          "label": "Recréation",
-          "required": "Requise",
-          "notRequired": "Non requise"
-        },
-        "availability": {
-          "label": "Opérations du runtime",
-          "available": "Disponibles",
-          "unavailable": "Indisponibles",
-          "availableDescription": "Les opérations du runtime sont disponibles avec la configuration actuelle.",
-          "recreationDescription": "Recréez le runtime avant d’exécuter des opérations Workspace avec la nouvelle configuration.",
-          "blockedDescription": "Les opérations du runtime sont indisponibles, car la configuration sélectionnée est bloquée.",
-          "unavailableDescription": "Les opérations du runtime restent indisponibles jusqu’à ce que la configuration actuelle soit prête."
-        }
-      },
       "configurationEvidence": {
         "revision": "Révision",
         "profile": "Profil du runtime",

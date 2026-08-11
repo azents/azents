@@ -22,13 +22,13 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 
-from azents_runtime_runner.containment import DirectExecutionBackend
+from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.operations import (
     RunnerOperations,
     # Validate root-prefix parsing without traversing the host root.
     _extract_glob_dir_prefix,
 )
-from azents_runtime_runner.workspace import FilesystemAccessPolicy, Workspace
+from azents_runtime_runner.workspace import Workspace
 
 
 class _FakeClient:
@@ -258,66 +258,6 @@ async def test_file_write_read_and_list_stay_in_workspace(tmp_path: Path) -> Non
             "modified_at": modified_at,
         }
     ]
-
-
-@pytest.mark.asyncio
-async def test_contained_native_operations_enforce_filesystem_permissions(
-    tmp_path: Path,
-) -> None:
-    """Python handlers reject denied paths before native filesystem access."""
-    root = tmp_path / "agent"
-    private = tmp_path / "runner-private"
-    outside = Path("/var/lib") / f"azents-native-operation-{tmp_path.name}"
-    root.mkdir()
-    private.mkdir()
-    (private / "credential").write_text("secret")
-    (root / "private-link").symlink_to(private, target_is_directory=True)
-    client = _FakeClient()
-    operations = RunnerOperations(
-        execution_backend=DirectExecutionBackend(),
-        client=client,
-        workspace=Workspace(
-            str(root),
-            access_policy=FilesystemAccessPolicy.contained(
-                temporary_backing_path=tmp_path / "agent-temporary",
-                read_only_paths=(),
-                denied_paths=(private,),
-            ),
-        ),
-    )
-
-    await operations.handle(
-        _operation(
-            operation_type="file.read",
-            payload={"path": "private-link/credential"},
-        )
-    )
-    await operations.handle(
-        _operation(
-            operation_type="file.write",
-            payload={"path": str(outside / "report.txt")},
-            body_chunks=(RunnerBodyChunk(chunk_id=1, data=b"blocked", final=True),),
-        )
-    )
-    await operations.handle(
-        _operation(
-            operation_type="list_git_refs",
-            payload={"source_project_path": str(private)},
-        )
-    )
-
-    errors = [
-        event.payload
-        for event in client.events
-        if event.event_type is RuntimeRunnerEventType.FINAL_ERROR
-    ]
-    assert [error["error_code"] for error in errors] == [
-        "INVALID_PATH",
-        "INVALID_PATH",
-        "invalid_source_path",
-    ]
-    assert not (outside / "report.txt").exists()
-    await operations.close()
 
 
 @pytest.mark.asyncio

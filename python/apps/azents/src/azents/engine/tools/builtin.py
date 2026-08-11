@@ -32,10 +32,6 @@ from azents.core.runtime_capabilities import (
     RuntimeCapabilityResolver,
 )
 from azents.core.runtime_profile import (
-    DockerContainerProfileSpecV1,
-    DockerContainerProfileSpecV2,
-    KubernetesPodProfileSpecV1,
-    KubernetesPodProfileSpecV2,
     RuntimeConfigurationResolutionStatus,
     parse_runtime_infrastructure_profile_spec,
 )
@@ -651,24 +647,6 @@ class RuntimeEnvProvider(Protocol):
 _RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT = (
     "Runtime-dependent operations are currently unavailable."
 )
-_RUNTIME_CONTAINED_BEHAVIOR_PROMPT = dedent(
-    """\
-    ## Runtime Behavior
-
-    Runtime-dependent operations follow the selected contained Runtime Profile when
-    they are available:
-
-    - The Agent Workspace is writable and remains the durable working area.
-    - `/tmp` and `/tmp/agent` provide Runtime-scoped temporary storage.
-    - The bundled system and development toolchain is readable and executable but
-      Runtime system state is not persistently writable.
-    - Commands and native file operations run as a non-root user.
-    - Nested Docker execution is unavailable.
-    - Ordinary outbound connectivity remains bounded by the Runtime Provider.
-
-    This describes the desired Runtime behavior, not current Runtime readiness.
-    """
-).strip()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1199,16 +1177,10 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         if not isinstance(effective_profile, dict):
             return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
         try:
-            profile = parse_runtime_infrastructure_profile_spec(effective_profile)
+            parse_runtime_infrastructure_profile_spec(effective_profile)
         except ValidationError:
             return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
-        match profile:
-            case KubernetesPodProfileSpecV2() | DockerContainerProfileSpecV2():
-                if profile.process_containment is not None:
-                    return (_RUNTIME_CONTAINED_BEHAVIOR_PROMPT, expected_authority)
-                return ("", expected_authority)
-            case KubernetesPodProfileSpecV1() | DockerContainerProfileSpecV1():
-                return ("", expected_authority)
+        return ("", expected_authority)
 
     async def _make_instruction_context(
         self,

@@ -9,7 +9,6 @@ Name | Type | Description | Notes
 **status** | **str** |  | 
 **desired** | [**RuntimeConfigurationRevisionResponse**](RuntimeConfigurationRevisionResponse.md) |  | 
 **applied** | [**RuntimeConfigurationRevisionResponse**](RuntimeConfigurationRevisionResponse.md) |  | 
-**containment** | [**RuntimeContainmentStatus**](RuntimeContainmentStatus.md) |  | 
 
 ## Example
 

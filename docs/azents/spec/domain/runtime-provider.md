@@ -52,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
 last_verified_at: 2026-08-11
-spec_version: 22
+spec_version: 23
 ---
 
 # Runtime Provider
@@ -89,13 +89,16 @@ typed contract, canonicalizes it, and creates or reuses the Provider-local diges
 registering the connection. A changed valid advertisement immediately changes current compatibility.
 An invalid advertisement is rejected and cannot retain command authority through older history.
 
-Process containment is Provider capability rather than Profile-declared proof. The Kubernetes
-Provider always advertises Profile schema v2 and `runtime.process-containment`, prepares the bundled
-backend from trusted deployment settings, and validates the trusted security-profile name and any
-configured RuntimeClass. Docker advertises the capability after its daemon AppArmor preflight
-succeeds. Each contained Runner independently qualifies the effective boundary before its Control
-registration and readiness. Missing or failed preparation cannot fall back to direct or another
-weaker backend for a contained Profile.
+Both Providers advertise Profile schema versions 1 and 2. Schema v2 no longer carries an
+Azents-owned process-containment module and does not require a containment capability. Historical
+stored schema-v2 documents with `process_containment: null` are normalized to the current direct
+contract; a non-null value is invalid and cannot silently execute through the direct path.
+Admin Profile write ingress rejects unknown removed fields instead of stripping them. Runner
+startup rejects `AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG`, and bundled Provider startup rejects every
+`AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_*` variable, including empty values, so version-skewed
+deployment configuration cannot silently select direct execution.
+Infrastructure-level process isolation remains an operator-owned deployment boundary rather than a
+Provider capability or Profile option.
 
 Provider-global operational configuration revisions remain a separate Provider-owned mechanism.
 They may configure the Provider process but cannot contain Workspace or Agent Runtime Profile
@@ -149,11 +152,10 @@ Each Provider owns typed infrastructure Profiles for its native substrate:
 - Docker Providers own Container Profile schema v1 or v2 containing typed resources and
   Docker-network placement.
 
-Profile v2 may add the portable `process_containment` module v1. The product-level module contains
-no backend or operating-system arguments. It requires the Provider capability
-`runtime.process-containment` and is mutually exclusive with Kubernetes DinD. Profile v1 remains
-valid and direct; Profile v2 without the module is also direct. Workspace, Agent, Session, and user
-surfaces can select a complete Profile but cannot alter or weaken its containment settings.
+Profile v1 and Profile v2 both describe direct Runner execution. Profile v2 retains its versioned
+contract shape for stored compatibility but has no process-containment field. Workspace, Agent,
+Session, and user surfaces select the complete infrastructure Profile without exposing an
+Azents-owned process-isolation toggle.
 
 Infrastructure Profile writes are Provider-kind-specific, expected-version-fenced, and validated
 against the Provider's current capability contract. Missing or removed capability makes dependent
@@ -174,9 +176,7 @@ NetworkPolicy-only Kubernetes changes may be adopted in place. PodSpec, PVC, and
 require explicit durable recreation. Provider-, infrastructure-Profile-, and Workspace-Profile-
 scoped recreation operations snapshot exact target IDs and versions, use bounded concurrency and
 retries, skip stale or superseded targets, and preserve Workspace storage. PVC expansion may apply
-to the current claim; shrink waits for an explicit destructive reset or terminal delete. Enabling
-or removing process containment changes the physical Runtime contract and therefore also requires
-explicit Workspace-preserving recreation; it is never silently applied to an existing incarnation.
+to the current claim; shrink waits for an explicit destructive reset or terminal delete.
 
 Kubernetes Provider v2 reports Pod lifecycle directly and does not use process-local command or
 NetworkPolicy verification history as lifecycle authority. A current `OBSERVE` completion may include
@@ -203,11 +203,9 @@ Control; only `agent-runtime-provider-kubernetes-v2` obtains connection and comm
 Docker Provider protocol behavior is unchanged.
 
 Admin/Public surfaces expose typed schema versions and values, current compatibility, impact,
-desired/applied status, containment enablement, nested-Docker availability, and bounded recreation
-progress. Agent Runtime status derives containment application and Runtime availability from the
-desired/applied revision and current Provider/Runner authority. These surfaces do not expose
-backend arguments, Provider credentials, socket paths, raw manifests, Kubernetes resource names,
-qualification diagnostics, or generic privileged controls.
+desired/applied status, and bounded recreation progress. These surfaces do not expose Provider
+credentials, socket paths, raw manifests, Kubernetes resource names, or generic privileged
+controls.
 
 ## Authentication bindings
 
@@ -244,15 +242,16 @@ The active chart has no Provider credential or shared Runtime Control authentica
 
 Authentication rollout does not render, own, select, delete, rename, or recreate Runtime PersistentVolumeClaims or PersistentVolumes. Credential-driven Runtime Pod replacement reuses the existing PVC; only the established explicit Runtime reset or terminal-delete operations may invoke PVC deletion.
 
-Containment deployment preparation is also deployment-owned. Docker configuration supplies the
-selected backend and AppArmor profile outside Profile input. Kubernetes Helm configuration supplies
-the backend, AppArmor profile, optional RuntimeClass, required RuntimeClass read RBAC, and separate
-Agent/Runner temporary storage preparation. Admin Profile editing cannot mutate those trusted
-values. A direct Profile rollback recreates compute with the direct backend while preserving the
-Agent Workspace.
+Runtime workload security is deployment-owned. Providers retain ordinary non-root workload
+hardening and substrate controls, while node security, RuntimeClass selection, AppArmor, gVisor,
+network controls, and infrastructure access are operator responsibilities outside Profile input.
+Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **23 (2026-08-11):** Removed the Azents-owned process-containment capability, Profile module,
+  derived status projections, and Provider deployment preparation while retaining schema-v2
+  compatibility for historical null fields and rejecting active containment requests.
 - **22 (2026-08-11):** Made Kubernetes process containment a permanent Provider capability and
   removed the deployment feature flag that conditionally advertised Profile schema v2.
 - **21 (2026-08-10):** Added optional logical Runtime binding, explicit stopped add and

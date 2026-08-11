@@ -2,10 +2,7 @@
 
 import pytest
 
-from azents_runtime_provider_docker.aiodocker_api import (
-    _container_info,
-    _system_security_options,
-)
+from azents_runtime_provider_docker.aiodocker_api import _container_info
 from azents_runtime_provider_docker.docker_api import DockerBindMount
 
 
@@ -20,23 +17,12 @@ def test_container_info_decodes_security_mount_and_terminal_evidence() -> None:
                 "Env": ["HOME=/runtime/home"],
             },
             "HostConfig": {
-                "CapAdd": [
-                    "SYS_ADMIN",
-                    "SYS_CHROOT",
-                    "NET_ADMIN",
-                    "SETUID",
-                    "SETGID",
-                    "SYS_PTRACE",
-                    "SETPCAP",
-                ],
+                "CapAdd": [],
                 "CapDrop": ["ALL"],
-                "SecurityOpt": [
-                    "seccomp=unconfined",
-                    "apparmor=azents-runtime-bwrap",
-                ],
-                "UsernsMode": "host",
-                "MaskedPaths": [],
-                "ReadonlyPaths": [],
+                "SecurityOpt": ["no-new-privileges"],
+                "UsernsMode": "",
+                "MaskedPaths": ["/proc/kcore"],
+                "ReadonlyPaths": ["/proc/asound"],
                 "Privileged": False,
             },
             "State": {
@@ -58,23 +44,12 @@ def test_container_info_decodes_security_mount_and_terminal_evidence() -> None:
     )
 
     assert info.user == "1000:1000"
-    assert info.cap_add == (
-        "SYS_ADMIN",
-        "SYS_CHROOT",
-        "NET_ADMIN",
-        "SETUID",
-        "SETGID",
-        "SYS_PTRACE",
-        "SETPCAP",
-    )
+    assert info.cap_add == ()
     assert info.cap_drop == ("ALL",)
-    assert info.security_options == (
-        "seccomp=unconfined",
-        "apparmor=azents-runtime-bwrap",
-    )
-    assert info.userns_mode == "host"
-    assert info.masked_paths == ()
-    assert info.readonly_paths == ()
+    assert info.security_options == ("no-new-privileges",)
+    assert info.userns_mode is None
+    assert info.masked_paths == ("/proc/kcore",)
+    assert info.readonly_paths == ("/proc/asound",)
     assert info.privileged is False
     assert info.binds == (
         DockerBindMount(
@@ -119,19 +94,3 @@ def test_container_info_rejects_untyped_security_evidence() -> None:
                 "Mounts": [],
             },
         )
-
-
-def test_system_security_options_decode_daemon_evidence() -> None:
-    assert _system_security_options(
-        {
-            "SecurityOptions": [
-                "name=seccomp,profile=builtin",
-                "name=apparmor",
-                "name=cgroupns",
-            ]
-        }
-    ) == (
-        "name=seccomp,profile=builtin",
-        "name=apparmor",
-        "name=cgroupns",
-    )

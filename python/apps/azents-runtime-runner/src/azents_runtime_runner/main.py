@@ -6,7 +6,6 @@ import dataclasses
 import json
 import logging
 import os
-import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,12 +30,7 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
 
-from azents_runtime_runner.containment import (
-    ContainmentBootstrapError,
-    ContainmentQualificationError,
-    ExecutionBackend,
-    execution_backend_from_environment,
-)
+from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.transfer import RunnerTransferManager
 from azents_runtime_runner.workspace import Workspace
@@ -70,6 +64,7 @@ _DEFAULT_MAX_CONCURRENT_OPERATIONS = 50
 _DEFAULT_MAX_PENDING_OPERATIONS_PER_OWNER = 100
 _DEFAULT_MAX_PENDING_OPERATIONS = 1_000
 _DEFAULT_MAX_CONCURRENT_CONTROL_OPERATIONS = 4
+_REMOVED_CONTAINMENT_ENV = "AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"
 _LOGGER = logging.getLogger(__name__)
 _STANDARD_LOG_RECORD_FIELDS = frozenset(logging.makeLogRecord({}).__dict__) | {
     "asctime",
@@ -129,6 +124,7 @@ def main() -> None:
 
 
 async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
+    _reject_removed_containment_env()
     endpoint = _required_env("AZ_RUNTIME_CONTROL_ENDPOINT")
     transfer_endpoint = _required_env("AZ_RUNTIME_TRANSFER_ENDPOINT")
     runtime_id = _required_env("AZ_RUNTIME_ID")
@@ -143,13 +139,8 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         os.environ.get("AZ_RUNTIME_RUNNER_CONNECTION_ID") or uuid.uuid4().hex
     )
     limit_config = runner_limit_config_from_env()
-    execution_backend = await _qualified_execution_backend(
-        workspace_path=workspace_path,
-    )
-    workspace = Workspace(
-        workspace_path,
-        access_policy=execution_backend.filesystem_access_policy,
-    )
+    execution_backend = DirectExecutionBackend()
+    workspace = Workspace(workspace_path)
     registration = RunnerRegistration(
         runtime_id=runtime_id,
         runner_id=runner_id,
@@ -182,7 +173,6 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             "max_concurrent_control_operations": (
                 limit_config.max_concurrent_control_operations
             ),
-            "execution_backend": execution_backend.kind,
         },
     )
     try:
@@ -285,55 +275,6 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         await execution_backend.close()
 
 
-async def _qualified_execution_backend(
-    *,
-    workspace_path: str,
-) -> ExecutionBackend:
-    """Select and qualify one backend before normal Runner registration."""
-    try:
-        backend = execution_backend_from_environment(workspace_path=workspace_path)
-    except ContainmentBootstrapError as error:
-        _LOGGER.error(
-            "Runtime Runner process containment bootstrap rejected",
-            extra={"failure_category": "bootstrap_invalid"},
-        )
-        raise SystemExit("Runtime process containment bootstrap is invalid") from error
-    started_at = time.monotonic()
-    _LOGGER.info(
-        "Runtime Runner execution backend qualification started",
-        extra={"execution_backend": backend.kind},
-    )
-    try:
-        await backend.qualify()
-    except ContainmentQualificationError as error:
-        await backend.close()
-        _LOGGER.error(
-            "Runtime Runner execution backend qualification failed",
-            extra={
-                "execution_backend": backend.kind,
-                "failure_category": error.category,
-                "duration_ms": round(
-                    (time.monotonic() - started_at) * 1000,
-                    3,
-                ),
-            },
-        )
-        raise SystemExit(
-            f"Runtime process containment qualification failed: {error.category}"
-        ) from error
-    _LOGGER.info(
-        "Runtime Runner execution backend qualification succeeded",
-        extra={
-            "execution_backend": backend.kind,
-            "duration_ms": round(
-                (time.monotonic() - started_at) * 1000,
-                3,
-            ),
-        },
-    )
-    return backend
-
-
 def runner_limit_config_from_env() -> RunnerLimitConfig:
     config = RunnerLimitConfig(
         max_concurrent_operations_per_session=_positive_int_env(
@@ -417,6 +358,14 @@ def _runtime_configuration_evidence_from_env() -> RuntimeConfigurationEvidence:
             _required_env("AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION")
         ),
     )
+
+
+def _reject_removed_containment_env() -> None:
+    if _REMOVED_CONTAINMENT_ENV in os.environ:
+        raise SystemExit(
+            f"{_REMOVED_CONTAINMENT_ENV} is no longer supported; "
+            "remove the containment configuration before starting the Runner."
+        )
 
 
 def _required_env(name: str) -> str:

@@ -226,11 +226,6 @@ runtimeProviderKubernetes:
     maxPendingOperationsPerOwner: 100
     maxPendingOperations: 1000
     maxConcurrentControlOperations: 4
-  processContainment:
-    backend: bwrap
-    securityProfile: azents-runtime-bwrap
-    qualificationTimeoutSeconds: 15
-    runtimeClassName: ""
   runtimePod:
     annotations: {}
     imagePullSecrets: null

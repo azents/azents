@@ -20,7 +20,6 @@ import json
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec
-from azentspublicclient.models.runtime_profile_containment_status import RuntimeProfileContainmentStatus
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -36,13 +35,12 @@ class SelectableInfrastructureProfileResponse(BaseModel):
     display_name: StrictStr
     description: StrictStr
     spec: RuntimeInfrastructureProfileSpec
-    containment: RuntimeProfileContainmentStatus
     required_capabilities: List[StrictStr]
     version: StrictInt
     digest: StrictStr
     capability_revision_id: StrictStr
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider_id", "provider_display_name", "provider_kind", "profile_kind", "display_name", "description", "spec", "containment", "required_capabilities", "version", "digest", "capability_revision_id"]
+    __properties: ClassVar[List[str]] = ["id", "provider_id", "provider_display_name", "provider_kind", "profile_kind", "display_name", "description", "spec", "required_capabilities", "version", "digest", "capability_revision_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -88,9 +86,6 @@ class SelectableInfrastructureProfileResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of spec
         if self.spec:
             _dict['spec'] = self.spec.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of containment
-        if self.containment:
-            _dict['containment'] = self.containment.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -116,7 +111,6 @@ class SelectableInfrastructureProfileResponse(BaseModel):
             "display_name": obj.get("display_name"),
             "description": obj.get("description"),
             "spec": RuntimeInfrastructureProfileSpec.from_dict(obj["spec"]) if obj.get("spec") is not None else None,
-            "containment": RuntimeProfileContainmentStatus.from_dict(obj["containment"]) if obj.get("containment") is not None else None,
             "required_capabilities": obj.get("required_capabilities"),
             "version": obj.get("version"),
             "digest": obj.get("digest"),

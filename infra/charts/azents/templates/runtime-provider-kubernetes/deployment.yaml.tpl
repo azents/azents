@@ -107,16 +107,6 @@ spec:
               value: {{ .Values.runtimeProviderKubernetes.runtimePod.nodeSelector | toJson | quote }}
             - name: AZ_RUNTIME_PROVIDER_POD_TOLERATIONS
               value: {{ .Values.runtimeProviderKubernetes.runtimePod.tolerations | toJson | quote }}
-            - name: AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND
-              value: {{ .Values.runtimeProviderKubernetes.processContainment.backend | quote }}
-            - name: AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE
-              value: {{ .Values.runtimeProviderKubernetes.processContainment.securityProfile | quote }}
-            - name: AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS
-              value: {{ .Values.runtimeProviderKubernetes.processContainment.qualificationTimeoutSeconds | quote }}
-            {{- with .Values.runtimeProviderKubernetes.processContainment.runtimeClassName }}
-            - name: AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME
-              value: {{ . | quote }}
-            {{- end }}
             - name: AZ_RUNTIME_RUNNER_IMAGE
               value: {{ include "azents.runtimeRunnerImage" . | quote }}
           volumeMounts:

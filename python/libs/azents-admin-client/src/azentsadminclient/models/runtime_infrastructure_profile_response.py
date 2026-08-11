@@ -21,7 +21,6 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentsadminclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec
-from azentsadminclient.models.runtime_profile_containment_status import RuntimeProfileContainmentStatus
 from azentsadminclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle
 from typing import Optional, Set
 from typing_extensions import Self
@@ -37,8 +36,7 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
     lifecycle: RuntimeProfileLifecycle
     contract_family: StrictStr
     schema_version: StrictInt
-    spec: RuntimeInfrastructureProfileSpec
-    containment: RuntimeProfileContainmentStatus
+    spec: Optional[RuntimeInfrastructureProfileSpec]
     required_capabilities: List[StrictStr]
     version: StrictInt
     digest: StrictStr
@@ -50,7 +48,7 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "profile_kind", "display_name", "description", "lifecycle", "contract_family", "schema_version", "spec", "containment", "required_capabilities", "version", "digest", "compatible", "compatibility_reason_code", "missing_capabilities", "incompatible_constraints", "capability_revision_id", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "profile_kind", "display_name", "description", "lifecycle", "contract_family", "schema_version", "spec", "required_capabilities", "version", "digest", "compatible", "compatibility_reason_code", "missing_capabilities", "incompatible_constraints", "capability_revision_id", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -96,13 +94,15 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of spec
         if self.spec:
             _dict['spec'] = self.spec.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of containment
-        if self.containment:
-            _dict['containment'] = self.containment.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
+
+        # set to None if spec (nullable) is None
+        # and model_fields_set contains the field
+        if self.spec is None and "spec" in self.model_fields_set:
+            _dict['spec'] = None
 
         # set to None if compatibility_reason_code (nullable) is None
         # and model_fields_set contains the field
@@ -134,7 +134,6 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
             "contract_family": obj.get("contract_family"),
             "schema_version": obj.get("schema_version"),
             "spec": RuntimeInfrastructureProfileSpec.from_dict(obj["spec"]) if obj.get("spec") is not None else None,
-            "containment": RuntimeProfileContainmentStatus.from_dict(obj["containment"]) if obj.get("containment") is not None else None,
             "required_capabilities": obj.get("required_capabilities"),
             "version": obj.get("version"),
             "digest": obj.get("digest"),

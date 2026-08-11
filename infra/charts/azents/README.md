@@ -100,12 +100,10 @@ Container resource requirements follow the standard Helm chart pattern: defaults
   without the corresponding Runner and Engine digests.
 - Runtime Pod resources: `runtimeProviderKubernetes.runnerResources` is passed to the Provider as Kubernetes `ResourceRequirements`. Defaults set requests to CPU `1` and memory `2Gi`; limits are intentionally omitted unless consumers set them.
 - Runner operation limits: `runtimeProviderKubernetes.runnerLimits` configures per-Session, system, Runtime, pending, and control-path concurrency. Defaults are 10 Session active, 10 system active, 50 Runtime active, 100 pending per owner, 1,000 pending per Runtime, and 4 control operations. The Provider forwards these values to new Runner Pods; restart existing Runtimes after changing them.
-- Runtime process containment: the Kubernetes Provider always supports Pod Profile v2
-  and the bundled bwrap preparation contract. The AppArmor profile must be installed
-  on every eligible Runtime node. `runtimeClassName` is optional; when set, the
-  chart grants the Provider read-only access to that exact RuntimeClass and the
-  Provider refuses registration if it is absent or does not select the supported
-  `runc` handler.
+- Runtime workload security: Runner containers execute as non-root, drop all Linux
+  capabilities, disable privilege escalation, use the Kubernetes RuntimeDefault
+  seccomp profile, and do not mount a ServiceAccount token. Optional node-level
+  isolation remains the Platform operator's responsibility.
 - Persistence: Kubernetes Provider v1 uses PVCs in the workload namespace as canonical persistence
 - Runtime NetworkPolicy: Profile-managed Runtime Pods always match a chart-owned
   deny-all baseline and receive DNS, Runtime Control, and general outbound egress
