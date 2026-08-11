@@ -9,6 +9,10 @@ from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvi
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import (
+    AgentRuntimeCapability,
+    RuntimeProviderObservedState,
+)
 from azents.core.runtime_profile import (
     RuntimeConfigurationStateStatus,
     RuntimeProfileLifecycle,
@@ -29,6 +33,7 @@ from azents.rdb.models.runtime_profile import (
     RDBWorkspaceRuntimeProfile,
 )
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
+from azents.rdb.models.workspace import RDBWorkspace
 
 from .data import (
     RuntimeConfigurationAppliedSlot,
@@ -44,6 +49,8 @@ from .data import (
     RuntimeRecreationOperationItem,
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileCreate,
+    WorkspaceRuntimeProfileDeleteOutcome,
+    WorkspaceRuntimeProfileDeletion,
     WorkspaceRuntimeProfileReplace,
 )
 
@@ -275,6 +282,194 @@ class RuntimeProfileRepository:
         rdb = result.scalar_one_or_none()
         await session.flush()
         return self._build_workspace_profile(rdb) if rdb is not None else None
+
+    async def delete_workspace_runtime_profile(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        profile_id: str,
+        expected_version: int,
+    ) -> WorkspaceRuntimeProfileDeleteOutcome:
+        """Delete one exact Profile and atomically clear all live authority."""
+        workspace = await session.scalar(
+            sa.select(RDBWorkspace)
+            .where(RDBWorkspace.id == workspace_id)
+            .with_for_update()
+        )
+        if workspace is None:
+            return WorkspaceRuntimeProfileDeleteOutcome(
+                deletion=None,
+                current_profile=None,
+            )
+        profile = await session.scalar(
+            sa.select(RDBWorkspaceRuntimeProfile)
+            .where(
+                RDBWorkspaceRuntimeProfile.id == profile_id,
+                RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
+            )
+            .with_for_update()
+        )
+        if profile is None:
+            return WorkspaceRuntimeProfileDeleteOutcome(
+                deletion=None,
+                current_profile=None,
+            )
+        current_profile = self._build_workspace_profile(profile)
+        if profile.version != expected_version:
+            return WorkspaceRuntimeProfileDeleteOutcome(
+                deletion=None,
+                current_profile=current_profile,
+            )
+
+        now = tznow()
+        cleared_workspace_default = workspace.default_runtime_profile_id == profile_id
+        if cleared_workspace_default:
+            workspace.default_runtime_profile_id = None
+            workspace.default_runtime_profile_version += 1
+            workspace.updated_at = now
+
+        agents = list(
+            (
+                await session.scalars(
+                    sa.select(RDBAgent)
+                    .where(
+                        RDBAgent.workspace_id == workspace_id,
+                        RDBAgent.runtime_profile_id == profile_id,
+                    )
+                    .order_by(RDBAgent.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        managed_agent_ids: list[str] = []
+        for agent in agents:
+            if agent.runtime_capability is AgentRuntimeCapability.MANAGED:
+                managed_agent_ids.append(agent.id)
+            agent.runtime_profile_id = None
+            agent.runtime_profile_selection_version += 1
+            agent.updated_at = now
+
+        runtimes: list[RDBAgentRuntime] = []
+        if managed_agent_ids:
+            runtimes = list(
+                (
+                    await session.scalars(
+                        sa.select(RDBAgentRuntime)
+                        .where(RDBAgentRuntime.agent_id.in_(managed_agent_ids))
+                        .order_by(RDBAgentRuntime.id)
+                        .with_for_update()
+                    )
+                ).all()
+            )
+        affected_running_runtime_count = 0
+        for runtime in runtimes:
+            if runtime.provider_observed_state is RuntimeProviderObservedState.RUNNING:
+                affected_running_runtime_count += 1
+            state = await session.scalar(
+                sa.select(RDBRuntimeConfigurationState)
+                .where(RDBRuntimeConfigurationState.runtime_id == runtime.id)
+                .with_for_update()
+            )
+            next_sequence = runtime.configuration_sequence + 1
+            runtime.configuration_sequence = next_sequence
+            runtime.updated_at = now
+            if state is None:
+                session.add(
+                    RDBRuntimeConfigurationState(
+                        runtime_id=runtime.id,
+                        desired_sequence=next_sequence,
+                        desired_status=RuntimeConfigurationStateStatus.UNCONFIGURED,
+                        desired_target_generation=runtime.desired_generation,
+                        desired_digest=None,
+                        desired_document=None,
+                        desired_reason_code="runtime_profile_required",
+                        provider_reported_digest=None,
+                        runner_reported_digest=None,
+                        provider_acknowledged_at=None,
+                        runner_observed_at=None,
+                        applied_sequence=None,
+                        applied_target_generation=None,
+                        applied_digest=None,
+                        applied_document=None,
+                        applied_at=None,
+                    )
+                )
+            else:
+                state.desired_sequence = next_sequence
+                state.desired_status = RuntimeConfigurationStateStatus.UNCONFIGURED
+                state.desired_target_generation = runtime.desired_generation
+                state.desired_digest = None
+                state.desired_document = None
+                state.desired_reason_code = "runtime_profile_required"
+                state.provider_reported_digest = None
+                state.runner_reported_digest = None
+                state.provider_acknowledged_at = None
+                state.runner_observed_at = None
+                state.updated_at = now
+
+        operations = list(
+            (
+                await session.scalars(
+                    sa.select(RDBRuntimeRecreationOperation)
+                    .where(
+                        RDBRuntimeRecreationOperation.target_kind
+                        == RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
+                        RDBRuntimeRecreationOperation.target_id == profile_id,
+                        RDBRuntimeRecreationOperation.status.in_(
+                            (
+                                RuntimeRecreationOperationStatus.PENDING,
+                                RuntimeRecreationOperationStatus.RUNNING,
+                            )
+                        ),
+                    )
+                    .order_by(RDBRuntimeRecreationOperation.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        for operation in operations:
+            items = list(
+                (
+                    await session.scalars(
+                        sa.select(RDBRuntimeRecreationOperationItem)
+                        .where(
+                            RDBRuntimeRecreationOperationItem.operation_id
+                            == operation.id,
+                            RDBRuntimeRecreationOperationItem.status.in_(
+                                (
+                                    RuntimeRecreationItemStatus.PENDING,
+                                    RuntimeRecreationItemStatus.RUNNING,
+                                )
+                            ),
+                        )
+                        .with_for_update()
+                    )
+                ).all()
+            )
+            for item in items:
+                item.status = RuntimeRecreationItemStatus.SKIPPED
+                item.failure_code = "target_deleted"
+                item.failure_message = "Runtime Profile was deleted."
+                item.updated_at = now
+            operation.pending_count = 0
+            operation.running_count = 0
+            operation.skipped_count += len(items)
+            operation.status = RuntimeRecreationOperationStatus.COMPLETED
+            operation.completed_at = now
+
+        await session.delete(profile)
+        await session.flush()
+        return WorkspaceRuntimeProfileDeleteOutcome(
+            deletion=WorkspaceRuntimeProfileDeletion(
+                profile_id=profile_id,
+                cleared_workspace_default=cleared_workspace_default,
+                cleared_agent_count=len(agents),
+                affected_running_runtime_count=affected_running_runtime_count,
+                superseded_recreation_operation_count=len(operations),
+            ),
+            current_profile=None,
+        )
 
     async def get_configuration_state(
         self,

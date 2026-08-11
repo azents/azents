@@ -121,6 +121,25 @@ class WorkspaceRuntimeProfileReplace:
 
 
 @dataclass(frozen=True)
+class WorkspaceRuntimeProfileDeletion:
+    """Bounded impact from one committed Workspace Profile deletion."""
+
+    profile_id: str
+    cleared_workspace_default: bool
+    cleared_agent_count: int
+    affected_running_runtime_count: int
+    superseded_recreation_operation_count: int
+
+
+@dataclass(frozen=True)
+class WorkspaceRuntimeProfileDeleteOutcome:
+    """Exact deletion result or current optimistic conflict evidence."""
+
+    deletion: WorkspaceRuntimeProfileDeletion | None
+    current_profile: WorkspaceRuntimeProfile | None
+
+
+@dataclass(frozen=True)
 class RuntimeConfigurationSlot:
     """One current desired configuration slot."""
 

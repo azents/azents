@@ -10,6 +10,7 @@ from azents.core.runtime_profile import (
     WorkspaceRuntimeProfilePolicyV1,
     parse_runtime_infrastructure_profile_spec,
 )
+from azents.repos.runtime_profile.data import WorkspaceRuntimeProfileDeletion
 from azents.services.runtime_profile_workspace.service import (
     SelectableInfrastructureProfileProjection,
     WorkspaceRuntimeProfileDefaultProjection,
@@ -141,6 +142,38 @@ class WorkspaceRuntimeProfileReplaceRequest(BaseModel):
     description: str = Field(max_length=4000)
     lifecycle: RuntimeProfileLifecycle
     policy: WorkspaceRuntimeProfilePolicyV1
+
+
+class WorkspaceRuntimeProfileDeleteRequest(BaseModel):
+    """Exact optimistic Workspace Runtime Profile deletion request."""
+
+    expected_version: int = Field(ge=1)
+
+
+class WorkspaceRuntimeProfileDeleteResponse(BaseModel):
+    """Bounded impact from one committed Runtime Profile deletion."""
+
+    profile_id: str
+    cleared_workspace_default: bool
+    cleared_agent_count: int = Field(ge=0)
+    affected_running_runtime_count: int = Field(ge=0)
+    superseded_recreation_operation_count: int = Field(ge=0)
+
+    @classmethod
+    def convert_from(
+        cls,
+        deletion: WorkspaceRuntimeProfileDeletion,
+    ) -> "WorkspaceRuntimeProfileDeleteResponse":
+        """Convert one committed deletion result."""
+        return cls(
+            profile_id=deletion.profile_id,
+            cleared_workspace_default=deletion.cleared_workspace_default,
+            cleared_agent_count=deletion.cleared_agent_count,
+            affected_running_runtime_count=(deletion.affected_running_runtime_count),
+            superseded_recreation_operation_count=(
+                deletion.superseded_recreation_operation_count
+            ),
+        )
 
 
 class WorkspaceRuntimeProfileDefaultResponse(BaseModel):

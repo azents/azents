@@ -40,6 +40,13 @@ class TestRuntimeProfileV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_profile_v1_delete_workspace_runtime_profile(self) -> None:
+        """Test case for runtime_profile_v1_delete_workspace_runtime_profile
+
+        Delete Workspace Runtime Profile
+        """
+        pass
+
     def test_runtime_profile_v1_get_workspace_runtime_profile(self) -> None:
         """Test case for runtime_profile_v1_get_workspace_runtime_profile
 

@@ -3,6 +3,7 @@
 import dataclasses
 import hashlib
 import json
+import logging
 from typing import Annotated
 
 from azcommon.datetime import tznow
@@ -32,6 +33,7 @@ from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfile,
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileCreate,
+    WorkspaceRuntimeProfileDeletion,
     WorkspaceRuntimeProfileReplace,
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
@@ -48,6 +50,8 @@ from azents.repos.workspace.data import (
     Workspace,
     WorkspaceRuntimeProfileDefaultReplace,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -82,7 +86,7 @@ class WorkspaceRuntimeProfileDefaultProjection:
     profile: WorkspaceRuntimeProfileProjection | None
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class RuntimeProfileWorkspaceUnavailable(Exception):
     """One bounded Workspace Runtime Profile failure."""
 
@@ -433,6 +437,64 @@ class RuntimeProfileWorkspaceService:
                 available_at=tznow(),
             )
             return await self._project(session, workspace_id, profile)
+
+    async def delete_profile(
+        self,
+        workspace_id: str,
+        profile_id: str,
+        *,
+        expected_version: int,
+        actor_workspace_user_id: str,
+    ) -> WorkspaceRuntimeProfileDeletion:
+        """Permanently delete one exact Workspace Profile and live selection."""
+        async with self.session_manager() as session:
+            try:
+                outcome = (
+                    await self.profile_repository.delete_workspace_runtime_profile(
+                        session,
+                        workspace_id=workspace_id,
+                        profile_id=profile_id,
+                        expected_version=expected_version,
+                    )
+                )
+            except IntegrityError as error:
+                raise RuntimeProfileWorkspaceUnavailable(
+                    code="runtime_profile_delete_conflict",
+                    message=(
+                        "Runtime Profile deletion conflicted with a concurrent change."
+                    ),
+                ) from error
+            if outcome.deletion is None:
+                if outcome.current_profile is None:
+                    raise RuntimeProfileWorkspaceUnavailable(
+                        code="runtime_profile_not_found",
+                        message="Workspace Runtime Profile was not found.",
+                    )
+                raise RuntimeProfileWorkspaceUnavailable(
+                    code="runtime_profile_version_conflict",
+                    message="Workspace Runtime Profile version is stale.",
+                    current_profile=outcome.current_profile,
+                )
+            deletion = outcome.deletion
+
+        logger.info(
+            "Workspace Runtime Profile deleted",
+            extra={
+                "workspace_id": workspace_id,
+                "profile_id": profile_id,
+                "profile_version": expected_version,
+                "actor_workspace_user_id": actor_workspace_user_id,
+                "cleared_workspace_default": deletion.cleared_workspace_default,
+                "cleared_agent_count": deletion.cleared_agent_count,
+                "affected_running_runtime_count": (
+                    deletion.affected_running_runtime_count
+                ),
+                "superseded_recreation_operation_count": (
+                    deletion.superseded_recreation_operation_count
+                ),
+            },
+        )
+        return deletion
 
     async def list_selectable_infrastructure(
         self,
