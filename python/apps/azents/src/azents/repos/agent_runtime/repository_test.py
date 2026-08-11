@@ -5,6 +5,7 @@ import datetime
 from contextlib import suppress
 from uuid import uuid4
 
+import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -480,6 +481,242 @@ class TestAgentRuntimeRepository:
         assert repeated_acknowledged_request.terminal_delete_acknowledgement_kind is (
             RuntimeTerminalDeleteAcknowledgementKind.PROVIDER_REPORT
         )
+
+    async def test_no_physical_binding_acknowledgement_never_dispatches(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A never-bound logical Runtime terminalizes without Provider work."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "agent-runtime-no-physical-binding-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "agent-runtime-no-physical-binding",
+        )
+        repository = AgentRuntimeRepository()
+        runtime = await repository.ensure_for_agent(rdb_session, agent_id)
+
+        acknowledged = (
+            await repository.request_terminal_delete_without_physical_binding(
+                rdb_session,
+                runtime.id,
+            )
+        )
+        repeated = await repository.request_terminal_delete_without_physical_binding(
+            rdb_session,
+            runtime.id,
+        )
+        candidates = await repository.find_lifecycle_dispatch_candidates(
+            rdb_session,
+            limit=10,
+            retry_delay=datetime.timedelta(0),
+        )
+
+        assert acknowledged is not None
+        assert repeated is not None
+        assert repeated.desired_generation == acknowledged.desired_generation
+        assert acknowledged.desired_generation == runtime.desired_generation + 1
+        assert acknowledged.last_lifecycle_command is None
+        assert acknowledged.provider_observed_state is (
+            RuntimeProviderObservedState.UNKNOWN
+        )
+        assert acknowledged.provider_observed_at is None
+        assert acknowledged.runner_state is RuntimeRunnerState.UNKNOWN
+        assert (
+            acknowledged.last_lifecycle_dispatch_generation
+            == acknowledged.desired_generation
+        )
+        assert (
+            acknowledged.terminal_delete_requested_generation
+            == acknowledged.desired_generation
+        )
+        assert (
+            acknowledged.terminal_delete_acknowledged_generation
+            == acknowledged.desired_generation
+        )
+        assert acknowledged.terminal_delete_acknowledgement_kind is (
+            RuntimeTerminalDeleteAcknowledgementKind.NO_PHYSICAL_BINDING
+        )
+        assert all(candidate.id != runtime.id for candidate in candidates)
+
+    @pytest.mark.parametrize(
+        "evidence_values",
+        [
+            {"runtime_provider_id": "historical-provider"},
+            {"provider_binding_origin": (RuntimeProviderBindingOrigin.AGENT_EXPLICIT)},
+            {"provider_binding_evidence": {"source": "historical"}},
+            {"provider_generation": 1},
+            {"provider_observed_state": RuntimeProviderObservedState.RUNNING},
+            {"provider_observed_generation": 1},
+            {"provider_observed_at": datetime.datetime.now(datetime.UTC)},
+            {"provider_observe_requested_at": datetime.datetime.now(datetime.UTC)},
+            {"last_lifecycle_dispatch_generation": 1},
+            {"provider_connection_state": (RuntimeProviderConnectionState.CONNECTED)},
+            {"runner_state": RuntimeRunnerState.READY},
+            {"runner_generation": 1},
+            {"workspace_path": "/runtime/historical-workspace"},
+            {
+                "failure_generation": 0,
+                "failure_code": "historical_failure",
+                "failure_message": "Historical Runtime failure",
+            },
+        ],
+    )
+    async def test_no_physical_binding_rejects_observation_or_dispatch_evidence(
+        self,
+        rdb_session: AsyncSession,
+        evidence_values: dict[str, object],
+    ) -> None:
+        """Any prior observation or route evidence requires physical deletion."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            f"agent-runtime-no-binding-proof-{uuid4().hex[:8]}",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            f"agent-runtime-no-binding-proof-{uuid4().hex[:8]}",
+        )
+        repository = AgentRuntimeRepository()
+        runtime = await repository.ensure_for_agent(rdb_session, agent_id)
+        await rdb_session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(**evidence_values)
+        )
+
+        acknowledged = (
+            await repository.request_terminal_delete_without_physical_binding(
+                rdb_session,
+                runtime.id,
+            )
+        )
+        reloaded = await repository.get_by_id(rdb_session, runtime.id)
+
+        assert acknowledged is None
+        assert reloaded is not None
+        assert reloaded.terminal_delete_requested_generation is None
+        assert reloaded.terminal_delete_acknowledged_generation is None
+
+    async def test_rearm_preserves_identity_and_clears_incarnation_state(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Exact deletion acknowledgement permits one higher-generation rearm."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "agent-runtime-rearm-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "agent-runtime-rearm",
+        )
+        repository = AgentRuntimeRepository()
+        runtime = await repository.ensure_for_agent(rdb_session, agent_id)
+        provider = await RuntimeProviderRepository().create(
+            rdb_session,
+            RuntimeProviderCreate(
+                provider_id="system-kubernetes-rearm",
+                scope=RuntimeProviderScope.SYSTEM,
+                workspace_id=None,
+                kind=RuntimeProviderKind.KUBERNETES,
+                display_name="Kubernetes rearm",
+                registration_method=RuntimeProviderRegistrationMethod.ADMIN,
+                enabled=True,
+                lifecycle_state=RuntimeProviderLifecycleState.ACTIVE,
+                availability_mode=RuntimeProviderAvailabilityMode.PLATFORM_WIDE,
+                capabilities={},
+                config_schema=None,
+                metadata=None,
+            ),
+        )
+        bound = await repository.attach_provider_binding(
+            rdb_session,
+            runtime_id=runtime.id,
+            provider_logical_id=provider.provider_id,
+            provider_resource_id=provider.id,
+            binding_origin=RuntimeProviderBindingOrigin.AGENT_EXPLICIT,
+            binding_evidence={"origin": "add"},
+        )
+        assert bound is not None
+        observed = await repository.record_provider_observed_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderObservedState.RUNNING,
+            provider_generation=2,
+            observed_generation=runtime.desired_generation,
+        )
+        assert observed is not None
+        ready = await repository.record_runner_state(
+            rdb_session,
+            runtime.id,
+            RuntimeRunnerState.READY,
+            runner_generation=3,
+            expected_desired_generation=runtime.desired_generation,
+            workspace_path="/runtime/old-home",
+        )
+        assert ready is not None
+        requested = await repository.request_terminal_delete(
+            rdb_session,
+            runtime.id,
+        )
+        assert requested is not None
+        acknowledged = await repository.record_terminal_delete_acknowledgement(
+            rdb_session,
+            runtime.id,
+            provider_generation=4,
+            acknowledged_generation=requested.desired_generation,
+        )
+        assert acknowledged is not None
+
+        provider_conflict = await repository.rearm_terminally_deleted(
+            rdb_session,
+            runtime_id=runtime.id,
+            expected_terminal_generation=requested.desired_generation,
+            provider_logical_id="different-provider",
+            provider_resource_id=provider.id,
+        )
+        rearmed = await repository.rearm_terminally_deleted(
+            rdb_session,
+            runtime_id=runtime.id,
+            expected_terminal_generation=requested.desired_generation,
+            provider_logical_id=provider.provider_id,
+            provider_resource_id=provider.id,
+        )
+        late_provider = await repository.record_provider_observed_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderObservedState.RUNNING,
+            provider_generation=4,
+            observed_generation=requested.desired_generation,
+        )
+
+        assert provider_conflict is None
+        assert rearmed is not None
+        assert rearmed.id == runtime.id
+        assert rearmed.desired_state is RuntimeDesiredState.STOPPED
+        assert rearmed.desired_generation == requested.desired_generation + 1
+        assert rearmed.last_lifecycle_command is None
+        assert rearmed.last_lifecycle_dispatch_generation == rearmed.desired_generation
+        assert rearmed.terminal_delete_requested_generation is None
+        assert rearmed.terminal_delete_acknowledged_generation is None
+        assert rearmed.terminal_delete_acknowledgement_kind is None
+        assert rearmed.provider_observed_state is RuntimeProviderObservedState.UNKNOWN
+        assert rearmed.provider_generation == acknowledged.provider_generation
+        assert rearmed.provider_observed_generation == 0
+        assert rearmed.provider_connection_state is (
+            RuntimeProviderConnectionState.DISCONNECTED
+        )
+        assert rearmed.runner_state is RuntimeRunnerState.UNKNOWN
+        assert rearmed.runner_generation == ready.runner_generation
+        assert rearmed.workspace_path is None
+        assert rearmed.desired_runtime_configuration_revision_id is None
+        assert rearmed.applied_runtime_configuration_revision_id is None
+        assert late_provider is None
 
     async def test_record_provider_and_runner_state(
         self, rdb_session: AsyncSession

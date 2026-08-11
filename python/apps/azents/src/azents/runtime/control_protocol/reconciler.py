@@ -440,7 +440,7 @@ class RuntimeLifecycleReconciler:
                     session,
                     runtime.id,
                     runtime.desired_generation,
-                    retry_delay=self._config.provider_command_deadline,
+                    retry_delay=self._config.lifecycle_retry_delay,
                 )
             if claimed is None:
                 _LOGGER.debug(

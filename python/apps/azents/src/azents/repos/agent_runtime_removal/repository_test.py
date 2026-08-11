@@ -219,6 +219,12 @@ async def test_create_claim_progress_complete_and_recreate(
     assert completed.cleanup_scanned_context_count == 3
     assert completed.cleanup_invalidated_context_count == 2
     assert completed.physical_delete_acknowledgement_kind is None
+    latest_completed = await repository.get_latest_completed_by_agent_id(
+        rdb_session,
+        agent_id,
+    )
+    assert latest_completed is not None
+    assert latest_completed.id == completed.id
 
     next_operation = await create("remove-2", 3)
     assert next_operation.idempotency_match is True
