@@ -789,7 +789,7 @@ class ExternalChannelFileTransferService:
         agent_id: str,
         binding_id: str,
         paths: Sequence[str],
-        file_storage: FileStorage,
+        file_storage: FileStorage | None,
         authority: SessionResourceAuthority | None = None,
     ) -> tuple[ExternalChannelOutboundFileManifest, ...]:
         """Validate one file-bearing reply before its durable action commit."""
@@ -818,6 +818,12 @@ class ExternalChannelFileTransferService:
         )
         if not isinstance(resolved.config, ExternalChannelFilesConfig):
             raise RuntimeError("Unexpected External Channel files settings model.")
+        if file_storage is None and any(
+            "://" not in path and PurePosixPath(path).is_absolute() for path in paths
+        ):
+            raise ExternalChannelFileTransferError(
+                "Outbound Runtime file paths require Runtime file storage for this run."
+            )
         manifests: list[ExternalChannelOutboundFileManifest] = []
         total_size = 0
         for path in paths:
@@ -844,6 +850,10 @@ class ExternalChannelFileTransferService:
                     raise ExternalChannelFileTransferError(
                         "Every outbound Runtime file path must be absolute; Exchange "
                         "sources must use an exchange:// URI."
+                    )
+                if file_storage is None:
+                    raise ExternalChannelFileTransferError(
+                        "Runtime file storage is unavailable for this run."
                     )
                 metadata = await self._stat_outbound(
                     file_storage,

@@ -13,7 +13,10 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
 )
-from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_file import (
+    ExternalChannelOutboundFileManifest,
+    ExternalChannelOutboundFileSource,
+)
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.hooks.types import (
     AfterToolCallHookContext,
@@ -130,9 +133,16 @@ class _FileTransferService:
         **kwargs: object,
     ) -> tuple[ExternalChannelOutboundFileManifest, ...]:
         self.prepare_calls.append(kwargs)
+        paths = cast(list[str], kwargs["paths"])
+        path = paths[0]
         return (
             ExternalChannelOutboundFileManifest(
-                path="/workspace/agent/report.csv",
+                source=(
+                    ExternalChannelOutboundFileSource.EXCHANGE
+                    if path.startswith("exchange://")
+                    else ExternalChannelOutboundFileSource.RUNTIME
+                ),
+                path=path,
                 filename="report.csv",
                 media_type="text/csv",
                 expected_size=42,
@@ -335,6 +345,23 @@ async def test_ignore_schema_is_always_exposed() -> None:
         "continue",
         "ignore",
     ]
+
+
+@pytest.mark.asyncio
+async def test_channel_action_schema_names_each_supported_file_path_format() -> None:
+    """The file schema distinguishes Runtime paths from Exchange object URIs."""
+    toolkit = _toolkit(_ActionService([_snapshot()]))
+
+    state = await toolkit.update_context(_turn_context())
+    properties = cast(dict[str, object], state.tools[0].spec.input_schema["properties"])
+    files = cast(dict[str, object], properties["files"])
+
+    assert files["description"] == (
+        "File source paths. Each item must be either an absolute POSIX Runtime path "
+        "beginning with `/` or an authorized `exchange://{object_key}` URI. Relative "
+        "paths and other URI schemes, including `artifact://` and `azents://`, are "
+        "unsupported."
+    )
 
 
 @pytest.mark.asyncio
@@ -543,6 +570,51 @@ async def test_channel_action_preflights_files_with_current_runtime_storage() ->
     assert manifests[0].path == "/workspace/agent/report.csv"
     assert service.calls[0]["file_storage"] is file_storage
     assert service.calls[0]["authority"] is None
+
+
+@pytest.mark.asyncio
+async def test_channel_action_preflights_exchange_without_runtime_storage() -> None:
+    """Server-backed Exchange publication does not require a managed Runtime."""
+    service = _ActionService([_snapshot()])
+    file_transfer_service = _FileTransferService()
+    toolkit = _toolkit(
+        service,
+        file_transfer_service=file_transfer_service,
+    )
+    state = await toolkit.update_context(_turn_context())
+    uri = "exchange://exchange/workspace-1/files/file-1/original"
+
+    with client_tool_execution_context(call_id="call-exchange", name="channel_action"):
+        await state.tools[0].handler(
+            json.dumps(
+                {
+                    "mode": "continue",
+                    "binding": "binding-1",
+                    "message": "Attached report.",
+                    "files": [uri],
+                }
+            )
+        )
+
+    assert file_transfer_service.prepare_calls == [
+        {
+            "session_id": "session-1",
+            "agent_id": "agent-1",
+            "binding_id": "binding-1",
+            "paths": [uri],
+            "file_storage": None,
+            "authority": None,
+        }
+    ]
+    manifests = cast(
+        tuple[ExternalChannelOutboundFileManifest, ...],
+        service.calls[0]["files"],
+    )
+    assert manifests[0].source is ExternalChannelOutboundFileSource.EXCHANGE
+    assert manifests[0].path == uri
+    assert service.calls[0]["file_storage"] is None
+    assert service.calls[0]["provider_delivery_service"] is None
+    assert service.calls[0]["resolve_runtime_target"] is None
 
 
 @pytest.mark.asyncio

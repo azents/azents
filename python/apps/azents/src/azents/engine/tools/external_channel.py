@@ -185,8 +185,10 @@ class ChannelActionInput(BaseModel):
         min_length=1,
         max_length=MAX_EXTERNAL_CHANNEL_FILES,
         description=(
-            "Absolute Runtime paths or authorized `exchange://` URIs. Relative, "
-            "`artifact://`, and `azents://` values are unsupported."
+            "File source paths. Each item must be either an absolute POSIX Runtime "
+            "path beginning with `/` or an authorized `exchange://{object_key}` URI. "
+            "Relative paths and other URI schemes, including `artifact://` and "
+            "`azents://`, are unsupported."
         ),
     )
 
@@ -454,16 +456,16 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                 )
                 manifests = ()
                 if value.files is not None:
-                    if runtime_context is None:
-                        raise ExternalChannelFileTransferError(
-                            "Runtime file storage is unavailable for this run."
-                        )
                     manifests = await self.file_transfer_service.prepare_outbound(
                         session_id=self.session_id,
                         agent_id=self.agent_id,
                         binding_id=value.binding,
                         paths=value.files,
-                        file_storage=runtime_context.file_storage,
+                        file_storage=(
+                            None
+                            if runtime_context is None
+                            else runtime_context.file_storage
+                        ),
                         authority=self.resource_authority,
                     )
                 result = await self.service.execute(
