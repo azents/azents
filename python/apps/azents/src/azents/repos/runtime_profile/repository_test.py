@@ -9,12 +9,14 @@ from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvi
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRuntimeCapability,
     LLMProvider,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderAvailabilityMode,
     RuntimeProviderKind,
     RuntimeProviderLifecycleState,
+    RuntimeProviderObservedState,
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
@@ -49,7 +51,10 @@ from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
 from azents.repos.workspace import WorkspaceRepository
-from azents.repos.workspace.data import WorkspaceCreate
+from azents.repos.workspace.data import (
+    WorkspaceCreate,
+    WorkspaceRuntimeProfileDefaultReplace,
+)
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .data import (
@@ -528,6 +533,217 @@ async def test_affected_agent_queries_follow_exact_profile_bindings(
             after_agent_id=None,
             limit=10,
         ) == [selected_agent_id]
+
+
+async def test_delete_workspace_profile_clears_live_authority_and_retains_applied(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Hard delete is atomic and preserves the running Runtime snapshot."""
+    repository = RuntimeProfileRepository()
+    workspace_repository = WorkspaceRepository()
+    async with rdb_session_manager() as session:
+        provider_id = await _create_provider(
+            session,
+            logical_id="profile-hard-delete-provider",
+        )
+        workspace_result = await workspace_repository.create(
+            session,
+            WorkspaceCreate(
+                name="Profile hard delete",
+                handle="profile-hard-delete",
+            ),
+        )
+        assert isinstance(workspace_result, Success)
+        workspace_id = await workspace_repository.resolve_id(
+            session,
+            "profile-hard-delete",
+        )
+        assert workspace_id is not None
+        infrastructure = await repository.create_infrastructure_profile(
+            session,
+            create=_infrastructure_create(provider_id),
+        )
+        profile = await repository.create_workspace_runtime_profile(
+            session,
+            create=WorkspaceRuntimeProfileCreate(
+                workspace_id=workspace_id,
+                provider_id=provider_id,
+                infrastructure_profile_id=infrastructure.id,
+                display_name="Delete me",
+                description="Selected Profile",
+                lifecycle=RuntimeProfileLifecycle.ACTIVE,
+                policy={"schema_version": 1, "network_restriction": None},
+                digest="b" * 64,
+                actor_workspace_user_id=None,
+            ),
+        )
+        default = await workspace_repository.replace_runtime_profile_default(
+            session,
+            workspace_id,
+            WorkspaceRuntimeProfileDefaultReplace(
+                expected_version=1,
+                runtime_profile_id=profile.id,
+            ),
+        )
+        assert default is not None
+        integration = RDBLLMProviderIntegration(
+            workspace_id=workspace_id,
+            provider=LLMProvider.ANTHROPIC,
+            name="profile-hard-delete-integration",
+            encrypted_credentials="encrypted-test-value",
+            config=None,
+        )
+        session.add(integration)
+        await session.flush()
+        agent_ids: list[str] = []
+        for index in range(2):
+            selection = make_test_model_selection_dict(
+                integration_id=integration.id,
+                provider=LLMProvider.ANTHROPIC,
+                model_identifier=f"profile-hard-delete-{index}",
+            )
+            agent = RDBAgent(
+                workspace_id=workspace_id,
+                name=f"Selected Agent {index}",
+                model_selection=selection,
+                lightweight_model_selection=selection,
+                runtime_profile_id=profile.id,
+                runtime_capability=AgentRuntimeCapability.MANAGED,
+                shell_enabled=True,
+            )
+            session.add(agent)
+            await session.flush()
+            agent_ids.append(agent.id)
+        runtime = RDBAgentRuntime(
+            workspace_id=workspace_id,
+            agent_id=agent_ids[0],
+            runtime_provider_id="profile-hard-delete-provider",
+            runtime_provider_resource_id=provider_id,
+        )
+        session.add(runtime)
+        await session.flush()
+        runtime.provider_observed_state = RuntimeProviderObservedState.RUNNING
+        runtime.configuration_sequence = 1
+        document = RuntimeConfigurationDocument(
+            schema_version=1,
+            source_trace={},
+            provider_id=provider_id,
+            provider_capability_revision_id=None,
+            infrastructure_profile_id=infrastructure.id,
+            infrastructure_profile_version=infrastructure.version,
+            workspace_runtime_profile_id=profile.id,
+            workspace_runtime_profile_version=profile.version,
+            agent_selection_version=1,
+            required_capabilities=(),
+            missing_capabilities=(),
+            resolved_configuration={"workspace": "preserved"},
+        ).model_dump(mode="json")
+        now = datetime.datetime.now(datetime.UTC)
+        session.add(
+            RDBRuntimeConfigurationState(
+                runtime_id=runtime.id,
+                desired_sequence=1,
+                desired_status=RuntimeConfigurationStateStatus.READY,
+                desired_target_generation=0,
+                desired_digest="c" * 64,
+                desired_document=document,
+                desired_reason_code=None,
+                provider_reported_digest="c" * 64,
+                runner_reported_digest="c" * 64,
+                provider_acknowledged_at=now,
+                runner_observed_at=now,
+                applied_sequence=1,
+                applied_target_generation=0,
+                applied_digest="c" * 64,
+                applied_document=document,
+                applied_at=now,
+            )
+        )
+        operation = await repository.create_recreation_operation(
+            session,
+            target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
+            target_id=profile.id,
+            target_version=str(profile.version),
+            concurrency_limit=1,
+            actor_user_id=None,
+            actor_workspace_user_id=None,
+        )
+        await repository.add_recreation_items(
+            session,
+            operation_id=operation.id,
+            items=[(runtime.id, 1, "c" * 64, 0)],
+        )
+
+        outcome = await repository.delete_workspace_runtime_profile(
+            session,
+            workspace_id=workspace_id,
+            profile_id=profile.id,
+            expected_version=profile.version,
+        )
+
+        workspace = await workspace_repository.get_by_id(session, workspace_id)
+        selected_agents = [
+            await session.get(RDBAgent, agent_id) for agent_id in agent_ids
+        ]
+        retained_runtime = await AgentRuntimeRepository().get_by_id(
+            session,
+            runtime.id,
+        )
+        state = await repository.get_configuration_state(
+            session,
+            runtime_id=runtime.id,
+        )
+        deleted_profile = await repository.get_workspace_runtime_profile(
+            session,
+            workspace_id=workspace_id,
+            profile_id=profile.id,
+            for_update=False,
+        )
+        completed_operation = await repository.get_recreation_operation(
+            session,
+            operation_id=operation.id,
+        )
+        skipped_items = await repository.list_recreation_items(
+            session,
+            operation_id=operation.id,
+            offset=0,
+            limit=10,
+        )
+
+    assert outcome.deletion is not None
+    assert outcome.deletion.cleared_workspace_default is True
+    assert outcome.deletion.cleared_agent_count == 2
+    assert outcome.deletion.affected_running_runtime_count == 1
+    assert outcome.deletion.superseded_recreation_operation_count == 1
+    assert workspace is not None
+    assert workspace.default_runtime_profile_id is None
+    assert workspace.default_runtime_profile_version == 3
+    assert all(agent is not None for agent in selected_agents)
+    assert all(agent.runtime_profile_id is None for agent in selected_agents if agent)
+    assert all(
+        agent.runtime_profile_selection_version == 2
+        for agent in selected_agents
+        if agent
+    )
+    assert retained_runtime is not None
+    assert retained_runtime.configuration_sequence == 2
+    assert retained_runtime.runtime_provider_resource_id == provider_id
+    assert state is not None
+    assert state.desired.status is RuntimeConfigurationStateStatus.UNCONFIGURED
+    assert state.desired.sequence == 2
+    assert state.desired.reason_code == "runtime_profile_required"
+    assert state.applied is not None
+    assert state.applied.sequence == 1
+    assert state.applied.document.workspace_runtime_profile_id == profile.id
+    assert deleted_profile is None
+    assert completed_operation is not None
+    assert completed_operation.status is RuntimeRecreationOperationStatus.COMPLETED
+    assert completed_operation.pending_count == 0
+    assert completed_operation.skipped_count == 1
+    assert len(skipped_items) == 1
+    skipped_item = skipped_items[0]
+    assert skipped_item.status is RuntimeRecreationItemStatus.SKIPPED
+    assert skipped_item.failure_code == "target_deleted"
 
 
 async def test_recreation_target_items_match_exact_document_profile_fields(

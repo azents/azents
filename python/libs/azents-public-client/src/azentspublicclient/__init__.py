@@ -456,6 +456,8 @@ __all__ = [
     "WorkspaceRuntimeProfileCreateRequest",
     "WorkspaceRuntimeProfileDefaultReplaceRequest",
     "WorkspaceRuntimeProfileDefaultResponse",
+    "WorkspaceRuntimeProfileDeleteRequest",
+    "WorkspaceRuntimeProfileDeleteResponse",
     "WorkspaceRuntimeProfileListResponse",
     "WorkspaceRuntimeProfilePolicyV1",
     "WorkspaceRuntimeProfileReplaceRequest",
@@ -914,6 +916,8 @@ from azentspublicclient.models.workspace_response import WorkspaceResponse as Wo
 from azentspublicclient.models.workspace_runtime_profile_create_request import WorkspaceRuntimeProfileCreateRequest as WorkspaceRuntimeProfileCreateRequest
 from azentspublicclient.models.workspace_runtime_profile_default_replace_request import WorkspaceRuntimeProfileDefaultReplaceRequest as WorkspaceRuntimeProfileDefaultReplaceRequest
 from azentspublicclient.models.workspace_runtime_profile_default_response import WorkspaceRuntimeProfileDefaultResponse as WorkspaceRuntimeProfileDefaultResponse
+from azentspublicclient.models.workspace_runtime_profile_delete_request import WorkspaceRuntimeProfileDeleteRequest as WorkspaceRuntimeProfileDeleteRequest
+from azentspublicclient.models.workspace_runtime_profile_delete_response import WorkspaceRuntimeProfileDeleteResponse as WorkspaceRuntimeProfileDeleteResponse
 from azentspublicclient.models.workspace_runtime_profile_list_response import WorkspaceRuntimeProfileListResponse as WorkspaceRuntimeProfileListResponse
 from azentspublicclient.models.workspace_runtime_profile_policy_v1 import WorkspaceRuntimeProfilePolicyV1 as WorkspaceRuntimeProfilePolicyV1
 from azentspublicclient.models.workspace_runtime_profile_replace_request import WorkspaceRuntimeProfileReplaceRequest as WorkspaceRuntimeProfileReplaceRequest

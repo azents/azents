@@ -11,6 +11,7 @@ from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permission, Permissions
 from azents.core.enums import WorkspaceUserRole
 from azents.core.runtime_profile import (
+    RuntimeProfileLifecycle,
     RuntimeRecreationItemStatus,
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
@@ -18,6 +19,12 @@ from azents.core.runtime_profile import (
 from azents.repos.runtime_profile.data import (
     RuntimeRecreationOperation,
     RuntimeRecreationOperationItem,
+    WorkspaceRuntimeProfile,
+    WorkspaceRuntimeProfileDeletion,
+)
+from azents.services.runtime_profile_workspace.service import (
+    RuntimeProfileWorkspaceService,
+    RuntimeProfileWorkspaceUnavailable,
 )
 from azents.services.runtime_recreation.service import (
     RuntimeRecreationProjection,
@@ -74,10 +81,15 @@ def _app(
     service: AsyncMock,
     *,
     permissions: set[Permission],
+    workspace_service: AsyncMock | None = None,
 ) -> FastAPI:
     """Create a Public API app with recreation dependencies overridden."""
     app = create_dummy_public_app()
     app.dependency_overrides[RuntimeRecreationService] = lambda: service
+    if workspace_service is not None:
+        app.dependency_overrides[RuntimeProfileWorkspaceService] = lambda: (
+            workspace_service
+        )
     app.dependency_overrides[get_workspace_member] = lambda: WorkspaceMember(
         user_id="user-1",
         workspace_id="workspace-1",
@@ -93,9 +105,26 @@ def _client(
     service: AsyncMock,
     *,
     permissions: set[Permission],
+    workspace_service: AsyncMock | None = None,
 ) -> TestClient:
     """Create a Public API client for recreation route tests."""
-    return TestClient(_app(service, permissions=permissions))
+    return TestClient(
+        _app(
+            service,
+            permissions=permissions,
+            workspace_service=workspace_service,
+        )
+    )
+
+
+def _deleted_profile() -> WorkspaceRuntimeProfileDeletion:
+    return WorkspaceRuntimeProfileDeletion(
+        profile_id="profile-1",
+        cleared_workspace_default=True,
+        cleared_agent_count=2,
+        affected_running_runtime_count=1,
+        superseded_recreation_operation_count=1,
+    )
 
 
 def test_recreation_routes_require_explicit_read_and_write_permissions() -> None:
@@ -115,6 +144,114 @@ def test_recreation_routes_require_explicit_read_and_write_permissions() -> None
     assert get_response.status_code == 403
     service.create_workspace_profile_operation.assert_not_awaited()
     service.get_workspace_operation.assert_not_awaited()
+
+
+def test_delete_profile_requires_explicit_delete_permission() -> None:
+    """Runtime Profile write permission does not grant permanent deletion."""
+    recreation_service = AsyncMock(spec=RuntimeRecreationService)
+    workspace_service = AsyncMock(spec=RuntimeProfileWorkspaceService)
+
+    response = _client(
+        recreation_service,
+        permissions={Permissions.RUNTIME_PROFILES_WRITE},
+        workspace_service=workspace_service,
+    ).request(
+        "DELETE",
+        "/runtime-profile/v1/workspaces/acme/profiles/profile-1",
+        json={"expected_version": 7},
+    )
+
+    assert response.status_code == 403
+    workspace_service.delete_profile.assert_not_awaited()
+
+
+def test_delete_profile_forwards_exact_workspace_authority_and_actor() -> None:
+    """The delete route returns only bounded committed impact evidence."""
+    recreation_service = AsyncMock(spec=RuntimeRecreationService)
+    workspace_service = AsyncMock(spec=RuntimeProfileWorkspaceService)
+    workspace_service.delete_profile.return_value = _deleted_profile()
+
+    response = _client(
+        recreation_service,
+        permissions={Permissions.RUNTIME_PROFILES_DELETE},
+        workspace_service=workspace_service,
+    ).request(
+        "DELETE",
+        "/runtime-profile/v1/workspaces/acme/profiles/profile-1",
+        json={"expected_version": 7},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "profile_id": "profile-1",
+        "cleared_workspace_default": True,
+        "cleared_agent_count": 2,
+        "affected_running_runtime_count": 1,
+        "superseded_recreation_operation_count": 1,
+    }
+    workspace_service.delete_profile.assert_awaited_once_with(
+        "workspace-1",
+        "profile-1",
+        expected_version=7,
+        actor_workspace_user_id="workspace-user-1",
+    )
+
+
+def test_delete_profile_maps_not_found_and_version_conflict() -> None:
+    """Delete errors preserve non-disclosure and current optimistic evidence."""
+    recreation_service = AsyncMock(spec=RuntimeRecreationService)
+    workspace_service = AsyncMock(spec=RuntimeProfileWorkspaceService)
+    workspace_service.delete_profile.side_effect = RuntimeProfileWorkspaceUnavailable(
+        code="runtime_profile_not_found",
+        message="Workspace Runtime Profile was not found.",
+    )
+    client = _client(
+        recreation_service,
+        permissions={Permissions.RUNTIME_PROFILES_DELETE},
+        workspace_service=workspace_service,
+    )
+
+    not_found = client.request(
+        "DELETE",
+        "/runtime-profile/v1/workspaces/acme/profiles/foreign-profile",
+        json={"expected_version": 7},
+    )
+
+    assert not_found.status_code == 404
+    assert not_found.json()["detail"] == {"code": "runtime_profile_not_found"}
+
+    now = datetime.datetime(2026, 8, 11, tzinfo=datetime.UTC)
+    workspace_service.delete_profile.side_effect = RuntimeProfileWorkspaceUnavailable(
+        code="runtime_profile_version_conflict",
+        message="Workspace Runtime Profile version is stale.",
+        current_profile=WorkspaceRuntimeProfile(
+            id="profile-1",
+            workspace_id="workspace-1",
+            provider_id="provider-1",
+            infrastructure_profile_id="infrastructure-1",
+            display_name="Profile",
+            description="Profile",
+            lifecycle=RuntimeProfileLifecycle.ACTIVE,
+            policy={"schema_version": 1},
+            version=8,
+            digest="a" * 64,
+            created_by_workspace_user_id=None,
+            updated_by_workspace_user_id=None,
+            created_at=now,
+            updated_at=now,
+        ),
+    )
+    conflict = client.request(
+        "DELETE",
+        "/runtime-profile/v1/workspaces/acme/profiles/profile-1",
+        json={"expected_version": 7},
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == {
+        "code": "runtime_profile_version_conflict",
+        "current_version": 8,
+    }
 
 
 def test_create_recreation_uses_workspace_authority_and_actor() -> None:

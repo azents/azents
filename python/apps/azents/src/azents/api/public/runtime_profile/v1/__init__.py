@@ -27,6 +27,8 @@ from .data import (
     WorkspaceRuntimeProfileCreateRequest,
     WorkspaceRuntimeProfileDefaultReplaceRequest,
     WorkspaceRuntimeProfileDefaultResponse,
+    WorkspaceRuntimeProfileDeleteRequest,
+    WorkspaceRuntimeProfileDeleteResponse,
     WorkspaceRuntimeProfileListResponse,
     WorkspaceRuntimeProfileReplaceRequest,
     WorkspaceRuntimeProfileResponse,
@@ -174,6 +176,28 @@ async def replace_workspace_runtime_profile(
     return WorkspaceRuntimeProfileResponse.convert_from(profile)
 
 
+@router.delete("/workspaces/{handle}/profiles/{profile_id}")
+async def delete_workspace_runtime_profile(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[RuntimeProfileWorkspaceService, Depends()],
+    request_body: WorkspaceRuntimeProfileDeleteRequest,
+    *,
+    profile_id: str,
+) -> WorkspaceRuntimeProfileDeleteResponse:
+    """Permanently delete one exact Workspace-owned Runtime Profile."""
+    _require_permission(member, Permissions.RUNTIME_PROFILES_DELETE)
+    try:
+        deletion = await service.delete_profile(
+            member.workspace_id,
+            profile_id,
+            expected_version=request_body.expected_version,
+            actor_workspace_user_id=member.workspace_user_id,
+        )
+    except RuntimeProfileWorkspaceUnavailable as error:
+        _raise_unavailable(error)
+    return WorkspaceRuntimeProfileDeleteResponse.convert_from(deletion)
+
+
 @router.post(
     "/workspaces/{handle}/profiles/{profile_id}/recreation-operations",
     status_code=status.HTTP_201_CREATED,
@@ -235,6 +259,7 @@ def _raise_unavailable(error: RuntimeProfileWorkspaceUnavailable) -> NoReturn:
     if error.code in {
         "workspace_not_found",
         "profile_not_found",
+        "runtime_profile_not_found",
         "infrastructure_profile_not_found",
     }:
         raise HTTPException(

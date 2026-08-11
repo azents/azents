@@ -28,6 +28,7 @@ class Action(StrEnum):
     WILDCARD = "*"
     READ = "read"
     WRITE = "write"
+    DELETE = "delete"
 
 
 @dataclass(frozen=True)
@@ -142,6 +143,7 @@ class Permissions:
     # Workspace Runtime Profiles
     RUNTIME_PROFILES_READ = Permission(Resource.RUNTIME_PROFILES, Action.READ)
     RUNTIME_PROFILES_WRITE = Permission(Resource.RUNTIME_PROFILES, Action.WRITE)
+    RUNTIME_PROFILES_DELETE = Permission(Resource.RUNTIME_PROFILES, Action.DELETE)
 
 
 def has_permission(granted: set[Permission], required: Permission) -> bool:

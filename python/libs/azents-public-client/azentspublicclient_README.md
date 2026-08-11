@@ -245,6 +245,7 @@ Class | Method | HTTP request | Description
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_update_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_update_integration) | **PATCH** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Update Integration
 *RuntimeProfileV1Api* | [**runtime_profile_v1_create_profile_recreation**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_create_profile_recreation) | **POST** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}/recreation-operations | Create Profile Recreation
 *RuntimeProfileV1Api* | [**runtime_profile_v1_create_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_create_workspace_runtime_profile) | **POST** /runtime-profile/v1/workspaces/{handle}/profiles | Create Workspace Runtime Profile
+*RuntimeProfileV1Api* | [**runtime_profile_v1_delete_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_delete_workspace_runtime_profile) | **DELETE** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id} | Delete Workspace Runtime Profile
 *RuntimeProfileV1Api* | [**runtime_profile_v1_get_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile) | **GET** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id} | Get Workspace Runtime Profile
 *RuntimeProfileV1Api* | [**runtime_profile_v1_get_workspace_runtime_profile_default**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile_default) | **GET** /runtime-profile/v1/workspaces/{handle}/default | Get Workspace Runtime Profile Default
 *RuntimeProfileV1Api* | [**runtime_profile_v1_get_workspace_runtime_profile_recreation**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile_recreation) | **GET** /runtime-profile/v1/workspaces/{handle}/recreation-operations/{operation_id} | Get Workspace Runtime Profile Recreation
@@ -710,6 +711,8 @@ Class | Method | HTTP request | Description
  - [WorkspaceRuntimeProfileCreateRequest](azentspublicclient/docs/WorkspaceRuntimeProfileCreateRequest.md)
  - [WorkspaceRuntimeProfileDefaultReplaceRequest](azentspublicclient/docs/WorkspaceRuntimeProfileDefaultReplaceRequest.md)
  - [WorkspaceRuntimeProfileDefaultResponse](azentspublicclient/docs/WorkspaceRuntimeProfileDefaultResponse.md)
+ - [WorkspaceRuntimeProfileDeleteRequest](azentspublicclient/docs/WorkspaceRuntimeProfileDeleteRequest.md)
+ - [WorkspaceRuntimeProfileDeleteResponse](azentspublicclient/docs/WorkspaceRuntimeProfileDeleteResponse.md)
  - [WorkspaceRuntimeProfileListResponse](azentspublicclient/docs/WorkspaceRuntimeProfileListResponse.md)
  - [WorkspaceRuntimeProfilePolicyV1](azentspublicclient/docs/WorkspaceRuntimeProfilePolicyV1.md)
  - [WorkspaceRuntimeProfileReplaceRequest](azentspublicclient/docs/WorkspaceRuntimeProfileReplaceRequest.md)
