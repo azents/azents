@@ -50,6 +50,7 @@ def _runtime(
         id="runtime-1",
         workspace_id="workspace-1",
         agent_id="agent-1",
+        terminal_delete_acknowledgement_kind=None,
         desired_state=desired_state,
         desired_generation=desired_generation,
         provider_observed_state=provider_observed_state,

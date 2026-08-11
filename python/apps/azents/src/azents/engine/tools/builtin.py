@@ -101,6 +101,7 @@ from azents.engine.tools.write import make_write_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import require_session_working_folder_path
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -1101,7 +1102,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             )
         if context is None:
             raise RuntimeError("Session working-folder context is unavailable")
-        return context.working_folder_path
+        return require_session_working_folder_path(context)
 
     def _render_config_prompt(
         self,
@@ -1922,7 +1923,7 @@ def make_exec_command_tool(
                     raise FunctionToolError(
                         "Session working-folder context is unavailable."
                     )
-                workdir = context.working_folder_path
+                workdir = require_session_working_folder_path(context)
             runtime = await _ready_runtime_for_agent(
                 agent_runtime_repo=agent_runtime_repo,
                 agent_runtime_service=(agent_runtime_service),

@@ -13,6 +13,7 @@ from azents.core.agent import (
 )
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRuntimeCapability,
     AgentType,
     ExternalChannelResponseMode,
 )
@@ -75,6 +76,7 @@ class AgentRepository:
             ),
             type=create.type,
             runtime_profile_id=create.runtime_profile_id,
+            runtime_capability=create.runtime_capability,
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
             tool_search_enabled=create.tool_search_enabled,
@@ -128,6 +130,44 @@ class AgentRepository:
         if rdb_agent is None:
             return None
         return self._build_row(rdb_agent)
+
+    async def compare_and_set_runtime_capability(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        expected_capability: AgentRuntimeCapability,
+        expected_capability_version: int,
+        expected_runtime_profile_selection_version: int,
+        capability: AgentRuntimeCapability,
+        runtime_profile_id: str | None,
+        shell_enabled: bool,
+    ) -> Agent | None:
+        """Replace Runtime authority and Profile selection under both fences."""
+        result = await session.execute(
+            sa.update(RDBAgent)
+            .where(
+                RDBAgent.id == agent_id,
+                RDBAgent.runtime_capability == expected_capability,
+                RDBAgent.runtime_capability_version == expected_capability_version,
+                RDBAgent.runtime_profile_selection_version
+                == expected_runtime_profile_selection_version,
+            )
+            .values(
+                runtime_capability=capability,
+                runtime_capability_version=RDBAgent.runtime_capability_version + 1,
+                runtime_profile_id=runtime_profile_id,
+                runtime_profile_selection_version=(
+                    RDBAgent.runtime_profile_selection_version + 1
+                ),
+                shell_enabled=shell_enabled,
+                updated_at=sa.func.now(),
+            )
+            .returning(RDBAgent)
+        )
+        rdb_agent = result.scalar_one_or_none()
+        await session.flush()
+        return self._build_row(rdb_agent) if rdb_agent is not None else None
 
     async def list_by_workspace(
         self, session: AsyncSession, workspace_id: str
@@ -350,6 +390,8 @@ class AgentRepository:
             type=rdb.type,
             runtime_profile_id=rdb.runtime_profile_id,
             runtime_profile_selection_version=(rdb.runtime_profile_selection_version),
+            runtime_capability=rdb.runtime_capability,
+            runtime_capability_version=rdb.runtime_capability_version,
             shell_enabled=rdb.shell_enabled,
             memory_enabled=rdb.memory_enabled,
             tool_search_enabled=rdb.tool_search_enabled,

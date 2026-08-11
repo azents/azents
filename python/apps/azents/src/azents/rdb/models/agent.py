@@ -14,6 +14,7 @@ from azents.core.agent import (
 )
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRuntimeCapability,
     AgentType,
     ExternalChannelResponseMode,
 )
@@ -35,6 +36,12 @@ agent_type_enum = ENUM(
 agent_lifecycle_status_enum = ENUM(
     AgentLifecycleStatus,
     name="agent_lifecycle_status",
+    create_type=False,
+    values_callable=_agent_type_values,
+)
+agent_runtime_capability_enum = ENUM(
+    AgentRuntimeCapability,
+    name="agent_runtime_capability",
     create_type=False,
     values_callable=_agent_type_values,
 )
@@ -168,6 +175,18 @@ class RDBAgent(RDBModel):
         default=1,
         server_default="1",
     )
+    runtime_capability: Mapped[AgentRuntimeCapability] = mapped_column(
+        agent_runtime_capability_enum,
+        nullable=False,
+        default=AgentRuntimeCapability.MANAGED,
+        server_default=AgentRuntimeCapability.MANAGED.value,
+    )
+    runtime_capability_version: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
     # Enable runtime shell access.
     shell_enabled: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, default=True
@@ -230,6 +249,14 @@ class RDBAgent(RDBModel):
         "runtime_profile_selection_version >= 1",
         name="ck_agents_runtime_profile_selection_version_positive",
     )
+    CK_RUNTIME_CAPABILITY_VERSION_POSITIVE = sa.CheckConstraint(
+        "runtime_capability_version >= 1",
+        name="ck_agents_runtime_capability_version_positive",
+    )
+    CK_RUNTIME_CAPABILITY_PROFILE = sa.CheckConstraint(
+        "runtime_capability = 'managed' OR runtime_profile_id IS NULL",
+        name="ck_agents_runtime_capability_profile",
+    )
     CK_MODEL_NOT_NULL = sa.CheckConstraint(
         "model_selection IS NOT NULL AND lightweight_model_selection IS NOT NULL",
         name="ck_agents_model_not_null",
@@ -262,6 +289,8 @@ class RDBAgent(RDBModel):
         IX_WORKSPACE_ID,
         IX_RUNTIME_PROFILE_ID,
         CK_RUNTIME_PROFILE_SELECTION_VERSION_POSITIVE,
+        CK_RUNTIME_CAPABILITY_VERSION_POSITIVE,
+        CK_RUNTIME_CAPABILITY_PROFILE,
         CK_MODEL_NOT_NULL,
         CK_MAX_TURNS_POSITIVE,
         CK_AUTO_ARCHIVE_TTL_DAYS_POSITIVE,

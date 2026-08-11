@@ -25,6 +25,7 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
     RuntimeRunnerState,
+    SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
 )
@@ -129,6 +130,7 @@ class _RuntimeRepositoryDouble(AgentRuntimeRepository):
             id="runtime-1",
             workspace_id="workspace-1",
             agent_id="agent-1",
+            terminal_delete_acknowledgement_kind=None,
             created_at=now,
             updated_at=now,
         )
@@ -235,6 +237,9 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
             agent_id="agent-1",
             agent_runtime_id="runtime-1",
             working_folder_path="/workspace/agent/.azents/sessions/test-session-handle",
+            binding_state=SessionWorkingFolderBindingState.BOUND,
+            invalidated_by_removal_id=None,
+            invalidated_at=None,
             cleanup_status=SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED,
         )
 

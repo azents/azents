@@ -9,7 +9,7 @@ from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     SelectableModelOption,
 )
-from azents.core.enums import ExternalChannelResponseMode
+from azents.core.enums import AgentRuntimeCapability, ExternalChannelResponseMode
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
@@ -44,6 +44,7 @@ def _agent_create(*, tool_search_enabled: bool = True) -> AgentCreate:
         main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
         lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
         runtime_profile_id=None,
+        runtime_capability=AgentRuntimeCapability.MANAGED,
         external_channel_default_response_mode=(
             ExternalChannelResponseMode.ALL_MESSAGES
         ),
@@ -129,3 +130,32 @@ async def test_update_maps_tool_search_enabled_to_update_statement() -> None:
 
     statement = session.execute.call_args.args[0]
     assert statement.compile().params["tool_search_enabled"] is False
+
+
+async def test_runtime_capability_compare_and_set_maps_version_fence() -> None:
+    """Map the capability transition and optimistic version into SQL."""
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.side_effect = _StopAfterWrite
+
+    with pytest.raises(_StopAfterWrite):
+        await AgentRepository().compare_and_set_runtime_capability(
+            session,
+            agent_id="agent-1",
+            expected_capability=AgentRuntimeCapability.MANAGED,
+            expected_capability_version=3,
+            expected_runtime_profile_selection_version=7,
+            capability=AgentRuntimeCapability.REMOVING,
+            runtime_profile_id=None,
+            shell_enabled=False,
+        )
+
+    statement = session.execute.call_args.args[0]
+    params = statement.compile().params
+    assert params["runtime_capability_1"] is AgentRuntimeCapability.MANAGED
+    assert params["runtime_capability_version_1"] == 1
+    assert params["runtime_capability_version_2"] == 3
+    assert params["runtime_capability"] is AgentRuntimeCapability.REMOVING
+    assert params["runtime_profile_selection_version_1"] == 1
+    assert params["runtime_profile_selection_version_2"] == 7
+    assert params["runtime_profile_id"] is None
+    assert params["shell_enabled"] is False

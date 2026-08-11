@@ -15,6 +15,7 @@ from azents.core.agent import (
 )
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRuntimeCapability,
     AgentType,
     ExternalChannelResponseMode,
 )
@@ -59,6 +60,13 @@ class Agent(BaseModel):
     runtime_profile_selection_version: int = Field(
         ge=1,
         description="Optimistic Agent Runtime Profile selection version",
+    )
+    runtime_capability: AgentRuntimeCapability = Field(
+        description="Agent-owned managed Runtime capability state"
+    )
+    runtime_capability_version: int = Field(
+        ge=1,
+        description="Optimistic Agent Runtime capability version",
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
@@ -115,6 +123,9 @@ class AgentCreate(BaseModel):
     type: AgentType = Field(default=AgentType.PUBLIC, description="Visibility scope")
     runtime_profile_id: str | None = Field(
         description="Selected Workspace Runtime Profile ID"
+    )
+    runtime_capability: AgentRuntimeCapability = Field(
+        description="Initial managed Runtime capability state"
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")

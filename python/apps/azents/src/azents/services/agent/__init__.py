@@ -22,6 +22,7 @@ from azents.core.agent import (
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
+    AgentRuntimeCapability,
     AgentType,
     ExternalChannelResponseMode,
     WorkspaceUserRole,
@@ -393,6 +394,7 @@ class AgentService:
             ),
             type=create.type,
             runtime_profile_id=None,
+            runtime_capability=AgentRuntimeCapability.MANAGED,
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
             tool_search_enabled=create.tool_search_enabled,

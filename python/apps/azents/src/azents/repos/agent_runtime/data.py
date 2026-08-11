@@ -13,6 +13,7 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
     RuntimeSummary,
+    RuntimeTerminalDeleteAcknowledgementKind,
 )
 
 
@@ -65,6 +66,11 @@ class AgentRuntime(BaseModel):
     )
     terminal_delete_acknowledged_at: datetime.datetime | None = Field(
         default=None, description="Terminal deletion acknowledgement time"
+    )
+    terminal_delete_acknowledgement_kind: (
+        RuntimeTerminalDeleteAcknowledgementKind | None
+    ) = Field(
+        description="Authority that proved terminal deletion",
     )
     provider_observed_state: RuntimeProviderObservedState = Field(
         default=RuntimeProviderObservedState.UNKNOWN,

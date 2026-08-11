@@ -362,6 +362,7 @@ class _ReadyRuntimeRepository(AgentRuntimeRepository):
             id="runtime-archive-cleanup",
             workspace_id="workspace-archive-cleanup",
             agent_id=agent_id,
+            terminal_delete_acknowledgement_kind=None,
             runner_state=RuntimeRunnerState.READY,
             runner_generation=7,
             workspace_path="/workspace/agent",

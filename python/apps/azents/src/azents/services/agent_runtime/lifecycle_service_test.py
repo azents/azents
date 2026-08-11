@@ -55,6 +55,7 @@ def _runtime(
         terminal_delete_requested_generation=terminal_delete_requested_generation,
         terminal_delete_acknowledged_generation=None,
         terminal_delete_acknowledged_at=None,
+        terminal_delete_acknowledgement_kind=None,
         provider_observed_state=provider_observed_state,
         provider_observed_generation=0,
         provider_connection_state=provider_connection_state,

@@ -21,6 +21,7 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogEntry
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import require_session_working_folder_path
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
@@ -218,6 +219,7 @@ class ProjectBrowserManifestService:
             )
             if context is None:
                 raise RuntimeError("Active Session is missing working-folder context")
+            working_folder_path = require_session_working_folder_path(context)
             projects = await self.project_repository.list_projects(
                 session,
                 session_id=session_id,
@@ -227,7 +229,7 @@ class ProjectBrowserManifestService:
                 session_id=session_id,
             )
             paths = [
-                context.working_folder_path,
+                working_folder_path,
                 *(project.path for project in projects),
             ]
             catalog_entries = await self.catalog_repository.list_entries_by_paths(
@@ -264,16 +266,14 @@ class ProjectBrowserManifestService:
         git_project_paths = {worktree.worktree_path for worktree in worktrees}
         session_folder_entry = ProjectBrowserEntry(
             name="Session files",
-            path=context.working_folder_path,
+            path=working_folder_path,
             kind="directory",
             repository_type=None,
             source=ProjectBrowserEntrySource(
                 type="session_folder",
                 project_id=None,
             ),
-            status=_status_from_catalog(
-                catalog_by_path.get(context.working_folder_path)
-            ),
+            status=_status_from_catalog(catalog_by_path.get(working_folder_path)),
             capabilities=_SESSION_FOLDER_CAPABILITIES,
         )
         entries = [

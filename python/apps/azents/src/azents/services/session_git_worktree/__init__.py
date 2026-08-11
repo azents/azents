@@ -52,6 +52,7 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import require_session_working_folder_path
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import (
     SessionGitWorktree,
@@ -555,7 +556,7 @@ class SessionGitWorktreeService:
             )
         try:
             working_folder_path = validate_session_working_folder_path(
-                context.working_folder_path,
+                require_session_working_folder_path(context),
                 workspace_root=normalize_agent_workspace_root(
                     runtime.workspace_path
                 ).as_posix(),
@@ -1569,7 +1570,7 @@ class SessionGitWorktreeService:
             raise RuntimeError("Active root Session is missing working-folder context")
         try:
             working_folder_path = validate_session_working_folder_path(
-                working_folder_context.working_folder_path,
+                require_session_working_folder_path(working_folder_context),
                 workspace_root=workspace_root,
             )
         except ValueError:

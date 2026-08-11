@@ -14,6 +14,7 @@ from azents.core.enums import (
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
+    RuntimeTerminalDeleteAcknowledgementKind,
 )
 from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.rdb.models.agent import RDBAgent
@@ -656,6 +657,7 @@ class AgentRuntimeRepository:
                 ),
                 terminal_delete_acknowledged_generation=None,
                 terminal_delete_acknowledged_at=None,
+                terminal_delete_acknowledgement_kind=None,
                 last_state_change_at=sa.func.now(),
             )
             .returning(RDBAgentRuntime)
@@ -682,6 +684,9 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.desired_generation == acknowledged_generation,
                 RDBAgentRuntime.terminal_delete_requested_generation
                 == acknowledged_generation,
+                RDBAgentRuntime.terminal_delete_acknowledged_generation.is_(None),
+                RDBAgentRuntime.terminal_delete_acknowledged_at.is_(None),
+                RDBAgentRuntime.terminal_delete_acknowledgement_kind.is_(None),
                 RDBAgentRuntime.provider_generation <= provider_generation,
                 RDBAgentRuntime.provider_observed_generation <= acknowledged_generation,
             )
@@ -694,6 +699,9 @@ class AgentRuntimeRepository:
                 runner_state=RuntimeRunnerState.DISCONNECTED,
                 terminal_delete_acknowledged_generation=acknowledged_generation,
                 terminal_delete_acknowledged_at=sa.func.now(),
+                terminal_delete_acknowledgement_kind=(
+                    RuntimeTerminalDeleteAcknowledgementKind.PROVIDER_REPORT
+                ),
                 failure_generation=None,
                 failure_code=None,
                 failure_message=None,
@@ -1281,6 +1289,9 @@ class AgentRuntimeRepository:
                 rdb.terminal_delete_acknowledged_generation
             ),
             terminal_delete_acknowledged_at=rdb.terminal_delete_acknowledged_at,
+            terminal_delete_acknowledgement_kind=(
+                rdb.terminal_delete_acknowledgement_kind
+            ),
             provider_observed_state=rdb.provider_observed_state,
             provider_generation=rdb.provider_generation,
             provider_observed_generation=rdb.provider_observed_generation,

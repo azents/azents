@@ -15,6 +15,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     AgentSessionTitleSource,
     SessionAgentKind,
+    SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
 )
 from azents.core.inference_profile import SessionInferenceState
@@ -220,10 +221,30 @@ class SessionWorkingFolderContext(BaseModel):
     id: str = Field(description="SessionAgentContext ID")
     agent_id: str = Field(description="Agent ID")
     agent_runtime_id: str | None = Field(description="Current AgentRuntime ID")
-    working_folder_path: str = Field(description="Exact owned working-folder path")
+    working_folder_path: str | None = Field(
+        description="Exact historical working-folder path"
+    )
+    binding_state: SessionWorkingFolderBindingState = Field(
+        description="Current working-folder Runtime authority"
+    )
+    invalidated_by_removal_id: str | None = Field(
+        description="Runtime removal operation that invalidated this binding"
+    )
+    invalidated_at: datetime.datetime | None = Field(
+        description="Working-folder binding invalidation time"
+    )
     cleanup_status: SessionWorkingFolderCleanupStatus = Field(
         description="Latest archive cleanup state"
     )
+
+
+def require_session_working_folder_path(
+    context: SessionWorkingFolderContext,
+) -> str:
+    """Return the stored path while legacy path authority remains active."""
+    if context.working_folder_path is None:
+        raise RuntimeError("Session working-folder path is unavailable")
+    return context.working_folder_path
 
 
 class PendingSessionCommand(BaseModel):

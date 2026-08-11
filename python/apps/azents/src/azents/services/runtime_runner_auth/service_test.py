@@ -43,6 +43,7 @@ def _runtime(*, desired_generation: int) -> AgentRuntime:
         id="runtime-1",
         workspace_id="workspace-1",
         agent_id="agent-1",
+        terminal_delete_acknowledgement_kind=None,
         desired_generation=desired_generation,
         created_at=now,
         updated_at=now,

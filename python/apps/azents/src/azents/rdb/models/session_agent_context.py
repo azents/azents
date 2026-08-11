@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from azents.core.enums import (
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
+    SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
 )
 from azents.rdb.models.base import RDBModel
@@ -27,11 +28,24 @@ def _session_working_folder_cleanup_status_values(
     return [value.value for value in enum_cls]
 
 
+def _session_working_folder_binding_state_values(
+    enum_cls: type[SessionWorkingFolderBindingState],
+) -> list[str]:
+    """Return Session working-folder binding values stored in the DB."""
+    return [value.value for value in enum_cls]
+
+
 session_working_folder_cleanup_status_enum = ENUM(
     SessionWorkingFolderCleanupStatus,
     name="session_working_folder_cleanup_status",
     create_type=False,
     values_callable=_session_working_folder_cleanup_status_values,
+)
+session_working_folder_binding_state_enum = ENUM(
+    SessionWorkingFolderBindingState,
+    name="session_working_folder_binding_state",
+    create_type=False,
+    values_callable=_session_working_folder_binding_state_values,
 )
 
 
@@ -57,6 +71,28 @@ class RDBSessionAgentContext(RDBModel):
         "working_folder_path",
         name="uq_session_agent_contexts_working_folder_path",
     )
+    CK_WORKING_FOLDER_BINDING = sa.CheckConstraint(
+        "(working_folder_binding_state = 'none' "
+        "AND working_folder_path IS NULL "
+        "AND agent_runtime_id IS NULL "
+        "AND working_folder_invalidated_by_removal_id IS NULL "
+        "AND working_folder_invalidated_at IS NULL) OR "
+        "(working_folder_binding_state = 'pending' "
+        "AND working_folder_path IS NULL "
+        "AND agent_runtime_id IS NOT NULL "
+        "AND working_folder_invalidated_by_removal_id IS NULL "
+        "AND working_folder_invalidated_at IS NULL) OR "
+        "(working_folder_binding_state = 'bound' "
+        "AND working_folder_path IS NOT NULL "
+        "AND agent_runtime_id IS NOT NULL "
+        "AND working_folder_invalidated_by_removal_id IS NULL "
+        "AND working_folder_invalidated_at IS NULL) OR "
+        "(working_folder_binding_state = 'invalidated' "
+        "AND agent_runtime_id IS NOT NULL "
+        "AND working_folder_invalidated_by_removal_id IS NOT NULL "
+        "AND working_folder_invalidated_at IS NOT NULL)",
+        name="ck_session_agent_contexts_working_folder_binding",
+    )
 
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -68,9 +104,9 @@ class RDBSessionAgentContext(RDBModel):
         sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
         nullable=False,
     )
-    working_folder_path: Mapped[str] = mapped_column(
+    working_folder_path: Mapped[str | None] = mapped_column(
         sa.Text,
-        nullable=False,
+        nullable=True,
     )
     working_folder_cleanup_status: Mapped[SessionWorkingFolderCleanupStatus] = (
         mapped_column(
@@ -88,6 +124,14 @@ class RDBSessionAgentContext(RDBModel):
             nullable=True,
         )
     )
+    working_folder_binding_state: Mapped[SessionWorkingFolderBindingState] = (
+        mapped_column(
+            session_working_folder_binding_state_enum,
+            nullable=False,
+            default=SessionWorkingFolderBindingState.BOUND,
+            server_default=SessionWorkingFolderBindingState.BOUND.value,
+        )
+    )
     root_session_agent_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey(
@@ -102,6 +146,22 @@ class RDBSessionAgentContext(RDBModel):
     agent_runtime_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("agent_runtimes.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+    )
+    working_folder_invalidated_by_removal_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "agent_runtime_removal_operations.id",
+            ondelete="RESTRICT",
+            use_alter=True,
+            name=("fk_session_contexts_invalidated_removal_id"),
+        ),
+        nullable=True,
+        default=None,
+    )
+    working_folder_invalidated_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
         nullable=True,
         default=None,
     )
@@ -130,6 +190,7 @@ class RDBSessionAgentContext(RDBModel):
         IX_WORKSPACE_ID,
         IX_AGENT_RUNTIME_ID,
         UQ_WORKING_FOLDER_PATH,
+        CK_WORKING_FOLDER_BINDING,
     )
 
 
