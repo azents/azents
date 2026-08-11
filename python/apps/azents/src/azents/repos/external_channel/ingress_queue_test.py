@@ -610,7 +610,11 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
         session_id=None,
     )
 
-    def item_create(index: int) -> ExternalChannelIngressItemCreate:
+    def item_create(
+        index: int,
+        *,
+        invocation: bool = True,
+    ) -> ExternalChannelIngressItemCreate:
         return ExternalChannelIngressItemCreate(
             deduplication_key=f"{index:064d}",
             provider_event_id=f"event-{index}",
@@ -636,7 +640,7 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
             trigger_provider_message_id=f"{index}.0",
             trigger_position=f"{index:020d}",
             provider_user_id="U1",
-            invocation=True,
+            invocation=invocation,
             invocation_id=f"invocation-{index}",
             initial_title_eligible=False,
         )
@@ -650,7 +654,7 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
     second = await repository.admit(
         rdb_session,
         owner_create=owner_create,
-        item_create=item_create(2),
+        item_create=item_create(2, invocation=False),
     )
 
     assert first.owner.id == second.owner.id
@@ -669,6 +673,15 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
         )
         == 2
     )
+    correlations = await repository.list_active_correlations(
+        rdb_session,
+        connection_id=connection.id,
+        conversation_position_id=position.id,
+    )
+    assert set(correlations) == {"message-1", "message-2"}
+    assert correlations["message-1"].invocation_id == "invocation-1"
+    assert correlations["message-2"].invocation_id == "invocation-2"
+    assert correlations["message-2"].principal_id == principal.id
     owner_row = await rdb_session.get(
         RDBExternalChannelIngressOwner,
         first.owner.id,
