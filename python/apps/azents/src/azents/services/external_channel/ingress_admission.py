@@ -119,9 +119,10 @@ class ExternalChannelIngressAdmissionService:
             )
             if target is None:
                 return None
-            if (
-                not request.locator.invocation
-                and target.response_mode is ExternalChannelResponseMode.MENTION_ONLY
+            if not _response_mode_triggered(
+                invocation=request.locator.invocation,
+                binding=target.binding,
+                response_mode=target.response_mode,
             ):
                 await session.commit()
                 return _outcome(
@@ -503,6 +504,19 @@ def _provider_parent_channel_id(request: ExternalChannelIngestionRequest) -> str
     if request.locator.provider is ExternalChannelProvider.SLACK:
         return request.locator.provider_channel_id
     return request.scope.provider_channel_id
+
+
+def _response_mode_triggered(
+    *,
+    invocation: bool,
+    binding: ExternalChannelBinding | None,
+    response_mode: ExternalChannelResponseMode,
+) -> bool:
+    """Require explicit invocation until a Binding owns all-message continuation."""
+    return invocation or (
+        binding is not None
+        and response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+    )
 
 
 def _resource_labels(request: ExternalChannelIngestionRequest) -> dict[str, object]:

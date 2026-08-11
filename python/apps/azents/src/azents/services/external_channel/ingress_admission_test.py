@@ -3,9 +3,10 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -22,6 +23,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
+    ExternalChannelBinding,
     ExternalChannelConnection,
     ExternalChannelParticipationSetting,
     ExternalChannelResource,
@@ -31,27 +33,40 @@ from azents.repos.external_channel.ingress_queue import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelTriggerLocator,
 )
 from azents.services.external_channel.ingress_admission import (
     ExternalChannelIngressAdmissionService,
+    _response_mode_triggered,
 )
 
 
-def _session_manager() -> SessionManager[AsyncSession]:
+def _session_manager(
+    session: AsyncSession | None = None,
+) -> SessionManager[AsyncSession]:
     @asynccontextmanager
     async def manager() -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, object())
+        yield cast(AsyncSession, object()) if session is None else session
 
     return manager
 
 
-def _service(repository: MagicMock) -> ExternalChannelIngressAdmissionService:
+def _service(
+    repository: MagicMock,
+    *,
+    session_manager: SessionManager[AsyncSession] | None = None,
+    queue_repository: MagicMock | None = None,
+) -> ExternalChannelIngressAdmissionService:
     return ExternalChannelIngressAdmissionService(
-        session_manager=_session_manager(),
+        session_manager=session_manager or _session_manager(),
         repository=cast(ExternalChannelRepository, repository),
-        queue_repository=cast(ExternalChannelIngressQueueRepository, MagicMock()),
+        queue_repository=cast(
+            ExternalChannelIngressQueueRepository,
+            queue_repository or MagicMock(),
+        ),
         agent_session_repository=cast(AgentSessionRepository, MagicMock()),
         job_runtime=cast(JobRuntime, MagicMock()),
     )
@@ -87,7 +102,7 @@ def _resource(
     )
 
 
-def _request() -> ExternalChannelIngestionRequest:
+def _request(*, invocation: bool = True) -> ExternalChannelIngestionRequest:
     return cast(
         ExternalChannelIngestionRequest,
         SimpleNamespace(
@@ -105,7 +120,7 @@ def _request() -> ExternalChannelIngestionRequest:
                 trigger_provider_message_id="message-1",
                 trigger_position="0001",
                 provider_user_id="user-1",
-                invocation=True,
+                invocation=invocation,
             ),
             scope=SimpleNamespace(
                 kind=ExternalChannelConversationScopeKind.THREAD,
@@ -114,6 +129,129 @@ def _request() -> ExternalChannelIngestionRequest:
             ),
         ),
     )
+
+
+def _binding(
+    response_mode: ExternalChannelResponseMode,
+) -> ExternalChannelBinding:
+    return ExternalChannelBinding.model_construct(
+        id="binding-1",
+        resource_id="source-1",
+        route_id="route-1",
+        agent_session_id="session-1",
+        response_mode=response_mode,
+    )
+
+
+@pytest.mark.parametrize(
+    ("invocation", "binding", "response_mode", "expected"),
+    [
+        (False, None, ExternalChannelResponseMode.ALL_MESSAGES, False),
+        (True, None, ExternalChannelResponseMode.ALL_MESSAGES, True),
+        (
+            False,
+            _binding(ExternalChannelResponseMode.ALL_MESSAGES),
+            ExternalChannelResponseMode.ALL_MESSAGES,
+            True,
+        ),
+        (
+            False,
+            _binding(ExternalChannelResponseMode.MENTION_ONLY),
+            ExternalChannelResponseMode.MENTION_ONLY,
+            False,
+        ),
+    ],
+)
+def test_response_mode_requires_invocation_until_binding_exists(
+    invocation: bool,
+    binding: ExternalChannelBinding | None,
+    response_mode: ExternalChannelResponseMode,
+    expected: bool,
+) -> None:
+    """Only a connected all-messages Binding admits ordinary continuation."""
+    assert (
+        _response_mode_triggered(
+            invocation=invocation,
+            binding=binding,
+            response_mode=response_mode,
+        )
+        is expected
+    )
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        ExternalChannelConversationLocation.CHANNEL,
+        ExternalChannelConversationLocation.THREADS,
+    ],
+)
+async def test_unbound_all_messages_non_invocation_stops_before_queue(
+    location: ExternalChannelConversationLocation,
+) -> None:
+    """Configured defaults cannot create a Binding from an ordinary message."""
+    commit = AsyncMock()
+    session = cast(AsyncSession, SimpleNamespace(commit=commit))
+    repository = MagicMock()
+    repository.create_principal_idempotent = AsyncMock()
+    queue_repository = MagicMock()
+    queue_repository.admit = AsyncMock()
+    service = _service(
+        repository,
+        session_manager=_session_manager(session),
+        queue_repository=queue_repository,
+    )
+    source = _resource("source-1", ExternalChannelResourceType.THREAD)
+    target_resource = (
+        _resource(
+            "parent-resource-1",
+            ExternalChannelResourceType.PARENT_CHANNEL,
+        )
+        if location is ExternalChannelConversationLocation.CHANNEL
+        else source
+    )
+    target = SimpleNamespace(
+        resource=target_resource,
+        route=_route(),
+        setting=ExternalChannelParticipationSetting.model_construct(
+            id="setting-1",
+            route_id="route-1",
+            location=location,
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+            settings_generation=1,
+        ),
+        binding=None,
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+    )
+
+    with (
+        patch.object(
+            ExternalChannelIngressAdmissionService,
+            "_lock_authority",
+            new=AsyncMock(return_value=_connection()),
+        ),
+        patch.object(
+            ExternalChannelIngressAdmissionService,
+            "_ensure_source_resource",
+            new=AsyncMock(return_value=source),
+        ),
+        patch.object(
+            ExternalChannelIngressAdmissionService,
+            "_resolve_target",
+            new=AsyncMock(return_value=cast(Any, target)),
+        ),
+    ):
+        outcome = await service.admit_current_trigger(
+            provider_event_id="event-1",
+            request=_request(invocation=False),
+        )
+
+    assert outcome is not None
+    assert outcome.kind is ExternalChannelIngestionOutcomeKind.IGNORED
+    assert outcome.reason is ExternalChannelIngestionReason.RESPONSE_MODE_NOT_TRIGGERED
+    commit.assert_awaited_once()
+    repository.create_principal_idempotent.assert_not_awaited()
+    queue_repository.admit.assert_not_awaited()
 
 
 async def test_channel_location_fans_source_thread_into_parent_owner() -> None:
