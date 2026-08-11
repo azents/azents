@@ -23,6 +23,7 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
+from azents.core.external_channel_progress import checking_progress
 from azents.job_runtime.types import (
     JobExecutionContext,
     JobPayload,
@@ -46,6 +47,7 @@ from azents.repos.external_channel.ingress_queue_data import (
     ExternalChannelIngressOwner,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryDeadlineExceeded,
@@ -214,6 +216,10 @@ class ExternalChannelIngressDrainService:
     provisioning_service: Annotated[
         ExternalChannelIngressProvisioningService,
         Depends(ExternalChannelIngressProvisioningService),
+    ]
+    work_repository: Annotated[
+        ExternalChannelWorkRepository,
+        Depends(ExternalChannelWorkRepository.create),
     ]
     mailbox_service: Annotated[MailboxService, Depends(MailboxService)]
     wake_dispatcher: Annotated[
@@ -524,6 +530,7 @@ class ExternalChannelIngressDrainService:
         """Atomically apply one prepared successful subset and queue transitions."""
         now = datetime.datetime.now(datetime.UTC)
         wake: tuple[str, str] | None = None
+        progress_plan: ProviderEffectPlan | None = None
         async with self.session_manager() as session:
             connections = {
                 connection_id: await self.repository.lock_connection_for_routing(
@@ -744,6 +751,29 @@ class ExternalChannelIngressDrainService:
                 if not enqueues
                 else await self.mailbox_service.enqueue_many(session, enqueues)
             )
+            if any(result.created for result in mailbox_results):
+                target_session = await self.agent_session_repository.lock_by_id(
+                    session,
+                    batch.session_id,
+                )
+                if target_session is None:
+                    raise RuntimeError(
+                        "External Channel final Session ownership disappeared."
+                    )
+                work = await self.work_repository.ensure_active_work(
+                    session,
+                    agent_id=target_session.agent_id,
+                    session_id=batch.session_id,
+                    binding_id=batch.binding_id,
+                    desired_progress=checking_progress(),
+                )
+                progress_plan = await self.work_repository.prepare_initial_progress(
+                    session,
+                    agent_id=target_session.agent_id,
+                    session_id=batch.session_id,
+                    binding_id=batch.binding_id,
+                    work_cycle_id=work.work_cycle_id,
+                )
             for position_id, final_position in successful_positions.items():
                 advanced = (
                     await self.repository.advance_conversation_position_if_current(
@@ -783,6 +813,8 @@ class ExternalChannelIngressDrainService:
                 deleted_items=delete_items,
             )
             await session.commit()
+        if progress_plan is not None:
+            await self._attempt_control_plans((progress_plan,))
         self.metrics.record_finalization(
             retries=len(retry_outcomes),
             bounded_failures=len(bounded_failures),
