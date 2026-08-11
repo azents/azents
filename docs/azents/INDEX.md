@@ -298,6 +298,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Primary Agent Sessions and Team-First Multi-Session UX Historical Requirements Reconstruction](requirements/primary-260625-primary-sessions.md) | primary-260625 | 2026-06-25 | - |
 | [Agent Profile Image Historical Requirements Reconstruction](requirements/profile-260421-profile-image.md) | profile-260421 | 2026-04-21 | 2026-04-21 |
 | [Reuse the Active Run Profile for Matching Inputs Historical Requirements Reconstruction](requirements/profile-260710-profile-matching-join-policy.md) | profile-260710 | 2026-07-10 | - |
+| [Runtime Profile Deletion Requirements](requirements/profile-260811-runtime-profile-deletion.md) | profile-260811 | 2026-08-11 | - |
 | [Session Workspace Project Contract Historical Requirements Reconstruction](requirements/projects-260509-projects.md) | projects-260509 | 2026-05-09 | 2026-05-09 |
 | [System Prompt Context Inspector Preserves Pre-assembly Fragment Metadata Historical Requirements Reconstruction](requirements/prompt-260611-prompt-context-inspector.md) | prompt-260611 | 2026-06-11 | - |
 | [Per-Prompt Models Form FIFO Run Boundaries Historical Requirements Reconstruction](requirements/prompt-260710-prompt-fifo-boundaries.md) | prompt-260710 | 2026-07-10 | - |
@@ -684,6 +685,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Primary Agent Sessions and Team-First Multi-Session UX](adr/primary-260625-primary-sessions.md)
 - [Agent Profile Image Historical Decision Reconstruction](adr/profile-260421-profile-image.md)
 - [Reuse the Active Run Profile for Matching Inputs](adr/profile-260710-profile-matching-join-policy.md)
+- [Runtime Profile Deletion](adr/profile-260811-runtime-profile-deletion.md)
 - [Session Workspace Project Contract Historical Decision Reconstruction](adr/projects-260509-projects.md)
 - [System Prompt Context Inspector Preserves Pre-assembly Fragment Metadata](adr/prompt-260611-prompt-context-inspector.md)
 - [Per-Prompt Models Form FIFO Run Boundaries](adr/prompt-260710-prompt-fifo-boundaries.md)
