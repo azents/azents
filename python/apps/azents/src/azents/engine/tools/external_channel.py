@@ -185,8 +185,10 @@ class ChannelActionInput(BaseModel):
         min_length=1,
         max_length=MAX_EXTERNAL_CHANNEL_FILES,
         description=(
-            "Absolute Runtime paths or authorized `exchange://` URIs. Relative, "
-            "`artifact://`, and `azents://` values are unsupported."
+            "File source paths. Each item must be either an absolute POSIX Runtime "
+            "path beginning with `/` or an authorized `exchange://{object_key}` URI. "
+            "Relative paths and other URI schemes, including `artifact://` and "
+            "`azents://`, are unsupported."
         ),
     )
 

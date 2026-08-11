@@ -348,6 +348,23 @@ async def test_ignore_schema_is_always_exposed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_channel_action_schema_names_each_supported_file_path_format() -> None:
+    """The file schema distinguishes Runtime paths from Exchange object URIs."""
+    toolkit = _toolkit(_ActionService([_snapshot()]))
+
+    state = await toolkit.update_context(_turn_context())
+    properties = cast(dict[str, object], state.tools[0].spec.input_schema["properties"])
+    files = cast(dict[str, object], properties["files"])
+
+    assert files["description"] == (
+        "File source paths. Each item must be either an absolute POSIX Runtime path "
+        "beginning with `/` or an authorized `exchange://{object_key}` URI. Relative "
+        "paths and other URI schemes, including `artifact://` and `azents://`, are "
+        "unsupported."
+    )
+
+
+@pytest.mark.asyncio
 async def test_ignore_passes_no_publication_fields() -> None:
     """The fieldless Tool call delegates silent active-Work completion."""
     service = _ActionService([_snapshot()])

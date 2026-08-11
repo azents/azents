@@ -76,13 +76,14 @@ Within one Run, `channel_action` rejects the same `(binding, mode)` when it
 completed in the immediately preceding model turn. Rejected and failed calls do
 not count, and the guard uses only process-local Toolkit state.
 
-Either mode may attach up to 20 absolute Runtime paths or authorized `exchange://`
-file-location URIs to its conversational reply. Relative paths, `artifact://`,
-`azents://`, and other URI schemes are rejected. File-bearing calls always require
-non-empty text and do not introduce a separate upload action. Exchange-only calls use
-server-managed storage and remain available without a managed Runtime. Absolute Runtime
-paths, including mixed Exchange and Runtime-path calls, require current Runtime file
-storage. Text-only calls retain the existing behavior.
+Either mode may attach up to 20 file sources to its conversational reply. Each source
+must use one of two formats: an absolute POSIX Runtime file path beginning with `/`, or
+an authority-checked `exchange://{object_key}` file-location URI. Relative paths,
+`artifact://`, `azents://`, and other URI schemes are rejected. The path format selects
+current Runtime file storage or server-managed Exchange storage respectively. Mixed
+Exchange and Runtime-path calls require current Runtime file storage. File-bearing calls
+always require non-empty text and do not introduce a separate upload action. Text-only
+calls retain the existing behavior.
 
 Task updates require a concise current-work title in the same call. Guidance tells
 the Agent to use the participant's language, concrete progressive wording, and an
