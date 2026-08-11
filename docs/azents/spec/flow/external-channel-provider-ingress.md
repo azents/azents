@@ -62,7 +62,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-10
-spec_version: 36
+spec_version: 37
 ---
 
 # External Channel Provider Ingress
@@ -354,10 +354,12 @@ Binding keeps its prior snapshot and bypasses provider preparation.
 The shared response predicate is provider-neutral: explicit invocations proceed in
 either mode; an ordinary message proceeds only for an existing connected
 `all_messages` binding. An unbound or disconnected conversation always requires a new
-explicit invocation. Ignored `mention_only` messages leave the conversation position
-unchanged, so a later eligible mention can include them through the existing bounded
-provider-history range. Already committed mailbox input, wake, Channel Work, or
-AgentRun state is never cancelled or reclassified by a later mode change.
+explicit invocation, including when its configured location default is
+`all_messages`; therefore Binding creation is always mention-gated. Ignored ordinary
+messages leave the conversation position unchanged, so a later eligible mention can
+include them through the existing bounded provider-history range. Already committed
+mailbox input, wake, Channel Work, or AgentRun state is never cancelled or
+reclassified by a later mode change.
 
 Restricted access persists the trigger source plus immutable conversation-position,
 range-start, and trigger-position replay authority and returns one immediate
@@ -461,6 +463,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-10** (spec_version 37) — Made the existing unbound-conversation rule
+  explicit: every Binding creation is mention-gated, while `all_messages` applies only
+  to ordinary continuation on a connected Binding.
 - **2026-08-10** (spec_version 36) — Generalized callback admission to
   effective-conversation owners that can retain triggers before Binding/Session
   creation, prepare required Discord threads before the atomic ready transition,

@@ -65,7 +65,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-10
-spec_version: 54
+spec_version: 55
 ---
 
 # External Channel
@@ -198,9 +198,12 @@ contain multiple independent bindings.
   reactivate or disable that relationship.
 - A binding response mode is always concrete. `all_messages` admits eligible ordinary
   human messages on a connected binding; `mention_only` requires an explicit provider
-  invocation. Location selection snapshots the Agent default into the participation
-  setting. Later configured Bindings copy that setting, while existing Bindings retain
-  their own mode. Existing Agents and historical bindings use `all_messages`.
+  invocation. Creating any Binding requires an explicit invocation regardless of the
+  configured location or response-mode default; `all_messages` is continuation
+  authority only after the Binding is connected. Location selection snapshots the Agent
+  default into the participation setting. Later configured Bindings copy that setting,
+  while existing Bindings retain their own mode. Existing Agents and historical
+  bindings use `all_messages`.
 - Every model input boundary exposes `channel_action ignore` beside `finish` and
   `continue`. `ignore` accepts no publication or Work-update fields and uses the same
   active Session, Agent, binding, route, connection, and resource validation as other
@@ -450,6 +453,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-10** (spec_version 55) — Clarified that every new Binding requires an
+  explicit invocation and that `all_messages` authorizes only ordinary continuation on
+  an existing connected Binding.
 - **2026-08-10** (spec_version 54) — Generalized active ingress from
   Session-keyed drains to effective-conversation owners with source/target Resource
   separation, nullable Binding/Session readiness, Discord thread-before-Session
