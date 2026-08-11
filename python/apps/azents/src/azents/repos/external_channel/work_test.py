@@ -73,9 +73,10 @@ def _part(
     status: ExternalChannelWorkProjectionStatus,
     provider_message_key: str | None,
     revision: int = 3,
+    part_ordinal: int = 0,
 ) -> ChannelWorkProjectionPartState:
     return ChannelWorkProjectionPartState(
-        part_ordinal=0,
+        part_ordinal=part_ordinal,
         desired_progress_revision=revision,
         status=status,
         provider_message_key=provider_message_key,
@@ -539,6 +540,8 @@ async def test_continue_after_finished_work_creates_replacement_tracker() -> Non
 
 async def _commit_ignore(
     work: ChannelWorkState,
+    *,
+    provider: ExternalChannelProvider,
 ) -> tuple[ChannelActionTransition, ChannelWorkState, AsyncMock]:
     """Execute the canonical ignore mutator through repository authority checks."""
     binding = SimpleNamespace(
@@ -549,7 +552,13 @@ async def _commit_ignore(
     route = SimpleNamespace(id="route-1", connection_id="connection-1")
     connection = SimpleNamespace(
         id="connection-1",
-        provider=ExternalChannelProvider.SLACK,
+        provider=provider,
+        app_mode=ExternalChannelAppMode.SINGLE,
+        encrypted_credentials="ciphertext",
+        provider_tenant_id=(
+            "T1" if provider is ExternalChannelProvider.SLACK else "111"
+        ),
+        capabilities=None,
     )
     agent = SimpleNamespace(
         id="agent-1",
@@ -557,7 +566,21 @@ async def _commit_ignore(
         name="Agent",
         avatar=None,
     )
-    resource = SimpleNamespace(id="resource-1", labels={})
+    resource = SimpleNamespace(
+        id="resource-1",
+        labels=(
+            {
+                "channel_id": "C1",
+                "conversation_scope": "parent_channel",
+            }
+            if provider is ExternalChannelProvider.SLACK
+            else {
+                "guild_id": "111",
+                "parent_channel_id": "333",
+                "conversation_scope": "parent_channel",
+            }
+        ),
+    )
     session = MagicMock(spec=AsyncSession)
     session.scalar = AsyncMock(
         side_effect=[
@@ -631,13 +654,23 @@ async def _commit_ignore(
         ),
     ],
 )
-async def test_ignore_finishes_active_work_without_provider_effects(
+@pytest.mark.parametrize(
+    "provider",
+    [ExternalChannelProvider.SLACK, ExternalChannelProvider.DISCORD],
+)
+async def test_ignore_finishes_active_work_and_deletes_present_tracker(
     statuses: tuple[ExternalChannelWorkTaskStatus, ...],
+    provider: ExternalChannelProvider,
 ) -> None:
-    """Ignore finishes Work regardless of current task status."""
+    """Ignore finishes Work and deletes only this binding's visible Tracker."""
+    provider_message_key = (
+        "slack:C1:123.456"
+        if provider is ExternalChannelProvider.SLACK
+        else "discord:111:555"
+    )
     projection = _part(
         status=ExternalChannelWorkProjectionStatus.PRESENT,
-        provider_message_key="provider-key",
+        provider_message_key=provider_message_key,
     )
     work = _work(desired=True, projection_parts=[projection])
     work.tasks = [
@@ -652,10 +685,20 @@ async def test_ignore_finishes_active_work_without_provider_effects(
         for index, status in enumerate(statuses)
     ]
 
-    transition, updated, update = await _commit_ignore(work)
+    transition, updated, update = await _commit_ignore(work, provider=provider)
 
     assert transition.work_status is ExternalChannelWorkStatus.FINISHED
-    assert transition.effects == ()
+    assert len(transition.effects) == 1
+    effect = transition.effects[0]
+    assert (
+        effect.provider.target.operation
+        is ExternalChannelDeliveryOperation.PROGRESS_DELETE
+    )
+    assert effect.provider.target.binding_id == "binding-1"
+    assert effect.provider.target.provider is provider
+    assert effect.provider.target.request_payload["provider_message_key"] == (
+        provider_message_key
+    )
     assert updated.status is ExternalChannelWorkStatus.FINISHED
     assert updated.state_revision == work.state_revision + 1
     assert updated.desired_progress_revision == work.desired_progress_revision + 1
@@ -667,6 +710,37 @@ async def test_ignore_finishes_active_work_without_provider_effects(
         tzinfo=datetime.UTC,
     )
     assert updated.projection_parts == [projection]
+    update.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [ExternalChannelProvider.SLACK, ExternalChannelProvider.DISCORD],
+)
+async def test_ignore_without_present_tracker_has_no_provider_effect(
+    provider: ExternalChannelProvider,
+) -> None:
+    """Missing or terminal projection state creates no cleanup attempt."""
+    work = _work(
+        desired=True,
+        projection_parts=[
+            _part(
+                status=ExternalChannelWorkProjectionStatus.DELETED,
+                provider_message_key=None,
+            ),
+            _part(
+                status=ExternalChannelWorkProjectionStatus.FAILED,
+                provider_message_key="stale-provider-key",
+                part_ordinal=1,
+            ),
+        ],
+    )
+
+    transition, updated, update = await _commit_ignore(work, provider=provider)
+
+    assert transition.work_status is ExternalChannelWorkStatus.FINISHED
+    assert transition.effects == ()
+    assert updated.desired_progress is None
     update.assert_awaited_once()
 
 

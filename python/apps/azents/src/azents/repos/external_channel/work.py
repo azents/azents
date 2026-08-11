@@ -928,22 +928,6 @@ class ExternalChannelWorkRepository:
             if mode is ExternalChannelActionMode.IGNORE:
                 if current.status is not ExternalChannelWorkStatus.ACTIVE:
                     raise ValueError("Ignore requires active Channel Work.")
-                work = current.model_copy(deep=True)
-                work.status = ExternalChannelWorkStatus.FINISHED
-                work.state_revision += 1
-                work.finished_at = now
-                work.desired_progress_revision += 1
-                work.desired_progress = None
-                return ChannelWorkStateMutation(
-                    state=work,
-                    result=ChannelActionTransition(
-                        binding_id=binding.id,
-                        work_id=work.work_cycle_id,
-                        work_status=work.status,
-                        state_revision=work.state_revision,
-                        effects=(),
-                    ),
-                )
             work = (
                 default_work()
                 if current.status is ExternalChannelWorkStatus.FINISHED

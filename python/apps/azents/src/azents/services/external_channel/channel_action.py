@@ -291,13 +291,9 @@ class ExternalChannelActionService:
                 now=datetime.datetime.now(datetime.UTC),
             )
             await session.commit()
-        reply_delivered = (
-            transition.work_status is not ExternalChannelWorkStatus.FINISHED
-            or any(
-                effect.provider.target.operation
-                is ExternalChannelDeliveryOperation.REPLY
-                for effect in transition.effects
-            )
+        reply_delivered = mode is not ExternalChannelActionMode.FINISH or any(
+            effect.provider.target.operation is ExternalChannelDeliveryOperation.REPLY
+            for effect in transition.effects
         )
         outcomes: list[ProviderEffectOutcome] = []
         for effect in transition.effects:
