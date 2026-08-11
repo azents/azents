@@ -37,6 +37,7 @@ from azents.services.external_channel.connection import (
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import DiscordConnectionCredentials
 from azents.services.external_channel.discord_delivery import DiscordDeliveryClient
+from azents.services.external_channel.discord_sdk import DiscordSDKError
 
 logger = logging.getLogger(__name__)
 
@@ -100,23 +101,29 @@ class ExternalChannelThreadTitleService:
         )
         if authority is None:
             return
-        read = await self.discord_client.read_thread_title(
-            bot_token=authority.bot_token,
-            guild_id=authority.guild_id,
-            channel_id=authority.channel_id,
-        )
-        if read.status != "present" or read.name is None:
+        try:
+            async with self.discord_client.open(
+                bot_token=authority.bot_token
+            ) as discord_client:
+                read = await discord_client.read_thread_title(
+                    bot_token=authority.bot_token,
+                    guild_id=authority.guild_id,
+                    channel_id=authority.channel_id,
+                )
+                if read.status != "present" or read.name is None:
+                    return
+                if read.name == normalized_title:
+                    return
+                if read.name != authority.provisional_title:
+                    return
+                result = await discord_client.update_thread_title(
+                    bot_token=authority.bot_token,
+                    guild_id=authority.guild_id,
+                    channel_id=authority.channel_id,
+                    name=normalized_title,
+                )
+        except DiscordSDKError, TimeoutError:
             return
-        if read.name == normalized_title:
-            return
-        if read.name != authority.provisional_title:
-            return
-        result = await self.discord_client.update_thread_title(
-            bot_token=authority.bot_token,
-            guild_id=authority.guild_id,
-            channel_id=authority.channel_id,
-            name=normalized_title,
-        )
         if result.status != "delivered":
             logger.info(
                 "Discord automatic thread title attempt did not complete",

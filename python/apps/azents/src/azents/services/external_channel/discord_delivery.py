@@ -5,6 +5,7 @@ import contextlib
 import json
 import secrets
 from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass, replace
 from typing import Literal, Protocol
 
@@ -146,7 +147,7 @@ class DiscordFileMessageTransportProtocol(Protocol):
 
 
 class DiscordDeliveryClient:
-    """Perform Discord mutations through public SDK operations without replay."""
+    """Perform Discord mutations through one authenticated SDK session."""
 
     def __init__(
         self,
@@ -155,6 +156,36 @@ class DiscordDeliveryClient:
     ) -> None:
         self.sdk_factory = sdk_factory
         self.file_transport = file_transport
+
+    def open(
+        self,
+        *,
+        bot_token: str,
+    ) -> AbstractAsyncContextManager["DiscordDeliveryClient"]:
+        """Open one SDK login and return a workflow-bound delivery client."""
+        return self._open(bot_token=bot_token)
+
+    @contextlib.asynccontextmanager
+    async def _open(
+        self,
+        *,
+        bot_token: str,
+    ) -> AsyncIterator["DiscordDeliveryClient"]:
+        stack = AsyncExitStack()
+        try:
+            async with asyncio.timeout(_DISCORD_DELIVERY_TIMEOUT_SECONDS):
+                sdk = await stack.enter_async_context(
+                    self.sdk_factory.open(bot_token=bot_token)
+                )
+            yield DiscordDeliveryClient(
+                _BoundDiscordSDKClientFactory(
+                    session=sdk,
+                    bot_token=bot_token,
+                ),
+                self.file_transport,
+            )
+        finally:
+            await stack.aclose()
 
     async def ensure_thread(
         self,
@@ -397,6 +428,35 @@ class DiscordDeliveryClient:
         async with asyncio.timeout(_DISCORD_DELIVERY_TIMEOUT_SECONDS):
             async with self.sdk_factory.open(bot_token=bot_token) as sdk:
                 yield sdk
+
+
+class _BoundDiscordSDKClientFactory:
+    """Yield one existing operation-scoped SDK session without another login."""
+
+    def __init__(
+        self,
+        *,
+        session: DiscordSDKSession,
+        bot_token: str,
+    ) -> None:
+        self.session = session
+        self.bot_token = bot_token
+
+    def open(
+        self,
+        *,
+        bot_token: str,
+    ) -> AbstractAsyncContextManager[DiscordSDKSession]:
+        """Return the existing authenticated session for the same credential."""
+        if bot_token != self.bot_token:
+            raise DiscordSDKRequestRejected(
+                "Discord workflow credential changed during delivery."
+            )
+        return self._open()
+
+    @contextlib.asynccontextmanager
+    async def _open(self) -> AsyncIterator[DiscordSDKSession]:
+        yield self.session
 
 
 def _discord_thread_name(name: str | None) -> str:

@@ -217,64 +217,66 @@ class DiscordConnectionActivationService:
         if not isinstance(credentials, DiscordConnectionCredentials):
             raise DiscordActivationConfigurationError("discord_credentials_unavailable")
         target_guild_id = _target_guild_id(provider_config)
-        metadata = await self.discord_client.get_current_application(
+        async with self.discord_client.open(
             bot_token=credentials.bot_token
-        )
-        if provider_app_id != metadata.application_id:
-            raise DiscordActivationConfigurationError("discord_application_id_mismatch")
-        bot_user_id = await self.discord_client.get_current_bot_user_id(
-            bot_token=credentials.bot_token
-        )
-        selector = secrets.token_urlsafe(32)
-        selector_hash = hashlib.sha256(selector.encode()).hexdigest()
-        endpoint_url = urljoin(
-            self.config.external_channel_discord_callback_url.rstrip("/") + "/",
-            f"external-channel/v1/discord/interactions/{selector}",
-        )
-        async with self.session_manager() as session:
-            prepared = await self.repository.prepare_discord_callback(
-                session,
-                connection_id=connection_id,
-                expected_encrypted_credentials=encrypted_credentials,
-                expected_configuration_generation=configuration_generation,
-                provider_app_id=metadata.application_id,
-                interaction_public_key=metadata.verify_key,
-                callback_selector_hash=selector_hash,
-            )
-            if not prepared:
-                raise DiscordActivationConfigurationError("discord_authority_changed")
-            await session.commit()
-        command_set: DiscordGuildCommandSetCapability
-        failure_stage: DiscordActivationFailureStage = "provider_callback"
-        try:
-            await self.discord_client.configure_interactions_endpoint(
-                bot_token=credentials.bot_token,
-                endpoint_url=endpoint_url,
-            )
-            failure_stage = "provider_commands"
-            command_set = await self.discord_client.reconcile_required_guild_commands(
-                bot_token=credentials.bot_token,
-                application_id=metadata.application_id,
-                guild_id=target_guild_id,
-            )
-        except DiscordAPIError as error:
-            cleared = await self._clear_prepared_callback(
-                connection_id=connection_id,
-                expected_encrypted_credentials=encrypted_credentials,
-                expected_configuration_generation=configuration_generation,
-                callback_selector_hash=selector_hash,
-            )
-            if not cleared:
+        ) as discord_session:
+            metadata = await discord_session.get_current_application()
+            if provider_app_id != metadata.application_id:
                 raise DiscordActivationConfigurationError(
-                    "discord_authority_changed"
-                ) from error
-            return await self._record_failure(
-                connection_id=connection_id,
-                expected_encrypted_credentials=encrypted_credentials,
-                expected_configuration_generation=configuration_generation + 1,
-                error=error,
-                failure_stage=failure_stage,
+                    "discord_application_id_mismatch"
+                )
+            bot_user_id = discord_session.get_current_bot_user_id()
+            selector = secrets.token_urlsafe(32)
+            selector_hash = hashlib.sha256(selector.encode()).hexdigest()
+            endpoint_url = urljoin(
+                self.config.external_channel_discord_callback_url.rstrip("/") + "/",
+                f"external-channel/v1/discord/interactions/{selector}",
             )
+            async with self.session_manager() as session:
+                prepared = await self.repository.prepare_discord_callback(
+                    session,
+                    connection_id=connection_id,
+                    expected_encrypted_credentials=encrypted_credentials,
+                    expected_configuration_generation=configuration_generation,
+                    provider_app_id=metadata.application_id,
+                    interaction_public_key=metadata.verify_key,
+                    callback_selector_hash=selector_hash,
+                )
+                if not prepared:
+                    raise DiscordActivationConfigurationError(
+                        "discord_authority_changed"
+                    )
+                await session.commit()
+            command_set: DiscordGuildCommandSetCapability
+            failure_stage: DiscordActivationFailureStage = "provider_callback"
+            try:
+                await self.discord_client.configure_interactions_endpoint(
+                    bot_token=credentials.bot_token,
+                    endpoint_url=endpoint_url,
+                )
+                failure_stage = "provider_commands"
+                command_set = await discord_session.reconcile_required_guild_commands(
+                    application_id=metadata.application_id,
+                    guild_id=target_guild_id,
+                )
+            except DiscordAPIError as error:
+                cleared = await self._clear_prepared_callback(
+                    connection_id=connection_id,
+                    expected_encrypted_credentials=encrypted_credentials,
+                    expected_configuration_generation=configuration_generation,
+                    callback_selector_hash=selector_hash,
+                )
+                if not cleared:
+                    raise DiscordActivationConfigurationError(
+                        "discord_authority_changed"
+                    ) from error
+                return await self._record_failure(
+                    connection_id=connection_id,
+                    expected_encrypted_credentials=encrypted_credentials,
+                    expected_configuration_generation=configuration_generation + 1,
+                    error=error,
+                    failure_stage=failure_stage,
+                )
         async with self.session_manager() as session:
             capabilities = _discord_capabilities()
             activated = await self.repository.activate_discord_connection(

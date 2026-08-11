@@ -67,6 +67,8 @@ from azents.services.external_channel.discord_delivery import (
     DiscordFileMessageTransport,
     DiscordOutboundFile,
     DiscordOutboundFileContentError,
+    _sdk_delivery_failure,
+    _sdk_timeout_result,
 )
 from azents.services.external_channel.discord_presentation import (
     render_discord_binding_settings_on_demand,
@@ -76,6 +78,7 @@ from azents.services.external_channel.discord_presentation import (
 )
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKClientFactory,
+    DiscordSDKError,
     get_discord_sdk_client_factory,
 )
 from azents.services.external_channel.discord_settings_scope import (
@@ -544,6 +547,31 @@ class ExternalChannelActionService:
         agent_id: str | None,
         authority: SessionResourceAuthority | None,
     ) -> DiscordDeliveryResult:
+        """Deliver one Discord effect and reuse a session only when needed."""
+        return await ExternalChannelActionService._deliver_discord_with_client(
+            self,
+            target,
+            operation_key=operation_key,
+            bot_token=bot_token,
+            file_storage=file_storage,
+            agent_id=agent_id,
+            authority=authority,
+            discord_client=self.discord_client,
+            workflow_session_open=False,
+        )
+
+    async def _deliver_discord_with_client(
+        self,
+        target: ProviderTarget,
+        *,
+        operation_key: ProviderOperationKey,
+        bot_token: str,
+        file_storage: FileStorage | None,
+        agent_id: str | None,
+        authority: SessionResourceAuthority | None,
+        discord_client: DiscordDeliveryClient,
+        workflow_session_open: bool,
+    ) -> DiscordDeliveryResult:
         """Deliver one Discord text, multipart file, or control mutation."""
         payload = target.request_payload
         guild_id = payload.get("guild_id")
@@ -576,7 +604,29 @@ class ExternalChannelActionService:
                 or root_message_id != channel_id
             ):
                 return _discord_invalid_payload()
-            thread = await self.discord_client.ensure_thread(
+            if not workflow_session_open:
+                try:
+                    async with discord_client.open(
+                        bot_token=bot_token
+                    ) as workflow_client:
+                        return await (
+                            ExternalChannelActionService._deliver_discord_with_client(
+                                self,
+                                target,
+                                operation_key=operation_key,
+                                bot_token=bot_token,
+                                file_storage=file_storage,
+                                agent_id=agent_id,
+                                authority=authority,
+                                discord_client=workflow_client,
+                                workflow_session_open=True,
+                            )
+                        )
+                except DiscordSDKError as error:
+                    return _sdk_delivery_failure(error)
+                except TimeoutError:
+                    return _sdk_timeout_result()
+            thread = await discord_client.ensure_thread(
                 bot_token=bot_token,
                 guild_id=guild_id,
                 parent_channel_id=parent_channel_id,
@@ -628,7 +678,7 @@ class ExternalChannelActionService:
                             else None
                         ),
                     )
-                    return await self.discord_client.create_message(
+                    return await discord_client.create_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
@@ -677,7 +727,7 @@ class ExternalChannelActionService:
                             source_revision=source_revision,
                         ),
                     )
-                    return await self.discord_client.create_message(
+                    return await discord_client.create_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
@@ -710,7 +760,7 @@ class ExternalChannelActionService:
                             )
                         ),
                     )
-                    return await self.discord_client.create_message(
+                    return await discord_client.create_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
@@ -778,7 +828,7 @@ class ExternalChannelActionService:
                         if file_storage is None
                         else cast(RangedFileStorage, file_storage)
                     )
-                    return await self.discord_client.create_file_message(
+                    return await discord_client.create_file_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
@@ -801,14 +851,14 @@ class ExternalChannelActionService:
                         operation_key=operation_key,
                     )
                 if components is None and embeds is None:
-                    return await self.discord_client.create_message(
+                    return await discord_client.create_message(
                         bot_token=bot_token,
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
                         content=_discord_agent_content(target, text),
                         operation_key=operation_key,
                     )
-                return await self.discord_client.create_message(
+                return await discord_client.create_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,
@@ -835,7 +885,7 @@ class ExternalChannelActionService:
                     or message_id is None
                 ):
                     return _discord_invalid_payload()
-                return await self.discord_client.update_message(
+                return await discord_client.update_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,
@@ -853,7 +903,7 @@ class ExternalChannelActionService:
                 )
                 if message_id is None:
                     return _discord_invalid_payload()
-                return await self.discord_client.delete_message(
+                return await discord_client.delete_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,

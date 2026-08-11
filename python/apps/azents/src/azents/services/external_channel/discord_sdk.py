@@ -1,25 +1,22 @@
-"""Public discord.py REST lifecycle and bounded projection adapter."""
+"""Pinned discord.py REST lifecycle and bounded private-HTTP adapter."""
 
 import contextlib
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import discord
-from discord import app_commands
+from discord.http import handle_message_parameters
 
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.services.external_channel.discord_events import (
-    project_discord_sdk_history_message,
-)
-
-type DiscordSDKHistoryChannel = (
-    discord.TextChannel | discord.Thread | discord.VoiceChannel | discord.StageChannel
+    project_discord_message,
 )
 
 
 class DiscordSDKError(RuntimeError):
-    """Base class for controlled public discord.py failures."""
+    """Base class for controlled pinned discord.py failures."""
 
 
 class DiscordSDKCredentialsInvalid(DiscordSDKError):
@@ -99,7 +96,7 @@ class DiscordSDKAttachment:
 
 
 class DiscordSDKSession(Protocol):
-    """One request-scoped public discord.py REST session."""
+    """One authenticated pinned discord.py REST session."""
 
     async def fetch_application(self) -> DiscordSDKApplication:
         """Return current Application identity and interaction verification key."""
@@ -150,7 +147,7 @@ class DiscordSDKSession(Protocol):
         parent_channel_id: str,
         root_message_id: str,
         name: str,
-        auto_archive_duration: int,
+        auto_archive_duration: Literal[60, 1440, 4320, 10080],
     ) -> DiscordSDKThread:
         """Create one public Thread from an exact root message."""
         ...
@@ -246,7 +243,7 @@ class DiscordSDKSession(Protocol):
 
 
 class DiscordSDKClientFactory(Protocol):
-    """Create request-scoped public discord.py sessions."""
+    """Create request-scoped authenticated discord.py sessions."""
 
     def open(self, *, bot_token: str) -> AbstractAsyncContextManager[DiscordSDKSession]:
         """Open one authenticated SDK session and close it after use."""
@@ -254,7 +251,7 @@ class DiscordSDKClientFactory(Protocol):
 
 
 class DiscordPyClientFactory:
-    """Create public discord.py REST-only clients without shared credential state."""
+    """Create pinned discord.py REST-only clients without credential caching."""
 
     def open(
         self,
@@ -285,17 +282,19 @@ class DiscordPyClientFactory:
 
 
 class _DiscordPySession:
-    """Public discord.py operations for one authenticated Bot token."""
+    """Isolate pinned private HTTP calls for one authenticated Bot token."""
 
     def __init__(self, client: discord.Client) -> None:
         self._client = client
-        self._commands: dict[str, app_commands.AppCommand] = {}
+        self._http = client.http
+        self._commands: dict[str, DiscordSDKCommand] = {}
+        self._command_application_id: int | None = None
+        self._command_guild_id: int | None = None
 
     async def fetch_application(self) -> DiscordSDKApplication:
-        try:
-            application = await self._client.application_info()
-        except (discord.HTTPException, OSError) as error:
-            raise _sdk_error(error) from error
+        application = self._client.application
+        if application is None:
+            raise DiscordSDKUnavailable("Discord SDK Application is unavailable.")
         return DiscordSDKApplication(
             application_id=str(application.id),
             verify_key=application.verify_key,
@@ -321,13 +320,21 @@ class _DiscordPySession:
                 "Discord Application identity does not match the authenticated Bot."
             )
         try:
-            commands = await app_commands.CommandTree(self._client).fetch_commands(
-                guild=discord.Object(id=int(guild_id))
+            application_snowflake = int(application_id)
+            guild_snowflake = int(guild_id)
+            payload: object = await self._http.get_guild_commands(
+                application_snowflake,
+                guild_snowflake,
             )
         except (ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
-        self._commands = {str(command.id): command for command in commands}
-        return tuple(_sdk_command(command) for command in commands)
+        if not isinstance(payload, list):
+            raise DiscordSDKUnavailable("Discord command response is invalid.")
+        commands = tuple(_http_command(item) for item in payload)
+        self._commands = {command.command_id: command for command in commands}
+        self._command_application_id = application_snowflake
+        self._command_guild_id = guild_snowflake
+        return commands
 
     async def update_guild_command(
         self,
@@ -338,36 +345,54 @@ class _DiscordPySession:
         description: str | None,
     ) -> DiscordSDKCommand:
         command = self._commands.get(command_id)
-        if command is None or command.type.value != command_type:
+        if command is None or command.command_type != command_type:
             raise DiscordSDKRequestRejected(
                 "Discord command is unavailable in the current SDK session."
             )
-        try:
-            if command_type == 1:
-                if description is None:
-                    raise DiscordSDKRequestRejected(
-                        "Discord chat command description is required."
-                    )
-                updated = await command.edit(
-                    name=name,
-                    description=description,
+        if self._command_application_id is None or self._command_guild_id is None:
+            raise DiscordSDKRequestRejected(
+                "Discord command scope is unavailable in the current SDK session."
+            )
+        payload: dict[str, object] = {"name": name}
+        if command_type == 1:
+            if description is None:
+                raise DiscordSDKRequestRejected(
+                    "Discord chat command description is required."
                 )
-            else:
-                updated = await command.edit(name=name)
+            payload["description"] = description
+        try:
+            response: object = await self._http.edit_guild_command(
+                self._command_application_id,
+                self._command_guild_id,
+                int(command_id),
+                payload,
+            )
         except (discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
+        updated = _http_command(response)
+        if updated.command_id != command_id or updated.command_type != command_type:
+            raise DiscordSDKRequestRejected(
+                "Discord command response changed its identity or command type."
+            )
         self._commands[command_id] = updated
-        return _sdk_command(updated)
+        return updated
 
     async def delete_guild_command(self, *, command_id: str) -> None:
-        command = self._commands.get(command_id)
-        if command is None:
+        if command_id not in self._commands:
             raise DiscordSDKRequestRejected(
                 "Discord command is unavailable in the current SDK session."
             )
+        if self._command_application_id is None or self._command_guild_id is None:
+            raise DiscordSDKRequestRejected(
+                "Discord command scope is unavailable in the current SDK session."
+            )
         try:
-            await command.delete()
-        except (discord.HTTPException, OSError) as error:
+            await self._http.delete_guild_command(
+                self._command_application_id,
+                self._command_guild_id,
+                int(command_id),
+            )
+        except (ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
         self._commands.pop(command_id, None)
 
@@ -379,19 +404,27 @@ class _DiscordPySession:
         root_message_id: str,
     ) -> DiscordSDKThread | None:
         try:
-            channel = await self._validated_message_channel(
-                guild_id=guild_id,
-                channel_id=parent_channel_id,
+            payload: object = await self._http.get_message(
+                int(parent_channel_id),
+                int(root_message_id),
             )
-            if isinstance(channel, discord.Thread):
-                raise DiscordSDKRequestRejected(
-                    "Discord root message parent cannot be a Thread."
-                )
-            message = await channel.fetch_message(int(root_message_id))
-            thread = message.thread
-            return None if thread is None else _sdk_thread(thread)
         except (ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
+        message = _http_mapping(payload, "Discord root message response is invalid.")
+        _validate_message_identity(
+            message,
+            channel_id=parent_channel_id,
+            message_id=root_message_id,
+            guild_id=guild_id,
+        )
+        thread = message.get("thread")
+        if thread is None:
+            return None
+        return _http_thread(
+            thread,
+            guild_id=guild_id,
+            parent_channel_id=parent_channel_id,
+        )
 
     async def create_thread(
         self,
@@ -400,25 +433,22 @@ class _DiscordPySession:
         parent_channel_id: str,
         root_message_id: str,
         name: str,
-        auto_archive_duration: int,
+        auto_archive_duration: Literal[60, 1440, 4320, 10080],
     ) -> DiscordSDKThread:
         try:
-            channel = await self._validated_message_channel(
-                guild_id=guild_id,
-                channel_id=parent_channel_id,
-            )
-            if isinstance(channel, discord.Thread):
-                raise DiscordSDKRequestRejected(
-                    "Discord root message parent cannot be a Thread."
-                )
-            message = await channel.fetch_message(int(root_message_id))
-            thread = await message.create_thread(
+            payload: object = await self._http.start_thread_with_message(
+                int(parent_channel_id),
+                int(root_message_id),
                 name=name,
                 auto_archive_duration=auto_archive_duration,
             )
-            return _sdk_thread(thread)
         except (ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
+        return _http_thread(
+            payload,
+            guild_id=guild_id,
+            parent_channel_id=parent_channel_id,
+        )
 
     async def fetch_thread(
         self,
@@ -427,13 +457,10 @@ class _DiscordPySession:
         channel_id: str,
     ) -> DiscordSDKThread:
         try:
-            channel = await self._validated_thread_channel(
-                guild_id=guild_id,
-                channel_id=channel_id,
-            )
+            payload: object = await self._http.get_channel(int(channel_id))
         except (ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
-        return _sdk_thread(channel)
+        return _http_thread(payload, guild_id=guild_id, thread_id=channel_id)
 
     async def update_thread_name(
         self,
@@ -443,14 +470,18 @@ class _DiscordPySession:
         name: str,
     ) -> DiscordSDKThread:
         try:
-            channel = await self._validated_thread_channel(
-                guild_id=guild_id,
-                channel_id=channel_id,
+            payload: object = await self._http.edit_channel(
+                int(channel_id),
+                name=name,
             )
-            updated = await channel.edit(name=name)
-            return _sdk_thread(updated)
         except (ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
+        return _http_thread(
+            payload,
+            guild_id=guild_id,
+            thread_id=channel_id,
+            name=name,
+        )
 
     async def create_message(
         self,
@@ -463,20 +494,47 @@ class _DiscordPySession:
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
         try:
-            channel = await self._validated_message_channel(
-                guild_id=guild_id,
-                channel_id=channel_id,
-            )
-            message = await _send_sdk_message(
-                channel,
-                content=content,
-                nonce=nonce,
-                view=_sdk_view(components),
-                embeds=_sdk_embeds(embeds),
-            )
-            return _sdk_message(message, guild_id=guild_id)
+            view = _sdk_view(components)
+            sdk_embeds = _sdk_embeds(embeds)
+            if view is None and sdk_embeds is None:
+                parameters = handle_message_parameters(content, nonce=nonce)
+            elif view is None:
+                assert sdk_embeds is not None
+                parameters = handle_message_parameters(
+                    content,
+                    nonce=nonce,
+                    embeds=sdk_embeds,
+                )
+            elif sdk_embeds is None:
+                parameters = handle_message_parameters(
+                    content,
+                    nonce=nonce,
+                    view=view,
+                )
+            else:
+                parameters = handle_message_parameters(
+                    content,
+                    nonce=nonce,
+                    view=view,
+                    embeds=sdk_embeds,
+                )
+            with parameters as params:
+                if params.payload is None:
+                    raise DiscordSDKUnavailable(
+                        "Discord text message payload is unavailable."
+                    )
+                params.payload["enforce_nonce"] = True
+                payload: object = await self._http.send_message(
+                    int(channel_id),
+                    params=params,
+                )
         except (TypeError, ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
+        return _http_message(
+            payload,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
 
     async def update_message(
         self,
@@ -489,19 +547,24 @@ class _DiscordPySession:
         embeds: list[dict[str, object]] | None,
     ) -> DiscordSDKMessage:
         try:
-            channel = await self._validated_message_channel(
-                guild_id=guild_id,
-                channel_id=channel_id,
-            )
-            message = await channel.fetch_message(int(message_id))
-            updated = await message.edit(
+            with handle_message_parameters(
                 content=content,
                 view=_sdk_view(components),
                 embeds=_sdk_embeds(embeds) or [],
-            )
-            return _sdk_message(updated, guild_id=guild_id)
+            ) as params:
+                payload: object = await self._http.edit_message(
+                    int(channel_id),
+                    int(message_id),
+                    params=params,
+                )
         except (TypeError, ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
+        return _http_message(
+            payload,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            message_id=message_id,
+        )
 
     async def delete_message(
         self,
@@ -511,12 +574,10 @@ class _DiscordPySession:
         message_id: str,
     ) -> None:
         try:
-            channel = await self._validated_message_channel(
-                guild_id=guild_id,
-                channel_id=channel_id,
+            await self._http.delete_message(
+                int(channel_id),
+                int(message_id),
             )
-            message = await channel.fetch_message(int(message_id))
-            await message.delete()
         except (ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
 
@@ -529,25 +590,52 @@ class _DiscordPySession:
         attachment_id: str,
     ) -> DiscordSDKAttachment:
         try:
-            channel = await self._validated_message_channel(
-                guild_id=guild_id,
-                channel_id=channel_id,
+            payload: object = await self._http.get_message(
+                int(channel_id),
+                int(message_id),
             )
-            message = await channel.fetch_message(int(message_id))
         except (ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
-        if str(message.id) != message_id or str(message.channel.id) != channel_id:
-            raise DiscordSDKRequestRejected(
-                "Discord attachment source does not match the request."
+        message = _http_mapping(payload, "Discord attachment response is invalid.")
+        _validate_message_identity(
+            message,
+            channel_id=channel_id,
+            message_id=message_id,
+            guild_id=guild_id,
+        )
+        attachments = message.get("attachments")
+        if not isinstance(attachments, list):
+            raise DiscordSDKUnavailable(
+                "Discord attachment response omitted attachment metadata."
             )
-        for attachment in message.attachments:
-            if str(attachment.id) == attachment_id:
+        for item in attachments:
+            if not is_external_channel_projection(item):
+                continue
+            if item.get("id") == attachment_id:
+                filename = item.get("filename")
+                size = item.get("size")
+                content_type = item.get("content_type")
+                download_url = item.get("url")
+                if (
+                    not isinstance(filename, str)
+                    or not filename
+                    or not isinstance(size, int)
+                    or isinstance(size, bool)
+                    or size < 0
+                    or content_type is not None
+                    and not isinstance(content_type, str)
+                    or not isinstance(download_url, str)
+                    or not download_url
+                ):
+                    raise DiscordSDKUnavailable(
+                        "Discord attachment metadata is invalid."
+                    )
                 return DiscordSDKAttachment(
-                    attachment_id=str(attachment.id),
-                    filename=attachment.filename,
-                    size=attachment.size,
-                    content_type=attachment.content_type,
-                    download_url=attachment.url,
+                    attachment_id=attachment_id,
+                    filename=filename,
+                    size=size,
+                    content_type=content_type,
+                    download_url=download_url,
                 )
         raise DiscordSDKResourceUnavailable(
             "Discord no longer exposes the requested attachment."
@@ -562,20 +650,19 @@ class _DiscordPySession:
         message_id: str,
     ) -> dict[str, object]:
         try:
-            channel, thread_parent_id = await self._validated_history_channel(
-                guild_id=guild_id,
-                source_channel_id=source_channel_id,
-                channel_id=channel_id,
-            )
-            message = await channel.fetch_message(int(message_id))
-            return project_discord_sdk_history_message(
-                message=message,
-                guild_id=guild_id,
-                conversation_channel_id=channel_id,
-                thread_parent_id=thread_parent_id,
+            payload: object = await self._http.get_message(
+                int(channel_id),
+                int(message_id),
             )
         except (ValueError, discord.HTTPException, OSError) as error:
             raise _sdk_error(error) from error
+        return _project_http_history_message(
+            payload,
+            guild_id=guild_id,
+            source_channel_id=source_channel_id,
+            channel_id=channel_id,
+            message_id=message_id,
+        )
 
     async def fetch_history_projections(
         self,
@@ -587,112 +674,24 @@ class _DiscordPySession:
         limit: int,
     ) -> tuple[dict[str, object], ...]:
         try:
-            channel, thread_parent_id = await self._validated_history_channel(
+            payload: object = await self._http.logs_from(
+                int(channel_id),
+                limit,
+                before=int(before_message_id),
+            )
+        except (ValueError, discord.HTTPException, OSError) as error:
+            raise _sdk_error(error) from error
+        if not isinstance(payload, list):
+            raise DiscordSDKUnavailable("Discord history response is invalid.")
+        return tuple(
+            _project_http_history_message(
+                item,
                 guild_id=guild_id,
                 source_channel_id=source_channel_id,
                 channel_id=channel_id,
             )
-            messages = [
-                message
-                async for message in channel.history(
-                    limit=limit,
-                    before=discord.Object(id=int(before_message_id)),
-                    oldest_first=False,
-                )
-            ]
-            return tuple(
-                project_discord_sdk_history_message(
-                    message=message,
-                    guild_id=guild_id,
-                    conversation_channel_id=channel_id,
-                    thread_parent_id=thread_parent_id,
-                )
-                for message in messages
-            )
-        except (ValueError, discord.HTTPException, OSError) as error:
-            raise _sdk_error(error) from error
-
-    async def _validated_history_channel(
-        self,
-        *,
-        guild_id: str,
-        source_channel_id: str,
-        channel_id: str,
-    ) -> tuple[DiscordSDKHistoryChannel, str | None]:
-        channel = await self._client.fetch_channel(int(channel_id))
-        if not isinstance(
-            channel,
-            (
-                discord.TextChannel,
-                discord.Thread,
-                discord.VoiceChannel,
-                discord.StageChannel,
-            ),
-        ):
-            raise DiscordSDKRequestRejected(
-                "Discord history channel type is unsupported."
-            )
-        if str(channel.id) != channel_id or str(channel.guild.id) != guild_id:
-            raise DiscordSDKRequestRejected(
-                "Discord history channel identity does not match the request."
-            )
-        if channel_id == source_channel_id:
-            if isinstance(channel, discord.Thread):
-                raise DiscordSDKRequestRejected(
-                    "Discord source history channel cannot be a Thread."
-                )
-            return channel, None
-        if (
-            not isinstance(channel, discord.Thread)
-            or channel.parent_id is None
-            or str(channel.parent_id) != source_channel_id
-        ):
-            raise DiscordSDKRequestRejected(
-                "Discord history Thread parent does not match the source channel."
-            )
-        return channel, str(channel.parent_id)
-
-    async def _validated_message_channel(
-        self,
-        *,
-        guild_id: str,
-        channel_id: str,
-    ) -> DiscordSDKHistoryChannel:
-        channel = await self._client.fetch_channel(int(channel_id))
-        if not isinstance(
-            channel,
-            (
-                discord.TextChannel,
-                discord.Thread,
-                discord.VoiceChannel,
-                discord.StageChannel,
-            ),
-        ):
-            raise DiscordSDKRequestRejected(
-                "Discord message channel type is unsupported."
-            )
-        if str(channel.id) != channel_id or str(channel.guild.id) != guild_id:
-            raise DiscordSDKRequestRejected(
-                "Discord message channel identity does not match the request."
-            )
-        return channel
-
-    async def _validated_thread_channel(
-        self,
-        *,
-        guild_id: str,
-        channel_id: str,
-    ) -> discord.Thread:
-        channel = await self._client.fetch_channel(int(channel_id))
-        if (
-            not isinstance(channel, discord.Thread)
-            or str(channel.id) != channel_id
-            or str(channel.guild.id) != guild_id
-        ):
-            raise DiscordSDKRequestRejected(
-                "Discord Thread identity does not match the request."
-            )
-        return channel
+            for item in payload
+        )
 
 
 def get_discord_sdk_client_factory() -> DiscordSDKClientFactory:
@@ -712,37 +711,143 @@ def get_discord_sdk_client_factory() -> DiscordSDKClientFactory:
     return DiscordPyClientFactory()
 
 
-def _sdk_command(command: app_commands.AppCommand) -> DiscordSDKCommand:
-    command_type = command.type.value
+def _http_command(payload: object) -> DiscordSDKCommand:
+    command = _http_mapping(payload, "Discord command response is invalid.")
+    command_id = command.get("id")
+    name = command.get("name")
+    command_type = command.get("type")
+    description = command.get("description")
+    if (
+        not isinstance(command_id, str)
+        or not command_id.isdigit()
+        or not isinstance(name, str)
+        or not name
+        or not isinstance(command_type, int)
+        or isinstance(command_type, bool)
+        or description is not None
+        and not isinstance(description, str)
+    ):
+        raise DiscordSDKUnavailable("Discord command response is invalid.")
     return DiscordSDKCommand(
-        command_id=str(command.id),
-        name=command.name,
+        command_id=command_id,
+        name=name,
         command_type=command_type,
-        description=command.description if command_type == 1 else None,
+        description=description if command_type == 1 else None,
     )
 
 
-def _sdk_message(message: discord.Message, *, guild_id: str) -> DiscordSDKMessage:
-    if message.guild is None or str(message.guild.id) != guild_id:
-        raise DiscordSDKRequestRejected(
-            "Discord Message Guild identity does not match the request."
-        )
+def _http_message(
+    payload: object,
+    *,
+    guild_id: str,
+    channel_id: str,
+    message_id: str | None = None,
+) -> DiscordSDKMessage:
+    message = _http_mapping(payload, "Discord Message response is invalid.")
+    response_message_id = message.get("id")
+    _validate_message_identity(
+        message,
+        channel_id=channel_id,
+        message_id=message_id,
+        guild_id=guild_id,
+    )
+    assert isinstance(response_message_id, str)
     return DiscordSDKMessage(
-        message_id=str(message.id),
-        channel_id=str(message.channel.id),
+        message_id=response_message_id,
+        channel_id=channel_id,
         guild_id=guild_id,
     )
 
 
-def _sdk_thread(thread: discord.Thread) -> DiscordSDKThread:
-    if thread.parent_id is None:
-        raise DiscordSDKRequestRejected("Discord Thread parent is unavailable.")
+def _http_thread(
+    payload: object,
+    *,
+    guild_id: str,
+    parent_channel_id: str | None = None,
+    thread_id: str | None = None,
+    name: str | None = None,
+) -> DiscordSDKThread:
+    thread = _http_mapping(payload, "Discord Thread response is invalid.")
+    response_thread_id = thread.get("id")
+    response_parent_id = thread.get("parent_id")
+    response_guild_id = thread.get("guild_id")
+    response_name = thread.get("name")
+    channel_type = thread.get("type")
+    if (
+        not isinstance(response_thread_id, str)
+        or not response_thread_id.isdigit()
+        or thread_id is not None
+        and response_thread_id != thread_id
+        or not isinstance(response_parent_id, str)
+        or not response_parent_id.isdigit()
+        or parent_channel_id is not None
+        and response_parent_id != parent_channel_id
+        or response_guild_id != guild_id
+        or not isinstance(response_name, str)
+        or not response_name
+        or name is not None
+        and response_name != name
+        or channel_type not in {10, 11, 12}
+    ):
+        raise DiscordSDKRequestRejected("Discord Thread response is invalid.")
     return DiscordSDKThread(
-        thread_id=str(thread.id),
-        parent_id=str(thread.parent_id),
-        guild_id=str(thread.guild.id),
-        name=thread.name,
+        thread_id=response_thread_id,
+        parent_id=response_parent_id,
+        guild_id=guild_id,
+        name=response_name,
     )
+
+
+def _project_http_history_message(
+    payload: object,
+    *,
+    guild_id: str,
+    source_channel_id: str,
+    channel_id: str,
+    message_id: str | None = None,
+) -> dict[str, object]:
+    message = _http_mapping(payload, "Discord history Message response is invalid.")
+    _validate_message_identity(
+        message,
+        channel_id=channel_id,
+        message_id=message_id,
+        guild_id=guild_id,
+    )
+    source = dict(message)
+    if channel_id != source_channel_id:
+        source["thread"] = {
+            "id": channel_id,
+            "parent_id": source_channel_id,
+        }
+    return project_discord_message(message=source, guild_id=guild_id)
+
+
+def _validate_message_identity(
+    message: dict[str, object],
+    *,
+    channel_id: str,
+    message_id: str | None,
+    guild_id: str,
+) -> None:
+    response_message_id = message.get("id")
+    response_channel_id = message.get("channel_id")
+    response_guild_id = message.get("guild_id")
+    if (
+        not isinstance(response_message_id, str)
+        or not response_message_id.isdigit()
+        or message_id is not None
+        and response_message_id != message_id
+        or response_channel_id != channel_id
+        or response_guild_id is not None
+        and response_guild_id != guild_id
+    ):
+        raise DiscordSDKRequestRejected("Discord Message response is invalid.")
+
+
+def _http_mapping(payload: object, message: str) -> dict[str, object]:
+    if not is_external_channel_projection(payload):
+        raise DiscordSDKUnavailable(message)
+    return payload
 
 
 def _sdk_embeds(
@@ -751,24 +856,6 @@ def _sdk_embeds(
     if values is None:
         return None
     return [discord.Embed.from_dict(value) for value in values]
-
-
-async def _send_sdk_message(
-    channel: discord.abc.Messageable,
-    *,
-    content: str,
-    nonce: str,
-    view: discord.ui.View | None,
-    embeds: list[discord.Embed] | None,
-) -> discord.Message:
-    if view is None and embeds is None:
-        return await channel.send(content, nonce=nonce)
-    if view is None:
-        assert embeds is not None
-        return await channel.send(content, nonce=nonce, embeds=embeds)
-    if embeds is None:
-        return await channel.send(content, nonce=nonce, view=view)
-    return await channel.send(content, nonce=nonce, view=view, embeds=embeds)
 
 
 def _sdk_view(components: list[dict[str, object]] | None) -> discord.ui.View | None:

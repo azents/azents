@@ -64,8 +64,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-10
-spec_version: 55
+last_verified_at: 2026-08-11
+spec_version: 56
 ---
 
 # External Channel
@@ -103,14 +103,19 @@ contain multiple independent bindings.
   Azents-owned typed contracts at the durable JSON boundary. SDK objects, signed raw
   bodies, SDK private state, and Gateway frames remain process-local and are never
   reconstructed or persisted for replay.
-- Public `slack-sdk` and `discord.py` APIs own every supported provider operation.
+- Public `slack-sdk` APIs own supported Slack operations. Discord REST operations use
+  one pinned `discord.py` Client lifecycle and preserve its authenticated aiohttp
+  session and rate-limit state across each caller-owned multi-operation workflow.
+  Supported REST calls are isolated behind one bounded adapter over that Client's
+  private HTTP client; raw payloads are validated into Azents-owned typed contracts.
   Direct provider transport is closed to six gaps only: Discord current-Application
   Interaction Endpoint configuration, Discord individual Guild command create,
   Discord multipart file-message create, Discord CDN attachment bytes, Slack
   private-file bytes, and Slack external-upload bytes. The callback gap is removed
   when the adopted public `discord.py` API can transmit the endpoint field correctly.
-  Static repository checks reject private Discord SDK imports, second Discord SDKs,
-  SDK-global endpoint mutation, and provider HTTP outside that allowlist.
+  Static repository checks permit private Discord HTTP use only in the pinned adapter
+  and reject other private Discord SDK imports, second Discord SDKs, SDK-global
+  endpoint mutation, and provider HTTP outside the direct-transport allowlist.
 - Slack and Discord model input preserves provider-native user and channel reference
   tokens in the source body. Resolved display names appear separately after the message
   batch in one XML provider-reference mapping block, so readability enrichment does not
@@ -453,6 +458,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-11** (spec_version 56) — Reused one authenticated pinned `discord.py`
+  Client session across caller-owned Discord REST workflows and isolated supported
+  private HTTP calls behind signature-checked typed payload validation while retaining
+  the existing direct-transport gaps and public Gateway lifecycle.
 - **2026-08-10** (spec_version 55) — Clarified that every new Binding requires an
   explicit invocation and that `all_messages` authorizes only ordinary continuation on
   an existing connected Binding.
