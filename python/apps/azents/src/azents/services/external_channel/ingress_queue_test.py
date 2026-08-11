@@ -69,6 +69,9 @@ from azents.services.external_channel.ingress_queue import (
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
 )
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
+)
 from azents.services.mailbox import (
     MailboxAdmissionResult,
     MailboxService,
@@ -304,6 +307,10 @@ def _service(
         wake_dispatcher=cast(
             ExternalChannelMailboxWakeDispatcher,
             wake_dispatcher,
+        ),
+        provider_control=cast(
+            ExternalChannelProviderControlService,
+            MagicMock(),
         ),
         metrics=ExternalChannelIngressMetrics(),
     )

@@ -138,6 +138,15 @@ class _BindingCreation:
     session_created: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class ExternalChannelConfiguredBindingResult:
+    """Configured Binding plus process-local controls to attempt after commit."""
+
+    binding: ExternalChannelBinding
+    session_created: bool
+    control_plans: tuple[ProviderEffectPlan, ...]
+
+
 @dataclasses.dataclass
 class ExternalChannelMailboxIngestionStore:
     """Accept provider history directly into one canonical mailbox item."""
@@ -177,7 +186,7 @@ class ExternalChannelMailboxIngestionStore:
         resource_id: str,
         route_id: str,
         response_mode: ExternalChannelResponseMode,
-    ) -> ExternalChannelBinding:
+    ) -> ExternalChannelConfiguredBindingResult:
         """Create or reuse configured Session state in the caller transaction."""
         resource = await self.repository.lock_resource(
             session,
@@ -199,15 +208,16 @@ class ExternalChannelMailboxIngestionStore:
             resource_id=resource.id,
         )
         existing = binding is not None
+        session_created = False
         if binding is None:
-            binding = (
-                await self._create_binding(
-                    session,
-                    route=route,
-                    resource=resource,
-                    response_mode=response_mode,
-                )
-            ).binding
+            creation = await self._create_binding(
+                session,
+                route=route,
+                resource=resource,
+                response_mode=response_mode,
+            )
+            binding = creation.binding
+            session_created = creation.session_created
         elif binding.route_id != route.id or binding.response_mode is not response_mode:
             raise ValueError("External Channel Resource has an incompatible Binding.")
         target_session = await self.agent_session_repository.lock_by_id(
@@ -228,19 +238,33 @@ class ExternalChannelMailboxIngestionStore:
             binding_id=binding.id,
             desired_progress=checking_progress(),
         )
-        if not existing:
-            await self._create_session_presence_intent(
+        presence_plan = (
+            None
+            if existing
+            else await self._create_session_presence_intent(
                 session,
                 resource=resource,
                 binding=binding,
             )
-        await self._create_initial_progress_intent(
+        )
+        progress_plan = await self._create_initial_progress_intent(
             session,
             agent_id=agent_id,
             binding=binding,
             work=work,
         )
-        return binding
+        return ExternalChannelConfiguredBindingResult(
+            binding=binding,
+            session_created=session_created,
+            control_plans=tuple(
+                plan
+                for plan in (
+                    presence_plan,
+                    progress_plan,
+                )
+                if plan is not None
+            ),
+        )
 
     async def prepare(
         self,

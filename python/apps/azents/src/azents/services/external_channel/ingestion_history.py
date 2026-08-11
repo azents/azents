@@ -197,7 +197,10 @@ class ExternalChannelProviderHistoryReader:
             history = await self.discord_client.read_range(
                 trigger=DiscordConversationHistoryTrigger(
                     guild_id=locator.provider_tenant_id,
-                    source_channel_id=locator.provider_channel_id,
+                    source_channel_id=(
+                        locator.provider_parent_channel_id
+                        or locator.provider_channel_id
+                    ),
                     conversation_channel_id=(
                         locator.provider_thread_key or locator.provider_channel_id
                     ),
