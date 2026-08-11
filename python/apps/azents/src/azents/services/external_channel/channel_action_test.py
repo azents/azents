@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -37,8 +37,18 @@ from azents.services.session_resource_authority import SessionResourceAuthority
 _SESSION_URL = "https://azents.example/w/team/agents/agent-1/sessions/session-1"
 
 
+@dataclass
+class _DiscordClientDelegate:
+    open_error: Exception | None = None
+    ensure_thread: AsyncMock = field(default_factory=AsyncMock)
+    create_message: AsyncMock = field(default_factory=AsyncMock)
+    create_file_message: AsyncMock = field(default_factory=AsyncMock)
+    update_message: AsyncMock = field(default_factory=AsyncMock)
+    delete_message: AsyncMock = field(default_factory=AsyncMock)
+
+
 class _OpenableDiscordClient:
-    def __init__(self, delegate: object) -> None:
+    def __init__(self, delegate: _DiscordClientDelegate) -> None:
         self.delegate = delegate
         self.opens = 0
 
@@ -47,16 +57,27 @@ class _OpenableDiscordClient:
         self,
         *,
         bot_token: str,
-    ) -> AsyncIterator[object]:
+    ) -> AsyncIterator["_OpenableDiscordClient"]:
         assert bot_token == "discord-secret"
         self.opens += 1
-        open_error = getattr(self.delegate, "open_error", None)
-        if isinstance(open_error, BaseException):
-            raise open_error
-        yield self.delegate
+        if self.delegate.open_error is not None:
+            raise self.delegate.open_error
+        yield self
 
-    def __getattr__(self, name: str) -> object:
-        return getattr(self.delegate, name)
+    async def ensure_thread(self, **values: object) -> DiscordDeliveryResult:
+        return await self.delegate.ensure_thread(**values)
+
+    async def create_message(self, **values: object) -> DiscordDeliveryResult:
+        return await self.delegate.create_message(**values)
+
+    async def create_file_message(self, **values: object) -> DiscordDeliveryResult:
+        return await self.delegate.create_file_message(**values)
+
+    async def update_message(self, **values: object) -> DiscordDeliveryResult:
+        return await self.delegate.update_message(**values)
+
+    async def delete_message(self, **values: object) -> DiscordDeliveryResult:
+        return await self.delegate.delete_message(**values)
 
 
 def _target(
@@ -113,7 +134,7 @@ def _target(
 def _service(
     *,
     slack_client: object | None = None,
-    discord_client: object | None = None,
+    discord_client: _DiscordClientDelegate | None = None,
     exchange_file_service: object | None = None,
 ) -> ExternalChannelActionService:
     bound_discord_client: object | None = None
@@ -297,7 +318,7 @@ async def test_discord_exchange_file_delivery_does_not_require_runtime_storage()
 
     result = await ExternalChannelActionService._deliver_discord(
         _service(
-            discord_client=SimpleNamespace(
+            discord_client=_DiscordClientDelegate(
                 create_file_message=create_file_message,
             ),
             exchange_file_service=object(),
@@ -390,7 +411,7 @@ async def test_discord_tracker_delivery_includes_session_navigation(
             error_summary=None,
         )
     )
-    discord_client = SimpleNamespace(
+    discord_client = _DiscordClientDelegate(
         create_message=method if method_name == "create_message" else AsyncMock(),
         update_message=method if method_name == "update_message" else AsyncMock(),
     )
@@ -434,7 +455,7 @@ async def test_discord_parent_file_delivery_does_not_open_sdk_session() -> None:
         )
     )
     service = _service(
-        discord_client=SimpleNamespace(create_file_message=create_file_message)
+        discord_client=_DiscordClientDelegate(create_file_message=create_file_message)
     )
     target = _target(
         provider=ExternalChannelProvider.DISCORD,
@@ -486,7 +507,7 @@ async def test_discord_thread_effect_reuses_one_sdk_session() -> None:
         )
     )
     service = _service(
-        discord_client=SimpleNamespace(
+        discord_client=_DiscordClientDelegate(
             ensure_thread=ensure_thread,
             create_message=create_message,
         )
@@ -523,7 +544,7 @@ async def test_discord_thread_effect_reuses_one_sdk_session() -> None:
 async def test_discord_thread_session_open_failure_is_an_unknown_outcome() -> None:
     """A workflow login failure retains the delivery error contract."""
     service = _service(
-        discord_client=SimpleNamespace(open_error=DiscordSDKUnavailable())
+        discord_client=_DiscordClientDelegate(open_error=DiscordSDKUnavailable())
     )
     target = _target(
         provider=ExternalChannelProvider.DISCORD,

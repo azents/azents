@@ -82,10 +82,32 @@ def _message(
     }
 
 
+def _channel(
+    *,
+    channel_id: str = "300",
+    guild_id: str = "111",
+    channel_type: int = 0,
+    parent_id: str | None = None,
+    name: str = "general",
+) -> dict[str, object]:
+    return {
+        "id": channel_id,
+        "guild_id": guild_id,
+        "type": channel_type,
+        "parent_id": parent_id,
+        "name": name,
+    }
+
+
 @pytest.mark.asyncio
-async def test_history_uses_private_message_routes_without_channel_prefetch() -> None:
-    """History projects raw private HTTP responses without fetching a channel."""
+async def test_history_reuses_one_validated_private_channel_scope() -> None:
+    """History validates Thread ancestry once for adjacent private routes."""
     http = _PrivateHTTP()
+    http.get_channel.return_value = _channel(
+        channel_type=11,
+        parent_id="200",
+        name="incident",
+    )
     http.get_message.return_value = _message()
     http.logs_from.return_value = [_message(message_id="399")]
     session = _session(http)
@@ -106,15 +128,16 @@ async def test_history_uses_private_message_routes_without_channel_prefetch() ->
 
     assert exact["thread"] == {"id": "300", "parent_id": "200"}
     assert history[0]["thread"] == {"id": "300", "parent_id": "200"}
+    http.get_channel.assert_awaited_once_with(300)
     http.get_message.assert_awaited_once_with(300, 400)
     http.logs_from.assert_awaited_once_with(300, 100, before=400)
-    http.get_channel.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_private_message_mutations_do_not_prefetch_resources() -> None:
-    """Message create, update, and delete use direct private HTTP methods."""
+async def test_private_message_mutations_reuse_validated_channel_scope() -> None:
+    """Message mutations validate one Guild channel across one SDK session."""
     http = _PrivateHTTP()
+    http.get_channel.return_value = _channel()
     http.send_message.return_value = _message(message_id="401")
     http.edit_message.return_value = _message(message_id="401")
     session = _session(http)
@@ -150,7 +173,7 @@ async def test_private_message_mutations_do_not_prefetch_resources() -> None:
     assert create_params.payload["enforce_nonce"] is True
     assert http.edit_message.await_count == 1
     http.delete_message.assert_awaited_once_with(300, 401)
-    http.get_channel.assert_not_awaited()
+    http.get_channel.assert_awaited_once_with(300)
     http.get_message.assert_not_awaited()
 
 
@@ -158,7 +181,7 @@ async def test_private_message_mutations_do_not_prefetch_resources() -> None:
 async def test_private_thread_routes_validate_expected_identity() -> None:
     """Thread operations retain Guild, parent, identity, and name validation."""
     http = _PrivateHTTP()
-    thread = {
+    thread: dict[str, object] = {
         "id": "600",
         "parent_id": "300",
         "guild_id": "111",
@@ -166,7 +189,14 @@ async def test_private_thread_routes_validate_expected_identity() -> None:
         "type": 11,
     }
     http.start_thread_with_message.return_value = thread
-    http.get_channel.return_value = thread
+
+    async def get_channel(channel_id: int) -> dict[str, object]:
+        if channel_id == 300:
+            return _channel()
+        assert channel_id == 600
+        return thread
+
+    http.get_channel.side_effect = get_channel
     http.edit_channel.return_value = {**thread, "name": "Updated"}
     session = _session(http)
 
@@ -192,6 +222,7 @@ async def test_private_thread_routes_validate_expected_identity() -> None:
         auto_archive_duration=60,
     )
     http.edit_channel.assert_awaited_once_with(600, name="Updated")
+    http.get_channel.assert_awaited_once_with(300)
 
 
 @pytest.mark.asyncio
@@ -269,6 +300,7 @@ async def test_private_command_update_rejects_changed_response_identity() -> Non
 async def test_private_attachment_lookup_validates_current_message() -> None:
     """Attachment metadata comes directly from one exact private Message response."""
     http = _PrivateHTTP()
+    http.get_channel.return_value = _channel()
     http.get_message.return_value = {
         **_message(),
         "attachments": [
@@ -291,14 +323,15 @@ async def test_private_attachment_lookup_validates_current_message() -> None:
     )
 
     assert attachment.filename == "report.txt"
+    http.get_channel.assert_awaited_once_with(300)
     http.get_message.assert_awaited_once_with(300, 400)
-    http.get_channel.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_private_history_rejects_cross_channel_response() -> None:
     """A private Message response cannot cross the requested channel boundary."""
     http = _PrivateHTTP()
+    http.get_channel.return_value = _channel()
     http.get_message.return_value = _message(channel_id="999")
     session = _session(http)
 
@@ -309,6 +342,49 @@ async def test_private_history_rejects_cross_channel_response() -> None:
             channel_id="300",
             message_id="400",
         )
+
+
+@pytest.mark.asyncio
+async def test_private_message_mutation_rejects_cross_guild_channel() -> None:
+    """A channel from another Guild is rejected before message mutation."""
+    http = _PrivateHTTP()
+    http.get_channel.return_value = _channel(guild_id="222")
+    session = _session(http)
+
+    with pytest.raises(DiscordSDKRequestRejected):
+        await session.create_message(
+            guild_id="111",
+            channel_id="300",
+            content="hello",
+            nonce="nonce-1",
+            components=None,
+            embeds=None,
+        )
+
+    http.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_private_history_rejects_unproven_thread_parent() -> None:
+    """History cannot synthesize Thread ancestry from caller-supplied IDs."""
+    http = _PrivateHTTP()
+    http.get_channel.return_value = _channel(
+        channel_type=11,
+        parent_id="999",
+        name="incident",
+    )
+    session = _session(http)
+
+    with pytest.raises(DiscordSDKRequestRejected):
+        await session.fetch_history_projections(
+            guild_id="111",
+            source_channel_id="200",
+            channel_id="300",
+            before_message_id="400",
+            limit=100,
+        )
+
+    http.logs_from.assert_not_awaited()
 
 
 def test_private_http_signatures_match_pinned_discord_release() -> None:
