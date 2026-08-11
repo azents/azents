@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentSessionStatus,
+    ExternalChannelDeliveryOperation,
     ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressProfile,
     ExternalChannelPrincipalAuthorType,
@@ -24,6 +25,9 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.external_channel_progress import checking_progress
+from azents.core.external_channel_session_presence import (
+    binding_settings_on_demand_payload,
+)
 from azents.job_runtime.types import (
     JobExecutionContext,
     JobPayload,
@@ -530,6 +534,7 @@ class ExternalChannelIngressDrainService:
         """Atomically apply one prepared successful subset and queue transitions."""
         now = datetime.datetime.now(datetime.UTC)
         wake: tuple[str, str] | None = None
+        settings_plan: ProviderEffectPlan | None = None
         progress_plan: ProviderEffectPlan | None = None
         async with self.session_manager() as session:
             connections = {
@@ -612,6 +617,9 @@ class ExternalChannelIngressDrainService:
             order_group = uuid7().hex
             order_sequence = 0
             enqueues: list[MailboxEnqueue] = []
+            settings_trigger_keys: set[str] = set()
+            target_resource: ExternalChannelResource | None = None
+            target_binding: ExternalChannelBinding | None = None
             successful_positions = {
                 outcome.item.conversation_position_id: outcome.history.trigger_position
                 for outcome in prepared
@@ -647,6 +655,17 @@ class ExternalChannelIngressDrainService:
                         if resource is None or binding is None:
                             raise RuntimeError(
                                 "External Channel final ownership disappeared."
+                            )
+                        target_resource = resource
+                        target_binding = binding
+                        if item.invocation and not item.initial_title_eligible:
+                            settings_trigger_keys.add(
+                                _message_idempotency_key(
+                                    invocation_id=item.invocation_id,
+                                    provider_message_key=(
+                                        item.trigger_provider_message_key
+                                    ),
+                                )
                             )
                         for message_index, message in enumerate(
                             success.history.messages
@@ -751,7 +770,15 @@ class ExternalChannelIngressDrainService:
                 if not enqueues
                 else await self.mailbox_service.enqueue_many(session, enqueues)
             )
+            settings_requested = any(
+                result.created and enqueue.idempotency_key in settings_trigger_keys
+                for enqueue, result in zip(enqueues, mailbox_results, strict=True)
+            )
             if any(result.created for result in mailbox_results):
+                if target_resource is None or target_binding is None:
+                    raise RuntimeError(
+                        "External Channel final control ownership disappeared."
+                    )
                 target_session = await self.agent_session_repository.lock_by_id(
                     session,
                     batch.session_id,
@@ -759,6 +786,19 @@ class ExternalChannelIngressDrainService:
                 if target_session is None:
                     raise RuntimeError(
                         "External Channel final Session ownership disappeared."
+                    )
+                if settings_requested:
+                    settings_plan = await self.work_repository.prepare_direct_control(
+                        session,
+                        connection_id=target_resource.connection_id,
+                        resource_id=target_resource.id,
+                        route_id=target_binding.route_id,
+                        binding_id=target_binding.id,
+                        operation=(ExternalChannelDeliveryOperation.CONTROL_MESSAGE),
+                        request_payload=binding_settings_on_demand_payload(
+                            target_resource.labels
+                        ),
+                        operation_seed=f"binding-settings:{target_binding.id}",
                     )
                 work = await self.work_repository.ensure_active_work(
                     session,
@@ -813,6 +853,8 @@ class ExternalChannelIngressDrainService:
                 deleted_items=delete_items,
             )
             await session.commit()
+        if settings_plan is not None:
+            await self._attempt_control_plans((settings_plan,))
         if progress_plan is not None:
             await self._attempt_control_plans((progress_plan,))
         self.metrics.record_finalization(
