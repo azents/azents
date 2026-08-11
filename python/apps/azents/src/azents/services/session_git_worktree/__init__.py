@@ -52,7 +52,6 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import require_session_working_folder_path
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import (
     SessionGitWorktree,
@@ -75,11 +74,16 @@ from azents.runtime.deps import get_runtime_runner_operation_client
 from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operations
 from azents.services.agent_project_catalog import AgentProjectCatalogService
 from azents.services.agent_runtime.lifecycle_data import (
+    RuntimeOperationAuthority,
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
 )
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderBindingError,
+    SessionWorkingFolderBindingService,
+)
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
     normalize_agent_workspace_root,
@@ -260,6 +264,10 @@ class SessionGitWorktreeService:
     runtime_target_resolver: Annotated[
         RuntimeOperationTargetResolver,
         Depends(AgentRuntimeService),
+    ]
+    session_working_folder_binding_service: Annotated[
+        SessionWorkingFolderBindingService,
+        Depends(),
     ]
     runner_operations: Annotated[
         RuntimeRunnerOperationClient | None,
@@ -480,7 +488,7 @@ class SessionGitWorktreeService:
         on_projection_updated: ActionExecutionProjectionCallback | None,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
     ) -> GitWorktreeActionExecutionResult:
-        """Run one stored-path folder setup action."""
+        """Run one current-binding folder setup action."""
         if execution.session_id != session_id:
             raise ValueError("ActionExecution belongs to another session")
         if execution.owner_generation != owner_generation:
@@ -489,30 +497,14 @@ class SessionGitWorktreeService:
             raise RuntimeError("Only newly admitted pending operations may execute")
 
         async with self.session_manager() as session:
-            session_repository = self.agent_session_repository
-            agent_session = await session_repository.get_by_id(
+            agent_session = await self.agent_session_repository.get_by_id(
                 session,
                 session_id,
-            )
-            context = await session_repository.get_working_folder_context_by_session_id(
-                session,
-                session_id=session_id,
             )
         if agent_session is None or agent_session.agent_id != agent_id:
             await self._mark_session_working_folder_action_failed(
                 execution=execution,
                 reason_code="session_not_found",
-                on_projection_updated=on_projection_updated,
-                on_history_event_appended=on_history_event_appended,
-            )
-            return GitWorktreeActionExecutionResult(
-                completed=True,
-                context_invalidated=False,
-            )
-        if context is None or context.agent_id != agent_id:
-            await self._mark_session_working_folder_action_failed(
-                execution=execution,
-                reason_code="context_not_found",
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
@@ -540,8 +532,18 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
         try:
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bindable_context(
+                agent_id=agent_id,
+                session_id=session_id,
+            )
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id
+            )
+            binding = await binding_service.resolve_authority_for_target(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime_target=runtime,
             )
         except RuntimeStorageError:
             await self._mark_session_working_folder_action_failed(
@@ -554,17 +556,14 @@ class SessionGitWorktreeService:
                 completed=True,
                 context_invalidated=False,
             )
-        try:
-            working_folder_path = validate_session_working_folder_path(
-                require_session_working_folder_path(context),
-                workspace_root=normalize_agent_workspace_root(
-                    runtime.workspace_path
-                ).as_posix(),
-            )
-        except ValueError:
+        except SessionWorkingFolderBindingError as error:
             await self._mark_session_working_folder_action_failed(
                 execution=execution,
-                reason_code="invalid_stored_path",
+                reason_code=(
+                    "invalid_stored_path"
+                    if error.reason_code == "binding_stale"
+                    else "binding_unavailable"
+                ),
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
@@ -572,6 +571,7 @@ class SessionGitWorktreeService:
                 completed=True,
                 context_invalidated=False,
             )
+        working_folder_path = binding.working_folder_path
         if self.runner_operations is None:
             await self._mark_session_working_folder_action_failed(
                 execution=execution,
@@ -798,15 +798,25 @@ class SessionGitWorktreeService:
                 context_invalidated=False,
             )
         try:
-            runtime = await self.runtime_target_resolver.resolve_operation_target(
-                agent_id
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bound_context(
+                agent_id=agent_id,
+                session_id=session_id,
             )
-        except RuntimeStorageError as error:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                start_if_stopped=False,
+            )
+        except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
             L.warning(
                 "Manual orphan Git worktree cleanup failed",
                 extra=_cleanup_log_summary(
                     stage="terminal",
-                    reason_code="runtime_unavailable",
+                    reason_code=(
+                        "binding_unavailable"
+                        if isinstance(error, SessionWorkingFolderBindingError)
+                        else "runtime_unavailable"
+                    ),
                     candidates=[],
                 ),
             )
@@ -1492,13 +1502,6 @@ class SessionGitWorktreeService:
                 session,
                 session_id,
             )
-            context_repository = self.agent_session_repository
-            working_folder_context = (
-                await context_repository.get_working_folder_context_by_session_id(
-                    session,
-                    session_id=session_id,
-                )
-            )
         if agent_session is None or agent_session.agent_id != agent_id:
             await self._mark_action_execution_failed(
                 execution=execution,
@@ -1531,10 +1534,20 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
         try:
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bindable_context(
+                agent_id=agent_id,
+                session_id=session_id,
+            )
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id
             )
-        except RuntimeStorageError as error:
+            binding = await binding_service.resolve_authority_for_target(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime_target=runtime,
+            )
+        except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
             await self._mark_action_execution_failed(
                 execution=execution,
                 allocation=None,
@@ -1566,34 +1579,36 @@ class SessionGitWorktreeService:
                 completed=True,
                 context_invalidated=False,
             )
-        if working_folder_context is None:
-            raise RuntimeError("Active root Session is missing working-folder context")
+        working_folder_path = binding.working_folder_path
         try:
-            working_folder_path = validate_session_working_folder_path(
-                require_session_working_folder_path(working_folder_context),
-                workspace_root=workspace_root,
-            )
-        except ValueError:
+            async with self.session_manager() as session:
+                binding_service = self.session_working_folder_binding_service
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    runtime_target=runtime,
+                )
+                allocation = await self._ensure_action_worktree_allocation(
+                    session,
+                    execution=execution,
+                    session_id=session_id,
+                    session_handle=agent_session.handle,
+                    working_folder_path=working_folder_path,
+                    source_project_path=normalized_source_path,
+                    starting_ref=action.starting_ref.strip(),
+                )
+        except SessionWorkingFolderBindingError as error:
             await self._mark_action_execution_failed(
                 execution=execution,
                 allocation=None,
-                reason="Session working-folder path is invalid.",
+                reason=str(error),
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
-            )
-        async with self.session_manager() as session:
-            allocation = await self._ensure_action_worktree_allocation(
-                session,
-                execution=execution,
-                session_id=session_id,
-                session_handle=agent_session.handle,
-                working_folder_path=working_folder_path,
-                source_project_path=normalized_source_path,
-                starting_ref=action.starting_ref.strip(),
             )
         await self._publish_action_execution_projection(
             execution=execution,
@@ -1662,6 +1677,7 @@ class SessionGitWorktreeService:
                 )
         if not await self._run_action_register_project_step(
             agent_id=agent_id,
+            runtime=runtime,
             execution=execution,
             allocation=allocation,
             worktree_path=create_result.worktree_path,
@@ -1674,6 +1690,7 @@ class SessionGitWorktreeService:
             )
         if not await self._run_action_catalog_step(
             agent_id=agent_id,
+            runtime=runtime,
             execution=execution,
             allocation=allocation,
             worktree_path=create_result.worktree_path,
@@ -1885,6 +1902,7 @@ class SessionGitWorktreeService:
         self,
         *,
         agent_id: str,
+        runtime: RuntimeOperationTarget,
         execution: ActionExecution,
         allocation: SessionGitWorktree,
         worktree_path: str,
@@ -1892,7 +1910,6 @@ class SessionGitWorktreeService:
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
     ) -> bool:
         """Register the action-created worktree as a session Project."""
-        del agent_id
         await self._append_action_execution_event(
             execution=execution,
             kind=ActionExecutionEventKind.STEP_STARTED,
@@ -1903,7 +1920,24 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
         try:
+            expected_authority = RuntimeOperationAuthority(
+                configuration_revision_id=runtime.configuration_revision_id,
+                configuration_digest=runtime.configuration_digest,
+                desired_generation=runtime.desired_generation,
+            )
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                expected_authority=expected_authority,
+                start_if_stopped=False,
+            )
             async with self.session_manager() as session:
+                binding_service = self.session_working_folder_binding_service
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=agent_id,
+                    session_id=allocation.session_id,
+                    runtime_target=runtime,
+                )
                 await self._create_and_link_workspace_project(
                     session,
                     allocation=allocation,
@@ -1924,6 +1958,7 @@ class SessionGitWorktreeService:
         self,
         *,
         agent_id: str,
+        runtime: RuntimeOperationTarget,
         execution: ActionExecution,
         allocation: SessionGitWorktree,
         worktree_path: str,
@@ -1941,7 +1976,24 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
         try:
+            expected_authority = RuntimeOperationAuthority(
+                configuration_revision_id=runtime.configuration_revision_id,
+                configuration_digest=runtime.configuration_digest,
+                desired_generation=runtime.desired_generation,
+            )
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                expected_authority=expected_authority,
+                start_if_stopped=False,
+            )
             async with self.session_manager() as session:
+                binding_service = self.session_working_folder_binding_service
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=agent_id,
+                    session_id=allocation.session_id,
+                    runtime_target=runtime,
+                )
                 await self.agent_project_catalog_repository.upsert_entry(
                     session,
                     agent_id=agent_id,
@@ -2304,6 +2356,9 @@ class SessionGitWorktreeService:
             store=self.skill_store,
             session_manager=self.session_manager,
             runtime_target_resolver=self.runtime_target_resolver,
+            session_working_folder_binding_service=(
+                self.session_working_folder_binding_service
+            ),
             runner_operations=adapt_runtime_runner_operations(self.runner_operations),
             project_repository=self.session_workspace_project_repository,
         )
@@ -2434,10 +2489,16 @@ class SessionGitWorktreeService:
         if not cleanup_targets:
             return
         try:
-            runtime = await self.runtime_target_resolver.resolve_operation_target(
-                agent_id
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bound_context(
+                agent_id=agent_id,
+                session_id=session_id,
             )
-        except RuntimeStorageError as error:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                start_if_stopped=False,
+            )
+        except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
             await self._mark_cleanup_targets_failed(
                 allocations=cleanup_targets,
                 reason=str(error),
@@ -2516,23 +2577,6 @@ class SessionGitWorktreeService:
             if allocation.status is not SessionGitWorktreeStatus.CLEANED
         ]
         if cleanup_targets:
-            try:
-                runtime = await self.runtime_target_resolver.resolve_operation_target(
-                    agent_id
-                )
-            except RuntimeStorageError as error:
-                for allocation in cleanup_targets:
-                    _log_archive_cleanup_failure(
-                        agent_id=agent_id,
-                        root_session_id=root_session_id,
-                        allocation=allocation,
-                        reason_code="runtime_unavailable",
-                    )
-                await self._mark_cleanup_targets_failed(
-                    allocations=cleanup_targets,
-                    reason=str(error),
-                )
-                return len(allocations)
             if self.runner_operations is None:
                 for allocation in cleanup_targets:
                     _log_archive_cleanup_failure(
@@ -2563,32 +2607,35 @@ class SessionGitWorktreeService:
                         ),
                     )
                     continue
-                async with self.session_manager() as session:
-                    repository = self.agent_session_repository
-                    context = await repository.get_working_folder_context_by_session_id(
-                        session,
+                try:
+                    binding_service = self.session_working_folder_binding_service
+                    await binding_service.require_bound_context(
+                        agent_id=agent_id,
                         session_id=allocation.session_id,
                     )
-                _, ownership_error = _cleanup_classification(
-                    allocation=allocation,
-                    session_id=creator_session_id,
-                    workspace_root=normalize_agent_workspace_root(
-                        runtime.workspace_path
-                    ).as_posix(),
-                    working_folder_path=(
-                        context.working_folder_path if context is not None else None
-                    ),
-                )
-                if ownership_error is not None:
+                    runtime = (
+                        await self.runtime_target_resolver.resolve_operation_target(
+                            agent_id,
+                            start_if_stopped=False,
+                        )
+                    )
+                except (
+                    RuntimeStorageError,
+                    SessionWorkingFolderBindingError,
+                ) as error:
                     _log_archive_cleanup_failure(
                         agent_id=agent_id,
                         root_session_id=root_session_id,
                         allocation=allocation,
-                        reason_code="invalid_allocation_ownership",
+                        reason_code=(
+                            "binding_unavailable"
+                            if isinstance(error, SessionWorkingFolderBindingError)
+                            else "runtime_unavailable"
+                        ),
                     )
                     await self._mark_cleanup_failed(
                         worktree_id=allocation.id,
-                        reason=ownership_error,
+                        reason=str(error),
                     )
                     continue
                 try:
@@ -2644,21 +2691,42 @@ class SessionGitWorktreeService:
         force: bool,
     ) -> SessionGitWorktree | None:
         """Run cleanup for one session-owned Git worktree allocation."""
-        async with self.session_manager() as session:
-            repository = self.agent_session_repository
-            context = await repository.get_working_folder_context_by_session_id(
-                session,
-                session_id=allocation.session_id,
+        expected_authority = RuntimeOperationAuthority(
+            configuration_revision_id=runtime.configuration_revision_id,
+            configuration_digest=runtime.configuration_digest,
+            desired_generation=runtime.desired_generation,
+        )
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                expected_authority=expected_authority,
+                start_if_stopped=False,
             )
+            binding_service = self.session_working_folder_binding_service
+            binding = await binding_service.resolve_bound_authority_for_target(
+                agent_id=agent_id,
+                session_id=allocation.session_id,
+                runtime_target=runtime,
+            )
+        except RuntimeStorageError:
+            await self._mark_cleanup_failed(
+                worktree_id=allocation.id,
+                reason="Git worktree cleanup blocked: runtime_unavailable.",
+            )
+            return None
+        except SessionWorkingFolderBindingError:
+            await self._mark_cleanup_failed(
+                worktree_id=allocation.id,
+                reason="Git worktree cleanup blocked: session_binding_unavailable.",
+            )
+            return None
         cleanup_classification, ownership_error = _cleanup_classification(
             allocation=allocation,
             session_id=session_id,
             workspace_root=normalize_agent_workspace_root(
                 runtime.workspace_path
             ).as_posix(),
-            working_folder_path=(
-                context.working_folder_path if context is not None else None
-            ),
+            working_folder_path=binding.working_folder_path,
         )
         if ownership_error is not None:
             await self._mark_cleanup_failed(

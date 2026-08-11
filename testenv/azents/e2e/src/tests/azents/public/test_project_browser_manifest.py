@@ -23,6 +23,7 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 )
 from azentspublicclient.models.secrets import Secrets
 from pydantic import TypeAdapter, ValidationError
+from testcontainers.core.container import DockerContainer
 
 from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
@@ -226,6 +227,59 @@ def _create_session(
     return session_id
 
 
+def _prepare_session_folder(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+) -> None:
+    """Request explicit preparation of a pending Session folder."""
+    _post_json(
+        server_url=server_url,
+        token=token,
+        path=(
+            f"/chat/v1/agents/{agent_id}/sessions/{session_id}"
+            "/workspace/session-folder/prepare"
+        ),
+        payload={"client_request_id": f"project-browser-prepare-{unique()}"},
+    )
+
+
+def _wait_for_session_manifest(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+) -> dict[str, object]:
+    """Wait for asynchronous Session-folder preparation to bind the manifest."""
+    path = (
+        f"/chat/v1/agents/{agent_id}/sessions/{session_id}"
+        "/workspace/project-browser-manifest"
+    )
+    deadline = time.monotonic() + 120
+    last_response: requests.Response | None = None
+    while time.monotonic() < deadline:
+        response = requests.get(
+            f"{server_url}{path}",
+            headers=_headers(token),
+            timeout=10,
+        )
+        if response.ok:
+            return _response_object(response, label=f"GET {path} response")
+        last_response = response
+        if response.status_code != 400:
+            response.raise_for_status()
+        time.sleep(1)
+    raise AssertionError(
+        "Session Project browser manifest did not become available after "
+        "preparation: "
+        f"{last_response.status_code if last_response is not None else None} "
+        f"{last_response.text if last_response is not None else None}"
+    )
+
+
 def _session_manifest(
     *,
     server_url: str,
@@ -310,16 +364,23 @@ def test_empty_project_manifest_includes_the_session_folder(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
+    azents_engine_worker_container: DockerContainer,
     runtime_workspace_path: str,
 ) -> None:
     """A session with no Projects exposes its fixed Session-folder root."""
+    del azents_engine_worker_container
     setup = _setup_project_browser(
         public_api_client=public_api_client,
         admin_api_client=admin_api_client,
         public_url=azents_public_server_url,
     )
-
-    manifest = _session_manifest(
+    _prepare_session_folder(
+        server_url=azents_public_server_url,
+        token=setup.token,
+        agent_id=setup.agent_id,
+        session_id=setup.primary_session_id,
+    )
+    manifest = _wait_for_session_manifest(
         server_url=azents_public_server_url,
         token=setup.token,
         agent_id=setup.agent_id,
@@ -350,9 +411,11 @@ def test_session_project_manifest_uses_registry_capabilities_and_removal(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
+    azents_engine_worker_container: DockerContainer,
     runtime_workspace_path: str,
 ) -> None:
     """Session manifest entries are Project roots with registry-scoped removal."""
+    del azents_engine_worker_container
     setup = _setup_project_browser(
         public_api_client=public_api_client,
         admin_api_client=admin_api_client,
@@ -366,8 +429,13 @@ def test_session_project_manifest_uses_registry_capabilities_and_removal(
         agent_id=setup.agent_id,
         project_paths=paths,
     )
-
-    manifest = _session_manifest(
+    _prepare_session_folder(
+        server_url=azents_public_server_url,
+        token=setup.token,
+        agent_id=setup.agent_id,
+        session_id=session_id,
+    )
+    manifest = _wait_for_session_manifest(
         server_url=azents_public_server_url,
         token=setup.token,
         agent_id=setup.agent_id,

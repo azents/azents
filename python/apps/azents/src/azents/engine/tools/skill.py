@@ -67,6 +67,10 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderBindingError,
+    SessionWorkingFolderBindingService,
+)
 from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 from azents.transport.chat import chat_input_actions_updated_dump
 
@@ -429,6 +433,7 @@ class SkillProjectionService:
         store: SkillProjectionStateStore,
         session_manager: SessionManager[AsyncSession],
         runtime_target_resolver: RuntimeOperationTargetResolver,
+        session_working_folder_binding_service: SessionWorkingFolderBindingService,
         runner_operations: SkillRuntimeFileReader | None = None,
         project_repository: SessionWorkspaceProjectRepository | None = None,
         broadcast: SkillBroadcast | None = None,
@@ -437,6 +442,9 @@ class SkillProjectionService:
         self.store = store
         self.session_manager = session_manager
         self.runtime_target_resolver = runtime_target_resolver
+        self.session_working_folder_binding_service = (
+            session_working_folder_binding_service
+        )
         self.runner_operations = runner_operations
         self.project_repository = (
             project_repository or SessionWorkspaceProjectRepository()
@@ -454,19 +462,25 @@ class SkillProjectionService:
         runner_operations = self.runner_operations
         if runner_operations is None:
             return await self.store.load(agent_id, session_id)
-        async with self.session_manager() as session:
-            projects = await self.project_repository.list_projects(
-                session,
-                session_id=session_id,
-            )
         try:
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id,
                 wait_timeout_seconds=0.0,
                 start_if_stopped=False,
             )
-        except RuntimeStorageError:
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.resolve_authority_for_target(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime_target=runtime,
+            )
+        except RuntimeStorageError, SessionWorkingFolderBindingError:
             return await self.store.load(agent_id, session_id)
+        async with self.session_manager() as session:
+            projects = await self.project_repository.list_projects(
+                session,
+                session_id=session_id,
+            )
         items = await self._scan_runtime(
             runner_operations=runner_operations,
             runtime_id=runtime.id,

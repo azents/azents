@@ -19,13 +19,18 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogEntry
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import require_session_working_folder_path
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.agent_project_catalog import AgentProjectCatalogService
+from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
+from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderBindingError,
+    SessionWorkingFolderBindingService,
+)
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
     normalize_agent_workspace_root,
@@ -168,10 +173,6 @@ class ProjectBrowserManifestService:
         AgentProjectCatalogRepository,
         Depends(AgentProjectCatalogRepository),
     ]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository,
-        Depends(AgentRuntimeRepository),
-    ]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository,
         Depends(WorkspaceUserRepository),
@@ -179,6 +180,14 @@ class ProjectBrowserManifestService:
     catalog_service: Annotated[
         AgentProjectCatalogService,
         Depends(AgentProjectCatalogService),
+    ]
+    runtime_target_resolver: Annotated[
+        RuntimeOperationTargetResolver,
+        Depends(AgentRuntimeService),
+    ]
+    session_working_folder_binding_service: Annotated[
+        SessionWorkingFolderBindingService,
+        Depends(),
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -212,14 +221,25 @@ class ProjectBrowserManifestService:
             )
             if workspace_user is None:
                 return Failure(ProjectBrowserAccessDenied())
-            repository = self.agent_session_repository
-            context = await repository.get_working_folder_context_by_session_id(
-                session,
+        try:
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bound_context(
+                agent_id=agent_id,
                 session_id=session_id,
             )
-            if context is None:
-                raise RuntimeError("Active Session is missing working-folder context")
-            working_folder_path = require_session_working_folder_path(context)
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                start_if_stopped=False,
+            )
+            binding = await binding_service.resolve_bound_authority_for_target(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime_target=runtime,
+            )
+        except (RuntimeStorageError, SessionWorkingFolderBindingError) as exc:
+            return Failure(InvalidProjectPath(path="", reason=str(exc)))
+        working_folder_path = binding.working_folder_path
+        async with self.session_manager() as session:
             projects = await self.project_repository.list_projects(
                 session,
                 session_id=session_id,
@@ -237,13 +257,9 @@ class ProjectBrowserManifestService:
                 agent_id=agent_id,
                 paths=paths,
             )
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
-                session,
-                agent_id,
-            )
         try:
             workspace_root = normalize_agent_workspace_root(
-                runtime.workspace_path if runtime is not None else None
+                runtime.workspace_path
             ).as_posix()
             normalize_session_workspace_project_paths(
                 paths,
@@ -331,20 +347,20 @@ class ProjectBrowserManifestService:
             )
             if workspace_user is None:
                 return Failure(ProjectBrowserAccessDenied())
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
-                session,
-                agent_id,
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
             )
-            try:
-                workspace_root = normalize_agent_workspace_root(
-                    runtime.workspace_path if runtime is not None else None
-                ).as_posix()
-                normalized_paths = normalize_session_workspace_project_paths(
-                    project_paths,
-                    workspace_root=workspace_root,
-                )
-            except ValueError as exc:
-                return Failure(InvalidProjectPath(path="", reason=str(exc)))
+            workspace_root = normalize_agent_workspace_root(
+                runtime.workspace_path
+            ).as_posix()
+            normalized_paths = normalize_session_workspace_project_paths(
+                project_paths,
+                workspace_root=workspace_root,
+            )
+        except (RuntimeStorageError, ValueError) as exc:
+            return Failure(InvalidProjectPath(path="", reason=str(exc)))
+        async with self.session_manager() as session:
             catalog_entries = await self.catalog_repository.list_entries_by_paths(
                 session,
                 agent_id=agent_id,

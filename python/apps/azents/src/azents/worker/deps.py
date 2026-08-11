@@ -99,6 +99,9 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.external_channel.slack_events import SlackConversationClient
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderBindingService,
+)
 from azents.services.system_setting.service import SystemSettingsService
 from azents.services.vfs import VfsProjectionService
 from azents.utils.appctx import AppContext
@@ -163,6 +166,10 @@ def get_skill_toolkit_provider(
         AgentRuntimeService,
         Depends(),
     ],
+    session_working_folder_binding_service: Annotated[
+        SessionWorkingFolderBindingService,
+        Depends(),
+    ],
 ) -> SkillToolkitProvider:
     """SkillToolkitProvider dependency for Worker with runtime sync support."""
     store = SkillStateStore(session_manager=session_manager)
@@ -172,6 +179,9 @@ def get_skill_toolkit_provider(
             store=store,
             session_manager=session_manager,
             runtime_target_resolver=agent_runtime_service,
+            session_working_folder_binding_service=(
+                session_working_folder_binding_service
+            ),
             runner_operations=runner_operations,
             project_repository=SessionWorkspaceProjectRepository(),
             broadcast=broadcast,
@@ -216,6 +226,10 @@ def get_builtin_toolkit_provider(
         AgentSessionRepository,
         Depends(AgentSessionRepository),
     ],
+    session_working_folder_binding_service: Annotated[
+        SessionWorkingFolderBindingService,
+        Depends(),
+    ],
     config: Annotated[Config, Depends(get_config)],
     s3_service: Annotated[S3Service, Depends(get_s3_service)],
     coordinator: Annotated[
@@ -245,6 +259,7 @@ def get_builtin_toolkit_provider(
         agent_runtime_service=agent_runtime_service,
         runner_operations=runner_operations,
         agent_session_repository=agent_session_repository,
+        session_working_folder_binding_service=(session_working_folder_binding_service),
         project_repo=SessionWorkspaceProjectRepository(),
         server_to_runtime_transfer_service=transfer.server_to_runtime,
         runtime_image_read_service=transfer.runtime_image_read,

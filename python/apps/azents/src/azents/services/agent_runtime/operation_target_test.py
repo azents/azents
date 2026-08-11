@@ -128,7 +128,11 @@ class _OperationTargetService(AgentRuntimeService):
     def __init__(self, resolutions: list[RuntimeProfileResolutionResult]) -> None:
         self.resolutions = resolutions
         self.resolution_index = 0
+        self.ensure_runtime_calls = 0
         self.ensure_started_calls = 0
+        self.capability_versions = [4]
+        self.capability_check_index = 0
+        self.capability_available = True
 
     async def _ensure_runtime_for_agent(
         self,
@@ -136,6 +140,7 @@ class _OperationTargetService(AgentRuntimeService):
     ) -> RuntimeProfileResolutionResult:
         """Return the next configured resolution and retain the final snapshot."""
         del agent_id
+        self.ensure_runtime_calls += 1
         index = min(self.resolution_index, len(self.resolutions) - 1)
         resolution = self.resolutions[index]
         if self.resolution_index < len(self.resolutions) - 1:
@@ -149,6 +154,29 @@ class _OperationTargetService(AgentRuntimeService):
         index = min(self.resolution_index, len(self.resolutions) - 1)
         return self.resolutions[index].runtime
 
+    async def _require_runtime_operation_capability(
+        self,
+        agent_id: str,
+        *,
+        expected_version: int | None = None,
+    ) -> int:
+        """Return ordered Agent capability versions for resolver tests."""
+        del agent_id
+        if not self.capability_available:
+            raise RuntimeStorageError("Agent Runtime capability is unavailable.")
+        index = min(
+            self.capability_check_index,
+            len(self.capability_versions) - 1,
+        )
+        version = self.capability_versions[index]
+        if self.capability_check_index < len(self.capability_versions) - 1:
+            self.capability_check_index += 1
+        if expected_version is not None and version != expected_version:
+            raise RuntimeStorageError(
+                "Agent Runtime capability changed during the operation."
+            )
+        return version
+
 
 async def test_resolve_operation_target_returns_exact_qualified_evidence() -> None:
     """Complete matching evidence returns one immutable operation target."""
@@ -157,10 +185,23 @@ async def test_resolve_operation_target_returns_exact_qualified_evidence() -> No
     target = await service.resolve_operation_target("agent-1")
 
     assert target.id == "runtime-1"
+    assert target.runtime_capability_version == 4
     assert target.desired_generation == 2
     assert target.runner_generation == 3
     assert target.configuration_revision_id == "revision-2"
     assert target.workspace_path == "/workspace/agent"
+
+
+async def test_resolve_operation_target_rejects_before_runtime_resolution() -> None:
+    """Runtime-free admission cannot ensure, start, or inspect a Runtime."""
+    service = _OperationTargetService([_resolution()])
+    service.capability_available = False
+
+    with pytest.raises(RuntimeStorageError, match="capability is unavailable"):
+        await service.resolve_operation_target("agent-1")
+
+    assert service.ensure_runtime_calls == 0
+    assert service.ensure_started_calls == 0
 
 
 async def test_resolve_operation_target_waits_for_same_revision_runner() -> None:
@@ -359,9 +400,23 @@ def test_qualified_operation_target_rejects_nonoperational_authority(
 ) -> None:
     """Shared qualification keeps API availability aligned with resolver gates."""
     assert (
-        AgentRuntimeService._qualified_operation_target(_resolution(runtime=runtime))
+        AgentRuntimeService._qualified_operation_target(
+            _resolution(runtime=runtime),
+            runtime_capability_version=4,
+        )
         is None
     )
+
+
+async def test_resolve_operation_target_rejects_capability_change_before_return() -> (
+    None
+):
+    """A capability version change fences a target before Runner dispatch."""
+    service = _OperationTargetService([_resolution()])
+    service.capability_versions = [4, 4, 5]
+
+    with pytest.raises(RuntimeStorageError, match="capability changed"):
+        await service.resolve_operation_target("agent-1")
 
 
 async def test_resolve_operation_target_times_out_without_runner_readiness() -> None:

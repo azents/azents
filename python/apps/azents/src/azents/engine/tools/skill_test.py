@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -124,6 +125,7 @@ class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
         )
         return RuntimeOperationTarget(
             id="runtime-1",
+            runtime_capability_version=1,
             desired_generation=1,
             runner_generation=1,
             configuration_revision_id="revision-1",
@@ -727,6 +729,7 @@ class TestSkillProjectionService:
             store=_SkillStore(SkillProjectionState()),
             session_manager=_session_manager,
             runtime_target_resolver=_RuntimeTargetResolver(),
+            session_working_folder_binding_service=AsyncMock(),
         )
 
         items = await service.scan_runtime_for_test(
@@ -763,6 +766,7 @@ class TestSkillProjectionService:
             store=_SkillStore(SkillProjectionState()),
             session_manager=_session_manager,
             runtime_target_resolver=_RuntimeTargetResolver(),
+            session_working_folder_binding_service=AsyncMock(),
         )
 
         items = await service.scan_runtime_for_test(
@@ -791,6 +795,7 @@ class TestSkillProjectionService:
             store=_SkillStore(SkillProjectionState()),
             session_manager=_session_manager,
             runtime_target_resolver=_RuntimeTargetResolver(),
+            session_working_folder_binding_service=AsyncMock(),
             broadcast=broadcast,
         )
 

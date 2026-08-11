@@ -58,6 +58,7 @@ class RuntimeOperationTarget:
     """Immutable exact Runtime authority for one explicit operation."""
 
     id: str
+    runtime_capability_version: int
     desired_generation: int
     runner_generation: int
     configuration_revision_id: str

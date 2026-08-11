@@ -36,6 +36,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.session_working_folder import build_session_working_folder_path
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -134,6 +135,35 @@ async def _create_agent(
             ),
         )
     return agent.id
+
+
+async def _bind_root_working_folder(
+    session: AsyncSession,
+    *,
+    repository: AgentSessionRepository,
+    agent_id: str,
+    session_id: str,
+    workspace_root: str,
+) -> None:
+    """Bind one pending root context for cleanup-specific repository tests."""
+    runtime = await AgentRuntimeRepository().get_by_agent_id(session, agent_id)
+    locked = await repository.lock_working_folder_binding_by_session_id(
+        session,
+        session_id=session_id,
+    )
+    assert runtime is not None
+    assert locked is not None
+    bound = await repository.bind_pending_working_folder(
+        session,
+        context_id=locked.context.id,
+        expected_agent_id=agent_id,
+        expected_agent_runtime_id=runtime.id,
+        working_folder_path=build_session_working_folder_path(
+            locked.root_session_handle,
+            workspace_root=workspace_root,
+        ),
+    )
+    assert bound is not None
 
 
 class TestAgentSessionRepository:
@@ -257,6 +287,81 @@ class TestAgentSessionRepository:
             is SessionWorkingFolderBindingState.PENDING
         )
 
+    async def test_root_context_creation_allows_runtime_fk_compatible_locks(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Root context creation remains compatible with Runtime FK locks."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        repository = AgentSessionRepository()
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+            workspace_id = await _create_workspace(
+                setup_session,
+                f"root-context-runtime-locks-{suffix}",
+            )
+            agent_id = await _create_agent(
+                setup_session,
+                workspace_id,
+                f"root-context-runtime-locks-{suffix}",
+                workspace_path=None,
+            )
+            runtime = await AgentRuntimeRepository().get_by_agent_id(
+                setup_session,
+                agent_id,
+            )
+            assert runtime is not None
+            await setup_session.commit()
+
+        async def create_root_context() -> str:
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as create_session:
+                created = await repository.create(
+                    create_session,
+                    AgentSessionCreate(
+                        workspace_id=workspace_id,
+                        product_mode=AgentSessionProductMode.TEAM,
+                        associated_user_id=None,
+                        agent_id=agent_id,
+                        title=None,
+                    ),
+                )
+                await create_session.commit()
+                return created.id
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as runtime_session:
+            locked_agent_id = await runtime_session.scalar(
+                sa.select(RDBAgent.id)
+                .where(RDBAgent.id == agent_id)
+                .with_for_update(read=True, key_share=True)
+            )
+            locked_runtime = await AgentRuntimeRepository().get_by_agent_id_for_update(
+                runtime_session,
+                agent_id,
+            )
+            assert locked_agent_id == agent_id
+            assert locked_runtime is not None
+
+            created_id = await asyncio.wait_for(
+                create_root_context(),
+                timeout=5,
+            )
+
+        async with AsyncSession(rdb_engine) as verification_session:
+            context = await repository.get_working_folder_context_by_session_id(
+                verification_session,
+                session_id=created_id,
+            )
+            assert context is not None
+            assert context.agent_runtime_id == runtime.id
+            assert context.binding_state is SessionWorkingFolderBindingState.PENDING
+
     async def test_root_context_rejects_runtime_removing(
         self,
         rdb_session: AsyncSession,
@@ -282,6 +387,118 @@ class TestAgentSessionRepository:
                         title=None,
                     ),
                 )
+
+    async def test_pending_context_binds_once_with_root_session_handle(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Pending binding CAS stores one exact root-owned Session folder."""
+        workspace_id = await _create_workspace(rdb_session, "pending-bind")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "pending-bind",
+            workspace_path=None,
+        )
+        repository = AgentSessionRepository()
+        created = await repository.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        runtime = await AgentRuntimeRepository().get_by_agent_id(
+            rdb_session,
+            agent_id,
+        )
+        assert runtime is not None
+
+        locked = await repository.lock_working_folder_binding_by_session_id(
+            rdb_session,
+            session_id=created.id,
+        )
+
+        assert locked is not None
+        expected_path = (
+            f"/runtime/current/.azents/sessions/{locked.root_session_handle}"
+        )
+        bound = await repository.bind_pending_working_folder(
+            rdb_session,
+            context_id=locked.context.id,
+            expected_agent_id=agent_id,
+            expected_agent_runtime_id=runtime.id,
+            working_folder_path=expected_path,
+        )
+        repeated = await repository.bind_pending_working_folder(
+            rdb_session,
+            context_id=locked.context.id,
+            expected_agent_id=agent_id,
+            expected_agent_runtime_id=runtime.id,
+            working_folder_path="/runtime/other/.azents/sessions/stale",
+        )
+
+        assert bound is not None
+        assert bound.binding_state is SessionWorkingFolderBindingState.BOUND
+        assert bound.working_folder_path == expected_path
+        assert repeated is None
+        stored = await repository.get_working_folder_context_by_session_id(
+            rdb_session,
+            session_id=created.id,
+        )
+        assert stored is not None
+        assert stored.working_folder_path == expected_path
+
+    async def test_pending_context_binding_checks_runtime_identity(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A stale logical Runtime cannot bind a pending root context."""
+        workspace_id = await _create_workspace(rdb_session, "pending-bind-runtime")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "pending-bind-runtime",
+            workspace_path=None,
+        )
+        repository = AgentSessionRepository()
+        created = await repository.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        locked = await repository.lock_working_folder_binding_by_session_id(
+            rdb_session,
+            session_id=created.id,
+        )
+        assert locked is not None
+
+        bound = await repository.bind_pending_working_folder(
+            rdb_session,
+            context_id=locked.context.id,
+            expected_agent_id=agent_id,
+            expected_agent_runtime_id="stale-runtime",
+            working_folder_path=(
+                f"/runtime/current/.azents/sessions/{locked.root_session_handle}"
+            ),
+        )
+
+        assert bound is None
+        stored = await repository.get_working_folder_context_by_session_id(
+            rdb_session,
+            session_id=created.id,
+        )
+        assert stored is not None
+        assert stored.binding_state is SessionWorkingFolderBindingState.PENDING
+        assert stored.working_folder_path is None
 
     async def test_claim_owner_generation_is_monotonic(
         self,
@@ -643,12 +860,12 @@ class TestAgentSessionRepository:
         assert first.handle == "abandon-ability-able"
         assert second.handle == "about-above-absent"
 
-    async def test_create_assigns_root_context_working_folder(
+    async def test_create_assigns_pending_root_context_working_folder(
         self,
         rdb_session: AsyncSession,
         monkeypatch: MonkeyPatch,
     ) -> None:
-        """Persist one exact working folder with the root context."""
+        """Managed root creation records Runtime ownership without path authority."""
         workspace_id = await _create_workspace(
             rdb_session,
             "working-folder-context-ws",
@@ -686,13 +903,10 @@ class TestAgentSessionRepository:
         )
 
         assert context is not None
-        assert (
-            context.working_folder_path
-            == "/runtime/working-folder-context/.azents/sessions/cactus-river-window"
-        )
+        assert context.working_folder_path is None
         assert (
             context.working_folder_binding_state
-            is SessionWorkingFolderBindingState.BOUND
+            is SessionWorkingFolderBindingState.PENDING
         )
         assert (
             context.working_folder_cleanup_status
@@ -726,6 +940,13 @@ class TestAgentSessionRepository:
                 title=None,
             ),
         )
+        await _bind_root_working_folder(
+            rdb_session,
+            repository=repo,
+            agent_id=agent_id,
+            session_id=created.id,
+            workspace_root="/runtime/working-folder-cleanup-transition",
+        )
 
         pending = await repo.mark_working_folder_cleanup_pending(
             rdb_session,
@@ -747,7 +968,11 @@ class TestAgentSessionRepository:
 
         assert pending.cleanup_status is SessionWorkingFolderCleanupStatus.PENDING
         assert completed is True
-        assert repeated_pending is None
+        assert repeated_pending is not None
+        assert (
+            repeated_pending.cleanup_status
+            is SessionWorkingFolderCleanupStatus.SUCCEEDED
+        )
         root_agent = await repo.get_session_agent_by_session_id(
             rdb_session,
             created.id,
@@ -789,6 +1014,13 @@ class TestAgentSessionRepository:
                 title=None,
             ),
         )
+        await _bind_root_working_folder(
+            rdb_session,
+            repository=repo,
+            agent_id=agent_id,
+            session_id=created.id,
+            workspace_root="/runtime/working-folder-cleanup-invalid-status",
+        )
         pending = await repo.mark_working_folder_cleanup_pending(
             rdb_session,
             root_session_id=created.id,
@@ -828,6 +1060,13 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
             ),
+        )
+        await _bind_root_working_folder(
+            rdb_session,
+            repository=repo,
+            agent_id=agent_id,
+            session_id=created.id,
+            workspace_root="/runtime/working-folder-cleanup-restore",
         )
         pending = await repo.mark_working_folder_cleanup_pending(
             rdb_session,

@@ -21,7 +21,6 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project import (
     SessionWorkspaceProjectCleanupInProgress,
@@ -46,6 +45,10 @@ from azents.services.runtime_directory_validation import (
     validate_runtime_directory,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderBindingError,
+    SessionWorkingFolderBindingService,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -182,10 +185,6 @@ class SessionWorkspaceProjectService:
         AgentProjectCatalogRepository,
         Depends(AgentProjectCatalogRepository),
     ]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository,
-        Depends(AgentRuntimeRepository),
-    ]
     agent_session_repository: Annotated[
         AgentSessionRepository,
         Depends(AgentSessionRepository),
@@ -200,6 +199,10 @@ class SessionWorkspaceProjectService:
     runtime_target_resolver: Annotated[
         RuntimeOperationTargetResolver,
         Depends(AgentRuntimeService),
+    ]
+    session_working_folder_binding_service: Annotated[
+        SessionWorkingFolderBindingService,
+        Depends(),
     ]
     runner_operations: Annotated[
         RuntimeRunnerOperationClient | None,
@@ -216,16 +219,18 @@ class SessionWorkspaceProjectService:
         path: str,
     ) -> Result[SessionWorkspaceProject, ProjectCreateError]:
         """Create Project registry row."""
-        normalized_result = await self._validate_project_path(
-            session_id=session_id,
-            path=path,
-        )
-        match normalized_result:
-            case Success(normalized_path):
-                pass
-            case Failure(error):
-                return Failure(error)
         async with self.session_manager() as session:
+            normalized_result = await self._validate_project_path_in_session(
+                session,
+                session_id=session_id,
+                path=path,
+                bind_in_transaction=True,
+            )
+            match normalized_result:
+                case Success(normalized_path):
+                    pass
+                case Failure(error):
+                    return Failure(error)
             try:
                 project = await self.repository.create_project(
                     session,
@@ -273,6 +278,7 @@ class SessionWorkspaceProjectService:
                 session,
                 session_id=context.session_id,
                 path=path,
+                bind_in_transaction=False,
             )
             match validation:
                 case Success(normalized_path):
@@ -280,10 +286,20 @@ class SessionWorkspaceProjectService:
                 case Failure(error):
                     return Failure(error)
             try:
+                binding_service = self.session_working_folder_binding_service
+                await binding_service.require_bindable_context(
+                    agent_id=context.agent_id,
+                    session_id=context.session_id,
+                )
                 runtime = await self.runtime_target_resolver.resolve_operation_target(
                     context.agent_id
                 )
-            except RuntimeStorageError:
+                await binding_service.resolve_authority_for_target(
+                    agent_id=context.agent_id,
+                    session_id=context.session_id,
+                    runtime_target=runtime,
+                )
+            except RuntimeStorageError, SessionWorkingFolderBindingError:
                 return Failure(
                     InvalidProjectPath(
                         path=normalized_path,
@@ -340,6 +356,24 @@ class SessionWorkspaceProjectService:
                         )
                     case _:
                         assert_never(error)
+            try:
+                binding_service = self.session_working_folder_binding_service
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=context.agent_id,
+                    session_id=context.session_id,
+                    runtime_target=runtime,
+                )
+            except SessionWorkingFolderBindingError:
+                return Failure(
+                    InvalidProjectPath(
+                        path=normalized_path,
+                        reason=(
+                            "Project path can only be approved from an available "
+                            "runtime."
+                        ),
+                    )
+                )
             try:
                 project = await self.repository.create_project(
                     session,
@@ -400,6 +434,29 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
+        try:
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bound_context(
+                agent_id=context.agent_id,
+                session_id=context.session_id,
+            )
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                context.agent_id,
+                start_if_stopped=False,
+            )
+        except RuntimeStorageError, SessionWorkingFolderBindingError:
+            return Failure(ProjectAccessDenied())
+        async with self.session_manager() as session:
+            try:
+                binding_service = self.session_working_folder_binding_service
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=context.agent_id,
+                    session_id=context.session_id,
+                    runtime_target=runtime,
+                )
+            except SessionWorkingFolderBindingError:
+                return Failure(ProjectAccessDenied())
             projects = await self.repository.list_projects(
                 session,
                 session_id=context.session_id,
@@ -445,6 +502,29 @@ class SessionWorkspaceProjectService:
                     pass
                 case Failure(error):
                     return Failure(error)
+        try:
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bound_context(
+                agent_id=context.agent_id,
+                session_id=context.session_id,
+            )
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                context.agent_id,
+                start_if_stopped=False,
+            )
+        except RuntimeStorageError, SessionWorkingFolderBindingError:
+            return Failure(ProjectAccessDenied())
+        async with self.session_manager() as session:
+            try:
+                binding_service = self.session_working_folder_binding_service
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=context.agent_id,
+                    session_id=context.session_id,
+                    runtime_target=runtime,
+                )
+            except SessionWorkingFolderBindingError:
+                return Failure(ProjectAccessDenied())
             project = await self.repository.get_project_by_id(session, project_id)
             if project is None or project.session_id != context.session_id:
                 return Failure(ProjectNotFound())
@@ -483,6 +563,9 @@ class SessionWorkspaceProjectService:
             store=self.skill_store,
             session_manager=self.session_manager,
             runtime_target_resolver=self.runtime_target_resolver,
+            session_working_folder_binding_service=(
+                self.session_working_folder_binding_service
+            ),
             runner_operations=adapt_runtime_runner_operations(self.runner_operations),
             project_repository=self.repository,
         )
@@ -492,26 +575,13 @@ class SessionWorkspaceProjectService:
             reason="project_change",
         )
 
-    async def _validate_project_path(
-        self,
-        *,
-        session_id: str,
-        path: str,
-    ) -> Result[str, InvalidProjectPath | ProjectPathConflict]:
-        """Validate Project path contract and existing Project conflicts."""
-        async with self.session_manager() as session:
-            return await self._validate_project_path_in_session(
-                session,
-                session_id=session_id,
-                path=path,
-            )
-
     async def _validate_project_path_in_session(
         self,
         session: AsyncSession,
         *,
         session_id: str,
         path: str,
+        bind_in_transaction: bool,
     ) -> Result[str, InvalidProjectPath | ProjectPathConflict]:
         """Validate Project path inside open DB session."""
         agent_session = await self.agent_session_repository.get_by_id(
@@ -522,17 +592,37 @@ class SessionWorkspaceProjectService:
             return Failure(
                 InvalidProjectPath(path=path, reason="AgentSession not found")
             )
-        runtime = await self.agent_runtime_repository.get_by_agent_id(
-            session,
-            agent_session.agent_id,
-        )
         try:
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bindable_context(
+                agent_id=agent_session.agent_id,
+                session_id=session_id,
+            )
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_session.agent_id
+            )
+            if bind_in_transaction:
+                await binding_service.resolve_authority_in_transaction(
+                    session,
+                    agent_id=agent_session.agent_id,
+                    session_id=session_id,
+                    runtime_target=runtime,
+                )
+            else:
+                await binding_service.resolve_authority_for_target(
+                    agent_id=agent_session.agent_id,
+                    session_id=session_id,
+                    runtime_target=runtime,
+                )
             normalized = normalize_session_workspace_path(
                 path,
-                workspace_root=(runtime.workspace_path if runtime is not None else None)
-                or "",
+                workspace_root=runtime.workspace_path,
             )
-        except ValueError as exc:
+        except (
+            RuntimeStorageError,
+            SessionWorkingFolderBindingError,
+            ValueError,
+        ) as exc:
             return Failure(InvalidProjectPath(path=path, reason=str(exc)))
         existing_project = await self.repository.get_project_by_path(
             session,

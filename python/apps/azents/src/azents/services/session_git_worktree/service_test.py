@@ -23,6 +23,7 @@ from azents.core.enums import (
     RuntimeRunnerState,
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
+    SessionWorkingFolderBindingState,
     WorkspaceUserRole,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
@@ -107,6 +108,9 @@ from azents.services.session_git_worktree import (
     GitWorktreeCleanupSubagentReadOnly,
     SessionGitWorktreeService,
 )
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderBindingService,
+)
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
 from azents.testing.types import is_string_object_dict
@@ -177,6 +181,10 @@ def _readonly_service() -> SessionGitWorktreeService:
         event_transcript_repository=cast(EventTranscriptRepository, object()),
         session_manager=_session_manager_double,
         runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),
+        session_working_folder_binding_service=cast(
+            SessionWorkingFolderBindingService,
+            object(),
+        ),
         runner_operations=cast(RuntimeRunnerOperationClient, object()),
     )
 
@@ -242,6 +250,7 @@ class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
     ) -> None:
         self.session_manager = session_manager
         self.runtime_repository = runtime_repository
+        self.calls: list[dict[str, object]] = []
 
     async def resolve_operation_target(
         self,
@@ -253,11 +262,16 @@ class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
         start_if_stopped: bool = True,
     ) -> RuntimeOperationTarget:
         """Return ready fixture evidence or bounded unavailability."""
+        self.calls.append(
+            {
+                "agent_id": agent_id,
+                "expected_authority": expected_authority,
+                "start_if_stopped": start_if_stopped,
+            }
+        )
         del (
             wait_timeout_seconds,
             poll_interval_seconds,
-            expected_authority,
-            start_if_stopped,
         )
         async with self.session_manager() as session:
             runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
@@ -269,6 +283,7 @@ class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
             raise RuntimeStorageError("Runtime runner is not ready.")
         return RuntimeOperationTarget(
             id=runtime.id,
+            runtime_capability_version=1,
             desired_generation=runtime.desired_generation,
             runner_generation=runtime.runner_generation,
             configuration_revision_id="revision-1",
@@ -737,6 +752,11 @@ def _service(
 ) -> SessionGitWorktreeService:
     """Build the service under test."""
     runtime_repository = _RuntimeRepository()
+    binding_service = SessionWorkingFolderBindingService(
+        agent_repository=AgentRepository(),
+        agent_session_repository=AgentSessionRepository(),
+        session_manager=session_manager,
+    )
     return SessionGitWorktreeService(
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
@@ -754,6 +774,7 @@ def _service(
             session_manager,
             runtime_repository,
         ),
+        session_working_folder_binding_service=binding_service,
         runner_operations=runner,
     )
 
@@ -777,6 +798,10 @@ def _input_service(
             automatic_project_repository=AgentAutomaticProjectRepository(),
             agent_runtime_repository=_RuntimeRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            runtime_target_resolver=_RuntimeTargetResolver(
+                session_manager,
+                _RuntimeRepository(),
+            ),
         ),
         chat_write_request_repository=ChatWriteRequestRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -1183,6 +1208,9 @@ class TestSessionGitWorktreeService:
             context = await session.get(RDBSessionAgentContext, root_agent.context_id)
             assert context is not None
             context.working_folder_path = "/workspace/agent/not-managed"
+            context.working_folder_binding_state = (
+                SessionWorkingFolderBindingState.BOUND
+            )
             action = CreateSessionWorkingFolderAction()
             execution = await ActionExecutionRepository().create(
                 session,
@@ -1260,6 +1288,9 @@ class TestSessionGitWorktreeService:
             context = await session.get(RDBSessionAgentContext, root_agent.context_id)
             assert context is not None
             context.working_folder_path = "/workspace/agent/not-managed"
+            context.working_folder_binding_state = (
+                SessionWorkingFolderBindingState.BOUND
+            )
             action = CreateGitWorktreeAction(
                 source_project_path="/workspace/agent/repo",
                 starting_ref="main",
@@ -2497,7 +2528,65 @@ class TestSessionGitWorktreeService:
             )
         assert allocation is not None
         assert allocation.status is SessionGitWorktreeStatus.CLEANUP_FAILED
-        assert allocation.cleanup_summary == "Session working-folder path is invalid."
+        assert (
+            allocation.cleanup_summary
+            == "Git worktree cleanup blocked: session_binding_unavailable."
+        )
+
+    async def test_archive_cleanup_rejects_pending_context_before_runner_io(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Archive cleanup never promotes or uses a pending historical context."""
+        runner = _RunnerOperations()
+        (
+            worktree_service,
+            _,
+            agent_id,
+            session_id,
+        ) = await _create_ready_worktree_session(
+            rdb_session_manager,
+            slug="pending-context-cleanup",
+            runner=runner,
+        )
+        runner.calls.clear()
+        runtime_target_resolver = cast(
+            _RuntimeTargetResolver,
+            worktree_service.runtime_target_resolver,
+        )
+        runtime_resolution_count = len(runtime_target_resolver.calls)
+        async with rdb_session_manager() as session:
+            root_agent = await AgentSessionRepository().get_session_agent_by_session_id(
+                session,
+                session_id,
+            )
+            assert root_agent is not None
+            context = await session.get(RDBSessionAgentContext, root_agent.context_id)
+            assert context is not None
+            context.working_folder_binding_state = (
+                SessionWorkingFolderBindingState.PENDING
+            )
+            context.working_folder_path = None
+
+        await worktree_service.run_archive_cleanup_for_root_tree(
+            agent_id=agent_id,
+            root_session_id=session_id,
+            subtree_session_ids=[session_id],
+        )
+
+        assert runner.calls == []
+        assert len(runtime_target_resolver.calls) == runtime_resolution_count
+        async with rdb_session_manager() as session:
+            allocation = await SessionGitWorktreeRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        assert allocation is not None
+        assert allocation.status is SessionGitWorktreeStatus.CLEANUP_FAILED
+        assert (
+            allocation.cleanup_summary
+            == "Session working-folder binding is unavailable."
+        )
 
     async def test_archive_cleanup_keeps_legacy_parent_cleanup(
         self,
@@ -2515,6 +2604,11 @@ class TestSessionGitWorktreeService:
             slug="legacy-parent-cleanup",
             runner=runner,
         )
+        runtime_target_resolver = cast(
+            _RuntimeTargetResolver,
+            worktree_service.runtime_target_resolver,
+        )
+        runtime_resolution_count = len(runtime_target_resolver.calls)
         async with rdb_session_manager() as session:
             allocation_repository = SessionGitWorktreeRepository()
             allocation = await allocation_repository.get_by_session_id(
@@ -2542,6 +2636,13 @@ class TestSessionGitWorktreeService:
             subtree_session_ids=[session_id],
         )
 
+        cleanup_resolution_calls = runtime_target_resolver.calls[
+            runtime_resolution_count:
+        ]
+        assert len(cleanup_resolution_calls) == 2
+        assert all(
+            call["start_if_stopped"] is False for call in cleanup_resolution_calls
+        )
         assert [call["operation"] for call in runner.calls] == [
             "create_git_worktree",
             "remove_git_worktree",

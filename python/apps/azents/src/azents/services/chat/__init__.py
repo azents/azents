@@ -23,6 +23,7 @@ from azents.core.enums import (
     EventKind,
     MailboxItemKind,
     MailboxSchedulingMode,
+    SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
 )
 from azents.core.inference_profile import AppliedInferenceProfile
@@ -30,7 +31,6 @@ from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecycleTransitionContext,
 )
-from azents.core.session_working_folder import validate_session_working_folder_path
 from azents.engine.events.action_messages import (
     CreateGitWorktreeAction,
     CreateSessionWorkingFolderAction,
@@ -61,7 +61,6 @@ from azents.repos.agent_session.data import (
     AgentSessionUnreadTerminalRunProjection,
     SessionAgent,
     SessionWorkingFolderContext,
-    require_session_working_folder_path,
 )
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.message import MessageRepository
@@ -102,6 +101,10 @@ from azents.services.session_lifecycle.orchestrator import (
 )
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
+)
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderBindingError,
+    SessionWorkingFolderBindingService,
 )
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
@@ -403,6 +406,10 @@ class ChatSessionService:
     runtime_target_resolver: Annotated[
         RuntimeOperationTargetResolver,
         Depends(AgentRuntimeService),
+    ]
+    session_working_folder_binding_service: Annotated[
+        SessionWorkingFolderBindingService,
+        Depends(),
     ]
     runner_operations: Annotated[
         RuntimeRunnerOperationClient | None,
@@ -889,41 +896,55 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-            await self.root_agent_session_creation_service.ensure_team_primary(
-                session,
-                workspace_id=agent.workspace_id,
-                agent_id=agent_id,
-            )
-            if existing_project_paths or setup_actions:
-                runtime = await self.agent_runtime_repository.get_by_agent_id(
-                    session,
+            workspace_id = agent.workspace_id
+        if existing_project_paths or setup_actions:
+            try:
+                runtime = await self.runtime_target_resolver.resolve_operation_target(
                     agent_id,
                 )
-                try:
-                    workspace_root = normalize_agent_workspace_root(
-                        runtime.workspace_path if runtime is not None else None
-                    ).as_posix()
-                except ValueError as exc:
-                    return Failure(InvalidProjectPath(path="", reason=str(exc)))
-                workspace_items_result = _workspace_items_from_request(
-                    existing_project_paths=existing_project_paths,
-                    setup_actions=setup_actions,
-                    workspace_root=workspace_root,
+                workspace_root = normalize_agent_workspace_root(
+                    runtime.workspace_path
+                ).as_posix()
+            except (RuntimeStorageError, ValueError) as exc:
+                return Failure(InvalidProjectPath(path="", reason=str(exc)))
+            workspace_items_result = _workspace_items_from_request(
+                existing_project_paths=existing_project_paths,
+                setup_actions=setup_actions,
+                workspace_root=workspace_root,
+            )
+        else:
+            workspace_items_result = Success([])
+        match workspace_items_result:
+            case Success(workspace_items):
+                pass
+            case Failure(error):
+                return Failure(error)
+            case _:
+                assert_never(workspace_items_result)
+
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None or agent.workspace_id != workspace_id:
+                return Failure(AgentNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
                 )
-            else:
-                workspace_items_result = Success([])
-            match workspace_items_result:
-                case Success(workspace_items):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(workspace_items_result)
+            )
+            if workspace_user is None:
+                return Failure(NotWorkspaceMember())
+            await self.root_agent_session_creation_service.ensure_team_primary(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
             root_session_creation = self.root_agent_session_creation_service
             root_result = await root_session_creation.create_root_session(
                 session,
                 create=AgentSessionCreate(
-                    workspace_id=agent.workspace_id,
+                    workspace_id=workspace_id,
                     agent_id=agent_id,
                     title=None,
                     primary_kind=None,
@@ -1431,31 +1452,34 @@ class ChatSessionService:
         context: SessionWorkingFolderContext,
     ) -> None:
         """Delete one committed Session folder and terminalize its bounded result."""
+        if (
+            context.binding_state is not SessionWorkingFolderBindingState.BOUND
+            or context.cleanup_status is not SessionWorkingFolderCleanupStatus.PENDING
+        ):
+            return
         try:
-            runtime = await self.runtime_target_resolver.resolve_operation_target(
-                agent_id
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bound_context(
+                agent_id=agent_id,
+                session_id=root_session_id,
             )
-        except RuntimeStorageError:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                start_if_stopped=False,
+            )
+            binding = await binding_service.resolve_bound_authority_for_target(
+                agent_id=agent_id,
+                session_id=root_session_id,
+                runtime_target=runtime,
+            )
+        except RuntimeStorageError, SessionWorkingFolderBindingError:
             await self._complete_working_folder_cleanup(
                 context_id=context.id,
                 status=SessionWorkingFolderCleanupStatus.FAILED,
                 summary="Session working-folder cleanup failed: runtime_unavailable.",
             )
             return
-        try:
-            working_folder_path = validate_session_working_folder_path(
-                require_session_working_folder_path(context),
-                workspace_root=normalize_agent_workspace_root(
-                    runtime.workspace_path
-                ).as_posix(),
-            )
-        except ValueError:
-            await self._complete_working_folder_cleanup(
-                context_id=context.id,
-                status=SessionWorkingFolderCleanupStatus.FAILED,
-                summary="Session working-folder cleanup failed: invalid_stored_path.",
-            )
-            return
+        working_folder_path = binding.working_folder_path
 
         runner_operations = self.runner_operations
         if runner_operations is None:

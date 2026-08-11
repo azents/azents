@@ -16,7 +16,6 @@ from azents.repos.agent_project_catalog.data import (
     AgentProjectCatalogEntry,
     AgentProjectCatalogStatusPatch,
 )
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileStatResult,
     RuntimeRunnerOperationClient,
@@ -54,10 +53,6 @@ class AgentProjectCatalogService:
         AgentProjectCatalogRepository,
         Depends(AgentProjectCatalogRepository),
     ]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository,
-        Depends(AgentRuntimeRepository),
-    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -77,12 +72,17 @@ class AgentProjectCatalogService:
         path: str,
     ) -> Result[AgentProjectCatalogEntry, InvalidProjectPath]:
         """Upsert one Project candidate path."""
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
+            )
+        except RuntimeStorageError as exc:
+            return Failure(InvalidProjectPath(path=path, reason=str(exc)))
         async with self.session_manager() as session:
             try:
-                workspace_root = await self._workspace_root(session, agent_id)
                 normalized = normalize_session_workspace_path(
                     path,
-                    workspace_root=workspace_root,
+                    workspace_root=runtime.workspace_path,
                 )
             except ValueError as exc:
                 return Failure(InvalidProjectPath(path=path, reason=str(exc)))
@@ -101,12 +101,17 @@ class AgentProjectCatalogService:
         paths: list[str],
     ) -> Result[list[AgentProjectCatalogEntry], InvalidProjectPath]:
         """Upsert Project candidate paths."""
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id
+            )
+        except RuntimeStorageError as exc:
+            return Failure(InvalidProjectPath(path="", reason=str(exc)))
         async with self.session_manager() as session:
             try:
-                workspace_root = await self._workspace_root(session, agent_id)
                 normalized_paths = normalize_session_workspace_project_paths(
                     paths,
-                    workspace_root=workspace_root,
+                    workspace_root=runtime.workspace_path,
                 )
             except ValueError as exc:
                 return Failure(InvalidProjectPath(path="", reason=str(exc)))
@@ -141,12 +146,19 @@ class AgentProjectCatalogService:
         paths: list[str],
     ) -> Result[list[AgentProjectCatalogEntry], InvalidProjectPath]:
         """Fetch catalog entries for normalized Project paths."""
+        try:
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                wait_timeout_seconds=0.0,
+                start_if_stopped=False,
+            )
+        except RuntimeStorageError as exc:
+            return Failure(InvalidProjectPath(path="", reason=str(exc)))
         async with self.session_manager() as session:
             try:
-                workspace_root = await self._workspace_root(session, agent_id)
                 normalized_paths = normalize_session_workspace_project_paths(
                     paths,
-                    workspace_root=workspace_root,
+                    workspace_root=runtime.workspace_path,
                 )
             except ValueError as exc:
                 return Failure(InvalidProjectPath(path="", reason=str(exc)))
@@ -165,21 +177,17 @@ class AgentProjectCatalogService:
         path: str,
     ) -> Result[AgentProjectCatalogEntry, InvalidProjectPath]:
         """Refresh one Project candidate filesystem status projection."""
-        runtime: RuntimeOperationTarget | None = None
-        unavailable_detail = "Runtime runner is not ready."
         try:
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id
             )
         except RuntimeStorageError as error:
-            unavailable_detail = str(error)
+            return Failure(InvalidProjectPath(path=path, reason=str(error)))
         async with self.session_manager() as session:
             try:
-                workspace_root = (
-                    normalize_agent_workspace_root(runtime.workspace_path).as_posix()
-                    if runtime is not None
-                    else await self._workspace_root(session, agent_id)
-                )
+                workspace_root = normalize_agent_workspace_root(
+                    runtime.workspace_path
+                ).as_posix()
                 normalized = normalize_session_workspace_path(
                     path,
                     workspace_root=workspace_root,
@@ -189,7 +197,6 @@ class AgentProjectCatalogService:
         patch = await self._status_patch(
             runtime,
             normalized,
-            unavailable_detail=unavailable_detail,
         )
         async with self.session_manager() as session:
             entry = await self.catalog_repository.update_status(
@@ -208,21 +215,17 @@ class AgentProjectCatalogService:
         paths: list[str],
     ) -> Result[list[AgentProjectCatalogEntry], InvalidProjectPath]:
         """Refresh multiple Project candidate filesystem status projections."""
-        runtime: RuntimeOperationTarget | None = None
-        unavailable_detail = "Runtime runner is not ready."
         try:
             runtime = await self.runtime_target_resolver.resolve_operation_target(
                 agent_id
             )
         except RuntimeStorageError as error:
-            unavailable_detail = str(error)
+            return Failure(InvalidProjectPath(path="", reason=str(error)))
         async with self.session_manager() as session:
             try:
-                workspace_root = (
-                    normalize_agent_workspace_root(runtime.workspace_path).as_posix()
-                    if runtime is not None
-                    else await self._workspace_root(session, agent_id)
-                )
+                workspace_root = normalize_agent_workspace_root(
+                    runtime.workspace_path
+                ).as_posix()
                 normalized_paths = normalize_session_workspace_project_paths(
                     paths,
                     workspace_root=workspace_root,
@@ -233,7 +236,6 @@ class AgentProjectCatalogService:
             await self._status_patch(
                 runtime,
                 path,
-                unavailable_detail=unavailable_detail,
             )
             for path in normalized_paths
         ]
@@ -251,35 +253,13 @@ class AgentProjectCatalogService:
             await session.commit()
             return Success(entries)
 
-    async def _workspace_root(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-    ) -> str:
-        """Return the current Runner-reported Agent Workspace root."""
-        runtime = await self.agent_runtime_repository.get_by_agent_id(
-            session,
-            agent_id,
-        )
-        return normalize_agent_workspace_root(
-            runtime.workspace_path if runtime is not None else None
-        ).as_posix()
-
     async def _status_patch(
         self,
-        runtime: RuntimeOperationTarget | None,
+        runtime: RuntimeOperationTarget,
         path: str,
-        *,
-        unavailable_detail: str,
     ) -> AgentProjectCatalogStatusPatch:
         """Build the current status patch for a path."""
         checked_at = datetime.now(UTC)
-        if runtime is None:
-            return AgentProjectCatalogStatusPatch(
-                status=AgentProjectCatalogStatus.UNAVAILABLE,
-                status_detail=unavailable_detail,
-                checked_at=checked_at,
-            )
         if self.runner_operations is None:
             return AgentProjectCatalogStatusPatch(
                 status=AgentProjectCatalogStatus.UNAVAILABLE,

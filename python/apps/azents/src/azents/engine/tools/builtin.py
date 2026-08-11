@@ -108,7 +108,6 @@ from azents.engine.tools.write import make_write_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import require_session_working_folder_path
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -137,6 +136,11 @@ from azents.services.runtime_storage_error import (
     RuntimeStorageError,
 )
 from azents.services.session_storage import guess_media_type
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderAuthority,
+    SessionWorkingFolderBindingError,
+    SessionWorkingFolderBindingService,
+)
 from azents.services.vfs import VfsProjectionService
 
 logger = logging.getLogger(__name__)
@@ -709,6 +713,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         agent_runtime_repo: AgentRuntimeRepository,
         agent_runtime_service: AgentRuntimeService,
         agent_session_repository: AgentSessionRepository,
+        session_working_folder_binding_service: SessionWorkingFolderBindingService,
         project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor,
         runtime_image_read_service: RuntimeImageReadService | None,
@@ -733,6 +738,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self.agent_runtime_repo = agent_runtime_repo
         self.agent_runtime_service = agent_runtime_service
         self.agent_session_repository = agent_session_repository
+        self.session_working_folder_binding_service = (
+            session_working_folder_binding_service
+        )
         self.project_repo = project_repo
         self.agents_store = agents_store
         self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
@@ -916,7 +924,19 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         if capability_resolver is None:
             return ToolkitState(status=ToolkitStatus.DISABLED, tools=[])
         runtime_agent_id = self._runtime_agent_id
-        workspace_root = await self._load_workspace_root()
+        projection_target = await self._resolve_projection_runtime_target()
+        workspace_root = (
+            projection_target.workspace_path if projection_target is not None else None
+        )
+        projection_binding = await self._resolve_projection_binding(projection_target)
+        projects = (
+            sorted(
+                await self._load_projects(session_id=self._session_id),
+                key=lambda project: project.path,
+            )
+            if projection_binding is not None
+            else []
+        )
 
         file_ss = RuntimeRunnerFileStorage(
             runner_operations=self.runner_operations,
@@ -928,53 +948,38 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             expected_authority_provider=self._required_runtime_authority,
         )
 
-        async def resolve_runtime_target() -> ServerToRuntimeTarget:
-            runtime = await _ready_runtime_for_agent(
+        async def resolve_exact_runtime_target() -> RuntimeOperationTarget:
+            return await _ready_runtime_for_agent(
                 agent_runtime_repo=self.agent_runtime_repo,
                 agent_runtime_service=(self.agent_runtime_service),
                 session_manager=self.session_manager,
                 agent_id=runtime_agent_id,
                 expected_authority=self._required_runtime_authority(),
             )
+
+        async def resolve_runtime_target() -> ServerToRuntimeTarget:
+            runtime = await resolve_exact_runtime_target()
             return ServerToRuntimeTarget(
                 runtime_id=runtime.id,
                 desired_generation=runtime.desired_generation,
             )
 
         async def resolve_patch_target() -> RuntimePatchTarget:
-            runtime = await _ready_runtime_for_agent(
-                agent_runtime_repo=self.agent_runtime_repo,
-                agent_runtime_service=(self.agent_runtime_service),
-                session_manager=self.session_manager,
-                agent_id=runtime_agent_id,
-                expected_authority=self._required_runtime_authority(),
-            )
+            runtime = await resolve_exact_runtime_target()
             return RuntimePatchTarget(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
             )
 
         async def resolve_image_target() -> ServerToRuntimeTarget:
-            runtime = await _ready_runtime_for_agent(
-                agent_runtime_repo=self.agent_runtime_repo,
-                agent_runtime_service=(self.agent_runtime_service),
-                session_manager=self.session_manager,
-                agent_id=runtime_agent_id,
-                expected_authority=self._required_runtime_authority(),
-            )
+            runtime = await resolve_exact_runtime_target()
             return ServerToRuntimeTarget(
                 runtime_id=runtime.id,
                 desired_generation=runtime.desired_generation,
             )
 
         async def resolve_edit_target() -> RuntimeEditTarget:
-            runtime = await _ready_runtime_for_agent(
-                agent_runtime_repo=self.agent_runtime_repo,
-                agent_runtime_service=(self.agent_runtime_service),
-                session_manager=self.session_manager,
-                agent_id=runtime_agent_id,
-                expected_authority=self._required_runtime_authority(),
-            )
+            runtime = await resolve_exact_runtime_target()
             return RuntimeEditTarget(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
@@ -1050,13 +1055,15 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 agent_runtime_repo=self.agent_runtime_repo,
                 agent_runtime_service=(self.agent_runtime_service),
                 session_manager=self.session_manager,
-                agent_session_repository=self.agent_session_repository,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
                 peer_toolkits=self._peer_toolkits,
                 runtime_capability_resolver=capability_resolver,
                 expected_authority_provider=self._required_runtime_authority,
+                resolve_working_folder_authority=(
+                    self._resolve_operation_working_folder_authority
+                ),
             ),
             make_write_stdin_tool(
                 self.runner_operations,
@@ -1108,6 +1115,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         instruction_context = await self._make_instruction_context(
             file_ss,
             workspace_root=workspace_root,
+            projects=projects,
             resolve_runtime_target=resolve_runtime_target,
         )
         self.register_agents_context(instruction_context)
@@ -1119,21 +1127,31 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         """Return static runtime/files prompt for the current run."""
         if not await self._runtime_toolkit_allowed():
             return ""
-        projects = sorted(
-            await self._load_projects(session_id=self._session_id),
-            key=lambda project: project.path,
-        )
-        workspace_root = await self._load_workspace_root()
-        working_folder_path = await self._load_working_folder_path(
-            session_id=self._session_id
-        )
         behavior_prompt, expected_authority = await self._load_runtime_behavior_prompt()
         self._expected_runtime_authority = expected_authority
+        projection_target = await self._resolve_projection_runtime_target()
+        projection_binding = await self._resolve_projection_binding(projection_target)
+        projects = (
+            sorted(
+                await self._load_projects(session_id=self._session_id),
+                key=lambda project: project.path,
+            )
+            if projection_binding is not None
+            else []
+        )
         del context
         prompt = self._render_config_prompt(
             projects=projects,
-            workspace_root=workspace_root,
-            working_folder_path=working_folder_path,
+            workspace_root=(
+                projection_target.workspace_path
+                if projection_binding is not None and projection_target is not None
+                else None
+            ),
+            working_folder_path=(
+                projection_binding.working_folder_path
+                if projection_binding is not None
+                else None
+            ),
         )
         if behavior_prompt:
             return f"{prompt}\n\n{behavior_prompt}"
@@ -1197,13 +1215,10 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         file_storage: FileStorage,
         *,
         workspace_root: str | None,
+        projects: list[SessionWorkspaceProject],
         resolve_runtime_target: Callable[[], Awaitable[ServerToRuntimeTarget]],
     ) -> RuntimeInstructionContext:
         """Build shared Runtime context for instruction appendix providers."""
-        projects = sorted(
-            await self._load_projects(session_id=self._session_id),
-            key=lambda project: project.path,
-        )
         return RuntimeInstructionContext(
             file_storage=file_storage,
             workspace_root=workspace_root,
@@ -1228,35 +1243,77 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 session_id=session_id,
             )
 
-    async def _load_workspace_root(self) -> str | None:
-        """Fetch the current Runner-reported Agent Workspace root."""
-        async with self.session_manager() as session:
-            runtime = await self.agent_runtime_repo.get_by_agent_id(
-                session,
-                self._runtime_agent_id,
+    async def _resolve_projection_runtime_target(
+        self,
+    ) -> RuntimeOperationTarget | None:
+        """Return current qualified Runtime evidence without starting compute."""
+        try:
+            return await _ready_runtime_for_agent(
+                agent_runtime_repo=self.agent_runtime_repo,
+                agent_runtime_service=self.agent_runtime_service,
+                session_manager=self.session_manager,
+                agent_id=self._runtime_agent_id,
+                wait_timeout_seconds=0.0,
+                poll_interval_seconds=0.0,
+                expected_authority=self._expected_runtime_authority,
+                start_if_stopped=False,
             )
-        return runtime.workspace_path if runtime is not None else None
+        except RuntimeStorageError:
+            return None
 
-    async def _load_working_folder_path(self, *, session_id: str) -> str:
-        """Load the exact context-owned Session working folder."""
-        if not session_id:
-            raise RuntimeError("Runtime Session ID is unavailable")
-        repository = self.agent_session_repository
-        async with self.session_manager() as session:
-            context = await repository.get_working_folder_context_by_session_id(
-                session,
-                session_id=session_id,
+    async def _resolve_projection_binding(
+        self,
+        runtime_target: RuntimeOperationTarget | None,
+    ) -> SessionWorkingFolderAuthority | None:
+        """Return existing current binding without mutating pending state."""
+        resolver = self.runtime_capability_resolver
+        if resolver is None or runtime_target is None or not self._runtime_session_id:
+            return None
+        try:
+            await resolver.require(RuntimeCapability.WORKSPACE)
+            return await (
+                self.session_working_folder_binding_service.resolve_bound_authority(
+                    agent_id=self._runtime_agent_id,
+                    session_id=self._runtime_session_id,
+                    capability_snapshot=resolver.snapshot,
+                    runtime_target=runtime_target,
+                )
             )
-        if context is None:
-            raise RuntimeError("Session working-folder context is unavailable")
-        return require_session_working_folder_path(context)
+        except RuntimeCapabilityDeniedError, SessionWorkingFolderBindingError:
+            return None
+
+    async def _resolve_operation_working_folder_authority(
+        self,
+        runtime_target: RuntimeOperationTarget,
+    ) -> SessionWorkingFolderAuthority:
+        """Resolve or bind the exact Session folder for an admitted operation."""
+        resolver = self.runtime_capability_resolver
+        if resolver is None or not self._runtime_session_id:
+            raise RuntimeStorageError(
+                "Session working-folder authority is unavailable."
+            )
+        try:
+            await resolver.require(RuntimeCapability.WORKSPACE)
+            return await self.session_working_folder_binding_service.resolve_authority(
+                agent_id=self._runtime_agent_id,
+                session_id=self._runtime_session_id,
+                capability_snapshot=resolver.snapshot,
+                runtime_target=runtime_target,
+            )
+        except (
+            RuntimeCapabilityDeniedError,
+            SessionWorkingFolderBindingError,
+        ) as exc:
+            raise RuntimeStorageError(
+                "Session working-folder authority is unavailable."
+            ) from exc
 
     def _render_config_prompt(
         self,
         *,
         projects: list[SessionWorkspaceProject],
         workspace_root: str | None,
-        working_folder_path: str,
+        working_folder_path: str | None,
     ) -> str:
         """Return domain allow/block settings and accessible scope prompt."""
         parts: list[str] = []
@@ -1268,15 +1325,25 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             "`write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as "
             "appropriate. Use `exec_command` for command execution and "
             "`write_stdin` to interact with a running process.",
-            "Storage locations:",
-            f"- `{working_folder_path}` — Current Session working folder. "
-            "Use this as the default workdir and for ordinary Session output.",
-            "- Project directories — Durable project-specific files and instructions.",
-            "- `/tmp/` — Temporary scratch space for the current runtime instance",
         ]
-        if workspace_root is not None:
+        if working_folder_path is None or workspace_root is None:
             scope_lines.extend(
                 [
+                    "",
+                    "Runtime paths are resolved only when a current Session binding "
+                    "and Runner workspace are authorized.",
+                ]
+            )
+        else:
+            scope_lines.extend(
+                [
+                    "Storage locations:",
+                    f"- `{working_folder_path}` — Current Session working folder. "
+                    "Use this as the default workdir and for ordinary Session output.",
+                    "- Project directories — Durable project-specific files and "
+                    "instructions.",
+                    "- `/tmp/` — Temporary scratch space for the current runtime "
+                    "instance",
                     f"- `{workspace_root}/` — Agent Workspace shared across "
                     "Sessions. Use it explicitly for cross-Session or Agent-level "
                     "files.",
@@ -1285,10 +1352,6 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                     f"`mkdir -p {working_folder_path}` with `workdir` set "
                     f"explicitly to `{workspace_root}` before retrying.",
                 ]
-            )
-        else:
-            scope_lines.append(
-                "- The Runner-reported Agent Workspace path is unavailable."
             )
         if projects:
             scope_lines.extend(
@@ -1351,6 +1414,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         agent_runtime_service: AgentRuntimeService,
         runner_operations: RuntimeRunnerOperationClient,
         agent_session_repository: AgentSessionRepository,
+        session_working_folder_binding_service: SessionWorkingFolderBindingService,
         project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor,
         runtime_image_read_service: RuntimeImageReadService | None,
@@ -1368,6 +1432,9 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.agent_runtime_service = agent_runtime_service
         self.runner_operations = runner_operations
         self.agent_session_repository = agent_session_repository
+        self.session_working_folder_binding_service = (
+            session_working_folder_binding_service
+        )
         self.project_repo = project_repo
         self.agents_store = agents_store
         self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
@@ -1405,6 +1472,9 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             agent_runtime_repo=self.agent_runtime_repo,
             agent_runtime_service=(self.agent_runtime_service),
             agent_session_repository=self.agent_session_repository,
+            session_working_folder_binding_service=(
+                self.session_working_folder_binding_service
+            ),
             project_repo=self.project_repo,
             agents_store=self.agents_store,
             server_to_runtime_transfer_service=self.server_to_runtime_transfer_service,
@@ -2042,49 +2112,21 @@ def make_exec_command_tool(
     agent_runtime_repo: AgentRuntimeRepository,
     agent_runtime_service: AgentRuntimeService,
     session_manager: SessionManager[AsyncSession] | None,
-    agent_session_repository: AgentSessionRepository,
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
     owner_session_id: str,
     runtime_capability_resolver: RuntimeCapabilityResolver,
     expected_authority_provider: Callable[[], RuntimeOperationAuthority | None],
+    resolve_working_folder_authority: Callable[
+        [RuntimeOperationTarget],
+        Awaitable[SessionWorkingFolderAuthority],
+    ],
     peer_toolkits: Sequence[RuntimeEnvProvider] = (),
 ) -> FunctionTool:
     """Create an exec_command tool backed by Runtime Runner process operations."""
 
     async def handler(args: ExecCommandInput) -> FunctionToolResult:
         try:
-            await runtime_capability_resolver.require(
-                RuntimeCapability.RUNTIME_CREDENTIALS
-            )
-        except RuntimeCapabilityDeniedError as exc:
-            raise FunctionToolError(
-                "Runtime credential capability is unavailable.",
-                metadata={
-                    "kind": "runtime_capability_denied",
-                    "capability": RuntimeCapability.RUNTIME_CREDENTIALS.value,
-                    "reason_code": exc.reason_code,
-                },
-            ) from None
-        secret_env = await _collect_secret_env(peer_toolkits, agent_id)
-        try:
-            workdir = args.workdir
-            if workdir is None:
-                if session_manager is None:
-                    raise FunctionToolError(
-                        "Session working-folder context is unavailable."
-                    )
-                repository = agent_session_repository
-                async with session_manager() as session:
-                    context = await repository.get_working_folder_context_by_session_id(
-                        session,
-                        session_id=owner_session_id,
-                    )
-                if context is None:
-                    raise FunctionToolError(
-                        "Session working-folder context is unavailable."
-                    )
-                workdir = require_session_working_folder_path(context)
             runtime = await _ready_runtime_for_agent(
                 agent_runtime_repo=agent_runtime_repo,
                 agent_runtime_service=(agent_runtime_service),
@@ -2092,6 +2134,24 @@ def make_exec_command_tool(
                 agent_id=agent_id,
                 expected_authority=expected_authority_provider(),
             )
+            workdir = args.workdir
+            if workdir is None:
+                binding = await resolve_working_folder_authority(runtime)
+                workdir = binding.working_folder_path
+            try:
+                await runtime_capability_resolver.require(
+                    RuntimeCapability.RUNTIME_CREDENTIALS
+                )
+            except RuntimeCapabilityDeniedError as exc:
+                raise FunctionToolError(
+                    "Runtime credential capability is unavailable.",
+                    metadata={
+                        "kind": "runtime_capability_denied",
+                        "capability": RuntimeCapability.RUNTIME_CREDENTIALS.value,
+                        "reason_code": exc.reason_code,
+                    },
+                ) from None
+            secret_env = await _collect_secret_env(peer_toolkits, agent_id)
             await publish_event(RuntimeReadyEvent())
             result = await runner_operations.start_process(
                 runtime_id=runtime.id,

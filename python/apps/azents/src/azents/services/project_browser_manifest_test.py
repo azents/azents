@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +39,10 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeOperationAuthority,
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
+)
+from azents.services.session_working_folder_binding import (
+    SessionWorkingFolderAuthority,
+    SessionWorkingFolderBindingService,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
 
@@ -91,6 +96,7 @@ class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
         )
         return RuntimeOperationTarget(
             id="runtime-1",
+            runtime_capability_version=1,
             desired_generation=1,
             runner_generation=1,
             configuration_revision_id="revision-1",
@@ -183,21 +189,32 @@ def _service(session: AsyncSession) -> ProjectBrowserManifestService:
     """Create service for tests."""
     session_manager = _SessionManager(session)
     catalog_repository = AgentProjectCatalogRepository()
+    runtime_target_resolver = _RuntimeTargetResolver()
+    binding_service = AsyncMock(spec=SessionWorkingFolderBindingService)
+    binding_service.resolve_bound_authority_for_target.return_value = (
+        SessionWorkingFolderAuthority(
+            context_id="context-1",
+            agent_id="agent-1",
+            agent_runtime_id="runtime-1",
+            working_folder_path="/workspace/agent/.azents/sessions/session-1",
+            runtime_capability_version=1,
+        )
+    )
     return ProjectBrowserManifestService(
         agent_repository=AgentRepository(),
         agent_session_repository=AgentSessionRepository(),
         project_repository=SessionWorkspaceProjectRepository(),
         worktree_repository=SessionGitWorktreeRepository(),
         catalog_repository=catalog_repository,
-        agent_runtime_repository=AgentRuntimeRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         catalog_service=AgentProjectCatalogService(
             catalog_repository=catalog_repository,
-            agent_runtime_repository=AgentRuntimeRepository(),
             session_manager=session_manager,
-            runtime_target_resolver=_RuntimeTargetResolver(),
+            runtime_target_resolver=runtime_target_resolver,
             runner_operations=None,
         ),
+        runtime_target_resolver=runtime_target_resolver,
+        session_working_folder_binding_service=binding_service,
         session_manager=session_manager,
     )
 

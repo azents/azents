@@ -63,6 +63,7 @@ def _runtime_target() -> RuntimeOperationTarget:
     """Build one exact Runtime operation target."""
     return RuntimeOperationTarget(
         id="runtime-1",
+        runtime_capability_version=1,
         desired_generation=2,
         runner_generation=3,
         configuration_revision_id="revision-1",
