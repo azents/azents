@@ -674,38 +674,6 @@
             }
           }
         },
-        "processContainment": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "backend",
-            "securityProfile",
-            "qualificationTimeoutSeconds",
-            "runtimeClassName"
-          ],
-          "properties": {
-            "backend": {
-              "type": "string",
-              "enum": [
-                "bwrap"
-              ]
-            },
-            "securityProfile": {
-              "type": "string",
-              "enum": [
-                "azents-runtime-bwrap"
-              ]
-            },
-            "qualificationTimeoutSeconds": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 60
-            },
-            "runtimeClassName": {
-              "type": "string"
-            }
-          }
-        },
         "runtimePod": {
           "type": "object",
           "properties": {

@@ -122,14 +122,7 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                         runner_reported_digest = '', 
                         provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         runtime_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
-                    containment = azentspublicclient.models.runtime_containment_status.RuntimeContainmentStatus(
-                        enabled = True, 
-                        applied = True, 
-                        recreation_required = True, 
-                        nested_docker_available = True, 
-                        runtime_available = True, 
-                        availability_reason_code = '', ), ),
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), ),
                 command_type = 'start',
                 desired_generation = 56
             )
@@ -222,14 +215,7 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                         runner_reported_digest = '', 
                         provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         runtime_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
-                    containment = azentspublicclient.models.runtime_containment_status.RuntimeContainmentStatus(
-                        enabled = True, 
-                        applied = True, 
-                        recreation_required = True, 
-                        nested_docker_available = True, 
-                        runtime_available = True, 
-                        availability_reason_code = '', ), ),
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), ),
                 command_type = 'start',
                 desired_generation = 56,
         )

@@ -128,11 +128,6 @@ class KubernetesPodProfileV1:
 
 
 @dataclasses.dataclass(frozen=True)
-class RuntimeProcessContainmentModuleV1:
-    """Portable Provider-owned process containment contract version 1."""
-
-
-@dataclasses.dataclass(frozen=True)
 class KubernetesPodProfileV2:
     """Resolved Kubernetes Pod Profile contract version 2."""
 
@@ -142,7 +137,6 @@ class KubernetesPodProfileV2:
     service_account_name: str | None
     scheduling: KubernetesScheduling
     dind: KubernetesDinD | None
-    process_containment: RuntimeProcessContainmentModuleV1 | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -169,7 +163,6 @@ class DockerContainerProfileV2:
 
     runner_resources: DockerContainerResources
     network_name: str | None
-    process_containment: RuntimeProcessContainmentModuleV1 | None
 
 
 RuntimeResolvedProfile: TypeAlias = (
@@ -287,6 +280,43 @@ def parse_runtime_configuration_envelope(
         workspace_runtime_profile=workspace_runtime_profile,
         effective_profile=effective_profile,
     )
+
+
+def validate_runtime_configuration_cleanup_envelope(
+    envelope: RuntimeConfigurationEnvelope,
+    *,
+    desired_generation: int,
+    expected_provider_kind: str,
+) -> RuntimeProviderReference:
+    """Validate cleanup authority without accepting the Profile for execution."""
+    validate_runtime_configuration_evidence(envelope.evidence)
+    if envelope.evidence.desired_generation != desired_generation:
+        raise ValueError(
+            "Runtime configuration evidence generation does not match the command."
+        )
+    document = runtime_configuration_from_json(envelope.resolved_configuration_json)
+    _require_exact_fields(
+        document,
+        {
+            "schema_version",
+            "provider",
+            "infrastructure_profile",
+            "workspace_runtime_profile",
+            "effective_profile",
+        },
+        "Runtime configuration",
+    )
+    if _required_int(document, "schema_version") != 1:
+        raise ValueError("Runtime configuration schema version is unsupported.")
+    provider = _provider_reference(_required_mapping(document, "provider"))
+    if provider.kind != expected_provider_kind:
+        raise ValueError(
+            "Runtime configuration Provider kind does not match this Provider."
+        )
+    _infrastructure_reference(_required_mapping(document, "infrastructure_profile"))
+    _workspace_reference(_required_mapping(document, "workspace_runtime_profile"))
+    _required_mapping(document, "effective_profile")
+    return provider
 
 
 def configuration_document_digest(configuration: Mapping[str, JsonValue]) -> str:
@@ -411,6 +441,7 @@ def _kubernetes_profile_v1(
 def _kubernetes_profile_v2(
     value: Mapping[str, JsonValue],
 ) -> KubernetesPodProfileV2:
+    value = _without_removed_null_containment(value)
     _require_exact_fields(
         value,
         {
@@ -423,7 +454,6 @@ def _kubernetes_profile_v2(
             "service_account_name",
             "scheduling",
             "dind",
-            "process_containment",
         },
         "Kubernetes Pod Profile",
     )
@@ -434,9 +464,6 @@ def _kubernetes_profile_v2(
     if _required_int(value, "schema_version") != 2:
         raise ValueError("Kubernetes Pod Profile schema version is unsupported.")
     dind_value = value.get("dind")
-    process_containment = _process_containment(value.get("process_containment"))
-    if dind_value is not None and process_containment is not None:
-        raise ValueError("Process containment cannot be combined with nested Docker.")
     return KubernetesPodProfileV2(
         runner_resources=_kubernetes_resources(
             _required_mapping(value, "runner_resources")
@@ -450,7 +477,6 @@ def _kubernetes_profile_v2(
         dind=None
         if dind_value is None
         else _dind(_mapping_value(dind_value, "Kubernetes DinD")),
-        process_containment=process_containment,
     )
 
 
@@ -521,6 +547,7 @@ def _docker_profile_v1(value: Mapping[str, JsonValue]) -> DockerContainerProfile
 
 
 def _docker_profile_v2(value: Mapping[str, JsonValue]) -> DockerContainerProfileV2:
+    value = _without_removed_null_containment(value)
     _require_exact_fields(
         value,
         {
@@ -529,7 +556,6 @@ def _docker_profile_v2(value: Mapping[str, JsonValue]) -> DockerContainerProfile
             "schema_version",
             "runner_resources",
             "network_name",
-            "process_containment",
         },
         "Docker Container Profile",
     )
@@ -573,24 +599,17 @@ def _docker_profile_v2(value: Mapping[str, JsonValue]) -> DockerContainerProfile
     return DockerContainerProfileV2(
         runner_resources=parsed_resources,
         network_name=_optional_string(value, "network_name"),
-        process_containment=_process_containment(value.get("process_containment")),
     )
 
 
-def _process_containment(
-    value: JsonValue,
-) -> RuntimeProcessContainmentModuleV1 | None:
-    if value is None:
-        return None
-    module = _mapping_value(value, "Runtime process containment")
-    _require_exact_fields(
-        module,
-        {"schema_version"},
-        "Runtime process containment",
-    )
-    if _required_int(module, "schema_version") != 1:
-        raise ValueError("Runtime process containment schema version is unsupported.")
-    return RuntimeProcessContainmentModuleV1()
+def _without_removed_null_containment(
+    value: Mapping[str, JsonValue],
+) -> Mapping[str, JsonValue]:
+    if value.get("process_containment") is not None:
+        return value
+    normalized = dict(value)
+    normalized.pop("process_containment", None)
+    return normalized
 
 
 def _kubernetes_resources(

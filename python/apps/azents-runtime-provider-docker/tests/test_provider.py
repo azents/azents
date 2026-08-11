@@ -1,8 +1,6 @@
 """Docker Runtime Provider lifecycle tests."""
 
 import dataclasses
-import json
-import stat
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
@@ -31,7 +29,6 @@ from azents_runtime_provider_docker.docker_api import (
 )
 from azents_runtime_provider_docker.provider import (
     RUNNER_LIMIT_ENV_NAMES,
-    DockerProcessContainmentConfig,
     DockerRuntimeProvider,
     DockerRuntimeProviderConfig,
     InvalidResetFinalDesiredState,
@@ -92,10 +89,6 @@ class FakeDockerApi(DockerApi):
         self.networks: list[str] = []
         self.images: list[str] = []
 
-    async def security_options(self) -> Sequence[str]:
-        """Return Docker daemon security-option evidence."""
-        return ("name=apparmor",)
-
     async def ensure_network(self, name: str) -> None:
         """Record network creation."""
         self.networks.append(name)
@@ -143,8 +136,6 @@ class FakeDockerApi(DockerApi):
 def _provider(
     tmp_path: Path,
     docker: FakeDockerApi,
-    *,
-    process_containment: DockerProcessContainmentConfig | None = None,
 ) -> DockerRuntimeProvider:
     return DockerRuntimeProvider(
         docker,
@@ -154,16 +145,7 @@ def _provider(
             host_data_root=tmp_path,
             runner_env={},
             tmp_mount_path="/tmp/agent",
-            process_containment=process_containment,
         ),
-    )
-
-
-def _containment_config() -> DockerProcessContainmentConfig:
-    return DockerProcessContainmentConfig(
-        backend="bwrap",
-        security_profile="azents-runtime-bwrap",
-        qualification_timeout_seconds=15,
     )
 
 
@@ -242,14 +224,13 @@ async def test_start_accepts_direct_v2_without_containment(tmp_path: Path) -> No
     )
 
     spec = docker.containers["azents-runtime-runtime-1"].spec
-    assert "AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG" not in spec.env
     assert {bind.container_path for bind in spec.binds} == {
         "/runtime/home",
         "/tmp/agent",
     }
-    assert spec.cap_drop == ()
+    assert spec.cap_drop == ("ALL",)
     assert spec.cap_add == ()
-    assert spec.security_options == ("seccomp=unconfined",)
+    assert spec.security_options == ("no-new-privileges",)
     assert spec.userns_mode is None
     assert spec.masked_paths is None
     assert spec.readonly_paths is None
@@ -257,199 +238,25 @@ async def test_start_accepts_direct_v2_without_containment(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_contained_v2_requires_deployment_preparation(tmp_path: Path) -> None:
+async def test_active_removed_v2_field_is_rejected(tmp_path: Path) -> None:
     docker = FakeDockerApi()
     provider = _provider(tmp_path, docker)
 
     with pytest.raises(
-        UnsupportedRuntimeConfiguration,
-        match="containment is unavailable",
+        ValueError,
+        match="document shape is invalid",
     ):
         await provider.start(
             _command(
                 RuntimeLifecycleCommandType.START,
                 runtime_configuration=_runtime_configuration(
                     docker_schema_version=2,
-                    process_containment=True,
+                    removed_process_containment={"schema_version": 1},
                 ),
             )
         )
 
     assert docker.containers == {}
-
-
-@pytest.mark.asyncio
-async def test_contained_v2_emits_exact_bootstrap_mounts_and_security(
-    tmp_path: Path,
-) -> None:
-    docker = FakeDockerApi()
-    provider = _provider(
-        tmp_path,
-        docker,
-        process_containment=_containment_config(),
-    )
-
-    await provider.start(
-        _command(
-            RuntimeLifecycleCommandType.START,
-            runtime_configuration=_runtime_configuration(
-                docker_schema_version=2,
-                process_containment=True,
-            ),
-        )
-    )
-
-    spec = docker.containers["azents-runtime-runtime-1"].spec
-    bootstrap = json.loads(spec.env["AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"])
-    assert bootstrap == {
-        "schema_version": 1,
-        "backend": "bwrap",
-        "agent_workspace_path": "/runtime/home",
-        "agent_temporary_path": "/run/azents/agent-tmp",
-        "runner_private_paths": [
-            "/run/azents/runner-private",
-            "/workspace/python/apps/azents-runtime-runner/.venv",
-            "/var/run/azents-engine/docker.sock",
-        ],
-        "qualification_timeout_seconds": 15,
-    }
-    assert {bind.container_path for bind in spec.binds} == {
-        "/runtime/home",
-        "/run/azents/agent-tmp",
-        "/run/azents/runner-private",
-    }
-    assert "/tmp/agent" not in {bind.container_path for bind in spec.binds}
-    assert spec.user == "1000:1000"
-    assert spec.cap_add == (
-        "SYS_ADMIN",
-        "SYS_CHROOT",
-        "NET_ADMIN",
-        "SETUID",
-        "SETGID",
-        "SYS_PTRACE",
-        "SETPCAP",
-    )
-    assert spec.cap_drop == ("ALL",)
-    assert spec.security_options == (
-        "seccomp=unconfined",
-        "apparmor=azents-runtime-bwrap",
-    )
-    assert spec.userns_mode == "host"
-    assert spec.masked_paths == ()
-    assert spec.readonly_paths == ()
-    assert spec.privileged is False
-    runtime_root = tmp_path / "agent-runtimes" / "runtime-1"
-    assert (runtime_root / "workspace").is_dir()
-    assert (runtime_root / "tmp-agent-contained").is_dir()
-    assert (runtime_root / "runner-private").is_dir()
-    assert stat.S_IMODE((runtime_root / "workspace").stat().st_mode) == 0o777
-    assert stat.S_IMODE((runtime_root / "tmp-agent-contained").stat().st_mode) == 0o777
-    assert stat.S_IMODE((runtime_root / "runner-private").stat().st_mode) == 0o777
-    assert not (runtime_root / "tmp-agent").exists()
-
-
-@pytest.mark.asyncio
-async def test_contained_restart_preserves_workspace_and_clears_temporary_storage(
-    tmp_path: Path,
-) -> None:
-    docker = FakeDockerApi()
-    provider = _provider(
-        tmp_path,
-        docker,
-        process_containment=_containment_config(),
-    )
-    command = _command(
-        RuntimeLifecycleCommandType.START,
-        runtime_configuration=_runtime_configuration(
-            docker_schema_version=2,
-            process_containment=True,
-        ),
-    )
-    await provider.start(command)
-    runtime_root = tmp_path / "agent-runtimes" / "runtime-1"
-    workspace_marker = runtime_root / "workspace" / "keep.txt"
-    temporary_marker = runtime_root / "tmp-agent-contained" / "discard.txt"
-    workspace_marker.write_text("preserved")
-    temporary_marker.write_text("discarded")
-
-    await provider.restart(
-        dataclasses.replace(command, command_type=RuntimeLifecycleCommandType.RESTART)
-    )
-
-    assert workspace_marker.read_text() == "preserved"
-    assert not temporary_marker.exists()
-    assert (runtime_root / "tmp-agent-contained").is_dir()
-
-
-@pytest.mark.asyncio
-async def test_containment_adoption_and_rollback_never_restore_direct_temporary_files(
-    tmp_path: Path,
-) -> None:
-    docker = FakeDockerApi()
-    provider = _provider(
-        tmp_path,
-        docker,
-        process_containment=_containment_config(),
-    )
-    direct_command = _command(RuntimeLifecycleCommandType.START)
-    contained_command = _command(
-        RuntimeLifecycleCommandType.START,
-        runtime_configuration=_runtime_configuration(
-            docker_schema_version=2,
-            process_containment=True,
-        ),
-    )
-    await provider.start(direct_command)
-    runtime_root = tmp_path / "agent-runtimes" / "runtime-1"
-    stale_direct_marker = runtime_root / "tmp-agent" / "stale-secret.txt"
-    stale_direct_marker.write_text("must not return")
-
-    await provider.start(contained_command)
-
-    assert not (runtime_root / "tmp-agent").exists()
-    assert (runtime_root / "tmp-agent-contained").is_dir()
-
-    await provider.start(direct_command)
-
-    assert not stale_direct_marker.exists()
-    assert (runtime_root / "tmp-agent").is_dir()
-    assert not (runtime_root / "tmp-agent-contained").exists()
-    assert not (runtime_root / "runner-private").exists()
-
-
-@pytest.mark.asyncio
-async def test_contained_security_drift_forces_recreation(tmp_path: Path) -> None:
-    docker = FakeDockerApi()
-    provider = _provider(
-        tmp_path,
-        docker,
-        process_containment=_containment_config(),
-    )
-    command = _command(
-        RuntimeLifecycleCommandType.START,
-        runtime_configuration=_runtime_configuration(
-            docker_schema_version=2,
-            process_containment=True,
-        ),
-    )
-    await provider.start(command)
-    current = docker.containers["azents-runtime-runtime-1"]
-    current.spec = dataclasses.replace(current.spec, cap_add=())
-
-    await provider.start(command)
-
-    assert docker.removed == ["azents-runtime-runtime-1"]
-    replacement = docker.containers["azents-runtime-runtime-1"].spec
-    assert replacement.cap_add == (
-        "SYS_ADMIN",
-        "SYS_CHROOT",
-        "NET_ADMIN",
-        "SETUID",
-        "SETGID",
-        "SYS_PTRACE",
-        "SETPCAP",
-    )
-    assert replacement.cap_drop == ("ALL",)
 
 
 @pytest.mark.asyncio
@@ -492,7 +299,6 @@ async def test_start_passes_runner_limit_environment_to_container(
             host_data_root=tmp_path,
             runner_env=runner_env,
             tmp_mount_path="/tmp/agent",
-            process_containment=None,
         ),
     )
 
@@ -524,7 +330,6 @@ async def test_start_replaces_container_when_runner_limit_environment_changes(
             host_data_root=tmp_path,
             runner_env=initial_env,
             tmp_mount_path="/tmp/agent",
-            process_containment=None,
         ),
     )
     await initial_provider.start(_command(RuntimeLifecycleCommandType.START))
@@ -536,7 +341,6 @@ async def test_start_replaces_container_when_runner_limit_environment_changes(
             host_data_root=tmp_path,
             runner_env=replacement_env,
             tmp_mount_path="/tmp/agent",
-            process_containment=None,
         ),
     )
 
@@ -663,6 +467,28 @@ async def test_stop_preserves_workspace_data(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_stop_allows_cleanup_of_removed_containment_runtime(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    provider = _provider(tmp_path, docker)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+
+    result = await provider.stop(
+        _command(
+            RuntimeLifecycleCommandType.STOP,
+            runtime_configuration=_runtime_configuration(
+                docker_schema_version=2,
+                removed_process_containment={"schema_version": 1},
+            ),
+        )
+    )
+
+    assert result.report.observed_state is RuntimeProviderObservedState.STOPPED
+    assert "azents-runtime-runtime-1" not in docker.containers
+
+
+@pytest.mark.asyncio
 async def test_restart_replaces_container_and_preserves_workspace_data(
     tmp_path: Path,
 ) -> None:
@@ -746,6 +572,28 @@ async def test_terminal_delete_removes_container_and_workspace_idempotently(
 
 
 @pytest.mark.asyncio
+async def test_terminal_delete_allows_cleanup_of_removed_containment_runtime(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    provider = _provider(tmp_path, docker)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+
+    result = await provider.terminal_delete(
+        _command(
+            RuntimeLifecycleCommandType.TERMINAL_DELETE,
+            runtime_configuration=_runtime_configuration(
+                docker_schema_version=2,
+                removed_process_containment={"schema_version": 1},
+            ),
+        )
+    )
+
+    assert result.report.terminal_delete_acknowledged is True
+    assert "azents-runtime-runtime-1" not in docker.containers
+
+
+@pytest.mark.asyncio
 async def test_observe_known_runtimes_ignores_unproven_directory(
     tmp_path: Path,
 ) -> None:
@@ -803,38 +651,6 @@ def test_invalid_workspace_path_is_rejected(tmp_path: Path) -> None:
                 runner_env={},
                 workspace_mount_path="relative/path",
                 tmp_mount_path="/tmp/agent",
-                process_containment=None,
-            ),
-        )
-
-
-@pytest.mark.parametrize(
-    "security_profile",
-    (
-        "unconfined",
-        "azents-runtime-bwrap-typo",
-        " azents-runtime-bwrap",
-    ),
-)
-def test_invalid_process_containment_security_profile_is_rejected(
-    tmp_path: Path,
-    security_profile: str,
-) -> None:
-    docker = FakeDockerApi()
-
-    with pytest.raises(ValueError, match="security profile is unsupported"):
-        DockerRuntimeProvider(
-            docker,
-            DockerRuntimeProviderConfig(
-                provider_id="provider-docker",
-                host_data_root=tmp_path,
-                runner_env={},
-                workspace_mount_path="/runtime/home",
-                tmp_mount_path="/tmp/agent",
-                process_containment=dataclasses.replace(
-                    _containment_config(),
-                    security_profile=security_profile,
-                ),
             ),
         )
 
@@ -907,7 +723,7 @@ def _runtime_configuration(
     desired_generation: int = 1,
     provider_logical_id: str = "provider-docker",
     docker_schema_version: int = 1,
-    process_containment: bool = False,
+    removed_process_containment: JsonValue = None,
 ) -> RuntimeConfigurationEnvelope:
     effective_profile: dict[str, JsonValue]
     if kubernetes_profile:
@@ -944,9 +760,7 @@ def _runtime_configuration(
             "network_name": "azents-runtime",
         }
         if docker_schema_version == 2:
-            effective_profile["process_containment"] = (
-                {"schema_version": 1} if process_containment else None
-            )
+            effective_profile["process_containment"] = removed_process_containment
     configuration: dict[str, JsonValue] = {
         "schema_version": 1,
         "provider": {

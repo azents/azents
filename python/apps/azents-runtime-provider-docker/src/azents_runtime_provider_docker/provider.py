@@ -1,7 +1,6 @@
 """Docker implementation of the Agent Runtime Provider lifecycle."""
 
 import dataclasses
-import json
 import logging
 import os
 import re
@@ -10,7 +9,6 @@ import stat
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Literal
 
 from azents_runtime_control.provider import (
     RuntimeDesiredState,
@@ -25,6 +23,7 @@ from azents_runtime_control.runtime_configuration import (
     DockerContainerProfileV2,
     RuntimeConfigurationEvidence,
     parse_runtime_configuration_envelope,
+    validate_runtime_configuration_cleanup_envelope,
 )
 
 from azents_runtime_provider_docker.docker_api import (
@@ -43,27 +42,9 @@ _RUNNER_GID = 1000
 _RUNNER_USER = f"{_RUNNER_UID}:{_RUNNER_GID}"
 _WORKSPACE_DIR_MODE = 0o755
 _NON_ROOT_WORKSPACE_DIR_MODE = 0o777
-_CONTAINED_DIR_MODE = 0o777
 _CONTROL_HOST_ALIAS = "host.docker.internal:host-gateway"
-_CONTAINMENT_BOOTSTRAP_SCHEMA_VERSION = 1
-_CONTAINMENT_BOOTSTRAP_ENV = "AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"
-_CONTAINMENT_AGENT_TEMPORARY_PATH = "/run/azents/agent-tmp"
-_CONTAINMENT_RUNNER_PRIVATE_PATH = "/run/azents/runner-private"
-_CONTAINMENT_RUNNER_VENV_PATH = "/workspace/python/apps/azents-runtime-runner/.venv"
-_CONTAINMENT_DOCKER_SOCKET_PATH = "/var/run/azents-engine/docker.sock"
-_DIRECT_SECURITY_OPTIONS = ("seccomp=unconfined",)
-DOCKER_BWRAP_APPARMOR_PROFILE = "azents-runtime-bwrap"
-_CONTAINED_CAP_ADD = (
-    "SYS_ADMIN",
-    "SYS_CHROOT",
-    "NET_ADMIN",
-    "SETUID",
-    "SETGID",
-    "SYS_PTRACE",
-    "SETPCAP",
-)
-_CONTAINED_CAP_DROP = ("ALL",)
-_CONTAINED_USERNS_MODE = "host"
+_SECURITY_OPTIONS = ("no-new-privileges",)
+_CAP_DROP = ("ALL",)
 _LOGGER = logging.getLogger(__name__)
 
 _LABEL_MANAGED_BY = "azents/managed-by"
@@ -124,15 +105,6 @@ class UnsupportedRuntimeConfiguration(ValueError):
 
 
 @dataclasses.dataclass(frozen=True)
-class DockerProcessContainmentConfig:
-    """Trusted Docker deployment preparation for contained Runtimes."""
-
-    backend: Literal["bwrap"]
-    security_profile: str
-    qualification_timeout_seconds: int
-
-
-@dataclasses.dataclass(frozen=True)
 class DockerRuntimeProviderConfig:
     """Configuration for a single Docker Runtime Provider process."""
 
@@ -141,7 +113,6 @@ class DockerRuntimeProviderConfig:
     runner_env: Mapping[str, str]
     workspace_mount_path: str
     tmp_mount_path: str
-    process_containment: DockerProcessContainmentConfig | None
 
 
 class DockerRuntimeProvider:
@@ -164,9 +135,6 @@ class DockerRuntimeProvider:
         self._runner_env = dict(config.runner_env)
         self._workspace_mount_path = _absolute_posix_path(config.workspace_mount_path)
         self._tmp_mount_path = _absolute_posix_path(config.tmp_mount_path)
-        self._process_containment = _validate_process_containment(
-            config.process_containment
-        )
 
     async def start(
         self,
@@ -184,13 +152,9 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Stop the Runtime container without deleting workspace data."""
-        self._validate_command(command)
+        self._validate_cleanup_command(command)
         await self._docker.remove_container(
             _container_name(command.identity.runtime_id)
-        )
-        self._delete_recreated_ephemeral_dirs(
-            command.identity.runtime_id,
-            discard_direct=False,
         )
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.STOP,
@@ -219,7 +183,7 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Delete workspace data, then converge to the reset final desired state."""
-        profile = self._validate_command(command)
+        self._validate_command(command)
         if command.reset_final_desired_state is None:
             raise InvalidResetFinalDesiredState("reset final desired state is required")
         await self._docker.remove_container(
@@ -230,7 +194,7 @@ class DockerRuntimeProvider:
             await self._ensure_container(command, replace=False)
             report = await self.observe(command)
         else:
-            self._ensure_workspace_dirs(command.identity.runtime_id, profile)
+            self._ensure_workspace_dirs(command.identity.runtime_id)
             report = self._report(
                 command,
                 observed_state=RuntimeProviderObservedState.STOPPED,
@@ -257,6 +221,7 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Remove the Runtime container and all Provider-owned host data."""
+        self._validate_cleanup_command(command)
         await self._docker.remove_container(
             _container_name(command.identity.runtime_id)
         )
@@ -343,25 +308,12 @@ class DockerRuntimeProvider:
         runtime_id = command.identity.runtime_id
         container_name = _container_name(runtime_id)
         container = await self._docker.get_container(container_name)
-        replacing_contained = bool(
-            container is not None and _CONTAINMENT_BOOTSTRAP_ENV in container.env
-        )
-        contained_storage_exists = self._contained_storage_exists(runtime_id)
         if container is not None and (
             replace or not self._container_reusable(container, command, profile)
         ):
             await self._docker.remove_container(container_name)
             container = None
-        if container is None:
-            self._delete_recreated_ephemeral_dirs(
-                runtime_id,
-                discard_direct=(
-                    _contained_profile(profile)
-                    or replacing_contained
-                    or contained_storage_exists
-                ),
-            )
-        self._ensure_workspace_dirs(runtime_id, profile)
+        self._ensure_workspace_dirs(runtime_id)
         if profile.network_name is None:
             raise UnsupportedRuntimeConfiguration(
                 "Docker Container Profile requires a Provider-managed network name."
@@ -386,16 +338,14 @@ class DockerRuntimeProvider:
                 "Docker Container Profile requires a Provider-managed network name."
             )
         resources = profile.runner_resources
-        contained = _contained_profile(profile)
-        containment = self._containment_preparation(profile)
         return DockerContainerSpec(
             name=_container_name(command.identity.runtime_id),
             image=command.runner_image,
             user=_RUNNER_USER,
             working_dir=self._workspace_mount_path,
-            env=self._env(command, profile),
+            env=self._env(command),
             labels=labels,
-            binds=self._binds(command.identity.runtime_id, profile),
+            binds=self._binds(command.identity.runtime_id),
             network=profile.network_name,
             memory_bytes=resources.memory_limit_bytes,
             memory_reservation_bytes=resources.memory_reservation_bytes,
@@ -403,19 +353,12 @@ class DockerRuntimeProvider:
             cpu_period=_CONTAINER_CPU_PERIOD,
             cpu_shares=_cpu_shares(resources.cpu_reservation_millicores),
             extra_hosts=(_CONTROL_HOST_ALIAS,),
-            cap_add=_CONTAINED_CAP_ADD if contained else (),
-            cap_drop=_CONTAINED_CAP_DROP if contained else (),
-            security_options=(
-                (
-                    "seccomp=unconfined",
-                    f"apparmor={containment.security_profile}",
-                )
-                if containment is not None
-                else _DIRECT_SECURITY_OPTIONS
-            ),
-            userns_mode=_CONTAINED_USERNS_MODE if contained else None,
-            masked_paths=() if contained else None,
-            readonly_paths=() if contained else None,
+            cap_add=(),
+            cap_drop=_CAP_DROP,
+            security_options=_SECURITY_OPTIONS,
+            userns_mode=None,
+            masked_paths=None,
+            readonly_paths=None,
             privileged=False,
         )
 
@@ -452,11 +395,6 @@ class DockerRuntimeProvider:
             key: env[key] for key in RUNNER_LIMIT_ENV_NAMES if key in env
         }
         if managed_runner_env != self._runner_env:
-            return False
-        containment_env = self._containment_env(profile)
-        if any(env.get(key) != value for key, value in containment_env.items()):
-            return False
-        if not containment_env and _CONTAINMENT_BOOTSTRAP_ENV in env:
             return False
         expected = self._container_spec(command, profile=profile)
         return bool(
@@ -496,16 +434,11 @@ class DockerRuntimeProvider:
             _LABEL_WORKSPACE_ID: identity.workspace_id,
         }
 
-    def _env(
-        self,
-        command: RuntimeLifecycleCommand,
-        profile: DockerContainerProfileV1 | DockerContainerProfileV2,
-    ) -> dict[str, str]:
+    def _env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
         return {
             **self._stable_env(command),
             **self._runner_auth_env(command),
             **self._configuration_env(command),
-            **self._containment_env(profile),
             _ENV_PROVIDER_GENERATION: str(command.provider_generation),
         }
 
@@ -556,64 +489,16 @@ class DockerRuntimeProvider:
             _ENV_CONFIGURATION_DESIRED_GENERATION: str(evidence.desired_generation),
         }
 
-    def _containment_env(
-        self,
-        profile: DockerContainerProfileV1 | DockerContainerProfileV2,
-    ) -> dict[str, str]:
-        containment = self._containment_preparation(profile)
-        if containment is None:
-            return {}
-        bootstrap = {
-            "schema_version": _CONTAINMENT_BOOTSTRAP_SCHEMA_VERSION,
-            "backend": containment.backend,
-            "agent_workspace_path": self._workspace_mount_path,
-            "agent_temporary_path": _CONTAINMENT_AGENT_TEMPORARY_PATH,
-            "runner_private_paths": [
-                _CONTAINMENT_RUNNER_PRIVATE_PATH,
-                _CONTAINMENT_RUNNER_VENV_PATH,
-                _CONTAINMENT_DOCKER_SOCKET_PATH,
-            ],
-            "qualification_timeout_seconds": (
-                containment.qualification_timeout_seconds
-            ),
-        }
-        return {
-            _CONTAINMENT_BOOTSTRAP_ENV: json.dumps(
-                bootstrap,
-                sort_keys=True,
-                separators=(",", ":"),
-            )
-        }
-
-    def _binds(
-        self,
-        runtime_id: str,
-        profile: DockerContainerProfileV1 | DockerContainerProfileV2,
-    ) -> tuple[DockerBindMount, ...]:
-        workspace = DockerBindMount(
-            host_path=str(self._workspace_host_dir(runtime_id)),
-            container_path=self._workspace_mount_path,
-            read_only=False,
-        )
-        if not _contained_profile(profile):
-            return (
-                workspace,
-                DockerBindMount(
-                    host_path=str(self._tmp_host_dir(runtime_id)),
-                    container_path=self._tmp_mount_path,
-                    read_only=False,
-                ),
-            )
+    def _binds(self, runtime_id: str) -> tuple[DockerBindMount, ...]:
         return (
-            workspace,
             DockerBindMount(
-                host_path=str(self._contained_tmp_host_dir(runtime_id)),
-                container_path=_CONTAINMENT_AGENT_TEMPORARY_PATH,
+                host_path=str(self._workspace_host_dir(runtime_id)),
+                container_path=self._workspace_mount_path,
                 read_only=False,
             ),
             DockerBindMount(
-                host_path=str(self._runner_private_host_dir(runtime_id)),
-                container_path=_CONTAINMENT_RUNNER_PRIVATE_PATH,
+                host_path=str(self._tmp_host_dir(runtime_id)),
+                container_path=self._tmp_mount_path,
                 read_only=False,
             ),
         )
@@ -694,20 +579,18 @@ class DockerRuntimeProvider:
             raise UnsupportedRuntimeConfiguration(
                 "Docker Runtime Provider requires a Docker Container Profile."
             )
-        self._containment_preparation(profile)
         return profile
 
-    def _containment_preparation(
-        self,
-        profile: DockerContainerProfileV1 | DockerContainerProfileV2,
-    ) -> DockerProcessContainmentConfig | None:
-        if not _contained_profile(profile):
-            return None
-        if self._process_containment is None:
+    def _validate_cleanup_command(self, command: RuntimeLifecycleCommand) -> None:
+        provider = validate_runtime_configuration_cleanup_envelope(
+            command.runtime_configuration,
+            desired_generation=command.desired_generation,
+            expected_provider_kind="docker",
+        )
+        if provider.logical_id != self._config.provider_id:
             raise UnsupportedRuntimeConfiguration(
-                "Docker process containment is unavailable in this Provider deployment."
+                "Runtime configuration is bound to a different Docker Provider."
             )
-        return self._process_containment
 
     def _runtime_root(self, runtime_id: str) -> Path:
         if not _RUNTIME_ID_RE.fullmatch(runtime_id):
@@ -720,59 +603,10 @@ class DockerRuntimeProvider:
     def _tmp_host_dir(self, runtime_id: str) -> Path:
         return self._runtime_root(runtime_id) / "tmp-agent"
 
-    def _contained_tmp_host_dir(self, runtime_id: str) -> Path:
-        return self._runtime_root(runtime_id) / "tmp-agent-contained"
-
-    def _runner_private_host_dir(self, runtime_id: str) -> Path:
-        return self._runtime_root(runtime_id) / "runner-private"
-
-    def _ensure_workspace_dirs(
-        self,
-        runtime_id: str,
-        profile: DockerContainerProfileV1 | DockerContainerProfileV2,
-    ) -> None:
-        contained = _contained_profile(profile)
-        mode = _CONTAINED_DIR_MODE if contained else _provider_directory_mode()
+    def _ensure_workspace_dirs(self, runtime_id: str) -> None:
+        mode = _provider_directory_mode()
         _ensure_writable_dir(self._workspace_host_dir(runtime_id), mode=mode)
-        if contained:
-            _ensure_writable_dir(
-                self._contained_tmp_host_dir(runtime_id),
-                mode=_CONTAINED_DIR_MODE,
-            )
-            _ensure_writable_dir(
-                self._runner_private_host_dir(runtime_id),
-                mode=_CONTAINED_DIR_MODE,
-            )
-        else:
-            _ensure_writable_dir(
-                self._tmp_host_dir(runtime_id),
-                mode=_provider_directory_mode(),
-            )
-
-    def _contained_storage_exists(self, runtime_id: str) -> bool:
-        return any(
-            path.exists()
-            for path in (
-                self._contained_tmp_host_dir(runtime_id),
-                self._runner_private_host_dir(runtime_id),
-            )
-        )
-
-    def _delete_recreated_ephemeral_dirs(
-        self,
-        runtime_id: str,
-        *,
-        discard_direct: bool,
-    ) -> None:
-        paths = [
-            self._contained_tmp_host_dir(runtime_id),
-            self._runner_private_host_dir(runtime_id),
-        ]
-        if discard_direct:
-            paths.append(self._tmp_host_dir(runtime_id))
-        for path in paths:
-            if path.exists():
-                shutil.rmtree(path)
+        _ensure_writable_dir(self._tmp_host_dir(runtime_id), mode=mode)
 
     def _delete_runtime_root(self, runtime_id: str) -> None:
         runtime_root = self._runtime_root(runtime_id)
@@ -785,32 +619,6 @@ def _absolute_posix_path(raw_path: str) -> str:
     if not raw_path.strip() or not path.is_absolute():
         raise InvalidWorkspacePath(raw_path)
     return str(path)
-
-
-def _validate_process_containment(
-    value: DockerProcessContainmentConfig | None,
-) -> DockerProcessContainmentConfig | None:
-    if value is None:
-        return None
-    if value.backend != "bwrap":
-        raise ValueError("Docker process containment backend is unsupported.")
-    if value.security_profile != DOCKER_BWRAP_APPARMOR_PROFILE:
-        raise ValueError("Docker process containment security profile is unsupported.")
-    if (
-        isinstance(value.qualification_timeout_seconds, bool)
-        or not 1 <= value.qualification_timeout_seconds <= 60
-    ):
-        raise ValueError("Docker process containment qualification timeout is invalid.")
-    return value
-
-
-def _contained_profile(
-    profile: DockerContainerProfileV1 | DockerContainerProfileV2,
-) -> bool:
-    return bool(
-        isinstance(profile, DockerContainerProfileV2)
-        and profile.process_containment is not None
-    )
 
 
 def _container_name(runtime_id: str) -> str:

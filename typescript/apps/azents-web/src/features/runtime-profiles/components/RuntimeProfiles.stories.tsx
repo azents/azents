@@ -32,10 +32,6 @@ const infrastructureProfile: SelectableInfrastructureProfileResponse = {
     },
     network_name: "azents-runtimes",
   },
-  containment: {
-    enabled: false,
-    nested_docker_available: false,
-  },
   required_capabilities: ["runtime.docker.container-profile.v1"],
   version: 3,
   digest: "sha256:infrastructure-profile-digest",
@@ -65,10 +61,6 @@ const availableProfile: WorkspaceRuntimeProfileResponse = {
   compatible: true,
   missing_capabilities: [],
   incompatible_constraints: [],
-  containment: {
-    enabled: false,
-    nested_docker_available: false,
-  },
   created_at: "2026-07-31T06:00:00Z",
   updated_at: "2026-07-31T06:00:00Z",
 };

@@ -14,7 +14,6 @@ Name | Type | Description | Notes
 **contract_family** | **str** |  | 
 **schema_version** | **int** |  | 
 **spec** | [**RuntimeInfrastructureProfileSpec**](RuntimeInfrastructureProfileSpec.md) |  | 
-**containment** | [**RuntimeProfileContainmentStatus**](RuntimeProfileContainmentStatus.md) |  | 
 **required_capabilities** | **List[str]** |  | 
 **version** | **int** |  | 
 **digest** | **str** |  | 

@@ -47,11 +47,7 @@ from support.runtime_provider_auth import (
     RuntimeProviderAuthenticationError,
     issue_runtime_provider_credential,
 )
-from support.runtime_provider_mode import (
-    docker_infrastructure_profile_spec,
-    docker_process_containment_enabled,
-    docker_provider_containment_environment,
-)
+from support.runtime_provider_mode import docker_infrastructure_profile_spec
 from support.server_readiness import wait_for_server_ready
 from support.system_bootstrap import SystemBootstrapEvidence
 
@@ -1357,7 +1353,6 @@ def azents_runtime_provider_docker_container(
     if not docker_host.startswith("unix://"):
         pytest.fail("E2E Docker Runtime Provider requires a Unix Docker socket")
     docker_socket_path = docker_host.removeprefix("unix://")
-    containment_enabled = docker_process_containment_enabled(os.environ)
 
     with tempfile.TemporaryDirectory(
         prefix="azents-runtime-provider-e2e-"
@@ -1391,10 +1386,6 @@ def azents_runtime_provider_docker_container(
             .with_env("AZ_LOG_LEVEL", "INFO")
             .with_kwargs(user="root")
         )
-        for name, value in docker_provider_containment_environment(
-            enabled=containment_enabled
-        ).items():
-            container = container.with_env(name, value)
         try:
             with container:
                 _wait_for_runtime_provider_registered(
@@ -1411,7 +1402,6 @@ def azents_runtime_provider_docker_container(
                     access_token=system_bootstrap_evidence.access_token,
                     provider_id=_RUNTIME_PROVIDER_ID,
                     network_name=container_network.name,
-                    containment_enabled=containment_enabled,
                 )
                 yield container
                 _log_server_output(container, "azents-runtime-provider-docker")
@@ -1511,7 +1501,6 @@ def _create_e2e_docker_infrastructure_profile(
     access_token: str,
     provider_id: str,
     network_name: str,
-    containment_enabled: bool,
 ) -> None:
     """Create the selectable Docker Profile used by Runtime Provider journeys."""
     response = requests.post(
@@ -1526,7 +1515,6 @@ def _create_e2e_docker_infrastructure_profile(
             "lifecycle": "active",
             "spec": docker_infrastructure_profile_spec(
                 network_name=network_name,
-                containment_enabled=containment_enabled,
             ),
         },
         timeout=10,

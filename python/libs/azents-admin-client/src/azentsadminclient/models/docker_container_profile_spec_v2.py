@@ -21,7 +21,6 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_v
 from typing import Any, ClassVar, Dict, Optional
 from typing_extensions import Annotated
 from azentsadminclient.models.docker_container_resources import DockerContainerResources
-from azentsadminclient.models.runtime_process_containment_module_v1 import RuntimeProcessContainmentModuleV1
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -34,8 +33,7 @@ class DockerContainerProfileSpecV2(BaseModel):
     schema_version: StrictInt
     runner_resources: DockerContainerResources
     network_name: Optional[Annotated[str, Field(strict=True, max_length=255)]]
-    process_containment: Optional[RuntimeProcessContainmentModuleV1]
-    __properties: ClassVar[List[str]] = ["profile_kind", "contract_family", "schema_version", "runner_resources", "network_name", "process_containment"]
+    __properties: ClassVar[List[str]] = ["profile_kind", "contract_family", "schema_version", "runner_resources", "network_name"]
 
     @field_validator('profile_kind')
     def profile_kind_validate_enum(cls, value):
@@ -100,18 +98,10 @@ class DockerContainerProfileSpecV2(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of runner_resources
         if self.runner_resources:
             _dict['runner_resources'] = self.runner_resources.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of process_containment
-        if self.process_containment:
-            _dict['process_containment'] = self.process_containment.to_dict()
         # set to None if network_name (nullable) is None
         # and model_fields_set contains the field
         if self.network_name is None and "network_name" in self.model_fields_set:
             _dict['network_name'] = None
-
-        # set to None if process_containment (nullable) is None
-        # and model_fields_set contains the field
-        if self.process_containment is None and "process_containment" in self.model_fields_set:
-            _dict['process_containment'] = None
 
         return _dict
 
@@ -129,8 +119,7 @@ class DockerContainerProfileSpecV2(BaseModel):
             "contract_family": obj.get("contract_family"),
             "schema_version": obj.get("schema_version"),
             "runner_resources": DockerContainerResources.from_dict(obj["runner_resources"]) if obj.get("runner_resources") is not None else None,
-            "network_name": obj.get("network_name"),
-            "process_containment": RuntimeProcessContainmentModuleV1.from_dict(obj["process_containment"]) if obj.get("process_containment") is not None else None
+            "network_name": obj.get("network_name")
         })
         return _obj
 

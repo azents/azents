@@ -12,10 +12,10 @@ from azents_runtime_control.runtime_configuration import (
     KubernetesPodProfileV2,
     RuntimeConfigurationEnvelope,
     RuntimeConfigurationEvidence,
-    RuntimeProcessContainmentModuleV1,
     canonical_runtime_configuration_json,
     parse_runtime_configuration_envelope,
     runtime_configuration_from_json,
+    validate_runtime_configuration_cleanup_envelope,
 )
 
 
@@ -49,9 +49,9 @@ def test_kubernetes_pod_profile_parses_all_supported_controls() -> None:
     assert profile.dind.docker_storage_bytes == 8_589_934_592
 
 
-def test_docker_container_profile_v2_parses_containment() -> None:
+def test_docker_container_profile_v2_accepts_historical_null_containment() -> None:
     document = _document("docker")
-    document["effective_profile"] = _docker_profile_v2(contained=True)
+    document["effective_profile"] = _docker_profile_v2(include_null=True)
 
     parsed = parse_runtime_configuration_envelope(
         _envelope(document),
@@ -61,15 +61,11 @@ def test_docker_container_profile_v2_parses_containment() -> None:
 
     profile = parsed.effective_profile
     assert isinstance(profile, DockerContainerProfileV2)
-    assert isinstance(
-        profile.process_containment,
-        RuntimeProcessContainmentModuleV1,
-    )
 
 
-def test_kubernetes_pod_profile_v2_parses_without_containment() -> None:
+def test_kubernetes_pod_profile_v2_parses_without_removed_field() -> None:
     document = _document("kubernetes")
-    document["effective_profile"] = _kubernetes_profile_v2(contained=False)
+    document["effective_profile"] = _kubernetes_profile_v2(include_null=False)
 
     parsed = parse_runtime_configuration_envelope(
         _envelope(document),
@@ -79,37 +75,42 @@ def test_kubernetes_pod_profile_v2_parses_without_containment() -> None:
 
     profile = parsed.effective_profile
     assert isinstance(profile, KubernetesPodProfileV2)
-    assert profile.process_containment is None
 
 
-def test_kubernetes_v2_rejects_containment_with_nested_docker() -> None:
-    document = _document("kubernetes")
-    document["effective_profile"] = _kubernetes_profile_v2(contained=True)
-    effective_profile = document["effective_profile"]
-    assert isinstance(effective_profile, dict)
-    effective_profile["dind"] = _kubernetes_profile()["dind"]
-
-    with pytest.raises(
-        ValueError,
-        match="Process containment cannot be combined with nested Docker",
-    ):
-        parse_runtime_configuration_envelope(
-            _envelope(document),
-            desired_generation=3,
-            expected_provider_kind="kubernetes",
-        )
-
-
-def test_profile_v2_requires_explicit_containment_field() -> None:
+def test_profile_v2_rejects_enabled_removed_containment() -> None:
     document = _document("docker")
-    profile = _docker_profile_v2(contained=False)
-    del profile["process_containment"]
+    profile = _docker_profile_v2(include_null=False)
+    profile["process_containment"] = {"schema_version": 1}
     document["effective_profile"] = profile
 
     with pytest.raises(ValueError, match="document shape"):
         parse_runtime_configuration_envelope(
             _envelope(document),
             desired_generation=3,
+            expected_provider_kind="docker",
+        )
+
+
+def test_cleanup_validation_accepts_enabled_removed_containment() -> None:
+    document = _document("docker")
+    profile = _docker_profile_v2(include_null=False)
+    profile["process_containment"] = {"schema_version": 1}
+    document["effective_profile"] = profile
+
+    provider = validate_runtime_configuration_cleanup_envelope(
+        _envelope(document),
+        desired_generation=3,
+        expected_provider_kind="docker",
+    )
+
+    assert provider.logical_id == "provider-docker"
+
+
+def test_cleanup_validation_preserves_generation_fencing() -> None:
+    with pytest.raises(ValueError, match="generation"):
+        validate_runtime_configuration_cleanup_envelope(
+            _envelope(_document("docker")),
+            desired_generation=4,
             expected_provider_kind="docker",
         )
 
@@ -307,12 +308,14 @@ def _docker_profile() -> dict[str, JsonValue]:
     }
 
 
-def _docker_profile_v2(*, contained: bool) -> dict[str, JsonValue]:
-    return {
+def _docker_profile_v2(*, include_null: bool) -> dict[str, JsonValue]:
+    profile: dict[str, JsonValue] = {
         **_docker_profile(),
         "schema_version": 2,
-        "process_containment": {"schema_version": 1} if contained else None,
     }
+    if include_null:
+        profile["process_containment"] = None
+    return profile
 
 
 def _kubernetes_profile() -> dict[str, JsonValue]:
@@ -360,11 +363,12 @@ def _kubernetes_profile() -> dict[str, JsonValue]:
     }
 
 
-def _kubernetes_profile_v2(*, contained: bool) -> dict[str, JsonValue]:
+def _kubernetes_profile_v2(*, include_null: bool) -> dict[str, JsonValue]:
     profile = {
         **_kubernetes_profile(),
         "schema_version": 2,
-        "process_containment": {"schema_version": 1} if contained else None,
     }
     profile["dind"] = None
+    if include_null:
+        profile["process_containment"] = None
     return profile

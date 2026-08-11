@@ -11,7 +11,6 @@ Name | Type | Description | Notes
 **schema_version** | **int** |  | 
 **runner_resources** | [**DockerContainerResources**](DockerContainerResources.md) |  | 
 **network_name** | **str** |  | 
-**process_containment** | [**RuntimeProcessContainmentModuleV1**](RuntimeProcessContainmentModuleV1.md) |  | 
 
 ## Example
 

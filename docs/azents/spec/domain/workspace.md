@@ -97,8 +97,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-10
-spec_version: 62
+last_verified_at: 2026-08-11
+spec_version: 63
 ---
 
 # Workspace & Membership
@@ -251,11 +251,9 @@ caller's bounded timeout while preserving the initially selected revision and de
 supersession, timeout, or authority drift fails closed, and the server does not invent a fallback
 path. The read-only Workspace summary itself remains non-starting.
 
-The Runtime response includes a server-derived `configuration.containment` projection with
-`enabled`, `applied`, `recreation_required`, `nested_docker_available`, `runtime_available`, and a
-bounded nullable `availability_reason_code`. The projection keeps desired containment identity
-visible while reporting physical application and Runtime operation availability separately. The UI
-renders it as supplied and does not reconstruct containment from raw Provider/Runner states.
+The Runtime response includes the desired/applied configuration status and revision evidence without
+a process-containment projection. The UI renders the status supplied by the server and does not
+reconstruct physical security claims from raw Provider/Runner states.
 
 Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding; binary preview candidates return no text body and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, stat the regular file, and consume one verified Runtime transfer object in the API response adapter. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
 
@@ -283,10 +281,11 @@ unavailable without deleting it, its Agent selections, or its Runtime references
 computed from the exact Provider lifecycle/connection/current capability, infrastructure Profile
 compatibility, and Workspace Profile state. No arbitrary substitute is selected.
 
-Infrastructure and Workspace Runtime Profile responses expose the Profile schema and a derived
-containment/nested-Docker projection. Admin create/edit preserves Profile v1, supports direct
-Profile v2 and contained Profile v2, and rejects Kubernetes DinD plus process containment. Workspace
-and Agent surfaces can select the complete Profile but cannot edit backend or security arguments.
+Infrastructure and Workspace Runtime Profile responses expose the Profile schema without a derived
+process-containment projection. Admin create/edit preserves Profile v1 and direct Profile v2.
+Historical schema-v2 documents with `process_containment: null` remain readable, while non-null
+removed values are rejected rather than translated to direct execution. Workspace and Agent
+surfaces can select the complete Profile but cannot edit deployment-owned security arguments.
 
 Each Workspace also stores a nullable default Runtime Profile and an optimistic default version.
 The default is picker assistance only; omitting Runtime selection on Agent creation produces a
@@ -690,6 +689,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-11 (spec_version=63)** — Removed process-containment status and Profile projections
+  from Workspace APIs and UI, retained direct Profile v1/v2 editing, and preserved null-only
+  historical schema-v2 compatibility.
 - **2026-08-10 (spec_version=62)** — Added Runtime-free and removing Workspace states, made the
   Workspace default Profile picker-only, introduced nullable Session binding lifecycle and
   invalidation, and documented destructive Project projection cleanup with automatic policy-row

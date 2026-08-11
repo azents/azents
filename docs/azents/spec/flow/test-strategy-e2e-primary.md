@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-10
-spec_version: 26
+last_verified_at: 2026-08-11
+spec_version: 27
 ---
 
 # E2E Primary Test Strategy
@@ -164,18 +164,7 @@ Always-on required CI does not depend on external credentials.
   Workspace preservation across temporary stop, irreversible removal pending through Provider
   outage, exact acknowledgement after reconnect, higher-generation re-add, stale Session binding
   rejection, and a newly created post-add Session binding to current Runner evidence. The lane loads
-  the enforcing Runtime containment AppArmor profile before worktree-built images start and unloads
-  it during cleanup. Contained journeys use Profile v2 and fail when required AppArmor evidence is
-  absent rather than reporting a direct or skipped substitute as containment evidence.
-- The change-filtered `ci-kubernetes-containment-e2e-run` is required for containment Profile,
-  Runner backend/helper, Docker AppArmor, Kubernetes Provider, Helm, or conformance-driver changes.
-  It installs pinned kind/kubectl tools, loads the enforcing AppArmor profile, builds the tested
-  Runner and Kubernetes Provider images, pushes them to a disposable local registry, and creates a
-  disposable kind cluster. The test validates digest pulls, RuntimeClass and RBAC preparation, exact
-  contained Pod security/mount/environment lowering, pre-registration qualification, filesystem and
-  UID/GID/capability/process/socket/credential/network boundaries, Agent Workspace persistence,
-  ephemeral-state clearing, and direct Profile rollback. Cleanup uploads bounded resource listings,
-  Pod descriptions, container logs, and JUnit evidence with Runner credentials redacted.
+  no host AppArmor profile and uses direct Runner execution for both Profile schema versions.
 - Worktree-built Server, Runtime Runner, Docker Runtime Provider, Main Web, and
   Admin Web E2E images import image-specific BuildKit GitHub Actions cache scopes.
   Only `main` push jobs export cache, with one existing lane owning each scope;
@@ -238,16 +227,13 @@ only for bounded presentation branches.
 
 Qualified Kubernetes execution-policy coverage is live evidence. Its prerequisite contract must
 distinguish unadvertised capability from advertised-but-unenforced privileged engine, CNI,
-containment, and storage capability. Unadvertised capability may skip that live scenario; an
+and storage capability. Unadvertised capability may skip that live scenario; an
 advertised capability whose admission, isolation, network, or storage enforcement cannot be proven
 must fail. Missing Docker/testcontainers or qualified-cluster prerequisites are unavailable
 evidence, never a local live-PASS substitute.
 
-Required process-containment lanes are deterministic CI rather than optional external-provider
-verification. Missing AppArmor, Docker, kind, kubectl, image pull, RuntimeClass, RBAC, or qualified
-backend enforcement fails the selected required lane. A local environment that lacks those
-prerequisites records unavailable evidence and waits for the required CI result; it does not claim a
-local pass.
+Runtime Provider CI still validates direct workload hardening, Workspace persistence, Runtime
+configuration compatibility, and fail-closed rejection of removed active containment payloads.
 
 ## Feature and Ship Workflow Requirements
 
@@ -274,6 +260,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
   `Retry-After` controls, durable acknowledgement-before-history evidence,
   batching/cursor/mailbox/retry/wake diagnostics, and local prerequisite-failure
   handling for the batched External Channel ingress matrix.
+- **2026-08-11** — v27. Removed AppArmor/bwrap containment prerequisites and the dedicated
+  Kubernetes containment lane; retained direct Runtime Provider product journeys and contract
+  rejection coverage.
 - **2026-08-09** — v24. Added enforcing-AppArmor Docker Runtime Provider coverage and the required
   disposable kind Kubernetes containment lane with bounded evidence, fail-closed prerequisites,
   qualification, security boundaries, persistence, ephemeral clearing, and direct rollback.

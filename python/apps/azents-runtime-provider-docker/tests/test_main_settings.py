@@ -6,7 +6,6 @@ from azents_runtime_control.provider import JsonValue
 
 from azents_runtime_provider_docker.main import (
     ProviderSettings,
-    _effective_process_containment,
     _provider_registration,
     create_provider_control_client,
 )
@@ -20,26 +19,9 @@ _REQUIRED_ENV = {
     "AZ_RUNTIME_PROVIDER_WORKSPACE_PATH": "/runtime/home",
     "AZ_RUNTIME_PROVIDER_CREDENTIAL": "test-provider-credential",
 }
-_CONTAINMENT_ENV_NAMES = (
-    "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
-    "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
-    "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
-)
 
 
-def _expected_capability_contract(
-    *,
-    containment_enabled: bool,
-) -> dict[str, JsonValue]:
-    capabilities = [
-        "docker.container-profile",
-        "runtime.resources",
-        "workspace.host-directory",
-    ]
-    schema_versions = [1]
-    if containment_enabled:
-        capabilities.append("runtime.process-containment")
-        schema_versions.append(2)
+def _expected_capability_contract() -> dict[str, JsonValue]:
     return {
         "schema_version": 1,
         "implementation_key": "docker",
@@ -64,8 +46,12 @@ def _expected_capability_contract(
             {
                 "profile_kind": "docker_container",
                 "contract_family": "docker.container-profile",
-                "schema_versions": schema_versions,
-                "capabilities": capabilities,
+                "schema_versions": [1, 2],
+                "capabilities": [
+                    "docker.container-profile",
+                    "runtime.resources",
+                    "workspace.host-directory",
+                ],
                 "constraints": {
                     "maximums": {},
                     "allowed_values": {},
@@ -78,8 +64,6 @@ def _expected_capability_contract(
 def _set_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name, value in _REQUIRED_ENV.items():
         monkeypatch.setenv(name, value)
-    for name in _CONTAINMENT_ENV_NAMES:
-        monkeypatch.delenv(name, raising=False)
 
 
 def test_runner_limit_environment_is_empty_when_unset(
@@ -90,6 +74,25 @@ def test_runner_limit_environment_is_empty_when_unset(
         monkeypatch.delenv(name, raising=False)
 
     assert ProviderSettings().runner_env == {}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
+    ],
+)
+def test_provider_rejects_removed_containment_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv(name, "")
+
+    with pytest.raises(RuntimeError, match=name):
+        ProviderSettings()
 
 
 def test_runner_limit_environment_preserves_configured_raw_values(
@@ -126,163 +129,13 @@ def test_control_client_uses_explicit_issued_token_method(
     assert observed["provider_auth_method"] == "azents_issued_token"
 
 
-def test_registration_keeps_v1_contract_when_containment_is_disabled(
+def test_registration_advertises_direct_v1_and_v2_contracts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _set_required_env(monkeypatch)
     settings = ProviderSettings()
 
-    registration = _provider_registration(
-        settings,
-        process_containment=settings.process_containment,
-    )
+    registration = _provider_registration(settings)
 
-    assert registration.capability_contract == _expected_capability_contract(
-        containment_enabled=False
-    )
-    assert "process_containment_backend" not in registration.metadata
-
-
-def test_registration_advertises_v2_only_for_configured_containment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _set_required_env(monkeypatch)
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
-        "bwrap",
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
-        "azents-runtime-bwrap",
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
-        "15",
-    )
-
-    settings = ProviderSettings()
-    registration = _provider_registration(
-        settings,
-        process_containment=settings.process_containment,
-    )
-
-    assert settings.process_containment is not None
-    assert registration.capability_contract == _expected_capability_contract(
-        containment_enabled=True
-    )
-    assert registration.metadata["process_containment_backend"] == "bwrap"
-
-
-def test_incomplete_containment_settings_are_rejected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _set_required_env(monkeypatch)
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
-        "azents-runtime-bwrap",
-    )
-
-    with pytest.raises(RuntimeError, match="require a configured backend"):
-        ProviderSettings()
-
-
-@pytest.mark.parametrize(
-    "security_profile",
-    (
-        "unconfined",
-        "azents-runtime-bwrap-typo",
-        " azents-runtime-bwrap",
-    ),
-)
-def test_unsupported_containment_security_profiles_are_rejected(
-    monkeypatch: pytest.MonkeyPatch,
-    security_profile: str,
-) -> None:
-    _set_required_env(monkeypatch)
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
-        "bwrap",
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
-        security_profile,
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
-        "15",
-    )
-
-    with pytest.raises(RuntimeError, match="security profile is unsupported"):
-        ProviderSettings()
-
-
-def test_registration_omits_containment_when_configured_support_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _set_required_env(monkeypatch)
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
-        "bwrap",
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
-        "azents-runtime-bwrap",
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
-        "15",
-    )
-    settings = ProviderSettings()
-
-    registration = _provider_registration(settings, process_containment=None)
-
-    assert registration.capability_contract == _expected_capability_contract(
-        containment_enabled=False
-    )
-    assert "process_containment_backend" not in registration.metadata
-
-
-@pytest.mark.parametrize(
-    ("security_options", "expected_available"),
-    (
-        ([], False),
-        (["name=seccomp,profile=builtin", "name=cgroupns"], False),
-        (["name=apparmor"], True),
-        (["name=apparmor,profile=default"], True),
-    ),
-)
-def test_effective_containment_tracks_docker_apparmor_support(
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    security_options: list[str],
-    expected_available: bool,
-) -> None:
-    _set_required_env(monkeypatch)
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
-        "bwrap",
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
-        "azents-runtime-bwrap",
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
-        "15",
-    )
-    settings = ProviderSettings()
-
-    with caplog.at_level("WARNING"):
-        effective = _effective_process_containment(settings, security_options)
-
-    assert (effective is not None) is expected_available
-    if expected_available:
-        assert effective == settings.process_containment
-        assert caplog.records == []
-    else:
-        assert len(caplog.records) == 1
-        assert (
-            caplog.records[0].__dict__["containment_unavailable_reason"]
-            == "apparmor_unavailable"
-        )
-        assert "name=seccomp" not in caplog.text
+    assert registration.capability_contract == _expected_capability_contract()
+    assert registration.metadata == {"tmp_path": "/tmp/agent"}

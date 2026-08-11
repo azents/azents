@@ -43,9 +43,7 @@ class TestDockerContainerProfileSpecV2(unittest.TestCase):
                     cpu_limit_millicores = 1.0, 
                     memory_reservation_bytes = 1.0, 
                     memory_limit_bytes = 1.0, ),
-                network_name = '',
-                process_containment = azentsadminclient.models.runtime_process_containment_module_v1.RuntimeProcessContainmentModuleV1(
-                    schema_version = 1, )
+                network_name = ''
             )
         else:
             return DockerContainerProfileSpecV2(
@@ -58,8 +56,6 @@ class TestDockerContainerProfileSpecV2(unittest.TestCase):
                     memory_reservation_bytes = 1.0, 
                     memory_limit_bytes = 1.0, ),
                 network_name = '',
-                process_containment = azentsadminclient.models.runtime_process_containment_module_v1.RuntimeProcessContainmentModuleV1(
-                    schema_version = 1, ),
         )
         """
 

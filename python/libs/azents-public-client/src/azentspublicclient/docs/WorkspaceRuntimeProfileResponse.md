@@ -22,7 +22,6 @@ Name | Type | Description | Notes
 **compatible** | **bool** |  | 
 **missing_capabilities** | **List[str]** |  | 
 **incompatible_constraints** | **List[str]** |  | 
-**containment** | [**RuntimeProfileContainmentStatus**](RuntimeProfileContainmentStatus.md) |  | 
 **created_at** | **datetime** |  | 
 **updated_at** | **datetime** |  | 
 

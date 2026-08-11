@@ -43,8 +43,7 @@ class TestKubernetesPodProfileSpecV2(unittest.TestCase):
                 network_policy = { },
                 service_account_name = '',
                 scheduling = { },
-                dind = { },
-                process_containment = { }
+                dind = { }
             )
         else:
             return KubernetesPodProfileSpecV2(
@@ -57,7 +56,6 @@ class TestKubernetesPodProfileSpecV2(unittest.TestCase):
                 service_account_name = '',
                 scheduling = { },
                 dind = { },
-                process_containment = { },
         )
         """
 

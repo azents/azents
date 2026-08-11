@@ -3,7 +3,7 @@
 import datetime
 from typing import Any
 
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, ValidationError
 
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
@@ -15,9 +15,7 @@ from azents.core.enums import (
 )
 from azents.core.runtime_profile import (
     RuntimeInfrastructureProfileSpec,
-    RuntimeProfileContainmentStatus,
     RuntimeProfileLifecycle,
-    derive_runtime_profile_containment_status,
     parse_runtime_infrastructure_profile_spec,
 )
 from azents.repos.runtime_provider.data import RuntimeProvider
@@ -129,8 +127,7 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
     lifecycle: RuntimeProfileLifecycle
     contract_family: str
     schema_version: int
-    spec: RuntimeInfrastructureProfileSpec
-    containment: RuntimeProfileContainmentStatus
+    spec: RuntimeInfrastructureProfileSpec | None
     required_capabilities: list[str]
     version: int
     digest: str
@@ -150,7 +147,10 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
         """Convert one compatibility projection to an Admin response."""
         profile = projection.profile
         compatibility = projection.compatibility
-        spec = parse_runtime_infrastructure_profile_spec(profile.spec)
+        try:
+            spec = parse_runtime_infrastructure_profile_spec(profile.spec)
+        except ValidationError:
+            spec = None
         return cls(
             id=profile.id,
             profile_kind=profile.profile_kind.value,
@@ -160,7 +160,6 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
             contract_family=profile.contract_family,
             schema_version=profile.schema_version,
             spec=spec,
-            containment=derive_runtime_profile_containment_status(spec),
             required_capabilities=list(profile.required_capabilities),
             version=profile.version,
             digest=profile.digest,

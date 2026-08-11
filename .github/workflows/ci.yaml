@@ -26,7 +26,6 @@ jobs:
       python: ${{ github.event_name != 'pull_request' || steps.filter.outputs.python == 'true' }}
       python_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['python-e2e'] == 'true' }}
       tool_search_runtime_provider_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['tool-search-runtime-provider-e2e'] == 'true' }}
-      kubernetes_containment_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['kubernetes-containment-e2e'] == 'true' }}
       web_surface_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['web-surface-e2e'] == 'true' }}
       typescript: ${{ github.event_name != 'pull_request' || steps.filter.outputs.typescript == 'true' }}
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
@@ -75,14 +74,6 @@ jobs:
               - 'testenv/azents/e2e/src/tests/azents/public/test_external_channels.py'
               - 'testenv/azents/e2e/src/tests/azents/public/test_runtime_hooks.py'
               - 'testenv/azents/e2e/src/tests/azents/public/test_runtime_profiles.py'
-            kubernetes-containment-e2e:
-              - '.github/workflows/ci.yaml'
-              - 'infra/charts/azents/**'
-              - 'python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap'
-              - 'python/apps/azents-runtime-provider-kubernetes/**'
-              - 'python/apps/azents-runtime-runner/**'
-              - 'python/libs/azents-runtime-control/**'
-              - 'testenv/azents/e2e/scripts/run-kubernetes-containment-conformance.sh'
             web-surface-e2e:
               - '.dockerignore'
               - '.github/workflows/**'
@@ -390,11 +381,6 @@ jobs:
         run: |
           cd testenv/azents/e2e
           uv sync
-      - name: Load Runtime containment AppArmor profile
-        run: |
-          test "$(cat /sys/module/apparmor/parameters/enabled)" = "Y"
-          sudo apparmor_parser --replace \
-            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
       - name: Run focused runtime-provider E2E
         run: |
           set -o pipefail
@@ -402,7 +388,6 @@ jobs:
           mkdir -p "$report_dir"
           cd testenv/azents/e2e
           AZENTS_E2E_ARTIFACT_DIR="$report_dir" \
-            AZENTS_E2E_DOCKER_PROCESS_CONTAINMENT=true \
             AZENTS_E2E_DOCKER_BUILDER="${{ steps.buildx.outputs.name }}" \
             AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX="azents-e2e-v1" \
             AZENTS_E2E_DOCKER_GHA_CACHE_WRITE_REPOSITORIES="${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'azents-runtime-runner,azents-runtime-provider-docker' || '' }}" \
@@ -414,11 +399,6 @@ jobs:
             src/tests/azents/public/test_runtime_hooks.py::TestRuntimeHooks::test_tool_search_persists_deferred_probe_across_runs \
             src/tests/azents/public/test_external_channels.py::test_provider_native_channel_work_progress_journey \
             src/tests/azents/public/test_runtime_profiles.py::test_runtime_profile_precedence_applied_evidence_and_recreation
-      - name: Unload Runtime containment AppArmor profile
-        if: always()
-        run: |
-          sudo apparmor_parser --remove \
-            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
       - name: Capture runtime-provider E2E diagnostics
         if: always()
         run: |
@@ -439,71 +419,6 @@ jobs:
         with:
           name: e2e-observability-runtime-provider
           path: ${{ runner.temp }}/e2e-observability/runtime-provider
-          if-no-files-found: warn
-          overwrite: true
-          retention-days: 14
-
-  ci_kubernetes_containment_e2e_run:
-    name: ci-kubernetes-containment-e2e-run
-    needs: changes
-    if: needs.changes.outputs.kubernetes_containment_e2e == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-      - name: Install kind and kubectl
-        run: |
-          kind_version=v0.32.0
-          kubectl_version=v1.36.1
-          curl -fsSLO \
-            "https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64"
-          curl -fsSLO \
-            "https://github.com/kubernetes-sigs/kind/releases/download/${kind_version}/kind-linux-amd64.sha256sum"
-          sha256sum --check kind-linux-amd64.sha256sum
-          sudo install -m 0755 kind-linux-amd64 /usr/local/bin/kind
-          curl -fsSLo kubectl \
-            "https://dl.k8s.io/release/${kubectl_version}/bin/linux/amd64/kubectl"
-          curl -fsSLo kubectl.sha256 \
-            "https://dl.k8s.io/release/${kubectl_version}/bin/linux/amd64/kubectl.sha256"
-          echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
-          sudo install -m 0755 kubectl /usr/local/bin/kubectl
-          kind version
-          kubectl version --client
-      - name: Load Runtime containment AppArmor profile
-        run: |
-          test "$(cat /sys/module/apparmor/parameters/enabled)" = "Y"
-          sudo apparmor_parser --replace \
-            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
-      - name: Run disposable Kubernetes containment conformance
-        env:
-          AZENTS_E2E_ARTIFACT_DIR: ${{ runner.temp }}/e2e-observability/kubernetes-containment
-        run: |
-          testenv/azents/e2e/scripts/run-kubernetes-containment-conformance.sh
-      - name: Unload Runtime containment AppArmor profile
-        if: always()
-        run: |
-          sudo apparmor_parser --remove \
-            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
-      - name: Summarize Kubernetes containment conformance
-        if: always()
-        env:
-          RESULT: ${{ job.status }}
-        run: |
-          report_dir="${RUNNER_TEMP}/e2e-observability/kubernetes-containment"
-          mkdir -p "$report_dir"
-          {
-            echo '### Kubernetes containment E2E'
-            echo
-            printf 'Job result: `%s`\n\n' "$RESULT"
-            echo 'The artifact contains disposable-cluster resources, Pod descriptions, and bounded container logs.'
-          } > "$report_dir/summary.md"
-      - name: Upload Kubernetes containment observability
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: e2e-observability-kubernetes-containment
-          path: ${{ runner.temp }}/e2e-observability/kubernetes-containment
           if-no-files-found: warn
           overwrite: true
           retention-days: 14
@@ -578,7 +493,6 @@ jobs:
       - ci_testenv_unit_run
       - ci_python_e2e_run
       - ci_tool_search_runtime_provider_e2e_run
-      - ci_kubernetes_containment_e2e_run
       - ci_web_surface_e2e_run
     if: always()
     runs-on: ubuntu-latest
@@ -592,8 +506,6 @@ jobs:
           deterministic_result='${{ needs.ci_python_e2e_run.result }}'
           tool_search_runtime_provider_changed='${{ needs.changes.outputs.tool_search_runtime_provider_e2e }}'
           tool_search_runtime_provider_result='${{ needs.ci_tool_search_runtime_provider_e2e_run.result }}'
-          kubernetes_containment_changed='${{ needs.changes.outputs.kubernetes_containment_e2e }}'
-          kubernetes_containment_result='${{ needs.ci_kubernetes_containment_e2e_run.result }}'
           web_surface_changed='${{ needs.changes.outputs.web_surface_e2e }}'
           web_surface_result='${{ needs.ci_web_surface_e2e_run.result }}'
           if [ "$changes_result" != 'success' ]; then
@@ -615,11 +527,6 @@ jobs:
             echo "Tool Search runtime-provider E2E result was: $tool_search_runtime_provider_result"
             exit 1
           fi
-          if [ "$kubernetes_containment_changed" = 'true' ] \
-            && [ "$kubernetes_containment_result" != 'success' ]; then
-            echo "Kubernetes containment E2E result was: $kubernetes_containment_result"
-            exit 1
-          fi
           if [ "$web_surface_changed" = 'true' ] \
             && [ "$web_surface_result" != 'success' ]; then
             echo "Web Surface E2E result was: $web_surface_result"
@@ -633,7 +540,6 @@ jobs:
       - changes
       - ci_python_e2e_run
       - ci_tool_search_runtime_provider_e2e_run
-      - ci_kubernetes_containment_e2e_run
       - ci_web_surface_e2e_run
     if: >-
       always()
@@ -642,7 +548,6 @@ jobs:
       && (
         needs.changes.outputs.python_e2e == 'true'
         || needs.changes.outputs.tool_search_runtime_provider_e2e == 'true'
-        || needs.changes.outputs.kubernetes_containment_e2e == 'true'
         || needs.changes.outputs.web_surface_e2e == 'true'
       )
     runs-on: ubuntu-latest
@@ -660,7 +565,6 @@ jobs:
         env:
           DETERMINISTIC_RESULT: ${{ needs.ci_python_e2e_run.result }}
           RUNTIME_PROVIDER_RESULT: ${{ needs.ci_tool_search_runtime_provider_e2e_run.result }}
-          KUBERNETES_CONTAINMENT_RESULT: ${{ needs.ci_kubernetes_containment_e2e_run.result }}
           WEB_SURFACE_RESULT: ${{ needs.ci_web_surface_e2e_run.result }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -691,10 +595,6 @@ jobs:
               'Focused Runtime Provider E2E' \
               'runtime-provider' \
               "$RUNTIME_PROVIDER_RESULT"
-            append_lane \
-              'Kubernetes containment E2E' \
-              'kubernetes-containment' \
-              "$KUBERNETES_CONTAINMENT_RESULT"
             append_lane \
               'Web Surface E2E' \
               'web-surface' \

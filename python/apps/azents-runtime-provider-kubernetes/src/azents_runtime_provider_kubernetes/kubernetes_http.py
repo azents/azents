@@ -13,7 +13,6 @@ from typing import Any, Self, cast
 import aiohttp
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
-    AppArmorProfile,
     ContainerResourceClaim,
     ContainerResources,
     ContainerSecurityContext,
@@ -44,7 +43,6 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodStatus,
     PodWatchEvent,
     Probe,
-    RuntimeClassResource,
     SeccompProfile,
     Toleration,
     VolumeMount,
@@ -317,14 +315,6 @@ class KubernetesHttpApi(KubernetesApi):
             _lease_manifest(lease),
         )
 
-    async def get_runtime_class(self, name: str) -> RuntimeClassResource | None:
-        data = await self._request_json(
-            "GET",
-            f"/apis/node.k8s.io/v1/runtimeclasses/{name}",
-            allow_not_found=True,
-        )
-        return None if data is None else _runtime_class_resource(data)
-
     async def _create_or_merge_patch(
         self,
         resource_path: str,
@@ -474,10 +464,6 @@ def pod_manifest(pod: PodResource) -> JsonObject:
     }
     if pod.spec.service_account_name is not None:
         spec["serviceAccountName"] = pod.spec.service_account_name
-    if pod.spec.host_users is not None:
-        spec["hostUsers"] = pod.spec.host_users
-    if pod.spec.runtime_class_name is not None:
-        spec["runtimeClassName"] = pod.spec.runtime_class_name
     if pod.spec.image_pull_secrets:
         spec["imagePullSecrets"] = [
             {"name": secret.name} for secret in pod.spec.image_pull_secrets
@@ -566,15 +552,11 @@ def _container_security_context_manifest(
         manifest["seccompProfile"] = _security_profile_manifest(
             security_context.seccomp_profile
         )
-    if security_context.apparmor_profile is not None:
-        manifest["appArmorProfile"] = _security_profile_manifest(
-            security_context.apparmor_profile
-        )
     return manifest
 
 
 def _security_profile_manifest(
-    profile: SeccompProfile | AppArmorProfile,
+    profile: SeccompProfile,
 ) -> JsonObject:
     manifest: JsonObject = {"type": profile.profile_type}
     if profile.localhost_profile is not None:
@@ -796,8 +778,6 @@ def pod_resource(data: JsonObject) -> PodResource:
             automount_service_account_token=bool(
                 spec.get("automountServiceAccountToken", True)
             ),
-            host_users=_optional_bool(spec.get("hostUsers"), "spec.hostUsers"),
-            runtime_class_name=cast(str | None, spec.get("runtimeClassName")),
             image_pull_secrets=tuple(
                 LocalObjectReference(name=str(item["name"]))
                 for item in spec.get("imagePullSecrets", [])
@@ -821,12 +801,6 @@ def pod_resource(data: JsonObject) -> PodResource:
         ),
         status=None if status is None else _pod_status(status),
     )
-
-
-def _optional_bool(value: object, field: str) -> bool | None:
-    if value is None or isinstance(value, bool):
-        return value
-    raise RuntimeError(f"{field} must be a boolean")
 
 
 def _container(data: JsonObject) -> ContainerSpec:
@@ -898,9 +872,6 @@ def _container_security_context(data: JsonObject) -> ContainerSecurityContext:
         seccomp_profile=_seccomp_profile(
             cast(JsonObject | None, data.get("seccompProfile"))
         ),
-        apparmor_profile=_apparmor_profile(
-            cast(JsonObject | None, data.get("appArmorProfile"))
-        ),
     )
 
 
@@ -908,15 +879,6 @@ def _seccomp_profile(data: JsonObject | None) -> SeccompProfile | None:
     if data is None:
         return None
     return SeccompProfile(
-        profile_type=str(data["type"]),
-        localhost_profile=cast(str | None, data.get("localhostProfile")),
-    )
-
-
-def _apparmor_profile(data: JsonObject | None) -> AppArmorProfile | None:
-    if data is None:
-        return None
-    return AppArmorProfile(
         profile_type=str(data["type"]),
         localhost_profile=cast(str | None, data.get("localhostProfile")),
     )
@@ -1138,17 +1100,6 @@ def _lease_resource(data: JsonObject) -> LeaseResource:
         ),
         resource_version=cast(str | None, metadata.get("resourceVersion")),
     )
-
-
-def _runtime_class_resource(data: JsonObject) -> RuntimeClassResource:
-    metadata = cast(JsonObject, data["metadata"])
-    name = metadata.get("name")
-    handler = data.get("handler")
-    if not isinstance(name, str) or not name:
-        raise RuntimeError("RuntimeClass metadata.name must be a non-empty string")
-    if not isinstance(handler, str) or not handler:
-        raise RuntimeError("RuntimeClass handler must be a non-empty string")
-    return RuntimeClassResource(name=name, handler=handler)
 
 
 def _object_meta(data: JsonObject) -> ObjectMeta:

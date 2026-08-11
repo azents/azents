@@ -39,7 +39,6 @@ import type { InfrastructureProfileKind } from "../runtimeProviderPresentation";
 import type {
   KubernetesToleration,
   RuntimeInfrastructureProfileResponse,
-  RuntimeProcessContainmentModuleV1,
 } from "@azents/admin-client";
 
 interface InfrastructureProfileFormValues {
@@ -47,7 +46,6 @@ interface InfrastructureProfileFormValues {
   description: string;
   lifecycle: "active" | "disabled";
   schemaVersion: 1 | 2;
-  processContainmentEnabled: boolean;
   runnerCpuRequest: number | null;
   runnerCpuLimit: number | null;
   runnerMemoryRequest: number | null;
@@ -132,7 +130,6 @@ function blankValues(): InfrastructureProfileFormValues {
     description: "",
     lifecycle: "active",
     schemaVersion: 1,
-    processContainmentEnabled: false,
     runnerCpuRequest: null,
     runnerCpuLimit: null,
     runnerMemoryRequest: null,
@@ -271,6 +268,9 @@ function valuesFromProfile(
 ): InfrastructureProfileFormValues {
   const base = blankValues();
   const spec = profile.spec;
+  if (spec === null) {
+    throw new Error("The infrastructure Profile document is unavailable.");
+  }
   if (spec.profile_kind === "kubernetes_pod") {
     return {
       ...base,
@@ -278,8 +278,6 @@ function valuesFromProfile(
       description: profile.description,
       lifecycle: profile.lifecycle,
       schemaVersion: spec.schema_version,
-      processContainmentEnabled:
-        spec.schema_version === 2 && spec.process_containment !== null,
       runnerCpuRequest: spec.runner_resources.cpu_request_millicores,
       runnerCpuLimit: spec.runner_resources.cpu_limit_millicores,
       runnerMemoryRequest: spec.runner_resources.memory_request_bytes,
@@ -311,8 +309,6 @@ function valuesFromProfile(
     description: profile.description,
     lifecycle: profile.lifecycle,
     schemaVersion: spec.schema_version,
-    processContainmentEnabled:
-      spec.schema_version === 2 && spec.process_containment !== null,
     dockerCpuReservation: spec.runner_resources.cpu_reservation_millicores,
     dockerCpuLimit: spec.runner_resources.cpu_limit_millicores,
     dockerMemoryReservation: spec.runner_resources.memory_reservation_bytes,
@@ -356,9 +352,7 @@ function buildSpec(
           shared_temporary_storage_bytes: values.sharedTemporaryStorageBytes,
         }
       : null;
-    const processContainment: RuntimeProcessContainmentModuleV1 | null =
-      values.processContainmentEnabled ? { schema_version: 1 } : null;
-    if (values.schemaVersion === 2 || values.processContainmentEnabled) {
+    if (values.schemaVersion === 2) {
       return {
         profile_kind: "kubernetes_pod",
         contract_family: "kubernetes.pod-profile",
@@ -369,7 +363,6 @@ function buildSpec(
         service_account_name: values.serviceAccountName.trim() || null,
         scheduling,
         dind,
-        process_containment: processContainment,
       };
     }
     return {
@@ -390,16 +383,13 @@ function buildSpec(
     memory_reservation_bytes: values.dockerMemoryReservation,
     memory_limit_bytes: values.dockerMemoryLimit,
   };
-  if (values.schemaVersion === 2 || values.processContainmentEnabled) {
+  if (values.schemaVersion === 2) {
     return {
       profile_kind: "docker_container",
       contract_family: "docker.container-profile",
       schema_version: 2,
       runner_resources: runnerResources,
       network_name: values.dockerNetworkName.trim() || null,
-      process_containment: values.processContainmentEnabled
-        ? { schema_version: 1 }
-        : null,
     };
   }
   return {
@@ -779,9 +769,7 @@ function InfrastructureProfileEditor({
               <Divider label="Docker-in-Docker" />
               <Switch
                 label="Enable DinD topology"
-                description="Disable process containment before enabling nested Docker."
                 checked={form.values.dindEnabled}
-                disabled={form.values.processContainmentEnabled}
                 onChange={(event) =>
                   form.setFieldValue("dindEnabled", event.currentTarget.checked)
                 }
@@ -901,24 +889,6 @@ function InfrastructureProfileEditor({
             </>
           )}
 
-          <Divider label="Runtime containment" />
-          <Switch
-            label="Enable process containment"
-            description={
-              kind === "kubernetes_pod" && form.values.dindEnabled
-                ? "Disable DinD before enabling process containment."
-                : "Use the Provider-owned contained Runtime authority for Agent operations."
-            }
-            checked={form.values.processContainmentEnabled}
-            disabled={kind === "kubernetes_pod" && form.values.dindEnabled}
-            onChange={(event) =>
-              form.setFieldValue(
-                "processContainmentEnabled",
-                event.currentTarget.checked,
-              )
-            }
-          />
-
           {errorMessage !== null && <Alert color="red">{errorMessage}</Alert>}
           <Group justify="flex-end">
             <Button variant="default" onClick={onClose}>
@@ -1004,26 +974,6 @@ export function InfrastructureProfilesSection({
                     >
                       {profile.compatible ? "Compatible" : "Incompatible"}
                     </Badge>
-                    <Badge
-                      color={profile.containment.enabled ? "green" : "gray"}
-                      variant="light"
-                    >
-                      {profile.containment.enabled
-                        ? "Process isolation"
-                        : "Direct execution"}
-                    </Badge>
-                    <Badge
-                      color={
-                        profile.containment.nested_docker_available
-                          ? "blue"
-                          : "gray"
-                      }
-                      variant="light"
-                    >
-                      {profile.containment.nested_docker_available
-                        ? "Nested Docker available"
-                        : "Nested Docker unavailable"}
-                    </Badge>
                     {profile.lifecycle === "disabled" && (
                       <Badge color="gray" variant="outline">
                         Disabled
@@ -1063,6 +1013,7 @@ export function InfrastructureProfilesSection({
                   <Button
                     size="xs"
                     variant="subtle"
+                    disabled={profile.spec === null}
                     onClick={() => onOpenEdit(profile)}
                   >
                     Edit

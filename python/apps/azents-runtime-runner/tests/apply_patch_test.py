@@ -26,9 +26,9 @@ from azents_runtime_runner.apply_patch import (
     PatchOperation,
     execute_apply_patch,
 )
-from azents_runtime_runner.containment import DirectExecutionBackend
+from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.operations import RunnerOperations
-from azents_runtime_runner.workspace import FilesystemAccessPolicy, Workspace
+from azents_runtime_runner.workspace import Workspace
 
 
 class _FakeClient:
@@ -934,42 +934,6 @@ async def test_runner_cancellation_after_commit_starts_waits_for_terminal_result
 
     assert source.read_text() == "new\n"
     assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
-    await operations.close()
-
-
-@pytest.mark.asyncio
-async def test_runner_apply_patch_rejects_base_outside_filesystem_permissions(
-    tmp_path: Path,
-) -> None:
-    root = tmp_path / "agent"
-    denied = tmp_path / "runner-private"
-    root.mkdir()
-    denied.mkdir()
-    patch = b"""*** Begin Patch
-*** Add File: denied.txt
-+blocked
-*** End Patch"""
-    client = _FakeClient()
-    operations = RunnerOperations(
-        execution_backend=DirectExecutionBackend(),
-        client=client,
-        workspace=Workspace(
-            str(root),
-            access_policy=FilesystemAccessPolicy.contained(
-                temporary_backing_path=tmp_path / "agent-temporary",
-                read_only_paths=(),
-                denied_paths=(denied,),
-            ),
-        ),
-    )
-
-    await operations.handle(_operation(denied, patch))
-
-    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_ERROR
-    detail = client.events[-1].payload["file_apply_patch"]
-    assert isinstance(detail, dict)
-    assert detail["reason"] == "base_path_not_permitted"
-    assert not (denied / "denied.txt").exists()
     await operations.close()
 
 

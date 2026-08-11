@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
-    AppArmorProfile,
     ContainerResourceClaim,
     ContainerResources,
     ContainerSecurityContext,
@@ -30,7 +29,6 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodSecurityContext,
     PodSpec,
     Probe,
-    RuntimeClassResource,
     SeccompProfile,
     VolumeMount,
 )
@@ -160,8 +158,6 @@ def test_pod_manifest_preserves_image_pull_secrets() -> None:
         spec=PodSpec(
             service_account_name=pod.spec.service_account_name,
             automount_service_account_token=pod.spec.automount_service_account_token,
-            host_users=pod.spec.host_users,
-            runtime_class_name=pod.spec.runtime_class_name,
             image_pull_secrets=(LocalObjectReference(name="ecr-pull-secret"),),
             security_context=pod.spec.security_context,
             node_selector=pod.spec.node_selector,
@@ -306,8 +302,6 @@ def test_pod_policy_topology_round_trips() -> None:
         spec=PodSpec(
             service_account_name=None,
             automount_service_account_token=False,
-            host_users=None,
-            runtime_class_name=None,
             image_pull_secrets=(),
             security_context=PodSecurityContext(
                 run_as_user=None,
@@ -344,38 +338,21 @@ def test_pod_policy_topology_round_trips() -> None:
     }
 
 
-def test_contained_pod_security_and_runtime_class_round_trip() -> None:
+def test_runtime_default_seccomp_round_trip() -> None:
     pod = _pod(resources=None)
     runner = pod.spec.containers[0]
     pod = dataclasses.replace(
         pod,
         spec=dataclasses.replace(
             pod.spec,
-            host_users=False,
-            runtime_class_name="runc-bwrap",
             containers=(
                 dataclasses.replace(
                     runner,
                     security_context=dataclasses.replace(
                         runner.security_context,
-                        allow_privilege_escalation=True,
-                        capabilities_add=(
-                            "SYS_ADMIN",
-                            "SYS_CHROOT",
-                            "NET_ADMIN",
-                            "SETUID",
-                            "SETGID",
-                            "SYS_PTRACE",
-                            "SETPCAP",
-                        ),
-                        proc_mount="Unmasked",
                         seccomp_profile=SeccompProfile(
-                            profile_type="Unconfined",
+                            profile_type="RuntimeDefault",
                             localhost_profile=None,
-                        ),
-                        apparmor_profile=AppArmorProfile(
-                            profile_type="Localhost",
-                            localhost_profile="azents-runtime-bwrap",
                         ),
                     ),
                 ),
@@ -387,14 +364,7 @@ def test_contained_pod_security_and_runtime_class_round_trip() -> None:
 
     assert pod_resource(manifest) == pod
     container_security = manifest["spec"]["containers"][0]["securityContext"]
-    assert manifest["spec"]["hostUsers"] is False
-    assert manifest["spec"]["runtimeClassName"] == "runc-bwrap"
-    assert container_security["procMount"] == "Unmasked"
-    assert container_security["seccompProfile"] == {"type": "Unconfined"}
-    assert container_security["appArmorProfile"] == {
-        "type": "Localhost",
-        "localhostProfile": "azents-runtime-bwrap",
-    }
+    assert container_security["seccompProfile"] == {"type": "RuntimeDefault"}
 
 
 def test_pod_resource_decodes_bounded_termination_evidence() -> None:
@@ -424,29 +394,6 @@ def test_pod_resource_decodes_bounded_termination_evidence() -> None:
         reason="OOMKilled",
         oom_killed=True,
     )
-
-
-@pytest.mark.asyncio
-async def test_get_runtime_class_decodes_cluster_scoped_evidence() -> None:
-    api = RecordingKubernetesHttpApi(
-        (
-            {
-                "apiVersion": "node.k8s.io/v1",
-                "kind": "RuntimeClass",
-                "metadata": {"name": "runc-bwrap"},
-                "handler": "runc",
-            },
-        )
-    )
-
-    runtime_class = await api.get_runtime_class("runc-bwrap")
-
-    assert runtime_class == RuntimeClassResource(
-        name="runc-bwrap",
-        handler="runc",
-    )
-    assert api.requests[0].path == ("/apis/node.k8s.io/v1/runtimeclasses/runc-bwrap")
-    assert api.requests[0].allow_not_found is True
 
 
 def test_network_policy_round_trips_runtime_evidence_and_rules() -> None:
@@ -593,8 +540,6 @@ def _pod(resources: ContainerResources | None) -> PodResource:
         spec=PodSpec(
             service_account_name=None,
             automount_service_account_token=False,
-            host_users=None,
-            runtime_class_name=None,
             image_pull_secrets=(),
             security_context=None,
             node_selector={},
@@ -618,7 +563,6 @@ def _pod(resources: ContainerResources | None) -> PodResource:
                         capabilities_drop=("ALL",),
                         proc_mount=None,
                         seccomp_profile=None,
-                        apparmor_profile=None,
                     ),
                     readiness_probe=None,
                     env=(EnvVar(name="AZ_RUNTIME_ID", value="runtime"),),

@@ -8,7 +8,6 @@ from azents.core.runtime_profile import (
     DockerContainerResources,
     JsonValue,
     KubernetesContainerResources,
-    KubernetesDinDModule,
     KubernetesPodProfileSpecV1,
     KubernetesPodProfileSpecV2,
     KubernetesSchedulingModule,
@@ -17,16 +16,10 @@ from azents.core.runtime_profile import (
     RuntimeConfigurationResolutionStatus,
     RuntimeInfrastructureProfileKind,
     RuntimeNetworkPolicyModule,
-    RuntimeProcessContainmentModuleV1,
-    RuntimeProviderProfileContractSupport,
     WorkspaceRuntimeProfilePolicyV1,
     classify_runtime_configuration_application,
     compose_workspace_runtime_profile,
-    derive_runtime_profile_containment_status,
-    digest_runtime_profile_document,
-    evaluate_runtime_profile_compatibility,
     parse_runtime_infrastructure_profile_spec,
-    required_runtime_profile_capabilities,
 )
 
 
@@ -58,10 +51,7 @@ def _kubernetes_spec() -> KubernetesPodProfileSpecV1:
     )
 
 
-def _kubernetes_spec_v2(
-    *,
-    contained: bool,
-) -> KubernetesPodProfileSpecV2:
+def _kubernetes_spec_v2() -> KubernetesPodProfileSpecV2:
     return KubernetesPodProfileSpecV2(
         profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
         contract_family="kubernetes.pod-profile",
@@ -86,13 +76,10 @@ def _kubernetes_spec_v2(
             tolerations=(),
         ),
         dind=None,
-        process_containment=(
-            RuntimeProcessContainmentModuleV1(schema_version=1) if contained else None
-        ),
     )
 
 
-def _docker_spec_v2(*, contained: bool) -> DockerContainerProfileSpecV2:
+def _docker_spec_v2() -> DockerContainerProfileSpecV2:
     return DockerContainerProfileSpecV2(
         profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
         contract_family="docker.container-profile",
@@ -104,9 +91,6 @@ def _docker_spec_v2(*, contained: bool) -> DockerContainerProfileSpecV2:
             memory_limit_bytes=None,
         ),
         network_name=None,
-        process_containment=(
-            RuntimeProcessContainmentModuleV1(schema_version=1) if contained else None
-        ),
     )
 
 
@@ -123,41 +107,6 @@ def _docker_spec() -> DockerContainerProfileSpecV1:
         ),
         network_name=None,
     )
-
-
-def test_runtime_profile_containment_status_is_derived_from_typed_profile() -> None:
-    """Product projections distinguish containment and nested Docker safely."""
-    nested_docker = _kubernetes_spec().model_copy(
-        update={
-            "dind": KubernetesDinDModule(
-                engine_resources=KubernetesContainerResources(
-                    cpu_request_millicores=None,
-                    cpu_limit_millicores=None,
-                    memory_request_bytes=None,
-                    memory_limit_bytes=None,
-                ),
-                docker_storage_bytes=1,
-                shared_temporary_storage_bytes=1,
-            )
-        }
-    )
-
-    assert derive_runtime_profile_containment_status(
-        _kubernetes_spec_v2(contained=True)
-    ).model_dump() == {
-        "enabled": True,
-        "nested_docker_available": False,
-    }
-    assert derive_runtime_profile_containment_status(nested_docker).model_dump() == {
-        "enabled": False,
-        "nested_docker_available": True,
-    }
-    assert derive_runtime_profile_containment_status(
-        _docker_spec_v2(contained=False)
-    ).model_dump() == {
-        "enabled": False,
-        "nested_docker_available": False,
-    }
 
 
 def test_kubernetes_profile_preserves_absent_requests_with_limits() -> None:
@@ -187,9 +136,9 @@ def test_kubernetes_profile_preserves_absent_requests_with_limits() -> None:
     ("spec", "expected_type"),
     [
         (_kubernetes_spec(), KubernetesPodProfileSpecV1),
-        (_kubernetes_spec_v2(contained=True), KubernetesPodProfileSpecV2),
+        (_kubernetes_spec_v2(), KubernetesPodProfileSpecV2),
         (_docker_spec(), DockerContainerProfileSpecV1),
-        (_docker_spec_v2(contained=True), DockerContainerProfileSpecV2),
+        (_docker_spec_v2(), DockerContainerProfileSpecV2),
     ],
 )
 def test_profile_parser_dispatches_by_kind_and_schema_version(
@@ -213,109 +162,42 @@ def test_profile_parser_dispatches_by_kind_and_schema_version(
     assert parsed == spec
 
 
-def test_kubernetes_v2_rejects_containment_with_nested_docker() -> None:
-    """Contained Profiles cannot also grant nested Docker authority."""
-    payload = _kubernetes_spec_v2(contained=True).model_dump(mode="json")
-    payload["dind"] = {
-        "engine_resources": {
-            "cpu_request_millicores": None,
-            "cpu_limit_millicores": None,
-            "memory_request_bytes": None,
-            "memory_limit_bytes": None,
-        },
-        "docker_storage_bytes": 1,
-        "shared_temporary_storage_bytes": 1,
-    }
-
-    with pytest.raises(
-        ValueError,
-        match="Process containment cannot be combined with nested Docker",
-    ):
-        parse_runtime_infrastructure_profile_spec(payload)
-
-
-def test_workspace_network_restriction_preserves_containment_module() -> None:
-    """Workspace network composition cannot remove Provider containment."""
-    effective = compose_workspace_runtime_profile(
-        _kubernetes_spec_v2(contained=True),
-        WorkspaceRuntimeProfilePolicyV1(
-            schema_version=1,
-            network_restriction=RuntimeNetworkPolicyModule(
-                allowed_cidrs=("10.2.0.0/16",),
-                denied_cidrs=(),
-            ),
-        ),
-    )
-
-    assert effective["process_containment"] == {"schema_version": 1}
-
-
 @pytest.mark.parametrize(
-    ("uncontained", "contained"),
+    "spec",
     [
-        (
-            _kubernetes_spec_v2(contained=False),
-            _kubernetes_spec_v2(contained=True),
-        ),
-        (
-            _docker_spec_v2(contained=False),
-            _docker_spec_v2(contained=True),
-        ),
+        _kubernetes_spec_v2(),
+        _docker_spec_v2(),
     ],
 )
-def test_containment_module_changes_canonical_profile_digest(
-    uncontained: KubernetesPodProfileSpecV2 | DockerContainerProfileSpecV2,
-    contained: KubernetesPodProfileSpecV2 | DockerContainerProfileSpecV2,
-) -> None:
-    """Containment participates in immutable effective-Profile identity."""
-    assert digest_runtime_profile_document(uncontained) != (
-        digest_runtime_profile_document(contained)
-    )
-
-
-@pytest.mark.parametrize(
-    ("spec", "required"),
-    [
-        (_kubernetes_spec_v2(contained=False), False),
-        (_kubernetes_spec_v2(contained=True), True),
-        (_docker_spec_v2(contained=False), False),
-        (_docker_spec_v2(contained=True), True),
-    ],
-)
-def test_v2_profiles_require_containment_capability_only_when_enabled(
+def test_v2_profile_parser_accepts_historical_null_containment_key(
     spec: KubernetesPodProfileSpecV2 | DockerContainerProfileSpecV2,
-    required: bool,
 ) -> None:
-    """The portable capability follows exact typed containment presence."""
-    capabilities = required_runtime_profile_capabilities(spec)
+    """Old direct v2 documents normalize the removed null field."""
+    payload = spec.model_dump(mode="json")
+    payload["process_containment"] = None
 
-    assert ("runtime.process-containment" in capabilities) is required
+    parsed = parse_runtime_infrastructure_profile_spec(payload)
+
+    assert parsed == spec
+    assert "process_containment" not in parsed.model_dump(mode="json")
 
 
-def test_contained_profile_is_incompatible_without_provider_capability() -> None:
-    """Schema v2 support alone does not claim process containment."""
-    spec = _docker_spec_v2(contained=True)
-    compatibility = evaluate_runtime_profile_compatibility(
-        spec,
-        [
-            RuntimeProviderProfileContractSupport(
-                profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
-                contract_family="docker.container-profile",
-                schema_versions=frozenset({1, 2}),
-                capabilities=frozenset(
-                    {
-                        "docker.container-profile",
-                        "runtime.resources",
-                        "workspace.host-directory",
-                    }
-                ),
-            )
-        ],
-    )
+@pytest.mark.parametrize(
+    "spec",
+    [
+        _kubernetes_spec_v2(),
+        _docker_spec_v2(),
+    ],
+)
+def test_v2_profile_parser_rejects_historical_enabled_containment(
+    spec: KubernetesPodProfileSpecV2 | DockerContainerProfileSpecV2,
+) -> None:
+    """Enabled stored containment fails closed instead of becoming direct."""
+    payload = spec.model_dump(mode="json")
+    payload["process_containment"] = {"schema_version": 1}
 
-    assert compatibility.compatible is False
-    assert compatibility.reason_code == "profile_capability_missing"
-    assert compatibility.missing_capabilities == ("runtime.process-containment",)
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        parse_runtime_infrastructure_profile_spec(payload)
 
 
 def test_workspace_network_restriction_composes_within_platform_boundary() -> None:
@@ -474,46 +356,11 @@ def test_runtime_configuration_impact_requires_recreation_for_docker_change() ->
     )
 
 
-@pytest.mark.parametrize(
-    ("applied_containment", "desired_containment"),
-    [
-        (False, True),
-        (True, False),
-    ],
-)
-def test_containment_change_requires_runtime_recreation(
-    applied_containment: bool,
-    desired_containment: bool,
-) -> None:
-    """Adding or removing containment changes physical Runtime authority."""
-    applied_profile = _docker_spec_v2(contained=applied_containment).model_dump(
-        mode="json"
-    )
-    desired_profile = _docker_spec_v2(contained=desired_containment).model_dump(
-        mode="json"
-    )
-
-    assert (
-        classify_runtime_configuration_application(
-            desired_status=RuntimeConfigurationResolutionStatus.READY,
-            desired_configuration=_resolved_configuration(
-                desired_profile,
-                provider_kind="docker",
-            ),
-            applied_configuration=_resolved_configuration(
-                applied_profile,
-                provider_kind="docker",
-            ),
-        )
-        is RuntimeConfigurationApplicationImpact.RECREATE
-    )
-
-
 @pytest.mark.parametrize("upgrade", [True, False])
 def test_profile_version_change_requires_runtime_recreation(upgrade: bool) -> None:
     """Profile schema-version changes recreate the physical Runtime."""
     version_1 = _kubernetes_spec().model_dump(mode="json")
-    version_2 = _kubernetes_spec_v2(contained=False).model_dump(mode="json")
+    version_2 = _kubernetes_spec_v2().model_dump(mode="json")
     applied_profile = version_1 if upgrade else version_2
     desired_profile = version_2 if upgrade else version_1
 

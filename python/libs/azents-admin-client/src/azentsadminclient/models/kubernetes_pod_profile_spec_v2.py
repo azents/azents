@@ -25,7 +25,6 @@ from azentsadminclient.models.kubernetes_din_d_module import KubernetesDinDModul
 from azentsadminclient.models.kubernetes_scheduling_module import KubernetesSchedulingModule
 from azentsadminclient.models.kubernetes_workspace_volume import KubernetesWorkspaceVolume
 from azentsadminclient.models.runtime_network_policy_module import RuntimeNetworkPolicyModule
-from azentsadminclient.models.runtime_process_containment_module_v1 import RuntimeProcessContainmentModuleV1
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -42,8 +41,7 @@ class KubernetesPodProfileSpecV2(BaseModel):
     service_account_name: Optional[Annotated[str, Field(strict=True, max_length=253)]]
     scheduling: KubernetesSchedulingModule
     dind: Optional[KubernetesDinDModule]
-    process_containment: Optional[RuntimeProcessContainmentModuleV1]
-    __properties: ClassVar[List[str]] = ["profile_kind", "contract_family", "schema_version", "runner_resources", "workspace_volume", "network_policy", "service_account_name", "scheduling", "dind", "process_containment"]
+    __properties: ClassVar[List[str]] = ["profile_kind", "contract_family", "schema_version", "runner_resources", "workspace_volume", "network_policy", "service_account_name", "scheduling", "dind"]
 
     @field_validator('profile_kind')
     def profile_kind_validate_enum(cls, value):
@@ -120,9 +118,6 @@ class KubernetesPodProfileSpecV2(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of dind
         if self.dind:
             _dict['dind'] = self.dind.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of process_containment
-        if self.process_containment:
-            _dict['process_containment'] = self.process_containment.to_dict()
         # set to None if service_account_name (nullable) is None
         # and model_fields_set contains the field
         if self.service_account_name is None and "service_account_name" in self.model_fields_set:
@@ -132,11 +127,6 @@ class KubernetesPodProfileSpecV2(BaseModel):
         # and model_fields_set contains the field
         if self.dind is None and "dind" in self.model_fields_set:
             _dict['dind'] = None
-
-        # set to None if process_containment (nullable) is None
-        # and model_fields_set contains the field
-        if self.process_containment is None and "process_containment" in self.model_fields_set:
-            _dict['process_containment'] = None
 
         return _dict
 
@@ -158,8 +148,7 @@ class KubernetesPodProfileSpecV2(BaseModel):
             "network_policy": RuntimeNetworkPolicyModule.from_dict(obj["network_policy"]) if obj.get("network_policy") is not None else None,
             "service_account_name": obj.get("service_account_name"),
             "scheduling": KubernetesSchedulingModule.from_dict(obj["scheduling"]) if obj.get("scheduling") is not None else None,
-            "dind": KubernetesDinDModule.from_dict(obj["dind"]) if obj.get("dind") is not None else None,
-            "process_containment": RuntimeProcessContainmentModuleV1.from_dict(obj["process_containment"]) if obj.get("process_containment") is not None else None
+            "dind": KubernetesDinDModule.from_dict(obj["dind"]) if obj.get("dind") is not None else None
         })
         return _obj
 

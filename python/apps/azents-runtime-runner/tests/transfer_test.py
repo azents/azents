@@ -34,7 +34,7 @@ from azents_runtime_control.transfer import (
 )
 
 from azents_runtime_runner.transfer import RunnerTransferManager
-from azents_runtime_runner.workspace import FilesystemAccessPolicy, Workspace
+from azents_runtime_runner.workspace import Workspace
 
 _UNRESTRICTED_WORKSPACE = Workspace("/tmp")
 
@@ -176,46 +176,6 @@ async def test_invalid_intent_does_not_block_control_receiver() -> None:
     assert transfer.download_calls == 0
     control.release.set()
     assert (await _result(control)).failure is RunnerTransferFailure.PROTOCOL_VIOLATION
-    await manager.close()
-
-
-@pytest.mark.asyncio
-async def test_contained_download_uses_runtime_temporary_backing_path(
-    tmp_path: Path,
-) -> None:
-    """Python transfer enforcement preserves the contained Runtime namespace."""
-    data = b"contained transfer"
-    temporary = tmp_path / "agent-temporary"
-    workspace = Workspace(
-        str(tmp_path / "agent"),
-        access_policy=FilesystemAccessPolicy.contained(
-            temporary_backing_path=temporary,
-            read_only_paths=(Path("/usr"),),
-            denied_paths=(tmp_path / "runner-private",),
-        ),
-    )
-    control = _Control()
-    manager = RunnerTransferManager(
-        control=control,
-        transfer=_Transfer(
-            (
-                RunnerDownloadChunk(offset=0, data=data),
-                RunnerDownloadComplete(
-                    actual_size=len(data),
-                    sha256=hashlib.sha256(data).hexdigest(),
-                ),
-            )
-        ),
-        accepted_generation=lambda: 1,
-        workspace=workspace,
-    )
-
-    await manager.handle_intent(
-        _intent(Path("/tmp/agent/imports/report.bin"), data=data)
-    )
-
-    assert (await _result(control)).outcome is RunnerTransferOutcome.SUCCEEDED
-    assert (temporary / "agent/imports/report.bin").read_bytes() == data
     await manager.close()
 
 

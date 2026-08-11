@@ -5,7 +5,6 @@ import logging
 import os
 import signal
 import uuid
-from collections.abc import Sequence
 from pathlib import Path
 
 import grpc
@@ -24,9 +23,7 @@ from azents_runtime_control.provider import (
 
 from azents_runtime_provider_docker.aiodocker_api import AioDockerApi
 from azents_runtime_provider_docker.provider import (
-    DOCKER_BWRAP_APPARMOR_PROFILE,
     RUNNER_LIMIT_ENV_NAMES,
-    DockerProcessContainmentConfig,
     DockerRuntimeProvider,
     DockerRuntimeProviderConfig,
 )
@@ -35,7 +32,7 @@ _PROTOCOL_VERSION = "agent-runtime-provider-docker-v1"
 _CONFIG_SCHEMA_VERSION = "agent-runtime-provider-docker-v1"
 _DEFAULT_COMMAND_BLOCK_MS = 5_000
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
-_DOCKER_APPARMOR_SECURITY_OPTION = "name=apparmor"
+_REMOVED_CONTAINMENT_ENV_PREFIX = "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -76,12 +73,6 @@ async def _run_control_loop(
     *,
     stop: asyncio.Event,
 ) -> None:
-    process_containment = settings.process_containment
-    if process_containment is not None:
-        process_containment = _effective_process_containment(
-            settings,
-            await docker.security_options(),
-        )
     provider = DockerRuntimeProvider(
         docker,
         DockerRuntimeProviderConfig(
@@ -90,13 +81,9 @@ async def _run_control_loop(
             runner_env=settings.runner_env,
             workspace_mount_path=settings.workspace_path,
             tmp_mount_path=settings.tmp_path,
-            process_containment=process_containment,
         ),
     )
-    registration = _provider_registration(
-        settings,
-        process_containment=process_containment,
-    )
+    registration = _provider_registration(settings)
     while not stop.is_set():
         control_client = create_provider_control_client(settings)
         connection_id = _control_connection_id(settings.connection_id)
@@ -158,6 +145,7 @@ class ProviderSettings:
 
     def __init__(self) -> None:
         """Load deployment-critical settings from the environment."""
+        _reject_removed_containment_env()
         self.control_endpoint = _required_env("AZ_RUNTIME_CONTROL_ENDPOINT")
         self.control_tls = _control_tls_from_env()
         self.allow_insecure_control = _required_bool_env(
@@ -168,7 +156,6 @@ class ProviderSettings:
         self.workspace_path = _required_env("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH")
         self.tmp_path = os.environ.get("AZ_RUNTIME_PROVIDER_TMP_PATH", "/tmp/agent")
         self.runner_env = _runner_env_from_env()
-        self.process_containment = _process_containment_from_env()
         self.docker_host = os.environ.get("AZ_RUNTIME_PROVIDER_DOCKER_HOST")
         self.connection_id = os.environ.get(
             "AZ_RUNTIME_PROVIDER_CONNECTION_ID",
@@ -189,54 +176,18 @@ def _runner_env_from_env() -> dict[str, str]:
     }
 
 
-def _process_containment_from_env() -> DockerProcessContainmentConfig | None:
-    backend = os.environ.get("AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND")
-    security_profile = os.environ.get(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE"
+def _reject_removed_containment_env() -> None:
+    removed = sorted(
+        name for name in os.environ if name.startswith(_REMOVED_CONTAINMENT_ENV_PREFIX)
     )
-    timeout = os.environ.get(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS"
-    )
-    if backend is None:
-        if security_profile is not None or timeout is not None:
-            raise RuntimeError(
-                "Docker process containment settings require a configured backend."
-            )
-        return None
-    if backend != "bwrap":
-        raise RuntimeError("Docker process containment backend is unsupported.")
-    if security_profile is None or not security_profile:
-        raise RuntimeError("Docker process containment security profile is required.")
-    if security_profile != DOCKER_BWRAP_APPARMOR_PROFILE:
+    if removed:
         raise RuntimeError(
-            "Docker process containment security profile is unsupported."
+            f"{', '.join(removed)} is no longer supported; remove the containment "
+            "configuration before starting the Docker Runtime Provider."
         )
-    if timeout is None:
-        raise RuntimeError(
-            "Docker process containment qualification timeout is required."
-        )
-    try:
-        timeout_seconds = int(timeout)
-    except ValueError as error:
-        raise RuntimeError(
-            "Docker process containment qualification timeout is invalid."
-        ) from error
-    return DockerProcessContainmentConfig(
-        backend="bwrap",
-        security_profile=security_profile,
-        qualification_timeout_seconds=timeout_seconds,
-    )
 
 
-def _provider_registration(
-    settings: ProviderSettings,
-    *,
-    process_containment: DockerProcessContainmentConfig | None,
-) -> ProviderRegistration:
-    containment_enabled = process_containment is not None
-    metadata = {"tmp_path": settings.tmp_path}
-    if process_containment is not None:
-        metadata["process_containment_backend"] = process_containment.backend
+def _provider_registration(settings: ProviderSettings) -> ProviderRegistration:
     return ProviderRegistration(
         provider_id=settings.provider_id,
         provider_type="docker",
@@ -249,46 +200,12 @@ def _provider_registration(
             "host_directory_persistence",
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
-        metadata=metadata,
-        capability_contract=_capability_contract(
-            containment_enabled=containment_enabled
-        ),
+        metadata={"tmp_path": settings.tmp_path},
+        capability_contract=_capability_contract(),
     )
 
 
-def _effective_process_containment(
-    settings: ProviderSettings,
-    security_options: Sequence[str],
-) -> DockerProcessContainmentConfig | None:
-    process_containment = settings.process_containment
-    if process_containment is None:
-        return None
-    if any(
-        option == _DOCKER_APPARMOR_SECURITY_OPTION
-        or option.startswith(f"{_DOCKER_APPARMOR_SECURITY_OPTION},")
-        for option in security_options
-    ):
-        return process_containment
-    _LOGGER.warning(
-        "Docker process containment unavailable; continuing with direct Profiles",
-        extra={
-            "provider_id": settings.provider_id,
-            "containment_unavailable_reason": "apparmor_unavailable",
-        },
-    )
-    return None
-
-
-def _capability_contract(*, containment_enabled: bool) -> dict[str, JsonValue]:
-    capabilities = [
-        "docker.container-profile",
-        "runtime.resources",
-        "workspace.host-directory",
-    ]
-    schema_versions = [1]
-    if containment_enabled:
-        capabilities.append("runtime.process-containment")
-        schema_versions.append(2)
+def _capability_contract() -> dict[str, JsonValue]:
     return {
         "schema_version": 1,
         "implementation_key": "docker",
@@ -313,8 +230,12 @@ def _capability_contract(*, containment_enabled: bool) -> dict[str, JsonValue]:
             {
                 "profile_kind": "docker_container",
                 "contract_family": "docker.container-profile",
-                "schema_versions": schema_versions,
-                "capabilities": capabilities,
+                "schema_versions": [1, 2],
+                "capabilities": [
+                    "docker.container-profile",
+                    "runtime.resources",
+                    "workspace.host-directory",
+                ],
                 "constraints": {
                     "maximums": {},
                     "allowed_values": {},

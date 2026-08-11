@@ -20,7 +20,6 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.runtime_profile_containment_status import RuntimeProfileContainmentStatus
 from azentspublicclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle
 from azentspublicclient.models.workspace_runtime_profile_policy_v1 import WorkspaceRuntimeProfilePolicyV1
 from typing import Optional, Set
@@ -46,11 +45,10 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
     compatible: StrictBool
     missing_capabilities: List[StrictStr]
     incompatible_constraints: List[StrictStr]
-    containment: RuntimeProfileContainmentStatus
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider_id", "infrastructure_profile_id", "display_name", "description", "lifecycle", "policy", "version", "digest", "available", "availability_reason_code", "capability_revision_id", "infrastructure_profile_version", "compatible", "missing_capabilities", "incompatible_constraints", "containment", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "provider_id", "infrastructure_profile_id", "display_name", "description", "lifecycle", "policy", "version", "digest", "available", "availability_reason_code", "capability_revision_id", "infrastructure_profile_version", "compatible", "missing_capabilities", "incompatible_constraints", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -96,9 +94,6 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of policy
         if self.policy:
             _dict['policy'] = self.policy.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of containment
-        if self.containment:
-            _dict['containment'] = self.containment.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -142,7 +137,6 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
             "compatible": obj.get("compatible"),
             "missing_capabilities": obj.get("missing_capabilities"),
             "incompatible_constraints": obj.get("incompatible_constraints"),
-            "containment": RuntimeProfileContainmentStatus.from_dict(obj["containment"]) if obj.get("containment") is not None else None,
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
         })

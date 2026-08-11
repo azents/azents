@@ -43,9 +43,6 @@ class TestRuntimeInfrastructureProfileResponse(unittest.TestCase):
                 contract_family = '',
                 schema_version = 56,
                 spec = None,
-                containment = azentsadminclient.models.runtime_profile_containment_status.RuntimeProfileContainmentStatus(
-                    enabled = True, 
-                    nested_docker_available = True, ),
                 required_capabilities = [
                     ''
                     ],
@@ -73,9 +70,6 @@ class TestRuntimeInfrastructureProfileResponse(unittest.TestCase):
                 contract_family = '',
                 schema_version = 56,
                 spec = None,
-                containment = azentsadminclient.models.runtime_profile_containment_status.RuntimeProfileContainmentStatus(
-                    enabled = True, 
-                    nested_docker_available = True, ),
                 required_capabilities = [
                     ''
                     ],

@@ -36,18 +36,6 @@ class AgentRuntimeConfigurationStatus(BaseModel):
     ]
     desired: RuntimeConfigurationRevision | None
     applied: RuntimeConfigurationRevision | None
-    containment: "RuntimeContainmentStatus"
-
-
-class RuntimeContainmentStatus(BaseModel):
-    """Derived process-containment and Runtime operation projection."""
-
-    enabled: bool
-    applied: bool
-    recreation_required: bool
-    nested_docker_available: bool
-    runtime_available: bool
-    availability_reason_code: str | None
 
 
 RuntimeProfileConfigurationStatus = Literal[
@@ -275,7 +263,6 @@ __all__ = [
     "ProviderDisconnected",
     "RuntimeProviderUnavailable",
     "RuntimeNotFound",
-    "RuntimeContainmentStatus",
     "RuntimeOperationAuthority",
     "RuntimeOperationTarget",
     "RuntimeOperationTargetResolver",
