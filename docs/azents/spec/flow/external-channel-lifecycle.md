@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-09
-spec_version: 35
+last_verified_at: 2026-08-11
+spec_version: 36
 ---
 
 # External Channel Lifecycle
@@ -107,6 +107,9 @@ Editing a visible Discord connection replaces the submitted Application identity
 target Guild configuration, and complete Bot credential set in one fenced operation.
 It invalidates stale callback selector, Application claim, Gateway lease/checkpoint,
 gap, identity, capability, and health projections before callback activation repeats.
+Each activation attempt opens one authenticated pinned `discord.py` Client session and
+reuses it for current Application metadata, Bot identity, and Guild command
+reconciliation, then closes it before the activation attempt returns.
 Callback activation first persists the new selector hash and Discord Application public
 key under the unchanged credential and configuration-generation fences, commits that
 provisional PING-only authority, then asks Discord to register the endpoint. A failed
@@ -274,6 +277,10 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-11** (spec_version 36) — Reused one authenticated pinned `discord.py`
+  Client session across Discord activation metadata and command reconciliation while
+  preserving configuration fencing, activation deadlines, and the existing direct
+  endpoint and command-create gaps.
 - **2026-08-09** (spec_version 35) — Classified automatic Discord Interaction
   Endpoint registration as a removable direct-transport gap while the adopted public
   SDK cannot transmit the endpoint field.

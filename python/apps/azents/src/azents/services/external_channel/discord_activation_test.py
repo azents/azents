@@ -152,17 +152,23 @@ class _DiscordClientDouble:
         self.command_error = command_error
         self.endpoint_url: str | None = None
 
-    async def get_current_application(
+    @asynccontextmanager
+    async def open(
         self,
         *,
         bot_token: str,
-    ) -> DiscordApplicationMetadata:
+    ) -> AsyncGenerator["_DiscordClientDouble", None]:
+        """Yield one authenticated activation workflow session."""
         assert bot_token == "discord-bot-token"
+        yield self
+
+    async def get_current_application(
+        self,
+    ) -> DiscordApplicationMetadata:
         self.events.append("metadata")
         return DiscordApplicationMetadata(application_id="app-1", verify_key="ab" * 32)
 
-    async def get_current_bot_user_id(self, *, bot_token: str) -> str:
-        assert bot_token == "discord-bot-token"
+    def get_current_bot_user_id(self) -> str:
         self.events.append("bot")
         return "bot-1"
 
@@ -181,11 +187,9 @@ class _DiscordClientDouble:
     async def reconcile_required_guild_commands(
         self,
         *,
-        bot_token: str,
         application_id: str,
         guild_id: str,
     ) -> DiscordGuildCommandSetCapability:
-        assert bot_token == "discord-bot-token"
         assert application_id == "app-1"
         assert guild_id == "guild-1"
         self.events.append("command")

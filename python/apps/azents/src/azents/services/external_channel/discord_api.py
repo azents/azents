@@ -1,5 +1,6 @@
 """Minimal Discord REST adapter for connection-authority metadata."""
 
+import contextlib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from enum import StrEnum
@@ -19,6 +20,7 @@ from azents.services.external_channel.discord_sdk import (
     DiscordSDKRateLimited,
     DiscordSDKRequestRejected,
     DiscordSDKResourceUnavailable,
+    DiscordSDKSession,
     DiscordSDKUnavailable,
     get_discord_sdk_client_factory,
 )
@@ -269,7 +271,7 @@ class DiscordGuildCommandCreateHTTPTransport:
 
 
 class DiscordAPIClient:
-    """Use public discord.py operations plus the one command-create REST gap."""
+    """Use the pinned Discord SDK adapter plus closed direct REST gaps."""
 
     def __init__(
         self,
@@ -281,45 +283,43 @@ class DiscordAPIClient:
         self.interaction_endpoint_transport = interaction_endpoint_transport
         self.command_create_transport = command_create_transport
 
+    def open(
+        self,
+        *,
+        bot_token: str,
+    ) -> contextlib.AbstractAsyncContextManager["DiscordAPIAuthenticatedSession"]:
+        """Open one authenticated SDK session for an Application workflow."""
+        return self._open(bot_token=bot_token)
+
+    @contextlib.asynccontextmanager
+    async def _open(
+        self,
+        *,
+        bot_token: str,
+    ) -> AsyncIterator["DiscordAPIAuthenticatedSession"]:
+        try:
+            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
+                yield DiscordAPIAuthenticatedSession(
+                    sdk=sdk,
+                    bot_token=bot_token,
+                    command_create_transport=self.command_create_transport,
+                )
+        except DiscordSDKError as error:
+            raise _api_error(error) from error
+
     async def get_current_application(
         self,
         *,
         bot_token: str,
     ) -> DiscordApplicationMetadata:
         """Return App identity and interaction verification key."""
-        try:
-            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
-                application = await sdk.fetch_application()
-        except DiscordSDKError as error:
-            raise _api_error(error) from error
-        application_id = application.application_id
-        verify_key = application.verify_key
-        if (
-            not isinstance(application_id, str)
-            or not application_id
-            or not isinstance(verify_key, str)
-            or len(verify_key) != 64
-        ):
-            raise DiscordAPIUnavailable
-        try:
-            bytes.fromhex(verify_key)
-        except ValueError as error:
-            raise DiscordAPIUnavailable from error
-        return DiscordApplicationMetadata(
-            application_id=application_id,
-            verify_key=verify_key,
-        )
+        async with self.open(bot_token=bot_token) as session:
+            return await session.get_current_application()
 
     async def get_current_bot_user_id(self, *, bot_token: str) -> str:
         """Return the current Bot user identity required for mention classification."""
-        try:
-            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
-                bot_user_id = sdk.current_bot_user_id()
-        except DiscordSDKError as error:
-            raise _api_error(error) from error
-        if not bot_user_id.isdigit():
-            raise DiscordAPIUnavailable
-        return bot_user_id
+        async with self.open(bot_token=bot_token) as session:
+            return session.get_current_bot_user_id()
 
     async def configure_interactions_endpoint(
         self,
@@ -341,15 +341,11 @@ class DiscordAPIClient:
         guild_id: str,
     ) -> tuple[DiscordGuildCommand, ...]:
         """List sanitized current application commands for one target Guild."""
-        try:
-            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
-                commands = await sdk.list_guild_commands(
-                    application_id=application_id,
-                    guild_id=guild_id,
-                )
-        except DiscordSDKError as error:
-            raise _api_error(error) from error
-        return tuple(_command_from_sdk(command) for command in commands)
+        async with self.open(bot_token=bot_token) as session:
+            return await session.list_guild_commands(
+                application_id=application_id,
+                guild_id=guild_id,
+            )
 
     async def create_guild_command(
         self,
@@ -377,21 +373,15 @@ class DiscordAPIClient:
         definition: DiscordGuildCommandDefinition,
     ) -> DiscordGuildCommand:
         """Update one recognized Azents-owned Guild command to its current contract."""
-        try:
-            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
-                await sdk.list_guild_commands(
-                    application_id=application_id,
-                    guild_id=guild_id,
-                )
-                updated = await sdk.update_guild_command(
-                    command_id=command_id,
-                    name=definition.name,
-                    command_type=definition.command_type,
-                    description=definition.description,
-                )
-        except DiscordSDKError as error:
-            raise _api_error(error) from error
-        return _command_from_sdk(updated)
+        async with self.open(bot_token=bot_token) as session:
+            await session.list_guild_commands(
+                application_id=application_id,
+                guild_id=guild_id,
+            )
+            return await session.update_guild_command(
+                command_id=command_id,
+                definition=definition,
+            )
 
     async def delete_guild_command(
         self,
@@ -402,15 +392,12 @@ class DiscordAPIClient:
         command_id: str,
     ) -> None:
         """Delete one recognized obsolete Azents-owned Guild command."""
-        try:
-            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
-                await sdk.list_guild_commands(
-                    application_id=application_id,
-                    guild_id=guild_id,
-                )
-                await sdk.delete_guild_command(command_id=command_id)
-        except DiscordSDKError as error:
-            raise _api_error(error) from error
+        async with self.open(bot_token=bot_token) as session:
+            await session.list_guild_commands(
+                application_id=application_id,
+                guild_id=guild_id,
+            )
+            await session.delete_guild_command(command_id=command_id)
 
     async def reconcile_required_guild_commands(
         self,
@@ -420,52 +407,129 @@ class DiscordAPIClient:
         guild_id: str,
     ) -> DiscordGuildCommandSetCapability:
         """Reconcile only known Azents commands without replacing customer commands."""
+        async with self.open(bot_token=bot_token) as session:
+            return await session.reconcile_required_guild_commands(
+                application_id=application_id,
+                guild_id=guild_id,
+            )
+
+
+class DiscordAPIAuthenticatedSession:
+    """One authenticated SDK session for a bounded Application workflow."""
+
+    def __init__(
+        self,
+        *,
+        sdk: DiscordSDKSession,
+        bot_token: str,
+        command_create_transport: DiscordGuildCommandCreateTransport,
+    ) -> None:
+        self.sdk = sdk
+        self.bot_token = bot_token
+        self.command_create_transport = command_create_transport
+
+    async def get_current_application(self) -> DiscordApplicationMetadata:
+        """Return App identity and interaction verification key."""
+        application = await self.sdk.fetch_application()
+        application_id = application.application_id
+        verify_key = application.verify_key
+        if (
+            not isinstance(application_id, str)
+            or not application_id
+            or not isinstance(verify_key, str)
+            or len(verify_key) != 64
+        ):
+            raise DiscordAPIUnavailable
+        try:
+            bytes.fromhex(verify_key)
+        except ValueError as error:
+            raise DiscordAPIUnavailable from error
+        return DiscordApplicationMetadata(
+            application_id=application_id,
+            verify_key=verify_key,
+        )
+
+    def get_current_bot_user_id(self) -> str:
+        """Return the authenticated Bot identity from the current login."""
+        bot_user_id = self.sdk.current_bot_user_id()
+        if not bot_user_id.isdigit():
+            raise DiscordAPIUnavailable
+        return bot_user_id
+
+    async def list_guild_commands(
+        self,
+        *,
+        application_id: str,
+        guild_id: str,
+    ) -> tuple[DiscordGuildCommand, ...]:
+        """List sanitized current application commands for one target Guild."""
+        commands = await self.sdk.list_guild_commands(
+            application_id=application_id,
+            guild_id=guild_id,
+        )
+        return tuple(_command_from_sdk(command) for command in commands)
+
+    async def update_guild_command(
+        self,
+        *,
+        command_id: str,
+        definition: DiscordGuildCommandDefinition,
+    ) -> DiscordGuildCommand:
+        """Update one recognized Azents-owned Guild command."""
+        updated = await self.sdk.update_guild_command(
+            command_id=command_id,
+            name=definition.name,
+            command_type=definition.command_type,
+            description=definition.description,
+        )
+        return _command_from_sdk(updated)
+
+    async def delete_guild_command(self, *, command_id: str) -> None:
+        """Delete one recognized obsolete Azents-owned Guild command."""
+        await self.sdk.delete_guild_command(command_id=command_id)
+
+    async def reconcile_required_guild_commands(
+        self,
+        *,
+        application_id: str,
+        guild_id: str,
+    ) -> DiscordGuildCommandSetCapability:
+        """Reconcile required commands inside the current authenticated session."""
         selected: dict[DiscordGuildCommandRole, DiscordGuildCommand] = {}
         obsolete: list[DiscordGuildCommand] = []
-        try:
-            async with self.sdk_factory.open(bot_token=bot_token) as sdk:
-                current = tuple(
-                    _command_from_sdk(command)
-                    for command in await sdk.list_guild_commands(
-                        application_id=application_id,
-                        guild_id=guild_id,
-                    )
+        current = await self.list_guild_commands(
+            application_id=application_id,
+            guild_id=guild_id,
+        )
+        for definition in DISCORD_REQUIRED_GUILD_COMMANDS:
+            matching = sorted(
+                (command for command in current if definition.owns(command)),
+                key=lambda command: (
+                    not definition.matches(command),
+                    command.command_id,
+                ),
+            )
+            if not matching:
+                created = await self.command_create_transport.create(
+                    bot_token=self.bot_token,
+                    application_id=application_id,
+                    guild_id=guild_id,
+                    definition=definition,
                 )
-                for definition in DISCORD_REQUIRED_GUILD_COMMANDS:
-                    matching = sorted(
-                        (command for command in current if definition.owns(command)),
-                        key=lambda command: (
-                            not definition.matches(command),
-                            command.command_id,
-                        ),
-                    )
-                    if not matching:
-                        created = await self.command_create_transport.create(
-                            bot_token=bot_token,
-                            application_id=application_id,
-                            guild_id=guild_id,
-                            definition=definition,
-                        )
-                        _require_definition_match(created, definition)
-                        selected[definition.role] = created
-                        continue
-                    selected_command = matching[0]
-                    if not definition.matches(selected_command):
-                        selected_command = _command_from_sdk(
-                            await sdk.update_guild_command(
-                                command_id=selected_command.command_id,
-                                name=definition.name,
-                                command_type=definition.command_type,
-                                description=definition.description,
-                            )
-                        )
-                        _require_definition_match(selected_command, definition)
-                    selected[definition.role] = selected_command
-                    obsolete.extend(matching[1:])
-                for command in obsolete:
-                    await sdk.delete_guild_command(command_id=command.command_id)
-        except DiscordSDKError as error:
-            raise _api_error(error) from error
+                _require_definition_match(created, definition)
+                selected[definition.role] = created
+                continue
+            selected_command = matching[0]
+            if not definition.matches(selected_command):
+                selected_command = await self.update_guild_command(
+                    command_id=selected_command.command_id,
+                    definition=definition,
+                )
+                _require_definition_match(selected_command, definition)
+            selected[definition.role] = selected_command
+            obsolete.extend(matching[1:])
+        for command in obsolete:
+            await self.delete_guild_command(command_id=command.command_id)
         try:
             return DiscordGuildCommandSetCapability(
                 schema_version=1,

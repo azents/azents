@@ -216,6 +216,46 @@ async def test_reads_current_bot_user_identity_from_sdk() -> None:
 
 
 @pytest.mark.asyncio
+async def test_activation_workflow_reuses_one_authenticated_sdk_session() -> None:
+    """Metadata, Bot identity, and command reconciliation share one SDK login."""
+    session = _SDKSession(
+        commands=[
+            DiscordSDKCommand(
+                command_id="101",
+                name=DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
+                command_type=3,
+                description=None,
+            ),
+            DiscordSDKCommand(
+                command_id="102",
+                name=DISCORD_AZENTS_SETTINGS_COMMAND_NAME,
+                command_type=1,
+                description="Configure Azents settings.",
+            ),
+            DiscordSDKCommand(
+                command_id="103",
+                name="Conversation settings",
+                command_type=3,
+                description=None,
+            ),
+        ]
+    )
+    client, factory, _, _ = _client(session)
+
+    async with client.open(bot_token="redacted-token") as workflow:
+        metadata = await workflow.get_current_application()
+        bot_user_id = workflow.get_current_bot_user_id()
+        command_set = await workflow.reconcile_required_guild_commands(
+            application_id=metadata.application_id,
+            guild_id="guild-1",
+        )
+
+    assert bot_user_id == "123456789012345678"
+    assert command_set.command_id_for(DiscordGuildCommandRole.MESSAGE_ACTION) == "101"
+    assert factory.open_count == 1
+
+
+@pytest.mark.asyncio
 async def test_configures_interaction_endpoint_through_direct_gap() -> None:
     """Endpoint configuration uses only the approved fixed-route transport."""
     client, _, endpoint, _ = _client()

@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field, replace
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -25,6 +26,7 @@ from azents.services.external_channel.channel_action import (
     _provider_mutation_outcome,
 )
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
+from azents.services.external_channel.discord_sdk import DiscordSDKUnavailable
 from azents.services.external_channel.provider_effect import (
     ProviderOperationKey,
     ProviderTarget,
@@ -33,6 +35,49 @@ from azents.services.external_channel.slack_events import SlackControlMessageRes
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 _SESSION_URL = "https://azents.example/w/team/agents/agent-1/sessions/session-1"
+
+
+@dataclass
+class _DiscordClientDelegate:
+    open_error: Exception | None = None
+    ensure_thread: AsyncMock = field(default_factory=AsyncMock)
+    create_message: AsyncMock = field(default_factory=AsyncMock)
+    create_file_message: AsyncMock = field(default_factory=AsyncMock)
+    update_message: AsyncMock = field(default_factory=AsyncMock)
+    delete_message: AsyncMock = field(default_factory=AsyncMock)
+
+
+class _OpenableDiscordClient:
+    def __init__(self, delegate: _DiscordClientDelegate) -> None:
+        self.delegate = delegate
+        self.opens = 0
+
+    @asynccontextmanager
+    async def open(
+        self,
+        *,
+        bot_token: str,
+    ) -> AsyncIterator["_OpenableDiscordClient"]:
+        assert bot_token == "discord-secret"
+        self.opens += 1
+        if self.delegate.open_error is not None:
+            raise self.delegate.open_error
+        yield self
+
+    async def ensure_thread(self, **values: object) -> DiscordDeliveryResult:
+        return await self.delegate.ensure_thread(**values)
+
+    async def create_message(self, **values: object) -> DiscordDeliveryResult:
+        return await self.delegate.create_message(**values)
+
+    async def create_file_message(self, **values: object) -> DiscordDeliveryResult:
+        return await self.delegate.create_file_message(**values)
+
+    async def update_message(self, **values: object) -> DiscordDeliveryResult:
+        return await self.delegate.update_message(**values)
+
+    async def delete_message(self, **values: object) -> DiscordDeliveryResult:
+        return await self.delegate.delete_message(**values)
 
 
 def _target(
@@ -89,9 +134,12 @@ def _target(
 def _service(
     *,
     slack_client: object | None = None,
-    discord_client: object | None = None,
+    discord_client: _DiscordClientDelegate | None = None,
     exchange_file_service: object | None = None,
 ) -> ExternalChannelActionService:
+    bound_discord_client: object | None = None
+    if discord_client is not None:
+        bound_discord_client = _OpenableDiscordClient(discord_client)
     return cast(
         ExternalChannelActionService,
         SimpleNamespace(
@@ -100,7 +148,7 @@ def _service(
                 avatar_cdn_base_url=None,
             ),
             slack_client=slack_client,
-            discord_client=discord_client,
+            discord_client=bound_discord_client,
             exchange_file_service=exchange_file_service,
         ),
     )
@@ -270,7 +318,7 @@ async def test_discord_exchange_file_delivery_does_not_require_runtime_storage()
 
     result = await ExternalChannelActionService._deliver_discord(
         _service(
-            discord_client=SimpleNamespace(
+            discord_client=_DiscordClientDelegate(
                 create_file_message=create_file_message,
             ),
             exchange_file_service=object(),
@@ -363,7 +411,7 @@ async def test_discord_tracker_delivery_includes_session_navigation(
             error_summary=None,
         )
     )
-    discord_client = SimpleNamespace(
+    discord_client = _DiscordClientDelegate(
         create_message=method if method_name == "create_message" else AsyncMock(),
         update_message=method if method_name == "update_message" else AsyncMock(),
     )
@@ -393,3 +441,132 @@ async def test_discord_tracker_delivery_includes_session_navigation(
             ],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_discord_parent_file_delivery_does_not_open_sdk_session() -> None:
+    """The multipart direct gap does not add an unnecessary Discord login."""
+    create_file_message = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    service = _service(
+        discord_client=_DiscordClientDelegate(create_file_message=create_file_message)
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload["files"] = [
+        {
+            "source": "exchange",
+            "path": "exchange://file-1",
+            "filename": "report.txt",
+            "media_type": "text/plain",
+            "expected_size": 12,
+        }
+    ]
+    target.request_payload.pop("embeds")
+
+    result = await ExternalChannelActionService._deliver_discord(
+        service,
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-file"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=cast(Any, object()),
+    )
+
+    assert result.status == "delivered"
+    assert cast(_OpenableDiscordClient, service.discord_client).opens == 0
+    create_file_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_discord_thread_effect_reuses_one_sdk_session() -> None:
+    """Thread provisioning and the adjacent message share one login."""
+    ensure_thread = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord-thread:444",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    create_message = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    service = _service(
+        discord_client=_DiscordClientDelegate(
+            ensure_thread=ensure_thread,
+            create_message=create_message,
+        )
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "conversation_scope": "thread",
+            "thread_parent_channel_id": "222",
+            "thread_root_message_id": "333",
+        }
+    )
+
+    result = await ExternalChannelActionService._deliver_discord(
+        service,
+        replace(target, resource_id=None),
+        operation_key=ProviderOperationKey.from_seed("discord-thread"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    assert result.status == "delivered"
+    assert cast(_OpenableDiscordClient, service.discord_client).opens == 1
+    ensure_thread.assert_awaited_once()
+    create_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_discord_thread_session_open_failure_is_an_unknown_outcome() -> None:
+    """A workflow login failure retains the delivery error contract."""
+    service = _service(
+        discord_client=_DiscordClientDelegate(open_error=DiscordSDKUnavailable())
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "conversation_scope": "thread",
+            "thread_parent_channel_id": "222",
+            "thread_root_message_id": "333",
+        }
+    )
+
+    result = await ExternalChannelActionService._deliver_discord(
+        service,
+        replace(target, resource_id=None),
+        operation_key=ProviderOperationKey.from_seed("discord-thread-open"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    assert result.status == "unknown"
+    assert result.error_kind == "provider_ambiguous"

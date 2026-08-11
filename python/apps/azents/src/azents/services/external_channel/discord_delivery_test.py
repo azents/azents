@@ -235,6 +235,34 @@ async def test_thread_title_read_update_and_message_delete_use_sdk() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bound_delivery_workflow_reuses_one_sdk_factory_open() -> None:
+    """Several delivery methods share one authenticated SDK factory lifecycle."""
+    session = _SDKSession(thread=DiscordSDKThread("444", "222", "111", "Old"))
+    factory = _SDKFactory(session)
+    client = DiscordDeliveryClient(factory, _FileTransport())
+
+    async with client.open(bot_token="discord-secret") as workflow:
+        await workflow.read_thread_title(
+            bot_token="discord-secret",
+            guild_id="111",
+            channel_id="444",
+        )
+        await workflow.create_message(
+            bot_token="discord-secret",
+            guild_id="111",
+            channel_id="333",
+            content="Reply",
+            operation_key=ProviderOperationKey.from_seed("delivery-workflow"),
+        )
+
+    assert factory.opens == 1
+    assert [name for name, _ in session.calls] == [
+        "fetch_thread",
+        "create_message",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_file_message_delegates_only_to_g2_transport() -> None:
     """Streaming file delivery bypasses the SDK only through exact gap G2."""
     session = _SDKSession()

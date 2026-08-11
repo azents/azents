@@ -2,6 +2,8 @@
 
 import asyncio
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, Literal, cast
 
@@ -19,17 +21,39 @@ from azents.services.external_channel.discord_delivery import (
     DiscordDeliveryResult,
     DiscordThreadTitleReadResult,
 )
+from azents.services.external_channel.discord_sdk import DiscordSDKUnavailable
 from azents.services.external_channel.thread_title import (
     ExternalChannelThreadTitleService,
 )
 
 
 class _DiscordClient:
-    def __init__(self, *, current_name: str, read_status: str = "present") -> None:
+    def __init__(
+        self,
+        *,
+        current_name: str,
+        read_status: str = "present",
+        open_error: Exception | None = None,
+    ) -> None:
         self.current_name = current_name
         self.read_status = read_status
+        self.open_error = open_error
         self.read_calls: list[dict[str, str]] = []
         self.update_calls: list[dict[str, str]] = []
+        self.opens = 0
+
+    @asynccontextmanager
+    async def open(
+        self,
+        *,
+        bot_token: str,
+    ) -> AsyncIterator["_DiscordClient"]:
+        """Yield one title workflow client."""
+        assert bot_token == "discord-secret"
+        self.opens += 1
+        if self.open_error is not None:
+            raise self.open_error
+        yield self
 
     async def read_thread_title(self, **kwargs: str) -> DiscordThreadTitleReadResult:
         self.read_calls.append(kwargs)
@@ -140,6 +164,7 @@ async def test_projection_conditionally_updates_once(
         }
     ]
     assert len(client.update_calls) == expected_updates
+    assert client.opens == 1
     if expected_updates:
         assert client.update_calls[0] == {
             "bot_token": "discord-secret",
@@ -168,6 +193,38 @@ async def test_projection_stops_without_provider_io_when_authority_is_missing(
         title="Incident response",
     )
 
+    assert client.read_calls == []
+    assert client.update_calls == []
+
+
+async def test_projection_session_open_failure_ends_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed workflow login remains a best-effort terminal outcome."""
+    client = _DiscordClient(
+        current_name="Test agent",
+        open_error=DiscordSDKUnavailable(),
+    )
+    service = _service(client)
+
+    async def load_authority(**kwargs: object) -> object:
+        del kwargs
+        return SimpleNamespace(
+            bot_token="discord-secret",
+            guild_id="111",
+            channel_id="444",
+            provisional_title="Test agent",
+        )
+
+    monkeypatch.setattr(service, "_load_authority", load_authority)
+
+    await service.project_generated_title(
+        session_id="session-1",
+        event=_event(),
+        title="Incident response",
+    )
+
+    assert client.opens == 1
     assert client.read_calls == []
     assert client.update_calls == []
 

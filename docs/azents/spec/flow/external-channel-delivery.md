@@ -36,7 +36,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-11
-spec_version: 40
+spec_version: 41
 ---
 
 # External Channel Delivery and Channel Work
@@ -124,10 +124,13 @@ customization is unavailable.
 
 ## Canonical Commit and Immediate Provider Effects
 
-Slack Web API mutations and Discord text/thread/message mutations execute through the
-providers' public SDK clients. Azents invokes each operation once inside the existing
-deadline and adds no direct fallback or post-ambiguity replay. Direct transport remains
-only for Discord multipart file-message create, Discord CDN attachment bytes, Slack
+Slack Web API mutations execute through the public SDK client. Discord
+text/thread/message mutations execute through the pinned `discord.py` Client's
+isolated private HTTP adapter so one caller-owned multi-operation effect reuses the
+same authenticated aiohttp session and SDK rate-limit state without high-level
+channel or message prefetches. Azents invokes each operation once inside the existing
+deadline and adds no fallback or post-ambiguity replay. Direct transport remains only
+for Discord multipart file-message create, Discord CDN attachment bytes, Slack
 private-file bytes, and Slack external-upload bytes; each retains its exact origin,
 length, chunk, authority, and one-attempt contract.
 
@@ -410,6 +413,11 @@ not roll back the terminal lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-11** (spec_version 41) — Reused one authenticated pinned `discord.py`
+  session across each multi-operation Discord delivery effect and moved supported
+  text, thread, message, history, and attachment operations to the isolated private
+  HTTP adapter without changing one-attempt, nonce, validation, or ambiguity
+  semantics.
 - **2026-08-11** (spec_version 40) — Kept authorized `exchange://` Channel
   publication available without a managed Runtime while retaining Runtime storage
   admission for absolute Runtime paths and mixed-source calls.
