@@ -53,8 +53,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-08-09
-spec_version: 87
+last_verified_at: 2026-08-10
+spec_version: 88
 ---
 
 # Toolkit
@@ -323,7 +323,16 @@ Strong invariant: **raw credential is never exposed in agent prompt**.
 
 ### Runtime Tool Execution and Shell Environment
 
-Runtime file/process tools (`exec_command` / `write_stdin` / import_file / present_file / read / write / grep / glob / ...) are auto-bound when runtime tools are enabled for the Agent. ShellEnvironment is a profile determining **which domains are allowed for external network calls**.
+Runtime file/process tools (`exec_command` / `write_stdin` / `import_file` / `present_file` /
+`read` / `write` / `grep` / `glob` / ...) are auto-bound only when the captured Agent capability
+snapshot grants the declared Runtime capability. ShellEnvironment is a profile determining **which
+domains are allowed for external network calls**.
+
+Projection and execution are separate fences. A managed-but-stopped Agent may project an authorized
+operation and lazily start/wait when that operation executes. Runtime-free and removing Agents omit
+the capability before Runtime ensure, Profile resolution, Runner dispatch, or credential collection.
+Every admitted operation rechecks the captured capability version and current state before external
+side effects; a concurrent removal fails closed instead of retargeting another Runtime incarnation.
 
 Memory Read and Memory Write are resolved as separate auto-bound capabilities. Memory Read exposes `list_memories`, `get_memory`, and `search_memories`. Memory Write exposes `save_memory` and `delete_memory`. Root execution mode binds both when Agent memory is enabled. The future subagent execution mode keeps Memory Read eligible and excludes Memory Write from auto-binding.
 
@@ -532,8 +541,8 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | `memory_read` | auto-bound when Agent memory is enabled; eligible for root and subagent execution modes | — |
 | `subagent` | auto-bound collaboration toolkit; eligible for root and subagent execution modes | `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` |
 | `memory_write` | auto-bound when Agent memory is enabled and execution mode is root | — |
-| `runtime` | auto-bound when runtime tools are enabled. Domain restriction by ShellEnvironment. | — |
-| `claude_rules` | auto-bound when runtime tools are enabled; exposes hooks only, no model-visible tools | — |
+| `runtime` | auto-bound only when the Agent is `managed` and shell-gated Runtime capabilities are enabled. Domain restriction by ShellEnvironment. | — |
+| `claude_rules` | auto-bound only when managed filesystem capability is granted; exposes hooks only, no model-visible tools | — |
 | `mcp` | ToolkitConfig.enabled=True and `auth_type` satisfied (`none`/`header`/`bearer`/`oauth2`) | `encrypted_credentials` for static auth or `MCPOAuthConnection` for OAuth2 |
 | `github` | depends on `github_auth_type` — `pat`: workspace ToolkitConfig credentials, `github_app`: installation ID, `github_app_platform`: System Settings-resolved platform App JWT with App-ID binding checks | ToolkitConfig `encrypted_credentials` plus the current effective Platform GitHub App Section |
 | `notion`, `sentry` | MCP + toolkit-level OAuth2 connection exists | `MCPOAuthConnection` |
@@ -543,9 +552,19 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 
 ### Runtime-Only Toolkit Boundary
 
-Memory Read, Memory Write, Runtime file/process tools, Goal, Todo, AGENTS.md, Claude Rules, schedule, and background-task behavior are runtime-owned capabilities rather than user-created `ToolkitConfig` rows unless explicitly represented in the ToolkitConfig API. Runtime-only toolkits are mounted by worker/runtime policy and are not inherited through `agent_toolkits` rows.
+Memory Read/Write, Goal, Todo, managed VFS Skills, subagent collaboration, schedule, and compatible
+remote Toolkit operations do not require a managed Runtime. Runtime file/process tools,
+filesystem Skill discovery/materialization, AGENTS.md/Claude Rules filesystem projection, Runtime
+transfer, Workspace/Project/Git operations, and Runtime credential exposure declare stable Runtime
+capabilities and are projected only when the Agent is `managed`; shell-gated capabilities also
+require `shell_enabled`.
 
-Toolkit resolution receives an execution mode. Root sessions use root mode. Child sessions whose `AgentSession.session_kind` is `subagent` use subagent mode. This filter keeps root/user-facing capabilities such as Memory Write and Goal Toolkit out of subagent auto-binding without changing DB-registered ToolkitConfig resolution. Runtime file/process tools, Memory Read, Claude Rules, Skill, and Subagent collaboration remain eligible for subagent mode when their normal activation conditions are satisfied.
+Toolkit resolution receives an execution mode. Root sessions use root mode. Child sessions whose
+`AgentSession.session_kind` is `subagent` use subagent mode. This filter keeps root/user-facing
+capabilities such as Memory Write and Goal Toolkit out of subagent auto-binding without changing
+DB-registered ToolkitConfig resolution. Runtime-free mode retains compatible server and remote
+capabilities while omitting every Runtime-dependent tool, prompt, hook, filesystem projection, and
+credential injection path.
 
 
 ## Business Rules
@@ -761,6 +780,11 @@ longer eligible for idle continuation. Ordinary Session Todo state remains separ
 and never becomes the Channel Work source of truth.
 
 ## Changelog
+
+- **2026-08-10** (spec_version 88) — Separated Runtime-independent auto-bound and remote Toolkit
+  capabilities from managed Runtime capabilities, added capability/version admission before
+  Runtime/credential effects, and removed Runtime tool/prompt projection for Runtime-free and
+  removing Agents.
 
 - **2026-08-09** (spec_version 87) — Clarified one filesystem access policy with bwrap enforcement
   for shell/process Tools and direct Python enforcement for typed non-shell Runtime Tools.

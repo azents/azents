@@ -25,7 +25,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-08-10
-spec_version: 25
+spec_version: 26
 ---
 
 # E2E Primary Test Strategy
@@ -157,7 +157,16 @@ Always-on required CI does not depend on external credentials.
   leases, retry-tail movement, same-batch cursor views, final cursor CAS, atomic
   successful-subset mailbox admission, one post-batch wake, bounded failure logs,
   active diagnostics, producer recovery scans, and Redis-independent correctness.
-- Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run selected `runtime_provider` journeys, including Tool Search Runtime Hooks, provider-native External Channel progress, and the External Channel file-transfer journey. The lane loads the enforcing Runtime containment AppArmor profile before worktree-built images start and unloads it during cleanup. Contained journeys use Profile v2 and fail when required AppArmor evidence is absent rather than reporting a direct or skipped substitute as containment evidence.
+- Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run
+  selected `runtime_provider` journeys, including Tool Search Runtime Hooks, provider-native
+  External Channel progress, file transfer, and Optional Managed Runtime add/stop/remove/reconnect/
+  re-add. The Optional Managed Runtime journey proves stopped add without compute, lazy start,
+  Workspace preservation across temporary stop, irreversible removal pending through Provider
+  outage, exact acknowledgement after reconnect, higher-generation re-add, stale Session binding
+  rejection, and a newly created post-add Session binding to current Runner evidence. The lane loads
+  the enforcing Runtime containment AppArmor profile before worktree-built images start and unloads
+  it during cleanup. Contained journeys use Profile v2 and fail when required AppArmor evidence is
+  absent rather than reporting a direct or skipped substitute as containment evidence.
 - The change-filtered `ci-kubernetes-containment-e2e-run` is required for containment Profile,
   Runner backend/helper, Docker AppArmor, Kubernetes Provider, Helm, or conformance-driver changes.
   It installs pinned kind/kubectl tools, loads the enforcing AppArmor profile, builds the tested
@@ -174,18 +183,25 @@ Always-on required CI does not depend on external credentials.
   build timing metadata and Buildx cache disk usage, but never cache credentials or
   cache URLs. Testcontainers-managed Selenium remains an external image pull rather
   than an Actions-cached Docker archive.
-- Session working-folder coverage uses public API and the focused Docker Runtime
-  Provider without direct product-database writes. Project Browser verifies that a
-  Runner-ready Session exposes its Session folder first, retains it after registered
-  Project removal, and keeps pre-session preview Project-only. Worktree lifecycle
-  verifies a new worktree below the Session folder, action-specific durable terminal
-  history and idle handoff, archive-time Git plus whole-folder cleanup, external
-  symlink-target preservation, and restore without byte recovery. PostgreSQL
-  migration coverage starts from the pre-expand schema, verifies expand backfill
-  with `working_folder_path IS NULL` count zero, then verifies the non-null named
-  unique contract and reversible transitional index.
+- Session working-folder coverage uses public API and the focused Docker Runtime Provider without
+  direct product-database writes. Runtime-free roots prove nullable `none` bindings with no folder
+  setup; managed roots prove `pending` to `bound` using current Runner evidence; permanent removal
+  proves `pending`/`bound` to terminal `invalidated`; and re-add proves old `none`/`invalidated`
+  contexts remain unusable while only a new root can bind. Project Browser and worktree lifecycle
+  retain their existing bound-context checks. PostgreSQL migration coverage starts from the
+  pre-feature schema, backfills existing Agents to `managed` and existing folder paths to `bound`,
+  permits nullable paths for Runtime-free contexts, and validates the downgrade guard against
+  unrepresentable optional-Runtime state.
+- Deterministic Optional Managed Runtime E2E creates a Runtime-free Agent through public APIs,
+  executes and persists a model-only turn, verifies no logical or physical Runtime appears, and
+  confirms Runtime-backed Workspace projection remains unavailable.
 - Web Surface E2E runs in a separate parallel lane with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src/tests`.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
+- Optional Managed Runtime Web Surface E2E creates all product state through public/admin APIs,
+  then uses the real Main Web and server projections to prove the Runtime-free new-Session guidance,
+  Profile-backed Add Runtime confirmation, managed controls, aggregate-only destructive removal
+  confirmation, and non-cancellable removal progress. The browser journey does not write directly
+  to PostgreSQL or derive Runtime actions in test code.
 - The stable `ci-python-e2e` required gate aggregates Testenv unit plus the
   deterministic, focused Runtime Provider, and Web Surface lane results for the
   scopes selected by path filtering.
@@ -247,6 +263,12 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-08-10** — v26. Added Optional Managed Runtime deterministic, focused Docker Provider, and
+  Web Surface E2E policy, including Runtime-free model execution and UI guidance, explicit add,
+  lazy start, Provider-outage removal, privacy-safe progress, exact reconnect acknowledgement,
+  higher-generation re-add, destructive browser confirmation, and nullable Session binding
+  migration/invalidation evidence.
 
 - **2026-08-10** — v25. Added deterministic active-ingress barriers, ordered
   `Retry-After` controls, durable acknowledgement-before-history evidence,

@@ -2,6 +2,7 @@
 title: "Optional Managed Runtime for Agents Design"
 created: 2026-08-03
 updated: 2026-08-10
+implemented: 2026-08-10
 tags: [agent, runtime, workspace, backend, frontend, security, testenv]
 document_role: primary
 document_type: design

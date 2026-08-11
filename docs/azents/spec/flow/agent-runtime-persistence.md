@@ -7,9 +7,13 @@ owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation]
 code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
+  - python/apps/azents/src/azents/rdb/models/agent_runtime_add.py
+  - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent_runtime/**
+  - python/apps/azents/src/azents/repos/agent_runtime_add/**
+  - python/apps/azents/src/azents/repos/agent_runtime_removal/**
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
@@ -22,23 +26,28 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-09
-spec_version: 20
+last_verified_at: 2026-08-10
+spec_version: 21
 ---
 
 # Agent Runtime Persistence
 
 ## Overview
 
-Agent Workspace durability is owned by the Runtime Provider backend, not by the Azents server
-process and not by S3 checkpoint/restore as an event path. The current-generation Runner reports
-the effective Agent Workspace absolute path as Runtime metadata. Server file APIs, Projects,
-worktrees, and prompts consume that reported path without a fixed server-side fallback.
+Managed Agent Workspace durability is owned by the Runtime Provider backend, not by the Azents
+server process and not by S3 checkpoint/restore as an event path. An Agent may be Runtime-free and
+have no logical Runtime row or Workspace. When managed compute exists, the current-generation
+Runner reports the effective Agent Workspace absolute path as Runtime metadata. Server file APIs,
+Projects, worktrees, and prompts consume that reported path without a fixed server-side fallback.
 
 ## Runtime Profile binding and configuration revisions
 
-An Agent stores one exact Workspace Runtime Profile selection or no selection. When the logical
-Runtime row is ensured, the Runtime Profile resolver reads that exact Profile and persists the
+An Agent stores capability `none`, `managed`, or `removing` independently from one exact Workspace
+Runtime Profile selection or no selection. Existing Agents were backfilled to `managed`; new Agents
+default to `none` and do not create a logical Runtime. Explicit add from `none` requires an
+available Profile and creates or rearms the logical row in stopped desired state.
+
+When the logical Runtime row is created or reconciled, the Runtime Profile resolver reads that exact Profile and persists the
 logical/durable Provider routing IDs, infrastructure Profile ID, Workspace Runtime Profile ID, and
 an immutable desired configuration revision. It does not consult a Provider preference, Platform
 default, environment default, fallback, or live Provider connection state.
@@ -119,6 +128,22 @@ directory or PVC remains intact.
 
 Any ambiguous backend outcome is treated as unavailable or retryable until Provider evidence proves
 the desired state. Ambiguity is not permission to delete the workspace.
+
+Permanent managed Runtime removal persists one Agent-scoped operation with irreversible capability
+fence, cleanup cursor/counts, interruption evidence, retry/lease state, exact target terminal-delete
+generation, acknowledgement kind/time, and bounded failures. PostgreSQL is sufficient for
+correctness; Redis may only accelerate wake-up.
+
+Removal clears Session Project/worktree metadata, Runtime-only Toolkit projections, Agent Project
+defaults/presets/catalog, and automatic Project policy items while preserving the automatic policy
+settings row. It terminally invalidates every retained `pending` or `bound` Session folder binding.
+After exact physical acknowledgement, finalization clears Profile selection, keeps shell disabled,
+and sets capability to `none`.
+
+Re-add reuses a retained logical Runtime ID only after completed removal and exact acknowledgement.
+It advances desired generation, attaches a newly resolved Profile revision, and starts stopped with
+no Workspace path or applied incarnation evidence. The Provider therefore creates a fresh empty
+Workspace on later start; old Session bindings and deleted Project/worktree rows are never restored.
 
 ## Kubernetes Provider v2
 
@@ -251,6 +276,10 @@ Required checks:
   policy/override/snapshot schema.
 
 ## Changelog
+
+- **2026-08-10 (spec_version=21)** — Made AgentRuntime optional, added durable add/removal
+  transition persistence and bounded cleanup evidence, preserved the empty automatic Project policy
+  authority, and defined acknowledged higher-generation re-add with a fresh Workspace.
 
 - **2026-08-09 (spec_version=20)** — Removed live Provider connectivity from immutable
   configuration revision identity while retaining connection-gated lifecycle dispatch and

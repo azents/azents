@@ -97,8 +97,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-09
-spec_version: 61
+last_verified_at: 2026-08-10
+spec_version: 62
 ---
 
 # Workspace & Membership
@@ -221,7 +221,10 @@ erDiagram
 
 ### Agent Workspace Runtime State
 
-Agent Workspace API exposes Agent-based Runtime lifecycle state to user. `GET /chat/v1/agents/{agent_id}/workspace` is a read API, so it does not automatically start Runtime start/reset. Server reads PostgreSQL Runtime state as source of truth and returns `runtime`, `workspace`, and `actions` by summarizing Provider observed state, Provider connection state, and Runner state.
+Agent Workspace API exposes Agent Runtime capability and lifecycle state. Read APIs do not ensure or
+start a Runtime. Server reads PostgreSQL capability, optional logical Runtime, Provider/Runner state,
+and durable removal progress as source of truth and returns server-computed Workspace state and
+actions.
 
 UI renders server-calculated summary/actions. It does not recompute availability on frontend by combining Provider/Runner raw state. Frontend-side judgment is limited to API failure and network error.
 
@@ -229,6 +232,8 @@ The concrete-session Workspace panel requests the Project browser manifest only 
 
 | Runtime summary | Workspace response | Behavior |
 |---|---|---|
+| capability `none` | `UNAVAILABLE` | No managed Runtime authority. Show capability-aware empty state and Add Runtime when authorized |
+| capability `removing` | `UNAVAILABLE` | Runtime access is revoked while irreversible removal remains pending. Show progress and no add/cancel action |
 | `STOPPED` | `UNAVAILABLE` | No currently running Runtime. Provide start action |
 | `STARTING` / `STOPPING` / `RESETTING` / `RECOVERING` | `UNAVAILABLE` or transitional summary | In transition. Do not expose READY early |
 | `PROVIDER_DISCONNECTED` | `UNAVAILABLE` | No Provider connection/observation, so lifecycle/workspace access unavailable. Show explicit error |
@@ -284,8 +289,9 @@ Profile v2 and contained Profile v2, and rejects Kubernetes DinD plus process co
 and Agent surfaces can select the complete Profile but cannot edit backend or security arguments.
 
 Each Workspace also stores a nullable default Runtime Profile and an optimistic default version.
-The default is copied once when a new Agent omits an explicit selection. Changing or clearing the
-default does not modify existing Agents.
+The default is picker assistance only; omitting Runtime selection on Agent creation produces a
+Runtime-free Agent and does not copy the default. Changing or clearing the default does not modify
+existing Agents.
 
 Parent Profile changes enqueue authoritative desired-configuration reconciliation for affected
 Agents. NetworkPolicy-only Kubernetes changes may be adopted in place after exact evidence.
@@ -316,6 +322,9 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
   `SessionAgentContext`. It performs no Runtime I/O at Session creation time.
   Existing Sessions keep their context-owned snapshot when policy configuration
   changes.
+- Permanent Runtime removal clears automatic policy items, defaults, presets, catalog rows, context
+  Projects, and managed worktree metadata. It preserves the automatic policy settings row as an
+  empty revisioned policy required by later root Session creation.
 - `agent_project_defaults` stores the last non-empty new-session workspace selection used when creating a non-primary session for the Agent. New-session defaults come from this table, not from the current live Project rows of the most recent session. Creating a new session with non-empty existing Project paths or setup actions replaces the stored defaults in selection order; creating a session with an empty selection leaves the stored defaults unchanged.
 - `GET /chat/v1/agents/{agent_id}/session-project-defaults` returns both legacy `project_paths` and ordered `items` for the new-session UI, including source metadata (`empty` or `last_created_session`).
 - `agent_project_presets` stores agent-scoped recent Project path presets. Creating a new session with selected Projects or registering an existing Project refreshes matching presets. `GET /chat/v1/agents/{agent_id}/project-presets` returns these presets ordered by recent use.
@@ -348,42 +357,29 @@ Git-backed Project root rows separate registry removal from destructive cleanup.
 
 ### Session working-folder lifecycle
 
-Each root Session context stores one exact, unique, non-null working-folder path
-under the current Runner-reported Agent Workspace. The server persists that path at
-context creation and reuses it for all descendants; it does not reconstruct a
-replacement path from a fixed server root. Initial creation, forward adoption,
-restore, and explicit retry can enqueue the same system-only, queue-first folder
-setup action. Physical presence is not durable state: Runner stat/list is current
-truth, so setup failure or Runtime reset leaves the entry visible and permits later
-Agent repair or explicit retry.
+Each root `SessionAgentContext` stores a nullable historical path, optional logical Runtime ID, and
+one binding state:
 
-The existing-session Project browser prepends the fixed Session-folder entry before
-registered Project roots. It has `source.type: "session_folder"`, no Project ID,
-`prepare_session_folder: true`, and no root removal, filesystem delete, move, or
-rename capability. It remains visible when the physical directory is missing. The
-frontend preserves Session files before all other displayed Projects roots after
-its own entry sorting and displays the manifest-provided exact working-folder path
-as dimmed, truncatable supporting text while retaining the Session files name.
-Existing browser search continues to exclude an unmatched Session files entry, and
-All files mode keeps its independent directory ordering. The same root protection
-applies to direct workspace mutation surfaces, while ordinary descendant file
-operations remain available. Pre-session manifest preview remains Project-only.
+- `none` is assigned to roots created while Runtime-free. It has no path and is never eligible for
+  later automatic binding.
+- `pending` is assigned to managed roots before current Runner Workspace evidence is available. An
+  explicitly authorized Session-folder preparation may bind it exactly once.
+- `bound` owns one exact unique path under the current Runner-reported Agent Workspace. Only this
+  state authorizes Session files, Project/worktree operations, Runtime prompt/default workdir, and
+  archive folder cleanup.
+- `invalidated` retains its historical path and removal evidence for audit after permanent Runtime
+  removal but authorizes no Runner, browser, setup, retry, Project, worktree, or archive operation.
 
-The stored path is the authority for ordinary non-Project Session work, new
-worktree allocation, root mutation protection, and archive cleanup. New worktrees
-allocate below `{working_folder_path}/worktrees/{repository_leaf}` and remain both
-nested within the Session-folder filesystem tree and independently registered as
-top-level Git Projects. Recorded legacy allocations retain their stored paths and
-their existing cleanup rule.
+The existing-session Project browser includes the Session-folder entry only for an active managed
+binding. Runtime-free and invalidated contexts return a capability-aware unavailable state rather
+than exposing a historical path. A later Runtime add never binds an old `none` or `invalidated`
+context; only a newly created post-add root may enter `pending` and then `bound`.
 
-Archive commits the complete Session tree and its retention snapshot before external
-cleanup. One successful archive request then makes one best-effort typed Git cleanup
-attempt for each eligible allocation and one lexical recursive delete attempt for
-the exact stored Session-folder path, even if Git cleanup degraded. Cleanup records
-the bounded terminal outcome without changing archive success. Restore preserves the
-stored path but does not recover deleted files or worktrees. Retention purge is
-database-only: it neither accesses Runtime/Git/filesystem state nor retries failed
-folder cleanup.
+New worktrees allocate below a currently bound Session folder and remain independently registered
+as top-level Git Projects. Archive performs best-effort Git and folder cleanup only for an
+authorized `bound` context. Permanent Runtime removal invalidates all retained `pending` and
+`bound` contexts in bounded batches and relies on terminal Runtime deletion for physical Workspace
+removal instead of dispatching per-Session folder deletion. Retention purge remains database-only.
 
 ### Workspace Home / Membership UI
 
@@ -693,6 +689,11 @@ stateDiagram-v2
 - **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
+
+- **2026-08-10 (spec_version=62)** — Added Runtime-free and removing Workspace states, made the
+  Workspace default Profile picker-only, introduced nullable Session binding lifecycle and
+  invalidation, and documented destructive Project projection cleanup with automatic policy-row
+  preservation.
 
 - **2026-08-09 (spec_version=61)** — Made exact Runtime-backed Workspace operations wait through
   transient same-generation Provider and Runner reconnect gaps within their existing bounded

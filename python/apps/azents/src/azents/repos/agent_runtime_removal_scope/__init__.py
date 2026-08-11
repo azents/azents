@@ -16,6 +16,9 @@ from azents.core.enums import (
     SessionWorkingFolderCleanupStatus,
 )
 from azents.rdb.models.action_execution import RDBActionExecution
+from azents.rdb.models.agent_automatic_project_item import (
+    RDBAgentAutomaticProjectItem,
+)
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
@@ -312,6 +315,16 @@ class AgentRuntimeRemovalScopeRepository:
         if pending_binding:
             raise RuntimeError("Agent Runtime Session binding cleanup is incomplete")
 
+        automatic_project_policy_exists = await session.scalar(
+            sa.select(
+                sa.exists().where(
+                    RDBAgentAutomaticProjectSetting.agent_id == agent_id,
+                )
+            )
+        )
+        if not automatic_project_policy_exists:
+            raise RuntimeError("Agent automatic Project policy is missing")
+
         context_ids = sa.select(RDBSessionAgentContext.id).where(
             RDBSessionAgentContext.agent_id == agent_id
         )
@@ -329,9 +342,9 @@ class AgentRuntimeRemovalScopeRepository:
                 "Session Project metadata",
             ),
             (
-                RDBAgentAutomaticProjectSetting,
-                RDBAgentAutomaticProjectSetting.agent_id == agent_id,
-                "Agent automatic Project settings",
+                RDBAgentAutomaticProjectItem,
+                RDBAgentAutomaticProjectItem.agent_id == agent_id,
+                "Agent automatic Project items",
             ),
             (
                 RDBAgentProjectCatalogEntry,
@@ -429,8 +442,27 @@ class AgentRuntimeRemovalScopeRepository:
                     RDBGitWorktreePathClaim.agent_runtime_id == agent_runtime_id
                 )
             )
+        automatic_project_items_exist = sa.exists().where(
+            RDBAgentAutomaticProjectItem.agent_id == agent_id
+        )
+        await session.execute(
+            sa.update(RDBAgentAutomaticProjectSetting)
+            .where(
+                RDBAgentAutomaticProjectSetting.agent_id == agent_id,
+                automatic_project_items_exist,
+            )
+            .values(
+                revision=RDBAgentAutomaticProjectSetting.revision + 1,
+                updated_by_workspace_user_id=None,
+                updated_at=sa.func.now(),
+            )
+        )
+        await session.execute(
+            sa.delete(RDBAgentAutomaticProjectItem).where(
+                RDBAgentAutomaticProjectItem.agent_id == agent_id
+            )
+        )
         for model in (
-            RDBAgentAutomaticProjectSetting,
             RDBAgentProjectCatalogEntry,
             RDBAgentProjectDefault,
             RDBAgentProjectPreset,

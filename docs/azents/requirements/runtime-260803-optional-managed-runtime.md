@@ -2,6 +2,7 @@
 title: "Optional Managed Runtime for Agents Requirements"
 created: 2026-08-03
 updated: 2026-08-03
+implemented: 2026-08-10
 tags: [agent, runtime, workspace, frontend, security]
 document_role: primary
 document_type: requirements

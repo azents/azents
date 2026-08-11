@@ -78,8 +78,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-09
-spec_version: 151
+last_verified_at: 2026-08-10
+spec_version: 152
 ---
 
 # Agent Execution Loop
@@ -119,7 +119,7 @@ Main steps:
     field is false, it then observes the terminal `RunComplete` boundary and transitions
     `AgentSession.run_state` to idle.
 
-### Team Session authority boundary
+### Session authority and optional Runtime boundary
 
 The broker receives and sends only `SessionWakeUp(session_id)` and
 `SessionStopSignal(session_id)`. These are routing notifications, not execution envelopes: they
@@ -129,12 +129,24 @@ generation and loads one immutable canonical PostgreSQL snapshot. That snapshot 
 Session, Agent, Workspace, current/root SessionAgent lineage and context, exact owner generation, and
 expected FIFO InputBuffer, pending command, recoverable Run, or idle-continuation work.
 
-All currently implemented sessions execute as Team Sessions. `InputMessage`, `InvokeInput`,
-`RunRequest`, generic resolve contexts, and Toolkit/turn contexts contain no execution User. A Human
-`sender_user_id` remains only on the admitted input/event provenance. A public requester/auditor and
-an External Channel provider principal remain admission/provenance facts, never an execution
-identity. Mutable promotion, resource, and completion steps re-lock their exact durable rows and
-validated owner generation before commit; snapshot drift fails closed.
+Team and private User Sessions use the same internal execution authority. `InputMessage`,
+`InvokeInput`, `RunRequest`, generic resolve contexts, and Toolkit/turn contexts contain no
+execution User. A Human `sender_user_id` remains only on admitted input/event provenance. A public
+requester/auditor and an External Channel provider principal remain admission/provenance facts,
+never an execution identity. Mutable promotion, resource, and completion steps re-lock their exact
+durable rows and validated owner generation before commit; snapshot drift fails closed.
+
+The canonical snapshot includes Agent Runtime capability and version plus the root
+`SessionAgentContext` binding state. Model resolution, durable transcript, Memory, Goal, Todo,
+managed VFS Skills, compatible remote Toolkits, and subagent collaboration may proceed with no
+logical Runtime. Runtime tools, Workspace/Project/Git operations, filesystem Skills, transfer, and
+credential exposure require the declared managed capability and, for Session resources, a current
+`bound` context. Projection omits unavailable capabilities, and execution rechecks state/version
+before Profile resolution, Runtime ensure/start, Runner dispatch, or credential collection.
+
+Capability `removing` is an Agent-wide execution fence. New input, recovery, idle continuation,
+subagent spawn/wake, and queued Runtime work are rejected or interrupted across Team and private
+User trees. A stale Worker cannot resume ordinary work after the capability version changes.
 
 ### Run-scoped managed-file projection
 
@@ -1233,6 +1245,10 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- **2026-08-10** (spec_version 152) — Made AgentRuntime optional for model execution, added
+  capability/version and Session-binding admission for Runtime-dependent work, preserved
+  Runtime-independent execution, and added the irreversible removing fence across Team/User trees.
 
 - **2026-08-09** (spec_version 151) — Defined the shared filesystem access policy as the authority
   behind both bwrap-enforced shell/process execution and direct Python-enforced typed non-shell
