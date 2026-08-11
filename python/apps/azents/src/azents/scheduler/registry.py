@@ -11,6 +11,7 @@ from azents.scheduler.types import (
     TaskResult,
 )
 from azents.services.agent_decommission import AgentDecommissionService
+from azents.services.agent_runtime_removal import AgentRuntimeRemovalService
 from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.archived_session_retention import (
     ArchivedSessionRetentionService,
@@ -108,6 +109,23 @@ async def agent_decommission_handler(context: TaskContext) -> TaskResult:
     """Advance durable Agent decommission jobs without owning session purge."""
     service = await context.container.solve(AgentDecommissionService)
     summary = await service.decommission_once(
+        lease_owner=context.lease_owner,
+        deadline=context.deadline,
+    )
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            **dataclasses.asdict(summary),
+        }
+    )
+
+
+async def agent_runtime_removal_handler(context: TaskContext) -> TaskResult:
+    """Advance durable Agent Runtime removal operations."""
+    service = await context.container.solve(AgentRuntimeRemovalService)
+    summary = await service.coordinate_once(
         lease_owner=context.lease_owner,
         deadline=context.deadline,
     )
@@ -241,6 +259,20 @@ AGENT_DECOMMISSION_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+AGENT_RUNTIME_REMOVAL_TASK = ScheduledTaskDefinition(
+    key="agent_runtime_removal",
+    description="Interrupt work and permanently remove managed Agent Runtimes.",
+    interval=datetime.timedelta(minutes=1),
+    timeout=datetime.timedelta(minutes=10),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=1),
+        max_delay=datetime.timedelta(minutes=30),
+    ),
+    handler=agent_runtime_removal_handler,
+    enabled_by_default=True,
+)
+
 OWNER_LIFECYCLE_TASK = ScheduledTaskDefinition(
     key="owner_lifecycle",
     description="Archive/purge User Sessions for membership loss and account deletion.",
@@ -276,6 +308,7 @@ SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     ARCHIVED_SESSION_PURGE_TASK,
     SESSION_AUTO_ARCHIVE_TASK,
     AGENT_DECOMMISSION_TASK,
+    AGENT_RUNTIME_REMOVAL_TASK,
     OWNER_LIFECYCLE_TASK,
     FILE_LIFECYCLE_CLEANUP_TASK,
 )

@@ -24,6 +24,7 @@ from azents_runtime_control.runtime_configuration import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRuntimeCapability,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
@@ -35,6 +36,7 @@ from azents.core.runtime_profile import (
     classify_runtime_configuration_application,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
@@ -93,6 +95,7 @@ class RuntimeLifecycleReconciler:
     def __init__(
         self,
         *,
+        agent_repository: AgentRepository,
         runtime_repository: AgentRuntimeRepository,
         profile_repository: RuntimeProfileRepository,
         session_manager: SessionManager[AsyncSession],
@@ -101,6 +104,7 @@ class RuntimeLifecycleReconciler:
         config: RuntimeLifecycleDispatchConfig,
     ) -> None:
         """Initialize the reconciler."""
+        self._agent_repository = agent_repository
         self._runtime_repository = runtime_repository
         self._profile_repository = profile_repository
         self._session_manager = session_manager
@@ -349,6 +353,37 @@ class RuntimeLifecycleReconciler:
         reconciliation_reason: str | None = None,
         locked_session: AsyncSession | None = None,
     ) -> bool:
+        if locked_session is None:
+            async with self._session_manager() as session:
+                agent = await self._agent_repository.lock_by_id(
+                    session,
+                    runtime.agent_id,
+                )
+                if agent is None or not _runtime_dispatch_allowed(
+                    agent.runtime_capability,
+                    command_type,
+                ):
+                    return False
+                current = await self._runtime_repository.get_by_id_for_update(
+                    session,
+                    runtime.id,
+                )
+                if not _runtime_dispatch_snapshot_matches(current, runtime):
+                    return False
+                assert current is not None
+                return await self._dispatch_runtime_command(
+                    current,
+                    command_type=command_type,
+                    claim_lifecycle=claim_lifecycle,
+                    required_provider_generation=required_provider_generation,
+                    required_observed_generation=required_observed_generation,
+                    required_configuration_revision_id=(
+                        required_configuration_revision_id
+                    ),
+                    reconciliation_kind=reconciliation_kind,
+                    reconciliation_reason=reconciliation_reason,
+                    locked_session=session,
+                )
         provider_id = runtime.runtime_provider_id
         if provider_id is None:
             _LOGGER.warning(
@@ -435,13 +470,12 @@ class RuntimeLifecycleReconciler:
             runtime = current
 
         if claim_lifecycle:
-            async with self._session_manager() as session:
-                claimed = await self._runtime_repository.claim_lifecycle_dispatch(
-                    session,
-                    runtime.id,
-                    runtime.desired_generation,
-                    retry_delay=self._config.lifecycle_retry_delay,
-                )
+            claimed = await self._runtime_repository.claim_lifecycle_dispatch(
+                locked_session,
+                runtime.id,
+                runtime.desired_generation,
+                retry_delay=self._config.lifecycle_retry_delay,
+            )
             if claimed is None:
                 _LOGGER.debug(
                     "Runtime lifecycle dispatch skipped after concurrent claim",
@@ -463,15 +497,13 @@ class RuntimeLifecycleReconciler:
             command_type is RuntimeProviderCommandType.OBSERVE
             and runtime.desired_state is RuntimeDesiredState.STOPPED
         ):
-            async with self._session_manager() as session:
-                ensure_revision = (
-                    self._runtime_repository.ensure_lifecycle_configuration_revision
-                )
-                prepared = await ensure_revision(
-                    session,
+            prepared = (
+                await self._runtime_repository.ensure_lifecycle_configuration_revision(
+                    locked_session,
                     runtime.id,
                     runtime.desired_generation,
                 )
+            )
             if prepared is None:
                 await self._record_failure(
                     runtime,
@@ -737,6 +769,44 @@ def _reset_final_desired_state(runtime: AgentRuntime) -> str | None:
     if runtime.reset_final_desired_state is None:
         return None
     return runtime.reset_final_desired_state.value
+
+
+def _runtime_dispatch_allowed(
+    capability: AgentRuntimeCapability,
+    command_type: RuntimeProviderCommandType,
+) -> bool:
+    """Allow ordinary dispatch only while managed; removal owns terminal delete."""
+    return capability is AgentRuntimeCapability.MANAGED or (
+        capability is AgentRuntimeCapability.REMOVING
+        and command_type is RuntimeProviderCommandType.TERMINAL_DELETE
+    )
+
+
+def _runtime_dispatch_snapshot_matches(
+    current: AgentRuntime | None,
+    expected: AgentRuntime,
+) -> bool:
+    """Require the locked Runtime to match the selected dispatch authority."""
+    return (
+        current is not None
+        and current.agent_id == expected.agent_id
+        and current.runtime_provider_id == expected.runtime_provider_id
+        and current.runtime_provider_resource_id
+        == expected.runtime_provider_resource_id
+        and current.desired_state is expected.desired_state
+        and current.desired_generation == expected.desired_generation
+        and current.last_lifecycle_command is expected.last_lifecycle_command
+        and current.terminal_delete_requested_generation
+        == expected.terminal_delete_requested_generation
+        and current.desired_runtime_configuration_revision_id
+        == expected.desired_runtime_configuration_revision_id
+        and current.applied_runtime_configuration_revision_id
+        == expected.applied_runtime_configuration_revision_id
+        and current.provider_generation == expected.provider_generation
+        and current.provider_observed_generation
+        == expected.provider_observed_generation
+        and current.provider_observed_state is expected.provider_observed_state
+    )
 
 
 def _provider_command_type(

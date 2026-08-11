@@ -80,6 +80,18 @@ class AgentRuntimeRepository:
             return None
         return self._build(rdb)
 
+    async def _get_by_id_populated(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+    ) -> AgentRuntime | None:
+        """Reload one Runtime after ORM DML updated an identity-mapped row."""
+        rdb = await session.get(RDBAgentRuntime, runtime_id)
+        if rdb is None:
+            return None
+        await session.refresh(rdb)
+        return self._build(rdb)
+
     async def get_by_id_for_update(
         self,
         session: AsyncSession,
@@ -669,13 +681,14 @@ class AgentRuntimeRepository:
                 terminal_delete_acknowledgement_kind=None,
                 last_state_change_at=sa.func.now(),
             )
-            .returning(RDBAgentRuntime)
+            .execution_options(synchronize_session=False)
+            .returning(*RDBAgentRuntime.__table__.c)
         )
-        rdb = result.scalar_one_or_none()
-        if rdb is not None:
+        row = result.mappings().one_or_none()
+        if row is not None:
             await session.flush()
-            return self._build(rdb)
-        return await self.get_by_id(session, runtime_id)
+            return AgentRuntime.model_validate(dict(row))
+        return await self._get_by_id_populated(session, runtime_id)
 
     async def record_terminal_delete_acknowledgement(
         self,
@@ -716,13 +729,14 @@ class AgentRuntimeRepository:
                 failure_message=None,
                 last_state_change_at=sa.func.now(),
             )
-            .returning(RDBAgentRuntime)
+            .execution_options(synchronize_session=False)
+            .returning(*RDBAgentRuntime.__table__.c)
         )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
+        row = result.mappings().one_or_none()
+        if row is None:
             return None
         await session.flush()
-        return self._build(rdb)
+        return AgentRuntime.model_validate(dict(row))
 
     async def request_terminal_delete_without_physical_binding(
         self,
@@ -737,7 +751,10 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.runtime_provider_id.is_(None),
                 RDBAgentRuntime.runtime_provider_resource_id.is_(None),
                 RDBAgentRuntime.provider_binding_origin.is_(None),
-                RDBAgentRuntime.provider_binding_evidence.is_(None),
+                sa.or_(
+                    RDBAgentRuntime.provider_binding_evidence.is_(None),
+                    RDBAgentRuntime.provider_binding_evidence == sa.JSON.NULL,
+                ),
                 RDBAgentRuntime.infrastructure_profile_id.is_(None),
                 RDBAgentRuntime.workspace_runtime_profile_id.is_(None),
                 RDBAgentRuntime.desired_runtime_configuration_revision_id.is_(None),
@@ -788,11 +805,12 @@ class AgentRuntimeRepository:
                 ),
                 last_state_change_at=sa.func.now(),
             )
-            .returning(RDBAgentRuntime)
+            .execution_options(synchronize_session=False)
+            .returning(*RDBAgentRuntime.__table__.c)
         )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            current = await self.get_by_id(session, runtime_id)
+        row = result.mappings().one_or_none()
+        if row is None:
+            current = await self._get_by_id_populated(session, runtime_id)
             if (
                 current is not None
                 and current.terminal_delete_requested_generation
@@ -805,7 +823,7 @@ class AgentRuntimeRepository:
                 return current
             return None
         await session.flush()
-        return self._build(rdb)
+        return AgentRuntime.model_validate(dict(row))
 
     async def rearm_terminally_deleted(
         self,
@@ -880,13 +898,15 @@ class AgentRuntimeRepository:
     ) -> AgentRuntime | None:
         """Return Runtime only after its current terminal deletion is acknowledged."""
         result = await session.execute(
-            sa.select(RDBAgentRuntime).where(
+            sa.select(RDBAgentRuntime)
+            .where(
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.terminal_delete_requested_generation
                 == RDBAgentRuntime.desired_generation,
                 RDBAgentRuntime.terminal_delete_acknowledged_generation
                 == RDBAgentRuntime.desired_generation,
             )
+            .execution_options(populate_existing=True)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:

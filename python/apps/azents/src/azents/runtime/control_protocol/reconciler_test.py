@@ -23,6 +23,7 @@ from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRuntimeCapability,
     LLMProvider,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
@@ -48,6 +49,7 @@ from azents.rdb.models.runtime_provider_policy import (
     RDBRuntimeProviderContractRevision,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
@@ -93,6 +95,15 @@ class ReadTrackingAgentRuntimeRepository(AgentRuntimeRepository):
         """Record one lock-free Runtime read."""
         self.read_runtime_ids.append(runtime_id)
         return await super().get_by_id(session, runtime_id)
+
+    async def get_by_id_for_update(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+    ) -> AgentRuntime | None:
+        """Record one locked Runtime authority recheck."""
+        self.read_runtime_ids.append(runtime_id)
+        return await super().get_by_id_for_update(session, runtime_id)
 
 
 async def test_reconciler_refreshes_stale_provider_connection_before_start_timeout(
@@ -147,6 +158,7 @@ async def test_reconciler_refreshes_stale_provider_connection_before_start_timeo
 
     store = InMemoryRuntimeCoordinationStore()
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
@@ -255,6 +267,7 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
@@ -295,6 +308,40 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
     assert "control_token" not in auth
     assert updated is not None
     assert updated.provider_observe_requested_at is not None
+
+    async with rdb_session_manager() as session:
+        await session.execute(
+            sa.update(RDBAgent)
+            .where(RDBAgent.id == agent_id)
+            .values(
+                runtime_capability=AgentRuntimeCapability.REMOVING,
+                runtime_capability_version=RDBAgent.runtime_capability_version + 1,
+                runtime_profile_id=None,
+                runtime_profile_selection_version=(
+                    RDBAgent.runtime_profile_selection_version + 1
+                ),
+                shell_enabled=False,
+            )
+        )
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(
+                provider_observed_at=old_observe_at,
+                provider_observe_requested_at=old_observe_at,
+            )
+        )
+
+    blocked_dispatch = await reconciler.reconcile_once(limit=10)
+    blocked_request = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+
+    assert blocked_dispatch == 0
+    assert blocked_request is None
 
 
 async def test_reconciler_repairs_current_network_policy_drift_once(
@@ -355,6 +402,7 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=rdb_session_manager,
@@ -473,6 +521,7 @@ async def test_reconcile_observe_completion_rejects_stale_provider_generation(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=rdb_session_manager,
@@ -565,6 +614,7 @@ async def test_drift_repair_rechecks_runtime_snapshot_before_dispatch(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=rdb_session_manager,
@@ -684,6 +734,7 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
@@ -799,6 +850,7 @@ async def test_reconciler_repairs_stale_stop_configuration_generation(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
         profile_repository=profile_repository,
         session_manager=rdb_session_manager,
@@ -890,6 +942,7 @@ async def test_reconciler_rejects_mismatched_resolved_provider_reference(
 
     store = InMemoryRuntimeCoordinationStore()
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
@@ -970,6 +1023,7 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
         request_id_factory=lambda: "request-disconnected-stopping",
     )
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,
@@ -1055,6 +1109,19 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
             RuntimeProviderConnectionState.CONNECTED,
         )
         assert connected is not None
+        await session.execute(
+            sa.update(RDBAgent)
+            .where(RDBAgent.id == agent_id)
+            .values(
+                runtime_capability=AgentRuntimeCapability.REMOVING,
+                runtime_capability_version=RDBAgent.runtime_capability_version + 1,
+                runtime_profile_id=None,
+                runtime_profile_selection_version=(
+                    RDBAgent.runtime_profile_selection_version + 1
+                ),
+                shell_enabled=False,
+            )
+        )
 
     store = InMemoryRuntimeCoordinationStore()
     request_ids = iter(("terminal-request-1", "terminal-request-2"))
@@ -1067,6 +1134,7 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
         registered_at=datetime.datetime.now(datetime.UTC),
     )
     reconciler = RuntimeLifecycleReconciler(
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
         profile_repository=RuntimeProfileRepository(),
         session_manager=rdb_session_manager,

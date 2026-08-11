@@ -9,13 +9,15 @@ from unittest.mock import ANY, AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import RuntimeDesiredState
+from azents.core.enums import AgentRuntimeCapability, RuntimeDesiredState
 from azents.core.runtime_profile import (
     RuntimeConfigurationResolutionStatus,
     RuntimeRecreationItemStatus,
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
@@ -96,6 +98,7 @@ def _runtime(
 ) -> MagicMock:
     runtime = MagicMock(spec=AgentRuntime)
     runtime.id = "runtime-1"
+    runtime.agent_id = "agent-1"
     runtime.workspace_runtime_profile_id = "profile-1"
     runtime.infrastructure_profile_id = "infrastructure-1"
     runtime.runtime_provider_resource_id = "provider-1"
@@ -110,6 +113,15 @@ def _runtime(
     return runtime
 
 
+def _agent(
+    *,
+    runtime_capability: AgentRuntimeCapability = AgentRuntimeCapability.MANAGED,
+) -> MagicMock:
+    agent = MagicMock(spec=Agent)
+    agent.runtime_capability = runtime_capability
+    return agent
+
+
 def _ready_revision() -> MagicMock:
     revision = MagicMock()
     revision.resolution_status = RuntimeConfigurationResolutionStatus.READY
@@ -121,19 +133,23 @@ def _reconciler() -> tuple[
     RuntimeRecreationReconciler,
     AsyncMock,
     AsyncMock,
+    AsyncMock,
 ]:
     profile_repository = AsyncMock(spec=RuntimeProfileRepository)
     profile_repository.get_recreation_target_version.return_value = "2"
     runtime_repository = AsyncMock(spec=AgentRuntimeRepository)
+    agent_repository = AsyncMock(spec=AgentRepository)
+    agent_repository.lock_by_id.return_value = _agent()
     reconciler = RuntimeRecreationReconciler(
         session_manager=_SessionManager(),
         profile_repository=profile_repository,
         runtime_repository=runtime_repository,
+        agent_repository=agent_repository,
         operation_limit=1,
         item_limit=1,
         maximum_attempts=3,
     )
-    return reconciler, profile_repository, runtime_repository
+    return reconciler, profile_repository, runtime_repository, agent_repository
 
 
 def _authority_service() -> tuple[
@@ -272,7 +288,7 @@ async def test_workspace_recreation_create_persists_locked_target_version() -> N
 
 async def test_recreation_dispatches_exact_next_generation() -> None:
     """A claimed item stores one atomic restart and its exact new revision."""
-    reconciler, profiles, runtimes = _reconciler()
+    reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item()
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = []
@@ -297,9 +313,34 @@ async def test_recreation_dispatches_exact_next_generation() -> None:
     assert dispatch["dispatched_generation"] == 1
 
 
+async def test_recreation_skips_dispatch_after_runtime_removal_fence() -> None:
+    """A removal capability fence wins before a recreation restart dispatch."""
+    reconciler, profiles, runtimes, agents = _reconciler()
+    item = _item()
+    profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
+    profiles.list_recreation_items.return_value = []
+    profiles.claim_recreation_items.return_value = [item]
+    profiles.lock_recreation_item.return_value = item
+    profiles.get_recreation_operation.return_value = _operation()
+    profiles.finish_recreation_item.return_value = True
+    runtimes.get_by_id.return_value = _runtime()
+    agents.lock_by_id.return_value = _agent(
+        runtime_capability=AgentRuntimeCapability.REMOVING
+    )
+
+    result = await reconciler.reconcile_once()
+
+    assert result.dispatched_items == 0
+    assert result.completed_items == 1
+    runtimes.set_desired_state_if_ready.assert_not_awaited()
+    finish = profiles.finish_recreation_item.await_args.kwargs
+    assert finish["status"] is RuntimeRecreationItemStatus.SKIPPED
+    assert finish["failure_code"] == "runtime_capability_unavailable"
+
+
 async def test_recreation_completes_only_after_exact_applied_evidence() -> None:
     """A dispatched item succeeds only after the applied pointer matches."""
-    reconciler, profiles, runtimes = _reconciler()
+    reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item(expected_revision_id="revision-1", dispatched_generation=1)
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = [item]
@@ -326,7 +367,7 @@ async def test_recreation_completes_only_after_exact_applied_evidence() -> None:
 
 async def test_recreation_skips_blocked_latest_configuration() -> None:
     """A blocked superseding revision is explicit and never recreated."""
-    reconciler, profiles, runtimes = _reconciler()
+    reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item(expected_revision_id="revision-blocked")
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = []
@@ -354,7 +395,7 @@ async def test_recreation_skips_blocked_latest_configuration() -> None:
 
 async def test_recreation_skips_configuration_changed_after_snapshot() -> None:
     """An undispatched item never adopts a different configuration target."""
-    reconciler, profiles, runtimes = _reconciler()
+    reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item(expected_revision_id="revision-snapshot")
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = []
@@ -379,7 +420,7 @@ async def test_recreation_skips_configuration_changed_after_snapshot() -> None:
 
 async def test_recreation_skips_changed_authority_target_before_dispatch() -> None:
     """A newer source version cannot dispatch the operation's old snapshot."""
-    reconciler, profiles, runtimes = _reconciler()
+    reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item(expected_revision_id="revision-snapshot")
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = []
@@ -411,7 +452,7 @@ async def test_recreation_skips_changed_authority_target_before_dispatch() -> No
 
 async def test_recreation_skips_superseded_exact_dispatch() -> None:
     """A later Runtime command cannot cause an implicit second restart."""
-    reconciler, profiles, runtimes = _reconciler()
+    reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item(
         expected_revision_id="revision-dispatched",
         dispatched_generation=4,
@@ -440,7 +481,7 @@ async def test_recreation_skips_superseded_exact_dispatch() -> None:
 
 async def test_recreation_ignores_item_locked_by_peer_worker() -> None:
     """A peer-held running item cannot be processed or redispatched."""
-    reconciler, profiles, runtimes = _reconciler()
+    reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item()
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = [item]
@@ -458,7 +499,7 @@ async def test_recreation_ignores_item_locked_by_peer_worker() -> None:
 
 async def test_recreation_failure_becomes_terminal_at_maximum_attempts() -> None:
     """An exact dispatched failure is bounded by the durable attempt count."""
-    reconciler, profiles, runtimes = _reconciler()
+    reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item(
         expected_revision_id="revision-dispatched",
         dispatched_generation=4,
