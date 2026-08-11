@@ -454,16 +454,16 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                 )
                 manifests = ()
                 if value.files is not None:
-                    if runtime_context is None:
-                        raise ExternalChannelFileTransferError(
-                            "Runtime file storage is unavailable for this run."
-                        )
                     manifests = await self.file_transfer_service.prepare_outbound(
                         session_id=self.session_id,
                         agent_id=self.agent_id,
                         binding_id=value.binding,
                         paths=value.files,
-                        file_storage=runtime_context.file_storage,
+                        file_storage=(
+                            None
+                            if runtime_context is None
+                            else runtime_context.file_storage
+                        ),
                         authority=self.resource_authority,
                     )
                 result = await self.service.execute(

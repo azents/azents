@@ -15,6 +15,10 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_file import (
+    ExternalChannelOutboundFileManifest,
+    ExternalChannelOutboundFileSource,
+)
 from azents.repos.external_channel.work_data import ChannelActionTransition
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
@@ -26,6 +30,7 @@ from azents.services.external_channel.provider_effect import (
     ProviderTarget,
 )
 from azents.services.external_channel.slack_events import SlackControlMessageResult
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 _SESSION_URL = "https://azents.example/w/team/agents/agent-1/sessions/session-1"
 
@@ -85,6 +90,7 @@ def _service(
     *,
     slack_client: object | None = None,
     discord_client: object | None = None,
+    exchange_file_service: object | None = None,
 ) -> ExternalChannelActionService:
     return cast(
         ExternalChannelActionService,
@@ -95,7 +101,30 @@ def _service(
             ),
             slack_client=slack_client,
             discord_client=discord_client,
+            exchange_file_service=exchange_file_service,
         ),
+    )
+
+
+def _exchange_manifest() -> ExternalChannelOutboundFileManifest:
+    return ExternalChannelOutboundFileManifest(
+        source=ExternalChannelOutboundFileSource.EXCHANGE,
+        path="exchange://exchange/workspace-1/files/file-1/original",
+        filename="report.csv",
+        media_type="text/csv",
+        expected_size=42,
+    )
+
+
+def _authority() -> SessionResourceAuthority:
+    return SessionResourceAuthority(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        root_session_id="session-1",
+        run_id="run-1",
+        run_index=1,
+        owner_generation=1,
     )
 
 
@@ -181,6 +210,83 @@ async def test_ignore_transition_completes_without_provider_execution() -> None:
     repository.commit_direct_action.assert_awaited_once()
     session.commit.assert_awaited_once()
     execute_direct_effect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_slack_exchange_file_delivery_does_not_require_runtime_services() -> None:
+    """Slack Exchange delivery bypasses every Runtime file dependency."""
+    delivered = SlackControlMessageResult(
+        status="delivered",
+        provider_message_key="slack:C1:123.456",
+        error_kind=None,
+        error_summary=None,
+    )
+    post_file_message = AsyncMock(return_value=delivered)
+    result = await ExternalChannelActionService._deliver_slack_files(
+        _service(
+            slack_client=SimpleNamespace(post_file_message=post_file_message),
+            exchange_file_service=object(),
+        ),
+        bot_token="slack-secret",
+        tenant_id="T1",
+        channel_id="C1",
+        thread_ts=None,
+        markdown_text="Attached report.",
+        files=(_exchange_manifest(),),
+        operation_key=ProviderOperationKey.from_seed("slack-exchange"),
+        agent_id="agent-1",
+        session_id="session-1",
+        authority=_authority(),
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+
+    assert result is delivered
+    call = post_file_message.await_args
+    assert call is not None
+    assert call.kwargs["deadline_at"] is None
+    assert len(call.kwargs["files"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_discord_exchange_file_delivery_does_not_require_runtime_storage() -> (
+    None
+):
+    """Discord Exchange delivery accepts a server-backed source without Runtime."""
+    delivered = DiscordDeliveryResult(
+        status="delivered",
+        provider_message_key="discord:111:555",
+        error_kind=None,
+        error_summary=None,
+    )
+    create_file_message = AsyncMock(return_value=delivered)
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.pop("blocks")
+    target.request_payload.pop("embeds")
+    target.request_payload["files"] = [_exchange_manifest().model_dump(mode="json")]
+
+    result = await ExternalChannelActionService._deliver_discord(
+        _service(
+            discord_client=SimpleNamespace(
+                create_file_message=create_file_message,
+            ),
+            exchange_file_service=object(),
+        ),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-exchange"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id="agent-1",
+        authority=_authority(),
+    )
+
+    assert result is delivered
+    call = create_file_message.await_args
+    assert call is not None
+    assert len(call.kwargs["files"]) == 1
 
 
 @pytest.mark.asyncio

@@ -1390,13 +1390,12 @@ async def test_outbound_preflight_builds_only_bounded_runtime_manifests() -> Non
 
 @pytest.mark.asyncio
 async def test_outbound_preflight_supports_authorized_exchange_file() -> None:
-    """Exchange publication shares file limits without staging Runtime bytes."""
+    """Exchange publication shares file limits without managed Runtime storage."""
     exchange_file = _exchange_file()
     exchange_file_service = AsyncMock()
     exchange_file_service.resolve_for_authority.return_value = Success(
         ExchangeFileDownload(file=exchange_file, body=b"pngdata")
     )
-    storage = _OutboundStorage({})
     service = _service(
         repository=_Repository(_target(capabilities=_capabilities(upload_files=True))),
         slack_client=_SlackClient(),
@@ -1412,7 +1411,7 @@ async def test_outbound_preflight_supports_authorized_exchange_file() -> None:
         agent_id="agent-1",
         binding_id="binding-1",
         paths=[exchange_file.uri],
-        file_storage=cast(FileStorage, storage),
+        file_storage=None,
         authority=_authority(),
     )
 
@@ -1429,8 +1428,41 @@ async def test_outbound_preflight_supports_authorized_exchange_file() -> None:
         uri=exchange_file.uri,
         authority=_authority(),
     )
-    assert storage.stat_calls == []
-    assert storage.read_calls == []
+
+
+@pytest.mark.asyncio
+async def test_outbound_preflight_requires_runtime_storage_only_for_runtime_paths() -> (
+    None
+):
+    """Runtime and mixed sources fail precisely when Runtime storage is absent."""
+    exchange_file = _exchange_file()
+    exchange_file_service = AsyncMock()
+    exchange_file_service.resolve_for_authority.return_value = Success(
+        ExchangeFileDownload(file=exchange_file, body=b"pngdata")
+    )
+    service = _service(
+        repository=_Repository(_target(capabilities=_capabilities(upload_files=True))),
+        slack_client=_SlackClient(),
+        exchange_file_service=exchange_file_service,
+    )
+
+    for paths in (
+        ["/workspace/agent/report.csv"],
+        [exchange_file.uri, "/workspace/agent/report.csv"],
+    ):
+        with pytest.raises(
+            ExternalChannelFileTransferError,
+            match="require Runtime file storage",
+        ):
+            await service.prepare_outbound(
+                session_id="session-1",
+                agent_id="agent-1",
+                binding_id="binding-1",
+                paths=paths,
+                file_storage=None,
+                authority=_authority(),
+            )
+    exchange_file_service.resolve_for_authority.assert_not_awaited()
 
 
 @pytest.mark.asyncio

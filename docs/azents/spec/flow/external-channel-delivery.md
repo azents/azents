@@ -35,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-09
-spec_version: 39
+last_verified_at: 2026-08-11
+spec_version: 40
 ---
 
 # External Channel Delivery and Channel Work
@@ -79,8 +79,10 @@ not count, and the guard uses only process-local Toolkit state.
 Either mode may attach up to 20 absolute Runtime paths or authorized `exchange://`
 file-location URIs to its conversational reply. Relative paths, `artifact://`,
 `azents://`, and other URI schemes are rejected. File-bearing calls always require
-non-empty text and do not introduce a separate upload action. Text-only calls retain the
-existing behavior.
+non-empty text and do not introduce a separate upload action. Exchange-only calls use
+server-managed storage and remain available without a managed Runtime. Absolute Runtime
+paths, including mixed Exchange and Runtime-path calls, require current Runtime file
+storage. Text-only calls retain the existing behavior.
 
 Task updates require a concise current-work title in the same call. Guidance tells
 the Agent to use the participant's language, concrete progressive wording, and an
@@ -407,6 +409,9 @@ not roll back the terminal lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-11** (spec_version 40) — Kept authorized `exchange://` Channel
+  publication available without a managed Runtime while retaining Runtime storage
+  admission for absolute Runtime paths and mixed-source calls.
 - **2026-08-09** (spec_version 39) — Exposed `ignore` on every model input boundary,
   removed continuation binding scope, and made silent active-Work completion
   independent of recorded task status.
