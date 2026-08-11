@@ -43,8 +43,10 @@ from azents.services.external_channel.ingress_provisioning import (
     ExternalChannelIngressProvisioningService,
 )
 from azents.services.external_channel.mailbox_ingestion_store import (
+    ExternalChannelConfiguredBindingResult,
     ExternalChannelMailboxIngestionStore,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 
 def _session_manager() -> SessionManager[AsyncSession]:
@@ -254,8 +256,15 @@ async def test_complete_uses_caller_transaction() -> None:
         response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
         disconnected_at=None,
     )
+    presence_plan = make_provider_effect_plan("joined-presence")
+    progress_plan = make_provider_effect_plan("initial-progress")
+    configured = ExternalChannelConfiguredBindingResult(
+        binding=binding,
+        session_created=True,
+        control_plans=(presence_plan, progress_plan),
+    )
     mailbox_store = MagicMock()
-    mailbox_store.create_configured_binding = AsyncMock(return_value=binding)
+    mailbox_store.create_configured_binding = AsyncMock(return_value=configured)
     service = _service(
         repository=repository,
         work_repository=work_repository,
@@ -272,7 +281,7 @@ async def test_complete_uses_caller_transaction() -> None:
         ),
     )
 
-    assert completed is binding
+    assert completed is configured
     work_repository.record_discord_delivery_channel.assert_awaited_once_with(
         transaction,
         resource_id="resource-1",

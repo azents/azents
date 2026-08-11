@@ -420,6 +420,123 @@ async def test_channel_action_ignores_connection_health_status() -> None:
     assert "external_channel_connections.status" not in _where_sql(connection_query)
 
 
+async def test_continue_after_finished_work_creates_replacement_tracker() -> None:
+    """Active Todos after finish create a Tracker for the new Work cycle."""
+    finished = _work(
+        desired=False,
+        projection_parts=[
+            _part(
+                status=ExternalChannelWorkProjectionStatus.DELETED,
+                provider_message_key=None,
+            )
+        ],
+    )
+    finished.status = ExternalChannelWorkStatus.FINISHED
+    finished.finished_at = datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC)
+    binding = SimpleNamespace(
+        id="binding-1",
+        route_id="route-1",
+        resource_id="resource-1",
+    )
+    route = SimpleNamespace(id="route-1", connection_id="connection-1")
+    connection = SimpleNamespace(
+        id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
+        app_mode=ExternalChannelAppMode.SINGLE,
+        encrypted_credentials="ciphertext",
+        provider_tenant_id="tenant-1",
+        capabilities={},
+    )
+    agent = SimpleNamespace(
+        id="agent-1",
+        workspace_id="workspace-1",
+        name="Agent",
+        avatar=None,
+    )
+    resource = SimpleNamespace(
+        id="resource-1",
+        labels={
+            "channel_id": "channel-1",
+            "thread_ts": "1.000001",
+        },
+    )
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(
+        side_effect=[
+            SimpleNamespace(id="session-1"),
+            agent,
+            binding,
+            route,
+            connection,
+            resource,
+        ]
+    )
+    session.get = AsyncMock(return_value=SimpleNamespace(handle="workspace"))
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+    current = finished
+
+    async def update(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        default_factory: Callable[[], ChannelWorkState],
+        mutator: Callable[
+            [ChannelWorkState],
+            ChannelWorkStateMutation[ChannelActionTransition],
+        ],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[ChannelActionTransition]:
+        nonlocal current
+        del (
+            _session,
+            agent_id,
+            session_id,
+            binding_id,
+            default_factory,
+            max_retries,
+        )
+        mutation = mutator(current)
+        current = mutation.state
+        return mutation
+
+    state_store.update = AsyncMock(side_effect=update)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+    transition = await repository.commit_direct_action(
+        cast(AsyncSession, session),
+        session_id="session-1",
+        agent_id="agent-1",
+        run_id="run-1",
+        client_tool_call_id="tool-call-reactivate",
+        binding_id=binding.id,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message=None,
+        title="Working…",
+        tasks=[
+            ChannelWorkTask(
+                id="task-1",
+                title="Follow-up task",
+                status=ExternalChannelWorkTaskStatus.IN_PROGRESS,
+                details=None,
+                output=None,
+                sources=[],
+            )
+        ],
+        files=(),
+        now=datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC),
+    )
+
+    assert transition.work_status is ExternalChannelWorkStatus.ACTIVE
+    assert transition.work_id != finished.work_cycle_id
+    assert len(transition.effects) == 1
+    assert (
+        transition.effects[0].provider.target.operation
+        is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+    )
+    assert current.projection_parts == []
+
+
 async def _commit_ignore(
     work: ChannelWorkState,
 ) -> tuple[ChannelActionTransition, ChannelWorkState, AsyncMock]:

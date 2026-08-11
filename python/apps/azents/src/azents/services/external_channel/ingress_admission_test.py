@@ -148,6 +148,8 @@ def _binding(
     [
         (False, None, ExternalChannelResponseMode.ALL_MESSAGES, False),
         (True, None, ExternalChannelResponseMode.ALL_MESSAGES, True),
+        (False, None, ExternalChannelResponseMode.MENTION_ONLY, False),
+        (True, None, ExternalChannelResponseMode.MENTION_ONLY, True),
         (
             False,
             _binding(ExternalChannelResponseMode.ALL_MESSAGES),
@@ -159,6 +161,12 @@ def _binding(
             _binding(ExternalChannelResponseMode.MENTION_ONLY),
             ExternalChannelResponseMode.MENTION_ONLY,
             False,
+        ),
+        (
+            True,
+            _binding(ExternalChannelResponseMode.MENTION_ONLY),
+            ExternalChannelResponseMode.MENTION_ONLY,
+            True,
         ),
     ],
 )

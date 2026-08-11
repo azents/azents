@@ -42,6 +42,7 @@ from azents.repos.external_channel.ingress_queue_data import (
     ExternalChannelIngressOwner,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.mailbox.data import MailboxItem
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryPermissionDenied,
@@ -66,6 +67,9 @@ from azents.services.external_channel.ingress_queue import (
     _retry_transition,
     build_external_channel_ingress_job_request,
 )
+from azents.services.external_channel.mailbox_ingestion_store import (
+    ExternalChannelConfiguredBindingResult,
+)
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
 )
@@ -76,6 +80,7 @@ from azents.services.mailbox import (
     MailboxAdmissionResult,
     MailboxService,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 8, 10, 2, tzinfo=datetime.UTC)
 
@@ -282,8 +287,19 @@ def _service(
     mailbox_service: MagicMock,
     agent_session_repository: MagicMock,
     wake_dispatcher: MagicMock,
+    work_repository: MagicMock | None = None,
+    provider_control: MagicMock | None = None,
 ) -> ExternalChannelIngressDrainService:
     """Construct the drain with isolated collaborators."""
+    work = work_repository or MagicMock()
+    if work_repository is None:
+        work.ensure_active_work = AsyncMock(
+            return_value=SimpleNamespace(work_cycle_id="work-1")
+        )
+        work.prepare_initial_progress = AsyncMock(return_value=None)
+    control = provider_control or MagicMock()
+    if provider_control is None:
+        control.attempt = AsyncMock()
     return ExternalChannelIngressDrainService(
         session_manager=session_manager,
         repository=cast(ExternalChannelRepository, repository),
@@ -303,15 +319,13 @@ def _service(
             ExternalChannelIngressProvisioningService,
             MagicMock(),
         ),
+        work_repository=cast(ExternalChannelWorkRepository, work),
         mailbox_service=cast(MailboxService, mailbox_service),
         wake_dispatcher=cast(
             ExternalChannelMailboxWakeDispatcher,
             wake_dispatcher,
         ),
-        provider_control=cast(
-            ExternalChannelProviderControlService,
-            MagicMock(),
-        ),
+        provider_control=cast(ExternalChannelProviderControlService, control),
         metrics=ExternalChannelIngressMetrics(),
     )
 
@@ -365,6 +379,9 @@ def _collaborators(
 
     mailbox_service.enqueue_many = AsyncMock(side_effect=enqueue_many)
     agent_session_repository = MagicMock()
+    agent_session_repository.lock_by_id = AsyncMock(
+        return_value=SimpleNamespace(agent_id="agent-1")
+    )
     agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
     wake_dispatcher = MagicMock()
     wake_dispatcher.dispatch = AsyncMock(return_value="dispatched")
@@ -668,6 +685,14 @@ async def test_preparation_locks_connection_before_owner() -> None:
 
     queue_repository.lock_leased_owner = AsyncMock(side_effect=lock_owner)
     queue_repository.mark_owner_ready = AsyncMock()
+    provider_control = MagicMock()
+    presence_plan = make_provider_effect_plan("joined-presence")
+    progress_plan = make_provider_effect_plan("initial-progress")
+
+    async def attempt_control(_plan: object) -> None:
+        transaction.commit.assert_awaited_once()
+
+    provider_control.attempt = AsyncMock(side_effect=attempt_control)
     service = _service(
         session_manager=_session_manager(transaction),
         repository=repository,
@@ -675,12 +700,17 @@ async def test_preparation_locks_connection_before_owner() -> None:
         mailbox_service=MagicMock(),
         agent_session_repository=MagicMock(),
         wake_dispatcher=MagicMock(),
+        provider_control=provider_control,
     )
     service.provisioning_service.prepare = AsyncMock(return_value=object())
     service.provisioning_service.complete = AsyncMock(
-        return_value=ExternalChannelBinding.model_construct(
-            id="binding-1",
-            agent_session_id="session-1",
+        return_value=ExternalChannelConfiguredBindingResult(
+            binding=ExternalChannelBinding.model_construct(
+                id="binding-1",
+                agent_session_id="session-1",
+            ),
+            session_created=True,
+            control_plans=(presence_plan, progress_plan),
         )
     )
 
@@ -693,6 +723,17 @@ async def test_preparation_locks_connection_before_owner() -> None:
     assert prepared
     assert calls == ["connection", "owner"]
     transaction.commit.assert_awaited_once()
+    queue_repository.mark_owner_ready.assert_awaited_once_with(
+        transaction,
+        owner=owner,
+        binding_id="binding-1",
+        session_id="session-1",
+        initial_title_eligible=True,
+    )
+    assert provider_control.attempt.await_args_list == [
+        ((presence_plan,), {}),
+        ((progress_plan,), {}),
+    ]
 
 
 async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
@@ -765,6 +806,81 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
         read_through_position="00000000000000000002",
     )
     transaction.commit.assert_awaited_once()
+    wake_dispatcher.dispatch.assert_awaited_once()
+
+
+async def test_followup_work_tracker_is_attempted_after_commit_before_wake(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bound follow-up starts a Work Tracker before waking the Session."""
+    item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+    )
+    row = SimpleNamespace(id=item.id)
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=[row])
+    transaction = _Session()
+    work_repository = MagicMock()
+    work_repository.ensure_active_work = AsyncMock(
+        return_value=SimpleNamespace(work_cycle_id="work-followup")
+    )
+    progress_plan = make_provider_effect_plan("followup-progress")
+    work_repository.prepare_initial_progress = AsyncMock(return_value=progress_plan)
+    provider_control = MagicMock()
+
+    async def attempt_progress(_plan: object) -> None:
+        transaction.commit.assert_awaited_once()
+        wake_dispatcher.dispatch.assert_not_awaited()
+
+    provider_control.attempt = AsyncMock(side_effect=attempt_progress)
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+        work_repository=work_repository,
+        provider_control=provider_control,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    stale = await service._finalize_batch(  # noqa: SLF001
+        _batch(item),
+        prepared=[
+            _PreparedSuccess(
+                item=item,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=item.trigger_provider_message_key,
+                    trigger_position=item.trigger_position,
+                ),
+            )
+        ],
+    )
+
+    assert stale is False
+    work_repository.ensure_active_work.assert_awaited_once()
+    ensure_call = work_repository.ensure_active_work.await_args
+    assert ensure_call is not None
+    desired_progress = ensure_call.kwargs["desired_progress"]
+    assert desired_progress.state == "checking"
+    work_repository.prepare_initial_progress.assert_awaited_once_with(
+        transaction,
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+        work_cycle_id="work-followup",
+    )
+    provider_control.attempt.assert_awaited_once_with(progress_plan)
     wake_dispatcher.dispatch.assert_awaited_once()
 
 

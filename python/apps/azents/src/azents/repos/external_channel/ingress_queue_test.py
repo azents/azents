@@ -239,6 +239,32 @@ async def test_claim_due_batch_refreshes_updated_at_before_dto_conversion() -> N
     session.refresh.assert_awaited_once_with(item, attribute_names=["updated_at"])
 
 
+async def test_mark_owner_ready_preserves_creation_invocation_for_auto_title() -> None:
+    """Provisioning marks the first invocation only after Session creation commits."""
+    repository = ExternalChannelIngressQueueRepository()
+    session = _session()
+    owner = _owner(first_batch_pending=True)
+    owner.binding_id = None
+    owner.session_id = None
+    first_invocation = _item(1)
+    session.scalar.return_value = first_invocation
+
+    await repository.mark_owner_ready(
+        session,
+        owner=cast(RDBExternalChannelIngressOwner, owner),
+        binding_id="binding-created",
+        session_id="session-created",
+        initial_title_eligible=True,
+    )
+
+    assert owner.binding_id == "binding-created"
+    assert owner.session_id == "session-created"
+    assert owner.preparation_next_attempt_at is None
+    assert first_invocation.initial_title_eligible is True
+    session.scalar.assert_awaited_once()
+    session.flush.assert_awaited_once()
+
+
 async def test_expired_lease_is_reclaimed_and_current_lease_is_released() -> None:
     """A stale owner is fenced by generation and explicit release clears ownership."""
     repository = ExternalChannelIngressQueueRepository()
