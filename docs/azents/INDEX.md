@@ -15,25 +15,25 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-10 | 64 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-11 | 65 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-10 | 146 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-11 | 57 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-11 | 23 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-11 | 24 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-11 | 90 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-11 | 91 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-06 | 10 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-11 | 63 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-11 | 64 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-11 | 153 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-11 | 58 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-11 | 23 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-11 | 154 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-11 | 59 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-11 | 24 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-03 | 33 |
@@ -298,7 +298,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Primary Agent Sessions and Team-First Multi-Session UX Historical Requirements Reconstruction](requirements/primary-260625-primary-sessions.md) | primary-260625 | 2026-06-25 | - |
 | [Agent Profile Image Historical Requirements Reconstruction](requirements/profile-260421-profile-image.md) | profile-260421 | 2026-04-21 | 2026-04-21 |
 | [Reuse the Active Run Profile for Matching Inputs Historical Requirements Reconstruction](requirements/profile-260710-profile-matching-join-policy.md) | profile-260710 | 2026-07-10 | - |
-| [Runtime Profile Deletion Requirements](requirements/profile-260811-runtime-profile-deletion.md) | profile-260811 | 2026-08-11 | - |
+| [Runtime Profile Deletion Requirements](requirements/profile-260811-runtime-profile-deletion.md) | profile-260811 | 2026-08-11 | 2026-08-11 |
 | [Session Workspace Project Contract Historical Requirements Reconstruction](requirements/projects-260509-projects.md) | projects-260509 | 2026-05-09 | 2026-05-09 |
 | [System Prompt Context Inspector Preserves Pre-assembly Fragment Metadata Historical Requirements Reconstruction](requirements/prompt-260611-prompt-context-inspector.md) | prompt-260611 | 2026-06-11 | - |
 | [Per-Prompt Models Form FIFO Run Boundaries Historical Requirements Reconstruction](requirements/prompt-260710-prompt-fifo-boundaries.md) | prompt-260710 | 2026-07-10 | - |

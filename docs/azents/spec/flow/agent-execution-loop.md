@@ -79,7 +79,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-11
-spec_version: 153
+spec_version: 154
 ---
 
 # Agent Execution Loop
@@ -739,14 +739,24 @@ operation times out into a failed/cancelled tool result path instead of leaving 
 `client_tool_call` without a corresponding `client_tool_result` forever.
 
 Runtime Toolkit prompt construction is database-only and independent from Runner readiness. It
-renders bounded behavior from the immutable desired Profile and freezes that revision ID,
-configuration digest, and desired generation as the model step's Runtime authority. Each
-Runtime-backed Tool resolves one bounded target that must also match that prompt-selected authority,
-the applied revision, Provider/Runner generations and readiness, and current Workspace evidence.
+renders bounded behavior from the PostgreSQL current desired configuration slot and freezes its
+positive configuration sequence, digest, and desired target generation as the model step's Runtime
+authority. Missing state and unconfigured, blocked, or malformed desired state leave Runtime
+operations unavailable without consulting or substituting a physical Runtime.
+
+Each Runtime-backed Tool resolves one bounded exact target that must match that prompt-selected
+sequence, digest, and desired generation. Qualification requires a ready current desired slot, the
+bounded applied slot promoted from that same sequence, exact Provider and Runner digest evidence
+admitted under their current connection generations, a connected Provider running on the current
+desired generation, a ready positive Runner generation, and current Workspace evidence. The
+resulting target freezes Runtime ID, Runtime capability version, desired generation, Runner
+generation, configuration sequence and digest, and Workspace path for dispatch.
+
 Operation TurnActions, including those executed before prompt construction, use the same exact
-resolver without a prompt fence. A transient Provider or Runner disconnect waits within the
-caller's bounded timeout while retaining the initially selected revision and desired generation. In
-both paths, a configuration or generation change during wait or execution fails closed rather than
+resolver without a prompt fence. During a bounded readiness wait, the resolver retains the initially
+selected desired sequence and generation while allowing only same-target Provider or Runner
+reconnection and readiness progress. Prompt-authority mismatch, desired sequence or generation
+change, capability drift, or loss of exact current-state qualification fails closed rather than
 dispatching against a substituted Runtime.
 
 Runtime-backed process Tools execute directly through the Runner process service. Native
@@ -1244,6 +1254,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-11** (spec_version 154) — Replaced Runtime revision-pointer prompt and
+  operation authority with database-only bounded desired/applied current state, positive
+  sequence/digest/generation evidence, and exact Provider/Runner-fenced target resolution.
 - **2026-08-11** (spec_version 153) — Removed the contained execution branch and bwrap policy
   enforcement; process and native file Tools now use direct Runner execution under the Runtime
   operating-system user's ordinary filesystem permissions.

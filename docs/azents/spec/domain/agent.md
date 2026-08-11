@@ -74,6 +74,7 @@ api_routes:
   - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add
   - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/remove
   - /runtime-profile/v1/workspaces/{handle}/profiles
+  - /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}
   - /runtime-profile/v1/workspaces/{handle}/default
   - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations
   - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/models
@@ -85,8 +86,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-08-10
-spec_version: 64
+last_verified_at: 2026-08-11
+spec_version: 65
 ---
 
 # Agent Domain Spec
@@ -157,6 +158,23 @@ the selection, and a non-null replacement must identify a Profile in the same Wo
 changes enqueue authoritative Runtime configuration reconciliation; there is no Agent Apply action.
 An unavailable selected Profile remains visible and stored, and the server never substitutes
 another Profile or Provider.
+
+Permanent Workspace Runtime Profile deletion is a separate Owner-only authority from ordinary
+Profile management. It requires the exact expected Profile version and physically deletes the
+Profile while atomically clearing a matching Workspace default and every matching Agent selection.
+The Workspace default version and each affected Agent's selection version advance once, and no
+default, Provider, or other Profile is substituted. Managers retain ordinary Profile create,
+replace, default-selection, and recreation management, but cannot permanently delete a Profile.
+
+An affected managed Agent remains `managed` with a null selection and reports
+`runtime_profile_status=profile_required`. If it owns a logical Runtime, deletion advances the
+Runtime configuration sequence and overwrites only the desired current state as
+`unconfigured/runtime_profile_required`. An already running Runtime, its applied current
+configuration, Provider binding, and Agent Workspace storage remain intact. Profile-dependent
+create, start, restart, reset, recreate, and Runner operations remain unavailable until an
+authorized Agent manager explicitly selects a replacement Profile; stop and terminal Runtime
+removal remain available under their normal lifecycle guards. Replacement never happens
+automatically.
 
 `selectable_model_options` is a JSONB array rather than a separate table because option order is part of the fallback contract. The list invariants are:
 
@@ -308,8 +326,9 @@ Create/update requests accept selectable model options as the current model cont
   omission leaves the selection unchanged, explicit null clears it, and a non-null value replaces
   it. The request must include `expected_runtime_profile_selection_version`.
 - Runtime Profile selection changes do not directly issue a lifecycle command or recreate physical
-  compute. They reconcile the authoritative desired configuration, and current lifecycle guards
-  decide whether explicit recreation is required.
+  compute. They overwrite the authoritative desired current configuration state at a higher
+  Runtime configuration sequence, and current lifecycle guards decide whether explicit recreation
+  is required.
 - Response returns stored `selectable_model_options`, `main_model_label`, `lightweight_model_label`, effective `model_selection`, effective `lightweight_model_selection`, `model_parameters`, `subagent_settings`, and effective context window value.
 
 ### 2.2 Workspace model settings
@@ -534,6 +553,10 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-08-11** (spec_version 65) — Added exact-version Owner-only Workspace Runtime Profile hard
+  deletion, atomic default and Agent selection clearing with version advancement, managed-Agent
+  `profile_required` recovery, and preservation of running Runtime, applied configuration, and
+  Agent Workspace storage until explicit replacement.
 - **2026-08-10** (spec_version 64) — Added optional Agent Runtime capability, Runtime-free creation,
   dedicated add/remove and higher-generation rearm, read-only unified Runtime projection, and
   automatic Project policy preservation across destructive removal.

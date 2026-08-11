@@ -37,7 +37,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-11
-spec_version: 58
+spec_version: 59
 ---
 
 # Agent Runtime Control
@@ -146,14 +146,21 @@ Runtime Transfer authorization or startup input.
 
 - desired lifecycle state and desired generation
 - selected logical and durable Provider IDs used for exact routing
-- exact infrastructure Profile and Workspace Runtime Profile IDs
-- desired and applied Runtime configuration revision IDs
+- monotonic Runtime-scoped `configuration_sequence` high-water mark
 - provider observed state, provider generation, provider runtime id, connection state
 - runner-reported Agent Workspace path
 - runner state, runner generation, active operation ids, connection state
 - current-generation failure code/message/details
 - run state for the Agent execution loop
 - terminal-delete requested generation, acknowledged generation, and acknowledgement timestamp
+
+One one-to-one `runtime_configuration_states` row exists only while desired or applied configuration
+state exists. It contains the current desired status, positive sequence, target desired generation,
+digest, canonical source/configuration document or bounded reason, Provider/Runner acknowledgement
+evidence, and the optional applied sequence/generation/digest/document/time. Source Profile,
+infrastructure Profile, and Provider capability identifiers inside these documents are scalar
+snapshot evidence rather than foreign keys to mutable source rows. Superseded desired and applied
+documents are not retained as product history.
 
 Server output exposes raw Runtime data only as diagnostics. UI behavior must be driven by the server-computed summary/actions:
 
@@ -180,10 +187,12 @@ or closes Provider/Runner streams whose inbound message generation differs from 
 registration generation. Durable Provider reports are accepted only when both the Provider stream
 generation and observed desired generation are monotonic relative to the `agent_runtimes` row.
 Durable Runner state reports are accepted only when the Runner generation is not older than the row
-generation and any reported configuration evidence names the current desired generation and exact
-digest. A Runner from the replaced desired generation is ignored during workload handoff and cannot
-create an evidence-mismatch failure for the new target. Stale reports must not overwrite workspace
-path, observed state, configuration evidence, runner availability, or current failure fields.
+generation and any reported configuration evidence names the exact current desired generation,
+positive configuration sequence, and digest. Provider configuration evidence is additionally
+fenced by the exact bound Provider and current Provider connection generation. A Runner from the
+replaced desired generation is ignored during workload handoff and cannot create an
+evidence-mismatch failure for the new target. Stale reports must not overwrite workspace path,
+observed state, configuration evidence, runner availability, or current failure fields.
 
 Provider report framing always uses the generation accepted for the current Control stream. A Provider reconnect or leader failover may observe backend resources whose labels contain an older Provider generation; those labels are historical command metadata and must be replaced with the current connection generation before initial resync reports, watch reports, or command completion reports are sent to Control.
 
@@ -237,18 +246,27 @@ is observed by either check discards the handoff; a later periodic observation c
 that races after the last check. Pending lifecycle dispatch and terminal deletion block the handoff.
 Lifecycle and desired-configuration adoption retain their existing precedence and do not compete
 with this one-shot handoff. Eligible handoff and successful dispatch logs carry Runtime/Provider
-identity, Provider and desired generations, configuration revision, reconciliation kind, and reason;
-these logs are not durable repair state.
+identity, Provider and desired generations, configuration sequence, reconciliation kind, and
+reason; these logs are not durable repair state.
 
 The live Provider connection registry, rather than a cached per-Runtime connection flag, gates dispatch; periodic attempts are durably throttled while a Provider is unavailable, and a successful dispatch refreshes the cached connection flag. Start timeout evaluation happens only after the current reconciliation pass has checked that live registry and only for a desired generation already dispatched to its Provider, so a Control rollout cannot convert a stale durable `connected` flag into a false `START_TIMEOUT`. This converges Runner image/configuration drift after deployment and closes gaps when a backend deletion event is missed during Provider reconnect or leader handoff. A current-generation Provider `stopped` report also converges durable Runner state to `disconnected`; the stopped backend is authoritative that no Runner remains available. Kubernetes Pod replacement treats deletion as asynchronous: the Provider must not apply the replacement under the same name until the old Pod is no longer observable, avoiding immutable-field PATCH failures during restart.
 
-Runtime Profile reconciliation classifies one action for each candidate. A ready desired revision may
-dispatch lifecycle work, wait for Provider acknowledgement, offer exact evidence to the Runner
-through the ordinary heartbeat acknowledgement, wait for a matching Runner state report, adopt a
-NetworkPolicy-only change in place, wait for explicit recreation, or do nothing. Independent loops
-must not select competing lifecycle and configuration actions for the same observation.
+Runtime Profile reconciliation classifies one action for each candidate. A ready desired slot may
+dispatch lifecycle work, wait for Provider acknowledgement, offer exact sequence/digest/generation
+evidence to the Runner through the ordinary heartbeat acknowledgement, wait for a matching Runner
+state report, adopt a NetworkPolicy-only change in place, wait for explicit recreation, or do
+nothing. Independent loops must not select competing lifecycle and configuration actions for the
+same observation.
 
-Provider and Runner request streams use explicit claim/ack delivery. Control returns each claimed request with the stream cursor and consumer-group metadata needed to acknowledge the request only after it has been sent on the matching gRPC stream. Unacknowledged requests may be reclaimed after an idle interval so a Control replica crash or stream interruption does not strand in-flight Provider/Runner work. A repeated stop request for a Runtime already targeted by stop retains the existing desired generation. Before dispatching stop, stopped-desired observe, or terminal delete, Control ensures that usable immutable configuration evidence exists for the current desired generation by reusing an existing exact revision or cloning the retained ready desired/applied evidence. This repair also lets lifecycle reconciliation recover rows created before the exact-generation invariant was enforced.
+Provider and Runner request streams use explicit claim/ack delivery. Control returns each claimed
+request with the stream cursor and consumer-group metadata needed to acknowledge the request only
+after it has been sent on the matching gRPC stream. Unacknowledged requests may be reclaimed after
+an idle interval so a Control replica crash or stream interruption does not strand in-flight
+Provider/Runner work. A repeated stop request for a Runtime already targeted by stop retains the
+existing desired generation. Configuration-requiring commands use the current ready desired slot.
+Cleanup-only stop, stopped-desired observe, and terminal delete may instead use the retained applied
+document when desired state is blocked or unconfigured; command evidence remains fenced by the
+current lifecycle desired generation plus the retained positive sequence and digest.
 
 Runner operation cancellation is an ordered request on the same generation-scoped stream as the original operation. Control records `cancel_requested_at`, transitions non-final metadata to `cancel_requested`, and appends `operation.cancel` after the operation request. Start authorization atomically claims an active operation as running, so cancellation may win before handler creation. A Runner whose start claim is denied emits the operation's terminal cancellation result instead of silently dropping the request. Pending work is removed from the owner queue; active work is cancelled through its handler task. Final operation metadata and reply cursors remain authoritative, and a late Runner final cannot overwrite an already accepted terminal result.
 
@@ -319,11 +337,15 @@ configurations. It preserves canonical document, evidence, desired-generation, P
 Provider-binding checks but does not reinterpret or execute the unsupported Profile. Start,
 restart, reset, update, and observe continue to require the complete supported typed Profile.
 
-Provider reports include the applied configuration generation and digest. Control records Provider
-acknowledgement only for the exact desired revision. After that acknowledgement, Runner heartbeat
-ACK may carry the same pending evidence; Runner adopts it locally and emits its ordinary state
-report. Control promotes the desired revision to applied only when Provider and Runner evidence both
-match. There is no separate Runner configuration-update request/ACK protocol.
+Provider reports include the applied configuration sequence, desired generation, and digest.
+Control records Provider acknowledgement only when Runtime identity, bound Provider, Provider
+generation, desired generation, current desired sequence, and digest all match. After that
+acknowledgement, Runner heartbeat ACK may carry the same pending evidence; Runner adopts it locally
+and emits its ordinary state report. Runner evidence must also match the authenticated Runtime and
+current Runner generation. Once both reports match the current ready desired tuple, one
+compare-and-set copies the desired sequence/generation/digest/document into the applied slot and
+overwrites the previous applied slot. There is no separate Runner configuration-update request/ACK
+protocol.
 
 Provider reports backend observed state and configuration evidence without Agent Workspace metadata.
 Kubernetes Provider v2 command reports may additionally carry exactly one structured
@@ -469,15 +491,18 @@ Lifecycle APIs are desired-state declarations. Repeating the same request must c
 
 `AgentRuntime` is optional. Runtime GET is read-only and never creates a row. The dedicated add
 transition creates or rearms one logical Runtime in stopped desired state and attaches an exact
-desired configuration revision without dispatching compute. A later start or authorized
-Runtime-dependent operation performs ordinary lazy provisioning.
+ready desired current-configuration slot at a new positive configuration sequence without
+dispatching compute. A later start or authorized Runtime-dependent operation performs ordinary lazy
+provisioning.
 
 Permanent removal is a separate irreversible product transition. Its PostgreSQL coordinator fences
 Agent work, interrupts active Session trees, clears Runtime-owned product state, requests terminal
 delete, and remains pending through Provider outage or ambiguous dispatch. Finalization requires
 exact requested/desired/acknowledged generation equality. After completion, rearm preserves the
 logical Runtime ID but advances desired generation and clears Provider/Runner observation,
-Workspace path, applied revision, failure, terminal-request, and incarnation-scoped dispatch state.
+Workspace path, the bounded configuration-state row, failure, terminal-request, and
+incarnation-scoped dispatch state. The Runtime-owned configuration-sequence high-water mark remains
+monotonic across terminal cleanup and rearm.
 
 - `start` sets desired state to running.
 - `stop` sets desired state to stopped and must preserve workspace data.
@@ -487,40 +512,50 @@ Workspace path, applied revision, failure, terminal-request, and incarnation-sco
 
 Reset carries its own desired generation and a final desired state. Provider is responsible for performing backend deletion/recreation according to that command and reporting the resulting observed state.
 
-Runtime configuration targets are immutable generation-fenced revisions resolved from the Agent's
-exact Workspace Runtime Profile and durable Provider, capability, and Profile sources. Live
-Provider connection state is not configuration identity and cannot create a blocked revision.
-Parent Profile or current capability changes create a new desired revision automatically; there is
-no Agent Apply boundary and no legacy policy fallback.
+Runtime configuration authority is one bounded desired/applied current-state row plus the
+Runtime-owned sequence high-water mark. Resolution snapshots the Agent's exact Workspace Runtime
+Profile and durable Provider, capability, infrastructure Profile, source versions, resolved
+configuration, desired generation, and canonical digest. Live Provider connection state is not
+configuration identity and cannot change desired status or digest. A materially new source,
+lifecycle generation, blocked result, or unconfigured target overwrites the desired slot at the
+next positive configuration sequence; an identical target reuses the current sequence. There is no
+Agent Apply boundary, historical configuration catalog, or legacy policy fallback.
 
-Lifecycle commands that create or replace physical compute require the latest ready desired revision.
-An unavailable or blocked desired revision prevents create/start/restart/reset/recreate and reports
-a bounded reason. Stop and terminal delete remain available where needed to remove authority or
-complete decommissioning.
+Lifecycle commands that create or replace physical compute require a ready current desired slot.
+An absent, unconfigured, or blocked desired slot prevents create/start/restart/reset/recreate and
+reports a bounded reason. Stop and terminal delete remain available where needed to remove
+authority or complete decommissioning and may use retained applied evidence for cleanup.
 
 Every explicit Runtime-backed tool or TurnAction resolves one bounded immutable operation target.
 The resolver may request start when that operation permits it, then requires the exact desired and
-applied revision ID/digest, desired generation, accepted Runner generation, Provider connection and
-observation, qualified durable Runner readiness, and current Runner-reported Agent Workspace path.
-Protocol `BUSY` reports retain availability by normalizing to durable `READY`. Callers use the
-prompt-selected revision/digest/generation when available.
-A transient Provider or Runner disconnection keeps the initially selected revision and desired
-generation and waits within the caller's bounded operation timeout. Dispatch and operation
-qualification still require current Provider and Runner authority. Supersession, current-generation
-failure, timeout, cancellation, or authority drift fails closed rather than retargeting the
-operation to another Runtime incarnation.
+applied configuration sequence and digest, desired generation, accepted Runner generation, Provider
+connection and observation, qualified durable Runner readiness, and current Runner-reported Agent
+Workspace path. Protocol `BUSY` reports retain availability by normalizing to durable `READY`.
+Callers use the prompt-selected sequence/digest/generation when available. A transient Provider or
+Runner disconnection keeps the initially selected sequence and desired generation and waits within
+the caller's bounded operation timeout. Dispatch and operation qualification still require current
+Provider and Runner authority. Supersession, current-generation failure, timeout, cancellation, or
+authority drift fails closed rather than retargeting the operation to another Runtime incarnation.
 
 Desired/applied mismatch never authorizes implicit recreation. Kubernetes NetworkPolicy-only changes
 may adopt in place through exact Provider and Runner evidence. PodSpec, PVC, and Docker changes
 remain waiting for an explicit recreation operation. Recreation snapshots the exact target version
-and revision, dispatches one fenced next generation, skips stale or superseded items, and completes
-only after the replacement revision becomes applied. Stopped Runtimes skip immediate recreation and
-adopt the current Profile on their next start.
+plus configuration sequence, digest, and desired generation, dispatches one fenced next generation,
+skips stale or superseded items, and completes only after that exact replacement state becomes
+applied. Stopped Runtimes skip immediate recreation and adopt the current Profile on their next
+start.
 
 Start, stop, restart, ordinary recreation, recovery, and in-place adoption preserve Agent Workspace
 data. Reset and terminal delete retain their explicit destructive boundaries. Provider or Profile
 loss preserves stored selection and running incarnation state; it does not select a fallback or
 silently weaken configuration.
+
+Owner-only exact-version Workspace Runtime Profile deletion clears matching Workspace default and
+Agent selections without fallback. Each affected managed Runtime receives a higher-sequence
+`unconfigured/runtime_profile_required` desired slot while its applied slot, Provider binding,
+running workload, and Agent Workspace remain intact. Profile-dependent lifecycle and Runner work
+remain unavailable until explicit replacement selection. Stop, observation where applicable, and
+terminal removal retain their ordinary authority.
 
 ## Delivery
 
@@ -552,7 +587,7 @@ Required deterministic coverage:
   registration acceptance
 - strict `network_policy`-only reconciliation report decoding and sink rejection
 - stream-local `OBSERVE` completion correlation, current row-lock repair fencing, structured
-  handoff/dispatch logs, stale generation/revision rejection, and
+  handoff/dispatch logs, stale generation/sequence rejection, and
   lifecycle/configuration/repair/periodic precedence
 - Runner operation tests for process, file, Git, and strict V4A patch operations
 - Runtime Control contract tests for ordered operation cancellation, start/cancel races, terminal cursor authority, and typed patch result folding
@@ -560,7 +595,7 @@ Required deterministic coverage:
 - Runtime Profile tests for exact resolution, current-capability compatibility, desired/applied
   evidence, one-action reconciliation, explicit recreation, stale target skips, and bounded failures
 - shared operation-target tests for delayed start, durable readiness plus protocol `BUSY`
-  normalization, exact revision/digest/generation fencing, Provider disconnection, supersession,
+  normalization, exact sequence/digest/generation fencing, Provider disconnection, supersession,
   timeout, cancellation, and Workspace evidence
 - Runner direct execution tests for environment propagation, process groups, deadlines,
   cancellation, native filesystem behavior, and ordinary operating-system permission failures
@@ -576,6 +611,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-11** (spec_version 59) — Replaced Runtime configuration revisions with bounded
+  desired/applied current state, monotonic sequence/digest/generation fencing, exact promotion and
+  terminal cleanup, and Owner hard-delete behavior that preserves applied running Workspace state.
 - **2026-08-11** (spec_version 58) — Removed Azents-owned process containment, backend bootstrap,
   AppArmor/RuntimeClass preparation, qualification, and containment CI evidence; retained direct
   Runner execution, provider workload hardening, null-field compatibility, and active-field

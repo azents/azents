@@ -98,7 +98,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-08-11
-spec_version: 63
+spec_version: 64
 ---
 
 # Workspace & Membership
@@ -243,17 +243,19 @@ The concrete-session Workspace panel requests the Project browser manifest only 
 
 Runtime-dependent file, browser, Project, directory-validation, and worktree operations resolve one
 shared exact operation target. The resolver may request start/wait when the explicit operation
-allows it, then requires matching desired/applied revision and digest, desired/Runner generation,
+allows it, then requires a ready desired current configuration state, an applied state with the same
+configuration sequence, the exact configuration digest, desired and Runner generations,
 Provider/Runner authority, and a valid current Runner-reported Agent Workspace path. Missing or
 invalid Runner evidence produces `RUNNER_WORKSPACE_PATH_MISSING` or
 `RUNNER_WORKSPACE_PATH_INVALID`. A transient Provider or Runner disconnect waits within the
-caller's bounded timeout while preserving the initially selected revision and desired generation;
-supersession, timeout, or authority drift fails closed, and the server does not invent a fallback
-path. The read-only Workspace summary itself remains non-starting.
+caller's bounded timeout while preserving the initially selected configuration sequence and
+desired generation; supersession, timeout, or authority drift fails closed, and the server does not
+invent a fallback path. The read-only Workspace summary itself remains non-starting.
 
-The Runtime response includes the desired/applied configuration status and revision evidence without
-a process-containment projection. The UI renders the status supplied by the server and does not
-reconstruct physical security claims from raw Provider/Runner states.
+The Runtime response includes desired and applied current configuration-state status, sequence,
+target-generation, digest, source, and acknowledgement evidence without a process-containment
+projection. The UI renders the status supplied by the server and does not reconstruct physical
+security claims from raw Provider/Runner states.
 
 Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding; binary preview candidates return no text body and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, stat the regular file, and consume one verified Runtime transfer object in the API response adapter. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
 
@@ -275,11 +277,14 @@ but cannot expand either. Docker Profiles reject Workspace network policy rather
 false parity. Missing optional fields mean no Workspace-added restriction; they do not inherit
 hidden Provider or global customer policy.
 
-Profile create and complete replacement require `RUNTIME_PROFILES_WRITE`; reads require
-`RUNTIME_PROFILES_READ`. Replacement uses an expected Profile version. Lifecycle can make a Profile
-unavailable without deleting it, its Agent selections, or its Runtime references. Availability is
-computed from the exact Provider lifecycle/connection/current capability, infrastructure Profile
-compatibility, and Workspace Profile state. No arbitrary substitute is selected.
+Profile create, complete replacement, default selection, and scoped recreation require
+`RUNTIME_PROFILES_WRITE`; reads require `RUNTIME_PROFILES_READ`. Owners and Managers retain these
+ordinary management permissions. Permanent deletion requires the distinct
+`RUNTIME_PROFILES_DELETE` permission granted only to the Workspace Owner. Replacement and deletion
+use an exact expected Profile version. Lifecycle can make a Profile unavailable without deleting
+it, its Agent selections, or its Runtime references. Availability is computed from the exact
+Provider lifecycle/connection/current capability, infrastructure Profile compatibility, and
+Workspace Profile state. No arbitrary substitute is selected.
 
 Infrastructure and Workspace Runtime Profile responses expose the Profile schema without a derived
 process-containment projection. Admin create/edit preserves Profile v1 and direct Profile v2.
@@ -292,10 +297,30 @@ The default is picker assistance only; omitting Runtime selection on Agent creat
 Runtime-free Agent and does not copy the default. Changing or clearing the default does not modify
 existing Agents.
 
-Parent Profile changes enqueue authoritative desired-configuration reconciliation for affected
-Agents. NetworkPolicy-only Kubernetes changes may be adopted in place after exact evidence.
-PodSpec, PVC, and Docker changes remain `waiting_for_recreation` until an authorized actor creates a
-durable scoped recreation operation. Recreation snapshots target IDs and versions, uses bounded
+`DELETE /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}` permanently removes one
+Profile using `expected_version`. In one PostgreSQL transaction it clears a matching Workspace
+default and advances the default version, clears every matching Agent selection and advances each
+selection version, supersedes active recreation operations for the Profile, writes affected
+managed Runtimes' desired current state as `unconfigured/runtime_profile_required` at a higher
+configuration sequence, and deletes the Profile row. The committed response reports whether the
+default was cleared plus bounded counts for cleared Agents, affected running Runtimes, and
+superseded recreation operations. A stale version conflicts, a missing or cross-Workspace Profile
+is not found, and any failure rolls the whole operation back.
+
+Deletion never selects a fallback Workspace default, Provider default, or other Profile. Affected
+managed Agents remain managed but unconfigured and expose `profile_required` until an authorized
+Agent manager explicitly selects a replacement. Already running Runtimes keep their current
+Provider binding and applied configuration, and Agent Workspace storage is neither reset nor
+deleted. Profile-dependent create, start, restart, reset, recreate, and Runner operations remain
+unavailable; stop, observation, and terminal Runtime removal remain available where their normal
+lifecycle authority permits them. Selecting and applying a replacement is the only recovery path
+and preserves Workspace storage.
+
+Parent Profile changes enqueue authoritative current desired-configuration-state reconciliation
+for affected Agents. NetworkPolicy-only Kubernetes changes may be adopted in place after exact
+sequence, digest, and generation evidence. PodSpec, PVC, and Docker changes remain
+`waiting_for_recreation` until an authorized actor creates a durable scoped recreation operation.
+Recreation snapshots target IDs and versions plus current configuration authority, uses bounded
 concurrency, reports progress and bounded failures, skips stale/superseded targets, and preserves
 Agent Workspace data. No Agent Apply action exists.
 
@@ -413,9 +438,11 @@ duplicated in the settings overview.
 
 Every Workspace member may read all three settings areas. Existing Owner-only management behavior
 remains for model and LLM integration settings: only the Owner receives model save and integration
-create/edit/delete/enable controls. Runtime Profile management remains available to Owners and
-Managers. Backend authorization is final for every mutation. Each detail page owns independent query
-and mutation state, while tRPC cache remains the shared server-state authority across navigation.
+create/edit/delete/enable controls. Runtime Profile create, edit, default, and recreation management
+remains available to Owners and Managers, while the permanent delete action is visible and
+authorized only for the Owner. Backend authorization is final for every mutation. Each detail page
+owns independent query and mutation state, while tRPC cache remains the shared server-state
+authority across navigation.
 
 ### Membership Lifecycle
 
@@ -689,6 +716,10 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-11 (spec_version=64)** — Added exact-version Owner-only Runtime Profile hard deletion,
+  atomic Workspace default and Agent selection clearing with version advancement, no-fallback
+  `profile_required` recovery, running/applied Runtime and Agent Workspace preservation, and
+  configuration-sequence/current-state terminology.
 - **2026-08-11 (spec_version=63)** — Removed process-containment status and Profile projections
   from Workspace APIs and UI, retained direct Profile v1/v2 editing, and preserved null-only
   historical schema-v2 compatibility.
