@@ -2,6 +2,7 @@
 title: "Runtime Profile Deletion Design"
 created: 2026-08-11
 updated: 2026-08-11
+implemented: 2026-08-11
 tags: [runtime, profile, workspace, persistence, architecture]
 document_role: primary
 document_type: design

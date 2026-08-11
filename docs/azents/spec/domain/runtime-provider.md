@@ -52,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
 last_verified_at: 2026-08-11
-spec_version: 23
+spec_version: 24
 ---
 
 # Runtime Provider
@@ -121,13 +121,22 @@ resource and one infrastructure Profile owned by that Provider. The resolver doe
 Agent Provider preference, Platform default, environment default, or fallback Provider. It checks
 the exact Profile ownership, lifecycle, Provider lifecycle/enablement/scope/Workspace eligibility,
 current capability, infrastructure compatibility, and Workspace policy. Live connection state does
-not participate in the immutable configuration revision status or digest.
+not participate in desired configuration status, sequence, or digest.
 
-The logical Runtime stores routing identity plus the exact infrastructure Profile, Workspace
-Runtime Profile, desired configuration revision, and applied configuration revision. The immutable
-configuration revision stores the Provider capability revision and complete source identity.
-Provider/Profile changes create a new authoritative desired revision; they do not silently move the
-Agent to another Profile or Provider.
+The logical Runtime stores durable Provider routing identity and a monotonic
+`configuration_sequence` high-water mark. One bounded `runtime_configuration_states` row stores at
+most one desired slot and one applied slot. A ready or blocked desired document snapshots the exact
+Provider capability, infrastructure Profile, Workspace Runtime Profile, Agent selection, source
+versions, and resolved configuration required by the current target; those identifiers are scalar
+evidence rather than foreign keys to mutable Profile resources.
+
+Every materially new desired target, including a source-authority change, lifecycle generation
+advance, blocked result, or transition to unconfigured state, receives the next positive
+configuration sequence. Repeating an identical current target does not allocate another sequence.
+Provider/Profile changes overwrite the desired slot; they do not silently move the Agent to another
+Profile or Provider. Provider and Runner evidence is accepted only for the exact Runtime, desired
+generation, positive configuration sequence, digest, and current connection generation. Returning
+to an earlier document therefore cannot reuse evidence from its earlier application.
 
 Provider infrastructure chooses and mounts durable storage for Runner workloads. Bundled Providers
 set Runner `HOME` and working directory to the configured mount path, but Provider registration and
@@ -137,6 +146,22 @@ is the metadata authority for the effective absolute path.
 When the exact selection is missing or unavailable, Public Runtime creation/start/restart/reset/
 recreate returns a bounded `409` conflict instead of persisting a substitute target. Stop and
 terminal delete remain available where required to reduce authority or finalize decommissioning.
+
+A Workspace Owner may permanently delete a Workspace Runtime Profile with optimistic version
+fencing. The PostgreSQL transaction physically deletes the Profile, clears a matching Workspace
+default and every matching Agent selection while advancing their versions, and chooses no fallback.
+Each affected managed Runtime advances its configuration sequence and overwrites desired state as
+`unconfigured` with reason `runtime_profile_required`. Its Provider binding, applied slot, running
+workload, Runner-reported Workspace path, and Agent Workspace storage remain until an explicit
+replacement or terminal Runtime removal. Active recreation work targeting the deleted Profile is
+completed with affected pending or running items skipped as `target_deleted`.
+
+While desired state is unconfigured, create/start/restart/reset/recreate and Runner-dependent work
+that requires a current Profile are unavailable. Stop, read-only observation where applicable, and
+terminal removal remain available. Selecting a replacement Profile writes a higher-sequence ready
+desired slot; exact Provider and Runner acknowledgement promotes it and overwrites the prior applied
+slot. Exact terminal-removal finalization deletes the remaining configuration-state row while the
+Runtime-owned sequence high-water remains for later rearm fencing.
 
 Permanent Runtime removal may request terminal delete while the Provider is disconnected. The
 operation remains pending until a current authoritative Provider report acknowledges the exact
@@ -187,14 +212,14 @@ generation, lifecycle, and configuration evidence and persists only those ordina
 persists drift, a repair claim, or retry state. The gRPC bridge retains command-type correlation only
 for the live stream. A valid current `OBSERVE` completion with `network_policy:drifted` is handed
 once to the Lifecycle Reconciler, which re-fences the Runtime, Provider generation, and
-desired/applied revision while holding that Runtime row through exact configuration lookup and
-`UPDATE_CONFIGURATION` append, never `START`. Pending lifecycle dispatch and terminal deletion
-block the handoff. Control logs the transient handoff and successful dispatch with Runtime/Provider
-identity, generations, revision, NetworkPolicy kind, and reason, but does not persist those fields
-as repair state. Lost completion, stream/control restart, and dispatch failure discard the handoff;
-a later periodic `OBSERVE` is the only retry mechanism. Policy comparison excludes the historical
-Provider-generation transport label but keeps desired-generation, configuration identity, selectors,
-and rules exact.
+equal desired/applied configuration sequence while holding that Runtime row through exact
+configuration lookup and `UPDATE_CONFIGURATION` append, never `START`. Pending lifecycle dispatch
+and terminal deletion block the handoff. Control logs the transient handoff and successful dispatch
+with Runtime/Provider identity, Provider and desired generations, configuration sequence,
+NetworkPolicy kind, and reason, but does not persist those fields as repair state. Lost completion,
+stream/control restart, and dispatch failure discard the handoff; a later periodic `OBSERVE` is the
+only retry mechanism. Policy comparison excludes the historical Provider-generation transport
+label but keeps desired-generation, configuration identity, selectors, and rules exact.
 
 The current Kubernetes protocol accepts only `network_policy` reconciliation evidence. A report
 containing any other kind is rejected as a whole, and adding a kind requires a coordinated new
@@ -249,6 +274,9 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **24 (2026-08-11):** Replaced Agent Runtime configuration-history references with bounded
+  desired/applied state slots, positive sequence/digest/generation fencing, exact promotion and
+  cleanup, and Owner hard-delete behavior without fallback or running-Workspace disruption.
 - **23 (2026-08-11):** Removed the Azents-owned process-containment capability, Profile module,
   derived status projections, and Provider deployment preparation while retaining schema-v2
   compatibility for historical null fields and rejecting active containment requests.
@@ -259,7 +287,7 @@ Admin Profile editing cannot mutate those deployment boundaries.
   Agent Runtime removal.
 
 - **20 (2026-08-09):** Separated durable Runtime configuration identity from live Provider
-  connectivity so transient rollout reconnect gaps retain ready revisions while dispatch and
+  connectivity so transient rollout reconnect gaps retain ready desired state while dispatch and
   operation qualification still require current connection authority.
 - **19 (2026-08-09):** Added Profile v2 portable process containment, deployment-owned capability
   advertisement plus per-Runtime qualification, explicit recreation, safe derived product

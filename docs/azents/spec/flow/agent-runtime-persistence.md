@@ -27,7 +27,7 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-11
-spec_version: 23
+spec_version: 24
 ---
 
 # Agent Runtime Persistence
@@ -40,51 +40,70 @@ have no logical Runtime row or Workspace. When managed compute exists, the curre
 Runner reports the effective Agent Workspace absolute path as Runtime metadata. Server file APIs,
 Projects, worktrees, and prompts consume that reported path without a fixed server-side fallback.
 
-## Runtime Profile binding and configuration revisions
+## Runtime Profile binding and current configuration state
 
 An Agent stores capability `none`, `managed`, or `removing` independently from one exact Workspace
 Runtime Profile selection or no selection. Existing Agents were backfilled to `managed`; new Agents
 default to `none` and do not create a logical Runtime. Explicit add from `none` requires an
 available Profile and creates or rearms the logical row in stopped desired state.
 
-When the logical Runtime row is created or reconciled, the Runtime Profile resolver reads that exact Profile and persists the
-logical/durable Provider routing IDs, infrastructure Profile ID, Workspace Runtime Profile ID, and
-an immutable desired configuration revision. It does not consult a Provider preference, Platform
-default, environment default, fallback, or live Provider connection state.
+The logical Runtime persists durable Provider routing IDs and a monotonic
+`configuration_sequence` high-water mark. A one-to-one `runtime_configuration_states` row exists
+only while current configuration authority remains and contains one desired slot plus an optional
+applied slot. Superseded desired or applied documents are not retained as product history, and
+there is no configuration archive or Profile tombstone.
 
-The desired revision records the exact Provider capability revision, infrastructure and Workspace
-Profile IDs/versions/digests, Agent selection version, resolved full configuration, source trace,
-target desired generation, canonical digest, and complete retained Profile v1 or Profile v2
-document. Historical schema-v2 `process_containment: null` serialization is normalized away before
-canonicalization; a non-null value blocks parsing rather than becoming a direct configuration. A
-blocked resolution is also durable and keeps its bounded reason and missing-capability evidence
-without discarding the last applied revision.
+The Runtime Profile resolver reads the exact Agent selection, Workspace Profile, infrastructure
+Profile, Provider, and current capability as lock-free versioned snapshots. A ready desired
+document records their scalar IDs, versions, digests, Agent selection version, source trace,
+resolved full configuration, target desired generation, canonical digest, and complete retained
+Profile v1 or Profile v2 document. These source identifiers are snapshot evidence rather than
+foreign keys to mutable Profile resources. The resolver does not consult a Provider preference,
+Platform default, environment default, fallback, or live Provider connection state.
+
+Historical schema-v2 `process_containment: null` serialization is normalized away before
+canonicalization; a non-null value produces a blocked desired slot rather than becoming a direct
+configuration. Other unavailable source or capability results are also durable blocked slots with
+bounded reasons. No Profile selection produces `unconfigured/runtime_profile_required` without
+selected-Profile authority or resolved configuration. Both blocked and unconfigured desired state
+preserve any older applied slot while its running incarnation remains current.
 
 Provider connectivity is operational evidence rather than configuration identity. Disconnect and
-reconnect events do not change revision status or digest; current connection authority separately
-gates lifecycle dispatch and exact Runtime operation qualification.
+reconnect events do not change desired status, sequence, or digest; current connection authority
+separately gates lifecycle dispatch and exact Runtime operation qualification.
 
-Resolution reads Agent selection, Workspace Profile, infrastructure Profile, Provider, and
-capability inputs as lock-free versioned snapshots. It attaches a new desired pointer only through
-a Runtime compare-and-set that verifies the prior pointer, desired generation, and every snapshot
-identity/version relationship. A concurrent source change therefore cannot attach a stale revision.
-The resolver retries a stale attachment from a fresh snapshot once; a durable Agent-selection
-reconcile task converges any remaining conflict to the current authoritative selection.
+Resolution commits through a Runtime compare-and-set that verifies the expected sequence high-water,
+desired generation, and every snapshot identity/version relationship. A materially new source,
+desired generation, blocked result, or unconfigured target increments the high-water mark and
+overwrites the desired slot at that positive sequence. Repeating an identical current target does
+not allocate a sequence. A concurrent source change cannot attach stale state; the resolver retries
+a stale write from a fresh snapshot once, and a durable Agent-selection reconcile task converges
+any remaining conflict to the current authoritative selection.
 
-The applied revision pointer is separate physical evidence. It advances only after the exact
-Provider acknowledges the current revision and the ordinary Runner state report returns the same
-generation and digest. Desired changes therefore become visible immediately while the running
-incarnation may remain applied to an older revision or wait for explicit recreation.
+The applied slot is separate physical evidence. It is overwritten only after the exact current
+ready desired sequence, digest, and target generation are acknowledged by the bound Provider under
+its current connection generation and by the authenticated current-generation Runner. Desired
+changes therefore become visible immediately while the running incarnation may remain applied to
+an older sequence or wait for explicit recreation. Returning to an earlier canonical document
+still allocates a higher sequence, so old Provider or Runner evidence cannot become current again.
 
 There is no persisted process-containment lifecycle enum, boolean, status table, or qualification
-record. Product status is derived from desired/applied revision equality, current Provider/Runner
-authority, and current Runner-reported Workspace evidence.
+record. Product status is derived from bounded desired/applied current state, exact
+sequence/digest/generation evidence, current Provider/Runner authority, and current Runner-reported
+Workspace evidence.
 
 Capability/Profile changes never reassign the Agent to another Provider or Profile. Provider or
-Profile loss preserves IDs, revisions, and existing storage while blocking new create/start/restart/
-reset/recreate work. Historical hierarchy conversion occurs only inside the one-way Alembic
-migration; runtime services do not read legacy policy tables, snapshots, overrides, or status
-fallbacks.
+Profile loss preserves stored selection, Provider binding, applied state, running compute, and
+existing storage while blocking new create/start/restart/reset/recreate work. Historical hierarchy
+conversion occurs only inside the one-way Alembic migration; runtime services do not read legacy
+policy tables, snapshots, overrides, or status fallbacks.
+
+An Owner-only exact-version Workspace Runtime Profile hard delete physically removes the Profile in
+the same PostgreSQL transaction that clears a matching Workspace default and Agent selections,
+advances their versions, supersedes Profile-targeted recreation, and writes affected managed
+Runtimes' desired slot as higher-sequence `unconfigured/runtime_profile_required`. No fallback is
+selected. Existing applied state, Provider binding, running compute, Runner-reported Workspace
+path, and Agent Workspace storage remain until explicit replacement or terminal Runtime removal.
 
 ## Event Persistence
 
@@ -138,12 +157,14 @@ Removal clears Session Project/worktree metadata, Runtime-only Toolkit projectio
 defaults/presets/catalog, and automatic Project policy items while preserving the automatic policy
 settings row. It terminally invalidates every retained `pending` or `bound` Session folder binding.
 After exact physical acknowledgement, finalization clears Profile selection, keeps shell disabled,
+deletes the bounded configuration-state row, keeps the Runtime-owned sequence high-water mark,
 and sets capability to `none`.
 
 Re-add reuses a retained logical Runtime ID only after completed removal and exact acknowledgement.
-It advances desired generation, attaches a newly resolved Profile revision, and starts stopped with
-no Workspace path or applied incarnation evidence. The Provider therefore creates a fresh empty
-Workspace on later start; old Session bindings and deleted Project/worktree rows are never restored.
+It advances desired generation, allocates the next configuration sequence, writes a newly resolved
+ready desired slot with no applied slot, and starts stopped with no Workspace path or applied
+incarnation evidence. The Provider therefore creates a fresh empty Workspace on later start; old
+Session bindings and deleted Project/worktree rows are never restored.
 
 ## Kubernetes Provider v2
 
@@ -209,7 +230,7 @@ lifecycle-only reports may omit it. Runtime Control never persists drift evidenc
 retry times, or completion history. A successful live-stream-correlated `OBSERVE` completion with
 current `drifted` evidence may make one generation- and configuration-fenced, non-destructive
 `UPDATE_CONFIGURATION` dispatch. The Reconciler locks the current Runtime row through exact
-configuration lookup and queue append, so a same-generation desired-revision replacement cannot
+configuration lookup and queue append, so a same-generation desired-sequence replacement cannot
 apply the replaced NetworkPolicy. Pending lifecycle dispatch and terminal deletion prevent repair.
 Stale evidence cannot dispatch; a reconnect, stream/control restart, lost completion, or dispatch
 failure is discarded and can retry only after a later periodic `OBSERVE`. Unsupported evidence kinds
@@ -258,7 +279,7 @@ Required checks:
 - Runtime Profile E2E uses Admin/Public API setup and a real Docker Provider to verify unconfigured,
   default, and explicit selection; exact desired/applied evidence; explicit recreation; Provider
   loss without substitution; retained selection; and recovery.
-- Profile tests prove v1/v2 direct preservation, canonical revision identity, historical null-field
+- Profile tests prove v1/v2 direct preservation, canonical current-state identity, historical null-field
   normalization, and active containment rejection.
 - Docker and Kubernetes Provider tests prove Workspace persistence and ephemeral-state clearing on
   recreation.
@@ -269,6 +290,10 @@ Required checks:
 
 ## Changelog
 
+- **2026-08-11 (spec_version=24)** — Replaced configuration revision history with one bounded
+  desired/applied current-state row and Runtime-owned sequence high-water, added exact
+  sequence/digest/generation promotion and cleanup, and documented Owner hard delete without
+  fallback or running Workspace disruption.
 - **2026-08-11 (spec_version=23)** — Removed process-containment selection and derived status from
   persisted Runtime configuration while retaining historical null-field normalization and
   fail-closed rejection of active values.
