@@ -61,8 +61,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-10
-spec_version: 37
+last_verified_at: 2026-08-11
+spec_version: 38
 ---
 
 # External Channel Provider Ingress
@@ -310,8 +310,11 @@ durable queue content.
    avoidable duplicate reads without reordering admitted callbacks.
 8. The final transaction re-locks the owner, claimed items, connection
    authority, and affected conversation positions. It validates the initial cursor
-   snapshot, correlates every returned provider message with active admitted trigger
-   identities, and assigns `prompt_role = context | invocation`. A stale cursor rolls
+   snapshot, correlates every returned provider message with every active admitted
+   trigger identity, and assigns `prompt_role = context | invocation`. The exact
+   trigger for any admitted item is `invocation`, including connected `all_messages`
+   traffic whose provider-native explicit-invocation flag is false; retained messages
+   without another active admitted correlation remain `context`. A stale cursor rolls
    back the complete prepared batch and retries coordination without consuming a
    provider attempt.
 9. Every canonical provider message is admitted as one independent
@@ -359,7 +362,10 @@ explicit invocation, including when its configured location default is
 messages leave the conversation position unchanged, so a later eligible mention can
 include them through the existing bounded provider-history range. Already committed
 mailbox input, wake, Channel Work, or AgentRun state is never cancelled or
-reclassified by a later mode change.
+reclassified by a later mode change. The explicit-invocation flag remains the
+response-mode and settings-control signal; it does not demote an ordinary message that
+already passed the connected `all_messages` gate. That admitted item's exact trigger
+correlation produces `prompt_role=invocation`.
 
 Restricted access persists the trigger source plus immutable conversation-position,
 range-start, and trigger-position replay authority and returns one immediate
@@ -463,6 +469,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-11** (spec_version 38) — Required every active admitted trigger identity,
+  not only provider-native explicit mentions, to correlate its exact human provider
+  message to `prompt_role=invocation`; connected `all_messages` triggers now remain
+  invocation-role while retained history remains context.
 - **2026-08-10** (spec_version 37) — Made the existing unbound-conversation rule
   explicit: every Binding creation is mention-gated, while `all_messages` applies only
   to ordinary continuation on a connected Binding.

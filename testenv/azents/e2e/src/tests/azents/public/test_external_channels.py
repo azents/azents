@@ -1969,7 +1969,9 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             message="Later Slack mention did not include retained context",
         ),
     )
-    assert ordinary_body in {item["body"] for item in mention_evidence}
+    mention_by_body = {item["body"]: item for item in mention_evidence}
+    assert mention_by_body[ordinary_body]["prompt_role"] == "context"
+    assert mention_by_body[mention_body]["prompt_role"] == "invocation"
 
     updated = external_api.external_channel_v1_update_session_channel_response_mode(
         agent_id=agent_id,
@@ -2049,7 +2051,10 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             message="All-messages Slack continuation was not admitted",
         ),
     )
-    assert continuation_body in {item["body"] for item in continuation_evidence}
+    continuation_by_body = {item["body"]: item for item in continuation_evidence}
+    assert continuation_by_body[ordinary_body]["prompt_role"] == "context"
+    assert continuation_by_body[mention_body]["prompt_role"] == "invocation"
+    assert continuation_by_body[continuation_body]["prompt_role"] == "invocation"
 
     disconnected = external_api.external_channel_v1_disconnect_session_channel(
         agent_id=agent_id,

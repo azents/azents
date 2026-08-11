@@ -38,6 +38,7 @@ from azents.repos.external_channel.ingress_queue import (
 )
 from azents.repos.external_channel.ingress_queue_data import (
     ExternalChannelIngressBatch,
+    ExternalChannelIngressCorrelation,
     ExternalChannelIngressItem,
     ExternalChannelIngressLeaseClaim,
     ExternalChannelIngressOwner,
@@ -139,6 +140,7 @@ def _item(
     created_at: datetime.datetime = _NOW,
     invocation: bool = True,
     initial_title_eligible: bool = False,
+    provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
 ) -> ExternalChannelIngressItem:
     """Build one complete content-free active queue item."""
     return ExternalChannelIngressItem.model_construct(
@@ -148,12 +150,24 @@ def _item(
         deduplication_key=f"dedupe-{item_id}",
         provider_event_id=f"event-{item_id}",
         connection_id="connection-1",
-        provider=ExternalChannelProvider.SLACK,
-        ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
+        provider=provider,
+        ingress_profile=(
+            ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
+            if provider is ExternalChannelProvider.DISCORD
+            else ExternalChannelIngressProfile.SLACK_HTTP
+        ),
         configuration_generation=1,
-        authority_kind=ExternalChannelIngressAuthorityKind.CONFIGURATION,
-        authority_lease_owner=None,
-        authority_lease_generation=None,
+        authority_kind=(
+            ExternalChannelIngressAuthorityKind.LEASE
+            if provider is ExternalChannelProvider.DISCORD
+            else ExternalChannelIngressAuthorityKind.CONFIGURATION
+        ),
+        authority_lease_owner=(
+            "gateway-1" if provider is ExternalChannelProvider.DISCORD else None
+        ),
+        authority_lease_generation=(
+            1 if provider is ExternalChannelProvider.DISCORD else None
+        ),
         provider_event_type="message",
         provider_tenant_id="tenant-1",
         scope_kind=ExternalChannelConversationScopeKind.THREAD,
@@ -817,6 +831,81 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
     )
     transaction.commit.assert_awaited_once()
     wake_dispatcher.dispatch.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [ExternalChannelProvider.SLACK, ExternalChannelProvider.DISCORD],
+)
+async def test_admitted_all_messages_trigger_is_invocation_with_retained_context(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: ExternalChannelProvider,
+) -> None:
+    """A provider-neutral ordinary trigger stays invocation after correlation."""
+    item = _item(
+        item_id="item-2",
+        trigger_key="message-2",
+        trigger_position="00000000000000000002",
+        invocation=False,
+        provider=provider,
+    )
+    row = SimpleNamespace(id=item.id)
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=[row])
+    queue_repository.list_active_correlations.return_value = {
+        item.trigger_provider_message_key: ExternalChannelIngressCorrelation(
+            invocation_id=item.invocation_id,
+            principal_id=item.principal_id,
+        )
+    }
+    transaction = _Session()
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    stale = await service._finalize_batch(  # noqa: SLF001
+        _batch(item),
+        prepared=[
+            _PreparedSuccess(
+                item=item,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=item.trigger_provider_message_key,
+                    trigger_position=item.trigger_position,
+                    include_context=True,
+                ),
+            )
+        ],
+    )
+
+    assert stale is False
+    enqueues = mailbox_service.enqueue_many.await_args.args[1]
+    messages = [
+        enqueue.payload.items[0].metadata["external_channel_message"]
+        for enqueue in enqueues
+    ]
+    assert [
+        (message["provider_message_key"], message["prompt_role"])
+        for message in messages
+    ] == [
+        ("context-message", "context"),
+        ("message-2", "invocation"),
+    ]
+    assert messages[0]["principal_id"] is None
+    assert messages[1]["principal_id"] == item.principal_id
+    assert messages[1]["provider"] == provider.value
 
 
 async def test_explicit_followup_settings_and_tracker_precede_wake(

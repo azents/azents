@@ -34,8 +34,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-08-10
-spec_version: 22
+last_verified_at: 2026-08-11
+spec_version: 23
 ---
 
 # External Channel Authorization
@@ -169,6 +169,9 @@ eligibility. A repeated compatible decision, an existing Binding, or replay reco
 does not re-arm eligibility. Repeating a compatible Allow may resubmit the same Session
 execution key to recover a post-commit submission or provider-resolution failure, but
 active-ingress and mailbox identities prevent another logical input or execution.
+The replayed item's saved exact trigger identity participates in the same active
+correlation as normal ingress and therefore cannot be demoted to context during
+provider-history hydration.
 Replay failure never reverts the already committed access decision or Binding, and it
 does not couple provider-control success to accepted mailbox execution.
 This durable replay remains available while connection ingress health is `active`,
@@ -185,7 +188,10 @@ fails.
 
 Later authorized original messages on a connected `all_messages` binding create
 another active ingress item and later one mailbox row per canonical provider message
-before waking the same Session. A `mention_only` binding
+before waking the same Session. The exact admitted ordinary trigger is projected as
+`prompt_role=invocation` even though it has no provider-native explicit-invocation
+signal; earlier retained messages remain context unless independently correlated to
+another admitted trigger. A `mention_only` binding
 requires an explicit invocation; ordinary messages remain provider-history context
 without independent admission. Edit and delete callbacks are excluded in either mode;
 they do not independently invoke the Agent or create a lifecycle/revision correction.
@@ -217,6 +223,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-08-11** (spec_version 23) — Made exact active-trigger correlation explicit
+  for approval replay and connected ingress: the replayed or `all_messages` trigger is
+  invocation-role, while unrelated retained history remains context.
 - **2026-08-10** (spec_version 22) — Replaced synchronous access replay and one
   batch-shaped mailbox item with DB-only ingress admission, leased provider-history
   drain, per-message `prompt_role` mailbox rows, cursor CAS, and one post-batch wake.

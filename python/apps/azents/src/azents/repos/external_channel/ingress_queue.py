@@ -413,7 +413,6 @@ class ExternalChannelIngressQueueRepository:
                 RDBExternalChannelIngressItem.connection_id == connection_id,
                 RDBExternalChannelIngressItem.conversation_position_id
                 == conversation_position_id,
-                RDBExternalChannelIngressItem.invocation.is_(True),
             )
         )
         return {
