@@ -78,7 +78,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
                 payload=command_payload,
                 runtime_configuration=runtime_configuration_pb2.RuntimeConfigurationEnvelope(
                     evidence=runtime_configuration_pb2.RuntimeConfigurationEvidence(
-                        revision_id="revision-1",
+                        configuration_sequence="1",
                         digest="d" * 64,
                         desired_generation=5,
                     ),
@@ -124,6 +124,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
     assert command.command.auth.transfer_endpoint == "runtime-transfer:8030"
     assert command.command.auth.runner_auth_token == "runner-token"
     assert command.command.auth.runner_auth_credential_id == "runner-credential-1"
+    assert command.command.runtime_configuration.evidence.configuration_sequence == 1
     parsed = parse_runtime_configuration_envelope(
         command.command.runtime_configuration,
         desired_generation=5,
@@ -355,6 +356,14 @@ def test_provider_report_rejects_invalid_reconciliation_wire_evidence(
         provider_report_from_message(message)
 
 
+def test_provider_wire_evidence_rejects_noncanonical_sequence() -> None:
+    message = _report_message()
+    message.runtime_configuration.configuration_sequence = "01"
+
+    with pytest.raises(ValueError, match="canonical positive decimal"):
+        provider_report_from_message(message)
+
+
 def _report() -> RuntimeProviderReport:
     return RuntimeProviderReport(
         runtime_id="runtime-1",
@@ -394,7 +403,7 @@ def _report_message() -> runtime_provider_control_pb2.RuntimeProviderReport:
         reported_at=_timestamp_message(),
         terminal_delete_acknowledged=False,
         runtime_configuration=runtime_configuration_pb2.RuntimeConfigurationEvidence(
-            revision_id="revision-1",
+            configuration_sequence="1",
             digest="d" * 64,
             desired_generation=5,
         ),
@@ -409,7 +418,7 @@ def _timestamp_message() -> timestamp_pb2.Timestamp:
 
 def _runtime_configuration_evidence() -> RuntimeConfigurationEvidence:
     return RuntimeConfigurationEvidence(
-        revision_id="revision-1",
+        configuration_sequence=1,
         digest="d" * 64,
         desired_generation=5,
     )

@@ -39,6 +39,10 @@ class RDBAgentRuntimeAddReceipt(RDBModel):
         "runtime_desired_generation >= 0",
         name="ck_agent_runtime_add_receipts_runtime_generation",
     )
+    CK_CONFIGURATION_SEQUENCE = sa.CheckConstraint(
+        "runtime_configuration_sequence >= 1",
+        name="ck_agent_runtime_add_receipts_configuration_sequence",
+    )
 
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -52,9 +56,7 @@ class RDBAgentRuntimeAddReceipt(RDBModel):
     )
     idempotency_key: Mapped[str] = mapped_column(sa.String(120), nullable=False)
     workspace_runtime_profile_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("workspace_runtime_profiles.id", ondelete="RESTRICT"),
-        nullable=False,
+        sa.String(32), nullable=False
     )
     expected_capability_version: Mapped[int] = mapped_column(
         sa.BigInteger,
@@ -73,10 +75,11 @@ class RDBAgentRuntimeAddReceipt(RDBModel):
         sa.ForeignKey("agent_runtimes.id", ondelete="CASCADE"),
         nullable=False,
     )
-    runtime_configuration_revision_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_configuration_revisions.id", ondelete="RESTRICT"),
-        nullable=False,
+    runtime_configuration_sequence: Mapped[int] = mapped_column(
+        sa.BigInteger, nullable=False
+    )
+    runtime_configuration_digest: Mapped[str] = mapped_column(
+        sa.String(64), nullable=False
     )
     runtime_desired_generation: Mapped[int] = mapped_column(
         sa.BigInteger,
@@ -101,4 +104,5 @@ class RDBAgentRuntimeAddReceipt(RDBModel):
         CK_CAPABILITY_VERSIONS,
         CK_PROFILE_VERSION,
         CK_RUNTIME_GENERATION,
+        CK_CONFIGURATION_SEQUENCE,
     )

@@ -623,7 +623,7 @@ async def test_legacy_container_is_skipped_until_command_replaces_it(
     container = docker.containers["azents-runtime-runtime-1"]
     labels = cast(dict[str, str], container.spec.labels)
     for key in (
-        "azents/runtime-configuration-revision-id",
+        "azents/runtime-configuration-sequence",
         "azents/runtime-configuration-digest",
     ):
         labels.pop(key)
@@ -634,9 +634,7 @@ async def test_legacy_container_is_skipped_until_command_replaces_it(
 
     assert result.report.runtime_configuration == command.runtime_configuration.evidence
     replaced = docker.containers["azents-runtime-runtime-1"]
-    assert (
-        replaced.spec.labels["azents/runtime-configuration-revision-id"] == "revision-1"
-    )
+    assert replaced.spec.labels["azents/runtime-configuration-sequence"] == "1"
 
 
 def test_invalid_workspace_path_is_rejected(tmp_path: Path) -> None:
@@ -677,7 +675,7 @@ async def test_runtime_configuration_evidence_is_persisted_and_reported(
     )
 
     container = docker.containers["azents-runtime-runtime-1"]
-    assert container.spec.env["AZ_RUNTIME_CONFIGURATION_REVISION_ID"] == "revision-1"
+    assert container.spec.env["AZ_RUNTIME_CONFIGURATION_SEQUENCE"] == "1"
     assert result.report.runtime_configuration == configuration.evidence
 
 
@@ -784,7 +782,7 @@ def _runtime_configuration(
     }
     return RuntimeConfigurationEnvelope(
         evidence=RuntimeConfigurationEvidence(
-            revision_id="revision-1",
+            configuration_sequence=1,
             digest="d" * 64,
             desired_generation=desired_generation,
         ),

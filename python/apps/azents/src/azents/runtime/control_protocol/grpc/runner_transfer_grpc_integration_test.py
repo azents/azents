@@ -944,7 +944,7 @@ def _register() -> control_pb.RunnerMessage:
             workspace_path="/workspace",
             auth_credential_id="credential-1",
             runtime_configuration=configuration_pb.RuntimeConfigurationEvidence(
-                revision_id="revision-1",
+                configuration_sequence="1",
                 digest="d" * 64,
                 desired_generation=1,
             ),

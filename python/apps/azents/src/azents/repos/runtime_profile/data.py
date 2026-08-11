@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from azents.core.runtime_profile import (
-    RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationDocument,
+    RuntimeConfigurationStateStatus,
     RuntimeInfrastructureProfileKind,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
@@ -120,53 +121,53 @@ class WorkspaceRuntimeProfileReplace:
 
 
 @dataclass(frozen=True)
-class RuntimeConfigurationRevision:
-    """Immutable desired or applied full Runtime configuration evidence."""
+class RuntimeConfigurationSlot:
+    """One current desired configuration slot."""
 
-    id: str
-    runtime_id: str
-    provider_id: str
-    provider_capability_revision_id: str | None
-    infrastructure_profile_id: str
-    infrastructure_profile_version: int
-    workspace_runtime_profile_id: str
-    workspace_runtime_profile_version: int
-    agent_selection_version: int
-    resolution_status: RuntimeConfigurationResolutionStatus
+    sequence: int
+    status: RuntimeConfigurationStateStatus
+    target_generation: int
+    digest: str | None
+    document: RuntimeConfigurationDocument | None
     reason_code: str | None
-    required_capabilities: tuple[str, ...]
-    missing_capabilities: tuple[str, ...]
-    resolved_configuration: dict[str, Any] | None
-    source_trace: dict[str, Any]
-    digest: str
-    target_desired_generation: int
     provider_reported_digest: str | None
     runner_reported_digest: str | None
     provider_acknowledged_at: datetime.datetime | None
-    runtime_observed_at: datetime.datetime | None
-    created_at: datetime.datetime
+    runner_observed_at: datetime.datetime | None
 
 
 @dataclass(frozen=True)
-class RuntimeConfigurationRevisionCreate:
-    """Complete values for immutable Runtime configuration evidence."""
+class RuntimeConfigurationAppliedSlot:
+    """One current applied configuration slot."""
+
+    sequence: int
+    target_generation: int
+    digest: str
+    document: RuntimeConfigurationDocument
+    applied_at: datetime.datetime
+
+
+@dataclass(frozen=True)
+class RuntimeConfigurationState:
+    """Bounded desired/applied current configuration authority."""
 
     runtime_id: str
-    provider_id: str
-    provider_capability_revision_id: str | None
-    infrastructure_profile_id: str
-    infrastructure_profile_version: int
-    workspace_runtime_profile_id: str
-    workspace_runtime_profile_version: int
-    agent_selection_version: int
-    resolution_status: RuntimeConfigurationResolutionStatus
+    desired: RuntimeConfigurationSlot
+    applied: RuntimeConfigurationAppliedSlot | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+@dataclass(frozen=True)
+class RuntimeConfigurationDesiredStateWrite:
+    """Input for a current desired-state overwrite."""
+
+    runtime_id: str
+    status: RuntimeConfigurationStateStatus
+    target_generation: int
+    digest: str | None
+    document: RuntimeConfigurationDocument | None
     reason_code: str | None
-    required_capabilities: tuple[str, ...]
-    missing_capabilities: tuple[str, ...]
-    resolved_configuration: dict[str, Any] | None
-    source_trace: dict[str, Any]
-    digest: str
-    target_desired_generation: int
 
 
 @dataclass(frozen=True)
@@ -216,7 +217,9 @@ class RuntimeRecreationOperationItem:
     id: str
     operation_id: str
     runtime_id: str
-    expected_configuration_revision_id: str
+    expected_configuration_sequence: int
+    expected_configuration_digest: str
+    expected_desired_generation: int
     status: RuntimeRecreationItemStatus
     attempt: int
     dispatched_generation: int | None

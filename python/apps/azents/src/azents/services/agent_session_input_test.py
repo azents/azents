@@ -358,7 +358,7 @@ def _root_agent_session_creation_service() -> RootAgentSessionCreationService:
             runtime_capability_version=1,
             desired_generation=1,
             runner_generation=1,
-            configuration_revision_id="revision-1",
+            configuration_sequence=1,
             configuration_digest="a" * 64,
             workspace_path="/workspace/agent",
         )

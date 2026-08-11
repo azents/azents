@@ -779,7 +779,7 @@ def _report_message() -> runtime_provider_control_pb2.RuntimeProviderReport:
 def _runtime_configuration() -> RuntimeConfigurationEnvelope:
     return RuntimeConfigurationEnvelope(
         evidence=RuntimeConfigurationEvidence(
-            revision_id="revision-1",
+            configuration_sequence=1,
             digest="d" * 64,
             desired_generation=5,
         ),
@@ -794,7 +794,7 @@ def _runtime_configuration_evidence_message() -> (
 ):
     evidence = _runtime_configuration().evidence
     return runtime_configuration_pb2.RuntimeConfigurationEvidence(
-        revision_id=evidence.revision_id,
+        configuration_sequence=str(evidence.configuration_sequence),
         digest=evidence.digest,
         desired_generation=evidence.desired_generation,
     )

@@ -100,6 +100,7 @@ class _SourceRacingResolutionService(RuntimeProfileResolutionService):
             sa.update(RDBWorkspaceRuntimeProfile)
             .where(RDBWorkspaceRuntimeProfile.id == prepared.profile.id)
             .values(version=RDBWorkspaceRuntimeProfile.version + 1)
+            .execution_options(synchronize_session=False)
         )
         return await super().attach_prepared_selection(
             session,
@@ -392,11 +393,8 @@ async def test_add_runtime_commits_stopped_revision_and_exact_replay(
     assert added.runtime.last_lifecycle_command is None
     assert added.runtime.last_lifecycle_dispatch_generation == 0
     assert added.runtime.workspace_path is None
-    assert added.runtime.applied_runtime_configuration_revision_id is None
-    assert added.runtime.desired_runtime_configuration_revision_id == (
-        added.desired_revision.id
-    )
-    assert added.desired_revision.target_desired_generation == 0
+    assert added.runtime.configuration_sequence == added.desired.sequence
+    assert added.desired.target_generation == 0
     assert added.receipt.expected_capability_version == 1
     assert added.receipt.committed_capability_version == 2
     assert added.receipt.committed_runtime_profile_selection_version == 2
@@ -595,13 +593,8 @@ async def test_add_runtime_rearms_exact_completed_runtime_without_starting(
     assert rearmed.runtime.provider_observed_generation == 0
     assert rearmed.runtime.runner_state is RuntimeRunnerState.UNKNOWN
     assert rearmed.runtime.workspace_path is None
-    assert rearmed.runtime.applied_runtime_configuration_revision_id is None
-    assert rearmed.runtime.desired_runtime_configuration_revision_id == (
-        rearmed.desired_revision.id
-    )
-    assert rearmed.desired_revision.target_desired_generation == (
-        rearmed.runtime.desired_generation
-    )
+    assert rearmed.runtime.configuration_sequence == rearmed.desired.sequence
+    assert rearmed.desired.target_generation == rearmed.runtime.desired_generation
     assert rearmed.agent.runtime_capability is AgentRuntimeCapability.MANAGED
     assert rearmed.agent.runtime_capability_version == 4
     assert rearmed.agent.runtime_profile_selection_version == 4

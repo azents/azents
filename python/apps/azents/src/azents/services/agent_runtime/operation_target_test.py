@@ -12,9 +12,15 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
-from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.core.runtime_profile import (
+    RuntimeConfigurationDocument,
+    RuntimeConfigurationStateStatus,
+)
 from azents.repos.agent_runtime.data import AgentRuntime
-from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
+from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationAppliedSlot,
+    RuntimeConfigurationSlot,
+)
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationAuthority
 from azents.services.runtime_profile_resolution.data import (
     RuntimeProfileResolutionResult,
@@ -76,12 +82,12 @@ def _revision(
     revision_id: str = "revision-2",
     desired_generation: int = 2,
     qualified: bool = True,
-) -> RuntimeConfigurationRevision:
-    """Build one desired configuration revision with optional physical evidence."""
+) -> RuntimeConfigurationSlot:
+    """Build one desired configuration slot with optional physical evidence."""
     now = datetime.now(UTC)
-    return RuntimeConfigurationRevision(
-        id=revision_id,
-        runtime_id="runtime-1",
+    document = RuntimeConfigurationDocument(
+        schema_version=1,
+        source_trace={},
         provider_id="provider-1",
         provider_capability_revision_id="capability-1",
         infrastructure_profile_id="profile-1",
@@ -89,35 +95,62 @@ def _revision(
         workspace_runtime_profile_id="workspace-profile-1",
         workspace_runtime_profile_version=1,
         agent_selection_version=1,
-        resolution_status=RuntimeConfigurationResolutionStatus.READY,
-        reason_code=None,
         required_capabilities=(),
         missing_capabilities=(),
         resolved_configuration={},
-        source_trace={},
+    )
+    return RuntimeConfigurationSlot(
+        sequence=desired_generation,
+        status=RuntimeConfigurationStateStatus.READY,
+        target_generation=desired_generation,
         digest=_DIGEST,
-        target_desired_generation=desired_generation,
+        document=document,
+        reason_code=None,
         provider_reported_digest=_DIGEST if qualified else None,
         runner_reported_digest=_DIGEST if qualified else None,
         provider_acknowledged_at=now if qualified else None,
-        runtime_observed_at=now if qualified else None,
-        created_at=now,
+        runner_observed_at=now if qualified else None,
     )
 
 
 def _resolution(
     *,
     runtime: AgentRuntime | None = None,
-    revision: RuntimeConfigurationRevision | None = None,
+    revision: RuntimeConfigurationSlot | None = None,
     applied: bool = True,
 ) -> RuntimeProfileResolutionResult:
     """Combine one Runtime and desired/applied revision snapshot."""
     runtime = runtime or _runtime()
     revision = revision or _revision(desired_generation=runtime.desired_generation)
+    applied_slot = (
+        RuntimeConfigurationAppliedSlot(
+            sequence=revision.sequence,
+            target_generation=revision.target_generation,
+            digest=revision.digest or _DIGEST,
+            document=revision.document
+            or RuntimeConfigurationDocument(
+                schema_version=1,
+                source_trace={},
+                provider_id="provider-1",
+                provider_capability_revision_id="capability-1",
+                infrastructure_profile_id="profile-1",
+                infrastructure_profile_version=2,
+                workspace_runtime_profile_id="workspace-profile-1",
+                workspace_runtime_profile_version=1,
+                agent_selection_version=1,
+                required_capabilities=(),
+                missing_capabilities=(),
+                resolved_configuration={},
+            ),
+            applied_at=datetime.now(UTC),
+        )
+        if applied
+        else None
+    )
     return RuntimeProfileResolutionResult(
         runtime=runtime,
-        desired_revision=revision,
-        applied_revision=revision if applied else None,
+        desired=revision,
+        applied=applied_slot,
         runtime_created=False,
     )
 
@@ -188,7 +221,7 @@ async def test_resolve_operation_target_returns_exact_qualified_evidence() -> No
     assert target.runtime_capability_version == 4
     assert target.desired_generation == 2
     assert target.runner_generation == 3
-    assert target.configuration_revision_id == "revision-2"
+    assert target.configuration_sequence == 2
     assert target.workspace_path == "/workspace/agent"
 
 
@@ -256,7 +289,7 @@ async def test_resolve_operation_target_requests_start_before_fencing() -> None:
 
     assert service.ensure_started_calls == 1
     assert target.desired_generation == 2
-    assert target.configuration_revision_id == "revision-2"
+    assert target.configuration_sequence == 2
 
 
 async def test_resolve_operation_target_can_skip_start_for_nonblocking_call() -> None:
@@ -296,7 +329,7 @@ async def test_resolve_operation_target_rejects_prompt_authority_change() -> Non
         await service.resolve_operation_target(
             "agent-1",
             expected_authority=RuntimeOperationAuthority(
-                configuration_revision_id="revision-2",
+                configuration_sequence=2,
                 configuration_digest=_DIGEST,
                 desired_generation=2,
             ),
@@ -367,7 +400,7 @@ async def test_resolve_operation_target_waits_for_provider_reconnection() -> Non
     )
 
     assert target.desired_generation == 2
-    assert target.configuration_revision_id == "revision-2"
+    assert target.configuration_sequence == 2
 
 
 async def test_resolve_operation_target_reports_provider_timeout() -> None:

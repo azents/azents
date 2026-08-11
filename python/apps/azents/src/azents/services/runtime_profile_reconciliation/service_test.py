@@ -85,9 +85,7 @@ async def test_reconcile_persists_cursor_and_completes_next_page() -> None:
     repository = harness.repository
     resolution_service = harness.resolution_service
     resolution = MagicMock()
-    resolution.desired_revision.resolution_status = (
-        RuntimeConfigurationResolutionStatus.READY
-    )
+    resolution.desired.resolution_status = RuntimeConfigurationResolutionStatus.READY
     resolution_service.ensure_for_agent.return_value = resolution
     repository.get_reconcile_source_version.return_value = "1"
     repository.continue_reconcile_task.return_value = True
@@ -173,9 +171,7 @@ async def test_reconcile_does_not_advance_cursor_after_claim_is_reclaimed() -> N
     harness = _service()
     repository = harness.repository
     resolution = MagicMock()
-    resolution.desired_revision.resolution_status = (
-        RuntimeConfigurationResolutionStatus.READY
-    )
+    resolution.desired.resolution_status = RuntimeConfigurationResolutionStatus.READY
     harness.resolution_service.ensure_for_agent.return_value = resolution
     repository.claim_reconcile_tasks.return_value = [_task(cursor=None)]
     repository.get_reconcile_source_version.return_value = "1"

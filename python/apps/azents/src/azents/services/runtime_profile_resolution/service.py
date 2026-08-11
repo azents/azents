@@ -17,7 +17,9 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.core.runtime_profile import (
+    RuntimeConfigurationDocument,
     RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationStateStatus,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
     WorkspaceRuntimeProfilePolicyV1,
@@ -33,7 +35,7 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeCreate
 from azents.repos.runtime_profile.data import (
-    RuntimeConfigurationRevisionCreate,
+    RuntimeConfigurationDesiredStateWrite,
     RuntimeInfrastructureProfile,
     WorkspaceRuntimeProfile,
 )
@@ -168,35 +170,17 @@ class RuntimeProfileResolutionService:
         provider = prepared.provider
         infrastructure = prepared.infrastructure
         profile = prepared.profile
-        revision = await self.profile_repository.create_or_get_configuration_revision(
-            session,
-            create=RuntimeConfigurationRevisionCreate(
-                runtime_id=runtime.id,
-                provider_id=provider.id,
-                provider_capability_revision_id=(
-                    resolution.capability_revision.id
-                    if resolution.capability_revision is not None
-                    else None
-                ),
-                infrastructure_profile_id=infrastructure.id,
-                infrastructure_profile_version=infrastructure.version,
-                workspace_runtime_profile_id=profile.id,
-                workspace_runtime_profile_version=profile.version,
-                agent_selection_version=agent.runtime_profile_selection_version,
-                resolution_status=resolution.status,
-                reason_code=resolution.reason_code,
-                required_capabilities=infrastructure.required_capabilities,
-                missing_capabilities=resolution.missing_capabilities,
-                resolved_configuration=resolution.resolved_configuration,
-                source_trace=resolution.source_trace,
-                digest=resolution.digest,
-                target_desired_generation=runtime.desired_generation,
-            ),
+        write = _build_configuration_state_write(
+            runtime_id=runtime.id,
+            resolution=resolution,
+            infrastructure=infrastructure,
+            profile=profile,
+            target_generation=runtime.desired_generation,
         )
-        attached = await self.runtime_repository.attach_desired_configuration_revision(
+        attached = await self.runtime_repository.attach_desired_configuration_state(
             session,
             runtime_id=runtime.id,
-            expected_revision_id=runtime.desired_runtime_configuration_revision_id,
+            expected_configuration_sequence=runtime.configuration_sequence,
             expected_desired_generation=runtime.desired_generation,
             agent_id=agent.id,
             workspace_id=agent.workspace_id,
@@ -223,14 +207,15 @@ class RuntimeProfileResolutionService:
             infrastructure_profile_version=infrastructure.version,
             workspace_runtime_profile_id=profile.id,
             workspace_runtime_profile_version=profile.version,
-            configuration_revision_id=revision.id,
+            write=write,
         )
         if attached is None:
             return None
+        attached_runtime, state = attached
         return RuntimeProfileResolutionResult(
-            runtime=attached,
-            desired_revision=revision,
-            applied_revision=None,
+            runtime=attached_runtime,
+            desired=state.desired,
+            applied=state.applied,
             runtime_created=runtime_created,
         )
 
@@ -320,10 +305,7 @@ class RuntimeProfileResolutionService:
                             RuntimeProviderBindingOrigin.AGENT_EXPLICIT
                         ),
                         provider_binding_evidence=None,
-                        infrastructure_profile_id=infrastructure.id,
-                        workspace_runtime_profile_id=profile.id,
-                        desired_runtime_configuration_revision_id=None,
-                        applied_runtime_configuration_revision_id=None,
+                        configuration_sequence=0,
                     ),
                 )
                 existing = ensured.runtime
@@ -337,146 +319,55 @@ class RuntimeProfileResolutionService:
                 infrastructure=infrastructure,
                 profile=profile,
             )
-            revision = (
-                await self.profile_repository.create_or_get_configuration_revision(
-                    session,
-                    create=RuntimeConfigurationRevisionCreate(
-                        runtime_id=existing.id,
-                        provider_id=provider.id,
-                        provider_capability_revision_id=(
-                            prepared.capability_revision.id
-                            if prepared.capability_revision is not None
-                            else None
-                        ),
-                        infrastructure_profile_id=infrastructure.id,
-                        infrastructure_profile_version=infrastructure.version,
-                        workspace_runtime_profile_id=profile.id,
-                        workspace_runtime_profile_version=profile.version,
-                        agent_selection_version=(
-                            agent.runtime_profile_selection_version
-                        ),
-                        resolution_status=prepared.status,
-                        reason_code=prepared.reason_code,
-                        required_capabilities=infrastructure.required_capabilities,
-                        missing_capabilities=prepared.missing_capabilities,
-                        resolved_configuration=prepared.resolved_configuration,
-                        source_trace=prepared.source_trace,
-                        digest=prepared.digest,
-                        target_desired_generation=existing.desired_generation,
-                    ),
-                )
-            )
-            attach_desired = (
-                self.runtime_repository.attach_desired_configuration_revision
-            )
-            attached = await attach_desired(
+            prepared_result = await self.attach_prepared_selection(
                 session,
-                runtime_id=existing.id,
-                expected_revision_id=(
-                    existing.desired_runtime_configuration_revision_id
+                agent=agent,
+                runtime=existing,
+                prepared=PreparedRuntimeProfileSelection(
+                    provider=provider,
+                    infrastructure=infrastructure,
+                    profile=profile,
+                    resolution=prepared,
                 ),
-                expected_desired_generation=existing.desired_generation,
-                agent_id=agent.id,
-                workspace_id=agent.workspace_id,
-                agent_selection_version=agent.runtime_profile_selection_version,
-                provider_logical_id=provider.provider_id,
-                provider_resource_id=provider.id,
-                provider_admin_version=provider.admin_version,
-                provider_capability_revision_id=provider.current_contract_revision_id,
-                binding_origin=RuntimeProviderBindingOrigin.AGENT_EXPLICIT,
-                binding_evidence={
-                    "workspace_id": agent.workspace_id,
-                    "agent_selection_version": (
-                        agent.runtime_profile_selection_version
-                    ),
-                    "workspace_runtime_profile_id": profile.id,
-                    "workspace_runtime_profile_version": profile.version,
-                    "infrastructure_profile_id": infrastructure.id,
-                    "infrastructure_profile_version": infrastructure.version,
-                    "provider_capability_revision_id": (
-                        prepared.capability_revision.id
-                        if prepared.capability_revision is not None
-                        else None
-                    ),
-                },
-                infrastructure_profile_id=infrastructure.id,
-                infrastructure_profile_version=infrastructure.version,
-                workspace_runtime_profile_id=profile.id,
-                workspace_runtime_profile_version=profile.version,
-                configuration_revision_id=revision.id,
-            )
-            if attached is None:
-                current_agent = await self.agent_repository.get_by_id(session, agent.id)
-                if current_agent is not None:
-                    await self.profile_repository.enqueue_reconcile_task(
-                        session,
-                        source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
-                        source_id=current_agent.id,
-                        source_version=str(
-                            current_agent.runtime_profile_selection_version
-                        ),
-                        available_at=tznow(),
-                    )
-                current_runtime = await self.runtime_repository.get_by_agent_id(
-                    session,
-                    agent.id,
-                )
-                if (
-                    current_runtime is None
-                    or current_runtime.desired_runtime_configuration_revision_id is None
-                ):
-                    return None
-                current_revision = (
-                    await self.profile_repository.get_configuration_revision(
-                        session,
-                        revision_id=(
-                            current_runtime.desired_runtime_configuration_revision_id
-                        ),
-                    )
-                )
-                if current_revision is None:
-                    return None
-                if (
-                    current_agent is None
-                    or current_agent.runtime_profile_id
-                    != current_revision.workspace_runtime_profile_id
-                    or current_agent.runtime_profile_selection_version
-                    != current_revision.agent_selection_version
-                ):
-                    return None
-                applied_revision = None
-                if (
-                    current_runtime.applied_runtime_configuration_revision_id
-                    is not None
-                ):
-                    get_revision = self.profile_repository.get_configuration_revision
-                    applied_revision = await get_revision(
-                        session,
-                        revision_id=(
-                            current_runtime.applied_runtime_configuration_revision_id
-                        ),
-                    )
-                return RuntimeProfileResolutionResult(
-                    runtime=current_runtime,
-                    desired_revision=current_revision,
-                    applied_revision=applied_revision,
-                    runtime_created=False,
-                )
-            applied_revision = None
-            if attached.applied_runtime_configuration_revision_id is not None:
-                applied_revision = (
-                    await self.profile_repository.get_configuration_revision(
-                        session,
-                        revision_id=(
-                            attached.applied_runtime_configuration_revision_id
-                        ),
-                    )
-                )
-            return RuntimeProfileResolutionResult(
-                runtime=attached,
-                desired_revision=revision,
-                applied_revision=applied_revision,
                 runtime_created=created,
+            )
+            if prepared_result is not None:
+                return prepared_result
+
+            current_agent = await self.agent_repository.get_by_id(session, agent.id)
+            if current_agent is not None:
+                await self.profile_repository.enqueue_reconcile_task(
+                    session,
+                    source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
+                    source_id=current_agent.id,
+                    source_version=str(current_agent.runtime_profile_selection_version),
+                    available_at=tznow(),
+                )
+            current_runtime = await self.runtime_repository.get_by_agent_id(
+                session, agent.id
+            )
+            if current_runtime is None:
+                return None
+            current_state = await self.profile_repository.get_configuration_state(
+                session, runtime_id=current_runtime.id
+            )
+            if current_state is None:
+                return None
+            current_document = current_state.desired.document
+            if (
+                current_agent is None
+                or current_document is None
+                or current_document.workspace_runtime_profile_id
+                != current_agent.runtime_profile_id
+                or current_document.agent_selection_version
+                != current_agent.runtime_profile_selection_version
+            ):
+                return None
+            return RuntimeProfileResolutionResult(
+                runtime=current_runtime,
+                desired=current_state.desired,
+                applied=current_state.applied,
+                runtime_created=False,
             )
 
     async def _prepare_resolution(
@@ -596,6 +487,7 @@ class RuntimeProfileResolutionService:
             else RuntimeConfigurationResolutionStatus.BLOCKED
         )
         source_trace = {
+            "provider_id": provider.id,
             "agent_selection_version": agent_selection_version,
             "provider_admin_version": provider.admin_version,
             "provider_capability_revision_id": (
@@ -623,6 +515,54 @@ class RuntimeProfileResolutionService:
             source_trace=source_trace,
             digest=digest,
         )
+
+
+def _build_configuration_state_write(
+    *,
+    runtime_id: str,
+    resolution: PreparedRuntimeProfileResolution,
+    infrastructure: RuntimeInfrastructureProfile,
+    profile: WorkspaceRuntimeProfile,
+    target_generation: int,
+) -> RuntimeConfigurationDesiredStateWrite:
+    """Build one canonical desired current-state overwrite from prepared sources."""
+    status = (
+        RuntimeConfigurationStateStatus.READY
+        if resolution.status is RuntimeConfigurationResolutionStatus.READY
+        else RuntimeConfigurationStateStatus.BLOCKED
+    )
+    document = RuntimeConfigurationDocument(
+        schema_version=1,
+        source_trace=resolution.source_trace,
+        provider_id=resolution.source_trace.get("provider_id", ""),
+        provider_capability_revision_id=(
+            resolution.capability_revision.id
+            if resolution.capability_revision is not None
+            else None
+        ),
+        infrastructure_profile_id=infrastructure.id,
+        infrastructure_profile_version=infrastructure.version,
+        workspace_runtime_profile_id=profile.id,
+        workspace_runtime_profile_version=profile.version,
+        agent_selection_version=int(
+            resolution.source_trace.get("agent_selection_version", 1)
+        ),
+        required_capabilities=infrastructure.required_capabilities,
+        missing_capabilities=resolution.missing_capabilities,
+        resolved_configuration=resolution.resolved_configuration,
+    )
+    return RuntimeConfigurationDesiredStateWrite(
+        runtime_id=runtime_id,
+        status=status,
+        target_generation=target_generation,
+        digest=(
+            resolution.digest
+            if status is RuntimeConfigurationStateStatus.READY
+            else None
+        ),
+        document=document,
+        reason_code=resolution.reason_code,
+    )
 
 
 def _source_reason(

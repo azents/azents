@@ -38,6 +38,8 @@ from azents_runtime_control.provider import (
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEnvelope,
     RuntimeConfigurationEvidence,
+    parse_configuration_sequence,
+    serialize_configuration_sequence,
 )
 
 if TYPE_CHECKING:
@@ -541,7 +543,9 @@ def _runtime_configuration_evidence(
     message: runtime_configuration_pb2.RuntimeConfigurationEvidence,
 ) -> RuntimeConfigurationEvidence:
     return RuntimeConfigurationEvidence(
-        revision_id=message.revision_id,
+        configuration_sequence=parse_configuration_sequence(
+            message.configuration_sequence
+        ),
         digest=message.digest,
         desired_generation=message.desired_generation,
     )
@@ -551,7 +555,9 @@ def _runtime_configuration_evidence_message(
     evidence: RuntimeConfigurationEvidence,
 ) -> runtime_configuration_pb2.RuntimeConfigurationEvidence:
     return runtime_configuration_pb2.RuntimeConfigurationEvidence(
-        revision_id=evidence.revision_id,
+        configuration_sequence=serialize_configuration_sequence(
+            evidence.configuration_sequence
+        ),
         digest=evidence.digest,
         desired_generation=evidence.desired_generation,
     )

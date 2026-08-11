@@ -9,7 +9,7 @@ from fastapi import Depends
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.runtime_profile.data import RuntimeConfigurationReconcileTask
@@ -155,10 +155,7 @@ class RuntimeProfileReconciliationService:
                 )
             else:
                 reconciled += 1
-                if (
-                    resolution.desired_revision.resolution_status
-                    is RuntimeConfigurationResolutionStatus.BLOCKED
-                ):
+                if resolution.desired.status is RuntimeConfigurationStateStatus.BLOCKED:
                     blocked += 1
             cursor = agent_id
 

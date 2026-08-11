@@ -17,10 +17,10 @@ from azents.core.enums import (
     RuntimeProviderLifecycleState,
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
-    RuntimeRunnerState,
 )
 from azents.core.runtime_profile import (
-    RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationDocument,
+    RuntimeConfigurationStateStatus,
     RuntimeInfrastructureProfileKind,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
@@ -34,6 +34,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_profile import (
     RDBRuntimeConfigurationReconcileTask,
+    RDBRuntimeConfigurationState,
     RDBRuntimeRecreationOperation,
     RDBRuntimeRecreationOperationItem,
 )
@@ -52,7 +53,7 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .data import (
-    RuntimeConfigurationRevisionCreate,
+    RuntimeConfigurationDesiredStateWrite,
     RuntimeInfrastructureProfileCreate,
     RuntimeInfrastructureProfileReplace,
     WorkspaceRuntimeProfileCreate,
@@ -207,42 +208,27 @@ async def test_profile_ownership_and_optimistic_replacement(
 async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Applied configuration advances only after exact Provider and Runner evidence."""
+    """Current desired state promotes only after exact Provider and Runner evidence."""
     repository = RuntimeProfileRepository()
     runtime_repository = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
         provider_id = await _create_provider(
-            session,
-            logical_id="configuration-evidence-provider",
-        )
-        contract = await RuntimeProviderPolicyRepository().create_contract(
-            session,
-            create=RuntimeProviderContractRevisionCreate(
-                provider_id=provider_id,
-                digest="e" * 64,
-                implementation_version="1",
-                protocol_version="1",
-                contract={},
-                compatibility={},
-            ),
+            session, logical_id="configuration-evidence-provider"
         )
         workspace_repository = WorkspaceRepository()
         workspace_result = await workspace_repository.create(
             session,
             WorkspaceCreate(
-                name="Configuration evidence",
-                handle="configuration-evidence",
+                name="Configuration evidence", handle="configuration-evidence"
             ),
         )
         assert isinstance(workspace_result, Success)
         workspace_id = await workspace_repository.resolve_id(
-            session,
-            "configuration-evidence",
+            session, "configuration-evidence"
         )
         assert workspace_id is not None
         infrastructure = await repository.create_infrastructure_profile(
-            session,
-            create=_infrastructure_create(provider_id),
+            session, create=_infrastructure_create(provider_id)
         )
         workspace_profile = await repository.create_workspace_runtime_profile(
             session,
@@ -250,8 +236,8 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
                 workspace_id=workspace_id,
                 provider_id=provider_id,
                 infrastructure_profile_id=infrastructure.id,
-                display_name="Evidence Profile",
-                description="Configuration evidence Profile",
+                display_name="Evidence",
+                description="Configuration evidence",
                 lifecycle=RuntimeProfileLifecycle.ACTIVE,
                 policy={"schema_version": 1, "network_restriction": None},
                 digest="f" * 64,
@@ -262,7 +248,7 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
             workspace_id=workspace_id,
             provider=LLMProvider.ANTHROPIC,
             name="configuration-evidence-integration",
-            encrypted_credentials="encrypted-test-value",
+            encrypted_credentials="encrypted",
             config=None,
         )
         session.add(integration)
@@ -270,7 +256,7 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
         selection = make_test_model_selection_dict(
             integration_id=integration.id,
             provider=LLMProvider.ANTHROPIC,
-            model_identifier="configuration-evidence-model",
+            model_identifier="model",
         )
         agent = RDBAgent(
             workspace_id=workspace_id,
@@ -281,177 +267,84 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
         session.add(agent)
         await session.flush()
         runtime = await runtime_repository.ensure_for_agent(session, agent.id)
-        revision = await repository.create_configuration_revision(
-            session,
-            create=RuntimeConfigurationRevisionCreate(
-                runtime_id=runtime.id,
-                provider_id=provider_id,
-                provider_capability_revision_id=contract.id,
-                infrastructure_profile_id=infrastructure.id,
-                infrastructure_profile_version=infrastructure.version,
-                workspace_runtime_profile_id=workspace_profile.id,
-                workspace_runtime_profile_version=workspace_profile.version,
-                agent_selection_version=1,
-                resolution_status=RuntimeConfigurationResolutionStatus.READY,
-                reason_code=None,
-                required_capabilities=(),
-                missing_capabilities=(),
-                resolved_configuration={"schema_version": 1},
-                source_trace={},
-                digest="d" * 64,
-                target_desired_generation=runtime.desired_generation,
-            ),
-        )
-        blocked_revision = await repository.create_configuration_revision(
-            session,
-            create=RuntimeConfigurationRevisionCreate(
-                runtime_id=runtime.id,
-                provider_id=provider_id,
-                provider_capability_revision_id=contract.id,
-                infrastructure_profile_id=infrastructure.id,
-                infrastructure_profile_version=infrastructure.version,
-                workspace_runtime_profile_id=workspace_profile.id,
-                workspace_runtime_profile_version=workspace_profile.version,
-                agent_selection_version=2,
-                resolution_status=RuntimeConfigurationResolutionStatus.BLOCKED,
-                reason_code="MISSING_CAPABILITY",
-                required_capabilities=("network_policy",),
-                missing_capabilities=("network_policy",),
-                resolved_configuration=None,
-                source_trace={},
-                digest="c" * 64,
-                target_desired_generation=runtime.desired_generation,
-            ),
-        )
         await session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
-            .values(
-                runtime_provider_resource_id=provider_id,
-                desired_runtime_configuration_revision_id=revision.id,
-            )
+            .values(runtime_provider_resource_id=provider_id)
         )
-        evidence = RuntimeConfigurationEvidence(
-            revision_id=revision.id,
-            digest=revision.digest,
-            desired_generation=runtime.desired_generation,
-        )
-        stale_evidence = RuntimeConfigurationEvidence(
-            revision_id=revision.id,
-            digest="0" * 64,
-            desired_generation=runtime.desired_generation,
-        )
-
-        assert not await repository.configuration_evidence_matches_current(
-            session,
-            runtime_id=runtime.id,
+        document = RuntimeConfigurationDocument(
+            schema_version=1,
+            source_trace={},
             provider_id=provider_id,
-            evidence=stale_evidence,
+            provider_capability_revision_id=None,
+            infrastructure_profile_id=infrastructure.id,
+            infrastructure_profile_version=infrastructure.version,
+            workspace_runtime_profile_id=workspace_profile.id,
+            workspace_runtime_profile_version=workspace_profile.version,
+            agent_selection_version=1,
+            required_capabilities=(),
+            missing_capabilities=(),
+            resolved_configuration={"schema_version": 1},
+        )
+        state = await repository.overwrite_desired_configuration_state(
+            session,
+            write=RuntimeConfigurationDesiredStateWrite(
+                runtime_id=runtime.id,
+                status=RuntimeConfigurationStateStatus.READY,
+                target_generation=runtime.desired_generation,
+                digest="d" * 64,
+                document=document,
+                reason_code=None,
+            ),
+        )
+        assert state is not None
+        evidence = RuntimeConfigurationEvidence(
+            configuration_sequence=state.desired.sequence,
+            digest="d" * 64,
+            desired_generation=runtime.desired_generation,
         )
         assert await repository.configuration_evidence_matches_current(
-            session,
-            runtime_id=runtime.id,
-            provider_id=provider_id,
-            evidence=evidence,
-        )
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime.id)
-            .values(
-                desired_runtime_configuration_revision_id=blocked_revision.id,
-            )
-        )
-        assert not await repository.configuration_evidence_matches_current(
-            session,
-            runtime_id=runtime.id,
-            provider_id=provider_id,
-            evidence=evidence,
-        )
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime.id)
-            .values(
-                desired_runtime_configuration_revision_id=revision.id,
-            )
+            session, runtime_id=runtime.id, provider_id=provider_id, evidence=evidence
         )
         acknowledged_at = datetime.datetime(2026, 7, 30, tzinfo=datetime.UTC)
-        provider_revision = await repository.record_provider_configuration_evidence(
+        provider_state = await repository.record_provider_configuration_evidence(
             session,
             runtime_id=runtime.id,
             provider_id=provider_id,
             evidence=evidence,
             acknowledged_at=acknowledged_at,
         )
-        provider_runtime = await runtime_repository.get_by_id(session, runtime.id)
-        assert provider_revision is not None
-        assert provider_revision.provider_reported_digest == evidence.digest
-        assert provider_revision.runner_reported_digest is None
-        assert provider_revision.provider_acknowledged_at == acknowledged_at
-        assert provider_runtime is not None
-        assert provider_runtime.applied_runtime_configuration_revision_id is None
-
+        assert provider_state is not None
+        assert provider_state.desired.provider_reported_digest == "d" * 64
+        assert provider_state.applied is None
         observed_at = datetime.datetime(2026, 7, 30, 0, 0, 1, tzinfo=datetime.UTC)
-        persisted_revision = await repository.record_runner_configuration_evidence(
+        applied_state = await repository.record_runner_configuration_evidence(
             session,
             runtime_id=runtime.id,
             provider_id=provider_id,
             evidence=evidence,
             observed_at=observed_at,
         )
-        persisted_runtime = await runtime_repository.get_by_id(session, runtime.id)
-
-        assert persisted_revision is not None
-        assert persisted_revision.provider_reported_digest == evidence.digest
-        assert persisted_revision.runner_reported_digest == evidence.digest
-        assert persisted_revision.provider_acknowledged_at == acknowledged_at
-        assert persisted_revision.runtime_observed_at == observed_at
-        assert persisted_runtime is not None
-        assert (
-            persisted_runtime.applied_runtime_configuration_revision_id == revision.id
-        )
-        runtime_with_workspace = await runtime_repository.record_runner_state(
-            session,
-            runtime.id,
-            RuntimeRunnerState.READY,
-            runner_generation=1,
-            expected_desired_generation=runtime.desired_generation,
-            workspace_path="/runtime/old-home",
-        )
-        assert runtime_with_workspace is not None
-
-        command = await runtime_repository.set_desired_state_if_ready(
+        assert applied_state is not None
+        assert applied_state.applied is not None
+        assert applied_state.applied.sequence == state.desired.sequence
+        command = await runtime_repository.set_desired_state_if_configuration_current(
             session,
             runtime.id,
             RuntimeLifecycleCommandType.RESTART,
             RuntimeDesiredState.RUNNING,
-            expected_configuration_revision_id=revision.id,
+            expected_configuration_sequence=state.desired.sequence,
+            expected_digest="d" * 64,
+            expected_generation=runtime.desired_generation,
         )
-
         assert command is not None
         assert command.desired_generation == runtime.desired_generation + 1
-        assert command.runtime.workspace_path is None
-        assert command.runtime.desired_runtime_configuration_revision_id != revision.id
-        next_revision_id = command.runtime.desired_runtime_configuration_revision_id
-        assert next_revision_id is not None
-        next_revision = await repository.get_configuration_revision(
-            session,
-            revision_id=next_revision_id,
+        next_state = await repository.get_configuration_state(
+            session, runtime_id=runtime.id
         )
-        assert next_revision is not None
-        assert next_revision.digest == revision.digest
-        assert next_revision.target_desired_generation == command.desired_generation
-        assert next_revision.provider_reported_digest is None
-        assert next_revision.runner_reported_digest is None
-        assert (
-            await runtime_repository.set_desired_state_if_ready(
-                session,
-                runtime.id,
-                RuntimeLifecycleCommandType.RESTART,
-                RuntimeDesiredState.RUNNING,
-                expected_configuration_revision_id=revision.id,
-            )
-            is None
-        )
+        assert next_state is not None
+        assert next_state.desired.sequence > state.desired.sequence
+        assert next_state.desired.target_generation == command.desired_generation
 
 
 async def test_reconcile_enqueue_is_idempotent_and_claimed_once(
@@ -637,6 +530,142 @@ async def test_affected_agent_queries_follow_exact_profile_bindings(
         ) == [selected_agent_id]
 
 
+async def test_recreation_target_items_match_exact_document_profile_fields(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Profile targets ignore matching IDs in unrelated document fields."""
+    repository = RuntimeProfileRepository()
+    async with rdb_session_manager() as session:
+        provider_id = await _create_provider(
+            session,
+            logical_id="recreation-exact-target-provider",
+        )
+        workspace_result = await WorkspaceRepository().create(
+            session,
+            WorkspaceCreate(
+                name="Recreation exact target",
+                handle="recreation-exact-target",
+            ),
+        )
+        assert isinstance(workspace_result, Success)
+        workspace_id = await WorkspaceRepository().resolve_id(
+            session,
+            "recreation-exact-target",
+        )
+        assert workspace_id is not None
+        infrastructure = await repository.create_infrastructure_profile(
+            session,
+            create=_infrastructure_create(provider_id),
+        )
+        workspace_profile = await repository.create_workspace_runtime_profile(
+            session,
+            create=WorkspaceRuntimeProfileCreate(
+                workspace_id=workspace_id,
+                provider_id=provider_id,
+                infrastructure_profile_id=infrastructure.id,
+                display_name="Exact target Profile",
+                description="Exact recreation target Profile",
+                lifecycle=RuntimeProfileLifecycle.ACTIVE,
+                policy={"schema_version": 1, "network_restriction": None},
+                digest="b" * 64,
+                actor_workspace_user_id=None,
+            ),
+        )
+        integration = RDBLLMProviderIntegration(
+            workspace_id=workspace_id,
+            provider=LLMProvider.ANTHROPIC,
+            name="recreation-exact-target-integration",
+            encrypted_credentials="encrypted-test-value",
+            config=None,
+        )
+        session.add(integration)
+        await session.flush()
+        runtime_ids: list[str] = []
+        for index, (infrastructure_id, workspace_profile_id, source_trace) in enumerate(
+            (
+                (infrastructure.id, workspace_profile.id, {}),
+                (
+                    "unrelated-infrastructure",
+                    "unrelated-workspace-profile",
+                    {"collision": (f"{infrastructure.id}:{workspace_profile.id}")},
+                ),
+            )
+        ):
+            selection = make_test_model_selection_dict(
+                integration_id=integration.id,
+                provider=LLMProvider.ANTHROPIC,
+                model_identifier=f"recreation-exact-target-{index}",
+            )
+            agent = RDBAgent(
+                workspace_id=workspace_id,
+                name=f"Recreation exact target {index}",
+                model_selection=selection,
+                lightweight_model_selection=selection,
+            )
+            session.add(agent)
+            await session.flush()
+            runtime = RDBAgentRuntime(
+                workspace_id=workspace_id,
+                agent_id=agent.id,
+                runtime_provider_resource_id=provider_id,
+            )
+            session.add(runtime)
+            await session.flush()
+            runtime.configuration_sequence = 1
+            document = RuntimeConfigurationDocument(
+                schema_version=1,
+                source_trace=source_trace,
+                provider_id=provider_id,
+                provider_capability_revision_id=None,
+                infrastructure_profile_id=infrastructure_id,
+                infrastructure_profile_version=1,
+                workspace_runtime_profile_id=workspace_profile_id,
+                workspace_runtime_profile_version=1,
+                agent_selection_version=1,
+                required_capabilities=(),
+                missing_capabilities=(),
+                resolved_configuration={"collision": source_trace},
+            ).model_dump(mode="json")
+            now = datetime.datetime.now(datetime.UTC)
+            digest = str(index + 1) * 64
+            session.add(
+                RDBRuntimeConfigurationState(
+                    runtime_id=runtime.id,
+                    desired_sequence=1,
+                    desired_status=RuntimeConfigurationStateStatus.READY,
+                    desired_target_generation=0,
+                    desired_digest=digest,
+                    desired_document=document,
+                    desired_reason_code=None,
+                    provider_reported_digest=digest,
+                    runner_reported_digest=digest,
+                    provider_acknowledged_at=now,
+                    runner_observed_at=now,
+                    applied_sequence=1,
+                    applied_target_generation=0,
+                    applied_digest=digest,
+                    applied_document=document,
+                    applied_at=now,
+                )
+            )
+            runtime_ids.append(runtime.id)
+        await session.flush()
+
+        infrastructure_items = await repository.list_recreation_target_items(
+            session,
+            target_kind=RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE,
+            target_id=infrastructure.id,
+        )
+        workspace_items = await repository.list_recreation_target_items(
+            session,
+            target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
+            target_id=workspace_profile.id,
+        )
+
+    assert [item[0] for item in infrastructure_items] == [runtime_ids[0]]
+    assert [item[0] for item in workspace_items] == [runtime_ids[0]]
+
+
 async def test_recreation_claim_respects_existing_global_concurrency(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -721,7 +750,7 @@ async def test_recreation_claim_respects_existing_global_concurrency(
         )
         session.add(integration)
         await session.flush()
-        operation_items: list[tuple[str, str]] = []
+        operation_items: list[tuple[str, int, str, int]] = []
         for index in range(3):
             selection = make_test_model_selection_dict(
                 integration_id=integration.id,
@@ -739,31 +768,39 @@ async def test_recreation_claim_respects_existing_global_concurrency(
             runtime = RDBAgentRuntime(
                 workspace_id=workspace_id,
                 agent_id=agent.id,
+                runtime_provider_resource_id=provider_id,
             )
             session.add(runtime)
             await session.flush()
-            configuration = await repository.create_configuration_revision(
+            document = RuntimeConfigurationDocument(
+                schema_version=1,
+                source_trace={},
+                provider_id=provider_id,
+                provider_capability_revision_id=contract.id,
+                infrastructure_profile_id=infrastructure.id,
+                infrastructure_profile_version=infrastructure.version,
+                workspace_runtime_profile_id=workspace_profile.id,
+                workspace_runtime_profile_version=workspace_profile.version,
+                agent_selection_version=1,
+                required_capabilities=(),
+                missing_capabilities=(),
+                resolved_configuration={},
+            )
+            state = await repository.overwrite_desired_configuration_state(
                 session,
-                create=RuntimeConfigurationRevisionCreate(
+                write=RuntimeConfigurationDesiredStateWrite(
                     runtime_id=runtime.id,
-                    provider_id=provider_id,
-                    provider_capability_revision_id=contract.id,
-                    infrastructure_profile_id=infrastructure.id,
-                    infrastructure_profile_version=infrastructure.version,
-                    workspace_runtime_profile_id=workspace_profile.id,
-                    workspace_runtime_profile_version=workspace_profile.version,
-                    agent_selection_version=1,
-                    resolution_status=RuntimeConfigurationResolutionStatus.READY,
-                    reason_code=None,
-                    required_capabilities=(),
-                    missing_capabilities=(),
-                    resolved_configuration={},
-                    source_trace={},
+                    status=RuntimeConfigurationStateStatus.READY,
+                    target_generation=0,
                     digest=str(index + 1) * 64,
-                    target_desired_generation=0,
+                    document=document,
+                    reason_code=None,
                 ),
             )
-            operation_items.append((runtime.id, configuration.id))
+            assert state is not None
+            operation_items.append(
+                (runtime.id, state.desired.sequence, state.desired.digest or "", 0)
+            )
         operation = await repository.create_recreation_operation(
             session,
             target_kind=RuntimeRecreationTargetKind.PROVIDER,
@@ -816,7 +853,9 @@ async def test_recreation_claim_respects_existing_global_concurrency(
             session,
             item_id=claimed[0].id,
             expected_attempt=claimed[0].attempt,
-            configuration_revision_id=claimed[0].expected_configuration_revision_id,
+            configuration_sequence=claimed[0].expected_configuration_sequence,
+            configuration_digest=claimed[0].expected_configuration_digest,
+            desired_generation=claimed[0].expected_desired_generation,
             dispatched_generation=1,
         )
         assert await repository.finish_recreation_item(

@@ -11,10 +11,7 @@ Name | Type | Description | Notes
 **agent_id** | **str** |  | 
 **runtime_provider_id** | **str** |  | 
 **runtime_provider_resource_id** | **str** |  | 
-**infrastructure_profile_id** | **str** |  | 
-**workspace_runtime_profile_id** | **str** |  | 
-**desired_runtime_configuration_revision_id** | **str** |  | 
-**applied_runtime_configuration_revision_id** | **str** |  | 
+**configuration_sequence** | **int** |  | 
 **desired_state** | [**RuntimeDesiredState**](RuntimeDesiredState.md) |  | 
 **desired_generation** | **int** |  | 
 **last_lifecycle_command** | [**RuntimeLifecycleCommandType**](RuntimeLifecycleCommandType.md) |  | 

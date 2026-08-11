@@ -83,10 +83,6 @@ async def _seed_agent(
         runtime_provider_resource_id=None,
         provider_binding_origin=None,
         provider_binding_evidence=None,
-        infrastructure_profile_id=None,
-        workspace_runtime_profile_id=None,
-        desired_runtime_configuration_revision_id=None,
-        applied_runtime_configuration_revision_id=None,
     )
     session.add(runtime)
     await session.flush()

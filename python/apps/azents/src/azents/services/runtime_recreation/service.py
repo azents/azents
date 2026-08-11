@@ -13,7 +13,7 @@ from azents.core.enums import (
     RuntimeProviderKind,
 )
 from azents.core.runtime_profile import (
-    RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationStateStatus,
     RuntimeInfrastructureProfileKind,
     RuntimeRecreationItemStatus,
     RuntimeRecreationTargetKind,
@@ -24,6 +24,7 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationState,
     RuntimeRecreationOperation,
     RuntimeRecreationOperationItem,
 )
@@ -431,6 +432,13 @@ class RuntimeRecreationReconciler:
                 operation_id=item.operation_id,
             )
             runtime = await self.runtime_repository.get_by_id(session, item.runtime_id)
+            state = (
+                await self.profile_repository.get_configuration_state(
+                    session, runtime_id=item.runtime_id
+                )
+                if runtime is not None
+                else None
+            )
             if operation is None or runtime is None:
                 return False, await self.profile_repository.finish_recreation_item(
                     session,
@@ -440,7 +448,16 @@ class RuntimeRecreationReconciler:
                     failure_code="runtime_not_found",
                     failure_message="The Runtime recreation target no longer exists.",
                 )
-            if not _runtime_matches_target(runtime, operation):
+            if state is None:
+                return False, await self.profile_repository.finish_recreation_item(
+                    session,
+                    item_id=item.id,
+                    expected_attempt=item.attempt,
+                    status=RuntimeRecreationItemStatus.FAILED,
+                    failure_code="configuration_missing",
+                    failure_message="The Runtime has no current configuration state.",
+                )
+            if not _runtime_matches_target(runtime, state, operation):
                 return False, await self.profile_repository.finish_recreation_item(
                     session,
                     item_id=item.id,
@@ -469,22 +486,15 @@ class RuntimeRecreationReconciler:
                         "A stopped Runtime adopts the latest Profile on start."
                     ),
                 )
-            desired_revision_id = runtime.desired_runtime_configuration_revision_id
-            if desired_revision_id is None:
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.FAILED,
-                    failure_code="configuration_missing",
-                    failure_message=(
-                        "The Runtime has no desired configuration revision."
-                    ),
-                )
+
+            desired = state.desired
+            applied = state.applied
             if item.dispatched_generation is not None:
                 if (
-                    runtime.applied_runtime_configuration_revision_id
-                    == item.expected_configuration_revision_id
+                    applied is not None
+                    and applied.sequence == item.expected_configuration_sequence
+                    and applied.digest == item.expected_configuration_digest
+                    and applied.target_generation == item.expected_desired_generation
                 ):
                     return (
                         False,
@@ -511,7 +521,9 @@ class RuntimeRecreationReconciler:
                     return False, retried and item.attempt >= self.maximum_attempts
                 if (
                     runtime.desired_generation == item.dispatched_generation
-                    and desired_revision_id == item.expected_configuration_revision_id
+                    and desired.sequence == item.expected_configuration_sequence
+                    and desired.digest == item.expected_configuration_digest
+                    and desired.target_generation == item.expected_desired_generation
                 ):
                     return False, False
                 return False, await self.profile_repository.finish_recreation_item(
@@ -524,6 +536,7 @@ class RuntimeRecreationReconciler:
                         "The Runtime target changed after recreation dispatch."
                     ),
                 )
+
             agent = await self.agent_repository.lock_by_id(session, runtime.agent_id)
             if (
                 agent is None
@@ -556,7 +569,11 @@ class RuntimeRecreationReconciler:
                         "The recreation target changed after operation creation."
                     ),
                 )
-            if desired_revision_id != item.expected_configuration_revision_id:
+            if (
+                desired.sequence != item.expected_configuration_sequence
+                or desired.digest != item.expected_configuration_digest
+                or desired.target_generation != item.expected_desired_generation
+            ):
                 return False, await self.profile_repository.finish_recreation_item(
                     session,
                     item_id=item.id,
@@ -567,15 +584,10 @@ class RuntimeRecreationReconciler:
                         "The Runtime configuration changed after target snapshot."
                     ),
                 )
-            desired = await self.profile_repository.get_configuration_revision(
-                session,
-                revision_id=desired_revision_id,
-            )
             if (
-                desired is None
-                or desired.resolution_status
-                is not RuntimeConfigurationResolutionStatus.READY
-                or desired.resolved_configuration is None
+                desired.status is not RuntimeConfigurationStateStatus.READY
+                or desired.document is None
+                or desired.digest is None
             ):
                 return False, await self.profile_repository.finish_recreation_item(
                     session,
@@ -585,12 +597,16 @@ class RuntimeRecreationReconciler:
                     failure_code="configuration_blocked",
                     failure_message="The latest Runtime configuration is not ready.",
                 )
-            command = await self.runtime_repository.set_desired_state_if_ready(
-                session,
-                runtime.id,
-                RuntimeLifecycleCommandType.RESTART,
-                RuntimeDesiredState.RUNNING,
-                expected_configuration_revision_id=desired_revision_id,
+            command = await (
+                self.runtime_repository.set_desired_state_if_configuration_current(
+                    session,
+                    runtime.id,
+                    RuntimeLifecycleCommandType.RESTART,
+                    RuntimeDesiredState.RUNNING,
+                    expected_configuration_sequence=desired.sequence,
+                    expected_digest=desired.digest,
+                    expected_generation=desired.target_generation,
+                )
             )
             if command is None:
                 retried = await self.profile_repository.retry_recreation_item(
@@ -604,14 +620,18 @@ class RuntimeRecreationReconciler:
                     ),
                 )
                 return False, retried and item.attempt >= self.maximum_attempts
-            next_revision_id = command.runtime.desired_runtime_configuration_revision_id
-            if next_revision_id is None:
+            next_state = await self.profile_repository.get_configuration_state(
+                session, runtime_id=runtime.id
+            )
+            if next_state is None or next_state.desired.digest is None:
                 raise AssertionError("Recreation dispatch lost desired configuration.")
             updated = await self.profile_repository.update_recreation_item_dispatch(
                 session,
                 item_id=item.id,
                 expected_attempt=item.attempt,
-                configuration_revision_id=next_revision_id,
+                configuration_sequence=next_state.desired.sequence,
+                configuration_digest=next_state.desired.digest,
+                desired_generation=next_state.desired.target_generation,
                 dispatched_generation=command.desired_generation,
             )
             return updated, False
@@ -619,12 +639,16 @@ class RuntimeRecreationReconciler:
 
 def _runtime_matches_target(
     runtime: AgentRuntime,
+    state: RuntimeConfigurationState,
     operation: RuntimeRecreationOperation,
 ) -> bool:
     if operation.target_kind is RuntimeRecreationTargetKind.PROVIDER:
         return runtime.runtime_provider_resource_id == operation.target_id
+    document = state.desired.document
+    if document is None:
+        return False
     if operation.target_kind is RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE:
-        return runtime.infrastructure_profile_id == operation.target_id
+        return document.infrastructure_profile_id == operation.target_id
     if operation.target_kind is RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE:
-        return runtime.workspace_runtime_profile_id == operation.target_id
+        return document.workspace_runtime_profile_id == operation.target_id
     raise AssertionError(f"Unsupported recreation target kind: {operation.target_kind}")

@@ -41,10 +41,7 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                     agent_id = '', 
                     runtime_provider_id = '', 
                     runtime_provider_resource_id = '', 
-                    infrastructure_profile_id = '', 
-                    workspace_runtime_profile_id = '', 
-                    desired_runtime_configuration_revision_id = '', 
-                    applied_runtime_configuration_revision_id = '', 
+                    configuration_sequence = 56, 
                     desired_state = 'running', 
                     desired_generation = 56, 
                     last_lifecycle_command = 'start', 
@@ -75,8 +72,11 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                         message = '', ), ),
                 configuration = azentspublicclient.models.agent_runtime_configuration_status_response.AgentRuntimeConfigurationStatusResponse(
                     status = 'profile_required', 
-                    desired = azentspublicclient.models.runtime_configuration_revision_response.RuntimeConfigurationRevisionResponse(
-                        id = '', 
+                    desired = azentspublicclient.models.runtime_configuration_state_response.RuntimeConfigurationStateResponse(
+                        sequence = 56, 
+                        status = 'unconfigured', 
+                        target_generation = 56, 
+                        digest = '', 
                         provider_id = '', 
                         provider_capability_revision_id = '', 
                         infrastructure_profile_id = '', 
@@ -84,23 +84,23 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                         workspace_runtime_profile_id = '', 
                         workspace_runtime_profile_version = 56, 
                         agent_selection_version = 56, 
-                        resolution_status = 'ready', 
-                        reason_code = '', 
                         required_capabilities = [
                             ''
                             ], 
                         missing_capabilities = [
                             ''
                             ], 
-                        digest = '', 
-                        target_desired_generation = 56, 
+                        reason_code = '', 
                         provider_reported_digest = '', 
                         runner_reported_digest = '', 
                         provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        runtime_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
-                    applied = azentspublicclient.models.runtime_configuration_revision_response.RuntimeConfigurationRevisionResponse(
-                        id = '', 
+                        runner_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        applied_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
+                    applied = azentspublicclient.models.runtime_configuration_state_response.RuntimeConfigurationStateResponse(
+                        sequence = 56, 
+                        status = 'unconfigured', 
+                        target_generation = 56, 
+                        digest = '', 
                         provider_id = '', 
                         provider_capability_revision_id = '', 
                         infrastructure_profile_id = '', 
@@ -108,21 +108,18 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                         workspace_runtime_profile_id = '', 
                         workspace_runtime_profile_version = 56, 
                         agent_selection_version = 56, 
-                        resolution_status = 'ready', 
-                        reason_code = '', 
                         required_capabilities = [
                             ''
                             ], 
                         missing_capabilities = [
                             ''
                             ], 
-                        digest = '', 
-                        target_desired_generation = 56, 
+                        reason_code = '', 
                         provider_reported_digest = '', 
                         runner_reported_digest = '', 
                         provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        runtime_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), ),
+                        runner_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        applied_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), ),
                 command_type = 'start',
                 desired_generation = 56
             )
@@ -134,10 +131,7 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                     agent_id = '', 
                     runtime_provider_id = '', 
                     runtime_provider_resource_id = '', 
-                    infrastructure_profile_id = '', 
-                    workspace_runtime_profile_id = '', 
-                    desired_runtime_configuration_revision_id = '', 
-                    applied_runtime_configuration_revision_id = '', 
+                    configuration_sequence = 56, 
                     desired_state = 'running', 
                     desired_generation = 56, 
                     last_lifecycle_command = 'start', 
@@ -168,8 +162,11 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                         message = '', ), ),
                 configuration = azentspublicclient.models.agent_runtime_configuration_status_response.AgentRuntimeConfigurationStatusResponse(
                     status = 'profile_required', 
-                    desired = azentspublicclient.models.runtime_configuration_revision_response.RuntimeConfigurationRevisionResponse(
-                        id = '', 
+                    desired = azentspublicclient.models.runtime_configuration_state_response.RuntimeConfigurationStateResponse(
+                        sequence = 56, 
+                        status = 'unconfigured', 
+                        target_generation = 56, 
+                        digest = '', 
                         provider_id = '', 
                         provider_capability_revision_id = '', 
                         infrastructure_profile_id = '', 
@@ -177,23 +174,23 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                         workspace_runtime_profile_id = '', 
                         workspace_runtime_profile_version = 56, 
                         agent_selection_version = 56, 
-                        resolution_status = 'ready', 
-                        reason_code = '', 
                         required_capabilities = [
                             ''
                             ], 
                         missing_capabilities = [
                             ''
                             ], 
-                        digest = '', 
-                        target_desired_generation = 56, 
+                        reason_code = '', 
                         provider_reported_digest = '', 
                         runner_reported_digest = '', 
                         provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        runtime_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
-                    applied = azentspublicclient.models.runtime_configuration_revision_response.RuntimeConfigurationRevisionResponse(
-                        id = '', 
+                        runner_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        applied_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
+                    applied = azentspublicclient.models.runtime_configuration_state_response.RuntimeConfigurationStateResponse(
+                        sequence = 56, 
+                        status = 'unconfigured', 
+                        target_generation = 56, 
+                        digest = '', 
                         provider_id = '', 
                         provider_capability_revision_id = '', 
                         infrastructure_profile_id = '', 
@@ -201,21 +198,18 @@ class TestAgentRuntimeLifecycleResponse(unittest.TestCase):
                         workspace_runtime_profile_id = '', 
                         workspace_runtime_profile_version = 56, 
                         agent_selection_version = 56, 
-                        resolution_status = 'ready', 
-                        reason_code = '', 
                         required_capabilities = [
                             ''
                             ], 
                         missing_capabilities = [
                             ''
                             ], 
-                        digest = '', 
-                        target_desired_generation = 56, 
+                        reason_code = '', 
                         provider_reported_digest = '', 
                         runner_reported_digest = '', 
                         provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        runtime_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), ),
+                        runner_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        applied_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), ),
                 command_type = 'start',
                 desired_generation = 56,
         )

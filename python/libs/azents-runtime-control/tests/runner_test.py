@@ -193,7 +193,7 @@ async def test_heartbeat_adopts_configuration_and_reports_evidence() -> None:
     loop = _loop(client, BlockingOperations())
     await loop.start()
     evidence = RuntimeConfigurationEvidence(
-        revision_id="revision-2",
+        configuration_sequence=2,
         digest="e" * 64,
         desired_generation=5,
     )
@@ -212,7 +212,7 @@ async def test_heartbeat_rejects_mismatched_configuration_generation() -> None:
     await loop.start()
     original = client.reports[-1].runtime_configuration
     client.heartbeat_runtime_configuration = RuntimeConfigurationEvidence(
-        revision_id="revision-2",
+        configuration_sequence=2,
         digest="e" * 64,
         desired_generation=6,
     )
@@ -230,7 +230,7 @@ async def test_heartbeat_rejects_invalid_configuration_evidence() -> None:
     await loop.start()
     original = client.reports[-1].runtime_configuration
     client.heartbeat_runtime_configuration = RuntimeConfigurationEvidence(
-        revision_id="revision-2",
+        configuration_sequence=2,
         digest="invalid",
         desired_generation=5,
     )
@@ -751,7 +751,7 @@ def _registration() -> RunnerRegistration:
         metadata=metadata,
         auth_credential_id="credential-1",
         runtime_configuration=RuntimeConfigurationEvidence(
-            revision_id="revision-1",
+            configuration_sequence=1,
             digest="d" * 64,
             desired_generation=5,
         ),

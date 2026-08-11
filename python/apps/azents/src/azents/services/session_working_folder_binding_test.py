@@ -61,7 +61,7 @@ def _target() -> RuntimeOperationTarget:
         runtime_capability_version=4,
         desired_generation=3,
         runner_generation=3,
-        configuration_revision_id="revision-1",
+        configuration_sequence=1,
         configuration_digest="a" * 64,
         workspace_path="/workspace/agent",
     )

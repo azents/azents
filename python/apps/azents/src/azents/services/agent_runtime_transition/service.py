@@ -187,7 +187,8 @@ class AgentRuntimeTransitionService:
                         updated_agent.runtime_profile_selection_version
                     ),
                     agent_runtime_id=resolution.runtime.id,
-                    runtime_configuration_revision_id=(resolution.desired_revision.id),
+                    runtime_configuration_sequence=resolution.desired.sequence,
+                    runtime_configuration_digest=resolution.desired.digest or "",
                     runtime_desired_generation=(resolution.runtime.desired_generation),
                 ),
             )
@@ -199,7 +200,7 @@ class AgentRuntimeTransitionService:
             return AgentRuntimeAdditionResult(
                 agent=updated_agent,
                 runtime=resolution.runtime,
-                desired_revision=resolution.desired_revision,
+                desired=resolution.desired,
                 receipt=create_result.receipt,
                 replayed=not create_result.created,
             )
@@ -231,10 +232,7 @@ class AgentRuntimeTransitionService:
                         "workspace_id": agent.workspace_id,
                         "workspace_runtime_profile_id": prepared.profile.id,
                     },
-                    infrastructure_profile_id=prepared.infrastructure.id,
-                    workspace_runtime_profile_id=prepared.profile.id,
-                    desired_runtime_configuration_revision_id=None,
-                    applied_runtime_configuration_revision_id=None,
+                    configuration_sequence=0,
                 ),
             )
             return ensured.runtime, ensured.created
@@ -292,25 +290,26 @@ class AgentRuntimeTransitionService:
             session,
             receipt.agent_runtime_id,
         )
-        revision = await self.profile_repository.get_configuration_revision(
-            session,
-            revision_id=receipt.runtime_configuration_revision_id,
+        state = await self.profile_repository.get_configuration_state(
+            session, runtime_id=receipt.agent_runtime_id
         )
+        desired = state.desired if state is not None else None
+        document = desired.document if desired is not None else None
         if (
             runtime is None
             or runtime.agent_id != agent.id
             or runtime.workspace_id != agent.workspace_id
+            or runtime.configuration_sequence != receipt.runtime_configuration_sequence
             or runtime.desired_generation != receipt.runtime_desired_generation
-            or runtime.desired_runtime_configuration_revision_id
-            != receipt.runtime_configuration_revision_id
-            or runtime.workspace_runtime_profile_id
+            or desired is None
+            or desired.sequence != receipt.runtime_configuration_sequence
+            or desired.digest != receipt.runtime_configuration_digest
+            or desired.target_generation != receipt.runtime_desired_generation
+            or document is None
+            or document.workspace_runtime_profile_id
             != receipt.workspace_runtime_profile_id
-            or revision is None
-            or revision.runtime_id != runtime.id
-            or revision.id != receipt.runtime_configuration_revision_id
-            or revision.workspace_runtime_profile_id
-            != receipt.workspace_runtime_profile_id
-            or revision.target_desired_generation != receipt.runtime_desired_generation
+            or document.agent_selection_version
+            != receipt.committed_runtime_profile_selection_version
         ):
             raise AgentRuntimeAdditionUnavailable(
                 code="runtime_add_idempotency_evidence_missing",
@@ -319,7 +318,7 @@ class AgentRuntimeTransitionService:
         return AgentRuntimeAdditionResult(
             agent=agent,
             runtime=runtime,
-            desired_revision=revision,
+            desired=desired,
             receipt=receipt,
             replayed=True,
         )

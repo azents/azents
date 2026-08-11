@@ -32,7 +32,7 @@ from azents.core.runtime_capabilities import (
     RuntimeCapabilityResolver,
 )
 from azents.core.runtime_profile import (
-    RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationStateStatus,
     parse_runtime_infrastructure_profile_spec,
 )
 from azents.core.tools import (
@@ -1151,29 +1151,31 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 session,
                 self._runtime_agent_id,
             )
-            if (
-                runtime is None
-                or runtime.desired_runtime_configuration_revision_id is None
-            ):
+            if runtime is None:
                 return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, None)
             profile_repository = self.agent_runtime_service.runtime_profile_repository
-            revision = await profile_repository.get_configuration_revision(
+            state = await profile_repository.get_configuration_state(
                 session,
-                revision_id=runtime.desired_runtime_configuration_revision_id,
+                runtime_id=runtime.id,
             )
-        if revision is None:
+        if state is None:
             return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, None)
+        desired = state.desired
         expected_authority = RuntimeOperationAuthority(
-            configuration_revision_id=revision.id,
-            configuration_digest=revision.digest,
-            desired_generation=revision.target_desired_generation,
+            configuration_sequence=desired.sequence,
+            configuration_digest=desired.digest or "",
+            desired_generation=desired.target_generation,
         )
         if (
-            revision.resolution_status is RuntimeConfigurationResolutionStatus.BLOCKED
-            or revision.resolved_configuration is None
+            desired.status is not RuntimeConfigurationStateStatus.READY
+            or desired.document is None
+            or desired.digest is None
+            or desired.document.resolved_configuration is None
         ):
             return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
-        effective_profile = revision.resolved_configuration.get("effective_profile")
+        effective_profile = desired.document.resolved_configuration.get(
+            "effective_profile"
+        )
         if not isinstance(effective_profile, dict):
             return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
         try:

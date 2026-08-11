@@ -2106,7 +2106,7 @@
       "configurationNoDesired": "No desired configuration has been resolved.",
       "configurationNoApplied": "No configuration has been applied to a runtime.",
       "configurationEvidence": {
-        "revision": "Revision",
+        "sequence": "Configuration sequence",
         "profile": "Runtime profile",
         "infrastructure": "Infrastructure",
         "generation": "Generation",

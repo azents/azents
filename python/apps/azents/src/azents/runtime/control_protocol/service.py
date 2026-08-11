@@ -296,7 +296,9 @@ class RuntimeControlProtocolService:
             "reset_final_desired_state": command.reset_final_desired_state,
             "payload": command.payload,
             "runtime_configuration": {
-                "revision_id": command.runtime_configuration.evidence.revision_id,
+                "configuration_sequence": (
+                    command.runtime_configuration.evidence.configuration_sequence
+                ),
                 "digest": command.runtime_configuration.evidence.digest,
                 "desired_generation": (
                     command.runtime_configuration.evidence.desired_generation

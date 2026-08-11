@@ -14011,7 +14011,7 @@
           "desired": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RuntimeConfigurationRevisionResponse"
+                "$ref": "#/components/schemas/RuntimeConfigurationStateResponse"
               },
               {
                 "type": "null"
@@ -14021,7 +14021,7 @@
           "applied": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RuntimeConfigurationRevisionResponse"
+                "$ref": "#/components/schemas/RuntimeConfigurationStateResponse"
               },
               {
                 "type": "null"
@@ -14177,49 +14177,9 @@
             ],
             "title": "Runtime Provider Resource Id"
           },
-          "infrastructure_profile_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Infrastructure Profile Id"
-          },
-          "workspace_runtime_profile_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspace Runtime Profile Id"
-          },
-          "desired_runtime_configuration_revision_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Desired Runtime Configuration Revision Id"
-          },
-          "applied_runtime_configuration_revision_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Applied Runtime Configuration Revision Id"
+          "configuration_sequence": {
+            "type": "integer",
+            "title": "Configuration Sequence"
           },
           "desired_state": {
             "$ref": "#/components/schemas/RuntimeDesiredState"
@@ -14339,10 +14299,7 @@
           "agent_id",
           "runtime_provider_id",
           "runtime_provider_resource_id",
-          "infrastructure_profile_id",
-          "workspace_runtime_profile_id",
-          "desired_runtime_configuration_revision_id",
-          "applied_runtime_configuration_revision_id",
+          "configuration_sequence",
           "desired_state",
           "desired_generation",
           "last_lifecycle_command",
@@ -24881,23 +24838,45 @@
         "title": "ResponseModeRequest",
         "description": "Required full-value response-mode request."
       },
-      "RuntimeConfigurationResolutionStatus": {
-        "type": "string",
-        "enum": [
-          "ready",
-          "blocked"
-        ],
-        "title": "RuntimeConfigurationResolutionStatus",
-        "description": "Whether current source configuration can create a Runtime incarnation."
-      },
-      "RuntimeConfigurationRevisionResponse": {
+      "RuntimeConfigurationStateResponse": {
         "properties": {
-          "id": {
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "status": {
             "type": "string",
-            "title": "Id"
+            "enum": [
+              "unconfigured",
+              "blocked",
+              "ready"
+            ],
+            "title": "Status"
+          },
+          "target_generation": {
+            "type": "integer",
+            "title": "Target Generation"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
           },
           "provider_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Provider Id"
           },
           "provider_capability_revision_id": {
@@ -24912,27 +24891,87 @@
             "title": "Provider Capability Revision Id"
           },
           "infrastructure_profile_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Infrastructure Profile Id"
           },
           "infrastructure_profile_version": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Infrastructure Profile Version"
           },
           "workspace_runtime_profile_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Workspace Runtime Profile Id"
           },
           "workspace_runtime_profile_version": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Workspace Runtime Profile Version"
           },
           "agent_selection_version": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Agent Selection Version"
           },
-          "resolution_status": {
-            "$ref": "#/components/schemas/RuntimeConfigurationResolutionStatus"
+          "required_capabilities": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Required Capabilities"
+          },
+          "missing_capabilities": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Capabilities"
           },
           "reason_code": {
             "anyOf": [
@@ -24944,28 +24983,6 @@
               }
             ],
             "title": "Reason Code"
-          },
-          "required_capabilities": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Required Capabilities"
-          },
-          "missing_capabilities": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Missing Capabilities"
-          },
-          "digest": {
-            "type": "string",
-            "title": "Digest"
-          },
-          "target_desired_generation": {
-            "type": "integer",
-            "title": "Target Desired Generation"
           },
           "provider_reported_digest": {
             "anyOf": [
@@ -25001,7 +25018,7 @@
             ],
             "title": "Provider Acknowledged At"
           },
-          "runtime_observed_at": {
+          "runner_observed_at": {
             "anyOf": [
               {
                 "type": "string",
@@ -25011,17 +25028,27 @@
                 "type": "null"
               }
             ],
-            "title": "Runtime Observed At"
+            "title": "Runner Observed At"
           },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
+          "applied_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied At"
           }
         },
         "type": "object",
         "required": [
-          "id",
+          "sequence",
+          "status",
+          "target_generation",
+          "digest",
           "provider_id",
           "provider_capability_revision_id",
           "infrastructure_profile_id",
@@ -25029,20 +25056,17 @@
           "workspace_runtime_profile_id",
           "workspace_runtime_profile_version",
           "agent_selection_version",
-          "resolution_status",
-          "reason_code",
           "required_capabilities",
           "missing_capabilities",
-          "digest",
-          "target_desired_generation",
+          "reason_code",
           "provider_reported_digest",
           "runner_reported_digest",
           "provider_acknowledged_at",
-          "runtime_observed_at",
-          "created_at"
+          "runner_observed_at",
+          "applied_at"
         ],
-        "title": "RuntimeConfigurationRevisionResponse",
-        "description": "Safe immutable Runtime configuration revision evidence."
+        "title": "RuntimeConfigurationStateResponse",
+        "description": "Bounded desired or applied Runtime configuration state."
       },
       "RuntimeDesiredState": {
         "type": "string",

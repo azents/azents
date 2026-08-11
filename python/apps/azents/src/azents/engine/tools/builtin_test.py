@@ -24,7 +24,10 @@ from azents.core.runtime_capabilities import (
     RuntimeCapabilityResolver,
     RuntimeCapabilitySnapshot,
 )
-from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.core.runtime_profile import (
+    RuntimeConfigurationDocument,
+    RuntimeConfigurationStateStatus,
+)
 from azents.core.tools import (
     ResolveContext,
     ShellToolkitConfig,
@@ -88,6 +91,10 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
+from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationSlot,
+    RuntimeConfigurationState,
+)
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.transfer.runtime_image_read import (
@@ -125,7 +132,7 @@ async def test_ready_runtime_for_agent_forwards_shared_wait_options() -> None:
         runtime_capability_version=1,
         desired_generation=2,
         runner_generation=3,
-        configuration_revision_id="revision-2",
+        configuration_sequence=1,
         configuration_digest="a" * 64,
         workspace_path="/workspace/agent",
     )
@@ -286,6 +293,79 @@ class _FakeAgentsAppendixDedupeStateStore:
         """Apply appendix dedupe state update."""
         state = await self.load_appendix_dedupe(agent_id, session_id)
         self.dedupe_states[(agent_id, session_id)] = mutator(state)
+
+
+def _runtime_configuration_document(
+    *,
+    effective_profile: dict[str, Any] | None = None,
+) -> RuntimeConfigurationDocument:
+    """Create one bounded typed Runtime configuration document."""
+    if effective_profile is None:
+        effective_profile = {
+            "profile_kind": "docker_container",
+            "contract_family": "docker.container-profile",
+            "schema_version": 1,
+            "runner_resources": {
+                "cpu_reservation_millicores": None,
+                "cpu_limit_millicores": None,
+                "memory_reservation_bytes": None,
+                "memory_limit_bytes": None,
+            },
+            "network_name": None,
+        }
+    return RuntimeConfigurationDocument(
+        schema_version=1,
+        source_trace={"test": "builtin"},
+        provider_id="provider-1",
+        provider_capability_revision_id="capability-1",
+        infrastructure_profile_id="infrastructure-1",
+        infrastructure_profile_version=1,
+        workspace_runtime_profile_id="profile-1",
+        workspace_runtime_profile_version=1,
+        agent_selection_version=1,
+        required_capabilities=("runtime.resources",),
+        missing_capabilities=(),
+        resolved_configuration={"effective_profile": effective_profile},
+    )
+
+
+_DEFAULT_RUNTIME_CONFIGURATION_DOCUMENT = object()
+
+
+def _runtime_configuration_state(
+    *,
+    status: RuntimeConfigurationStateStatus = RuntimeConfigurationStateStatus.READY,
+    digest: str | None = "a" * 64,
+    document: RuntimeConfigurationDocument | None | object = (
+        _DEFAULT_RUNTIME_CONFIGURATION_DOCUMENT
+    ),
+    reason_code: str | None = None,
+) -> RuntimeConfigurationState:
+    """Create one bounded desired Runtime configuration state."""
+    now = datetime(2026, 8, 11, tzinfo=UTC)
+    desired_document = (
+        _runtime_configuration_document()
+        if document is _DEFAULT_RUNTIME_CONFIGURATION_DOCUMENT
+        else cast(RuntimeConfigurationDocument | None, document)
+    )
+    return RuntimeConfigurationState(
+        runtime_id="runtime-1",
+        desired=RuntimeConfigurationSlot(
+            sequence=1,
+            status=status,
+            target_generation=7,
+            digest=digest,
+            document=desired_document,
+            reason_code=reason_code,
+            provider_reported_digest=None,
+            runner_reported_digest=None,
+            provider_acknowledged_at=None,
+            runner_observed_at=None,
+        ),
+        applied=None,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 class _FakeRunnerOperations:
@@ -753,7 +833,7 @@ def _make_toolkit(
     agent_runtime_service = AsyncMock()
     agent_runtime_repo.get_by_agent_id.return_value = SimpleNamespace(
         id="runtime-1",
-        desired_runtime_configuration_revision_id="revision-1",
+        configuration_sequence=1,
         desired_state=desired_state,
         desired_generation=7,
         provider_connection_state=provider_connection_state,
@@ -763,25 +843,8 @@ def _make_toolkit(
         workspace_path="/workspace/agent",
     )
     profile_repository = agent_runtime_service.runtime_profile_repository
-    profile_repository.get_configuration_revision.return_value = SimpleNamespace(
-        id="revision-1",
-        digest="a" * 64,
-        target_desired_generation=7,
-        resolution_status=RuntimeConfigurationResolutionStatus.READY,
-        resolved_configuration={
-            "effective_profile": {
-                "profile_kind": "docker_container",
-                "contract_family": "docker.container-profile",
-                "schema_version": 1,
-                "runner_resources": {
-                    "cpu_reservation_millicores": None,
-                    "cpu_limit_millicores": None,
-                    "memory_reservation_bytes": None,
-                    "memory_limit_bytes": None,
-                },
-                "network_name": None,
-            }
-        },
+    profile_repository.get_configuration_state.return_value = (
+        _runtime_configuration_state()
     )
 
     async def resolve_operation_target(
@@ -824,13 +887,7 @@ def _make_toolkit(
             runtime_capability_version=1,
             desired_generation=getattr(runtime, "desired_generation", 7),
             runner_generation=runtime.runner_generation,
-            configuration_revision_id=(
-                getattr(
-                    runtime,
-                    "desired_runtime_configuration_revision_id",
-                    "revision-1",
-                )
-            ),
+            configuration_sequence=getattr(runtime, "configuration_sequence", 1),
             configuration_digest="a" * 64,
             workspace_path=runtime.workspace_path,
         )
@@ -916,7 +973,7 @@ def _make_toolkit(
     )
     toolkit.set_session_id(session_id)
     toolkit._expected_runtime_authority = RuntimeOperationAuthority(
-        configuration_revision_id="revision-1",
+        configuration_sequence=1,
         configuration_digest="a" * 64,
         desired_generation=7,
     )
@@ -990,7 +1047,7 @@ class TestBuiltinToolkitProviderResolve:
             runtime_capability_version=1,
             desired_generation=1,
             runner_generation=1,
-            configuration_revision_id="revision-1",
+            configuration_sequence=1,
             configuration_digest="a" * 64,
             workspace_path="/workspace/agent",
         )
@@ -1051,7 +1108,7 @@ class TestBuiltinToolkitProviderResolve:
         toolkit.set_runtime_capability_resolver(_MANAGED_RUNTIME_CAPABILITY_RESOLVER)
         await toolkit.update_context(_make_context())
         toolkit._expected_runtime_authority = RuntimeOperationAuthority(
-            configuration_revision_id="revision-1",
+            configuration_sequence=1,
             configuration_digest="a" * 64,
             desired_generation=1,
         )
@@ -1499,39 +1556,37 @@ class TestRuntimeToolkitUpdateContext:
         )
         runtime_service = cast(Any, toolkit)._test_agent_runtime_service
         profile_repository = runtime_service.runtime_profile_repository
-        profile_repository.get_configuration_revision.return_value = SimpleNamespace(
-            id="revision-1",
-            digest="a" * 64,
-            target_desired_generation=7,
-            resolution_status=RuntimeConfigurationResolutionStatus.READY,
-            resolved_configuration={
-                "effective_profile": {
-                    "profile_kind": "kubernetes_pod",
-                    "contract_family": "kubernetes.pod-profile",
-                    "schema_version": 2,
-                    "runner_resources": {
-                        "cpu_request_millicores": 100,
-                        "cpu_limit_millicores": 1000,
-                        "memory_request_bytes": 268_435_456,
-                        "memory_limit_bytes": 1_073_741_824,
-                    },
-                    "workspace_volume": {
-                        "storage_class_name": "standard",
-                        "storage_request_bytes": 1_073_741_824,
-                    },
-                    "network_policy": {
-                        "allowed_cidrs": [],
-                        "denied_cidrs": [],
-                    },
-                    "service_account_name": None,
-                    "scheduling": {
-                        "node_selector": {},
-                        "tolerations": [],
-                    },
-                    "dind": None,
-                    "process_containment": {"schema_version": 1},
-                }
-            },
+        profile_repository.get_configuration_state.return_value = (
+            _runtime_configuration_state(
+                document=_runtime_configuration_document(
+                    effective_profile={
+                        "profile_kind": "kubernetes_pod",
+                        "contract_family": "kubernetes.pod-profile",
+                        "schema_version": 2,
+                        "runner_resources": {
+                            "cpu_request_millicores": 100,
+                            "cpu_limit_millicores": 1000,
+                            "memory_request_bytes": 268_435_456,
+                            "memory_limit_bytes": 1_073_741_824,
+                        },
+                        "workspace_volume": {
+                            "storage_class_name": "standard",
+                            "storage_request_bytes": 1_073_741_824,
+                        },
+                        "network_policy": {
+                            "allowed_cidrs": [],
+                            "denied_cidrs": [],
+                        },
+                        "service_account_name": None,
+                        "scheduling": {
+                            "node_selector": {},
+                            "tolerations": [],
+                        },
+                        "dind": None,
+                        "process_containment": {"schema_version": 1},
+                    }
+                )
+            )
         )
 
         prompt = await toolkit.get_static_prompt(_make_context())
@@ -1546,13 +1601,13 @@ class TestRuntimeToolkitUpdateContext:
         toolkit = _make_toolkit()
         runtime_service = cast(Any, toolkit)._test_agent_runtime_service
         profile_repository = runtime_service.runtime_profile_repository
-        profile_repository.get_configuration_revision.return_value = SimpleNamespace(
-            id="revision-1",
-            digest="a" * 64,
-            target_desired_generation=7,
-            resolution_status=RuntimeConfigurationResolutionStatus.BLOCKED,
-            resolved_configuration=None,
-            reason_code="provider_capability_missing",
+        profile_repository.get_configuration_state.return_value = (
+            _runtime_configuration_state(
+                status=RuntimeConfigurationStateStatus.BLOCKED,
+                digest="b" * 64,
+                document=None,
+                reason_code="provider_capability_missing",
+            )
         )
 
         prompt = await toolkit.get_static_prompt(_make_context())
@@ -1948,7 +2003,7 @@ async def test_runtime_file_storage_revalidates_authority_for_each_operation() -
         {"/workspace/agent/report.txt": b"abcdef"}
     )
     authority = RuntimeOperationAuthority(
-        configuration_revision_id="revision-1",
+        configuration_sequence=1,
         configuration_digest="a" * 64,
         desired_generation=7,
     )
@@ -1957,7 +2012,7 @@ async def test_runtime_file_storage_revalidates_authority_for_each_operation() -
         runtime_capability_version=1,
         desired_generation=7,
         runner_generation=1,
-        configuration_revision_id="revision-1",
+        configuration_sequence=1,
         configuration_digest="a" * 64,
         workspace_path="/workspace/agent",
     )
@@ -2240,7 +2295,7 @@ class TestProcessToolHandler:
             "expected_authority"
         ]
         assert expected_authority == RuntimeOperationAuthority(
-            configuration_revision_id="revision-1",
+            configuration_sequence=1,
             configuration_digest="a" * 64,
             desired_generation=7,
         )

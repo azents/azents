@@ -714,8 +714,7 @@ class TestAgentRuntimeRepository:
         assert rearmed.runner_state is RuntimeRunnerState.UNKNOWN
         assert rearmed.runner_generation == ready.runner_generation
         assert rearmed.workspace_path is None
-        assert rearmed.desired_runtime_configuration_revision_id is None
-        assert rearmed.applied_runtime_configuration_revision_id is None
+        assert rearmed.configuration_sequence == runtime.configuration_sequence
         assert late_provider is None
 
     async def test_record_provider_and_runner_state(

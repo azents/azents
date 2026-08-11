@@ -37,10 +37,7 @@ class AgentRuntimeRawStateResponse(BaseModel):
     agent_id: StrictStr
     runtime_provider_id: Optional[StrictStr]
     runtime_provider_resource_id: Optional[StrictStr]
-    infrastructure_profile_id: Optional[StrictStr]
-    workspace_runtime_profile_id: Optional[StrictStr]
-    desired_runtime_configuration_revision_id: Optional[StrictStr]
-    applied_runtime_configuration_revision_id: Optional[StrictStr]
+    configuration_sequence: StrictInt
     desired_state: RuntimeDesiredState
     desired_generation: StrictInt
     last_lifecycle_command: Optional[RuntimeLifecycleCommandType]
@@ -58,7 +55,7 @@ class AgentRuntimeRawStateResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "workspace_id", "agent_id", "runtime_provider_id", "runtime_provider_resource_id", "infrastructure_profile_id", "workspace_runtime_profile_id", "desired_runtime_configuration_revision_id", "applied_runtime_configuration_revision_id", "desired_state", "desired_generation", "last_lifecycle_command", "reset_final_desired_state", "provider_observed_state", "provider_observed_generation", "provider_connection_state", "runner_state", "runner_generation", "workspace_path", "failure_generation", "failure_code", "failure_message", "last_state_change_at", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "workspace_id", "agent_id", "runtime_provider_id", "runtime_provider_resource_id", "configuration_sequence", "desired_state", "desired_generation", "last_lifecycle_command", "reset_final_desired_state", "provider_observed_state", "provider_observed_generation", "provider_connection_state", "runner_state", "runner_generation", "workspace_path", "failure_generation", "failure_code", "failure_message", "last_state_change_at", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -116,26 +113,6 @@ class AgentRuntimeRawStateResponse(BaseModel):
         if self.runtime_provider_resource_id is None and "runtime_provider_resource_id" in self.model_fields_set:
             _dict['runtime_provider_resource_id'] = None
 
-        # set to None if infrastructure_profile_id (nullable) is None
-        # and model_fields_set contains the field
-        if self.infrastructure_profile_id is None and "infrastructure_profile_id" in self.model_fields_set:
-            _dict['infrastructure_profile_id'] = None
-
-        # set to None if workspace_runtime_profile_id (nullable) is None
-        # and model_fields_set contains the field
-        if self.workspace_runtime_profile_id is None and "workspace_runtime_profile_id" in self.model_fields_set:
-            _dict['workspace_runtime_profile_id'] = None
-
-        # set to None if desired_runtime_configuration_revision_id (nullable) is None
-        # and model_fields_set contains the field
-        if self.desired_runtime_configuration_revision_id is None and "desired_runtime_configuration_revision_id" in self.model_fields_set:
-            _dict['desired_runtime_configuration_revision_id'] = None
-
-        # set to None if applied_runtime_configuration_revision_id (nullable) is None
-        # and model_fields_set contains the field
-        if self.applied_runtime_configuration_revision_id is None and "applied_runtime_configuration_revision_id" in self.model_fields_set:
-            _dict['applied_runtime_configuration_revision_id'] = None
-
         # set to None if last_lifecycle_command (nullable) is None
         # and model_fields_set contains the field
         if self.last_lifecycle_command is None and "last_lifecycle_command" in self.model_fields_set:
@@ -188,10 +165,7 @@ class AgentRuntimeRawStateResponse(BaseModel):
             "agent_id": obj.get("agent_id"),
             "runtime_provider_id": obj.get("runtime_provider_id"),
             "runtime_provider_resource_id": obj.get("runtime_provider_resource_id"),
-            "infrastructure_profile_id": obj.get("infrastructure_profile_id"),
-            "workspace_runtime_profile_id": obj.get("workspace_runtime_profile_id"),
-            "desired_runtime_configuration_revision_id": obj.get("desired_runtime_configuration_revision_id"),
-            "applied_runtime_configuration_revision_id": obj.get("applied_runtime_configuration_revision_id"),
+            "configuration_sequence": obj.get("configuration_sequence"),
             "desired_state": obj.get("desired_state"),
             "desired_generation": obj.get("desired_generation"),
             "last_lifecycle_command": obj.get("last_lifecycle_command"),

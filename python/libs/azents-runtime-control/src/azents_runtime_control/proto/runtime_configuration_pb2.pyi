@@ -21,28 +21,28 @@ DESCRIPTOR: _descriptor.FileDescriptor
 class RuntimeConfigurationEvidence(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
-    REVISION_ID_FIELD_NUMBER: _builtins.int
+    CONFIGURATION_SEQUENCE_FIELD_NUMBER: _builtins.int
     DIGEST_FIELD_NUMBER: _builtins.int
     DESIRED_GENERATION_FIELD_NUMBER: _builtins.int
-    revision_id: _builtins.str
+    configuration_sequence: _builtins.str
     digest: _builtins.str
     desired_generation: _builtins.int
     def __init__(
         self,
         *,
-        revision_id: _builtins.str = ...,
+        configuration_sequence: _builtins.str = ...,
         digest: _builtins.str = ...,
         desired_generation: _builtins.int = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "configuration_sequence",
+        b"configuration_sequence",
         "desired_generation",
         b"desired_generation",
         "digest",
         b"digest",
-        "revision_id",
-        b"revision_id",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...

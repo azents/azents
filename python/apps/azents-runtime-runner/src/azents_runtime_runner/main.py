@@ -24,7 +24,10 @@ from azents_runtime_control.runner import (
     RunnerRegistration,
     RunnerRunLoop,
 )
-from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEvidence,
+    parse_configuration_sequence,
+)
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
@@ -352,7 +355,9 @@ def _control_connection_id(base_connection_id: str) -> str:
 
 def _runtime_configuration_evidence_from_env() -> RuntimeConfigurationEvidence:
     return RuntimeConfigurationEvidence(
-        revision_id=_required_env("AZ_RUNTIME_CONFIGURATION_REVISION_ID"),
+        configuration_sequence=parse_configuration_sequence(
+            _required_env("AZ_RUNTIME_CONFIGURATION_SEQUENCE")
+        ),
         digest=_required_env("AZ_RUNTIME_CONFIGURATION_DIGEST"),
         desired_generation=int(
             _required_env("AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION")

@@ -44,6 +44,14 @@ class RuntimeConfigurationResolutionStatus(enum.StrEnum):
     BLOCKED = "blocked"
 
 
+class RuntimeConfigurationStateStatus(enum.StrEnum):
+    """Current desired Runtime configuration slot status."""
+
+    UNCONFIGURED = "unconfigured"
+    BLOCKED = "blocked"
+    READY = "ready"
+
+
 class RuntimeConfigurationApplicationImpact(enum.StrEnum):
     """Physical action required to adopt one desired Runtime configuration."""
 
@@ -130,6 +138,33 @@ class _FrozenProfileModel(BaseModel):
     """Strict immutable base for Profile documents."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class RuntimeConfigurationDocument(_FrozenProfileModel):
+    """Canonical schema-versioned current Runtime configuration envelope."""
+
+    schema_version: Literal[1]
+    source_trace: dict[str, JsonValue]
+    provider_id: str
+    provider_capability_revision_id: str | None
+    infrastructure_profile_id: str
+    infrastructure_profile_version: int = Field(ge=1)
+    workspace_runtime_profile_id: str
+    workspace_runtime_profile_version: int
+    agent_selection_version: int = Field(ge=1)
+    required_capabilities: tuple[str, ...]
+    missing_capabilities: tuple[str, ...]
+    resolved_configuration: dict[str, JsonValue] | None
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> "RuntimeConfigurationDocument":
+        """Require a resolved document only when capability resolution is ready."""
+        if self.missing_capabilities and self.resolved_configuration is not None:
+            raise ValueError(
+                "A document with missing capabilities cannot contain resolved "
+                "configuration."
+            )
+        return self
 
 
 class _DirectProfileSpecV2(_FrozenProfileModel):

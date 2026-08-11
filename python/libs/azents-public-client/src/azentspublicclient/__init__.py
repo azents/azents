@@ -367,8 +367,7 @@ __all__ = [
     "ResponseChatV1ReadAgentWorkspacePath",
     "ResponseLlmProviderIntegrationV1GetSubscriptionUsage",
     "ResponseModeRequest",
-    "RuntimeConfigurationResolutionStatus",
-    "RuntimeConfigurationRevisionResponse",
+    "RuntimeConfigurationStateResponse",
     "RuntimeDesiredState",
     "RuntimeInfrastructureProfileSpec",
     "RuntimeLifecycleCommandType",
@@ -826,8 +825,7 @@ from azentspublicclient.models.reset_agent_runtime_request import ResetAgentRunt
 from azentspublicclient.models.response_chat_v1_read_agent_workspace_path import ResponseChatV1ReadAgentWorkspacePath as ResponseChatV1ReadAgentWorkspacePath
 from azentspublicclient.models.response_llm_provider_integration_v1_get_subscription_usage import ResponseLlmProviderIntegrationV1GetSubscriptionUsage as ResponseLlmProviderIntegrationV1GetSubscriptionUsage
 from azentspublicclient.models.response_mode_request import ResponseModeRequest as ResponseModeRequest
-from azentspublicclient.models.runtime_configuration_resolution_status import RuntimeConfigurationResolutionStatus as RuntimeConfigurationResolutionStatus
-from azentspublicclient.models.runtime_configuration_revision_response import RuntimeConfigurationRevisionResponse as RuntimeConfigurationRevisionResponse
+from azentspublicclient.models.runtime_configuration_state_response import RuntimeConfigurationStateResponse as RuntimeConfigurationStateResponse
 from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState as RuntimeDesiredState
 from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec as RuntimeInfrastructureProfileSpec
 from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLifecycleCommandType as RuntimeLifecycleCommandType

@@ -11,7 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentRuntimeCapability, RuntimeDesiredState
 from azents.core.runtime_profile import (
-    RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationDocument,
+    RuntimeConfigurationStateStatus,
     RuntimeRecreationItemStatus,
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
@@ -21,6 +22,9 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationAppliedSlot,
+    RuntimeConfigurationSlot,
+    RuntimeConfigurationState,
     RuntimeRecreationOperation,
     RuntimeRecreationOperationItem,
 )
@@ -70,7 +74,9 @@ def _operation() -> RuntimeRecreationOperation:
 
 def _item(
     *,
-    expected_revision_id: str = "revision-0",
+    expected_sequence: int = 1,
+    expected_digest: str = "a" * 64,
+    expected_generation: int = 0,
     dispatched_generation: int | None = None,
     attempt: int = 1,
 ) -> RuntimeRecreationOperationItem:
@@ -79,7 +85,9 @@ def _item(
         id="item-1",
         operation_id="operation-1",
         runtime_id="runtime-1",
-        expected_configuration_revision_id=expected_revision_id,
+        expected_configuration_sequence=expected_sequence,
+        expected_configuration_digest=expected_digest,
+        expected_desired_generation=expected_generation,
         status=RuntimeRecreationItemStatus.RUNNING,
         attempt=attempt,
         dispatched_generation=dispatched_generation,
@@ -92,8 +100,7 @@ def _item(
 
 def _runtime(
     *,
-    desired_revision_id: str = "revision-0",
-    applied_revision_id: str | None = "revision-0",
+    configuration_sequence: int = 1,
     desired_generation: int = 0,
 ) -> MagicMock:
     runtime = MagicMock(spec=AgentRuntime)
@@ -104,8 +111,7 @@ def _runtime(
     runtime.runtime_provider_resource_id = "provider-1"
     runtime.terminal_delete_requested_generation = None
     runtime.desired_state = RuntimeDesiredState.RUNNING
-    runtime.desired_runtime_configuration_revision_id = desired_revision_id
-    runtime.applied_runtime_configuration_revision_id = applied_revision_id
+    runtime.configuration_sequence = configuration_sequence
     runtime.desired_generation = desired_generation
     runtime.failure_generation = None
     runtime.failure_code = None
@@ -122,11 +128,79 @@ def _agent(
     return agent
 
 
-def _ready_revision() -> MagicMock:
-    revision = MagicMock()
-    revision.resolution_status = RuntimeConfigurationResolutionStatus.READY
-    revision.resolved_configuration = {"schema_version": 1}
-    return revision
+def _blocked_state(
+    *, sequence: int = 2, target_generation: int = 0
+) -> RuntimeConfigurationState:
+    return RuntimeConfigurationState(
+        runtime_id="runtime-1",
+        desired=RuntimeConfigurationSlot(
+            sequence=sequence,
+            status=RuntimeConfigurationStateStatus.BLOCKED,
+            target_generation=target_generation,
+            digest=None,
+            document=None,
+            reason_code="provider_disabled",
+            provider_reported_digest=None,
+            runner_reported_digest=None,
+            provider_acknowledged_at=None,
+            runner_observed_at=None,
+        ),
+        applied=None,
+        created_at=datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC),
+        updated_at=datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC),
+    )
+
+
+def _ready_state(
+    *,
+    sequence: int = 1,
+    digest: str = "a" * 64,
+    target_generation: int = 0,
+    applied: bool = True,
+) -> RuntimeConfigurationState:
+    document = RuntimeConfigurationDocument(
+        schema_version=1,
+        source_trace={},
+        provider_id="provider-1",
+        provider_capability_revision_id=None,
+        infrastructure_profile_id="infrastructure-1",
+        infrastructure_profile_version=1,
+        workspace_runtime_profile_id="profile-1",
+        workspace_runtime_profile_version=1,
+        agent_selection_version=1,
+        required_capabilities=(),
+        missing_capabilities=(),
+        resolved_configuration={"schema_version": 1},
+    )
+    desired = RuntimeConfigurationSlot(
+        sequence=sequence,
+        status=RuntimeConfigurationStateStatus.READY,
+        target_generation=target_generation,
+        digest=digest,
+        document=document,
+        reason_code=None,
+        provider_reported_digest=None,
+        runner_reported_digest=None,
+        provider_acknowledged_at=None,
+        runner_observed_at=None,
+    )
+    return RuntimeConfigurationState(
+        runtime_id="runtime-1",
+        desired=desired,
+        applied=(
+            RuntimeConfigurationAppliedSlot(
+                sequence=sequence,
+                target_generation=target_generation,
+                digest=digest,
+                document=document,
+                applied_at=datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC),
+            )
+            if applied
+            else None
+        ),
+        created_at=datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC),
+        updated_at=datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC),
+    )
 
 
 def _reconciler() -> tuple[
@@ -295,21 +369,22 @@ async def test_recreation_dispatches_exact_next_generation() -> None:
     profiles.claim_recreation_items.return_value = [item]
     profiles.lock_recreation_item.return_value = item
     profiles.get_recreation_operation.return_value = _operation()
-    profiles.get_configuration_revision.return_value = _ready_revision()
+    profiles.get_configuration_state.return_value = _ready_state()
     profiles.update_recreation_item_dispatch.return_value = True
     runtimes.get_by_id.return_value = _runtime()
     command = MagicMock()
     command.desired_generation = 1
-    command.runtime.desired_runtime_configuration_revision_id = "revision-1"
-    runtimes.set_desired_state_if_ready.return_value = command
+    command.runtime.configuration_sequence = 1
+    runtimes.set_desired_state_if_configuration_current.return_value = command
 
     result = await reconciler.reconcile_once()
 
     assert result.dispatched_items == 1
     assert result.completed_items == 0
-    runtimes.set_desired_state_if_ready.assert_awaited_once()
+    runtimes.set_desired_state_if_configuration_current.assert_awaited_once()
     dispatch = profiles.update_recreation_item_dispatch.await_args.kwargs
-    assert dispatch["configuration_revision_id"] == "revision-1"
+    assert dispatch["configuration_sequence"] == 1
+    assert dispatch["configuration_digest"] == "a" * 64
     assert dispatch["dispatched_generation"] == 1
 
 
@@ -322,6 +397,7 @@ async def test_recreation_skips_dispatch_after_runtime_removal_fence() -> None:
     profiles.claim_recreation_items.return_value = [item]
     profiles.lock_recreation_item.return_value = item
     profiles.get_recreation_operation.return_value = _operation()
+    profiles.get_configuration_state.return_value = _ready_state()
     profiles.finish_recreation_item.return_value = True
     runtimes.get_by_id.return_value = _runtime()
     agents.lock_by_id.return_value = _agent(
@@ -332,7 +408,7 @@ async def test_recreation_skips_dispatch_after_runtime_removal_fence() -> None:
 
     assert result.dispatched_items == 0
     assert result.completed_items == 1
-    runtimes.set_desired_state_if_ready.assert_not_awaited()
+    runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
     finish = profiles.finish_recreation_item.await_args.kwargs
     assert finish["status"] is RuntimeRecreationItemStatus.SKIPPED
     assert finish["failure_code"] == "runtime_capability_unavailable"
@@ -341,17 +417,16 @@ async def test_recreation_skips_dispatch_after_runtime_removal_fence() -> None:
 async def test_recreation_completes_only_after_exact_applied_evidence() -> None:
     """A dispatched item succeeds only after the applied pointer matches."""
     reconciler, profiles, runtimes, _agents = _reconciler()
-    item = _item(expected_revision_id="revision-1", dispatched_generation=1)
+    item = _item(expected_sequence=1, dispatched_generation=1, expected_generation=1)
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = [item]
     profiles.claim_recreation_items.return_value = []
     profiles.lock_recreation_item.return_value = item
     profiles.get_recreation_operation.return_value = _operation()
-    profiles.get_configuration_revision.return_value = _ready_revision()
+    profiles.get_configuration_state.return_value = _ready_state(target_generation=1)
     profiles.finish_recreation_item.return_value = True
     runtimes.get_by_id.return_value = _runtime(
-        desired_revision_id="revision-1",
-        applied_revision_id="revision-1",
+        configuration_sequence=1,
         desired_generation=1,
     )
 
@@ -359,7 +434,7 @@ async def test_recreation_completes_only_after_exact_applied_evidence() -> None:
 
     assert result.dispatched_items == 0
     assert result.completed_items == 1
-    runtimes.set_desired_state_if_ready.assert_not_awaited()
+    runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
     finish = profiles.finish_recreation_item.await_args.kwargs
     assert finish["status"] is RuntimeRecreationItemStatus.SUCCEEDED
     assert finish["failure_code"] is None
@@ -368,51 +443,43 @@ async def test_recreation_completes_only_after_exact_applied_evidence() -> None:
 async def test_recreation_skips_blocked_latest_configuration() -> None:
     """A blocked superseding revision is explicit and never recreated."""
     reconciler, profiles, runtimes, _agents = _reconciler()
-    item = _item(expected_revision_id="revision-blocked")
+    item = _item(expected_sequence=1, expected_digest="a" * 64, expected_generation=0)
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = []
     profiles.claim_recreation_items.return_value = [item]
     profiles.lock_recreation_item.return_value = item
     profiles.get_recreation_operation.return_value = _operation()
-    blocked = MagicMock()
-    blocked.resolution_status = RuntimeConfigurationResolutionStatus.BLOCKED
-    blocked.resolved_configuration = None
-    profiles.get_configuration_revision.return_value = blocked
+    profiles.get_configuration_state.return_value = _blocked_state()
     profiles.finish_recreation_item.return_value = True
-    runtimes.get_by_id.return_value = _runtime(
-        desired_revision_id="revision-blocked",
-        applied_revision_id="revision-0",
-    )
+    runtimes.get_by_id.return_value = _runtime(configuration_sequence=1)
 
     result = await reconciler.reconcile_once()
 
     assert result.completed_items == 1
-    runtimes.set_desired_state_if_ready.assert_not_awaited()
+    runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
     finish = profiles.finish_recreation_item.await_args.kwargs
     assert finish["status"] is RuntimeRecreationItemStatus.SKIPPED
-    assert finish["failure_code"] == "configuration_blocked"
+    assert finish["failure_code"] == "target_no_longer_matches"
 
 
 async def test_recreation_skips_configuration_changed_after_snapshot() -> None:
     """An undispatched item never adopts a different configuration target."""
     reconciler, profiles, runtimes, _agents = _reconciler()
-    item = _item(expected_revision_id="revision-snapshot")
+    item = _item(expected_sequence=1, expected_digest="a" * 64, expected_generation=0)
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = []
     profiles.claim_recreation_items.return_value = [item]
     profiles.lock_recreation_item.return_value = item
     profiles.get_recreation_operation.return_value = _operation()
+    profiles.get_configuration_state.return_value = _ready_state(sequence=2)
     profiles.finish_recreation_item.return_value = True
-    runtimes.get_by_id.return_value = _runtime(
-        desired_revision_id="revision-new",
-        applied_revision_id="revision-old",
-    )
+    runtimes.get_by_id.return_value = _runtime(configuration_sequence=2)
 
     result = await reconciler.reconcile_once()
 
     assert result.completed_items == 1
-    runtimes.set_desired_state_if_ready.assert_not_awaited()
-    profiles.get_configuration_revision.assert_not_awaited()
+    runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
+    profiles.get_configuration_state.assert_awaited_once()
     finish = profiles.finish_recreation_item.await_args.kwargs
     assert finish["status"] is RuntimeRecreationItemStatus.SKIPPED
     assert finish["failure_code"] == "configuration_target_changed"
@@ -421,18 +488,16 @@ async def test_recreation_skips_configuration_changed_after_snapshot() -> None:
 async def test_recreation_skips_changed_authority_target_before_dispatch() -> None:
     """A newer source version cannot dispatch the operation's old snapshot."""
     reconciler, profiles, runtimes, _agents = _reconciler()
-    item = _item(expected_revision_id="revision-snapshot")
+    item = _item(expected_sequence=1, expected_digest="a" * 64, expected_generation=0)
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = []
     profiles.claim_recreation_items.return_value = [item]
     profiles.lock_recreation_item.return_value = item
     profiles.get_recreation_operation.return_value = _operation()
     profiles.get_recreation_target_version.return_value = "3"
+    profiles.get_configuration_state.return_value = _ready_state()
     profiles.finish_recreation_item.return_value = True
-    runtimes.get_by_id.return_value = _runtime(
-        desired_revision_id="revision-snapshot",
-        applied_revision_id="revision-old",
-    )
+    runtimes.get_by_id.return_value = _runtime(configuration_sequence=1)
 
     result = await reconciler.reconcile_once()
 
@@ -443,8 +508,8 @@ async def test_recreation_skips_changed_authority_target_before_dispatch() -> No
         target_id="profile-1",
         for_share=True,
     )
-    runtimes.set_desired_state_if_ready.assert_not_awaited()
-    profiles.get_configuration_revision.assert_not_awaited()
+    runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
+    profiles.get_configuration_state.assert_awaited_once()
     finish = profiles.finish_recreation_item.await_args.kwargs
     assert finish["status"] is RuntimeRecreationItemStatus.SKIPPED
     assert finish["failure_code"] == "target_version_changed"
@@ -454,7 +519,9 @@ async def test_recreation_skips_superseded_exact_dispatch() -> None:
     """A later Runtime command cannot cause an implicit second restart."""
     reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item(
-        expected_revision_id="revision-dispatched",
+        expected_sequence=1,
+        expected_digest="a" * 64,
+        expected_generation=0,
         dispatched_generation=4,
     )
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
@@ -462,18 +529,21 @@ async def test_recreation_skips_superseded_exact_dispatch() -> None:
     profiles.claim_recreation_items.return_value = []
     profiles.lock_recreation_item.return_value = item
     profiles.get_recreation_operation.return_value = _operation()
+    profiles.get_configuration_state.return_value = _ready_state(
+        sequence=2,
+        target_generation=5,
+    )
     profiles.finish_recreation_item.return_value = True
     runtimes.get_by_id.return_value = _runtime(
-        desired_revision_id="revision-new",
-        applied_revision_id="revision-old",
+        configuration_sequence=2,
         desired_generation=5,
     )
 
     result = await reconciler.reconcile_once()
 
     assert result.completed_items == 1
-    runtimes.set_desired_state_if_ready.assert_not_awaited()
-    profiles.get_configuration_revision.assert_not_awaited()
+    runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
+    profiles.get_configuration_state.assert_awaited_once()
     finish = profiles.finish_recreation_item.await_args.kwargs
     assert finish["status"] is RuntimeRecreationItemStatus.SKIPPED
     assert finish["failure_code"] == "recreation_dispatch_superseded"
@@ -501,7 +571,9 @@ async def test_recreation_failure_becomes_terminal_at_maximum_attempts() -> None
     """An exact dispatched failure is bounded by the durable attempt count."""
     reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item(
-        expected_revision_id="revision-dispatched",
+        expected_sequence=1,
+        expected_digest="a" * 64,
+        expected_generation=0,
         dispatched_generation=4,
         attempt=3,
     )
@@ -510,12 +582,9 @@ async def test_recreation_failure_becomes_terminal_at_maximum_attempts() -> None
     profiles.claim_recreation_items.return_value = []
     profiles.lock_recreation_item.return_value = item
     profiles.get_recreation_operation.return_value = _operation()
+    profiles.get_configuration_state.return_value = _ready_state(applied=False)
     profiles.retry_recreation_item.return_value = True
-    runtime = _runtime(
-        desired_revision_id="revision-dispatched",
-        applied_revision_id="revision-old",
-        desired_generation=4,
-    )
+    runtime = _runtime(configuration_sequence=1, desired_generation=4)
     runtime.failure_generation = 4
     runtime.failure_code = "PROVIDER_RESTART_FAILED"
     runtime.failure_message = "Provider restart failed."
@@ -532,4 +601,4 @@ async def test_recreation_failure_becomes_terminal_at_maximum_attempts() -> None
         failure_code="PROVIDER_RESTART_FAILED",
         failure_message="Provider restart failed.",
     )
-    runtimes.set_desired_state_if_ready.assert_not_awaited()
+    runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
