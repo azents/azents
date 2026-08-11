@@ -88,6 +88,28 @@ def _seed_existing_runtime_state(connection: sa.Connection) -> None:
             """
         )
     )
+    connection.execute(
+        sa.text(
+            """
+            INSERT INTO session_agent_contexts (
+                id, agent_id, workspace_id, agent_runtime_id,
+                working_folder_path, working_folder_cleanup_status,
+                working_folder_cleanup_summary,
+                working_folder_cleanup_completed_at
+            )
+            VALUES (
+                'optional-runtime-legacy-context',
+                'optional-runtime-agent',
+                'optional-runtime-workspace',
+                NULL,
+                '/runtime/optional/.azents/sessions/legacy',
+                'not_attempted',
+                NULL,
+                NULL
+            )
+            """
+        )
+    )
 
 
 def test_existing_state_backfills_without_runtime_side_effects(
@@ -141,7 +163,8 @@ def test_existing_state_backfills_without_runtime_side_effects(
             connection.execute(
                 sa.text(
                     """
-                    SELECT working_folder_path, working_folder_binding_state,
+                    SELECT agent_runtime_id, working_folder_path,
+                           working_folder_binding_state,
                            working_folder_cleanup_status,
                            working_folder_cleanup_summary
                     FROM session_agent_contexts
@@ -152,6 +175,7 @@ def test_existing_state_backfills_without_runtime_side_effects(
             .mappings()
             .one()
         )
+        assert context["agent_runtime_id"] == "optional-runtime-logical"
         assert context["working_folder_path"] == (
             "/runtime/optional/.azents/sessions/existing"
         )
@@ -160,6 +184,28 @@ def test_existing_state_backfills_without_runtime_side_effects(
         assert context["working_folder_cleanup_summary"] == (
             "historical cleanup result"
         )
+
+        legacy_context = (
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT agent_runtime_id, working_folder_path,
+                           working_folder_binding_state,
+                           working_folder_cleanup_status
+                    FROM session_agent_contexts
+                    WHERE id = 'optional-runtime-legacy-context'
+                    """
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert legacy_context["agent_runtime_id"] == "optional-runtime-logical"
+        assert legacy_context["working_folder_path"] == (
+            "/runtime/optional/.azents/sessions/legacy"
+        )
+        assert legacy_context["working_folder_binding_state"] == "bound"
+        assert legacy_context["working_folder_cleanup_status"] == "not_attempted"
 
         runtime_count = connection.scalar(
             sa.text(
