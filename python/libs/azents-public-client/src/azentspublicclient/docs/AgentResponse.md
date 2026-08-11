@@ -24,6 +24,11 @@ Name | Type | Description | Notes
 **runtime_profile_selection_version** | **int** |  | 
 **runtime_profile_available** | **bool** |  | 
 **runtime_profile_availability_reason_code** | **str** |  | 
+**runtime_capability** | [**AgentRuntimeCapability**](AgentRuntimeCapability.md) |  | 
+**runtime_capability_version** | **int** |  | 
+**runtime_profile_configuration_status** | **str** |  | 
+**runtime_add_available** | **bool** |  | 
+**runtime_remove_available** | **bool** |  | 
 **shell_enabled** | **bool** |  | 
 **memory_enabled** | **bool** |  | 
 **tool_search_enabled** | **bool** |  | 

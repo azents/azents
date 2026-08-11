@@ -2,7 +2,7 @@
 
 import dataclasses
 import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 from typing_extensions import Self, TypedDict
@@ -15,7 +15,7 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SubagentSettings,
 )
-from azents.core.enums import AgentType
+from azents.core.enums import AgentRuntimeCapability, AgentType
 from azents.repos.agent.data import Agent
 from azents.repos.agent_decommission.data import AgentDecommissionJob
 from azents.services.uploads.schema import UploadedImage
@@ -43,6 +43,16 @@ class AgentOutput(BaseModel):
     runtime_profile_selection_version: int
     runtime_profile_available: bool
     runtime_profile_availability_reason_code: str | None
+    runtime_capability: AgentRuntimeCapability
+    runtime_capability_version: int
+    runtime_profile_configuration_status: Literal[
+        "not_applicable",
+        "profile_required",
+        "configured",
+        "unavailable",
+    ]
+    runtime_add_available: bool
+    runtime_remove_available: bool
     shell_enabled: bool
     memory_enabled: bool
     tool_search_enabled: bool
@@ -63,6 +73,7 @@ class AgentOutput(BaseModel):
         effective_auto_compaction_threshold_tokens: int | None,
         runtime_profile_available: bool,
         runtime_profile_availability_reason_code: str | None,
+        can_manage: bool,
     ) -> Self:
         """Create output by combining domain `Agent` and resolved `avatar`."""
         return cls(
@@ -89,6 +100,21 @@ class AgentOutput(BaseModel):
             runtime_profile_availability_reason_code=(
                 runtime_profile_availability_reason_code
             ),
+            runtime_capability=data.runtime_capability,
+            runtime_capability_version=data.runtime_capability_version,
+            runtime_profile_configuration_status=(
+                _runtime_profile_configuration_status(
+                    capability=data.runtime_capability,
+                    runtime_profile_id=data.runtime_profile_id,
+                    runtime_profile_available=runtime_profile_available,
+                )
+            ),
+            runtime_add_available=(
+                can_manage and data.runtime_capability is AgentRuntimeCapability.NONE
+            ),
+            runtime_remove_available=(
+                can_manage and data.runtime_capability is AgentRuntimeCapability.MANAGED
+            ),
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
             tool_search_enabled=data.tool_search_enabled,
@@ -99,6 +125,27 @@ class AgentOutput(BaseModel):
             created_at=data.created_at,
             updated_at=data.updated_at,
         )
+
+
+def _runtime_profile_configuration_status(
+    *,
+    capability: AgentRuntimeCapability,
+    runtime_profile_id: str | None,
+    runtime_profile_available: bool,
+) -> Literal[
+    "not_applicable",
+    "profile_required",
+    "configured",
+    "unavailable",
+]:
+    """Derive the compact Agent Runtime Profile configuration status."""
+    if capability is not AgentRuntimeCapability.MANAGED:
+        return "not_applicable"
+    if runtime_profile_id is None:
+        return "profile_required"
+    if runtime_profile_available:
+        return "configured"
+    return "unavailable"
 
 
 @dataclasses.dataclass(frozen=True)

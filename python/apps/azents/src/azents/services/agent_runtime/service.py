@@ -33,6 +33,7 @@ from azents.core.runtime_profile import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import (
@@ -41,10 +42,28 @@ from azents.repos.agent_runtime.data import (
     AgentRuntimeFailureSummary,
     AgentRuntimeSummaryState,
 )
+from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
+from azents.repos.agent_runtime_removal.data import AgentRuntimeRemovalOperation
+from azents.repos.agent_runtime_removal_scope import (
+    AgentRuntimeRemovalScopeRepository,
+)
+from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
 from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
+)
+from azents.services.agent_runtime_removal import AgentRuntimeRemovalService
+from azents.services.agent_runtime_removal.data import (
+    AgentRuntimeRemovalConfirmationRequest,
+    AgentRuntimeRemovalUnavailable,
+)
+from azents.services.agent_runtime_transition.data import (
+    AgentRuntimeAdditionRequest,
+    AgentRuntimeAdditionUnavailable,
+)
+from azents.services.agent_runtime_transition.service import (
+    AgentRuntimeTransitionService,
 )
 from azents.services.runtime_profile_resolution.data import (
     RuntimeProfileResolutionResult,
@@ -53,21 +72,33 @@ from azents.services.runtime_profile_resolution.data import (
 from azents.services.runtime_profile_resolution.service import (
     RuntimeProfileResolutionService,
 )
+from azents.services.runtime_profile_workspace.service import (
+    RuntimeProfileWorkspaceService,
+    RuntimeProfileWorkspaceUnavailable,
+)
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 from .lifecycle_data import (
     AgentAccessDenied,
+    AgentManagementAccessDenied,
     AgentNotBelongToWorkspace,
     AgentNotFound,
+    AgentRuntimeActionUnavailable,
+    AgentRuntimeAdditionOutput,
     AgentRuntimeConfigurationStatus,
     AgentRuntimeLifecycleOutput,
     AgentRuntimeOutput,
+    AgentRuntimePublicActions,
+    AgentRuntimeReadOutput,
+    AgentRuntimeRemovalOutput,
+    AgentRuntimeRemovalProgress,
     InvalidResetFinalDesiredState,
     ProviderDisconnected,
     RuntimeContainmentStatus,
     RuntimeNotFound,
     RuntimeOperationAuthority,
     RuntimeOperationTarget,
+    RuntimeProfileConfigurationStatus,
     RuntimeProviderUnavailable,
 )
 
@@ -87,6 +118,23 @@ _SAFE_RUNTIME_CONFIGURATION_REASON_CODES = frozenset(
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class _AuthorizedAgent:
+    """Authorized Agent and contextual settings-management capability."""
+
+    agent: Agent
+    can_manage: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class _RuntimeProfileProjection:
+    """Compact Runtime Profile status for public read models."""
+
+    status: RuntimeProfileConfigurationStatus
+    available: bool
+    reason_code: str | None
+
+
 @dataclasses.dataclass
 class AgentRuntimeService:
     """Agent Runtime lifecycle service."""
@@ -98,12 +146,24 @@ class AgentRuntimeService:
     agent_admin_repository: Annotated[
         AgentAdminRepository, Depends(AgentAdminRepository)
     ]
+    removal_repository: Annotated[
+        AgentRuntimeRemovalRepository,
+        Depends(AgentRuntimeRemovalRepository),
+    ]
+    removal_scope_repository: Annotated[
+        AgentRuntimeRemovalScopeRepository,
+        Depends(AgentRuntimeRemovalScopeRepository),
+    ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
     runtime_profile_resolution_service: Annotated[
         RuntimeProfileResolutionService,
         Depends(),
+    ]
+    runtime_profile_workspace_service: Annotated[
+        RuntimeProfileWorkspaceService,
+        Depends(RuntimeProfileWorkspaceService),
     ]
     runtime_profile_repository: Annotated[
         RuntimeProfileRepository,
@@ -112,6 +172,14 @@ class AgentRuntimeService:
     runtime_provider_control_repository: Annotated[
         RuntimeProviderControlRepository,
         Depends(RuntimeProviderControlRepository),
+    ]
+    transition_service: Annotated[
+        AgentRuntimeTransitionService,
+        Depends(AgentRuntimeTransitionService),
+    ]
+    removal_service: Annotated[
+        AgentRuntimeRemovalService,
+        Depends(AgentRuntimeRemovalService),
     ]
 
     async def get(
@@ -122,33 +190,165 @@ class AgentRuntimeService:
         workspace_user_id: str,
         role: WorkspaceUserRole,
     ) -> Result[
-        AgentRuntimeOutput,
-        AgentNotFound
-        | AgentNotBelongToWorkspace
-        | AgentAccessDenied
-        | RuntimeProviderUnavailable,
+        AgentRuntimeReadOutput,
+        AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied,
     ]:
-        """Fetch Runtime status by Agent."""
-        access_error = await self._authorize_agent(
+        """Fetch the unified read-only Runtime model by Agent."""
+        access = await self._get_authorized_agent(
             agent_id,
             workspace_id=workspace_id,
             workspace_user_id=workspace_user_id,
             role=role,
         )
-        if access_error is not None:
-            return Failure(access_error)
+        if isinstance(
+            access,
+            AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied,
+        ):
+            return Failure(access)
+        return Success(
+            await self._build_read_output(
+                access.agent,
+                can_manage=access.can_manage,
+            )
+        )
 
+    async def add(
+        self,
+        agent_id: str,
+        *,
+        workspace_runtime_profile_id: str,
+        expected_capability_version: int,
+        expected_runtime_profile_selection_version: int,
+        idempotency_key: str,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        AgentRuntimeAdditionOutput,
+        AgentNotFound
+        | AgentNotBelongToWorkspace
+        | AgentAccessDenied
+        | AgentManagementAccessDenied
+        | AgentRuntimeActionUnavailable,
+    ]:
+        """Commit or replay one dedicated Runtime addition."""
+        access = await self._get_authorized_agent(
+            agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        if isinstance(
+            access,
+            AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied,
+        ):
+            return Failure(access)
+        if not access.can_manage:
+            return Failure(AgentManagementAccessDenied(agent_id=agent_id))
         try:
-            resolution = await self._ensure_runtime_for_agent(agent_id)
-        except RuntimeProfileResolutionUnavailable as error:
+            added = await self.transition_service.add_runtime(
+                AgentRuntimeAdditionRequest(
+                    agent_id=agent_id,
+                    workspace_runtime_profile_id=workspace_runtime_profile_id,
+                    expected_capability_version=expected_capability_version,
+                    expected_runtime_profile_selection_version=(
+                        expected_runtime_profile_selection_version
+                    ),
+                    idempotency_key=idempotency_key,
+                )
+            )
+        except AgentRuntimeAdditionUnavailable as error:
             return Failure(
-                RuntimeProviderUnavailable(
+                AgentRuntimeActionUnavailable(
                     code=error.code,
-                    provider_id=error.provider_id,
+                    message=str(error),
+                )
+            )
+        return Success(
+            AgentRuntimeAdditionOutput(
+                runtime=await self._build_read_output(
+                    added.agent,
+                    can_manage=True,
+                ),
+                replayed=added.replayed,
+            )
+        )
+
+    async def remove(
+        self,
+        agent_id: str,
+        *,
+        expected_capability_version: int,
+        expected_runtime_profile_selection_version: int,
+        idempotency_key: str,
+        confirmed: bool,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> Result[
+        AgentRuntimeRemovalOutput,
+        AgentNotFound
+        | AgentNotBelongToWorkspace
+        | AgentAccessDenied
+        | AgentManagementAccessDenied
+        | AgentRuntimeActionUnavailable,
+    ]:
+        """Commit or replay one irreversible Runtime removal."""
+        access = await self._get_authorized_agent(
+            agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        if isinstance(
+            access,
+            AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied,
+        ):
+            return Failure(access)
+        if not access.can_manage:
+            return Failure(AgentManagementAccessDenied(agent_id=agent_id))
+        if not confirmed:
+            return Failure(
+                AgentRuntimeActionUnavailable(
+                    code="runtime_remove_confirmation_required",
+                    message=(
+                        "Final destructive Runtime removal confirmation is required."
+                    ),
+                )
+            )
+        try:
+            removed = await self.removal_service.confirm(
+                AgentRuntimeRemovalConfirmationRequest(
+                    agent_id=agent_id,
+                    workspace_id=workspace_id,
+                    requested_by_workspace_user_id=workspace_user_id,
+                    idempotency_key=idempotency_key,
+                    expected_capability_version=expected_capability_version,
+                    expected_runtime_profile_selection_version=(
+                        expected_runtime_profile_selection_version
+                    ),
+                )
+            )
+        except AgentRuntimeRemovalUnavailable as error:
+            return Failure(
+                AgentRuntimeActionUnavailable(
+                    code=error.code,
                     message=error.message,
                 )
             )
-        return Success(await self._build_output(resolution))
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+        if agent is None:
+            return Failure(AgentNotFound(agent_id=agent_id))
+        return Success(
+            AgentRuntimeRemovalOutput(
+                runtime=await self._build_read_output(
+                    agent,
+                    can_manage=True,
+                ),
+                replayed=removed.replayed,
+            )
+        )
 
     async def start(
         self,
@@ -319,11 +519,8 @@ class AgentRuntimeService:
         workspace_user_id: str,
         role: WorkspaceUserRole,
     ) -> Result[
-        AgentRuntimeOutput,
-        AgentNotFound
-        | AgentNotBelongToWorkspace
-        | AgentAccessDenied
-        | RuntimeProviderUnavailable,
+        AgentRuntimeReadOutput,
+        AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied,
     ]:
         """Return current read model for Runtime observe request."""
         return await self.get(
@@ -746,20 +943,239 @@ class AgentRuntimeService:
         role: WorkspaceUserRole,
     ) -> AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied | None:
         """Check Agent Runtime access permission."""
+        access = await self._get_authorized_agent(
+            agent_id,
+            workspace_id=workspace_id,
+            workspace_user_id=workspace_user_id,
+            role=role,
+        )
+        match access:
+            case _AuthorizedAgent():
+                return None
+            case AgentNotFound() | AgentNotBelongToWorkspace() | AgentAccessDenied():
+                return access
+            case _:
+                assert_never(access)
+
+    async def _get_authorized_agent(
+        self,
+        agent_id: str,
+        *,
+        workspace_id: str,
+        workspace_user_id: str,
+        role: WorkspaceUserRole,
+    ) -> (
+        _AuthorizedAgent | AgentNotFound | AgentNotBelongToWorkspace | AgentAccessDenied
+    ):
+        """Load one visible Agent and derive settings-management authority."""
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
         if agent is None or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
             return AgentNotFound(agent_id=agent_id)
         if agent.workspace_id != workspace_id:
             return AgentNotBelongToWorkspace(agent_id=agent_id)
-        if agent.type == AgentType.PRIVATE and role != WorkspaceUserRole.OWNER:
+        can_manage = role is WorkspaceUserRole.OWNER
+        if not can_manage:
             async with self.session_manager() as session:
-                is_admin = await self.agent_admin_repository.is_admin(
+                can_manage = await self.agent_admin_repository.is_admin(
                     session, agent_id, workspace_user_id
                 )
-            if not is_admin:
-                return AgentAccessDenied(agent_id=agent_id)
-        return None
+        if agent.type is AgentType.PRIVATE and not can_manage:
+            return AgentAccessDenied(agent_id=agent_id)
+        return _AuthorizedAgent(agent=agent, can_manage=can_manage)
+
+    async def _build_read_output(
+        self,
+        agent: Agent,
+        *,
+        can_manage: bool,
+    ) -> AgentRuntimeReadOutput:
+        """Build the unified Runtime projection without ensuring any Runtime."""
+        async with self.session_manager() as session:
+            runtime = await self.runtime_repository.get_by_agent_id(session, agent.id)
+            active_removal = await self.removal_repository.get_active_by_agent_id(
+                session,
+                agent.id,
+            )
+            completed_removal = (
+                None
+                if active_removal is not None
+                else await self.removal_repository.get_latest_completed_by_agent_id(
+                    session,
+                    agent.id,
+                )
+            )
+            removal = active_removal or completed_removal
+            if not can_manage:
+                removal_impact = None
+            elif removal is not None:
+                removal_impact = self._removal_impact_from_operation(removal)
+            elif agent.runtime_capability is AgentRuntimeCapability.MANAGED:
+                removal_impact = await self.removal_scope_repository.get_impact(
+                    session,
+                    agent_id=agent.id,
+                )
+            else:
+                removal_impact = None
+
+        runtime_profile = await self._runtime_profile_projection(agent)
+
+        state = self.calculate_state(runtime) if runtime is not None else None
+        resolution = await self._get_existing_resolution(agent.id)
+        configuration = (
+            await self._configuration_status(resolution)
+            if resolution is not None
+            else None
+        )
+        physical_actions = (
+            state.actions
+            if state is not None
+            and agent.runtime_capability is AgentRuntimeCapability.MANAGED
+            else AgentRuntimeActions(
+                start=False,
+                stop=False,
+                restart=False,
+                reset=False,
+                use_runner=False,
+            )
+        )
+        add_available = (
+            can_manage
+            and agent.runtime_capability is AgentRuntimeCapability.NONE
+            and active_removal is None
+            and (
+                runtime is None
+                or self.transition_service.completed_removal_authorizes_rearm(
+                    completed_removal,
+                    runtime,
+                )
+            )
+        )
+        profile_actions_available = runtime_profile.status == "configured"
+        return AgentRuntimeReadOutput(
+            capability=agent.runtime_capability,
+            capability_version=agent.runtime_capability_version,
+            runtime_profile_id=agent.runtime_profile_id,
+            runtime_profile_selection_version=(agent.runtime_profile_selection_version),
+            runtime_profile_status=runtime_profile.status,
+            runtime_profile_available=runtime_profile.available,
+            runtime_profile_availability_reason_code=runtime_profile.reason_code,
+            removal_impact=removal_impact,
+            removal=(
+                self._removal_progress_from_operation(removal)
+                if removal is not None
+                else None
+            ),
+            runtime=runtime,
+            state=state,
+            configuration=configuration,
+            actions=AgentRuntimePublicActions(
+                add=add_available,
+                remove=(
+                    can_manage
+                    and agent.runtime_capability is AgentRuntimeCapability.MANAGED
+                    and active_removal is None
+                ),
+                start=(
+                    (physical_actions.start and profile_actions_available)
+                    or (
+                        agent.runtime_capability is AgentRuntimeCapability.MANAGED
+                        and runtime is None
+                        and profile_actions_available
+                    )
+                ),
+                stop=physical_actions.stop,
+                restart=(physical_actions.restart and profile_actions_available),
+                reset=physical_actions.reset and profile_actions_available,
+                observe=(
+                    agent.runtime_capability is AgentRuntimeCapability.MANAGED
+                    and runtime is not None
+                ),
+                use_runner=(physical_actions.use_runner and profile_actions_available),
+            ),
+        )
+
+    async def _runtime_profile_projection(
+        self,
+        agent: Agent,
+    ) -> _RuntimeProfileProjection:
+        """Project current Profile configuration without resolving Runtime state."""
+        if agent.runtime_capability is not AgentRuntimeCapability.MANAGED:
+            return _RuntimeProfileProjection(
+                status="not_applicable",
+                available=False,
+                reason_code=None,
+            )
+        if agent.runtime_profile_id is None:
+            return _RuntimeProfileProjection(
+                status="profile_required",
+                available=False,
+                reason_code="runtime_profile_unconfigured",
+            )
+        try:
+            projection = await self.runtime_profile_workspace_service.get_profile(
+                agent.workspace_id,
+                agent.runtime_profile_id,
+            )
+        except RuntimeProfileWorkspaceUnavailable as error:
+            return _RuntimeProfileProjection(
+                status="unavailable",
+                available=False,
+                reason_code=error.code,
+            )
+        if projection.available:
+            return _RuntimeProfileProjection(
+                status="configured",
+                available=True,
+                reason_code=None,
+            )
+        return _RuntimeProfileProjection(
+            status="unavailable",
+            available=False,
+            reason_code=projection.reason_code,
+        )
+
+    @staticmethod
+    def _removal_impact_from_operation(
+        operation: AgentRuntimeRemovalOperation,
+    ) -> AgentRuntimeRemovalImpact:
+        """Project immutable privacy-safe impact from a removal operation."""
+        return AgentRuntimeRemovalImpact(
+            active_root_session_count=operation.active_root_session_count,
+            active_subagent_count=operation.active_subagent_count,
+            active_run_count=operation.active_run_count,
+            queued_runtime_action_count=operation.queued_runtime_action_count,
+        )
+
+    @staticmethod
+    def _removal_progress_from_operation(
+        operation: AgentRuntimeRemovalOperation,
+    ) -> AgentRuntimeRemovalProgress:
+        """Project bounded removal progress without internal authority fields."""
+        return AgentRuntimeRemovalProgress(
+            id=operation.id,
+            status=operation.status,
+            stage=operation.stage,
+            confirmed_at=operation.confirmed_at,
+            cleanup_scanned_context_count=operation.cleanup_scanned_context_count,
+            cleanup_invalidated_context_count=(
+                operation.cleanup_invalidated_context_count
+            ),
+            product_cleanup_completed_at=operation.product_cleanup_completed_at,
+            physical_deletion_required=operation.physical_deletion_required,
+            physical_delete_requested_at=operation.physical_delete_requested_at,
+            physical_delete_acknowledgement_kind=(
+                operation.physical_delete_acknowledgement_kind
+            ),
+            physical_delete_acknowledged_at=(operation.physical_delete_acknowledged_at),
+            attempt_count=operation.attempt_count,
+            next_attempt_at=operation.next_attempt_at,
+            last_error_kind=operation.last_error_kind,
+            last_error_summary=operation.last_error_summary,
+            started_at=operation.started_at,
+            completed_at=operation.completed_at,
+            updated_at=operation.updated_at,
+        )
 
     async def _ensure_runtime_for_agent(
         self, agent_id: str

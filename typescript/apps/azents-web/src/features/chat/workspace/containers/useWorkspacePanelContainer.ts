@@ -223,7 +223,7 @@ export function useWorkspacePanelContainer({
     { handle, agentId },
     {
       refetchInterval: (query): number | false =>
-        query.state.data?.configuration.status === "waiting_for_recreation"
+        query.state.data?.configuration?.status === "waiting_for_recreation"
           ? WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS
           : false,
     },

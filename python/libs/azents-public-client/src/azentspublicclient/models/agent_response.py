@@ -18,9 +18,10 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_model_selection import AgentModelSelection
+from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.model_parameters import ModelParameters
 from azentspublicclient.models.selectable_model_option import SelectableModelOption
@@ -51,6 +52,11 @@ class AgentResponse(BaseModel):
     runtime_profile_selection_version: StrictInt
     runtime_profile_available: StrictBool
     runtime_profile_availability_reason_code: Optional[StrictStr]
+    runtime_capability: AgentRuntimeCapability
+    runtime_capability_version: StrictInt
+    runtime_profile_configuration_status: StrictStr
+    runtime_add_available: StrictBool
+    runtime_remove_available: StrictBool
     shell_enabled: StrictBool
     memory_enabled: StrictBool
     tool_search_enabled: StrictBool
@@ -61,7 +67,14 @@ class AgentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "shell_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "runtime_capability", "runtime_capability_version", "runtime_profile_configuration_status", "runtime_add_available", "runtime_remove_available", "shell_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
+
+    @field_validator('runtime_profile_configuration_status')
+    def runtime_profile_configuration_status_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['not_applicable', 'profile_required', 'configured', 'unavailable']):
+            raise ValueError("must be one of enum values ('not_applicable', 'profile_required', 'configured', 'unavailable')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -216,6 +229,11 @@ class AgentResponse(BaseModel):
             "runtime_profile_selection_version": obj.get("runtime_profile_selection_version"),
             "runtime_profile_available": obj.get("runtime_profile_available"),
             "runtime_profile_availability_reason_code": obj.get("runtime_profile_availability_reason_code"),
+            "runtime_capability": obj.get("runtime_capability"),
+            "runtime_capability_version": obj.get("runtime_capability_version"),
+            "runtime_profile_configuration_status": obj.get("runtime_profile_configuration_status"),
+            "runtime_add_available": obj.get("runtime_add_available"),
+            "runtime_remove_available": obj.get("runtime_remove_available"),
             "shell_enabled": obj.get("shell_enabled"),
             "memory_enabled": obj.get("memory_enabled"),
             "tool_search_enabled": obj.get("tool_search_enabled"),

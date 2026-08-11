@@ -45,7 +45,12 @@ def start_and_wait_for_agent_runtime(
             _headers=headers,
         )
         last_state = state
-        if state.state.actions.use_runner and state.runtime.workspace_path:
+        if (
+            state.state is not None
+            and state.runtime is not None
+            and state.state.actions.use_runner
+            and state.runtime.workspace_path
+        ):
             return
         time.sleep(1)
     raise AssertionError(

@@ -1,14 +1,24 @@
 # AgentRuntimeResponse
 
-Agent Runtime response.
+Unified capability-aware Agent Runtime response.
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**capability** | [**AgentRuntimeCapability**](AgentRuntimeCapability.md) |  | 
+**capability_version** | **int** |  | 
+**runtime_profile_id** | **str** |  | 
+**runtime_profile_selection_version** | **int** |  | 
+**runtime_profile_status** | **str** |  | 
+**runtime_profile_available** | **bool** |  | 
+**runtime_profile_availability_reason_code** | **str** |  | 
+**removal_impact** | [**AgentRuntimeRemovalImpactResponse**](AgentRuntimeRemovalImpactResponse.md) |  | 
+**removal** | [**AgentRuntimeRemovalProgressResponse**](AgentRuntimeRemovalProgressResponse.md) |  | 
 **runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  | 
 **state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  | 
 **configuration** | [**AgentRuntimeConfigurationStatusResponse**](AgentRuntimeConfigurationStatusResponse.md) |  | 
+**actions** | [**AgentRuntimePublicActionsResponse**](AgentRuntimePublicActionsResponse.md) |  | 
 
 ## Example
 

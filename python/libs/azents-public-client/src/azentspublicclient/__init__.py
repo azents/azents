@@ -56,6 +56,7 @@ __all__ = [
     "ActionExecutionEventResponse",
     "ActionExecutionProjectionResponse",
     "ActionExecutionResponse",
+    "AddAgentRuntimeRequest",
     "AgentAdminAddRequest",
     "AgentAdminListResponse",
     "AgentAdminResponse",
@@ -69,11 +70,21 @@ __all__ = [
     "AgentResponse",
     "AgentRunPhase",
     "AgentRunStatus",
+    "AgentRuntimeActionErrorDetail",
+    "AgentRuntimeActionErrorResponse",
     "AgentRuntimeActionsResponse",
+    "AgentRuntimeAdditionResponse",
+    "AgentRuntimeCapability",
     "AgentRuntimeConfigurationStatusResponse",
     "AgentRuntimeFailureResponse",
     "AgentRuntimeLifecycleResponse",
+    "AgentRuntimePublicActionsResponse",
     "AgentRuntimeRawStateResponse",
+    "AgentRuntimeRemovalImpactResponse",
+    "AgentRuntimeRemovalProgressResponse",
+    "AgentRuntimeRemovalResponse",
+    "AgentRuntimeRemovalStage",
+    "AgentRuntimeRemovalStatus",
     "AgentRuntimeResponse",
     "AgentRuntimeSummaryResponse",
     "AgentSessionCreateRequest",
@@ -348,6 +359,7 @@ __all__ = [
     "RedeemSignupTokenResponse",
     "RefreshTokenRequest",
     "RefreshTokenResponse",
+    "RemoveAgentRuntimeRequest",
     "RequestSignupEmailRequest",
     "RequestSignupEmailResponse",
     "RequestedInferenceProfile",
@@ -379,6 +391,7 @@ __all__ = [
     "RuntimeRecreationTargetKind",
     "RuntimeRunnerState",
     "RuntimeSummary",
+    "RuntimeTerminalDeleteAcknowledgementKind",
     "Secrets",
     "Secrets1",
     "SelectableInfrastructureProfileListResponse",
@@ -505,6 +518,7 @@ from azentspublicclient.models.action2 import Action2 as Action2
 from azentspublicclient.models.action_execution_event_response import ActionExecutionEventResponse as ActionExecutionEventResponse
 from azentspublicclient.models.action_execution_projection_response import ActionExecutionProjectionResponse as ActionExecutionProjectionResponse
 from azentspublicclient.models.action_execution_response import ActionExecutionResponse as ActionExecutionResponse
+from azentspublicclient.models.add_agent_runtime_request import AddAgentRuntimeRequest as AddAgentRuntimeRequest
 from azentspublicclient.models.agent_admin_add_request import AgentAdminAddRequest as AgentAdminAddRequest
 from azentspublicclient.models.agent_admin_list_response import AgentAdminListResponse as AgentAdminListResponse
 from azentspublicclient.models.agent_admin_response import AgentAdminResponse as AgentAdminResponse
@@ -518,11 +532,21 @@ from azentspublicclient.models.agent_project_preset_response import AgentProject
 from azentspublicclient.models.agent_response import AgentResponse as AgentResponse
 from azentspublicclient.models.agent_run_phase import AgentRunPhase as AgentRunPhase
 from azentspublicclient.models.agent_run_status import AgentRunStatus as AgentRunStatus
+from azentspublicclient.models.agent_runtime_action_error_detail import AgentRuntimeActionErrorDetail as AgentRuntimeActionErrorDetail
+from azentspublicclient.models.agent_runtime_action_error_response import AgentRuntimeActionErrorResponse as AgentRuntimeActionErrorResponse
 from azentspublicclient.models.agent_runtime_actions_response import AgentRuntimeActionsResponse as AgentRuntimeActionsResponse
+from azentspublicclient.models.agent_runtime_addition_response import AgentRuntimeAdditionResponse as AgentRuntimeAdditionResponse
+from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability as AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_configuration_status_response import AgentRuntimeConfigurationStatusResponse as AgentRuntimeConfigurationStatusResponse
 from azentspublicclient.models.agent_runtime_failure_response import AgentRuntimeFailureResponse as AgentRuntimeFailureResponse
 from azentspublicclient.models.agent_runtime_lifecycle_response import AgentRuntimeLifecycleResponse as AgentRuntimeLifecycleResponse
+from azentspublicclient.models.agent_runtime_public_actions_response import AgentRuntimePublicActionsResponse as AgentRuntimePublicActionsResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse as AgentRuntimeRawStateResponse
+from azentspublicclient.models.agent_runtime_removal_impact_response import AgentRuntimeRemovalImpactResponse as AgentRuntimeRemovalImpactResponse
+from azentspublicclient.models.agent_runtime_removal_progress_response import AgentRuntimeRemovalProgressResponse as AgentRuntimeRemovalProgressResponse
+from azentspublicclient.models.agent_runtime_removal_response import AgentRuntimeRemovalResponse as AgentRuntimeRemovalResponse
+from azentspublicclient.models.agent_runtime_removal_stage import AgentRuntimeRemovalStage as AgentRuntimeRemovalStage
+from azentspublicclient.models.agent_runtime_removal_status import AgentRuntimeRemovalStatus as AgentRuntimeRemovalStatus
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse as AgentRuntimeResponse
 from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse as AgentRuntimeSummaryResponse
 from azentspublicclient.models.agent_session_create_request import AgentSessionCreateRequest as AgentSessionCreateRequest
@@ -797,6 +821,7 @@ from azentspublicclient.models.redeem_signup_token_request import RedeemSignupTo
 from azentspublicclient.models.redeem_signup_token_response import RedeemSignupTokenResponse as RedeemSignupTokenResponse
 from azentspublicclient.models.refresh_token_request import RefreshTokenRequest as RefreshTokenRequest
 from azentspublicclient.models.refresh_token_response import RefreshTokenResponse as RefreshTokenResponse
+from azentspublicclient.models.remove_agent_runtime_request import RemoveAgentRuntimeRequest as RemoveAgentRuntimeRequest
 from azentspublicclient.models.request_signup_email_request import RequestSignupEmailRequest as RequestSignupEmailRequest
 from azentspublicclient.models.request_signup_email_response import RequestSignupEmailResponse as RequestSignupEmailResponse
 from azentspublicclient.models.requested_inference_profile import RequestedInferenceProfile as RequestedInferenceProfile
@@ -828,6 +853,7 @@ from azentspublicclient.models.runtime_recreation_operation_status import Runtim
 from azentspublicclient.models.runtime_recreation_target_kind import RuntimeRecreationTargetKind as RuntimeRecreationTargetKind
 from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState as RuntimeRunnerState
 from azentspublicclient.models.runtime_summary import RuntimeSummary as RuntimeSummary
+from azentspublicclient.models.runtime_terminal_delete_acknowledgement_kind import RuntimeTerminalDeleteAcknowledgementKind as RuntimeTerminalDeleteAcknowledgementKind
 from azentspublicclient.models.secrets import Secrets as Secrets
 from azentspublicclient.models.secrets1 import Secrets1 as Secrets1
 from azentspublicclient.models.selectable_infrastructure_profile_list_response import SelectableInfrastructureProfileListResponse as SelectableInfrastructureProfileListResponse

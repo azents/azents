@@ -14,7 +14,7 @@ from azents.core.agent import (
     SelectableModelOptionInput,
     SubagentSettings,
 )
-from azents.core.enums import AgentType
+from azents.core.enums import AgentRuntimeCapability, AgentType
 from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
 from azents.repos.memory.data import MemoryScope
 from azents.services.agent.data import (
@@ -48,6 +48,16 @@ class AgentResponse(BaseModel):
     runtime_profile_selection_version: int
     runtime_profile_available: bool
     runtime_profile_availability_reason_code: str | None
+    runtime_capability: AgentRuntimeCapability
+    runtime_capability_version: int
+    runtime_profile_configuration_status: Literal[
+        "not_applicable",
+        "profile_required",
+        "configured",
+        "unavailable",
+    ]
+    runtime_add_available: bool
+    runtime_remove_available: bool
     shell_enabled: bool
     memory_enabled: bool
     tool_search_enabled: bool
@@ -87,6 +97,13 @@ class AgentResponse(BaseModel):
             runtime_profile_availability_reason_code=(
                 data.runtime_profile_availability_reason_code
             ),
+            runtime_capability=data.runtime_capability,
+            runtime_capability_version=data.runtime_capability_version,
+            runtime_profile_configuration_status=(
+                data.runtime_profile_configuration_status
+            ),
+            runtime_add_available=data.runtime_add_available,
+            runtime_remove_available=data.runtime_remove_available,
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
             tool_search_enabled=data.tool_search_enabled,

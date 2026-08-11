@@ -34,3 +34,11 @@ class TestRouteMount:
             "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/reset"
             in paths
         )
+        assert (
+            "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add"
+            in paths
+        )
+        assert (
+            "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/remove"
+            in paths
+        )

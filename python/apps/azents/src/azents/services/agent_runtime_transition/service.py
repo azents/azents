@@ -245,7 +245,7 @@ class AgentRuntimeTransitionService:
                 agent.id,
             )
         )
-        if not self._completed_removal_authorizes_rearm(
+        if not self.completed_removal_authorizes_rearm(
             completed_removal,
             existing,
         ):
@@ -366,7 +366,7 @@ class AgentRuntimeTransitionService:
                 message="Runtime addition idempotency key was reused.",
             )
 
-    def _completed_removal_authorizes_rearm(
+    def completed_removal_authorizes_rearm(
         self,
         operation: AgentRuntimeRemovalOperation | None,
         runtime: AgentRuntime,

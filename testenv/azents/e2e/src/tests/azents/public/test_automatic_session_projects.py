@@ -306,7 +306,7 @@ def _prepare_runtime_workspace(
             _headers=_headers(setup.token),
         )
         last_state = state
-        if state.state.actions.use_runner:
+        if state.state is not None and state.state.actions.use_runner:
             return _seed_projects(setup.agent_id, unique())
         time.sleep(1)
     raise AssertionError(f"Runtime Runner did not become ready: {last_state!r}")

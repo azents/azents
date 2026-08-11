@@ -4,13 +4,101 @@ All URIs are relative to *http://localhost*
 
 Method | HTTP request | Description
 ------------- | ------------- | -------------
+[**agent_runtime_v1_add_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_add_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add | Add Agent Runtime
 [**agent_runtime_v1_get_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_get_agent_runtime) | **GET** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime | Get Agent Runtime
 [**agent_runtime_v1_observe_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_observe_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/observe | Observe Agent Runtime
+[**agent_runtime_v1_remove_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_remove_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/remove | Remove Agent Runtime
 [**agent_runtime_v1_reset_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_reset_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/reset | Reset Agent Runtime
 [**agent_runtime_v1_restart_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_restart_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/restart | Restart Agent Runtime
 [**agent_runtime_v1_start_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_start_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/start | Start Agent Runtime
 [**agent_runtime_v1_stop_agent_runtime**](AgentRuntimeV1Api.md#agent_runtime_v1_stop_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/stop | Stop Agent Runtime
 
+
+# **agent_runtime_v1_add_agent_runtime**
+> AgentRuntimeAdditionResponse agent_runtime_v1_add_agent_runtime(agent_id, handle, add_agent_runtime_request)
+
+Add Agent Runtime
+
+Add a stopped managed Runtime through the dedicated transition.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.add_agent_runtime_request import AddAgentRuntimeRequest
+from azentspublicclient.models.agent_runtime_addition_response import AgentRuntimeAdditionResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    add_agent_runtime_request = azentspublicclient.AddAgentRuntimeRequest() # AddAgentRuntimeRequest | 
+
+    try:
+        # Add Agent Runtime
+        api_response = api_instance.agent_runtime_v1_add_agent_runtime(agent_id, handle, add_agent_runtime_request)
+        print("The response of AgentRuntimeV1Api->agent_runtime_v1_add_agent_runtime:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentRuntimeV1Api->agent_runtime_v1_add_agent_runtime: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **add_agent_runtime_request** | [**AddAgentRuntimeRequest**](AddAgentRuntimeRequest.md)|  | 
+
+### Return type
+
+[**AgentRuntimeAdditionResponse**](AgentRuntimeAdditionResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**403** | The caller cannot manage this Agent. |  -  |
+**409** | The Runtime addition cannot be committed. |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **agent_runtime_v1_get_agent_runtime**
 > AgentRuntimeResponse agent_runtime_v1_get_agent_runtime(agent_id, handle)
@@ -170,6 +258,92 @@ Name | Type | Description  | Notes
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **agent_runtime_v1_remove_agent_runtime**
+> AgentRuntimeRemovalResponse agent_runtime_v1_remove_agent_runtime(agent_id, handle, remove_agent_runtime_request)
+
+Remove Agent Runtime
+
+Commit final irreversible managed Runtime removal.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_runtime_removal_response import AgentRuntimeRemovalResponse
+from azentspublicclient.models.remove_agent_runtime_request import RemoveAgentRuntimeRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.AgentRuntimeV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    remove_agent_runtime_request = azentspublicclient.RemoveAgentRuntimeRequest() # RemoveAgentRuntimeRequest | 
+
+    try:
+        # Remove Agent Runtime
+        api_response = api_instance.agent_runtime_v1_remove_agent_runtime(agent_id, handle, remove_agent_runtime_request)
+        print("The response of AgentRuntimeV1Api->agent_runtime_v1_remove_agent_runtime:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling AgentRuntimeV1Api->agent_runtime_v1_remove_agent_runtime: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **remove_agent_runtime_request** | [**RemoveAgentRuntimeRequest**](RemoveAgentRuntimeRequest.md)|  | 
+
+### Return type
+
+[**AgentRuntimeRemovalResponse**](AgentRuntimeRemovalResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**403** | The caller cannot manage this Agent. |  -  |
+**409** | The irreversible Runtime removal cannot be committed. |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
