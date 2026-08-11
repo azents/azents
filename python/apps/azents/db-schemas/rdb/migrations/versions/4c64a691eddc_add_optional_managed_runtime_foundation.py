@@ -372,6 +372,28 @@ def upgrade() -> None:
         ondelete="RESTRICT",
         use_alter=True,
     )
+    op.execute(
+        """
+        WITH candidate_runtimes AS (
+            SELECT
+                id,
+                agent_id,
+                workspace_id,
+                count(*) OVER (
+                    PARTITION BY agent_id, workspace_id
+                ) AS candidate_count
+            FROM agent_runtimes
+        )
+        UPDATE session_agent_contexts AS contexts
+        SET agent_runtime_id = candidate_runtimes.id
+        FROM candidate_runtimes
+        WHERE contexts.agent_runtime_id IS NULL
+          AND contexts.working_folder_path IS NOT NULL
+          AND candidate_runtimes.agent_id = contexts.agent_id
+          AND candidate_runtimes.workspace_id = contexts.workspace_id
+          AND candidate_runtimes.candidate_count = 1
+        """
+    )
     op.create_check_constraint(
         "ck_session_agent_contexts_working_folder_binding",
         "session_agent_contexts",
