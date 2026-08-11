@@ -227,7 +227,6 @@ runtimeProviderKubernetes:
     maxPendingOperations: 1000
     maxConcurrentControlOperations: 4
   processContainment:
-    enabled: false
     backend: bwrap
     securityProfile: azents-runtime-bwrap
     qualificationTimeoutSeconds: 15

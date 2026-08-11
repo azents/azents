@@ -211,7 +211,7 @@ class KubernetesRuntimeProviderConfig:
     runtime_control_labels: Mapping[str, str]
     runtime_control_port: int
     workspace_mount_path: str
-    process_containment: KubernetesProcessContainmentConfig | None = None
+    process_containment: KubernetesProcessContainmentConfig
     network_hard_cap_allowed_cidrs: tuple[str, ...] = ()
     network_hard_cap_denied_cidrs: tuple[str, ...] = ()
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = ()
@@ -1293,11 +1293,6 @@ class KubernetesRuntimeProvider:
     ) -> KubernetesProcessContainmentConfig | None:
         if isinstance(policy, KubernetesPodProfileV1):
             return None
-        if self._process_containment is None:
-            raise UnsupportedRuntimeConfiguration(
-                "Kubernetes Pod Profile schema version 2 requires Provider "
-                "process-containment preparation."
-            )
         return self._process_containment
 
 

@@ -107,7 +107,6 @@ spec:
               value: {{ .Values.runtimeProviderKubernetes.runtimePod.nodeSelector | toJson | quote }}
             - name: AZ_RUNTIME_PROVIDER_POD_TOLERATIONS
               value: {{ .Values.runtimeProviderKubernetes.runtimePod.tolerations | toJson | quote }}
-            {{- if .Values.runtimeProviderKubernetes.processContainment.enabled }}
             - name: AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND
               value: {{ .Values.runtimeProviderKubernetes.processContainment.backend | quote }}
             - name: AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE
@@ -117,7 +116,6 @@ spec:
             {{- with .Values.runtimeProviderKubernetes.processContainment.runtimeClassName }}
             - name: AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME
               value: {{ . | quote }}
-            {{- end }}
             {{- end }}
             - name: AZ_RUNTIME_RUNNER_IMAGE
               value: {{ include "azents.runtimeRunnerImage" . | quote }}

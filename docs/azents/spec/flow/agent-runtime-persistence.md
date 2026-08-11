@@ -26,8 +26,8 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-10
-spec_version: 21
+last_verified_at: 2026-08-11
+spec_version: 22
 ---
 
 # Agent Runtime Persistence
@@ -200,6 +200,10 @@ bootstrap privilege. Runner-local qualification proves capability-free non-root 
 before the Runner can register. Recreating from contained to direct, or direct to contained, preserves the PVC
 while replacing both ephemeral temporary views.
 
+The Kubernetes Provider always advertises Pod Profile schema v2 and process containment support.
+The selected Pod Profile remains the per-Runtime source of truth for direct or contained execution;
+there is no deployment feature flag controlling capability availability.
+
 The Runtime-specific Kubernetes NetworkPolicy is the intersection of the Provider hard boundary,
 the selected Pod Profile preset, and any Workspace narrowing. Required DNS and Runtime Control
 traffic remains protected. Resolution uses the exact Provider's current valid capability revision,
@@ -277,6 +281,8 @@ Required checks:
 
 ## Changelog
 
+- **2026-08-11 (spec_version=22)** — Removed the Kubernetes process-containment deployment feature
+  flag and made Pod Profile schema v2 a permanent Provider capability.
 - **2026-08-10 (spec_version=21)** — Made AgentRuntime optional, added durable add/removal
   transition persistence and bounded cleanup evidence, preserved the empty automatic Project policy
   authority, and defined acknowledged higher-generation re-add with a fresh Workspace.

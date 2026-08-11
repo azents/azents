@@ -82,6 +82,18 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         monkeypatch.delenv(name, raising=False)
     for name in _CONTAINMENT_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+        "bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+        "azents-runtime-bwrap",
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
+        "15",
+    )
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ENDPOINT", "runtime-control:8030")
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
     monkeypatch.setenv(
@@ -145,7 +157,10 @@ def test_provider_settings_loads_provider_global_runtime_controls(
     assert settings.network_hard_cap_allowed_cidrs == ()
     assert settings.network_hard_cap_denied_cidrs == ()
     assert settings.network_hard_cap_extra_egress == ()
-    assert settings.process_containment is None
+    assert settings.process_containment.backend == "bwrap"
+    assert settings.process_containment.security_profile == "azents-runtime-bwrap"
+    assert settings.process_containment.qualification_timeout_seconds == 15
+    assert settings.process_containment.runtime_class_name is None
     assert settings.service_account_token_file == provider_env
     assert read_service_account_token(provider_env) == "test-provider-credential"
 
@@ -328,25 +343,12 @@ def test_provider_settings_parse_process_containment(
     provider_env: Path,
 ) -> None:
     monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
-        "bwrap",
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
-        "azents-runtime-bwrap",
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
-        "15",
-    )
-    monkeypatch.setenv(
         "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME",
         "runc-bwrap",
     )
 
     settings = ProviderSettings()
 
-    assert settings.process_containment is not None
     assert settings.process_containment.backend == "bwrap"
     assert settings.process_containment.security_profile == "azents-runtime-bwrap"
     assert settings.process_containment.qualification_timeout_seconds == 15
@@ -365,12 +367,12 @@ def test_provider_settings_reject_partial_process_containment(
     monkeypatch: pytest.MonkeyPatch,
     provider_env: Path,
 ) -> None:
-    monkeypatch.setenv(
-        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
-        "azents-runtime-bwrap",
-    )
+    monkeypatch.delenv("AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND")
 
-    with pytest.raises(RuntimeError, match="require a configured backend"):
+    with pytest.raises(
+        RuntimeError,
+        match="AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+    ):
         ProviderSettings()
 
 
@@ -472,7 +474,7 @@ async def test_runtime_class_validation_rejects_incompatible_handler(
 def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
     """Registration advertises the exact current Pod Profile contract."""
     assert provider_main._PROTOCOL_VERSION == "agent-runtime-provider-kubernetes-v2"
-    contract = provider_main._capability_contract(containment_enabled=False)
+    contract = provider_main._capability_contract()
     assert contract["implementation_version"] == "0.3.0"
     assert contract["optional_capabilities"] == ["network_policy_reconciliation"]
     profile_contracts = contract["profile_contracts"]
@@ -482,7 +484,7 @@ def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
         {
             "profile_kind": "kubernetes_pod",
             "contract_family": "kubernetes.pod-profile",
-            "schema_versions": [1],
+            "schema_versions": [1, 2],
             "capabilities": [
                 "kubernetes.pod-profile",
                 "runtime.resources",
@@ -493,6 +495,7 @@ def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
                 "kubernetes.scheduling",
                 "docker.dind",
                 "docker.storage.ephemeral",
+                "runtime.process-containment",
             ],
             "constraints": {
                 "maximums": {},
@@ -500,9 +503,3 @@ def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
             },
         }
     ]
-
-    contained_contract = provider_main._capability_contract(containment_enabled=True)
-    contained_profiles = contained_contract["profile_contracts"]
-    assert isinstance(contained_profiles, list)
-    assert contained_profiles[0]["schema_versions"] == [1, 2]
-    assert "runtime.process-containment" in contained_profiles[0]["capabilities"]
