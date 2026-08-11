@@ -678,16 +678,12 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "enabled",
             "backend",
             "securityProfile",
             "qualificationTimeoutSeconds",
             "runtimeClassName"
           ],
           "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
             "backend": {
               "type": "string",
               "enum": [

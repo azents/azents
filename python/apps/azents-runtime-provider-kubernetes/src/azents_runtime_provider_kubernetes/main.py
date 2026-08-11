@@ -409,7 +409,9 @@ class ProviderSettings:
         self.lease_name: str = _required_env("AZ_RUNTIME_PROVIDER_LEASE_NAME")
         self.workspace_path: str = _required_env("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH")
         self.runner_env: Mapping[str, str] = _selected_env(RUNNER_LIMIT_ENV_NAMES)
-        self.process_containment = _process_containment_from_env()
+        self.process_containment: KubernetesProcessContainmentConfig = (
+            _process_containment_from_env()
+        )
         self.engine_image = _required_env("AZ_RUNTIME_PROVIDER_ENGINE_IMAGE")
         self.runtime_control_namespace = _required_env(
             "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE"
@@ -494,36 +496,22 @@ async def prepare_runtime_provider(
     )
 
 
-def _process_containment_from_env() -> KubernetesProcessContainmentConfig | None:
-    backend = os.environ.get("AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND")
-    security_profile = os.environ.get(
+def _process_containment_from_env() -> KubernetesProcessContainmentConfig:
+    backend = _required_env("AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND")
+    security_profile = _required_env(
         "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE"
     )
-    timeout = os.environ.get(
+    timeout = _required_env(
         "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS"
     )
     runtime_class_name = os.environ.get(
         "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME"
     )
-    if backend is None:
-        if (
-            security_profile is not None
-            or timeout is not None
-            or runtime_class_name is not None
-        ):
-            raise RuntimeError(
-                "Kubernetes process containment settings require a configured backend."
-            )
-        return None
     if backend != "bwrap":
         raise RuntimeError("Kubernetes process containment backend is unsupported.")
     if security_profile != KUBERNETES_BWRAP_APPARMOR_PROFILE:
         raise RuntimeError(
             "Kubernetes process containment security profile is unsupported."
-        )
-    if timeout is None:
-        raise RuntimeError(
-            "Kubernetes process containment qualification timeout is required."
         )
     try:
         timeout_seconds = int(timeout)
@@ -552,7 +540,7 @@ async def _validate_runtime_class(
     api: KubernetesHttpApi,
 ) -> None:
     containment = settings.process_containment
-    if containment is None or containment.runtime_class_name is None:
+    if containment.runtime_class_name is None:
         return
     runtime_class = await api.get_runtime_class(containment.runtime_class_name)
     if runtime_class is None:
@@ -566,14 +554,13 @@ async def _validate_runtime_class(
 
 
 def _provider_registration(settings: ProviderSettings) -> ProviderRegistration:
-    containment_enabled = settings.process_containment is not None
-    metadata: dict[str, str] = {}
-    if settings.process_containment is not None:
-        metadata["process_containment_backend"] = settings.process_containment.backend
-        if settings.process_containment.runtime_class_name is not None:
-            metadata["process_containment_runtime_class"] = (
-                settings.process_containment.runtime_class_name
-            )
+    metadata = {
+        "process_containment_backend": settings.process_containment.backend,
+    }
+    if settings.process_containment.runtime_class_name is not None:
+        metadata["process_containment_runtime_class"] = (
+            settings.process_containment.runtime_class_name
+        )
     return ProviderRegistration(
         provider_id=settings.provider_id,
         provider_type="kubernetes",
@@ -588,13 +575,11 @@ def _provider_registration(settings: ProviderSettings) -> ProviderRegistration:
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata=metadata,
-        capability_contract=_capability_contract(
-            containment_enabled=containment_enabled
-        ),
+        capability_contract=_capability_contract(),
     )
 
 
-def _capability_contract(*, containment_enabled: bool) -> dict[str, JsonValue]:
+def _capability_contract() -> dict[str, JsonValue]:
     capabilities = [
         "kubernetes.pod-profile",
         "runtime.resources",
@@ -605,11 +590,8 @@ def _capability_contract(*, containment_enabled: bool) -> dict[str, JsonValue]:
         "kubernetes.scheduling",
         "docker.dind",
         "docker.storage.ephemeral",
+        "runtime.process-containment",
     ]
-    schema_versions = [1]
-    if containment_enabled:
-        capabilities.append("runtime.process-containment")
-        schema_versions.append(2)
     return {
         "schema_version": 1,
         "implementation_key": "kubernetes",
@@ -634,7 +616,7 @@ def _capability_contract(*, containment_enabled: bool) -> dict[str, JsonValue]:
             {
                 "profile_kind": "kubernetes_pod",
                 "contract_family": "kubernetes.pod-profile",
-                "schema_versions": schema_versions,
+                "schema_versions": [1, 2],
                 "capabilities": capabilities,
                 "constraints": {
                     "maximums": {},

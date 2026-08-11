@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
-last_verified_at: 2026-08-10
-spec_version: 21
+last_verified_at: 2026-08-11
+spec_version: 22
 ---
 
 # Runtime Provider
@@ -89,13 +89,13 @@ typed contract, canonicalizes it, and creates or reuses the Provider-local diges
 registering the connection. A changed valid advertisement immediately changes current compatibility.
 An invalid advertisement is rejected and cannot retain command authority through older history.
 
-Process containment is deployment-owned capability rather than Profile-declared proof. A Provider
-advertises Profile schema v2 and `runtime.process-containment` only when trusted deployment
-configuration selects the supported backend and Provider startup preflight succeeds. Docker
-preflight requires daemon AppArmor support. Kubernetes validates the trusted security-profile name
-and any configured RuntimeClass. Each contained Runner independently qualifies the effective
-boundary before its Control registration and readiness. Missing or failed preparation cannot fall
-back to direct or another weaker backend for a contained Profile.
+Process containment is Provider capability rather than Profile-declared proof. The Kubernetes
+Provider always advertises Profile schema v2 and `runtime.process-containment`, prepares the bundled
+backend from trusted deployment settings, and validates the trusted security-profile name and any
+configured RuntimeClass. Docker advertises the capability after its daemon AppArmor preflight
+succeeds. Each contained Runner independently qualifies the effective boundary before its Control
+registration and readiness. Missing or failed preparation cannot fall back to direct or another
+weaker backend for a contained Profile.
 
 Provider-global operational configuration revisions remain a separate Provider-owned mechanism.
 They may configure the Provider process but cannot contain Workspace or Agent Runtime Profile
@@ -253,6 +253,8 @@ Agent Workspace.
 
 ## Version history
 
+- **22 (2026-08-11):** Made Kubernetes process containment a permanent Provider capability and
+  removed the deployment feature flag that conditionally advertised Profile schema v2.
 - **21 (2026-08-10):** Added optional logical Runtime binding, explicit stopped add and
   higher-generation rearm, and reconnect-safe exact-generation terminal deletion for permanent
   Agent Runtime removal.

@@ -34,7 +34,7 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "azents.runtimeProviderKubernetesServiceAccountName" . | quote }}
     namespace: {{ include "azents.runtimeProviderKubernetesNamespace" . | quote }}
-{{- if and .Values.runtimeProviderKubernetes.processContainment.enabled .Values.runtimeProviderKubernetes.processContainment.runtimeClassName }}
+{{- if .Values.runtimeProviderKubernetes.processContainment.runtimeClassName }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

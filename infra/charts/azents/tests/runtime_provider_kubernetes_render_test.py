@@ -137,11 +137,11 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_LABELS" in rendered
     assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT" in rendered
-    assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND" not in rendered
-    assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE" not in rendered
+    assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND" in rendered
+    assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE" in rendered
     assert (
         "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS"
-        not in rendered
+        in rendered
     )
     assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_RUNTIME_CLASS_NAME" not in rendered
     assert 'resources: ["runtimeclasses"]' not in rendered
@@ -151,14 +151,13 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
 
 
 def test_runtime_provider_kubernetes_process_containment_render_contract() -> None:
-    """Containment opt-in wires trusted settings and exact RuntimeClass RBAC."""
+    """Containment settings and exact RuntimeClass RBAC are always wired."""
     rendered = _helm_template(
         "runtimeProviderKubernetes.enabled=true",
         "runtimeProviderKubernetes.image.repository=repo/provider",
         "runtimeProviderKubernetes.image.tag=sha",
         "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
         "runtimeProviderKubernetes.runnerImage.tag=sha",
-        "runtimeProviderKubernetes.processContainment.enabled=true",
         "runtimeProviderKubernetes.processContainment.runtimeClassName=runc-bwrap",
     )
 
@@ -196,7 +195,6 @@ def test_runtime_provider_kubernetes_default_runtime_class_needs_no_cluster_rbac
         "runtimeProviderKubernetes.image.tag=sha",
         "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
         "runtimeProviderKubernetes.runnerImage.tag=sha",
-        "runtimeProviderKubernetes.processContainment.enabled=true",
     )
 
     assert "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND" in rendered

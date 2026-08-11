@@ -241,7 +241,7 @@ def _provider_with_runner_env(
                 "app.kubernetes.io/component": "runtime-control",
             },
             runtime_control_port=8030,
-            process_containment=process_containment,
+            process_containment=process_containment or _containment_config(),
             network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
             network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
             network_hard_cap_extra_egress=network_hard_cap_extra_egress,
@@ -358,29 +358,6 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert "azents/workspace-path" not in pvc.metadata.labels
     assert "azents/workspace-path" not in pod.metadata.annotations
     assert "azents/workspace-path" not in pvc.metadata.annotations
-
-
-@pytest.mark.asyncio
-async def test_schema_v2_requires_enabled_provider_preparation_before_mutation() -> (
-    None
-):
-    api = FakeKubernetesApi()
-    provider = _provider(api)
-
-    with pytest.raises(
-        UnsupportedRuntimeConfiguration,
-        match="schema version 2 requires Provider",
-    ):
-        await provider.start(
-            _command(
-                RuntimeLifecycleCommandType.START,
-                runtime_configuration=_runtime_configuration(schema_version=2),
-            )
-        )
-
-    assert api.pods == {}
-    assert api.pvcs == {}
-    assert api.network_policies == {}
 
 
 @pytest.mark.asyncio
@@ -1323,6 +1300,7 @@ async def test_start_applies_configured_pod_annotations() -> None:
                 "app.kubernetes.io/component": "runtime-control",
             },
             runtime_control_port=8030,
+            process_containment=_containment_config(),
             pod_annotations={"descheduler/no-evict": "true"},
         ),
     )
@@ -1385,6 +1363,7 @@ async def test_start_applies_configured_runtime_pod_image_pull_secrets() -> None
                 "app.kubernetes.io/component": "runtime-control",
             },
             runtime_control_port=8030,
+            process_containment=_containment_config(),
             image_pull_secrets=(LocalObjectReference(name="ecr-pull-secret"),),
         ),
     )
@@ -1420,6 +1399,7 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
                 "app.kubernetes.io/component": "runtime-control",
             },
             runtime_control_port=8030,
+            process_containment=_containment_config(),
         ),
     )
     new_provider = KubernetesRuntimeProvider(
@@ -1435,6 +1415,7 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
                 "app.kubernetes.io/component": "runtime-control",
             },
             runtime_control_port=8030,
+            process_containment=_containment_config(),
             image_pull_secrets=(LocalObjectReference(name="ecr-pull-secret"),),
         ),
     )
@@ -1764,6 +1745,7 @@ def test_invalid_workspace_path_is_rejected() -> None:
                 },
                 runtime_control_port=8030,
                 workspace_mount_path="relative/path",
+                process_containment=_containment_config(),
             ),
         )
 
@@ -2022,6 +2004,7 @@ def test_provider_rejects_mutable_engine_image() -> None:
                     "app.kubernetes.io/component": "runtime-control",
                 },
                 runtime_control_port=8030,
+                process_containment=_containment_config(),
             ),
         )
 
