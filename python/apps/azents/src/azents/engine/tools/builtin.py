@@ -26,6 +26,11 @@ from azents.core.enums import (
     AgentSessionProductMode,
     RuntimeProviderObservedState,
 )
+from azents.core.runtime_capabilities import (
+    RuntimeCapability,
+    RuntimeCapabilityDeniedError,
+    RuntimeCapabilityResolver,
+)
 from azents.core.runtime_profile import (
     DockerContainerProfileSpecV1,
     DockerContainerProfileSpecV2,
@@ -53,7 +58,9 @@ from azents.engine.run.types import (
     FunctionTool,
     FunctionToolCancelRequest,
     FunctionToolError,
+    FunctionToolHandler,
     FunctionToolResult,
+    PlaintextCustomToolHandler,
 )
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.apply_patch import RuntimePatchTarget, make_apply_patch_tool
@@ -660,6 +667,31 @@ _RUNTIME_CONTAINED_BEHAVIOR_PROMPT = dedent(
 ).strip()
 
 
+@dataclasses.dataclass(frozen=True)
+class _RuntimeCapabilityGuardedPlaintextHandler:
+    """Preserve plaintext-custom execution while enforcing Runtime admission."""
+
+    original_handler: FunctionToolHandler
+    require_capability: Callable[[], Awaitable[None]]
+
+    async def __call__(self, arguments: str) -> str | FunctionToolResult:
+        """Enforce capability admission before JSON-function execution."""
+        await self.require_capability()
+        return await self.original_handler(arguments)
+
+    async def execute_plaintext_custom(
+        self,
+        arguments: str,
+    ) -> str | FunctionToolResult:
+        """Enforce capability admission before plaintext-custom execution."""
+        await self.require_capability()
+        if not isinstance(self.original_handler, PlaintextCustomToolHandler):
+            raise RuntimeError(
+                "Plaintext-custom Runtime guard requires a compatible handler"
+            )
+        return await self.original_handler.execute_plaintext_custom(arguments)
+
+
 class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     """Runtime Runner dependent shell/file tool execution instance."""
 
@@ -683,6 +715,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         runtime_to_server_publication_service: PresentFilePublicationExecutor,
         runtime_to_provider_delivery_service: RuntimeToProviderDeliveryExecutor,
         import_file_staging_configuration: ImportFileStagingConfiguration,
+        runtime_capability_resolver: RuntimeCapabilityResolver | None = None,
     ) -> None:
         self._config = config
         self.runner_operations = runner_operations
@@ -709,6 +742,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         )
         self.runtime_to_provider_delivery_service = runtime_to_provider_delivery_service
         self.import_file_staging_configuration = import_file_staging_configuration
+        self.runtime_capability_resolver = runtime_capability_resolver
         self._agents_context: RuntimeInstructionContext | None = None
         self._agents_appendix_lock = asyncio.Lock()
         self._agents_missing_cache: dict[str, float] = {}
@@ -720,6 +754,13 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     ) -> None:
         """Register shared Runtime instruction context store."""
         self.instruction_context_store = store
+
+    def set_runtime_capability_resolver(
+        self,
+        resolver: RuntimeCapabilityResolver,
+    ) -> None:
+        """Set the shared Agent Runtime capability resolver."""
+        self.runtime_capability_resolver = resolver
 
     def set_peer_toolkits(self, peers: Sequence[RuntimeEnvProvider]) -> None:
         """Register peer toolkits that collect env during Shell execution.
@@ -782,12 +823,98 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             denied_domains=tuple(self._config.denied_domains),
         )
 
+    async def _runtime_toolkit_allowed(self) -> bool:
+        """Return whether the complete Runtime Toolkit may be projected."""
+        resolver = self.runtime_capability_resolver
+        if resolver is None:
+            return False
+        try:
+            for capability in (
+                RuntimeCapability.WORKSPACE,
+                RuntimeCapability.RUNTIME_FILESYSTEM,
+                RuntimeCapability.PROCESS_EXECUTION,
+            ):
+                await resolver.require(capability)
+        except RuntimeCapabilityDeniedError:
+            return False
+        return True
+
+    def _guard_runtime_tool(
+        self,
+        tool: FunctionTool,
+        capability: RuntimeCapability,
+    ) -> FunctionTool:
+        """Guard one Runtime tool before any handler side effect."""
+        resolver = self.runtime_capability_resolver
+        original_handler = tool.handler
+        original_cancel_handler = tool.cancel_handler
+
+        async def require_capability() -> None:
+            if resolver is None:
+                raise FunctionToolError(
+                    "Runtime capability context is unavailable.",
+                    metadata={
+                        "kind": "runtime_capability_denied",
+                        "capability": capability.value,
+                        "reason_code": "runtime_capability_context_missing",
+                    },
+                )
+            try:
+                await resolver.require(capability)
+            except RuntimeCapabilityDeniedError as exc:
+                raise FunctionToolError(
+                    "Runtime capability is unavailable.",
+                    metadata={
+                        "kind": "runtime_capability_denied",
+                        "capability": capability.value,
+                        "reason_code": exc.reason_code,
+                    },
+                ) from None
+
+        async def guarded_handler(
+            arguments: str,
+        ) -> str | FunctionToolResult:
+            await require_capability()
+            return await original_handler(arguments)
+
+        async def guarded_cancel_handler(
+            request: FunctionToolCancelRequest,
+        ) -> None:
+            if original_cancel_handler is None or resolver is None:
+                return
+            try:
+                await resolver.require(capability)
+            except RuntimeCapabilityDeniedError:
+                return
+            await original_cancel_handler(request)
+
+        handler: FunctionToolHandler = guarded_handler
+        if isinstance(original_handler, PlaintextCustomToolHandler):
+            handler = _RuntimeCapabilityGuardedPlaintextHandler(
+                original_handler=original_handler,
+                require_capability=require_capability,
+            )
+
+        return dataclasses.replace(
+            tool,
+            handler=handler,
+            cancel_handler=(
+                guarded_cancel_handler if original_cancel_handler is not None else None
+            ),
+        )
+
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Create shell and file tools and return prompt.
 
         :param context: Context passed each turn
         :return: Current state (tools + prompt)
         """
+        if not await self._runtime_toolkit_allowed():
+            return ToolkitState(status=ToolkitStatus.DISABLED, tools=[])
+
+        capability_resolver = self.runtime_capability_resolver
+        if capability_resolver is None:
+            return ToolkitState(status=ToolkitStatus.DISABLED, tools=[])
         runtime_agent_id = self._runtime_agent_id
         workspace_root = await self._load_workspace_root()
 
@@ -928,6 +1055,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
                 peer_toolkits=self._peer_toolkits,
+                runtime_capability_resolver=capability_resolver,
                 expected_authority_provider=self._required_runtime_authority,
             ),
             make_write_stdin_tool(
@@ -960,6 +1088,23 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         if self._excluded_tools:
             tools = [t for t in tools if t.spec.name not in self._excluded_tools]
 
+        tools = [
+            self._guard_runtime_tool(
+                tool,
+                (
+                    RuntimeCapability.PROCESS_EXECUTION
+                    if tool.spec.name in {"exec_command", "write_stdin"}
+                    else (
+                        RuntimeCapability.RUNTIME_TRANSFER
+                        if tool.spec.name
+                        in {"import_file", "present_file", "read_image"}
+                        else RuntimeCapability.RUNTIME_FILESYSTEM
+                    )
+                ),
+            )
+            for tool in tools
+        ]
+
         instruction_context = await self._make_instruction_context(
             file_ss,
             workspace_root=workspace_root,
@@ -972,6 +1117,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 
     async def get_static_prompt(self, context: TurnContext) -> str:
         """Return static runtime/files prompt for the current run."""
+        if not await self._runtime_toolkit_allowed():
+            return ""
         projects = sorted(
             await self._load_projects(session_id=self._session_id),
             key=lambda project: project.path,
@@ -1899,12 +2046,26 @@ def make_exec_command_tool(
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
     owner_session_id: str,
+    runtime_capability_resolver: RuntimeCapabilityResolver,
     expected_authority_provider: Callable[[], RuntimeOperationAuthority | None],
     peer_toolkits: Sequence[RuntimeEnvProvider] = (),
 ) -> FunctionTool:
     """Create an exec_command tool backed by Runtime Runner process operations."""
 
     async def handler(args: ExecCommandInput) -> FunctionToolResult:
+        try:
+            await runtime_capability_resolver.require(
+                RuntimeCapability.RUNTIME_CREDENTIALS
+            )
+        except RuntimeCapabilityDeniedError as exc:
+            raise FunctionToolError(
+                "Runtime credential capability is unavailable.",
+                metadata={
+                    "kind": "runtime_capability_denied",
+                    "capability": RuntimeCapability.RUNTIME_CREDENTIALS.value,
+                    "reason_code": exc.reason_code,
+                },
+            ) from None
         secret_env = await _collect_secret_env(peer_toolkits, agent_id)
         try:
             workdir = args.workdir

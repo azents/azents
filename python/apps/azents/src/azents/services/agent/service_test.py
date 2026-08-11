@@ -3,6 +3,7 @@
 import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
 
@@ -19,6 +20,7 @@ from azents.core.enums import (
     AgentRuntimeCapability,
     AgentType,
     ExternalChannelResponseMode,
+    WorkspaceUserRole,
 )
 from azents.repos.agent.data import Agent
 from azents.testing.model_selection import (
@@ -26,13 +28,20 @@ from azents.testing.model_selection import (
     make_test_model_settings,
 )
 
+from ..runtime_profile_workspace.service import RuntimeProfileWorkspaceUnavailable
 from . import AgentService
-from .data import AgentCreateInput, ModelRequired
+from .data import AgentCreateInput, ModelRequired, RuntimeProfileSelectionInvalid
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
 
-def _make_agent(agent_id: str = "agent-1") -> Agent:
+def _make_agent(
+    agent_id: str = "agent-1",
+    *,
+    runtime_profile_id: str | None = None,
+    runtime_capability: AgentRuntimeCapability = AgentRuntimeCapability.NONE,
+    shell_enabled: bool = False,
+) -> Agent:
     """Create Agent for tests."""
     selection = make_test_model_selection()
     return Agent(
@@ -57,11 +66,11 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         external_channel_default_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
         lifecycle_status=AgentLifecycleStatus.ACTIVE,
         type=AgentType.PUBLIC,
-        runtime_profile_id=None,
+        runtime_profile_id=runtime_profile_id,
         runtime_profile_selection_version=1,
-        runtime_capability=AgentRuntimeCapability.MANAGED,
+        runtime_capability=runtime_capability,
         runtime_capability_version=1,
-        shell_enabled=True,
+        shell_enabled=shell_enabled,
         memory_enabled=True,
         tool_search_enabled=False,
         max_turns=None,
@@ -83,7 +92,6 @@ def _make_service() -> AgentService:
     archived_session_retention_repository = AsyncMock()
     runtime_profile_repository = AsyncMock()
     runtime_profile_service = AsyncMock()
-    runtime_profile_service.resolve_agent_create_profile.return_value = None
     upload_service = AsyncMock()
     avatar_handler = AsyncMock()
     s3_service = AsyncMock()
@@ -171,7 +179,112 @@ class TestAgentServiceModelSelection:
         settings_repo.set_default_model_if_empty.assert_awaited_once()
         repository_create = agent_repo.create.await_args.args[1]
         assert repository_create.runtime_profile_id is None
+        assert repository_create.runtime_capability is AgentRuntimeCapability.NONE
+        assert repository_create.shell_enabled is False
         assert repository_create.tool_search_enabled is True
+        runtime_profile_service = cast(Any, service.runtime_profile_service)
+        runtime_profile_service.require_available_agent_profile.assert_not_awaited()
+        runtime_profile_repository = cast(Any, service.runtime_profile_repository)
+        runtime_profile_repository.enqueue_reconcile_task.assert_not_awaited()
+
+    async def test_create_with_explicit_runtime_profile_is_managed(self) -> None:
+        """Explicit available Runtime selection grants managed capability."""
+        service = _make_service()
+        selection = make_test_model_selection()
+        settings = AsyncMock()
+        settings.default_model_selection = None
+        settings.default_lightweight_model_selection = None
+        settings.default_selectable_model_options = None
+        settings.default_main_model_label = None
+        settings.default_lightweight_model_label = None
+        settings_repo = cast(Any, service.workspace_model_settings_repository)
+        catalog_read_service = cast(Any, service.model_catalog_read_service)
+        agent_repo = cast(Any, service.repository)
+        admin_repo = cast(Any, service.admin_repository)
+        runtime_profile_service = cast(Any, service.runtime_profile_service)
+        runtime_profile_repository = cast(Any, service.runtime_profile_repository)
+        settings_repo.get_or_create.return_value = settings
+        catalog_read_service.resolve_agent_model_selection.return_value = Success(
+            selection
+        )
+        runtime_profile_service.get_profile.return_value = SimpleNamespace(
+            available=True,
+            reason_code=None,
+        )
+        agent_repo.create.return_value = _make_agent(
+            runtime_profile_id="profile-1",
+            runtime_capability=AgentRuntimeCapability.MANAGED,
+            shell_enabled=True,
+        )
+        admin_repo.create.return_value = AsyncMock()
+
+        result = await service.create(
+            AgentCreateInput(
+                workspace_id="ws-1",
+                name="agent",
+                model_selection=AgentModelSelectionInput(
+                    llm_provider_integration_id="integ-1",
+                    model_identifier="gpt-4o",
+                ),
+                runtime_profile_id="profile-1",
+                shell_enabled=True,
+            ),
+            creator_workspace_user_id="wu-1",
+        )
+
+        assert isinstance(result, Success)
+        repository_session, repository_create = agent_repo.create.await_args.args
+        profile_session = (
+            runtime_profile_service.require_available_agent_profile.await_args.args[0]
+        )
+        assert profile_session is repository_session
+        assert repository_create.runtime_profile_id == "profile-1"
+        assert repository_create.runtime_capability is AgentRuntimeCapability.MANAGED
+        assert repository_create.shell_enabled is True
+        runtime_profile_repository.enqueue_reconcile_task.assert_awaited_once()
+
+    async def test_create_rejects_unavailable_explicit_runtime_profile(self) -> None:
+        """Unavailable explicit Runtime selection fails before Agent persistence."""
+        service = _make_service()
+        selection = make_test_model_selection()
+        settings = AsyncMock()
+        settings.default_model_selection = None
+        settings.default_lightweight_model_selection = None
+        settings.default_selectable_model_options = None
+        settings.default_main_model_label = None
+        settings.default_lightweight_model_label = None
+        settings_repo = cast(Any, service.workspace_model_settings_repository)
+        catalog_read_service = cast(Any, service.model_catalog_read_service)
+        agent_repo = cast(Any, service.repository)
+        runtime_profile_service = cast(Any, service.runtime_profile_service)
+        settings_repo.get_or_create.return_value = settings
+        catalog_read_service.resolve_agent_model_selection.return_value = Success(
+            selection
+        )
+        runtime_profile_service.require_available_agent_profile.side_effect = (
+            RuntimeProfileWorkspaceUnavailable(
+                code="runtime_profile_unavailable",
+                message="Runtime Profile is unavailable",
+            )
+        )
+
+        result = await service.create(
+            AgentCreateInput(
+                workspace_id="ws-1",
+                name="agent",
+                model_selection=AgentModelSelectionInput(
+                    llm_provider_integration_id="integ-1",
+                    model_identifier="gpt-4o",
+                ),
+                runtime_profile_id="profile-1",
+            ),
+            creator_workspace_user_id="wu-1",
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, RuntimeProfileSelectionInvalid)
+        assert result.error.code == "runtime_profile_unavailable"
+        agent_repo.create.assert_not_awaited()
 
     async def test_create_preserves_explicit_tool_search_opt_out(self) -> None:
         """Creation forwards an explicit Tool Search opt-out to the repository."""
@@ -210,3 +323,78 @@ class TestAgentServiceModelSelection:
         assert isinstance(result, Success)
         repository_create = agent_repo.create.await_args.args[1]
         assert repository_create.tool_search_enabled is False
+
+    async def test_runtime_free_update_cannot_select_runtime_profile(self) -> None:
+        """Runtime-free Agents require the dedicated add transition."""
+        service = _make_service()
+        repository = cast(Any, service.repository)
+        repository.get_by_id.return_value = _make_agent()
+
+        result = await service.update_by_id(
+            "agent-1",
+            {
+                "runtime_profile_id": "profile-1",
+                "expected_runtime_profile_selection_version": 1,
+            },
+            workspace_id="ws-1",
+            workspace_user_id="wu-1",
+            role=WorkspaceUserRole.OWNER,
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, RuntimeProfileSelectionInvalid)
+        assert result.error.code == "runtime_capability_unavailable"
+        repository.replace_runtime_profile_selection.assert_not_awaited()
+
+    async def test_runtime_free_update_keeps_shell_disabled(self) -> None:
+        """Legacy shell updates cannot grant Runtime-free authority."""
+        service = _make_service()
+        repository = cast(Any, service.repository)
+        runtime_free_agent = _make_agent()
+        repository.get_by_id.return_value = runtime_free_agent
+        repository.lock_by_id.return_value = runtime_free_agent
+        repository.update_by_id.return_value = Success(runtime_free_agent)
+
+        result = await service.update_by_id(
+            "agent-1",
+            {"shell_enabled": True},
+            workspace_id="ws-1",
+            workspace_user_id="wu-1",
+            role=WorkspaceUserRole.OWNER,
+        )
+
+        assert isinstance(result, Success)
+        repository.lock_by_id.assert_awaited_once()
+        repo_update = repository.update_by_id.await_args.args[2]
+        assert repo_update["shell_enabled"] is False
+
+    async def test_runtime_profile_update_rechecks_capability_under_lock(self) -> None:
+        """A concurrent removal fence blocks stale Runtime Profile updates."""
+        service = _make_service()
+        repository = cast(Any, service.repository)
+        repository.get_by_id.return_value = _make_agent(
+            runtime_profile_id="profile-1",
+            runtime_capability=AgentRuntimeCapability.MANAGED,
+            shell_enabled=True,
+        )
+        repository.lock_by_id.return_value = _make_agent(
+            runtime_capability=AgentRuntimeCapability.REMOVING,
+        )
+
+        result = await service.update_by_id(
+            "agent-1",
+            {
+                "runtime_profile_id": "profile-2",
+                "expected_runtime_profile_selection_version": 1,
+            },
+            workspace_id="ws-1",
+            workspace_user_id="wu-1",
+            role=WorkspaceUserRole.OWNER,
+        )
+
+        assert isinstance(result, Failure)
+        assert isinstance(result.error, RuntimeProfileSelectionInvalid)
+        assert result.error.code == "runtime_capability_unavailable"
+        repository.lock_by_id.assert_awaited_once()
+        repository.replace_runtime_profile_selection.assert_not_awaited()
+        repository.update_by_id.assert_not_awaited()

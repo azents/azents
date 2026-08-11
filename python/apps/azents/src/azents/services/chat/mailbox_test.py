@@ -210,6 +210,7 @@ def _service(
         agent_runtime_repository=AgentRuntimeRepository(),
         root_agent_session_creation_service=RootAgentSessionCreationService(
             agent_session_repository=AgentSessionRepository(),
+            agent_repository=AgentRepository(),
             automatic_project_repository=AgentAutomaticProjectRepository(),
             agent_runtime_repository=AgentRuntimeRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),

@@ -22,6 +22,7 @@ from azents.core.enums import (
     ActionExecutionStatus,
     AgentRunPhase,
     AgentRunStatus,
+    AgentRuntimeCapability,
     AgentSessionKind,
     EventKind,
 )
@@ -33,6 +34,10 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.runtime_capabilities import (
+    RuntimeCapability,
+    RuntimeCapabilityResolver,
+)
 from azents.core.tools import ToolkitContext, ToolkitProvider
 from azents.core.vfs import VfsProjection, make_vfs_projection
 from azents.engine.events.action_messages import CreateGitWorktreeAction
@@ -94,6 +99,7 @@ from azents.engine.tools.todo import TodoToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution.data import ActionExecution
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import PendingSessionCommand
@@ -476,10 +482,13 @@ class _SessionLifecycle:
 class _AgentRepository:
     """AgentRepository test double."""
 
+    def __init__(self, agent: object | None = None) -> None:
+        self.agent = agent
+
     async def get_by_id(self, session: AsyncSession, agent_id: str) -> object | None:
-        """Return no persisted agent settings."""
+        """Return the configured persisted Agent settings."""
         del session, agent_id
-        return None
+        return self.agent
 
 
 class _AgentSessionRepository:
@@ -1108,6 +1117,7 @@ def _executor(
     session_lifecycle: _SessionLifecycle | None = None,
     *,
     engine: AgentEngineProtocol | None = None,
+    agent: object | None = None,
     failed_run_finalizer: object | None = None,
     user_stop_finalizer: _UserStopFinalizer | None = None,
     command_registry: dict[str, CommandHandler] | None = None,
@@ -1165,7 +1175,7 @@ def _executor(
         broker=cast(SessionBroker, object()),
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
         engine=engine,
-        agent_repository=cast(AgentRepository, _AgentRepository()),
+        agent_repository=cast(AgentRepository, _AgentRepository(agent)),
         command_registry=command_registry,
         integration_repository=cast(LLMProviderIntegrationRepository, object()),
         toolkit_registry=cast(dict[str, ToolkitProvider[Any]], {}),
@@ -1253,6 +1263,103 @@ async def test_idle_continuation_toolkits_use_persisted_session_workspace(
     )
 
     assert resolved_contexts[0].workspace_id == "workspace-001"
+
+
+def _runtime_agent(
+    *,
+    state: AgentRuntimeCapability = AgentRuntimeCapability.NONE,
+    version: int = 1,
+    shell_enabled: bool = True,
+) -> SimpleNamespace:
+    """Create Runtime capability fields used by Worker resolution tests."""
+    return SimpleNamespace(
+        memory_enabled=True,
+        runtime_capability=state,
+        runtime_capability_version=version,
+        shell_enabled=shell_enabled,
+    )
+
+
+@pytest.mark.asyncio
+async def test_idle_continuation_projects_runtime_tools_from_capability_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Idle continuation passes the capability resolver instead of shell state."""
+    executor = _executor(
+        agent=_runtime_agent(
+            state=AgentRuntimeCapability.MANAGED,
+            version=7,
+            shell_enabled=True,
+        )
+    )
+    captured: list[RuntimeCapabilityResolver] = []
+
+    async def resolve_tools(
+        agent_id: str,
+        context: ToolkitContext,
+        **kwargs: object,
+    ) -> list[ToolkitBinding]:
+        """Capture the idle continuation resolver."""
+        del agent_id, context
+        captured.append(
+            cast(RuntimeCapabilityResolver, kwargs["runtime_capability_resolver"])
+        )
+        return []
+
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", resolve_tools)
+
+    async def prepare_toolkits(
+        toolkits: Sequence[ToolkitBinding],
+    ) -> list[ToolkitBinding]:
+        """Return the empty prepared toolkit set."""
+        return list(toolkits)
+
+    await executor.resolve_idle_continuation_toolkits(
+        _message(),
+        run_id="run-001",
+        prepare_toolkits=prepare_toolkits,
+        dispatch_event=_noop_dispatch_event,
+    )
+
+    assert len(captured) == 1
+    assert captured[0].snapshot.version == 7
+    assert captured[0].project(
+        (
+            RuntimeCapability.WORKSPACE,
+            RuntimeCapability.RUNTIME_FILESYSTEM,
+            RuntimeCapability.PROCESS_EXECUTION,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_capability_resolver_fails_closed() -> None:
+    """Capability state and version fences deny Runtime projection/admission."""
+    agent = _runtime_agent(state=AgentRuntimeCapability.NONE, version=3)
+    executor = _executor(agent=agent)
+    resolver = executor._runtime_capability_resolver(
+        agent_id="agent-001",
+        agent=cast(Agent, agent),
+    )
+
+    assert not resolver.project((RuntimeCapability.WORKSPACE,))
+
+    agent.runtime_capability = AgentRuntimeCapability.MANAGED
+    agent.runtime_capability_version = 4
+    decision = await resolver.decide(RuntimeCapability.WORKSPACE)
+
+    assert decision.allowed is False
+    assert decision.reason_code == "runtime_capability_stale"
+    assert decision.expected_version == 3
+    assert decision.actual_version == 4
+
+    missing_executor = _executor()
+    missing_resolver = missing_executor._runtime_capability_resolver(
+        agent_id="missing-agent",
+        agent=None,
+    )
+    with pytest.raises(RuntimeError, match="Agent was not found"):
+        await missing_resolver.decide(RuntimeCapability.WORKSPACE)
 
 
 @pytest.mark.asyncio
@@ -1653,9 +1760,15 @@ async def test_execute_recovers_activated_run_before_flushing_input(
     lifecycle = _SessionLifecycle(recoverable_run=recoverable)
     order: list[str] = []
     vfs_projection_service = _VfsProjectionService(order)
+    captured_resolvers: list[RuntimeCapabilityResolver] = []
     executor = _executor(
         session_lifecycle=lifecycle,
         vfs_projection_service=vfs_projection_service,
+        agent=_runtime_agent(
+            state=AgentRuntimeCapability.MANAGED,
+            version=11,
+            shell_enabled=True,
+        ),
     )
     poll_calls: list[dict[str, object]] = []
     recovered_snapshots: list[AgentModelSelection] = []
@@ -1701,6 +1814,18 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         del args, kwargs
         raise AssertionError("A recovered run must not resolve its target again")
 
+    async def resolve_tools(
+        agent_id: str,
+        context: ToolkitContext,
+        **kwargs: object,
+    ) -> list[ToolkitBinding]:
+        """Capture the active Run capability resolver."""
+        del agent_id, context
+        captured_resolvers.append(
+            cast(RuntimeCapabilityResolver, kwargs["runtime_capability_resolver"])
+        )
+        return []
+
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
     monkeypatch.setattr(
         run_executor_module,
@@ -1712,7 +1837,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         "resolve_invoke_input_with_profile",
         resolve_new,
     )
-    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", resolve_tools)
 
     async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
         del session_id, event
@@ -1732,6 +1857,9 @@ async def test_execute_recovers_activated_run_before_flushing_input(
     assert result.run_id == recoverable.id
     assert recovered_snapshots == [selection]
     assert order[:2] == ["vfs", "input"]
+    assert len(captured_resolvers) == 1
+    assert captured_resolvers[0].snapshot.state is AgentRuntimeCapability.MANAGED
+    assert captured_resolvers[0].snapshot.version == 11
     assert vfs_projection_service.calls == [
         (recoverable.id, "agent-001", "session-001", "workspace-001")
     ]

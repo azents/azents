@@ -17,6 +17,11 @@ import yaml
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.runtime_capabilities import (
+    RuntimeCapability,
+    RuntimeCapabilityDeniedError,
+    RuntimeCapabilityResolver,
+)
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -238,6 +243,7 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         self._appendix_lock = asyncio.Lock()
         self._rule_path_cache: dict[str, _ClaudeRulePathCacheEntry] = {}
         self.instruction_context_store: RuntimeInstructionContextStore | None = None
+        self.runtime_capability_resolver: RuntimeCapabilityResolver | None = None
 
     def set_agent_id(self, agent_id: str) -> None:
         """Inject agent_id."""
@@ -263,6 +269,13 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         """Register shared Runtime instruction context store."""
         self.instruction_context_store = store
 
+    def set_runtime_capability_resolver(
+        self,
+        resolver: RuntimeCapabilityResolver,
+    ) -> None:
+        """Set the shared Agent Runtime capability resolver."""
+        self.runtime_capability_resolver = resolver
+
     def hooks(self) -> RuntimeHooks:
         """Register Claude rules appendix hooks."""
         return {
@@ -279,6 +292,14 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         self, context: AfterToolCallHookContext
     ) -> ToolOutputReplace | None:
         """Append applicable Claude rules after successful read."""
+        if self.runtime_capability_resolver is None:
+            return None
+        try:
+            await self.runtime_capability_resolver.require(
+                RuntimeCapability.RUNTIME_FILESYSTEM
+            )
+        except RuntimeCapabilityDeniedError:
+            return None
         if context.error_message is not None or context.output_text is None:
             return None
         tool_name = _base_tool_name(context.tool_name)

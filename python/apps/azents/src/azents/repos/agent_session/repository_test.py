@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 import azents.repos.agent_session as agent_session_repo
 from azents.core.enums import (
+    AgentRuntimeCapability,
     AgentSessionKind,
     AgentSessionPrimaryKind,
     AgentSessionProductMode,
@@ -81,7 +82,15 @@ async def _create_user(session: AsyncSession, email: str) -> str:
     return user.id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(
+    session: AsyncSession,
+    workspace_id: str,
+    slug: str,
+    *,
+    runtime_capability: AgentRuntimeCapability = AgentRuntimeCapability.MANAGED,
+    workspace_path: str | None = "/runtime",
+    create_runtime: bool = True,
+) -> str:
     """Create Agent for tests."""
 
     integration = RDBLLMProviderIntegration(
@@ -97,6 +106,7 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     agent = RDBAgent(
         workspace_id=workspace_id,
         name="AgentSession test agent",
+        runtime_capability=runtime_capability,
         model_selection=make_test_model_selection_dict(
             integration_id=integration.id,
             provider=LLMProvider.ANTHROPIC,
@@ -110,21 +120,168 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     )
     session.add(agent)
     await session.flush()
-    runtime_repository = AgentRuntimeRepository()
-    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
-    await runtime_repository.record_runner_state(
-        session,
-        runtime.id,
-        RuntimeRunnerState.UNKNOWN,
-        1,
-        expected_desired_generation=runtime.desired_generation,
-        workspace_path=f"/runtime/{slug}",
-    )
+    if runtime_capability is AgentRuntimeCapability.MANAGED and create_runtime:
+        runtime_repository = AgentRuntimeRepository()
+        runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+        await runtime_repository.record_runner_state(
+            session,
+            runtime.id,
+            RuntimeRunnerState.UNKNOWN,
+            1,
+            expected_desired_generation=runtime.desired_generation,
+            workspace_path=(
+                f"{workspace_path}/{slug}" if workspace_path is not None else None
+            ),
+        )
     return agent.id
 
 
 class TestAgentSessionRepository:
     """AgentSessionRepository tests."""
+
+    async def test_root_context_without_runtime_uses_none_binding(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Runtime-free Agents create a context without Runtime ownership."""
+        workspace_id = await _create_workspace(rdb_session, "root-context-none")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "root-context-none",
+            runtime_capability=AgentRuntimeCapability.NONE,
+        )
+
+        created = await AgentSessionRepository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        context = await rdb_session.scalar(
+            sa.select(RDBSessionAgentContext).where(
+                RDBSessionAgentContext.agent_id == agent_id,
+                RDBSessionAgentContext.workspace_id == workspace_id,
+            )
+        )
+
+        assert context is not None
+        assert context.agent_runtime_id is None
+        assert context.working_folder_path is None
+        assert (
+            context.working_folder_binding_state
+            is SessionWorkingFolderBindingState.NONE
+        )
+        assert created.agent_id == agent_id
+
+    async def test_root_context_managed_without_workspace_path_is_pending(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Managed Agents await Runner workspace evidence before binding."""
+        workspace_id = await _create_workspace(rdb_session, "root-context-pending")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "root-context-pending",
+            workspace_path=None,
+        )
+
+        await AgentSessionRepository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        context = await rdb_session.scalar(
+            sa.select(RDBSessionAgentContext).where(
+                RDBSessionAgentContext.agent_id == agent_id,
+                RDBSessionAgentContext.workspace_id == workspace_id,
+            )
+        )
+
+        assert context is not None
+        assert context.agent_runtime_id is not None
+        assert context.working_folder_path is None
+        assert (
+            context.working_folder_binding_state
+            is SessionWorkingFolderBindingState.PENDING
+        )
+
+    async def test_root_context_managed_without_runtime_row_is_pending(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Managed unconfigured Agents may create pending root contexts."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "root-context-pending-no-runtime",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "root-context-pending-no-runtime",
+            create_runtime=False,
+        )
+
+        await AgentSessionRepository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        context = await rdb_session.scalar(
+            sa.select(RDBSessionAgentContext).where(
+                RDBSessionAgentContext.agent_id == agent_id,
+                RDBSessionAgentContext.workspace_id == workspace_id,
+            )
+        )
+
+        assert context is not None
+        assert context.agent_runtime_id is not None
+        assert context.working_folder_path is None
+        assert (
+            context.working_folder_binding_state
+            is SessionWorkingFolderBindingState.PENDING
+        )
+
+    async def test_root_context_rejects_runtime_removing(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Runtime removal fences root context admission."""
+        workspace_id = await _create_workspace(rdb_session, "root-context-removing")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "root-context-removing",
+            runtime_capability=AgentRuntimeCapability.REMOVING,
+        )
+
+        with pytest.raises(RuntimeError, match="Runtime is being removed"):
+            async with rdb_session.begin_nested():
+                await AgentSessionRepository().create(
+                    rdb_session,
+                    AgentSessionCreate(
+                        workspace_id=workspace_id,
+                        product_mode=AgentSessionProductMode.TEAM,
+                        associated_user_id=None,
+                        agent_id=agent_id,
+                        title=None,
+                    ),
+                )
 
     async def test_claim_owner_generation_is_monotonic(
         self,

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentProjectDefaultItemType,
+    AgentRuntimeCapability,
     AgentSessionKind,
     AgentSessionProductMode,
     AgentSessionStatus,
@@ -29,11 +30,13 @@ from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_default.data import AgentProjectDefaultCreate
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
@@ -70,7 +73,7 @@ from azents.services.session_workspace_project import (
 class BufferedAgentSessionInputResult:
     """MailboxItem creation and broker wake-up result."""
 
-    agent_runtime_id: str
+    agent_runtime_id: str | None
     agent_session_id: str
     accepted_mailbox_item_id: str
     mailbox_item: MailboxItem | None
@@ -81,7 +84,7 @@ class BufferedAgentSessionInputResult:
 class CreatedAgentSessionInputResult:
     """New AgentSession creation and first input enqueue result."""
 
-    agent_runtime_id: str
+    agent_runtime_id: str | None
     agent_session: AgentSession
     accepted_mailbox_item_id: str
     mailbox_item: MailboxItem | None
@@ -104,6 +107,11 @@ class AgentSessionInputInactiveSession:
 
 
 @dataclasses.dataclass(frozen=True)
+class AgentSessionInputRuntimeRemoving(AgentSessionInputInactiveSession):
+    """Agent Runtime removal is fencing ordinary input admission."""
+
+
+@dataclasses.dataclass(frozen=True)
 class AgentSessionInputSubagentReadOnly:
     """Requested child subagent session does not accept direct human input."""
 
@@ -119,6 +127,7 @@ AgentSessionInputError = (
     AgentSessionInputSessionNotFound
     | AgentSessionInputWrongAgent
     | AgentSessionInputInactiveSession
+    | AgentSessionInputRuntimeRemoving
     | AgentSessionInputSubagentReadOnly
     | AgentSessionInputIdempotencyConflict
     | ExchangeFileInputClaimError
@@ -260,13 +269,23 @@ class AgentSessionInputService:
             ):
                 return Failure(AgentSessionInputSessionNotFound())
 
-            runtime = await self.agent_runtime_repository.ensure_for_agent(
-                session, agent_id
-            )
-            await self._enqueue_working_folder_adoption_if_needed(
+            runtime_result = await self._resolve_runtime_for_input(
                 session,
-                agent_session=agent_session,
+                agent=agent,
+                runtime_dependent=False,
             )
+            match runtime_result:
+                case Success(runtime):
+                    pass
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(runtime_result)
+            if runtime is not None:
+                await self._enqueue_working_folder_adoption_if_needed(
+                    session,
+                    agent_session=agent_session,
+                )
             canonical_request_payload = {
                 **request_payload,
                 "sender_user_id": requester_user_id,
@@ -307,7 +326,9 @@ class AgentSessionInputService:
                         )
                     return Success(
                         BufferedAgentSessionInputResult(
-                            agent_runtime_id=runtime.id,
+                            agent_runtime_id=(
+                                runtime.id if runtime is not None else None
+                            ),
                             agent_session_id=agent_session.id,
                             accepted_mailbox_item_id=existing.accepted_id,
                             mailbox_item=mailbox_item,
@@ -386,7 +407,7 @@ class AgentSessionInputService:
 
         return Success(
             BufferedAgentSessionInputResult(
-                agent_runtime_id=runtime.id,
+                agent_runtime_id=runtime.id if runtime is not None else None,
                 agent_session_id=agent_session.id,
                 accepted_mailbox_item_id=result.mailbox_item.id,
                 mailbox_item=result.mailbox_item,
@@ -469,14 +490,18 @@ class AgentSessionInputService:
                                 "session product mode"
                             )
                         )
-                    runtime = await self.agent_runtime_repository.get_by_agent_id(
+                    runtime_result = await self._resolve_runtime_for_input(
                         session,
-                        agent_id,
+                        agent=agent,
+                        runtime_dependent=bool(existing_project_paths or setup_actions),
                     )
-                    if runtime is None:
-                        raise RuntimeError(
-                            "Session creation idempotency record has no Agent runtime"
-                        )
+                    match runtime_result:
+                        case Success(runtime):
+                            pass
+                        case Failure(error):
+                            return Failure(error)
+                        case _:
+                            assert_never(runtime_result)
                     mailbox_item = await self.mailbox_item_service.get_by_id(
                         session,
                         buffer_id=existing.accepted_id,
@@ -491,22 +516,43 @@ class AgentSessionInputService:
                         )
                     return Success(
                         CreatedAgentSessionInputResult(
-                            agent_runtime_id=runtime.id,
+                            agent_runtime_id=(
+                                runtime.id if runtime is not None else None
+                            ),
                             agent_session=agent_session,
                             accepted_mailbox_item_id=existing.accepted_id,
                             mailbox_item=mailbox_item,
                             created=False,
                         )
                     )
-            runtime = await self.agent_runtime_repository.ensure_for_agent(
-                session, agent_id
+            runtime_result = await self._resolve_runtime_for_input(
+                session,
+                agent=agent,
+                runtime_dependent=bool(existing_project_paths or setup_actions),
             )
+            match runtime_result:
+                case Success(runtime):
+                    pass
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(runtime_result)
             await self.root_agent_session_creation_service.ensure_team_primary(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
             )
             if existing_project_paths or setup_actions:
+                if runtime is None or runtime.workspace_path is None:
+                    return Failure(
+                        InvalidProjectPath(
+                            path="",
+                            reason=(
+                                "A current Agent Workspace is required for "
+                                "Project or worktree setup."
+                            ),
+                        )
+                    )
                 workspace_items_result = self._workspace_items_from_request(
                     existing_project_paths=existing_project_paths,
                     setup_actions=setup_actions,
@@ -562,6 +608,7 @@ class AgentSessionInputService:
                 session,
                 agent_session=agent_session,
                 workspace_items=workspace_items,
+                create_session_working_folder=runtime is not None,
                 message=message,
                 inference_profile=inference_profile,
                 user_id=user_id,
@@ -620,7 +667,7 @@ class AgentSessionInputService:
 
         return Success(
             CreatedAgentSessionInputResult(
-                agent_runtime_id=runtime.id,
+                agent_runtime_id=runtime.id if runtime is not None else None,
                 agent_session=agent_session,
                 accepted_mailbox_item_id=mailbox_item.id,
                 mailbox_item=mailbox_item,
@@ -703,14 +750,18 @@ class AgentSessionInputService:
                                 "session product mode"
                             )
                         )
-                    runtime = await self.agent_runtime_repository.get_by_agent_id(
+                    runtime_result = await self._resolve_runtime_for_input(
                         session,
-                        agent_id,
+                        agent=agent,
+                        runtime_dependent=bool(existing_project_paths or setup_actions),
                     )
-                    if runtime is None:
-                        raise RuntimeError(
-                            "Session creation idempotency record has no Agent runtime"
-                        )
+                    match runtime_result:
+                        case Success(runtime):
+                            pass
+                        case Failure(error):
+                            return Failure(error)
+                        case _:
+                            assert_never(runtime_result)
                     mailbox_item = await self.mailbox_item_service.get_by_id(
                         session,
                         buffer_id=existing.accepted_id,
@@ -725,22 +776,43 @@ class AgentSessionInputService:
                         )
                     return Success(
                         CreatedAgentSessionInputResult(
-                            agent_runtime_id=runtime.id,
+                            agent_runtime_id=(
+                                runtime.id if runtime is not None else None
+                            ),
                             agent_session=agent_session,
                             accepted_mailbox_item_id=existing.accepted_id,
                             mailbox_item=mailbox_item,
                             created=False,
                         )
                     )
-            runtime = await self.agent_runtime_repository.ensure_for_agent(
-                session, agent_id
+            runtime_result = await self._resolve_runtime_for_input(
+                session,
+                agent=agent,
+                runtime_dependent=bool(existing_project_paths or setup_actions),
             )
+            match runtime_result:
+                case Success(runtime):
+                    pass
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(runtime_result)
             await self.root_agent_session_creation_service.ensure_team_primary(
                 session,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
             )
             if existing_project_paths or setup_actions:
+                if runtime is None or runtime.workspace_path is None:
+                    return Failure(
+                        InvalidProjectPath(
+                            path="",
+                            reason=(
+                                "A current Agent Workspace is required for "
+                                "Project or worktree setup."
+                            ),
+                        )
+                    )
                 workspace_items_result = self._workspace_items_from_request(
                     existing_project_paths=existing_project_paths,
                     setup_actions=setup_actions,
@@ -796,6 +868,7 @@ class AgentSessionInputService:
                 session,
                 agent_session=agent_session,
                 workspace_items=workspace_items,
+                create_session_working_folder=runtime is not None,
                 message=message,
                 inference_profile=inference_profile,
                 user_id=user_id,
@@ -854,7 +927,7 @@ class AgentSessionInputService:
 
         return Success(
             CreatedAgentSessionInputResult(
-                agent_runtime_id=runtime.id,
+                agent_runtime_id=runtime.id if runtime is not None else None,
                 agent_session=agent_session,
                 accepted_mailbox_item_id=mailbox_item.id,
                 mailbox_item=mailbox_item,
@@ -868,34 +941,38 @@ class AgentSessionInputService:
         *,
         agent_session: AgentSession,
         workspace_items: list[NewSessionWorkspaceItem],
+        create_session_working_folder: bool,
         message: InputMessage,
         inference_profile: RequestedInferenceProfile,
         user_id: str,
         client_request_id: str | None,
     ) -> None:
         """Enqueue ordered setup TurnActions before the first user message."""
-        await self.mailbox_item_service.enqueue(
-            session,
-            MailboxEnqueue(
-                session_id=agent_session.id,
-                kind=MailboxItemKind.ACTION_MESSAGE,
-                scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
-                requested_model_target_label=None,
-                requested_reasoning_effort=None,
-                sender_user_id=None,
-                order_group=None,
-                order_sequence=0,
-                content="",
-                idempotency_key=(f"session-working-folder:initial:{agent_session.id}"),
-                metadata={
-                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-                    "source": "system",
-                },
-                action=CreateSessionWorkingFolderAction().model_dump(mode="json"),
-                attachments=[],
-                file_parts=[],
-            ),
-        )
+        if create_session_working_folder:
+            await self.mailbox_item_service.enqueue(
+                session,
+                MailboxEnqueue(
+                    session_id=agent_session.id,
+                    kind=MailboxItemKind.ACTION_MESSAGE,
+                    scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
+                    sender_user_id=None,
+                    order_group=None,
+                    order_sequence=0,
+                    content="",
+                    idempotency_key=(
+                        f"session-working-folder:initial:{agent_session.id}"
+                    ),
+                    metadata={
+                        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                        "source": "system",
+                    },
+                    action=CreateSessionWorkingFolderAction().model_dump(mode="json"),
+                    attachments=[],
+                    file_parts=[],
+                ),
+            )
         for index, item in enumerate(workspace_items):
             match item:
                 case ExistingProjectWorkspaceItem():
@@ -1224,13 +1301,16 @@ class AgentSessionInputService:
                     "Client request ID already used for another session product mode"
                 )
             )
-        runtime = await self.agent_runtime_repository.get_by_agent_id(
-            session,
-            agent_id,
-        )
-        if runtime is None:
-            raise RuntimeError(
-                "Session creation idempotency record has no Agent runtime"
+        agent = await self.agent_repository.get_by_id(session, agent_id)
+        if agent is None:
+            raise RuntimeError("Agent not found")
+        if agent.runtime_capability is AgentRuntimeCapability.REMOVING:
+            return Failure(AgentSessionInputRuntimeRemoving())
+        runtime = None
+        if agent.runtime_capability is AgentRuntimeCapability.MANAGED:
+            runtime = await self.agent_runtime_repository.get_by_agent_id(
+                session,
+                agent_id,
             )
         mailbox_item = await self.mailbox_item_service.get_by_id(
             session,
@@ -1243,11 +1323,41 @@ class AgentSessionInputService:
             )
         return Success(
             CreatedAgentSessionInputResult(
-                agent_runtime_id=runtime.id,
+                agent_runtime_id=runtime.id if runtime is not None else None,
                 agent_session=agent_session,
                 accepted_mailbox_item_id=existing.accepted_id,
                 mailbox_item=mailbox_item,
                 created=False,
+            )
+        )
+
+    async def _resolve_runtime_for_input(
+        self,
+        session: AsyncSession,
+        *,
+        agent: Agent,
+        runtime_dependent: bool,
+    ) -> Result[AgentRuntime | None, AgentSessionInputError]:
+        """Resolve the optional logical Runtime for one input boundary."""
+        runtime_capability = agent.runtime_capability
+        if runtime_capability is AgentRuntimeCapability.REMOVING:
+            return Failure(AgentSessionInputRuntimeRemoving())
+        if runtime_capability is AgentRuntimeCapability.NONE:
+            if runtime_dependent:
+                return Failure(
+                    InvalidProjectPath(
+                        path="",
+                        reason=(
+                            "This Agent has no managed Runtime capability for "
+                            "Project or worktree setup."
+                        ),
+                    )
+                )
+            return Success(None)
+        return Success(
+            await self.agent_runtime_repository.ensure_for_agent(
+                session,
+                agent.id,
             )
         )
 

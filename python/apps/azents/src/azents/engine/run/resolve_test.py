@@ -26,6 +26,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.runtime_capabilities import RuntimeCapabilityResolver
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -255,6 +256,18 @@ def _make_toolkit_context() -> ToolkitContext:
     )
 
 
+def _runtime_capability_resolver(
+    *,
+    enabled: bool,
+) -> RuntimeCapabilityResolver:
+    """Create an explicit Runtime capability snapshot for Toolkit tests."""
+    return RuntimeCapabilityResolver.from_agent(
+        state=AgentRuntimeCapability.MANAGED,
+        version=1,
+        shell_enabled=enabled,
+    )
+
+
 def test_auto_toolkit_revision_changes_with_canonical_scope() -> None:
     """Auto-bound Toolkits replace retained instances after scope changes."""
     config = _TestToolkitConfig(value="same")
@@ -331,7 +344,7 @@ async def _resolve_failing_registered_toolkit(
             denied_domains=(),
         ),
         memory_enabled=False,
-        runtime_tools_enabled=False,
+        runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
     )
 
 
@@ -796,8 +809,8 @@ class TestResolveAgentTools:
                 _FailingToolkitProvider(RuntimeError("provider bug"))
             )
 
-    async def test_auto_binds_claude_rules_when_runtime_tools_enabled(self) -> None:
-        """Claude rules Toolkit is auto-bound after runtime shell Toolkit."""
+    async def test_auto_binds_claude_rules_when_runtime_capability_allows(self) -> None:
+        """Claude rules Toolkit is auto-bound after Runtime capability admission."""
         session = AsyncMock(spec=AsyncSession)
         session.get.return_value = None
         agent_toolkit_repository = AsyncMock()
@@ -823,7 +836,7 @@ class TestResolveAgentTools:
                 store=_FakeClaudeRulesAppendixDedupeStateStore()
             ),
             memory_enabled=True,
-            runtime_tools_enabled=True,
+            runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
         )
 
         assert [binding.slug for binding in bindings] == [
@@ -847,10 +860,10 @@ class TestResolveAgentTools:
         }
         assert memory_write_tools == {"save_memory", "delete_memory"}
 
-    async def test_does_not_auto_bind_claude_rules_when_runtime_tools_disabled(
+    async def test_does_not_auto_bind_claude_rules_when_capability_denies(
         self,
     ) -> None:
-        """Claude rules Toolkit is not auto-bound without runtime tools."""
+        """Claude rules Toolkit is not auto-bound without Runtime capability."""
         session = AsyncMock(spec=AsyncSession)
         session.get.return_value = None
         agent_toolkit_repository = AsyncMock()
@@ -876,7 +889,7 @@ class TestResolveAgentTools:
                 store=_FakeClaudeRulesAppendixDedupeStateStore()
             ),
             memory_enabled=True,
-            runtime_tools_enabled=False,
+            runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
         )
 
         assert [binding.slug for binding in bindings] == ["memory_read", "memory_write"]
@@ -905,7 +918,7 @@ class TestResolveAgentTools:
             ),
             subagent_toolkit_provider=_make_subagent_provider(),
             memory_enabled=False,
-            runtime_tools_enabled=False,
+            runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
         )
 
         assert [binding.slug for binding in bindings] == ["subagent"]
@@ -952,7 +965,7 @@ class TestResolveAgentTools:
                 store=GoalStateStore(session_manager=goal_session_manager)
             ),
             memory_enabled=True,
-            runtime_tools_enabled=True,
+            runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
         )
 
         assert [binding.slug for binding in bindings] == [

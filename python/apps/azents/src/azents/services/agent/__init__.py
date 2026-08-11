@@ -377,53 +377,54 @@ class AgentService:
             case _:
                 assert_never(params_result)
 
-        repo_create = AgentCreate(
-            workspace_id=create.workspace_id,
-            name=create.name,
-            model_selection=main_selection,
-            lightweight_model_selection=lightweight_selection,
-            selectable_model_options=model_options.selectable_model_options,
-            main_model_label=model_options.main_model_label,
-            lightweight_model_label=model_options.lightweight_model_label,
-            description=create.description,
-            model_parameters=create.model_parameters,
-            system_prompt=create.system_prompt,
-            enabled=create.enabled,
-            external_channel_default_response_mode=(
-                ExternalChannelResponseMode.ALL_MESSAGES
-            ),
-            type=create.type,
-            runtime_profile_id=None,
-            runtime_capability=AgentRuntimeCapability.MANAGED,
-            shell_enabled=create.shell_enabled,
-            memory_enabled=create.memory_enabled,
-            tool_search_enabled=create.tool_search_enabled,
-            max_turns=create.max_turns,
-            auto_archive_ttl_days=create.auto_archive_ttl_days,
-            subagent_settings=create.subagent_settings,
-        )
         async with self.session_manager() as session:
-            try:
-                runtime_profile_id = (
-                    await self.runtime_profile_service.resolve_agent_create_profile(
+            runtime_profile_id: str | None = None
+            runtime_capability = AgentRuntimeCapability.NONE
+            shell_enabled = False
+            if create.runtime_profile_id is not None:
+                try:
+                    await self.runtime_profile_service.require_available_agent_profile(
                         session,
                         workspace_id=create.workspace_id,
-                        explicit_profile_id=create.runtime_profile_id,
+                        profile_id=create.runtime_profile_id,
                     )
-                )
-            except RuntimeProfileWorkspaceUnavailable as error:
-                return Failure(RuntimeProfileSelectionInvalid(code=error.code))
+                except RuntimeProfileWorkspaceUnavailable as error:
+                    return Failure(RuntimeProfileSelectionInvalid(code=error.code))
+                runtime_profile_id = create.runtime_profile_id
+                runtime_capability = AgentRuntimeCapability.MANAGED
+                shell_enabled = create.shell_enabled
+
+            repo_create = AgentCreate(
+                workspace_id=create.workspace_id,
+                name=create.name,
+                model_selection=main_selection,
+                lightweight_model_selection=lightweight_selection,
+                selectable_model_options=model_options.selectable_model_options,
+                main_model_label=model_options.main_model_label,
+                lightweight_model_label=model_options.lightweight_model_label,
+                description=create.description,
+                model_parameters=create.model_parameters,
+                system_prompt=create.system_prompt,
+                enabled=create.enabled,
+                external_channel_default_response_mode=(
+                    ExternalChannelResponseMode.ALL_MESSAGES
+                ),
+                type=create.type,
+                runtime_profile_id=runtime_profile_id,
+                runtime_capability=runtime_capability,
+                shell_enabled=shell_enabled,
+                memory_enabled=create.memory_enabled,
+                tool_search_enabled=create.tool_search_enabled,
+                max_turns=create.max_turns,
+                auto_archive_ttl_days=create.auto_archive_ttl_days,
+                subagent_settings=create.subagent_settings,
+            )
             if create.model_selection is not None:
                 set_default = (
                     self.workspace_model_settings_repository.set_default_model_if_empty
                 )
                 await set_default(session, create.workspace_id, main_selection)
-            agent = await self.repository.create(
-                session,
-                repo_create.model_copy(
-                    update={"runtime_profile_id": runtime_profile_id}
-                ),
-            )
+            agent = await self.repository.create(session, repo_create)
             await self.admin_repository.create(
                 session,
                 AgentAdminCreate(
@@ -431,13 +432,14 @@ class AgentService:
                     workspace_user_id=creator_workspace_user_id,
                 ),
             )
-            await self.runtime_profile_repository.enqueue_reconcile_task(
-                session,
-                source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
-                source_id=agent.id,
-                source_version=str(agent.runtime_profile_selection_version),
-                available_at=tznow(),
-            )
+            if runtime_capability is AgentRuntimeCapability.MANAGED:
+                await self.runtime_profile_repository.enqueue_reconcile_task(
+                    session,
+                    source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
+                    source_id=agent.id,
+                    source_version=str(agent.runtime_profile_selection_version),
+                    available_at=tznow(),
+                )
         return Success(await self._build_output(agent))
 
     async def list_by_workspace(
@@ -513,6 +515,13 @@ class AgentService:
             return Failure(NotFound(agent_id=agent_id))
         if existing.workspace_id != workspace_id:
             return Failure(NotBelongToWorkspace(agent_id=agent_id))
+        if (
+            "runtime_profile_id" in update
+            and existing.runtime_capability is not AgentRuntimeCapability.MANAGED
+        ):
+            return Failure(
+                RuntimeProfileSelectionInvalid(code="runtime_capability_unavailable")
+            )
 
         admin_check = await self._check_admin_or_owner(
             agent_id, workspace_user_id, role
@@ -638,8 +647,6 @@ class AgentService:
             repo_update["enabled"] = update["enabled"]
         if "type" in update:
             repo_update["type"] = update["type"]
-        if "shell_enabled" in update:
-            repo_update["shell_enabled"] = update["shell_enabled"]
         if "memory_enabled" in update:
             repo_update["memory_enabled"] = update["memory_enabled"]
         if "tool_search_enabled" in update:
@@ -652,6 +659,27 @@ class AgentService:
             repo_update["subagent_settings"] = update["subagent_settings"]
 
         async with self.session_manager() as session:
+            if "runtime_profile_id" in update or "shell_enabled" in update:
+                locked = await self.repository.lock_by_id(session, agent_id)
+                if locked is None:
+                    return Failure(NotFound(agent_id=agent_id))
+                if locked.workspace_id != workspace_id:
+                    return Failure(NotBelongToWorkspace(agent_id=agent_id))
+                if (
+                    "runtime_profile_id" in update
+                    and locked.runtime_capability is not AgentRuntimeCapability.MANAGED
+                ):
+                    return Failure(
+                        RuntimeProfileSelectionInvalid(
+                            code="runtime_capability_unavailable"
+                        )
+                    )
+                if "shell_enabled" in update:
+                    repo_update["shell_enabled"] = (
+                        update["shell_enabled"]
+                        if locked.runtime_capability is AgentRuntimeCapability.MANAGED
+                        else False
+                    )
             if "runtime_profile_id" in update:
                 if "expected_runtime_profile_selection_version" not in update:
                     return Failure(RuntimeProfileSelectionVersionRequired())

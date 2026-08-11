@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRuntimeCapability,
     AgentSessionKind,
     AgentSessionPrimaryKind,
     AgentSessionProductMode,
@@ -149,8 +150,10 @@ class _ActiveAgentRepositoryDouble(AgentRepository):
         return cast(
             Agent,
             SimpleNamespace(
+                id="agent-1",
                 lifecycle_status=AgentLifecycleStatus.ACTIVE,
                 workspace_id="workspace-1",
+                runtime_capability=AgentRuntimeCapability.MANAGED,
             ),
         )
 
@@ -346,6 +349,7 @@ def _root_agent_session_creation_service() -> RootAgentSessionCreationService:
     """Build root Session creation service for tests."""
     return RootAgentSessionCreationService(
         agent_session_repository=AgentSessionRepository(),
+        agent_repository=AgentRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
         agent_runtime_repository=AgentRuntimeRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
@@ -388,6 +392,7 @@ async def _create_agent(
     slug: str,
     *,
     workspace_path: str | None = "/workspace/agent",
+    runtime_capability: AgentRuntimeCapability = AgentRuntimeCapability.MANAGED,
 ) -> str:
     """Create Agent for tests."""
 
@@ -414,22 +419,25 @@ async def _create_agent(
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{slug}-id",
         ),
+        runtime_capability=runtime_capability,
+        shell_enabled=runtime_capability is AgentRuntimeCapability.MANAGED,
     )
     session.add(agent)
     await session.flush()
     session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
     await session.flush()
-    runtime_repository = AgentRuntimeRepository()
-    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
-    if workspace_path is not None:
-        await runtime_repository.record_runner_state(
-            session,
-            runtime.id,
-            RuntimeRunnerState.UNKNOWN,
-            1,
-            expected_desired_generation=runtime.desired_generation,
-            workspace_path=workspace_path,
-        )
+    if runtime_capability is AgentRuntimeCapability.MANAGED:
+        runtime_repository = AgentRuntimeRepository()
+        runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+        if workspace_path is not None:
+            await runtime_repository.record_runner_state(
+                session,
+                runtime.id,
+                RuntimeRunnerState.UNKNOWN,
+                1,
+                expected_desired_generation=runtime.desired_generation,
+                workspace_path=workspace_path,
+            )
     return agent.id
 
 
@@ -865,6 +873,69 @@ class TestAgentSessionInputService:
         assert all(
             item.product_mode is AgentSessionProductMode.TEAM for item in team_list
         )
+
+    async def test_runtime_free_session_queues_only_user_input(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Runtime-free Session creation omits Runtime working-folder actions."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(session, "runtime-free-input")
+            user_id = await _create_user(session, "runtime-free-input@example.com")
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            agent_id = await _create_agent(
+                session,
+                workspace_id,
+                "runtime-free-input",
+                runtime_capability=AgentRuntimeCapability.NONE,
+            )
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            session_manager=rdb_session_manager,
+        )
+
+        result = await service.create_user_session_with_buffered_input(
+            agent_id=agent_id,
+            message=InputMessage(
+                text="runtime-free input",
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=[],
+            ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+            request_payload={"request": "runtime-free-input"},
+            client_request_id="runtime-free-input",
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.agent_runtime_id is None
+        async with rdb_session_manager() as session:
+            buffers = await MailboxRepository().list_by_session_id(
+                session,
+                result.value.agent_session.id,
+            )
+        assert len(buffers) == 1
+        assert buffers[0].kind is MailboxItemKind.USER_MESSAGE
+        assert buffers[0].action is None
 
     async def test_new_session_retry_reuses_admitted_session_and_input(
         self,

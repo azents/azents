@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.agent import AgentModelSelection, SelectableModelSettings
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentRuntimeCapability,
     AgentSessionEndReason,
     AgentSessionKind,
     AgentSessionPrimaryKind,
@@ -40,6 +41,7 @@ from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
+from azents.repos.agent_runtime import AgentRuntimeRepository
 
 from .data import (
     AgentSession,
@@ -1985,20 +1987,47 @@ class AgentSessionRepository:
         """Create the root SessionAgent and context for a root AgentSession."""
         context_id = uuid7().hex
         root_session_agent_id = uuid7().hex
+        capability = await session.scalar(
+            sa.select(RDBAgent.runtime_capability)
+            .where(RDBAgent.id == agent_id)
+            .with_for_update()
+        )
+        if capability is None:
+            raise RuntimeError("Agent is unavailable")
+        if capability is AgentRuntimeCapability.REMOVING:
+            raise RuntimeError("Agent Runtime is being removed")
         runtime = await session.scalar(
             sa.select(RDBAgentRuntime).where(RDBAgentRuntime.agent_id == agent_id)
         )
-        if runtime is None or runtime.workspace_path is None:
-            raise RuntimeError("Agent Runtime workspace path is unavailable")
+        if capability is AgentRuntimeCapability.NONE:
+            agent_runtime_id = None
+            working_folder_path = None
+            working_folder_binding_state = SessionWorkingFolderBindingState.NONE
+        elif runtime is None:
+            ensured_runtime = await AgentRuntimeRepository().ensure_for_agent(
+                session,
+                agent_id,
+            )
+            agent_runtime_id = ensured_runtime.id
+            working_folder_path = None
+            working_folder_binding_state = SessionWorkingFolderBindingState.PENDING
+        elif runtime.workspace_path is None:
+            agent_runtime_id = runtime.id
+            working_folder_path = None
+            working_folder_binding_state = SessionWorkingFolderBindingState.PENDING
+        else:
+            agent_runtime_id = runtime.id
+            working_folder_path = build_session_working_folder_path(
+                root_session_handle,
+                workspace_root=runtime.workspace_path,
+            )
+            working_folder_binding_state = SessionWorkingFolderBindingState.BOUND
         context = RDBSessionAgentContext(
             agent_id=agent_id,
             workspace_id=workspace_id,
-            agent_runtime_id=runtime.id,
-            working_folder_path=build_session_working_folder_path(
-                root_session_handle,
-                workspace_root=runtime.workspace_path,
-            ),
-            working_folder_binding_state=SessionWorkingFolderBindingState.BOUND,
+            agent_runtime_id=agent_runtime_id,
+            working_folder_path=working_folder_path,
+            working_folder_binding_state=working_folder_binding_state,
             working_folder_cleanup_status=(
                 SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
             ),

@@ -24,6 +24,7 @@ from azents.core.enums import (
     ActionExecutionStatus,
     AgentRunPhase,
     AgentRunStatus,
+    AgentRuntimeCapability,
     AgentSessionKind,
     EventKind,
 )
@@ -34,6 +35,11 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
+from azents.core.runtime_capabilities import (
+    RuntimeCapability,
+    RuntimeCapabilityResolver,
+    RuntimeCapabilitySnapshot,
+)
 from azents.core.tools import (
     ToolkitContext,
     ToolkitExecutionMode,
@@ -134,6 +140,7 @@ from azents.repos.action_execution.data import (
     ActionExecutionProjection,
 )
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
@@ -519,6 +526,41 @@ class RunExecutor:
             )
         return active_run.id
 
+    def _runtime_capability_resolver(
+        self,
+        *,
+        agent_id: str,
+        agent: Agent | None,
+    ) -> RuntimeCapabilityResolver:
+        """Build a capability resolver fenced by the current Agent version."""
+
+        async def current_snapshot_provider() -> RuntimeCapabilitySnapshot:
+            async with self.session_manager() as session:
+                current_agent = await self.agent_repository.get_by_id(
+                    session,
+                    agent_id,
+                )
+            if current_agent is None:
+                raise RuntimeError(
+                    "Agent was not found while resolving Runtime capability."
+                )
+            return RuntimeCapabilitySnapshot(
+                state=current_agent.runtime_capability,
+                version=current_agent.runtime_capability_version,
+                shell_enabled=current_agent.shell_enabled,
+            )
+
+        return RuntimeCapabilityResolver.from_agent(
+            state=(
+                agent.runtime_capability
+                if agent is not None
+                else AgentRuntimeCapability.NONE
+            ),
+            version=agent.runtime_capability_version if agent is not None else 1,
+            shell_enabled=agent.shell_enabled if agent is not None else False,
+            current_snapshot_provider=current_snapshot_provider,
+        )
+
     async def resolve_idle_continuation_toolkits(
         self,
         snapshot: CanonicalExecutionSnapshot,
@@ -534,6 +576,10 @@ class RunExecutor:
 
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, snapshot.agent_id)
+        runtime_capability_resolver = self._runtime_capability_resolver(
+            agent_id=snapshot.agent_id,
+            agent=agent,
+        )
         context = ToolkitContext(
             session_id=snapshot.session_id,
             workspace_id=snapshot.workspace_id,
@@ -570,7 +616,7 @@ class RunExecutor:
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
             memory_enabled=agent.memory_enabled if agent is not None else True,
-            runtime_tools_enabled=agent.shell_enabled if agent is not None else False,
+            runtime_capability_resolver=runtime_capability_resolver,
         )
         prepared = await prepare_toolkits(toolkits)
         _refresh_runtime_peer_toolkits(prepared)
@@ -1126,7 +1172,17 @@ class RunExecutor:
                 else ToolkitExecutionMode.ROOT
             )
             agent_memory_enabled = agent.memory_enabled if agent else True
-            runtime_tools_enabled = agent.shell_enabled if agent else False
+            runtime_capability_resolver = self._runtime_capability_resolver(
+                agent_id=invoke_input.agent_id,
+                agent=agent,
+            )
+            runtime_tools_projected = runtime_capability_resolver.project(
+                (
+                    RuntimeCapability.WORKSPACE,
+                    RuntimeCapability.RUNTIME_FILESYSTEM,
+                    RuntimeCapability.PROCESS_EXECUTION,
+                )
+            )
             runtime_domain_config = RuntimeDomainConfig(
                 allowed_domains=(), denied_domains=()
             )
@@ -1141,7 +1197,13 @@ class RunExecutor:
                 "model": run_request.model,
                 "execution_mode": execution_mode.value,
                 "memory_enabled": agent_memory_enabled,
-                "runtime_tools_enabled": runtime_tools_enabled,
+                "runtime_capability_state": (
+                    runtime_capability_resolver.snapshot.state.value
+                ),
+                "runtime_capability_version": (
+                    runtime_capability_resolver.snapshot.version
+                ),
+                "runtime_tools_projected": runtime_tools_projected,
             },
         )
         toolkits = await resolve_agent_tools(
@@ -1165,7 +1227,7 @@ class RunExecutor:
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
             memory_enabled=agent_memory_enabled,
-            runtime_tools_enabled=runtime_tools_enabled,
+            runtime_capability_resolver=runtime_capability_resolver,
         )
         toolkits.append(
             ToolkitBinding(
@@ -1199,7 +1261,13 @@ class RunExecutor:
                 "duration_seconds": round(now - boundary_started_at, 3),
                 "total_duration_seconds": round(now - preparation_started_at, 3),
                 "memory_enabled": agent_memory_enabled,
-                "runtime_tools_enabled": runtime_tools_enabled,
+                "runtime_capability_state": (
+                    runtime_capability_resolver.snapshot.state.value
+                ),
+                "runtime_capability_version": (
+                    runtime_capability_resolver.snapshot.version
+                ),
+                "runtime_tools_projected": runtime_tools_projected,
             },
         )
         boundary_started_at = now
