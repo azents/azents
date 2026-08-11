@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.runtime_configuration_revision_response import RuntimeConfigurationRevisionResponse
+from azentspublicclient.models.runtime_configuration_state_response import RuntimeConfigurationStateResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -28,8 +28,8 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
     Desired and applied Runtime configuration status.
     """ # noqa: E501
     status: StrictStr
-    desired: Optional[RuntimeConfigurationRevisionResponse]
-    applied: Optional[RuntimeConfigurationRevisionResponse]
+    desired: Optional[RuntimeConfigurationStateResponse]
+    applied: Optional[RuntimeConfigurationStateResponse]
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["status", "desired", "applied"]
 
@@ -115,8 +115,8 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
 
         _obj = cls.model_validate({
             "status": obj.get("status"),
-            "desired": RuntimeConfigurationRevisionResponse.from_dict(obj["desired"]) if obj.get("desired") is not None else None,
-            "applied": RuntimeConfigurationRevisionResponse.from_dict(obj["applied"]) if obj.get("applied") is not None else None
+            "desired": RuntimeConfigurationStateResponse.from_dict(obj["desired"]) if obj.get("desired") is not None else None,
+            "applied": RuntimeConfigurationStateResponse.from_dict(obj["applied"]) if obj.get("applied") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

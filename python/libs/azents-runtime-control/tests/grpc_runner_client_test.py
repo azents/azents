@@ -11,6 +11,7 @@ from azents_runtime_control.grpc_runner_client import (
     GrpcRunnerControlClient,
     RuntimeRunnerControlStreamClosed,
     runner_event_from_message,
+    runner_runtime_configuration_evidence_from_message,
 )
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
@@ -88,7 +89,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
         )
         heartbeat_ack.runtime_configuration.CopyFrom(
             runtime_configuration_pb2.RuntimeConfigurationEvidence(
-                revision_id="revision-2",
+                configuration_sequence="2",
                 digest="e" * 64,
                 desired_generation=5,
             )
@@ -129,7 +130,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
     ) == RunnerHeartbeatAcknowledgement(
         accepted=True,
         runtime_configuration=RuntimeConfigurationEvidence(
-            revision_id="revision-2",
+            configuration_sequence=2,
             digest="e" * 64,
             desired_generation=5,
         ),
@@ -173,6 +174,17 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
     assert event.final_success.process.status == "running"
     assert not event.final_success.process.HasField("exit_code")
     await client.close()
+
+
+def test_runner_wire_evidence_rejects_noncanonical_sequence() -> None:
+    message = runtime_configuration_pb2.RuntimeConfigurationEvidence(
+        configuration_sequence="01",
+        digest="d" * 64,
+        desired_generation=5,
+    )
+
+    with pytest.raises(ValueError, match="canonical positive decimal"):
+        runner_runtime_configuration_evidence_from_message(message)
 
 
 @pytest.mark.asyncio
@@ -753,7 +765,7 @@ def _registration() -> RunnerRegistration:
 
 def _runtime_configuration_evidence() -> RuntimeConfigurationEvidence:
     return RuntimeConfigurationEvidence(
-        revision_id="revision-1",
+        configuration_sequence=1,
         digest="d" * 64,
         desired_generation=5,
     )

@@ -36,7 +36,8 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.core.runtime_profile import (
-    RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationDocument,
+    RuntimeConfigurationStateStatus,
     RuntimeInfrastructureProfileKind,
     RuntimeProfileLifecycle,
 )
@@ -44,7 +45,7 @@ from azents.core.runtime_runner_credential import RuntimeRunnerCredentialVerifie
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationRevision
+from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationState
 from azents.rdb.models.runtime_provider_policy import (
     RDBRuntimeProviderContractRevision,
 )
@@ -53,8 +54,8 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
-    RuntimeConfigurationRevision,
-    RuntimeConfigurationRevisionCreate,
+    RuntimeConfigurationDesiredStateWrite,
+    RuntimeConfigurationState,
     RuntimeInfrastructureProfileCreate,
     WorkspaceRuntimeProfileCreate,
 )
@@ -223,15 +224,10 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
             RuntimeDesiredState.RUNNING,
         )
         assert command is not None
-        revision = await _attach_runtime_configuration(
+        await _attach_runtime_configuration(
             session,
             runtime_id=runtime.id,
             target_desired_generation=command.desired_generation,
-        )
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime.id)
-            .values(applied_runtime_configuration_revision_id=revision.id)
         )
         await runtime_repository.mark_lifecycle_dispatched(
             session,
@@ -367,15 +363,10 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
             RuntimeDesiredState.RUNNING,
         )
         assert command is not None
-        revision = await _attach_runtime_configuration(
+        state = await _attach_runtime_configuration(
             session,
             runtime_id=runtime.id,
             target_desired_generation=command.desired_generation,
-        )
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime.id)
-            .values(applied_runtime_configuration_revision_id=revision.id)
         )
         dispatched = await runtime_repository.mark_lifecycle_dispatched(
             session,
@@ -426,7 +417,7 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
             _network_policy_drift_report(
                 runtime_id=runtime.id,
                 desired_generation=command.desired_generation,
-                revision_id=revision.id,
+                configuration_sequence=state.desired.sequence,
             )
         )
     claimed = await control_protocol.claim_next_provider_request(
@@ -458,7 +449,7 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
         assert record.__dict__["provider_id"] == "provider-1"
         assert record.__dict__["provider_generation"] == accepted.generation
         assert record.__dict__["desired_generation"] == command.desired_generation
-        assert record.__dict__["configuration_revision_id"] == revision.id
+        assert record.__dict__["configuration_sequence"] == state.desired.sequence
         assert record.__dict__["reconciliation_kind"] == "network_policy"
         assert record.__dict__["reconciliation_reason"] == "network_policy_mismatch"
 
@@ -488,15 +479,10 @@ async def test_reconcile_observe_completion_rejects_stale_provider_generation(
             RuntimeDesiredState.RUNNING,
         )
         assert command is not None
-        revision = await _attach_runtime_configuration(
+        state = await _attach_runtime_configuration(
             session,
             runtime_id=runtime.id,
             target_desired_generation=command.desired_generation,
-        )
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime.id)
-            .values(applied_runtime_configuration_revision_id=revision.id)
         )
         observed = await runtime_repository.record_provider_observed_state(
             session,
@@ -542,7 +528,7 @@ async def test_reconcile_observe_completion_rejects_stale_provider_generation(
             runtime_id=runtime.id,
             provider_generation=previous.generation,
             desired_generation=command.desired_generation,
-            revision_id=revision.id,
+            configuration_sequence=state.desired.sequence,
         )
     )
     claimed = await control_protocol.claim_next_provider_request(
@@ -579,15 +565,10 @@ async def test_drift_repair_rechecks_runtime_snapshot_before_dispatch(
             RuntimeDesiredState.RUNNING,
         )
         assert command is not None
-        revision = await _attach_runtime_configuration(
+        state = await _attach_runtime_configuration(
             session,
             runtime_id=runtime.id,
             target_desired_generation=command.desired_generation,
-        )
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime.id)
-            .values(applied_runtime_configuration_revision_id=revision.id)
         )
         observed = await runtime_repository.record_provider_observed_state(
             session,
@@ -636,7 +617,7 @@ async def test_drift_repair_rechecks_runtime_snapshot_before_dispatch(
         claim_lifecycle=False,
         required_provider_generation=accepted.generation,
         required_observed_generation=command.desired_generation,
-        required_configuration_revision_id=revision.id,
+        required_configuration_sequence=state.desired.sequence,
     )
     claimed = await control_protocol.claim_next_provider_request(
         provider_id="provider-1",
@@ -670,29 +651,24 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
             RuntimeDesiredState.RUNNING,
         )
         assert initial is not None
-        initial_revision = await _attach_runtime_configuration(
+        initial_state = await _attach_runtime_configuration(
             session,
             runtime_id=runtime.id,
             target_desired_generation=initial.desired_generation,
         )
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime.id)
-            .values(applied_runtime_configuration_revision_id=initial_revision.id)
-        )
-        restart = await runtime_repository.set_desired_state_if_ready(
+        restart = await runtime_repository.set_desired_state_if_configuration_current(
             session,
             runtime.id,
             RuntimeLifecycleCommandType.RESTART,
             RuntimeDesiredState.RUNNING,
-            expected_configuration_revision_id=initial_revision.id,
+            expected_configuration_sequence=initial_state.desired.sequence,
+            expected_digest=initial_state.desired.digest or "",
+            expected_generation=initial.desired_generation,
         )
         assert restart is not None
-        desired_revision_id = restart.runtime.desired_runtime_configuration_revision_id
-        assert desired_revision_id is not None
         await session.execute(
-            sa.update(RDBRuntimeConfigurationRevision)
-            .where(RDBRuntimeConfigurationRevision.id == desired_revision_id)
+            sa.update(RDBRuntimeConfigurationState)
+            .where(RDBRuntimeConfigurationState.runtime_id == runtime.id)
             .values(
                 provider_reported_digest="d" * 64,
                 provider_acknowledged_at=datetime.datetime.now(datetime.UTC),
@@ -800,7 +776,7 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
 async def test_reconciler_repairs_stale_stop_configuration_generation(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """STOP clones usable configuration evidence for its desired generation."""
+    """STOP reuses usable state without rewriting the bounded desired slot."""
     runtime_repository = AgentRuntimeRepository()
     profile_repository = RuntimeProfileRepository()
     async with rdb_session_manager() as session:
@@ -819,7 +795,7 @@ async def test_reconciler_repairs_stale_stop_configuration_generation(
             RuntimeDesiredState.RUNNING,
         )
         assert start is not None
-        source_revision = await _attach_runtime_configuration(
+        source_state = await _attach_runtime_configuration(
             session,
             runtime_id=runtime.id,
             target_desired_generation=start.desired_generation,
@@ -876,11 +852,9 @@ async def test_reconciler_repairs_stale_stop_configuration_generation(
     async with rdb_session_manager() as session:
         updated = await runtime_repository.get_by_agent_id(session, agent_id)
         assert updated is not None
-        revision_id = updated.desired_runtime_configuration_revision_id
-        assert revision_id is not None
-        repaired_revision = await profile_repository.get_configuration_revision(
+        repaired_state = await profile_repository.get_configuration_state(
             session,
-            revision_id=revision_id,
+            runtime_id=runtime.id,
         )
 
     assert dispatched == 1
@@ -890,16 +864,22 @@ async def test_reconciler_repairs_stale_stop_configuration_generation(
     runtime_configuration = claimed.payload["runtime_configuration"]
     assert isinstance(runtime_configuration, dict)
     assert runtime_configuration["desired_generation"] == stop.desired_generation
-    assert repaired_revision is not None
-    assert repaired_revision.id != source_revision.id
-    assert repaired_revision.digest == source_revision.digest
-    assert repaired_revision.target_desired_generation == stop.desired_generation
+    assert (
+        runtime_configuration["configuration_sequence"] == source_state.desired.sequence
+    )
+    assert repaired_state is not None
+    assert repaired_state.desired.sequence == source_state.desired.sequence
+    assert repaired_state.desired.digest == source_state.desired.digest
+    assert (
+        repaired_state.desired.target_generation
+        == source_state.desired.target_generation
+    )
 
 
 async def test_reconciler_rejects_mismatched_resolved_provider_reference(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Dispatch validates resolved references against the immutable revision row."""
+    """Dispatch validates resolved references against the current state document."""
     runtime_repository = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
         workspace_id = await _create_workspace(
@@ -920,22 +900,26 @@ async def test_reconciler_rejects_mismatched_resolved_provider_reference(
             RuntimeDesiredState.RUNNING,
         )
         assert command is not None
-        revision = await _attach_runtime_configuration(
+        state = await _attach_runtime_configuration(
             session,
             runtime_id=runtime.id,
             target_desired_generation=command.desired_generation,
         )
-        configuration = dict(revision.resolved_configuration or {})
+        assert state.desired.document is not None
+        configuration = dict(state.desired.document.resolved_configuration or {})
         provider_reference = configuration["provider"]
         assert isinstance(provider_reference, dict)
         configuration["provider"] = {
             **provider_reference,
             "id": "mismatched-provider-resource",
         }
+        document = state.desired.document.model_copy(
+            update={"resolved_configuration": configuration}
+        )
         await session.execute(
-            sa.update(RDBRuntimeConfigurationRevision)
-            .where(RDBRuntimeConfigurationRevision.id == revision.id)
-            .values(resolved_configuration=configuration)
+            sa.update(RDBRuntimeConfigurationState)
+            .where(RDBRuntimeConfigurationState.runtime_id == runtime.id)
+            .values(desired_document=document.model_dump(mode="json"))
         )
         current = await runtime_repository.get_by_id(session, runtime.id)
         assert current is not None
@@ -1194,7 +1178,7 @@ def _network_policy_drift_report(
     *,
     runtime_id: str,
     desired_generation: int,
-    revision_id: str,
+    configuration_sequence: int,
     provider_generation: int = 1,
 ) -> RuntimeProviderReport:
     """Build one current typed NetworkPolicy drift observation."""
@@ -1210,7 +1194,7 @@ def _network_policy_drift_report(
         reported_at=datetime.datetime.now(datetime.UTC),
         terminal_delete_acknowledged=False,
         runtime_configuration=RuntimeConfigurationEvidence(
-            revision_id=revision_id,
+            configuration_sequence=configuration_sequence,
             digest="d" * 64,
             desired_generation=desired_generation,
         ),
@@ -1313,7 +1297,7 @@ async def _attach_runtime_configuration(
     *,
     runtime_id: str,
     target_desired_generation: int,
-) -> RuntimeConfigurationRevision:
+) -> RuntimeConfigurationState:
     runtime = await session.get(RDBAgentRuntime, runtime_id)
     assert runtime is not None
     provider = await RuntimeProviderRepository().create(
@@ -1420,55 +1404,79 @@ async def _attach_runtime_configuration(
             actor_workspace_user_id=None,
         ),
     )
-    revision = await profile_repository.create_configuration_revision(
-        session,
-        create=RuntimeConfigurationRevisionCreate(
-            runtime_id=runtime_id,
-            provider_id=provider.id,
-            provider_capability_revision_id=contract.id,
-            infrastructure_profile_id=infrastructure.id,
-            infrastructure_profile_version=infrastructure.version,
-            workspace_runtime_profile_id=workspace_profile.id,
-            workspace_runtime_profile_version=workspace_profile.version,
-            agent_selection_version=1,
-            resolution_status=RuntimeConfigurationResolutionStatus.READY,
-            reason_code=None,
-            required_capabilities=infrastructure.required_capabilities,
-            missing_capabilities=(),
-            resolved_configuration={
-                "schema_version": 1,
-                "provider": {
-                    "id": provider.id,
-                    "logical_id": provider.provider_id,
-                    "kind": provider.kind.value,
-                    "capability_revision_id": contract.id,
-                    "capability_digest": contract.digest,
-                },
-                "infrastructure_profile": {
-                    "id": infrastructure.id,
-                    "version": infrastructure.version,
-                    "digest": infrastructure.digest,
-                },
-                "workspace_runtime_profile": {
-                    "id": workspace_profile.id,
-                    "version": workspace_profile.version,
-                    "digest": workspace_profile.digest,
-                },
-                "effective_profile": effective_profile,
+    document = RuntimeConfigurationDocument(
+        schema_version=1,
+        source_trace={},
+        provider_id=provider.id,
+        provider_capability_revision_id=contract.id,
+        infrastructure_profile_id=infrastructure.id,
+        infrastructure_profile_version=infrastructure.version,
+        workspace_runtime_profile_id=workspace_profile.id,
+        workspace_runtime_profile_version=workspace_profile.version,
+        agent_selection_version=1,
+        required_capabilities=infrastructure.required_capabilities,
+        missing_capabilities=(),
+        resolved_configuration={
+            "schema_version": 1,
+            "provider": {
+                "id": provider.id,
+                "logical_id": provider.provider_id,
+                "kind": provider.kind.value,
+                "capability_revision_id": contract.id,
+                "capability_digest": contract.digest,
             },
-            source_trace={},
-            digest="d" * 64,
-            target_desired_generation=target_desired_generation,
-        ),
+            "infrastructure_profile": {
+                "id": infrastructure.id,
+                "version": infrastructure.version,
+                "digest": infrastructure.digest,
+            },
+            "workspace_runtime_profile": {
+                "id": workspace_profile.id,
+                "version": workspace_profile.version,
+                "digest": workspace_profile.digest,
+            },
+            "effective_profile": effective_profile,
+        },
     )
     await session.execute(
         sa.update(RDBAgentRuntime)
         .where(RDBAgentRuntime.id == runtime_id)
         .values(
             runtime_provider_resource_id=provider.id,
-            infrastructure_profile_id=infrastructure.id,
-            workspace_runtime_profile_id=workspace_profile.id,
-            desired_runtime_configuration_revision_id=revision.id,
         )
     )
-    return revision
+    state = await profile_repository.overwrite_desired_configuration_state(
+        session,
+        write=RuntimeConfigurationDesiredStateWrite(
+            runtime_id=runtime_id,
+            status=RuntimeConfigurationStateStatus.READY,
+            target_generation=target_desired_generation,
+            digest="d" * 64,
+            document=document,
+            reason_code=None,
+        ),
+    )
+    assert state is not None
+    evidence = RuntimeConfigurationEvidence(
+        configuration_sequence=state.desired.sequence,
+        digest=state.desired.digest or "",
+        desired_generation=target_desired_generation,
+    )
+    acknowledged_at = datetime.datetime.now(datetime.UTC)
+    state = await profile_repository.record_provider_configuration_evidence(
+        session,
+        runtime_id=runtime_id,
+        provider_id=provider.id,
+        evidence=evidence,
+        acknowledged_at=acknowledged_at,
+    )
+    assert state is not None
+    state = await profile_repository.record_runner_configuration_evidence(
+        session,
+        runtime_id=runtime_id,
+        provider_id=provider.id,
+        evidence=evidence,
+        observed_at=acknowledged_at,
+    )
+    assert state is not None
+    return state

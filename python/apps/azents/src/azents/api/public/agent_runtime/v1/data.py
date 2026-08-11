@@ -18,10 +18,12 @@ from azents.core.enums import (
     RuntimeSummary,
     RuntimeTerminalDeleteAcknowledgementKind,
 )
-from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
-from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
+from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationAppliedSlot,
+    RuntimeConfigurationSlot,
+)
 from azents.services.agent_runtime.lifecycle_data import (
     AgentRuntimeAdditionOutput,
     AgentRuntimeConfigurationStatus,
@@ -58,52 +60,101 @@ class AgentRuntimeSummaryResponse(BaseModel):
     failure: AgentRuntimeFailureResponse | None
 
 
-class RuntimeConfigurationRevisionResponse(BaseModel):
-    """Safe immutable Runtime configuration revision evidence."""
+class RuntimeConfigurationStateResponse(BaseModel):
+    """Bounded desired or applied Runtime configuration state."""
 
-    id: str
-    provider_id: str
+    sequence: int
+    status: Literal["unconfigured", "blocked", "ready"]
+    target_generation: int
+    digest: str | None
+    provider_id: str | None
     provider_capability_revision_id: str | None
-    infrastructure_profile_id: str
-    infrastructure_profile_version: int
-    workspace_runtime_profile_id: str
-    workspace_runtime_profile_version: int
-    agent_selection_version: int
-    resolution_status: RuntimeConfigurationResolutionStatus
+    infrastructure_profile_id: str | None
+    infrastructure_profile_version: int | None
+    workspace_runtime_profile_id: str | None
+    workspace_runtime_profile_version: int | None
+    agent_selection_version: int | None
+    required_capabilities: list[str] | None
+    missing_capabilities: list[str] | None
     reason_code: str | None
-    required_capabilities: list[str]
-    missing_capabilities: list[str]
-    digest: str
-    target_desired_generation: int
     provider_reported_digest: str | None
     runner_reported_digest: str | None
     provider_acknowledged_at: datetime.datetime | None
-    runtime_observed_at: datetime.datetime | None
-    created_at: datetime.datetime
+    runner_observed_at: datetime.datetime | None
+    applied_at: datetime.datetime | None
 
     @classmethod
-    def convert_from(cls, data: RuntimeConfigurationRevision) -> Self:
-        """Convert immutable evidence without resolved infrastructure details."""
+    def convert_from_desired(cls, data: RuntimeConfigurationSlot) -> Self:
+        """Convert desired state without stored configuration details."""
+        document = data.document
         return cls(
-            id=data.id,
-            provider_id=data.provider_id,
-            provider_capability_revision_id=data.provider_capability_revision_id,
-            infrastructure_profile_id=data.infrastructure_profile_id,
-            infrastructure_profile_version=data.infrastructure_profile_version,
-            workspace_runtime_profile_id=data.workspace_runtime_profile_id,
-            workspace_runtime_profile_version=data.workspace_runtime_profile_version,
-            agent_selection_version=data.agent_selection_version,
-            resolution_status=data.resolution_status,
-            reason_code=data.reason_code,
-            required_capabilities=list(data.required_capabilities),
-            missing_capabilities=list(data.missing_capabilities),
+            sequence=data.sequence,
+            status=data.status.value,
+            target_generation=data.target_generation,
             digest=data.digest,
-            target_desired_generation=data.target_desired_generation,
+            provider_id=document.provider_id if document is not None else None,
+            provider_capability_revision_id=(
+                document.provider_capability_revision_id
+                if document is not None
+                else None
+            ),
+            infrastructure_profile_id=(
+                document.infrastructure_profile_id if document is not None else None
+            ),
+            infrastructure_profile_version=(
+                document.infrastructure_profile_version
+                if document is not None
+                else None
+            ),
+            workspace_runtime_profile_id=(
+                document.workspace_runtime_profile_id if document is not None else None
+            ),
+            workspace_runtime_profile_version=(
+                document.workspace_runtime_profile_version
+                if document is not None
+                else None
+            ),
+            agent_selection_version=(
+                document.agent_selection_version if document is not None else None
+            ),
+            required_capabilities=(
+                list(document.required_capabilities) if document is not None else None
+            ),
+            missing_capabilities=(
+                list(document.missing_capabilities) if document is not None else None
+            ),
+            reason_code=data.reason_code,
             provider_reported_digest=data.provider_reported_digest,
             runner_reported_digest=data.runner_reported_digest,
             provider_acknowledged_at=data.provider_acknowledged_at,
-            runtime_observed_at=data.runtime_observed_at,
-            created_at=data.created_at,
+            runner_observed_at=data.runner_observed_at,
+            applied_at=None,
+        )
+
+    @classmethod
+    def convert_from_applied(cls, data: RuntimeConfigurationAppliedSlot) -> Self:
+        """Convert applied state without stored configuration details."""
+        document = data.document
+        return cls(
+            sequence=data.sequence,
+            status="ready",
+            target_generation=data.target_generation,
+            digest=data.digest,
+            provider_id=document.provider_id,
+            provider_capability_revision_id=document.provider_capability_revision_id,
+            infrastructure_profile_id=document.infrastructure_profile_id,
+            infrastructure_profile_version=document.infrastructure_profile_version,
+            workspace_runtime_profile_id=document.workspace_runtime_profile_id,
+            workspace_runtime_profile_version=document.workspace_runtime_profile_version,
+            agent_selection_version=document.agent_selection_version,
+            required_capabilities=list(document.required_capabilities),
+            missing_capabilities=list(document.missing_capabilities),
+            reason_code=None,
+            provider_reported_digest=None,
+            runner_reported_digest=None,
+            provider_acknowledged_at=None,
+            runner_observed_at=None,
+            applied_at=data.applied_at,
         )
 
 
@@ -117,8 +168,8 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
         "waiting_for_recreation",
         "applied",
     ]
-    desired: RuntimeConfigurationRevisionResponse | None
-    applied: RuntimeConfigurationRevisionResponse | None
+    desired: RuntimeConfigurationStateResponse | None
+    applied: RuntimeConfigurationStateResponse | None
 
     @classmethod
     def convert_from(cls, data: AgentRuntimeConfigurationStatus) -> Self:
@@ -126,12 +177,12 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
         return cls(
             status=data.status,
             desired=(
-                RuntimeConfigurationRevisionResponse.convert_from(data.desired)
+                RuntimeConfigurationStateResponse.convert_from_desired(data.desired)
                 if data.desired is not None
                 else None
             ),
             applied=(
-                RuntimeConfigurationRevisionResponse.convert_from(data.applied)
+                RuntimeConfigurationStateResponse.convert_from_applied(data.applied)
                 if data.applied is not None
                 else None
             ),
@@ -146,10 +197,7 @@ class AgentRuntimeRawStateResponse(BaseModel):
     agent_id: str
     runtime_provider_id: str | None
     runtime_provider_resource_id: str | None
-    infrastructure_profile_id: str | None
-    workspace_runtime_profile_id: str | None
-    desired_runtime_configuration_revision_id: str | None
-    applied_runtime_configuration_revision_id: str | None
+    configuration_sequence: int
     desired_state: RuntimeDesiredState
     desired_generation: int
     last_lifecycle_command: RuntimeLifecycleCommandType | None
@@ -176,14 +224,7 @@ class AgentRuntimeRawStateResponse(BaseModel):
             agent_id=data.agent_id,
             runtime_provider_id=data.runtime_provider_id,
             runtime_provider_resource_id=data.runtime_provider_resource_id,
-            infrastructure_profile_id=data.infrastructure_profile_id,
-            workspace_runtime_profile_id=data.workspace_runtime_profile_id,
-            desired_runtime_configuration_revision_id=(
-                data.desired_runtime_configuration_revision_id
-            ),
-            applied_runtime_configuration_revision_id=(
-                data.applied_runtime_configuration_revision_id
-            ),
+            configuration_sequence=data.configuration_sequence,
             desired_state=data.desired_state,
             desired_generation=data.desired_generation,
             last_lifecycle_command=data.last_lifecycle_command,

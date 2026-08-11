@@ -406,7 +406,7 @@ async def test_runner_grpc_registers_and_acks_heartbeat() -> None:
     store = InMemoryRuntimeCoordinationStore()
     sink = FakeStateSink(
         heartbeat_configuration=RuntimeConfigurationEvidence(
-            revision_id="revision-2",
+            configuration_sequence=2,
             digest="e" * 64,
             desired_generation=1,
         )
@@ -434,14 +434,14 @@ async def test_runner_grpc_registers_and_acks_heartbeat() -> None:
     assert accepted.register_accepted.runtime_id == "runtime-1"
     assert accepted.register_accepted.generation == 1
     assert heartbeat_ack.heartbeat_ack.monotonic_sequence == 7
-    assert heartbeat_ack.heartbeat_ack.runtime_configuration.revision_id == (
-        "revision-2"
+    assert (
+        heartbeat_ack.heartbeat_ack.runtime_configuration.configuration_sequence == "2"
     )
     assert heartbeat_ack.heartbeat_ack.runtime_configuration.digest == "e" * 64
     assert heartbeat_ack.heartbeat_ack.runtime_configuration.desired_generation == 1
     assert sink.reports[-1].runner_state is SharedRunnerState.UNKNOWN
     assert sink.reports[-1].diagnostic["reason"] == "runner_stream_closed"
-    assert sink.registrations[0].runtime_configuration.revision_id == "revision-1"
+    assert sink.registrations[0].runtime_configuration.configuration_sequence == 1
 
 
 @pytest.mark.asyncio
@@ -457,7 +457,7 @@ async def test_runner_grpc_rejects_registration_policy_mismatch() -> None:
 
     with pytest.raises(RuntimeError, match="FAILED_PRECONDITION"):
         await anext(stream)
-    assert sink.registrations[0].runtime_configuration.revision_id == "revision-1"
+    assert sink.registrations[0].runtime_configuration.configuration_sequence == 1
     assert sink.reports == []
 
 
@@ -1876,7 +1876,7 @@ def _runtime_configuration_evidence_message() -> (
     runtime_configuration_pb2.RuntimeConfigurationEvidence
 ):
     return runtime_configuration_pb2.RuntimeConfigurationEvidence(
-        revision_id="revision-1",
+        configuration_sequence="1",
         digest="d" * 64,
         desired_generation=1,
     )

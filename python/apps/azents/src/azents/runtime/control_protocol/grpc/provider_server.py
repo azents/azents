@@ -25,6 +25,9 @@ from azents_runtime_control.provider import (
 from azents_runtime_control.provider import (
     RuntimeProviderReport as SharedRuntimeProviderReport,
 )
+from azents_runtime_control.runtime_configuration import (
+    serialize_configuration_sequence,
+)
 from google.protobuf import timestamp_pb2
 
 from azents.core.enums import RuntimeProviderKind
@@ -875,9 +878,10 @@ def _provider_command(
     )
     command.payload.update(payload)
     runtime_configuration = _required_mapping(envelope.payload, "runtime_configuration")
-    command.runtime_configuration.evidence.revision_id = _required_string(
-        runtime_configuration,
-        "revision_id",
+    command.runtime_configuration.evidence.configuration_sequence = (
+        serialize_configuration_sequence(
+            _required_int(runtime_configuration, "configuration_sequence")
+        )
     )
     command.runtime_configuration.evidence.digest = _required_string(
         runtime_configuration,

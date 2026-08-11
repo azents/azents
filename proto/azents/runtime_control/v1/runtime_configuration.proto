@@ -3,7 +3,7 @@ syntax = "proto3";
 package azents.runtime_control.v1;
 
 message RuntimeConfigurationEvidence {
-  string revision_id = 1;
+  string configuration_sequence = 1;
   string digest = 2;
   uint64 desired_generation = 3;
 }

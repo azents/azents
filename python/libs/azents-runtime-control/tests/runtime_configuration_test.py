@@ -13,8 +13,10 @@ from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEnvelope,
     RuntimeConfigurationEvidence,
     canonical_runtime_configuration_json,
+    parse_configuration_sequence,
     parse_runtime_configuration_envelope,
     runtime_configuration_from_json,
+    serialize_configuration_sequence,
     validate_runtime_configuration_cleanup_envelope,
 )
 
@@ -143,22 +145,12 @@ def test_command_generation_mismatch_is_rejected() -> None:
     "evidence",
     (
         RuntimeConfigurationEvidence(
-            revision_id="",
-            digest="d" * 64,
-            desired_generation=3,
-        ),
-        RuntimeConfigurationEvidence(
-            revision_id=" revision-1 ",
-            digest="d" * 64,
-            desired_generation=3,
-        ),
-        RuntimeConfigurationEvidence(
-            revision_id="revision-1",
+            configuration_sequence=1,
             digest="invalid",
             desired_generation=3,
         ),
         RuntimeConfigurationEvidence(
-            revision_id="revision-1",
+            configuration_sequence=1,
             digest="d" * 64,
             desired_generation=-1,
         ),
@@ -173,6 +165,22 @@ def test_invalid_evidence_is_rejected(
             desired_generation=evidence.desired_generation,
             expected_provider_kind="docker",
         )
+
+
+@pytest.mark.parametrize(
+    "value",
+    ("", " 1", "1 ", "+1", "-1", "0", "01", "１２", "one"),
+)
+def test_configuration_sequence_rejects_noncanonical_text(value: str) -> None:
+    with pytest.raises(ValueError, match="canonical positive decimal"):
+        parse_configuration_sequence(value)
+
+
+@pytest.mark.parametrize("value", (1, 2, 123456789))
+def test_configuration_sequence_round_trips_canonical_text(value: int) -> None:
+    assert (
+        parse_configuration_sequence(serialize_configuration_sequence(value)) == value
+    )
 
 
 def test_unknown_top_level_field_is_rejected() -> None:
@@ -258,7 +266,7 @@ def _envelope(
 ) -> RuntimeConfigurationEnvelope:
     return RuntimeConfigurationEnvelope(
         evidence=RuntimeConfigurationEvidence(
-            revision_id="revision-1",
+            configuration_sequence=1,
             digest="d" * 64,
             desired_generation=3,
         ),

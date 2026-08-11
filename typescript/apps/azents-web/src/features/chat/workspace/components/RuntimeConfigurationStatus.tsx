@@ -12,7 +12,7 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import type { RuntimeConfigurationState } from "../types";
-import type { RuntimeConfigurationRevisionResponse } from "@azents/public-client";
+import type { RuntimeConfigurationStateResponse } from "@azents/public-client";
 
 interface RuntimeConfigurationStatusProps {
   state: RuntimeConfigurationState;
@@ -52,41 +52,58 @@ function configurationReason(reasonCode: string | null): ConfigurationReason {
   }
 }
 
-function revisionEvidence(
-  revision: RuntimeConfigurationRevisionResponse,
+function stateEvidence(
+  configurationState: RuntimeConfigurationStateResponse,
 ): Array<{
   label:
-    | "configurationEvidence.revision"
+    | "configurationEvidence.sequence"
     | "configurationEvidence.profile"
     | "configurationEvidence.infrastructure"
     | "configurationEvidence.generation"
     | "configurationEvidence.digest";
   value: string;
 }> {
+  const profile =
+    configurationState.workspace_runtime_profile_id !== null &&
+    configurationState.workspace_runtime_profile_version !== null
+      ? `${configurationState.workspace_runtime_profile_id} · v${configurationState.workspace_runtime_profile_version}`
+      : "—";
+  const infrastructure =
+    configurationState.infrastructure_profile_id !== null &&
+    configurationState.infrastructure_profile_version !== null
+      ? `${configurationState.infrastructure_profile_id} · v${configurationState.infrastructure_profile_version}`
+      : "—";
+
   return [
-    { label: "configurationEvidence.revision", value: revision.id },
+    {
+      label: "configurationEvidence.sequence",
+      value: configurationState.sequence.toString(),
+    },
     {
       label: "configurationEvidence.profile",
-      value: `${revision.workspace_runtime_profile_id} · v${revision.workspace_runtime_profile_version}`,
+      value: profile,
     },
     {
       label: "configurationEvidence.infrastructure",
-      value: `${revision.infrastructure_profile_id} · v${revision.infrastructure_profile_version}`,
+      value: infrastructure,
     },
     {
       label: "configurationEvidence.generation",
-      value: revision.target_desired_generation.toString(),
+      value: configurationState.target_generation.toString(),
     },
-    { label: "configurationEvidence.digest", value: revision.digest },
+    {
+      label: "configurationEvidence.digest",
+      value: configurationState.digest ?? "—",
+    },
   ];
 }
 
-function RevisionPanel({
+function StatePanel({
   title,
-  revision,
+  configurationState,
 }: {
   title: string;
-  revision: RuntimeConfigurationRevisionResponse;
+  configurationState: RuntimeConfigurationStateResponse;
 }): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
 
@@ -96,7 +113,7 @@ function RevisionPanel({
         <Text size="sm" fw={600}>
           {title}
         </Text>
-        {revisionEvidence(revision).map((item) => (
+        {stateEvidence(configurationState).map((item) => (
           <Stack key={item.label} gap={0}>
             <Text size="xs" fw={500}>
               {t(item.label)}
@@ -113,13 +130,13 @@ function RevisionPanel({
             </Text>
           </Stack>
         ))}
-        {revision.reason_code !== null && (
+        {configurationState.reason_code !== null && (
           <Alert color="red" p="xs">
             <Stack gap="xs">
               <Text size="xs">
                 {t(
                   `configurationReasons.${configurationReason(
-                    revision.reason_code,
+                    configurationState.reason_code,
                   )}`,
                 )}
               </Text>
@@ -128,19 +145,21 @@ function RevisionPanel({
                 ff="monospace"
                 style={{ overflowWrap: "anywhere" }}
               >
-                {revision.reason_code}
+                {configurationState.reason_code}
               </Text>
-              {revision.missing_capabilities.length > 0 && (
-                <Text
-                  size="xs"
-                  ff="monospace"
-                  style={{ overflowWrap: "anywhere" }}
-                >
-                  {t("configurationMissingCapabilities", {
-                    capabilities: revision.missing_capabilities.join(", "),
-                  })}
-                </Text>
-              )}
+              {configurationState.missing_capabilities !== null &&
+                configurationState.missing_capabilities.length > 0 && (
+                  <Text
+                    size="xs"
+                    ff="monospace"
+                    style={{ overflowWrap: "anywhere" }}
+                  >
+                    {t("configurationMissingCapabilities", {
+                      capabilities:
+                        configurationState.missing_capabilities.join(", "),
+                    })}
+                  </Text>
+                )}
             </Stack>
           </Alert>
         )}
@@ -205,22 +224,22 @@ export function RuntimeConfigurationStatus({
                 <Stack gap="sm">
                   {configuration.status === "applied" &&
                   configuration.applied !== null ? (
-                    <RevisionPanel
+                    <StatePanel
                       title={t("configurationCurrent")}
-                      revision={configuration.applied}
+                      configurationState={configuration.applied}
                     />
                   ) : (
                     <>
                       {configuration.desired !== null && (
-                        <RevisionPanel
+                        <StatePanel
                           title={t("configurationDesired")}
-                          revision={configuration.desired}
+                          configurationState={configuration.desired}
                         />
                       )}
                       {configuration.applied !== null && (
-                        <RevisionPanel
+                        <StatePanel
                           title={t("configurationApplied")}
-                          revision={configuration.applied}
+                          configurationState={configuration.applied}
                         />
                       )}
                     </>

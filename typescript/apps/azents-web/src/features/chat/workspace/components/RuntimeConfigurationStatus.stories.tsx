@@ -3,11 +3,14 @@ import { NextIntlClientProvider } from "next-intl";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import koMessages from "../../../../../messages/ko-KR.json";
 import { RuntimeConfigurationStatus } from "./RuntimeConfigurationStatus";
-import type { RuntimeConfigurationRevisionResponse } from "@azents/public-client";
+import type { RuntimeConfigurationStateResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
-const desiredRevision: RuntimeConfigurationRevisionResponse = {
-  id: "runtime-configuration-revision-desired",
+const desiredState: RuntimeConfigurationStateResponse = {
+  sequence: 18,
+  status: "ready",
+  target_generation: 18,
+  digest: "sha256:desired-runtime-configuration-digest",
   provider_id: "runtime-provider-kubernetes",
   provider_capability_revision_id: "capability-revision-12",
   infrastructure_profile_id: "infrastructure-profile-standard",
@@ -15,25 +18,23 @@ const desiredRevision: RuntimeConfigurationRevisionResponse = {
   workspace_runtime_profile_id: "workspace-runtime-profile-default",
   workspace_runtime_profile_version: 7,
   agent_selection_version: 3,
-  resolution_status: "ready",
-  reason_code: null,
   required_capabilities: ["runtime.kubernetes.pod-profile.v1"],
   missing_capabilities: [],
-  digest: "sha256:desired-runtime-configuration-digest",
-  target_desired_generation: 18,
+  reason_code: null,
   provider_reported_digest: null,
   runner_reported_digest: null,
   provider_acknowledged_at: null,
-  runtime_observed_at: null,
-  created_at: "2026-07-31T06:00:00Z",
+  runner_observed_at: null,
+  applied_at: null,
 };
 
-const appliedRevision: RuntimeConfigurationRevisionResponse = {
-  ...desiredRevision,
-  provider_reported_digest: desiredRevision.digest,
-  runner_reported_digest: desiredRevision.digest,
+const appliedState: RuntimeConfigurationStateResponse = {
+  ...desiredState,
+  provider_reported_digest: desiredState.digest,
+  runner_reported_digest: desiredState.digest,
   provider_acknowledged_at: "2026-07-31T06:01:00Z",
-  runtime_observed_at: "2026-07-31T06:02:00Z",
+  runner_observed_at: "2026-07-31T06:02:00Z",
+  applied_at: "2026-07-31T06:02:00Z",
 };
 
 const meta = {
@@ -75,8 +76,9 @@ export const ConfigurationBlocked = {
       configuration: {
         status: "configuration_blocked",
         desired: {
-          ...desiredRevision,
-          resolution_status: "blocked",
+          ...desiredState,
+          status: "blocked",
+          digest: null,
           reason_code: "provider_capability_missing",
           missing_capabilities: ["runtime.kubernetes.pod-profile.v1"],
         },
@@ -92,7 +94,7 @@ export const ConfiguredNotCreated = {
       type: "LOADED",
       configuration: {
         status: "configured_not_created",
-        desired: desiredRevision,
+        desired: desiredState,
         applied: null,
       },
     },
@@ -105,16 +107,16 @@ export const WaitingForRecreation = {
       type: "LOADED",
       configuration: {
         status: "waiting_for_recreation",
-        desired: desiredRevision,
+        desired: desiredState,
         applied: {
-          ...appliedRevision,
-          id: "runtime-configuration-revision-previous",
+          ...appliedState,
+          sequence: 17,
           digest: "sha256:previous-runtime-configuration-digest",
           provider_reported_digest:
             "sha256:previous-runtime-configuration-digest",
           runner_reported_digest:
             "sha256:previous-runtime-configuration-digest",
-          target_desired_generation: 17,
+          target_generation: 17,
         },
       },
     },
@@ -127,8 +129,8 @@ export const Applied = {
       type: "LOADED",
       configuration: {
         status: "applied",
-        desired: desiredRevision,
-        applied: appliedRevision,
+        desired: desiredState,
+        applied: appliedState,
       },
     },
   },
@@ -140,8 +142,8 @@ export const DirectRuntimeApplied = {
       type: "LOADED",
       configuration: {
         status: "applied",
-        desired: desiredRevision,
-        applied: appliedRevision,
+        desired: desiredState,
+        applied: appliedState,
       },
     },
   },

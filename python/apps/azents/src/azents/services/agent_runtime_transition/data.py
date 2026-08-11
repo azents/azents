@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_runtime_add.data import AgentRuntimeAddReceipt
-from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
+from azents.repos.runtime_profile.data import RuntimeConfigurationSlot
 
 
 class AgentRuntimeAdditionRequest(BaseModel):
@@ -28,7 +28,7 @@ class AgentRuntimeAdditionResult:
 
     agent: Agent
     runtime: AgentRuntime
-    desired_revision: RuntimeConfigurationRevision
+    desired: RuntimeConfigurationSlot
     receipt: AgentRuntimeAddReceipt
     replayed: bool
 

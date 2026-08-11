@@ -93,14 +93,6 @@ class RDBAgentRuntime(RDBModel):
         "ix_agent_runtimes_runtime_provider_resource_id",
         "runtime_provider_resource_id",
     )
-    IX_INFRASTRUCTURE_PROFILE_ID = sa.Index(
-        "ix_agent_runtimes_infrastructure_profile_id",
-        "infrastructure_profile_id",
-    )
-    IX_WORKSPACE_RUNTIME_PROFILE_ID = sa.Index(
-        "ix_agent_runtimes_workspace_runtime_profile_id",
-        "workspace_runtime_profile_id",
-    )
     IX_DESIRED_OBSERVED = sa.Index(
         "ix_agent_runtimes_desired_observed",
         "desired_state",
@@ -169,39 +161,11 @@ class RDBAgentRuntime(RDBModel):
         nullable=True,
         default=None,
     )
-    infrastructure_profile_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_infrastructure_profiles.id", ondelete="RESTRICT"),
-        nullable=True,
-        default=None,
-    )
-    workspace_runtime_profile_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("workspace_runtime_profiles.id", ondelete="RESTRICT"),
-        nullable=True,
-        default=None,
-    )
-    desired_runtime_configuration_revision_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey(
-            "runtime_configuration_revisions.id",
-            ondelete="RESTRICT",
-            use_alter=True,
-            name="fk_agent_runtimes_desired_runtime_configuration_revision_id",
-        ),
-        nullable=True,
-        default=None,
-    )
-    applied_runtime_configuration_revision_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey(
-            "runtime_configuration_revisions.id",
-            ondelete="RESTRICT",
-            use_alter=True,
-            name="fk_agent_runtimes_applied_runtime_configuration_revision_id",
-        ),
-        nullable=True,
-        default=None,
+    configuration_sequence: Mapped[int] = mapped_column(
+        sa.BigInteger,
+        init=False,
+        nullable=False,
+        server_default="0",
     )
     desired_state: Mapped[RuntimeDesiredState] = mapped_column(
         runtime_desired_state_enum,
@@ -356,8 +320,6 @@ class RDBAgentRuntime(RDBModel):
         IX_WORKSPACE_ID,
         IX_RUNTIME_PROVIDER_ID,
         IX_RUNTIME_PROVIDER_RESOURCE_ID,
-        IX_INFRASTRUCTURE_PROFILE_ID,
-        IX_WORKSPACE_RUNTIME_PROFILE_ID,
         IX_DESIRED_OBSERVED,
         IX_LIFECYCLE_DISPATCH,
         IX_PROVIDER_CONNECTION_STATE,

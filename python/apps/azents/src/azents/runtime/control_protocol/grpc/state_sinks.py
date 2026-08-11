@@ -209,22 +209,23 @@ class RuntimeRunnerStateRepositorySink:
             runtime = await self.runtime_repository.get_by_id(session, runtime_id)
             if runtime is None or runtime.runtime_provider_resource_id is None:
                 return None
-            revision_id = runtime.desired_runtime_configuration_revision_id
+            state = await self.profile_repository.get_configuration_state(
+                session,
+                runtime_id=runtime.id,
+            )
             if (
-                revision_id is None
-                or revision_id == runtime.applied_runtime_configuration_revision_id
+                state is None
+                or state.desired.digest is None
+                or (
+                    state.applied is not None
+                    and state.applied.sequence == state.desired.sequence
+                )
             ):
                 return None
-            revision = await self.profile_repository.get_configuration_revision(
-                session,
-                revision_id=revision_id,
-            )
-            if revision is None:
-                return None
             evidence = RuntimeConfigurationEvidence(
-                revision_id=revision.id,
-                digest=revision.digest,
-                desired_generation=revision.target_desired_generation,
+                configuration_sequence=state.desired.sequence,
+                digest=state.desired.digest,
+                desired_generation=state.desired.target_generation,
             )
             if not (
                 await self.profile_repository.configuration_evidence_matches_current(
@@ -236,9 +237,9 @@ class RuntimeRunnerStateRepositorySink:
             ):
                 return None
             if (
-                revision.provider_acknowledged_at is None
-                or revision.provider_reported_digest != revision.digest
-                or revision.runner_reported_digest == revision.digest
+                state.desired.provider_acknowledged_at is None
+                or state.desired.provider_reported_digest != state.desired.digest
+                or state.desired.runner_reported_digest == state.desired.digest
             ):
                 return None
             return evidence
@@ -364,8 +365,7 @@ class RuntimeRunnerStateRepositorySink:
         evidence: RuntimeConfigurationEvidence,
     ) -> bool:
         provider_id = runtime.runtime_provider_resource_id
-        applied_revision_id = runtime.applied_runtime_configuration_revision_id
-        if provider_id is None or applied_revision_id is None:
+        if provider_id is None:
             return False
         return await self.profile_repository.configuration_evidence_matches_applied(
             session,

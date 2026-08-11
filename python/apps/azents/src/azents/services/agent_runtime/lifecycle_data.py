@@ -21,7 +21,10 @@ from azents.repos.agent_runtime.data import (
     AgentRuntimeSummaryState,
 )
 from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
-from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
+from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationAppliedSlot,
+    RuntimeConfigurationSlot,
+)
 
 
 class AgentRuntimeConfigurationStatus(BaseModel):
@@ -34,8 +37,8 @@ class AgentRuntimeConfigurationStatus(BaseModel):
         "waiting_for_recreation",
         "applied",
     ]
-    desired: RuntimeConfigurationRevision | None
-    applied: RuntimeConfigurationRevision | None
+    desired: RuntimeConfigurationSlot | None
+    applied: RuntimeConfigurationAppliedSlot | None
 
 
 RuntimeProfileConfigurationStatus = Literal[
@@ -120,7 +123,7 @@ class AgentRuntimeRemovalOutput(BaseModel):
 class RuntimeOperationAuthority:
     """Expected desired Runtime configuration for one explicit operation."""
 
-    configuration_revision_id: str
+    configuration_sequence: int
     configuration_digest: str
     desired_generation: int
 
@@ -133,7 +136,7 @@ class RuntimeOperationTarget:
     runtime_capability_version: int
     desired_generation: int
     runner_generation: int
-    configuration_revision_id: str
+    configuration_sequence: int
     configuration_digest: str
     workspace_path: str
 

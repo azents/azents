@@ -13,15 +13,20 @@ JsonValue: TypeAlias = (
 )
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+_CONFIGURATION_SEQUENCE_RE = re.compile(r"^[1-9][0-9]*$")
 
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeConfigurationEvidence:
-    """Non-secret evidence identifying one exact Runtime configuration revision."""
+    """Non-secret evidence identifying one exact Runtime configuration state."""
 
-    revision_id: str
+    configuration_sequence: int
     digest: str
     desired_generation: int
+
+    def __post_init__(self) -> None:
+        """Reject invalid in-process configuration sequence values."""
+        validate_configuration_sequence(self.configuration_sequence)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -208,15 +213,34 @@ def runtime_configuration_from_json(value: str) -> dict[str, JsonValue]:
     return parsed
 
 
+def parse_configuration_sequence(value: str) -> int:
+    """Parse one canonical positive decimal configuration sequence."""
+    if not isinstance(value, str) or (
+        _CONFIGURATION_SEQUENCE_RE.fullmatch(value) is None
+    ):
+        raise ValueError(
+            "Runtime configuration sequence must be a canonical positive decimal."
+        )
+    return int(value)
+
+
+def serialize_configuration_sequence(value: int) -> str:
+    """Serialize one configuration sequence to canonical decimal text."""
+    validate_configuration_sequence(value)
+    return str(value)
+
+
+def validate_configuration_sequence(value: int) -> None:
+    """Reject invalid in-process configuration sequence values."""
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("Runtime configuration sequence must be positive.")
+
+
 def validate_runtime_configuration_evidence(
     evidence: RuntimeConfigurationEvidence,
 ) -> None:
-    """Reject incomplete revision, digest, or generation evidence."""
-    if (
-        not evidence.revision_id.strip()
-        or evidence.revision_id != evidence.revision_id.strip()
-    ):
-        raise ValueError("Runtime configuration revision ID is required.")
+    """Reject incomplete sequence, digest, or generation evidence."""
+    validate_configuration_sequence(evidence.configuration_sequence)
     if _DIGEST_RE.fullmatch(evidence.digest) is None:
         raise ValueError("Runtime configuration digest is invalid.")
     if isinstance(evidence.desired_generation, bool) or evidence.desired_generation < 0:

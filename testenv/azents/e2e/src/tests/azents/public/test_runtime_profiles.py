@@ -304,13 +304,14 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
     applied = applied_runtime.configuration.applied
     assert desired is not None
     assert applied is not None
-    assert applied.id == desired.id
+    assert applied.sequence == desired.sequence
     assert applied.digest == desired.digest
-    assert applied.provider_reported_digest == desired.digest
-    assert applied.runner_reported_digest == desired.digest
-    assert applied.provider_acknowledged_at is not None
-    assert applied.runtime_observed_at is not None
-    prior_applied_revision_id = applied.id
+    assert desired.provider_reported_digest == desired.digest
+    assert desired.runner_reported_digest == desired.digest
+    assert desired.provider_acknowledged_at is not None
+    assert desired.runner_observed_at is not None
+    assert applied.applied_at is not None
+    prior_applied_sequence = applied.sequence
 
     operation = profile_api.runtime_profile_v1_create_profile_recreation(
         profile_id=explicit_profile_id,
@@ -367,14 +368,14 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
             configuration is not None
             and configuration.status == "applied"
             and current_applied is not None
-            and current_applied.id != prior_applied_revision_id
+            and current_applied.sequence > prior_applied_sequence
         )
 
     wait_until(
         recreated_runtime_applied,
         timeout=120,
         interval=1,
-        message="Recreated Runtime did not apply its replacement revision",
+        message="Recreated Runtime did not apply its replacement state",
     )
 
     _stop_runtime_provider(azents_runtime_provider_docker_container)

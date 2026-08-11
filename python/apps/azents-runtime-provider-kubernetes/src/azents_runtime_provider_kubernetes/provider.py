@@ -28,7 +28,9 @@ from azents_runtime_control.runtime_configuration import (
     KubernetesPodProfileV2,
     RuntimeConfigurationEvidence,
     RuntimeNetworkPolicy,
+    parse_configuration_sequence,
     parse_runtime_configuration_envelope,
+    serialize_configuration_sequence,
     validate_runtime_configuration_cleanup_envelope,
 )
 
@@ -112,7 +114,7 @@ _LABEL_WORKSPACE_ID = "azents/workspace-id"
 _LABEL_DESIRED_GENERATION = "azents/desired-generation"
 _LABEL_PROVIDER_GENERATION = "azents/provider-generation"
 _LABEL_CONFIGURATION_MANAGED = "azents/runtime-configuration-managed"
-_ANNOTATION_CONFIGURATION_REVISION_ID = "azents/runtime-configuration-revision-id"
+_ANNOTATION_CONFIGURATION_SEQUENCE = "azents/runtime-configuration-sequence"
 _ANNOTATION_CONFIGURATION_DIGEST = "azents/runtime-configuration-digest"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
 
@@ -129,7 +131,7 @@ _ENV_DESIRED_GENERATION = "AZ_RUNTIME_DESIRED_GENERATION"
 _ENV_RUNNER_AUTH_TOKEN = "AZ_RUNTIME_RUNNER_AUTH_TOKEN"
 _ENV_RUNNER_AUTH_CREDENTIAL_ID = "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"
 _ENV_HOME = "HOME"
-_ENV_CONFIGURATION_REVISION_ID = "AZ_RUNTIME_CONFIGURATION_REVISION_ID"
+_ENV_CONFIGURATION_SEQUENCE = "AZ_RUNTIME_CONFIGURATION_SEQUENCE"
 _ENV_CONFIGURATION_DIGEST = "AZ_RUNTIME_CONFIGURATION_DIGEST"
 _ENV_CONFIGURATION_DESIRED_GENERATION = "AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION"
 _ENV_DOCKER_HOST = "DOCKER_HOST"
@@ -686,7 +688,7 @@ class KubernetesRuntimeProvider:
             if key not in ignored_labels and pod.metadata.labels.get(key) != value:
                 return False
         ignored_annotations = {
-            _ANNOTATION_CONFIGURATION_REVISION_ID,
+            _ANNOTATION_CONFIGURATION_SEQUENCE,
             _ANNOTATION_CONFIGURATION_DIGEST,
         }
         for key, value in expected.metadata.annotations.items():
@@ -1014,14 +1016,18 @@ class KubernetesRuntimeProvider:
     ) -> dict[str, str]:
         evidence = command.runtime_configuration.evidence
         return {
-            _ANNOTATION_CONFIGURATION_REVISION_ID: evidence.revision_id,
+            _ANNOTATION_CONFIGURATION_SEQUENCE: serialize_configuration_sequence(
+                evidence.configuration_sequence
+            ),
             _ANNOTATION_CONFIGURATION_DIGEST: evidence.digest,
         }
 
     def _configuration_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
         evidence = command.runtime_configuration.evidence
         return {
-            _ENV_CONFIGURATION_REVISION_ID: evidence.revision_id,
+            _ENV_CONFIGURATION_SEQUENCE: serialize_configuration_sequence(
+                evidence.configuration_sequence
+            ),
             _ENV_CONFIGURATION_DIGEST: evidence.digest,
             _ENV_CONFIGURATION_DESIRED_GENERATION: str(evidence.desired_generation),
         }
@@ -1592,7 +1598,7 @@ def _container_specs_equal_for_in_place(
         _ENV_PROVIDER_GENERATION,
         _ENV_RUNNER_AUTH_TOKEN,
         _ENV_RUNNER_AUTH_CREDENTIAL_ID,
-        _ENV_CONFIGURATION_REVISION_ID,
+        _ENV_CONFIGURATION_SEQUENCE,
         _ENV_CONFIGURATION_DIGEST,
         _ENV_CONFIGURATION_DESIRED_GENERATION,
     }
@@ -1827,12 +1833,12 @@ def _configuration_evidence_from_metadata(
     *,
     desired_generation: int,
 ) -> RuntimeConfigurationEvidence:
-    revision_id = values.get(_ANNOTATION_CONFIGURATION_REVISION_ID)
+    configuration_sequence = values.get(_ANNOTATION_CONFIGURATION_SEQUENCE)
     digest = values.get(_ANNOTATION_CONFIGURATION_DIGEST)
-    if revision_id is None or digest is None:
+    if configuration_sequence is None or digest is None:
         raise ValueError("Runtime configuration metadata is incomplete.")
     return RuntimeConfigurationEvidence(
-        revision_id=revision_id,
+        configuration_sequence=parse_configuration_sequence(configuration_sequence),
         digest=digest,
         desired_generation=desired_generation,
     )

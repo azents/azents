@@ -10,7 +10,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_profile import (
-    RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationStateStatus,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
     RuntimeReconcileTaskStatus,
@@ -22,7 +22,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_profile import (
     RDBRuntimeConfigurationReconcileTask,
-    RDBRuntimeConfigurationRevision,
+    RDBRuntimeConfigurationState,
     RDBRuntimeInfrastructureProfile,
     RDBRuntimeRecreationOperation,
     RDBRuntimeRecreationOperationItem,
@@ -31,9 +31,12 @@ from azents.rdb.models.runtime_profile import (
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 
 from .data import (
+    RuntimeConfigurationAppliedSlot,
+    RuntimeConfigurationDesiredStateWrite,
+    RuntimeConfigurationDocument,
     RuntimeConfigurationReconcileTask,
-    RuntimeConfigurationRevision,
-    RuntimeConfigurationRevisionCreate,
+    RuntimeConfigurationSlot,
+    RuntimeConfigurationState,
     RuntimeInfrastructureProfile,
     RuntimeInfrastructureProfileCreate,
     RuntimeInfrastructureProfileReplace,
@@ -273,104 +276,95 @@ class RuntimeProfileRepository:
         await session.flush()
         return self._build_workspace_profile(rdb) if rdb is not None else None
 
-    async def create_configuration_revision(
+    async def get_configuration_state(
         self,
         session: AsyncSession,
         *,
-        create: RuntimeConfigurationRevisionCreate,
-    ) -> RuntimeConfigurationRevision:
-        """Append immutable ready or blocked desired configuration evidence."""
-        rdb = RDBRuntimeConfigurationRevision(
-            runtime_id=create.runtime_id,
-            provider_id=create.provider_id,
-            provider_capability_revision_id=create.provider_capability_revision_id,
-            infrastructure_profile_id=create.infrastructure_profile_id,
-            infrastructure_profile_version=create.infrastructure_profile_version,
-            workspace_runtime_profile_id=create.workspace_runtime_profile_id,
-            workspace_runtime_profile_version=create.workspace_runtime_profile_version,
-            agent_selection_version=create.agent_selection_version,
-            resolution_status=create.resolution_status,
-            required_capabilities=list(create.required_capabilities),
-            missing_capabilities=list(create.missing_capabilities),
-            source_trace=create.source_trace,
-            digest=create.digest,
-            target_desired_generation=create.target_desired_generation,
-            reason_code=create.reason_code,
-            resolved_configuration=create.resolved_configuration,
-            provider_reported_digest=None,
-            runner_reported_digest=None,
-            provider_acknowledged_at=None,
-            runtime_observed_at=None,
+        runtime_id: str,
+        for_update: bool = False,
+    ) -> RuntimeConfigurationState | None:
+        """Load one current desired/applied state and decode its documents."""
+        statement = sa.select(RDBRuntimeConfigurationState).where(
+            RDBRuntimeConfigurationState.runtime_id == runtime_id
         )
-        session.add(rdb)
-        await session.flush()
-        return self._build_configuration_revision(rdb)
+        if for_update:
+            statement = statement.with_for_update()
+        row = (await session.execute(statement)).scalar_one_or_none()
+        return self._build_configuration_state(row) if row is not None else None
 
-    async def create_or_get_configuration_revision(
+    async def overwrite_desired_configuration_state(
         self,
         session: AsyncSession,
         *,
-        create: RuntimeConfigurationRevisionCreate,
-    ) -> RuntimeConfigurationRevision:
-        """Append immutable evidence or reuse the equivalent Runtime revision."""
-        revision_id = uuid7().hex
-        result = await session.execute(
-            insert(RDBRuntimeConfigurationRevision)
-            .values(
-                id=revision_id,
-                runtime_id=create.runtime_id,
-                provider_id=create.provider_id,
-                provider_capability_revision_id=(
-                    create.provider_capability_revision_id
-                ),
-                infrastructure_profile_id=create.infrastructure_profile_id,
-                infrastructure_profile_version=create.infrastructure_profile_version,
-                workspace_runtime_profile_id=create.workspace_runtime_profile_id,
-                workspace_runtime_profile_version=(
-                    create.workspace_runtime_profile_version
-                ),
-                agent_selection_version=create.agent_selection_version,
-                resolution_status=create.resolution_status,
-                required_capabilities=list(create.required_capabilities),
-                missing_capabilities=list(create.missing_capabilities),
-                source_trace=create.source_trace,
-                digest=create.digest,
-                target_desired_generation=create.target_desired_generation,
-                reason_code=create.reason_code,
-                resolved_configuration=create.resolved_configuration,
+        write: RuntimeConfigurationDesiredStateWrite,
+        expected_sequence: int | None = None,
+    ) -> RuntimeConfigurationState | None:
+        """Atomically allocate a Runtime sequence and overwrite desired state."""
+        runtime = await session.scalar(
+            sa.select(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == write.runtime_id)
+            .with_for_update()
+        )
+        if runtime is None or (
+            expected_sequence is not None
+            and runtime.configuration_sequence != expected_sequence
+        ):
+            return None
+        current = await session.scalar(
+            sa.select(RDBRuntimeConfigurationState)
+            .where(RDBRuntimeConfigurationState.runtime_id == write.runtime_id)
+            .with_for_update()
+        )
+        document = (
+            write.document.model_dump(mode="json")
+            if write.document is not None
+            else None
+        )
+        if (
+            current is not None
+            and current.desired_status.value == write.status.value
+            and current.desired_target_generation == write.target_generation
+            and current.desired_digest == write.digest
+            and current.desired_document == document
+            and current.desired_reason_code == write.reason_code
+        ):
+            return self._build_configuration_state(current)
+        next_sequence = runtime.configuration_sequence + 1
+        runtime.configuration_sequence = next_sequence
+        if current is None:
+            current = RDBRuntimeConfigurationState(
+                runtime_id=write.runtime_id,
+                desired_sequence=next_sequence,
+                desired_status=write.status,
+                desired_target_generation=write.target_generation,
+                desired_digest=write.digest,
+                desired_document=document,
+                desired_reason_code=write.reason_code,
                 provider_reported_digest=None,
                 runner_reported_digest=None,
                 provider_acknowledged_at=None,
-                runtime_observed_at=None,
+                runner_observed_at=None,
+                applied_sequence=None,
+                applied_target_generation=None,
+                applied_digest=None,
+                applied_document=None,
+                applied_at=None,
             )
-            .on_conflict_do_nothing(
-                constraint="uq_runtime_configuration_revisions_runtime_digest_generation"
-            )
-            .returning(RDBRuntimeConfigurationRevision)
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            existing = await session.execute(
-                sa.select(RDBRuntimeConfigurationRevision).where(
-                    RDBRuntimeConfigurationRevision.runtime_id == create.runtime_id,
-                    RDBRuntimeConfigurationRevision.digest == create.digest,
-                    RDBRuntimeConfigurationRevision.target_desired_generation
-                    == create.target_desired_generation,
-                )
-            )
-            rdb = existing.scalar_one()
+            session.add(current)
+        else:
+            current.desired_sequence = next_sequence
+            current.desired_status = write.status
+            current.desired_target_generation = write.target_generation
+            current.desired_digest = write.digest
+            current.desired_document = document
+            current.desired_reason_code = write.reason_code
+            current.provider_reported_digest = None
+            current.runner_reported_digest = None
+            current.provider_acknowledged_at = None
+            current.runner_observed_at = None
+            current.updated_at = tznow()
         await session.flush()
-        return self._build_configuration_revision(rdb)
-
-    async def get_configuration_revision(
-        self,
-        session: AsyncSession,
-        *,
-        revision_id: str,
-    ) -> RuntimeConfigurationRevision | None:
-        """Fetch one immutable Runtime configuration revision."""
-        rdb = await session.get(RDBRuntimeConfigurationRevision, revision_id)
-        return self._build_configuration_revision(rdb) if rdb is not None else None
+        return self._build_configuration_state(current)
 
     async def configuration_evidence_matches_current(
         self,
@@ -380,27 +374,23 @@ class RuntimeProfileRepository:
         provider_id: str,
         evidence: RuntimeConfigurationEvidence,
     ) -> bool:
-        """Return whether evidence identifies the exact current desired revision."""
-        runtime_result = await session.execute(
-            sa.select(RDBAgentRuntime.id).where(
+        """Check evidence against the exact current desired tuple."""
+        runtime = await session.scalar(
+            sa.select(RDBAgentRuntime).where(
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.runtime_provider_resource_id == provider_id,
-                RDBAgentRuntime.desired_runtime_configuration_revision_id
-                == evidence.revision_id,
                 RDBAgentRuntime.desired_generation == evidence.desired_generation,
             )
         )
-        if runtime_result.scalar_one_or_none() is None:
-            return False
-        revision = await self.get_configuration_revision(
-            session,
-            revision_id=evidence.revision_id,
-        )
-        return revision is not None and _configuration_evidence_matches(
-            revision,
-            runtime_id=runtime_id,
-            provider_id=provider_id,
-            evidence=evidence,
+        state = await self.get_configuration_state(session, runtime_id=runtime_id)
+        return bool(
+            runtime is not None
+            and state is not None
+            and state.desired.status is RuntimeConfigurationStateStatus.READY
+            and state.desired.sequence == evidence.configuration_sequence
+            and state.desired.digest == evidence.digest
+            and state.desired.document is not None
+            and state.desired.target_generation == evidence.desired_generation
         )
 
     async def configuration_evidence_matches_applied(
@@ -411,27 +401,21 @@ class RuntimeProfileRepository:
         provider_id: str,
         evidence: RuntimeConfigurationEvidence,
     ) -> bool:
-        """Return whether evidence identifies the exact applied revision."""
-        runtime_result = await session.execute(
-            sa.select(RDBAgentRuntime.id).where(
+        """Check evidence against the exact current applied tuple."""
+        runtime = await session.scalar(
+            sa.select(RDBAgentRuntime).where(
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.runtime_provider_resource_id == provider_id,
-                RDBAgentRuntime.applied_runtime_configuration_revision_id
-                == evidence.revision_id,
-                RDBAgentRuntime.desired_generation == evidence.desired_generation,
             )
         )
-        if runtime_result.scalar_one_or_none() is None:
-            return False
-        revision = await self.get_configuration_revision(
-            session,
-            revision_id=evidence.revision_id,
-        )
-        return revision is not None and _configuration_evidence_matches(
-            revision,
-            runtime_id=runtime_id,
-            provider_id=provider_id,
-            evidence=evidence,
+        state = await self.get_configuration_state(session, runtime_id=runtime_id)
+        return bool(
+            runtime is not None
+            and state is not None
+            and state.applied is not None
+            and state.applied.sequence == evidence.configuration_sequence
+            and state.applied.digest == evidence.digest
+            and state.applied.target_generation == evidence.desired_generation
         )
 
     async def record_provider_configuration_evidence(
@@ -442,35 +426,25 @@ class RuntimeProfileRepository:
         provider_id: str,
         evidence: RuntimeConfigurationEvidence,
         acknowledged_at: datetime.datetime,
-    ) -> RuntimeConfigurationRevision | None:
+    ) -> RuntimeConfigurationState | None:
         """Record exact Provider evidence and promote after Runner evidence."""
-        revision = await self._lock_current_configuration_evidence(
-            session,
-            runtime_id=runtime_id,
-            provider_id=provider_id,
-            evidence=evidence,
+        state = await self._lock_current_configuration_state(
+            session, runtime_id=runtime_id, provider_id=provider_id, evidence=evidence
         )
-        if revision is None:
+        if state is None:
             return None
-        await session.execute(
-            sa.update(RDBRuntimeConfigurationRevision)
-            .where(RDBRuntimeConfigurationRevision.id == evidence.revision_id)
-            .values(
-                provider_reported_digest=evidence.digest,
-                provider_acknowledged_at=acknowledged_at,
-            )
+        row = await session.scalar(
+            sa.select(RDBRuntimeConfigurationState)
+            .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
+            .with_for_update()
         )
-        await self._promote_configuration_if_complete(
-            session,
-            runtime_id=runtime_id,
-            provider_id=provider_id,
-            evidence=evidence,
-        )
+        assert row is not None
+        row.provider_reported_digest = evidence.digest
+        row.provider_acknowledged_at = acknowledged_at
+        self._promote_configuration_if_complete(row, evidence=evidence)
+        row.updated_at = tznow()
         await session.flush()
-        return await self.get_configuration_revision(
-            session,
-            revision_id=evidence.revision_id,
-        )
+        return self._build_configuration_state(row)
 
     async def record_runner_configuration_evidence(
         self,
@@ -480,117 +454,92 @@ class RuntimeProfileRepository:
         provider_id: str,
         evidence: RuntimeConfigurationEvidence,
         observed_at: datetime.datetime,
-    ) -> RuntimeConfigurationRevision | None:
+    ) -> RuntimeConfigurationState | None:
         """Record exact Runner evidence and promote after Provider evidence."""
-        revision = await self._lock_current_configuration_evidence(
-            session,
-            runtime_id=runtime_id,
-            provider_id=provider_id,
-            evidence=evidence,
+        state = await self._lock_current_configuration_state(
+            session, runtime_id=runtime_id, provider_id=provider_id, evidence=evidence
         )
-        if revision is None:
+        if state is None:
             return None
-        await session.execute(
-            sa.update(RDBRuntimeConfigurationRevision)
-            .where(RDBRuntimeConfigurationRevision.id == evidence.revision_id)
-            .values(
-                runner_reported_digest=evidence.digest,
-                runtime_observed_at=observed_at,
-            )
+        row = await session.scalar(
+            sa.select(RDBRuntimeConfigurationState)
+            .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
+            .with_for_update()
         )
-        await self._promote_configuration_if_complete(
-            session,
-            runtime_id=runtime_id,
-            provider_id=provider_id,
-            evidence=evidence,
+        assert row is not None
+        row.runner_reported_digest = evidence.digest
+        row.runner_observed_at = observed_at
+        self._promote_configuration_if_complete(
+            row, evidence=evidence, observed_at=observed_at
+        )
+        row.updated_at = tznow()
+        await session.flush()
+        return self._build_configuration_state(row)
+
+    async def clear_configuration_state(
+        self, session: AsyncSession, *, runtime_id: str
+    ) -> bool:
+        """Delete current desired/applied documents without resetting sequence."""
+        deleted_runtime_id = await session.scalar(
+            sa.delete(RDBRuntimeConfigurationState)
+            .where(RDBRuntimeConfigurationState.runtime_id == runtime_id)
+            .returning(RDBRuntimeConfigurationState.runtime_id)
         )
         await session.flush()
-        return await self.get_configuration_revision(
-            session,
-            revision_id=evidence.revision_id,
-        )
+        return deleted_runtime_id is not None
 
-    async def _lock_current_configuration_evidence(
+    async def _lock_current_configuration_state(
         self,
         session: AsyncSession,
         *,
         runtime_id: str,
         provider_id: str,
         evidence: RuntimeConfigurationEvidence,
-    ) -> RuntimeConfigurationRevision | None:
-        runtime_result = await session.execute(
-            sa.select(RDBAgentRuntime.id)
+    ) -> RuntimeConfigurationState | None:
+        runtime = await session.scalar(
+            sa.select(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.runtime_provider_resource_id == provider_id,
-                RDBAgentRuntime.desired_runtime_configuration_revision_id
-                == evidence.revision_id,
                 RDBAgentRuntime.desired_generation == evidence.desired_generation,
             )
             .with_for_update()
         )
-        if runtime_result.scalar_one_or_none() is None:
+        if runtime is None:
             return None
-        revision_result = await session.execute(
-            sa.select(RDBRuntimeConfigurationRevision)
-            .where(RDBRuntimeConfigurationRevision.id == evidence.revision_id)
-            .with_for_update()
+        state = await self.get_configuration_state(
+            session, runtime_id=runtime_id, for_update=True
         )
-        rdb = revision_result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        revision = self._build_configuration_revision(rdb)
-        if not _configuration_evidence_matches(
-            revision,
-            runtime_id=runtime_id,
-            provider_id=provider_id,
-            evidence=evidence,
+        if (
+            state is None
+            or state.desired.status is not RuntimeConfigurationStateStatus.READY
+            or state.desired.sequence != evidence.configuration_sequence
+            or state.desired.digest != evidence.digest
+            or state.desired.target_generation != evidence.desired_generation
         ):
             return None
-        return revision
+        return state
 
-    async def _promote_configuration_if_complete(
-        self,
-        session: AsyncSession,
+    @staticmethod
+    def _promote_configuration_if_complete(
+        row: RDBRuntimeConfigurationState,
         *,
-        runtime_id: str,
-        provider_id: str,
         evidence: RuntimeConfigurationEvidence,
+        observed_at: datetime.datetime | None = None,
     ) -> None:
-        revision_result = await session.execute(
-            sa.select(RDBRuntimeConfigurationRevision.id).where(
-                RDBRuntimeConfigurationRevision.id == evidence.revision_id,
-                RDBRuntimeConfigurationRevision.runtime_id == runtime_id,
-                RDBRuntimeConfigurationRevision.provider_id == provider_id,
-                RDBRuntimeConfigurationRevision.target_desired_generation
-                == evidence.desired_generation,
-                RDBRuntimeConfigurationRevision.digest == evidence.digest,
-                RDBRuntimeConfigurationRevision.provider_reported_digest
-                == evidence.digest,
-                RDBRuntimeConfigurationRevision.runner_reported_digest
-                == evidence.digest,
-                RDBRuntimeConfigurationRevision.provider_acknowledged_at.is_not(None),
-                RDBRuntimeConfigurationRevision.runtime_observed_at.is_not(None),
-            )
-        )
-        if revision_result.scalar_one_or_none() is None:
-            return
-        promoted = await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.id == runtime_id,
-                RDBAgentRuntime.runtime_provider_resource_id == provider_id,
-                RDBAgentRuntime.desired_runtime_configuration_revision_id
-                == evidence.revision_id,
-                RDBAgentRuntime.desired_generation == evidence.desired_generation,
-            )
-            .values(
-                applied_runtime_configuration_revision_id=evidence.revision_id,
-            )
-            .returning(RDBAgentRuntime.id)
-        )
-        if promoted.scalar_one_or_none() is None:
-            raise RuntimeError("Applied Runtime configuration target became stale.")
+        if (
+            row.desired_status is RuntimeConfigurationStateStatus.READY
+            and row.desired_sequence == evidence.configuration_sequence
+            and row.desired_digest == evidence.digest
+            and row.provider_reported_digest == evidence.digest
+            and row.runner_reported_digest == evidence.digest
+            and row.desired_document is not None
+        ):
+            row.applied_sequence = row.desired_sequence
+            row.applied_target_generation = row.desired_target_generation
+            row.applied_digest = row.desired_digest
+            row.applied_document = row.desired_document
+            row.applied_at = observed_at or tznow()
 
     async def enqueue_reconcile_task(
         self,
@@ -938,9 +887,9 @@ class RuntimeProfileRepository:
         session: AsyncSession,
         *,
         operation_id: str,
-        items: list[tuple[str, str]],
+        items: list[tuple[str, int, str, int]],
     ) -> list[RuntimeRecreationOperationItem]:
-        """Attach a stable Runtime and expected-revision target set."""
+        """Attach a stable Runtime and expected current-state tuple set."""
         operation = await session.get(
             RDBRuntimeRecreationOperation,
             operation_id,
@@ -955,14 +904,16 @@ class RuntimeProfileRepository:
             RDBRuntimeRecreationOperationItem(
                 operation_id=operation_id,
                 runtime_id=runtime_id,
-                expected_configuration_revision_id=revision_id,
+                expected_configuration_sequence=sequence,
+                expected_configuration_digest=digest,
+                expected_desired_generation=desired_generation,
                 status=RuntimeRecreationItemStatus.PENDING,
                 attempt=0,
                 dispatched_generation=None,
                 failure_code=None,
                 failure_message=None,
             )
-            for runtime_id, revision_id in items
+            for runtime_id, sequence, digest, desired_generation in items
         ]
         session.add_all(created)
         operation.total_count += len(created)
@@ -1025,16 +976,24 @@ class RuntimeProfileRepository:
         *,
         target_kind: RuntimeRecreationTargetKind,
         target_id: str,
-    ) -> list[tuple[str, str]]:
-        """Snapshot configured physical Runtimes under one exact authority target."""
+    ) -> list[tuple[str, int, str, int]]:
+        """Snapshot configured physical Runtimes and current fencing tuples."""
         statement = (
             sa.select(
                 RDBAgentRuntime.id,
-                RDBAgentRuntime.desired_runtime_configuration_revision_id,
+                RDBRuntimeConfigurationState.desired_sequence,
+                RDBRuntimeConfigurationState.desired_digest,
+                RDBRuntimeConfigurationState.desired_target_generation,
+            )
+            .join(
+                RDBRuntimeConfigurationState,
+                RDBRuntimeConfigurationState.runtime_id == RDBAgentRuntime.id,
             )
             .where(
-                RDBAgentRuntime.desired_runtime_configuration_revision_id.is_not(None),
-                RDBAgentRuntime.applied_runtime_configuration_revision_id.is_not(None),
+                RDBRuntimeConfigurationState.desired_status
+                == RuntimeConfigurationStateStatus.READY,
+                RDBRuntimeConfigurationState.desired_digest.is_not(None),
+                RDBRuntimeConfigurationState.applied_sequence.is_not(None),
             )
             .order_by(RDBAgentRuntime.id)
         )
@@ -1044,19 +1003,25 @@ class RuntimeProfileRepository:
             )
         elif target_kind is RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE:
             statement = statement.where(
-                RDBAgentRuntime.infrastructure_profile_id == target_id
+                RDBRuntimeConfigurationState.desired_document[
+                    "infrastructure_profile_id"
+                ].astext
+                == target_id
             )
         elif target_kind is RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE:
             statement = statement.where(
-                RDBAgentRuntime.workspace_runtime_profile_id == target_id
+                RDBRuntimeConfigurationState.desired_document[
+                    "workspace_runtime_profile_id"
+                ].astext
+                == target_id
             )
         else:
             raise AssertionError(f"Unsupported recreation target kind: {target_kind}")
         result = await session.execute(statement)
         return [
-            (runtime_id, revision_id)
-            for runtime_id, revision_id in result.tuples()
-            if revision_id is not None
+            (runtime_id, sequence, digest, generation)
+            for runtime_id, sequence, digest, generation in result.tuples()
+            if digest is not None
         ]
 
     async def get_recreation_operation(
@@ -1173,7 +1138,9 @@ class RuntimeProfileRepository:
         *,
         item_id: str,
         expected_attempt: int,
-        configuration_revision_id: str,
+        configuration_sequence: int,
+        configuration_digest: str,
+        desired_generation: int,
         dispatched_generation: int,
     ) -> bool:
         """Record exact evidence for one generation-fenced restart dispatch."""
@@ -1186,7 +1153,9 @@ class RuntimeProfileRepository:
                 RDBRuntimeRecreationOperationItem.attempt == expected_attempt,
             )
             .values(
-                expected_configuration_revision_id=configuration_revision_id,
+                expected_configuration_sequence=configuration_sequence,
+                expected_configuration_digest=configuration_digest,
+                expected_desired_generation=desired_generation,
                 dispatched_generation=dispatched_generation,
                 failure_code=None,
                 failure_message=None,
@@ -1352,32 +1321,49 @@ class RuntimeProfileRepository:
         )
 
     @staticmethod
-    def _build_configuration_revision(
-        rdb: RDBRuntimeConfigurationRevision,
-    ) -> RuntimeConfigurationRevision:
-        return RuntimeConfigurationRevision(
-            id=rdb.id,
+    def _build_configuration_state(
+        rdb: RDBRuntimeConfigurationState,
+    ) -> RuntimeConfigurationState:
+        desired_document = (
+            RuntimeConfigurationDocument.model_validate(rdb.desired_document)
+            if rdb.desired_document is not None
+            else None
+        )
+        applied = None
+        if rdb.applied_sequence is not None:
+            if (
+                rdb.applied_target_generation is None
+                or rdb.applied_digest is None
+                or rdb.applied_document is None
+                or rdb.applied_at is None
+            ):
+                raise ValueError("Applied configuration state is incomplete.")
+            applied = RuntimeConfigurationAppliedSlot(
+                sequence=rdb.applied_sequence,
+                target_generation=rdb.applied_target_generation,
+                digest=rdb.applied_digest,
+                document=RuntimeConfigurationDocument.model_validate(
+                    rdb.applied_document
+                ),
+                applied_at=rdb.applied_at,
+            )
+        return RuntimeConfigurationState(
             runtime_id=rdb.runtime_id,
-            provider_id=rdb.provider_id,
-            provider_capability_revision_id=rdb.provider_capability_revision_id,
-            infrastructure_profile_id=rdb.infrastructure_profile_id,
-            infrastructure_profile_version=rdb.infrastructure_profile_version,
-            workspace_runtime_profile_id=rdb.workspace_runtime_profile_id,
-            workspace_runtime_profile_version=rdb.workspace_runtime_profile_version,
-            agent_selection_version=rdb.agent_selection_version,
-            resolution_status=rdb.resolution_status,
-            reason_code=rdb.reason_code,
-            required_capabilities=tuple(rdb.required_capabilities),
-            missing_capabilities=tuple(rdb.missing_capabilities),
-            resolved_configuration=rdb.resolved_configuration,
-            source_trace=rdb.source_trace,
-            digest=rdb.digest,
-            target_desired_generation=rdb.target_desired_generation,
-            provider_reported_digest=rdb.provider_reported_digest,
-            runner_reported_digest=rdb.runner_reported_digest,
-            provider_acknowledged_at=rdb.provider_acknowledged_at,
-            runtime_observed_at=rdb.runtime_observed_at,
+            desired=RuntimeConfigurationSlot(
+                sequence=rdb.desired_sequence,
+                status=rdb.desired_status,
+                target_generation=rdb.desired_target_generation,
+                digest=rdb.desired_digest,
+                document=desired_document,
+                reason_code=rdb.desired_reason_code,
+                provider_reported_digest=rdb.provider_reported_digest,
+                runner_reported_digest=rdb.runner_reported_digest,
+                provider_acknowledged_at=rdb.provider_acknowledged_at,
+                runner_observed_at=rdb.runner_observed_at,
+            ),
+            applied=applied,
             created_at=rdb.created_at,
+            updated_at=rdb.updated_at,
         )
 
     @staticmethod
@@ -1430,7 +1416,9 @@ class RuntimeProfileRepository:
             id=rdb.id,
             operation_id=rdb.operation_id,
             runtime_id=rdb.runtime_id,
-            expected_configuration_revision_id=(rdb.expected_configuration_revision_id),
+            expected_configuration_sequence=rdb.expected_configuration_sequence,
+            expected_configuration_digest=rdb.expected_configuration_digest,
+            expected_desired_generation=rdb.expected_desired_generation,
             status=rdb.status,
             attempt=rdb.attempt,
             dispatched_generation=rdb.dispatched_generation,
@@ -1439,24 +1427,6 @@ class RuntimeProfileRepository:
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )
-
-
-def _configuration_evidence_matches(
-    revision: RuntimeConfigurationRevision,
-    *,
-    runtime_id: str,
-    provider_id: str,
-    evidence: RuntimeConfigurationEvidence,
-) -> bool:
-    return (
-        revision.id == evidence.revision_id
-        and revision.runtime_id == runtime_id
-        and revision.provider_id == provider_id
-        and revision.target_desired_generation == evidence.desired_generation
-        and revision.digest == evidence.digest
-        and revision.resolution_status is RuntimeConfigurationResolutionStatus.READY
-        and revision.resolved_configuration is not None
-    )
 
 
 def _provider_recreation_target_version(

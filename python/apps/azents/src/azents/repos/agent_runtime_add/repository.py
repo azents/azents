@@ -80,7 +80,8 @@ class AgentRuntimeAddReceiptRepository:
                 row.committed_runtime_profile_selection_version
             ),
             agent_runtime_id=row.agent_runtime_id,
-            runtime_configuration_revision_id=(row.runtime_configuration_revision_id),
+            runtime_configuration_sequence=row.runtime_configuration_sequence,
+            runtime_configuration_digest=row.runtime_configuration_digest,
             runtime_desired_generation=row.runtime_desired_generation,
             created_at=row.created_at,
         )

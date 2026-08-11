@@ -97,13 +97,13 @@ def test_resolve_workspace_path_requires_home_when_input_absent(
 def test_runner_reads_provider_injected_configuration_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AZ_RUNTIME_CONFIGURATION_REVISION_ID", "revision-1")
+    monkeypatch.setenv("AZ_RUNTIME_CONFIGURATION_SEQUENCE", "1")
     monkeypatch.setenv("AZ_RUNTIME_CONFIGURATION_DIGEST", "a" * 64)
     monkeypatch.setenv("AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION", "3")
 
     evidence = _runtime_configuration_evidence_from_env()
 
-    assert evidence.revision_id == "revision-1"
+    assert evidence.configuration_sequence == 1
     assert evidence.digest == "a" * 64
     assert evidence.desired_generation == 3
 

@@ -27,6 +27,7 @@ from azents.core.enums import (
     RuntimeRunnerState,
     RuntimeTerminalDeleteAcknowledgementKind,
 )
+from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.rdb.models.action_execution import RDBActionExecution
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -38,6 +39,7 @@ from azents.rdb.models.agent_runtime_removal import (
     RDBAgentRuntimeRemovalOperation,
 )
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationState
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.rdb.session import SessionManager
@@ -405,10 +407,6 @@ async def test_coordinator_records_locked_no_physical_binding_authority(
             runtime_provider_resource_id=None,
             provider_binding_origin=None,
             provider_binding_evidence=None,
-            infrastructure_profile_id=None,
-            workspace_runtime_profile_id=None,
-            desired_runtime_configuration_revision_id=None,
-            applied_runtime_configuration_revision_id=None,
         )
         session.add(runtime)
         await session.flush()
@@ -424,10 +422,7 @@ async def test_coordinator_records_locked_no_physical_binding_authority(
     assert before_delete.runtime_provider_resource_id is None
     assert before_delete.provider_binding_origin is None
     assert before_delete.provider_binding_evidence is None
-    assert before_delete.infrastructure_profile_id is None
-    assert before_delete.workspace_runtime_profile_id is None
-    assert before_delete.desired_runtime_configuration_revision_id is None
-    assert before_delete.applied_runtime_configuration_revision_id is None
+    assert before_delete.configuration_sequence == 0
     assert before_delete.provider_generation == 0
     assert before_delete.provider_observed_state is RuntimeProviderObservedState.UNKNOWN
     assert before_delete.provider_observed_generation == 0
@@ -504,12 +499,32 @@ async def test_coordinator_waits_for_exact_provider_acknowledgement(
             runtime_provider_resource_id=provider.id,
             provider_binding_origin=RuntimeProviderBindingOrigin.PLATFORM_DEFAULT,
             provider_binding_evidence={"source": "test"},
-            infrastructure_profile_id=None,
-            workspace_runtime_profile_id=None,
-            desired_runtime_configuration_revision_id=None,
-            applied_runtime_configuration_revision_id=None,
         )
         session.add(runtime)
+        await session.flush()
+        runtime.configuration_sequence = 1
+        document = {"schema_version": 1, "resolved_configuration": {"cpu": 1}}
+        now = datetime.datetime.now(datetime.UTC)
+        session.add(
+            RDBRuntimeConfigurationState(
+                runtime_id=runtime.id,
+                desired_sequence=1,
+                desired_status=RuntimeConfigurationStateStatus.READY,
+                desired_target_generation=0,
+                desired_digest="a" * 64,
+                desired_document=document,
+                desired_reason_code=None,
+                provider_reported_digest="a" * 64,
+                runner_reported_digest="a" * 64,
+                provider_acknowledged_at=now,
+                runner_observed_at=now,
+                applied_sequence=1,
+                applied_target_generation=0,
+                applied_digest="a" * 64,
+                applied_document=document,
+                applied_at=now,
+            )
+        )
         await session.flush()
         runtime_id = runtime.id
     service = _service(rdb_session_manager)
@@ -568,8 +583,16 @@ async def test_coordinator_waits_for_exact_provider_acknowledgement(
             confirmed.operation.id,
         )
         agent = await AgentRepository().get_by_id(session, agent_id)
+        runtime = await AgentRuntimeRepository().get_by_id(session, runtime_id)
+        configuration_state = await session.get(
+            RDBRuntimeConfigurationState,
+            runtime_id,
+        )
     assert operation is not None
     assert agent is not None
+    assert runtime is not None
+    assert runtime.configuration_sequence == 1
+    assert configuration_state is None
     assert operation.physical_delete_acknowledgement_kind is (
         RuntimeTerminalDeleteAcknowledgementKind.PROVIDER_REPORT
     )

@@ -21,7 +21,7 @@ _sym_db = _symbol_database.Default()
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x1bruntime_configuration.proto\x12\x19\x61zents.runtime_control.v1"_\n\x1cRuntimeConfigurationEvidence\x12\x13\n\x0brevision_id\x18\x01 \x01(\t\x12\x0e\n\x06\x64igest\x18\x02 \x01(\t\x12\x1a\n\x12\x64\x65sired_generation\x18\x03 \x01(\x04"\x8e\x01\n\x1cRuntimeConfigurationEnvelope\x12I\n\x08\x65vidence\x18\x01 \x01(\x0b\x32\x37.azents.runtime_control.v1.RuntimeConfigurationEvidence\x12#\n\x1bresolved_configuration_json\x18\x02 \x01(\tb\x06proto3'
+    b'\n\x1bruntime_configuration.proto\x12\x19\x61zents.runtime_control.v1"j\n\x1cRuntimeConfigurationEvidence\x12\x1e\n\x16\x63onfiguration_sequence\x18\x01 \x01(\t\x12\x0e\n\x06\x64igest\x18\x02 \x01(\t\x12\x1a\n\x12\x64\x65sired_generation\x18\x03 \x01(\x04"\x8e\x01\n\x1cRuntimeConfigurationEnvelope\x12I\n\x08\x65vidence\x18\x01 \x01(\x0b\x32\x37.azents.runtime_control.v1.RuntimeConfigurationEvidence\x12#\n\x1bresolved_configuration_json\x18\x02 \x01(\tb\x06proto3'
 )
 
 _globals = globals()
@@ -32,7 +32,7 @@ _builder.BuildTopDescriptorsAndMessages(
 if not _descriptor._USE_C_DESCRIPTORS:
     DESCRIPTOR._loaded_options = None
     _globals["_RUNTIMECONFIGURATIONEVIDENCE"]._serialized_start = 58
-    _globals["_RUNTIMECONFIGURATIONEVIDENCE"]._serialized_end = 153
-    _globals["_RUNTIMECONFIGURATIONENVELOPE"]._serialized_start = 156
-    _globals["_RUNTIMECONFIGURATIONENVELOPE"]._serialized_end = 298
+    _globals["_RUNTIMECONFIGURATIONEVIDENCE"]._serialized_end = 164
+    _globals["_RUNTIMECONFIGURATIONENVELOPE"]._serialized_start = 167
+    _globals["_RUNTIMECONFIGURATIONENVELOPE"]._serialized_end = 309
 # @@protoc_insertion_point(module_scope)

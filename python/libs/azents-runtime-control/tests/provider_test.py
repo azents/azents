@@ -424,7 +424,7 @@ def test_reconciliation_evidence_rejects_empty_or_duplicate_kinds() -> None:
 def _runtime_configuration() -> RuntimeConfigurationEnvelope:
     return RuntimeConfigurationEnvelope(
         evidence=RuntimeConfigurationEvidence(
-            revision_id="revision-1",
+            configuration_sequence=1,
             digest="d" * 64,
             desired_generation=3,
         ),

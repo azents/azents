@@ -20,7 +20,7 @@ from azents.core.enums import (
     SessionWorkingFolderCleanupStatus,
 )
 from azents.core.runtime_profile import (
-    RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationStateStatus,
     RuntimeInfrastructureProfileKind,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
@@ -30,7 +30,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_profile import (
     RDBRuntimeConfigurationReconcileTask,
-    RDBRuntimeConfigurationRevision,
+    RDBRuntimeConfigurationState,
 )
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
@@ -40,7 +40,8 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
-    RuntimeConfigurationRevisionCreate,
+    RuntimeConfigurationDesiredStateWrite,
+    RuntimeConfigurationState,
     RuntimeInfrastructureProfile,
     RuntimeInfrastructureProfileCreate,
     WorkspaceRuntimeProfile,
@@ -151,12 +152,12 @@ class _SelectionRacingAgentRuntimeRepository(AgentRuntimeRepository):
         self.replacement_profile_id = replacement_profile_id
         self.raced = False
 
-    async def attach_desired_configuration_revision(
+    async def attach_desired_configuration_state(
         self,
         session: AsyncSession,
         *,
         runtime_id: str,
-        expected_revision_id: str | None,
+        expected_configuration_sequence: int,
         expected_desired_generation: int,
         agent_id: str,
         workspace_id: str,
@@ -171,8 +172,8 @@ class _SelectionRacingAgentRuntimeRepository(AgentRuntimeRepository):
         infrastructure_profile_version: int,
         workspace_runtime_profile_id: str,
         workspace_runtime_profile_version: int,
-        configuration_revision_id: str,
-    ) -> AgentRuntime | None:
+        write: RuntimeConfigurationDesiredStateWrite,
+    ) -> tuple[AgentRuntime, RuntimeConfigurationState] | None:
         if not self.raced:
             self.raced = True
             async with self.session_manager() as race_session:
@@ -186,10 +187,10 @@ class _SelectionRacingAgentRuntimeRepository(AgentRuntimeRepository):
                         ),
                     )
                 )
-        return await super().attach_desired_configuration_revision(
+        return await super().attach_desired_configuration_state(
             session,
             runtime_id=runtime_id,
-            expected_revision_id=expected_revision_id,
+            expected_configuration_sequence=expected_configuration_sequence,
             expected_desired_generation=expected_desired_generation,
             agent_id=agent_id,
             workspace_id=workspace_id,
@@ -204,7 +205,7 @@ class _SelectionRacingAgentRuntimeRepository(AgentRuntimeRepository):
             infrastructure_profile_version=infrastructure_profile_version,
             workspace_runtime_profile_id=workspace_runtime_profile_id,
             workspace_runtime_profile_version=workspace_runtime_profile_version,
-            configuration_revision_id=configuration_revision_id,
+            write=write,
         )
 
 
@@ -409,16 +410,8 @@ async def _cleanup_independent_resolution_fixture(
         )
     )
     await session.execute(
-        sa.update(RDBAgentRuntime)
-        .where(RDBAgentRuntime.agent_id == agent_id)
-        .values(
-            desired_runtime_configuration_revision_id=None,
-            applied_runtime_configuration_revision_id=None,
-        )
-    )
-    await session.execute(
-        sa.delete(RDBRuntimeConfigurationRevision).where(
-            RDBRuntimeConfigurationRevision.runtime_id.in_(runtime_ids)
+        sa.delete(RDBRuntimeConfigurationState).where(
+            RDBRuntimeConfigurationState.runtime_id.in_(runtime_ids)
         )
     )
     await session.execute(
@@ -434,7 +427,7 @@ async def _cleanup_independent_resolution_fixture(
     await session.execute(sa.delete(RDBAgent).where(RDBAgent.id == agent_id))
 
 
-async def test_resolution_creates_ready_revision_and_reuses_same_digest(
+async def test_resolution_creates_ready_state_and_reuses_same_digest(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     """Durable configuration resolution does not require a live Provider stream."""
@@ -448,22 +441,23 @@ async def test_resolution_creates_ready_revision_and_reuses_same_digest(
     first = await service.ensure_for_agent(agent_id)
     repeated = await service.ensure_for_agent(agent_id)
 
-    assert first.desired_revision.resolution_status is (
-        RuntimeConfigurationResolutionStatus.READY
-    )
-    assert first.desired_revision.resolved_configuration is not None
-    effective = first.desired_revision.resolved_configuration["effective_profile"]
+    assert first.desired.status is RuntimeConfigurationStateStatus.READY
+    assert first.desired.document is not None
+    assert first.desired.document.resolved_configuration is not None
+    effective = first.desired.document.resolved_configuration["effective_profile"]
+    assert isinstance(effective, dict)
     assert effective["network_policy"] == {
         "allowed_cidrs": ["10.10.0.0/16"],
         "denied_cidrs": ["10.10.1.0/24"],
     }
-    assert repeated.desired_revision.id == first.desired_revision.id
-    assert repeated.runtime.desired_runtime_configuration_revision_id == (
-        first.desired_revision.id
+    assert repeated.desired.sequence == first.desired.sequence
+    assert repeated.desired.digest == first.desired.digest
+    assert (
+        repeated.runtime.configuration_sequence == first.runtime.configuration_sequence
     )
 
 
-async def test_resolution_recovers_transient_disconnection_blocked_revision(
+async def test_resolution_recovers_transient_disconnection_blocked_state(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     """A prior transient connection block converges to the retained ready identity."""
@@ -476,55 +470,26 @@ async def test_resolution_recovers_transient_disconnection_blocked_revision(
     service = _service(rdb_session_manager)
     ready = await service.ensure_for_agent(agent_id)
     async with rdb_session_manager() as session:
-        blocked = await RuntimeProfileRepository().create_or_get_configuration_revision(
-            session,
-            create=RuntimeConfigurationRevisionCreate(
-                runtime_id=ready.runtime.id,
-                provider_id=ready.desired_revision.provider_id,
-                provider_capability_revision_id=(
-                    ready.desired_revision.provider_capability_revision_id
+        blocked = await (
+            RuntimeProfileRepository().overwrite_desired_configuration_state(
+                session,
+                write=RuntimeConfigurationDesiredStateWrite(
+                    runtime_id=ready.runtime.id,
+                    status=RuntimeConfigurationStateStatus.BLOCKED,
+                    target_generation=ready.runtime.desired_generation,
+                    digest=None,
+                    document=None,
+                    reason_code="provider_disconnected",
                 ),
-                infrastructure_profile_id=(
-                    ready.desired_revision.infrastructure_profile_id
-                ),
-                infrastructure_profile_version=(
-                    ready.desired_revision.infrastructure_profile_version
-                ),
-                workspace_runtime_profile_id=(
-                    ready.desired_revision.workspace_runtime_profile_id
-                ),
-                workspace_runtime_profile_version=(
-                    ready.desired_revision.workspace_runtime_profile_version
-                ),
-                agent_selection_version=(
-                    ready.desired_revision.agent_selection_version
-                ),
-                resolution_status=RuntimeConfigurationResolutionStatus.BLOCKED,
-                reason_code="provider_disconnected",
-                required_capabilities=(ready.desired_revision.required_capabilities),
-                missing_capabilities=(),
-                resolved_configuration=None,
-                source_trace=ready.desired_revision.source_trace,
-                digest="f" * 64,
-                target_desired_generation=ready.runtime.desired_generation,
-            ),
-        )
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == ready.runtime.id)
-            .values(
-                desired_runtime_configuration_revision_id=blocked.id,
-                applied_runtime_configuration_revision_id=None,
             )
         )
+        assert blocked is not None
 
     recovered = await service.ensure_for_agent(agent_id)
 
     assert recovered.runtime.desired_generation == ready.runtime.desired_generation
-    assert recovered.desired_revision.id == ready.desired_revision.id
-    assert recovered.desired_revision.resolution_status is (
-        RuntimeConfigurationResolutionStatus.READY
-    )
+    assert recovered.desired.sequence > ready.desired.sequence
+    assert recovered.desired.status is RuntimeConfigurationStateStatus.READY
 
 
 async def test_resolution_reads_sources_without_row_locks(
@@ -547,9 +512,7 @@ async def test_resolution_reads_sources_without_row_locks(
 
     resolution = await service.ensure_for_agent(agent_id)
 
-    assert resolution.desired_revision.resolution_status is (
-        RuntimeConfigurationResolutionStatus.READY
-    )
+    assert resolution.desired.status is RuntimeConfigurationStateStatus.READY
     assert source_read_count == [2]
 
 
@@ -724,11 +687,12 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
         resolution = await service.ensure_for_agent(agent_id)
 
         assert racing_repository.raced
-        assert resolution.desired_revision.id != ready.desired_revision.id
+        assert resolution.desired.sequence > ready.desired.sequence
+        assert resolution.desired.document is not None
         assert (
-            resolution.desired_revision.workspace_runtime_profile_id == replacement.id
+            resolution.desired.document.workspace_runtime_profile_id == replacement.id
         )
-        assert resolution.desired_revision.agent_selection_version == 2
+        assert resolution.desired.document.agent_selection_version == 2
 
         async with independent_session_manager() as session:
             task = await session.scalar(
@@ -752,12 +716,12 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
         async with independent_session_manager() as session:
             runtime = await AgentRuntimeRepository().get_by_agent_id(session, agent_id)
             assert runtime is not None
-            desired = await RuntimeProfileRepository().get_configuration_revision(
-                session,
-                revision_id=runtime.desired_runtime_configuration_revision_id or "",
+            state = await RuntimeProfileRepository().get_configuration_state(
+                session, runtime_id=runtime.id
             )
-            assert desired is not None
-            assert desired.workspace_runtime_profile_id == replacement.id
+            assert state is not None
+            assert state.desired.document is not None
+            assert state.desired.document.workspace_runtime_profile_id == replacement.id
     finally:
         if agent_id is not None:
             async with independent_session_manager() as session:
@@ -767,7 +731,7 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
                 )
 
 
-async def test_resolution_records_blocked_revision_without_losing_prior_desired(
+async def test_resolution_records_blocked_state_without_losing_prior_desired(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     async with rdb_session_manager() as session:
@@ -787,13 +751,12 @@ async def test_resolution_records_blocked_revision_without_losing_prior_desired(
 
     blocked = await service.ensure_for_agent(agent_id)
 
-    assert blocked.desired_revision.id != ready.desired_revision.id
-    assert blocked.desired_revision.resolution_status is (
-        RuntimeConfigurationResolutionStatus.BLOCKED
-    )
-    assert blocked.desired_revision.reason_code == "provider_disabled"
-    assert blocked.desired_revision.resolved_configuration is None
-    assert blocked.runtime.applied_runtime_configuration_revision_id is None
+    assert blocked.desired.sequence > ready.desired.sequence
+    assert blocked.desired.status is RuntimeConfigurationStateStatus.BLOCKED
+    assert blocked.desired.reason_code == "provider_disabled"
+    assert blocked.desired.document is not None
+    assert blocked.desired.document.resolved_configuration is None
+    assert blocked.applied is None
 
 
 async def test_resolution_requires_explicit_agent_profile(

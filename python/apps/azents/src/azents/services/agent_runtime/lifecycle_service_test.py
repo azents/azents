@@ -9,9 +9,13 @@ from azents.core.enums import (
     RuntimeRunnerState,
     RuntimeSummary,
 )
-from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.core.runtime_profile import (
+    RuntimeConfigurationDocument,
+    RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationStateStatus,
+)
 from azents.repos.agent_runtime.data import AgentRuntime
-from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
+from azents.repos.runtime_profile.data import RuntimeConfigurationSlot
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.runtime_profile_resolution.data import (
     RuntimeProfileResolutionResult,
@@ -70,36 +74,43 @@ def _resolution(
     reason_code: str | None,
 ) -> RuntimeProfileResolutionResult:
     """Create one Runtime Profile resolution for lifecycle guard tests."""
-    now = datetime.now(UTC)
     runtime = _runtime()
-    revision = RuntimeConfigurationRevision(
-        id="revision-id",
-        runtime_id=runtime.id,
-        provider_id="provider-resource-id",
-        provider_capability_revision_id="capability-revision-id",
-        infrastructure_profile_id="infrastructure-profile-id",
-        infrastructure_profile_version=1,
-        workspace_runtime_profile_id="workspace-profile-id",
-        workspace_runtime_profile_version=1,
-        agent_selection_version=1,
-        resolution_status=status,
+    document = None
+    digest = None
+    state_status = RuntimeConfigurationStateStatus.BLOCKED
+    if reason_code is None:
+        document = RuntimeConfigurationDocument(
+            schema_version=1,
+            source_trace={},
+            provider_id="provider-resource-id",
+            provider_capability_revision_id="capability-revision-id",
+            infrastructure_profile_id="infrastructure-profile-id",
+            infrastructure_profile_version=1,
+            workspace_runtime_profile_id="workspace-profile-id",
+            workspace_runtime_profile_version=1,
+            agent_selection_version=1,
+            required_capabilities=(),
+            missing_capabilities=(),
+            resolved_configuration={},
+        )
+        digest = "a" * 64
+        state_status = RuntimeConfigurationStateStatus.READY
+    desired = RuntimeConfigurationSlot(
+        sequence=runtime.configuration_sequence,
+        status=state_status,
+        target_generation=runtime.desired_generation,
+        digest=digest,
+        document=document,
         reason_code=reason_code,
-        required_capabilities=(),
-        missing_capabilities=(),
-        resolved_configuration={} if reason_code is None else None,
-        source_trace={},
-        digest="a" * 64,
-        target_desired_generation=runtime.desired_generation,
         provider_reported_digest=None,
         runner_reported_digest=None,
         provider_acknowledged_at=None,
-        runtime_observed_at=None,
-        created_at=now,
+        runner_observed_at=None,
     )
     return RuntimeProfileResolutionResult(
         runtime=runtime,
-        desired_revision=revision,
-        applied_revision=None,
+        desired=desired,
+        applied=None,
         runtime_created=False,
     )
 

@@ -2106,7 +2106,7 @@
       "configurationNoDesired": "解決済みの期待する構成はありません。",
       "configurationNoApplied": "ランタイムに適用された構成はありません。",
       "configurationEvidence": {
-        "revision": "Revision",
+        "sequence": "構成シーケンス",
         "profile": "Runtime Profile",
         "infrastructure": "インフラストラクチャ",
         "generation": "Generation",

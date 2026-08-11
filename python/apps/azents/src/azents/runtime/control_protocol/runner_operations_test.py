@@ -1516,7 +1516,7 @@ def _runner_registration() -> RuntimeRunnerRegistration:
         metadata={},
         auth_credential_id="credential-1",
         runtime_configuration=RuntimeConfigurationEvidence(
-            revision_id="revision-1",
+            configuration_sequence=1,
             digest="d" * 64,
             desired_generation=3,
         ),

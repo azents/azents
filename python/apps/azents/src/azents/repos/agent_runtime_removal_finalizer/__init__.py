@@ -18,6 +18,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_runtime_removal import (
     RDBAgentRuntimeRemovalOperation,
 )
+from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationState
 from azents.repos.agent_runtime_removal_scope import (
     AgentRuntimeRemovalScopeRepository,
 )
@@ -92,6 +93,12 @@ class AgentRuntimeRemovalFinalizerRepository:
             .with_for_update()
         )
         self._require_physical_deletion(operation=operation, runtime=runtime)
+        if runtime is not None:
+            await session.execute(
+                sa.delete(RDBRuntimeConfigurationState).where(
+                    RDBRuntimeConfigurationState.runtime_id == runtime.id
+                )
+            )
 
         agent.runtime_capability = AgentRuntimeCapability.NONE
         agent.runtime_capability_version += 1

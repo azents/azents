@@ -1921,7 +1921,7 @@ class SessionGitWorktreeService:
         )
         try:
             expected_authority = RuntimeOperationAuthority(
-                configuration_revision_id=runtime.configuration_revision_id,
+                configuration_sequence=runtime.configuration_sequence,
                 configuration_digest=runtime.configuration_digest,
                 desired_generation=runtime.desired_generation,
             )
@@ -1977,7 +1977,7 @@ class SessionGitWorktreeService:
         )
         try:
             expected_authority = RuntimeOperationAuthority(
-                configuration_revision_id=runtime.configuration_revision_id,
+                configuration_sequence=runtime.configuration_sequence,
                 configuration_digest=runtime.configuration_digest,
                 desired_generation=runtime.desired_generation,
             )
@@ -2692,7 +2692,7 @@ class SessionGitWorktreeService:
     ) -> SessionGitWorktree | None:
         """Run cleanup for one session-owned Git worktree allocation."""
         expected_authority = RuntimeOperationAuthority(
-            configuration_revision_id=runtime.configuration_revision_id,
+            configuration_sequence=runtime.configuration_sequence,
             configuration_digest=runtime.configuration_digest,
             desired_generation=runtime.desired_generation,
         )

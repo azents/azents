@@ -33,12 +33,14 @@ from azents.core.enums import (
 from azents.core.runtime_profile import (
     RuntimeConfigurationApplicationImpact,
     RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationStateStatus,
     classify_runtime_configuration_application,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
+from azents.repos.runtime_profile.data import RuntimeConfigurationState
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
@@ -190,15 +192,21 @@ class RuntimeLifecycleReconciler:
         )
 
     async def _dispatch_periodic_reconcile(self, runtime: AgentRuntime) -> bool:
-        if (
-            runtime.desired_state is RuntimeDesiredState.RUNNING
-            and runtime.provider_observed_state is RuntimeProviderObservedState.RUNNING
-            and runtime.applied_runtime_configuration_revision_id is not None
-            and runtime.desired_runtime_configuration_revision_id
-            != runtime.applied_runtime_configuration_revision_id
-        ):
-            return False
         async with self._session_manager() as session:
+            state = await self._profile_repository.get_configuration_state(
+                session,
+                runtime_id=runtime.id,
+            )
+            if (
+                runtime.desired_state is RuntimeDesiredState.RUNNING
+                and runtime.provider_observed_state
+                is RuntimeProviderObservedState.RUNNING
+                and state is not None
+                and state.desired.status is RuntimeConfigurationStateStatus.READY
+                and state.applied is not None
+                and state.desired.sequence != state.applied.sequence
+            ):
+                return False
             await self._runtime_repository.mark_provider_observe_requested(
                 session,
                 runtime.id,
@@ -226,25 +234,27 @@ class RuntimeLifecycleReconciler:
         self,
         runtime: AgentRuntime,
     ) -> bool:
-        desired_revision_id = runtime.desired_runtime_configuration_revision_id
-        applied_revision_id = runtime.applied_runtime_configuration_revision_id
-        if desired_revision_id is None or applied_revision_id is None:
-            return False
         async with self._session_manager() as session:
-            desired = await self._profile_repository.get_configuration_revision(
+            state = await self._profile_repository.get_configuration_state(
                 session,
-                revision_id=desired_revision_id,
+                runtime_id=runtime.id,
             )
-            applied = await self._profile_repository.get_configuration_revision(
-                session,
-                revision_id=applied_revision_id,
-            )
-        if desired is None or applied is None:
+        if state is None or state.applied is None:
             return False
+        desired = state.desired
+        applied = state.applied
         impact = classify_runtime_configuration_application(
-            desired_status=desired.resolution_status,
-            desired_configuration=desired.resolved_configuration,
-            applied_configuration=applied.resolved_configuration,
+            desired_status=(
+                RuntimeConfigurationResolutionStatus.READY
+                if desired.status is RuntimeConfigurationStateStatus.READY
+                else RuntimeConfigurationResolutionStatus.BLOCKED
+            ),
+            desired_configuration=(
+                desired.document.resolved_configuration
+                if desired.document is not None
+                else None
+            ),
+            applied_configuration=applied.document.resolved_configuration,
         )
         if impact is not RuntimeConfigurationApplicationImpact.IN_PLACE:
             return False
@@ -299,10 +309,19 @@ class RuntimeLifecycleReconciler:
                 or runtime.provider_observed_generation
                 != report.observed_desired_generation
                 or runtime.desired_generation != report.observed_desired_generation
-                or runtime.desired_runtime_configuration_revision_id
-                != runtime.applied_runtime_configuration_revision_id
-                or runtime.desired_runtime_configuration_revision_id
-                != report.runtime_configuration.revision_id
+            ):
+                return False
+            state = await self._profile_repository.get_configuration_state(
+                session,
+                runtime_id=runtime.id,
+            )
+            if (
+                state is None
+                or state.applied is None
+                or state.desired.status is not RuntimeConfigurationStateStatus.READY
+                or state.desired.sequence != state.applied.sequence
+                or state.desired.sequence
+                != report.runtime_configuration.configuration_sequence
             ):
                 return False
             evidence_matches_current = (
@@ -324,7 +343,9 @@ class RuntimeLifecycleReconciler:
                 "provider_id": report.provider_id,
                 "provider_generation": report.provider_generation,
                 "desired_generation": report.observed_desired_generation,
-                "configuration_revision_id": report.runtime_configuration.revision_id,
+                "configuration_sequence": (
+                    report.runtime_configuration.configuration_sequence
+                ),
                 "reconciliation_kind": observation.kind,
                 "reconciliation_reason": observation.reason,
             },
@@ -335,7 +356,9 @@ class RuntimeLifecycleReconciler:
             claim_lifecycle=False,
             required_provider_generation=report.provider_generation,
             required_observed_generation=report.observed_desired_generation,
-            required_configuration_revision_id=report.runtime_configuration.revision_id,
+            required_configuration_sequence=(
+                report.runtime_configuration.configuration_sequence
+            ),
             reconciliation_kind=observation.kind,
             reconciliation_reason=observation.reason,
         )
@@ -348,7 +371,7 @@ class RuntimeLifecycleReconciler:
         claim_lifecycle: bool,
         required_provider_generation: int | None,
         required_observed_generation: int | None = None,
-        required_configuration_revision_id: str | None = None,
+        required_configuration_sequence: int | None = None,
         reconciliation_kind: str | None = None,
         reconciliation_reason: str | None = None,
         locked_session: AsyncSession | None = None,
@@ -377,9 +400,7 @@ class RuntimeLifecycleReconciler:
                     claim_lifecycle=claim_lifecycle,
                     required_provider_generation=required_provider_generation,
                     required_observed_generation=required_observed_generation,
-                    required_configuration_revision_id=(
-                        required_configuration_revision_id
-                    ),
+                    required_configuration_sequence=(required_configuration_sequence),
                     reconciliation_kind=reconciliation_kind,
                     reconciliation_reason=reconciliation_reason,
                     locked_session=session,
@@ -449,21 +470,30 @@ class RuntimeLifecycleReconciler:
             return False
         if (
             required_observed_generation is not None
-            or required_configuration_revision_id is not None
+            or required_configuration_sequence is not None
         ):
             if locked_session is None:
                 async with self._session_manager() as session:
                     current = await self._runtime_repository.get_by_id(
                         session, runtime.id
                     )
+                    state = await self._profile_repository.get_configuration_state(
+                        session,
+                        runtime_id=runtime.id,
+                    )
             else:
                 current = runtime
+                state = await self._profile_repository.get_configuration_state(
+                    locked_session,
+                    runtime_id=runtime.id,
+                )
             if not _current_network_policy_repair_target(
                 current,
+                state=state,
                 provider_id=provider_id,
                 provider_generation=required_provider_generation,
                 observed_generation=required_observed_generation,
-                configuration_revision_id=required_configuration_revision_id,
+                configuration_sequence=required_configuration_sequence,
             ):
                 return False
             assert current is not None
@@ -489,32 +519,6 @@ class RuntimeLifecycleReconciler:
                 )
                 return False
             runtime = claimed
-
-        if command_type in {
-            RuntimeProviderCommandType.STOP,
-            RuntimeProviderCommandType.TERMINAL_DELETE,
-        } or (
-            command_type is RuntimeProviderCommandType.OBSERVE
-            and runtime.desired_state is RuntimeDesiredState.STOPPED
-        ):
-            prepared = (
-                await self._runtime_repository.ensure_lifecycle_configuration_revision(
-                    locked_session,
-                    runtime.id,
-                    runtime.desired_generation,
-                )
-            )
-            if prepared is None:
-                await self._record_failure(
-                    runtime,
-                    code="RUNTIME_CONFIGURATION_INVALID",
-                    message=(
-                        "Runtime lifecycle configuration evidence is unavailable."
-                    ),
-                    locked_session=locked_session,
-                )
-                return False
-            runtime = prepared
 
         created_at = datetime.now(UTC)
         runner_credential_id = self._config.runner_credential_identifier.credential_id(
@@ -594,8 +598,8 @@ class RuntimeLifecycleReconciler:
                     "desired_generation": runtime.desired_generation,
                     "command_type": command_type.value,
                     "request_id": result.request_id,
-                    "configuration_revision_id": (
-                        runtime_configuration.evidence.revision_id
+                    "configuration_sequence": (
+                        runtime_configuration.evidence.configuration_sequence
                     ),
                     "reconciliation_kind": reconciliation_kind,
                     "reconciliation_reason": reconciliation_reason,
@@ -649,50 +653,52 @@ class RuntimeLifecycleReconciler:
         locked_session: AsyncSession | None,
         require_ready: bool = True,
     ) -> RuntimeConfigurationEnvelope:
-        revision_id = (
-            runtime.desired_runtime_configuration_revision_id
-            if require_ready
-            else (
-                runtime.desired_runtime_configuration_revision_id
-                or runtime.applied_runtime_configuration_revision_id
-            )
-        )
-        if revision_id is None:
-            raise ValueError("Runtime configuration target revision is missing.")
         if locked_session is None:
             async with self._session_manager() as session:
-                revision = await self._profile_repository.get_configuration_revision(
+                state = await self._profile_repository.get_configuration_state(
                     session,
-                    revision_id=revision_id,
+                    runtime_id=runtime.id,
                 )
         else:
-            revision = await self._profile_repository.get_configuration_revision(
+            state = await self._profile_repository.get_configuration_state(
                 locked_session,
-                revision_id=revision_id,
+                runtime_id=runtime.id,
             )
-        if revision is None:
-            raise ValueError("Runtime configuration target revision is missing.")
-        if revision.runtime_id != runtime.id:
-            raise ValueError("Runtime configuration revision ownership is invalid.")
+        if state is None:
+            raise ValueError("Runtime configuration state is missing.")
+        desired = state.desired
+        slot = (
+            desired
+            if desired.status is RuntimeConfigurationStateStatus.READY
+            else state.applied
+        )
+        if require_ready:
+            slot = desired
+        if (
+            slot is None
+            or slot.document is None
+            or slot.digest is None
+            or slot.document.resolved_configuration is None
+        ):
+            raise ValueError("Runtime configuration target document is missing.")
+        document = slot.document
+        resolved_configuration = document.resolved_configuration
+        assert resolved_configuration is not None
         if (
             runtime.runtime_provider_resource_id is None
-            or revision.provider_id != runtime.runtime_provider_resource_id
+            or document.provider_id != runtime.runtime_provider_resource_id
         ):
             raise ValueError("Runtime configuration Provider binding is invalid.")
-        if revision.target_desired_generation != runtime.desired_generation:
+        if require_ready and slot.target_generation != runtime.desired_generation:
             raise ValueError("Runtime configuration target generation is stale.")
-        if revision.resolution_status is not RuntimeConfigurationResolutionStatus.READY:
-            raise ValueError("Runtime configuration target revision is blocked.")
-        if revision.resolved_configuration is None:
-            raise ValueError("Runtime configuration target document is missing.")
         envelope = RuntimeConfigurationEnvelope(
             evidence=RuntimeConfigurationEvidence(
-                revision_id=revision.id,
-                digest=revision.digest,
-                desired_generation=revision.target_desired_generation,
+                configuration_sequence=slot.sequence,
+                digest=slot.digest,
+                desired_generation=runtime.desired_generation,
             ),
             resolved_configuration_json=canonical_runtime_configuration_json(
-                revision.resolved_configuration or {}
+                resolved_configuration
             ),
         )
         configuration = parse_runtime_configuration_envelope(
@@ -701,31 +707,28 @@ class RuntimeLifecycleReconciler:
             expected_provider_kind=None,
         )
         if (
-            configuration.provider.id != revision.provider_id
+            configuration.provider.id != document.provider_id
             or configuration.provider.logical_id != runtime.runtime_provider_id
             or configuration.provider.capability_revision_id
-            != revision.provider_capability_revision_id
+            != document.provider_capability_revision_id
         ):
             raise ValueError("Runtime configuration Provider reference is invalid.")
         if not require_ready:
             return envelope
         if (
-            revision.infrastructure_profile_id != runtime.infrastructure_profile_id
-            or configuration.infrastructure_profile.id
-            != revision.infrastructure_profile_id
+            configuration.infrastructure_profile.id
+            != document.infrastructure_profile_id
             or configuration.infrastructure_profile.version
-            != revision.infrastructure_profile_version
+            != document.infrastructure_profile_version
         ):
             raise ValueError(
                 "Runtime configuration Infrastructure Profile reference is invalid."
             )
         if (
-            revision.workspace_runtime_profile_id
-            != runtime.workspace_runtime_profile_id
-            or configuration.workspace_runtime_profile.id
-            != revision.workspace_runtime_profile_id
+            configuration.workspace_runtime_profile.id
+            != document.workspace_runtime_profile_id
             or configuration.workspace_runtime_profile.version
-            != revision.workspace_runtime_profile_version
+            != document.workspace_runtime_profile_version
         ):
             raise ValueError(
                 "Runtime configuration Workspace Runtime Profile reference is invalid."
@@ -798,10 +801,7 @@ def _runtime_dispatch_snapshot_matches(
         and current.last_lifecycle_command is expected.last_lifecycle_command
         and current.terminal_delete_requested_generation
         == expected.terminal_delete_requested_generation
-        and current.desired_runtime_configuration_revision_id
-        == expected.desired_runtime_configuration_revision_id
-        and current.applied_runtime_configuration_revision_id
-        == expected.applied_runtime_configuration_revision_id
+        and current.configuration_sequence == expected.configuration_sequence
         and current.provider_generation == expected.provider_generation
         and current.provider_observed_generation
         == expected.provider_observed_generation
@@ -826,10 +826,11 @@ def _provider_command_type(
 def _current_network_policy_repair_target(
     runtime: AgentRuntime | None,
     *,
+    state: RuntimeConfigurationState | None,
     provider_id: str,
     provider_generation: int | None,
     observed_generation: int | None,
-    configuration_revision_id: str | None,
+    configuration_sequence: int | None,
 ) -> bool:
     """Return whether one drift-repair snapshot remains current at dispatch."""
     return (
@@ -842,8 +843,9 @@ def _current_network_policy_repair_target(
         and runtime.desired_generation == observed_generation
         and runtime.last_lifecycle_dispatch_generation >= runtime.desired_generation
         and runtime.terminal_delete_requested_generation is None
-        and runtime.desired_runtime_configuration_revision_id
-        == configuration_revision_id
-        and runtime.applied_runtime_configuration_revision_id
-        == configuration_revision_id
+        and state is not None
+        and state.applied is not None
+        and state.desired.status is RuntimeConfigurationStateStatus.READY
+        and state.desired.sequence == configuration_sequence
+        and state.applied.sequence == configuration_sequence
     )

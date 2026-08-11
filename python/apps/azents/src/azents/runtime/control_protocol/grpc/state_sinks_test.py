@@ -53,20 +53,21 @@ async def test_runner_heartbeat_configuration_waits_for_provider_ack(
     cast(AsyncMock, runtime_repository.get_by_id).return_value = Mock(
         id="runtime-1",
         runtime_provider_resource_id="provider-1",
-        desired_runtime_configuration_revision_id="revision-2",
-        applied_runtime_configuration_revision_id="revision-1",
     )
     profile_repository = Mock(spec=RuntimeProfileRepository)
     cast(
         AsyncMock,
-        profile_repository.get_configuration_revision,
+        profile_repository.get_configuration_state,
     ).return_value = Mock(
-        id="revision-2",
-        digest="e" * 64,
-        target_desired_generation=5,
-        provider_acknowledged_at=None,
-        provider_reported_digest=None,
-        runner_reported_digest=None,
+        desired=Mock(
+            sequence=2,
+            digest="e" * 64,
+            target_generation=5,
+            provider_acknowledged_at=None,
+            provider_reported_digest=None,
+            runner_reported_digest=None,
+        ),
+        applied=Mock(sequence=1),
     )
     cast(
         AsyncMock,
@@ -92,22 +93,23 @@ async def test_runner_heartbeat_configuration_stops_after_runner_report(
     cast(AsyncMock, runtime_repository.get_by_id).return_value = Mock(
         id="runtime-1",
         runtime_provider_resource_id="provider-1",
-        desired_runtime_configuration_revision_id="revision-2",
-        applied_runtime_configuration_revision_id="revision-1",
     )
-    revision = Mock(
-        id="revision-2",
-        digest="e" * 64,
-        target_desired_generation=5,
-        provider_acknowledged_at=datetime(2026, 7, 31, tzinfo=UTC),
-        provider_reported_digest="e" * 64,
-        runner_reported_digest=None,
+    state = Mock(
+        desired=Mock(
+            sequence=2,
+            digest="e" * 64,
+            target_generation=5,
+            provider_acknowledged_at=datetime(2026, 7, 31, tzinfo=UTC),
+            provider_reported_digest="e" * 64,
+            runner_reported_digest=None,
+        ),
+        applied=Mock(sequence=1),
     )
     profile_repository = Mock(spec=RuntimeProfileRepository)
     cast(
         AsyncMock,
-        profile_repository.get_configuration_revision,
-    ).return_value = revision
+        profile_repository.get_configuration_state,
+    ).return_value = state
     cast(
         AsyncMock,
         profile_repository.configuration_evidence_matches_current,
@@ -121,13 +123,13 @@ async def test_runner_heartbeat_configuration_stops_after_runner_report(
     evidence = await sink.configuration_evidence_for_runner_heartbeat(
         runtime_id="runtime-1"
     )
-    revision.runner_reported_digest = "e" * 64
+    state.desired.runner_reported_digest = "e" * 64
     acknowledged = await sink.configuration_evidence_for_runner_heartbeat(
         runtime_id="runtime-1"
     )
 
     assert evidence == RuntimeConfigurationEvidence(
-        revision_id="revision-2",
+        configuration_sequence=2,
         digest="e" * 64,
         desired_generation=5,
     )
@@ -142,20 +144,21 @@ async def test_runner_heartbeat_configuration_rejects_stale_current_target(
     cast(AsyncMock, runtime_repository.get_by_id).return_value = Mock(
         id="runtime-1",
         runtime_provider_resource_id="provider-1",
-        desired_runtime_configuration_revision_id="revision-2",
-        applied_runtime_configuration_revision_id="revision-1",
     )
     profile_repository = Mock(spec=RuntimeProfileRepository)
     cast(
         AsyncMock,
-        profile_repository.get_configuration_revision,
+        profile_repository.get_configuration_state,
     ).return_value = Mock(
-        id="revision-2",
-        digest="e" * 64,
-        target_desired_generation=5,
-        provider_acknowledged_at=datetime(2026, 7, 31, tzinfo=UTC),
-        provider_reported_digest="e" * 64,
-        runner_reported_digest=None,
+        desired=Mock(
+            sequence=2,
+            digest="e" * 64,
+            target_generation=5,
+            provider_acknowledged_at=datetime(2026, 7, 31, tzinfo=UTC),
+            provider_reported_digest="e" * 64,
+            runner_reported_digest=None,
+        ),
+        applied=Mock(sequence=1),
     )
     current_match = cast(
         AsyncMock,
@@ -184,10 +187,15 @@ async def test_runner_heartbeat_configuration_skips_already_applied_target(
     cast(AsyncMock, runtime_repository.get_by_id).return_value = Mock(
         id="runtime-1",
         runtime_provider_resource_id="provider-1",
-        desired_runtime_configuration_revision_id="revision-2",
-        applied_runtime_configuration_revision_id="revision-2",
     )
     profile_repository = Mock(spec=RuntimeProfileRepository)
+    cast(
+        AsyncMock,
+        profile_repository.get_configuration_state,
+    ).return_value = Mock(
+        desired=Mock(sequence=2, digest="e" * 64),
+        applied=Mock(sequence=2),
+    )
     sink = RuntimeRunnerStateRepositorySink(
         cast(AgentRuntimeRepository, runtime_repository),
         cast(RuntimeProfileRepository, profile_repository),
@@ -201,7 +209,7 @@ async def test_runner_heartbeat_configuration_skips_already_applied_target(
     assert evidence is None
     cast(
         AsyncMock,
-        profile_repository.get_configuration_revision,
+        profile_repository.configuration_evidence_matches_current,
     ).assert_not_awaited()
 
 
@@ -847,7 +855,7 @@ def _runtime_configuration_evidence(
     desired_generation: int = 0,
 ) -> RuntimeConfigurationEvidence:
     return RuntimeConfigurationEvidence(
-        revision_id="revision-1",
+        configuration_sequence=1,
         digest="d" * 64,
         desired_generation=desired_generation,
     )

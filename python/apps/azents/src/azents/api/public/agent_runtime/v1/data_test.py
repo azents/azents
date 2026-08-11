@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from azents.api.public.agent_runtime.v1.data import (
     AgentRuntimeConfigurationStatusResponse,
+    AgentRuntimeRawStateResponse,
     AgentRuntimeRemovalProgressResponse,
     RemoveAgentRuntimeRequest,
 )
@@ -14,17 +15,23 @@ from azents.core.enums import (
     AgentRuntimeRemovalStage,
     AgentRuntimeRemovalStatus,
 )
-from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.core.runtime_profile import (
+    RuntimeConfigurationDocument,
+    RuntimeConfigurationStateStatus,
+)
 from azents.repos.agent_runtime_removal.data import AgentRuntimeRemovalOperation
-from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
+from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationAppliedSlot,
+    RuntimeConfigurationSlot,
+)
 from azents.services.agent_runtime.lifecycle_data import AgentRuntimeConfigurationStatus
 from azents.services.agent_runtime.service import AgentRuntimeService
 
 
-def _revision() -> RuntimeConfigurationRevision:
-    return RuntimeConfigurationRevision(
-        id="revision-1",
-        runtime_id="runtime-1",
+def _document() -> RuntimeConfigurationDocument:
+    return RuntimeConfigurationDocument(
+        schema_version=1,
+        source_trace={"internal_version": 1},
         provider_id="provider-1",
         provider_capability_revision_id="capability-1",
         infrastructure_profile_id="infrastructure-1",
@@ -32,19 +39,9 @@ def _revision() -> RuntimeConfigurationRevision:
         workspace_runtime_profile_id="profile-1",
         workspace_runtime_profile_version=3,
         agent_selection_version=4,
-        resolution_status=RuntimeConfigurationResolutionStatus.READY,
-        reason_code=None,
         required_capabilities=("runtime.resources",),
         missing_capabilities=(),
         resolved_configuration={"secret_provider_detail": "not-public"},
-        source_trace={"internal_version": 1},
-        digest="a" * 64,
-        target_desired_generation=5,
-        provider_reported_digest=None,
-        runner_reported_digest=None,
-        provider_acknowledged_at=None,
-        runtime_observed_at=None,
-        created_at=datetime.datetime(2026, 7, 30, tzinfo=datetime.UTC),
     )
 
 
@@ -58,19 +55,42 @@ def _all_keys(value: object) -> set[str]:
     return set()
 
 
-def test_configuration_status_exposes_only_safe_revision_evidence() -> None:
+def test_configuration_status_exposes_only_bounded_current_state() -> None:
     """Runtime status omits resolved infrastructure details and source traces."""
-    revision = _revision()
+    document = _document()
+    desired = RuntimeConfigurationSlot(
+        sequence=6,
+        status=RuntimeConfigurationStateStatus.READY,
+        target_generation=5,
+        digest="a" * 64,
+        document=document,
+        reason_code=None,
+        provider_reported_digest="a" * 64,
+        runner_reported_digest="a" * 64,
+        provider_acknowledged_at=datetime.datetime(2026, 7, 30, tzinfo=datetime.UTC),
+        runner_observed_at=datetime.datetime(2026, 7, 30, tzinfo=datetime.UTC),
+    )
+    applied = RuntimeConfigurationAppliedSlot(
+        sequence=6,
+        target_generation=5,
+        digest="a" * 64,
+        document=document,
+        applied_at=datetime.datetime(2026, 7, 30, tzinfo=datetime.UTC),
+    )
     payload = AgentRuntimeConfigurationStatusResponse.convert_from(
         AgentRuntimeConfigurationStatus(
             status="applied",
-            desired=revision,
-            applied=revision,
+            desired=desired,
+            applied=applied,
         )
     ).model_dump(mode="json")
 
     assert payload["status"] == "applied"
+    assert payload["desired"]["sequence"] == 6
+    assert payload["desired"]["status"] == "ready"
+    assert payload["desired"]["target_generation"] == 5
     assert payload["desired"]["workspace_runtime_profile_id"] == "profile-1"
+    assert payload["applied"]["applied_at"] is not None
     keys = _all_keys(payload)
     assert keys.isdisjoint(
         {
@@ -79,6 +99,50 @@ def test_configuration_status_exposes_only_safe_revision_evidence() -> None:
             "encrypted_secrets",
             "secret_metadata",
             "provider_config",
+        }
+    )
+
+
+def test_unconfigured_state_omits_source_scalars_and_digest() -> None:
+    """An unconfigured desired slot has no source or resolved target evidence."""
+    payload = AgentRuntimeConfigurationStatusResponse.convert_from(
+        AgentRuntimeConfigurationStatus(
+            status="profile_required",
+            desired=RuntimeConfigurationSlot(
+                sequence=7,
+                status=RuntimeConfigurationStateStatus.UNCONFIGURED,
+                target_generation=6,
+                digest=None,
+                document=None,
+                reason_code="runtime_profile_required",
+                provider_reported_digest=None,
+                runner_reported_digest=None,
+                provider_acknowledged_at=None,
+                runner_observed_at=None,
+            ),
+            applied=None,
+        )
+    ).model_dump(mode="json")
+
+    desired = payload["desired"]
+    assert desired["status"] == "unconfigured"
+    assert desired["digest"] is None
+    assert desired["provider_id"] is None
+    assert desired["required_capabilities"] is None
+    assert desired["reason_code"] == "runtime_profile_required"
+
+
+def test_raw_state_replaces_direct_configuration_pointers() -> None:
+    """Raw Runtime state exposes only the Runtime-owned sequence high-water mark."""
+    fields = set(AgentRuntimeRawStateResponse.model_fields)
+
+    assert "configuration_sequence" in fields
+    assert fields.isdisjoint(
+        {
+            "infrastructure_profile_id",
+            "workspace_runtime_profile_id",
+            "desired_runtime_configuration_revision_id",
+            "applied_runtime_configuration_revision_id",
         }
     )
 

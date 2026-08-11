@@ -683,7 +683,7 @@ class RunnerRunLoop:
                     extra={
                         "runtime_id": accepted.runtime_id,
                         "runner_generation": accepted.generation,
-                        "revision_id": evidence.revision_id,
+                        "configuration_sequence": evidence.configuration_sequence,
                         "error_code": "desired_generation_mismatch",
                     },
                 )
@@ -696,7 +696,7 @@ class RunnerRunLoop:
                         extra={
                             "runtime_id": accepted.runtime_id,
                             "runner_generation": accepted.generation,
-                            "revision_id": evidence.revision_id,
+                            "configuration_sequence": evidence.configuration_sequence,
                             "error_code": "runtime_configuration_invalid",
                         },
                     )

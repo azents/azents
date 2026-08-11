@@ -18,37 +18,43 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.runtime_configuration_resolution_status import RuntimeConfigurationResolutionStatus
 from typing import Optional, Set
 from typing_extensions import Self
 
-class RuntimeConfigurationRevisionResponse(BaseModel):
+class RuntimeConfigurationStateResponse(BaseModel):
     """
-    Safe immutable Runtime configuration revision evidence.
+    Bounded desired or applied Runtime configuration state.
     """ # noqa: E501
-    id: StrictStr
-    provider_id: StrictStr
+    sequence: StrictInt
+    status: StrictStr
+    target_generation: StrictInt
+    digest: Optional[StrictStr]
+    provider_id: Optional[StrictStr]
     provider_capability_revision_id: Optional[StrictStr]
-    infrastructure_profile_id: StrictStr
-    infrastructure_profile_version: StrictInt
-    workspace_runtime_profile_id: StrictStr
-    workspace_runtime_profile_version: StrictInt
-    agent_selection_version: StrictInt
-    resolution_status: RuntimeConfigurationResolutionStatus
+    infrastructure_profile_id: Optional[StrictStr]
+    infrastructure_profile_version: Optional[StrictInt]
+    workspace_runtime_profile_id: Optional[StrictStr]
+    workspace_runtime_profile_version: Optional[StrictInt]
+    agent_selection_version: Optional[StrictInt]
+    required_capabilities: Optional[List[StrictStr]]
+    missing_capabilities: Optional[List[StrictStr]]
     reason_code: Optional[StrictStr]
-    required_capabilities: List[StrictStr]
-    missing_capabilities: List[StrictStr]
-    digest: StrictStr
-    target_desired_generation: StrictInt
     provider_reported_digest: Optional[StrictStr]
     runner_reported_digest: Optional[StrictStr]
     provider_acknowledged_at: Optional[datetime]
-    runtime_observed_at: Optional[datetime]
-    created_at: datetime
+    runner_observed_at: Optional[datetime]
+    applied_at: Optional[datetime]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider_id", "provider_capability_revision_id", "infrastructure_profile_id", "infrastructure_profile_version", "workspace_runtime_profile_id", "workspace_runtime_profile_version", "agent_selection_version", "resolution_status", "reason_code", "required_capabilities", "missing_capabilities", "digest", "target_desired_generation", "provider_reported_digest", "runner_reported_digest", "provider_acknowledged_at", "runtime_observed_at", "created_at"]
+    __properties: ClassVar[List[str]] = ["sequence", "status", "target_generation", "digest", "provider_id", "provider_capability_revision_id", "infrastructure_profile_id", "infrastructure_profile_version", "workspace_runtime_profile_id", "workspace_runtime_profile_version", "agent_selection_version", "required_capabilities", "missing_capabilities", "reason_code", "provider_reported_digest", "runner_reported_digest", "provider_acknowledged_at", "runner_observed_at", "applied_at"]
+
+    @field_validator('status')
+    def status_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['unconfigured', 'blocked', 'ready']):
+            raise ValueError("must be one of enum values ('unconfigured', 'blocked', 'ready')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -68,7 +74,7 @@ class RuntimeConfigurationRevisionResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of RuntimeConfigurationRevisionResponse from a JSON string"""
+        """Create an instance of RuntimeConfigurationStateResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -96,10 +102,55 @@ class RuntimeConfigurationRevisionResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if digest (nullable) is None
+        # and model_fields_set contains the field
+        if self.digest is None and "digest" in self.model_fields_set:
+            _dict['digest'] = None
+
+        # set to None if provider_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.provider_id is None and "provider_id" in self.model_fields_set:
+            _dict['provider_id'] = None
+
         # set to None if provider_capability_revision_id (nullable) is None
         # and model_fields_set contains the field
         if self.provider_capability_revision_id is None and "provider_capability_revision_id" in self.model_fields_set:
             _dict['provider_capability_revision_id'] = None
+
+        # set to None if infrastructure_profile_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.infrastructure_profile_id is None and "infrastructure_profile_id" in self.model_fields_set:
+            _dict['infrastructure_profile_id'] = None
+
+        # set to None if infrastructure_profile_version (nullable) is None
+        # and model_fields_set contains the field
+        if self.infrastructure_profile_version is None and "infrastructure_profile_version" in self.model_fields_set:
+            _dict['infrastructure_profile_version'] = None
+
+        # set to None if workspace_runtime_profile_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.workspace_runtime_profile_id is None and "workspace_runtime_profile_id" in self.model_fields_set:
+            _dict['workspace_runtime_profile_id'] = None
+
+        # set to None if workspace_runtime_profile_version (nullable) is None
+        # and model_fields_set contains the field
+        if self.workspace_runtime_profile_version is None and "workspace_runtime_profile_version" in self.model_fields_set:
+            _dict['workspace_runtime_profile_version'] = None
+
+        # set to None if agent_selection_version (nullable) is None
+        # and model_fields_set contains the field
+        if self.agent_selection_version is None and "agent_selection_version" in self.model_fields_set:
+            _dict['agent_selection_version'] = None
+
+        # set to None if required_capabilities (nullable) is None
+        # and model_fields_set contains the field
+        if self.required_capabilities is None and "required_capabilities" in self.model_fields_set:
+            _dict['required_capabilities'] = None
+
+        # set to None if missing_capabilities (nullable) is None
+        # and model_fields_set contains the field
+        if self.missing_capabilities is None and "missing_capabilities" in self.model_fields_set:
+            _dict['missing_capabilities'] = None
 
         # set to None if reason_code (nullable) is None
         # and model_fields_set contains the field
@@ -121,16 +172,21 @@ class RuntimeConfigurationRevisionResponse(BaseModel):
         if self.provider_acknowledged_at is None and "provider_acknowledged_at" in self.model_fields_set:
             _dict['provider_acknowledged_at'] = None
 
-        # set to None if runtime_observed_at (nullable) is None
+        # set to None if runner_observed_at (nullable) is None
         # and model_fields_set contains the field
-        if self.runtime_observed_at is None and "runtime_observed_at" in self.model_fields_set:
-            _dict['runtime_observed_at'] = None
+        if self.runner_observed_at is None and "runner_observed_at" in self.model_fields_set:
+            _dict['runner_observed_at'] = None
+
+        # set to None if applied_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.applied_at is None and "applied_at" in self.model_fields_set:
+            _dict['applied_at'] = None
 
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of RuntimeConfigurationRevisionResponse from a dict"""
+        """Create an instance of RuntimeConfigurationStateResponse from a dict"""
         if obj is None:
             return None
 
@@ -138,7 +194,10 @@ class RuntimeConfigurationRevisionResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "id": obj.get("id"),
+            "sequence": obj.get("sequence"),
+            "status": obj.get("status"),
+            "target_generation": obj.get("target_generation"),
+            "digest": obj.get("digest"),
             "provider_id": obj.get("provider_id"),
             "provider_capability_revision_id": obj.get("provider_capability_revision_id"),
             "infrastructure_profile_id": obj.get("infrastructure_profile_id"),
@@ -146,17 +205,14 @@ class RuntimeConfigurationRevisionResponse(BaseModel):
             "workspace_runtime_profile_id": obj.get("workspace_runtime_profile_id"),
             "workspace_runtime_profile_version": obj.get("workspace_runtime_profile_version"),
             "agent_selection_version": obj.get("agent_selection_version"),
-            "resolution_status": obj.get("resolution_status"),
-            "reason_code": obj.get("reason_code"),
             "required_capabilities": obj.get("required_capabilities"),
             "missing_capabilities": obj.get("missing_capabilities"),
-            "digest": obj.get("digest"),
-            "target_desired_generation": obj.get("target_desired_generation"),
+            "reason_code": obj.get("reason_code"),
             "provider_reported_digest": obj.get("provider_reported_digest"),
             "runner_reported_digest": obj.get("runner_reported_digest"),
             "provider_acknowledged_at": obj.get("provider_acknowledged_at"),
-            "runtime_observed_at": obj.get("runtime_observed_at"),
-            "created_at": obj.get("created_at")
+            "runner_observed_at": obj.get("runner_observed_at"),
+            "applied_at": obj.get("applied_at")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

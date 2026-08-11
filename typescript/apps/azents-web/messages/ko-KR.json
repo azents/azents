@@ -2106,7 +2106,7 @@
       "configurationNoDesired": "확정된 원하는 구성이 없습니다.",
       "configurationNoApplied": "런타임에 적용된 구성이 없습니다.",
       "configurationEvidence": {
-        "revision": "Revision",
+        "sequence": "구성 시퀀스",
         "profile": "Runtime Profile",
         "infrastructure": "인프라",
         "generation": "Generation",

@@ -3,7 +3,10 @@
 import dataclasses
 
 from azents.repos.agent_runtime.data import AgentRuntime
-from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
+from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationAppliedSlot,
+    RuntimeConfigurationSlot,
+)
 
 
 @dataclasses.dataclass
@@ -20,9 +23,9 @@ class RuntimeProfileResolutionUnavailable(Exception):
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeProfileResolutionResult:
-    """Runtime with its authoritative immutable desired configuration."""
+    """Runtime with its authoritative current desired/applied configuration."""
 
     runtime: AgentRuntime
-    desired_revision: RuntimeConfigurationRevision
-    applied_revision: RuntimeConfigurationRevision | None
+    desired: RuntimeConfigurationSlot
+    applied: RuntimeConfigurationAppliedSlot | None
     runtime_created: bool

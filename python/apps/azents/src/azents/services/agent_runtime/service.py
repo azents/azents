@@ -22,7 +22,7 @@ from azents.core.enums import (
     RuntimeSummary,
     WorkspaceUserRole,
 )
-from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -105,6 +105,7 @@ _SAFE_RUNTIME_CONFIGURATION_REASON_CODES = frozenset(
         "profile_document_invalid",
         "profile_incompatible",
         "runtime_configuration_blocked",
+        "runtime_profile_required",
     }
 )
 
@@ -458,19 +459,24 @@ class AgentRuntimeService:
             blocked = self.configuration_blocking_error(resolution)
             if blocked is not None:
                 return Failure(blocked)
+            assert resolution.desired.digest is not None
             if (
                 runtime.provider_connection_state
                 == RuntimeProviderConnectionState.DISCONNECTED
             ):
                 return Failure(ProviderDisconnected(runtime_id=runtime.id))
             async with self.session_manager() as session:
-                command = await self.runtime_repository.set_desired_state_if_ready(
-                    session,
-                    runtime.id,
-                    RuntimeLifecycleCommandType.RESET,
-                    final_desired_state,
-                    expected_configuration_revision_id=(resolution.desired_revision.id),
-                    reset_final_desired_state=final_desired_state,
+                command = await (
+                    self.runtime_repository.set_desired_state_if_configuration_current(
+                        session,
+                        runtime.id,
+                        RuntimeLifecycleCommandType.RESET,
+                        final_desired_state,
+                        expected_configuration_sequence=resolution.desired.sequence,
+                        expected_digest=resolution.desired.digest,
+                        expected_generation=runtime.desired_generation,
+                        reset_final_desired_state=final_desired_state,
+                    )
                 )
             if command is None:
                 return Failure(
@@ -535,17 +541,22 @@ class AgentRuntimeService:
                 provider_id=blocked.provider_id,
                 message=blocked.message,
             )
+        assert resolution.desired.digest is not None
         await self._require_runtime_operation_capability(
             agent_id,
             expected_version=capability_version,
         )
         async with self.session_manager() as session:
-            command = await self.runtime_repository.set_desired_state_if_ready(
-                session,
-                runtime.id,
-                RuntimeLifecycleCommandType.START,
-                RuntimeDesiredState.RUNNING,
-                expected_configuration_revision_id=resolution.desired_revision.id,
+            command = await (
+                self.runtime_repository.set_desired_state_if_configuration_current(
+                    session,
+                    runtime.id,
+                    RuntimeLifecycleCommandType.START,
+                    RuntimeDesiredState.RUNNING,
+                    expected_configuration_sequence=resolution.desired.sequence,
+                    expected_digest=resolution.desired.digest,
+                    expected_generation=runtime.desired_generation,
+                )
             )
         if command is None:
             raise RuntimeProfileResolutionUnavailable(
@@ -569,7 +580,7 @@ class AgentRuntimeService:
         deadline = time.monotonic() + max(wait_timeout_seconds, 0.0)
         last_resolution: RuntimeProfileResolutionResult | None = None
         expected_desired_generation: int | None = None
-        expected_revision_id: str | None = None
+        expected_configuration_sequence: int | None = None
         while True:
             await self._require_runtime_operation_capability(
                 agent_id,
@@ -629,10 +640,10 @@ class AgentRuntimeService:
                     )
             if expected_desired_generation is None:
                 expected_desired_generation = runtime.desired_generation
-                expected_revision_id = resolution.desired_revision.id
+                expected_configuration_sequence = resolution.desired.sequence
             elif (
                 runtime.desired_generation != expected_desired_generation
-                or resolution.desired_revision.id != expected_revision_id
+                or resolution.desired.sequence != expected_configuration_sequence
             ):
                 raise RuntimeStorageError(
                     "Runtime configuration changed while waiting for the operation."
@@ -675,9 +686,8 @@ class AgentRuntimeService:
                 "Runtime Provider is disconnected. Please try again in a moment."
             )
         if (
-            last_resolution.applied_revision is None
-            or last_resolution.applied_revision.id
-            != last_resolution.desired_revision.id
+            last_resolution.applied is None
+            or last_resolution.applied.sequence != last_resolution.desired.sequence
         ):
             raise RuntimeStorageError(
                 "Runtime is still applying the selected Runtime Profile."
@@ -703,15 +713,16 @@ class AgentRuntimeService:
         if not AgentRuntimeService._operation_target_evidence_ready(resolution):
             return None
         runtime = resolution.runtime
-        desired = resolution.desired_revision
+        desired = resolution.desired
         workspace_path = runtime.workspace_path
         assert workspace_path is not None
+        assert desired.digest is not None
         return RuntimeOperationTarget(
             id=runtime.id,
             runtime_capability_version=runtime_capability_version,
             desired_generation=runtime.desired_generation,
             runner_generation=runtime.runner_generation,
-            configuration_revision_id=desired.id,
+            configuration_sequence=desired.sequence,
             configuration_digest=desired.digest,
             workspace_path=workspace_path,
         )
@@ -722,16 +733,18 @@ class AgentRuntimeService:
     ) -> bool:
         """Return whether current Runtime evidence can support an operation."""
         runtime = resolution.runtime
-        desired = resolution.desired_revision
-        applied = resolution.applied_revision
+        desired = resolution.desired
+        applied = resolution.applied
         if (
             applied is None
-            or applied.id != desired.id
-            or desired.target_desired_generation != runtime.desired_generation
+            or desired.status is not RuntimeConfigurationStateStatus.READY
+            or desired.document is None
+            or applied.sequence != desired.sequence
+            or desired.target_generation != runtime.desired_generation
             or desired.provider_reported_digest != desired.digest
             or desired.runner_reported_digest != desired.digest
             or desired.provider_acknowledged_at is None
-            or desired.runtime_observed_at is None
+            or desired.runner_observed_at is None
             or runtime.desired_state is not RuntimeDesiredState.RUNNING
             or runtime.provider_observed_state
             is not RuntimeProviderObservedState.RUNNING
@@ -780,9 +793,9 @@ class AgentRuntimeService:
     ) -> bool:
         """Check that a resolution still matches the prompt-selected authority."""
         runtime = resolution.runtime
-        desired = resolution.desired_revision
+        desired = resolution.desired
         return (
-            desired.id == expected_authority.configuration_revision_id
+            desired.sequence == expected_authority.configuration_sequence
             and desired.digest == expected_authority.configuration_digest
             and runtime.desired_generation == expected_authority.desired_generation
         )
@@ -854,6 +867,10 @@ class AgentRuntimeService:
             blocked = self.configuration_blocking_error(resolution)
             if blocked is not None:
                 return Failure(blocked)
+            desired_document = resolution.desired.document
+            desired_digest = resolution.desired.digest
+            assert desired_document is not None
+            assert desired_digest is not None
 
         async with self.session_manager() as session:
             if command_type is RuntimeLifecycleCommandType.STOP:
@@ -867,7 +884,7 @@ class AgentRuntimeService:
                 provider_connected = await (
                     self.runtime_provider_control_repository.has_connected_connection(
                         session,
-                        provider_id=resolution.desired_revision.provider_id,
+                        provider_id=desired_document.provider_id,
                         now=tznow(),
                         for_update=True,
                     )
@@ -880,12 +897,16 @@ class AgentRuntimeService:
                             message="Runtime Provider is disconnected.",
                         )
                     )
-                command = await self.runtime_repository.set_desired_state_if_ready(
-                    session,
-                    resolution.runtime.id,
-                    command_type,
-                    desired_state,
-                    expected_configuration_revision_id=(resolution.desired_revision.id),
+                command = await (
+                    self.runtime_repository.set_desired_state_if_configuration_current(
+                        session,
+                        resolution.runtime.id,
+                        command_type,
+                        desired_state,
+                        expected_configuration_sequence=resolution.desired.sequence,
+                        expected_digest=desired_digest,
+                        expected_generation=resolution.runtime.desired_generation,
+                    )
                 )
         if command is None:
             if command_type is RuntimeLifecycleCommandType.STOP:
@@ -1181,29 +1202,19 @@ class AgentRuntimeService:
         """Load retained configuration evidence without resolving new sources."""
         async with self.session_manager() as session:
             runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
-            if (
-                runtime is None
-                or runtime.desired_runtime_configuration_revision_id is None
-            ):
+            if runtime is None:
                 return None
-            desired = await self.runtime_profile_repository.get_configuration_revision(
+            state = await self.runtime_profile_repository.get_configuration_state(
                 session,
-                revision_id=runtime.desired_runtime_configuration_revision_id,
+                runtime_id=runtime.id,
+                for_update=False,
             )
-            if desired is None:
+            if state is None:
                 return None
-            applied = None
-            if runtime.applied_runtime_configuration_revision_id is not None:
-                applied = (
-                    await self.runtime_profile_repository.get_configuration_revision(
-                        session,
-                        revision_id=(runtime.applied_runtime_configuration_revision_id),
-                    )
-                )
         return RuntimeProfileResolutionResult(
             runtime=runtime,
-            desired_revision=desired,
-            applied_revision=applied,
+            desired=state.desired,
+            applied=state.applied,
             runtime_created=False,
         )
 
@@ -1222,13 +1233,15 @@ class AgentRuntimeService:
         self,
         resolution: RuntimeProfileResolutionResult,
     ) -> AgentRuntimeConfigurationStatus:
-        desired = resolution.desired_revision
-        applied = resolution.applied_revision
-        if desired.resolution_status.value == "blocked":
+        desired = resolution.desired
+        applied = resolution.applied
+        if desired.status is RuntimeConfigurationStateStatus.UNCONFIGURED:
+            status = "profile_required"
+        elif desired.status is RuntimeConfigurationStateStatus.BLOCKED:
             status = "configuration_blocked"
         elif applied is None:
             status = "configured_not_created"
-        elif applied.id != desired.id:
+        elif applied.sequence != desired.sequence:
             status = "waiting_for_recreation"
         else:
             status = "applied"
@@ -1250,11 +1263,11 @@ class AgentRuntimeService:
         resolution: RuntimeProfileResolutionResult,
     ) -> RuntimeProviderUnavailable | None:
         """Reject creation commands when current exact sources are blocked."""
-        desired = resolution.desired_revision
-        if (
-            desired.resolution_status
-            is not RuntimeConfigurationResolutionStatus.BLOCKED
-        ):
+        desired = resolution.desired
+        if desired.status not in {
+            RuntimeConfigurationStateStatus.BLOCKED,
+            RuntimeConfigurationStateStatus.UNCONFIGURED,
+        }:
             return None
         return RuntimeProviderUnavailable(
             code=desired.reason_code or "runtime_configuration_blocked",

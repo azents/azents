@@ -301,10 +301,7 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert env["AZ_RUNTIME_RUNNER_AUTH_TOKEN"] == "runner-token-1"
     assert env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"] == "runner-credential-1"
     assert "azents/workspace-path" not in pod.metadata.annotations
-    assert (
-        pod.metadata.annotations["azents/runtime-configuration-revision-id"]
-        == "revision-1"
-    )
+    assert pod.metadata.annotations["azents/runtime-configuration-sequence"] == "1"
     assert pod.spec.service_account_name is None
     assert pod.spec.automount_service_account_token is False
     assert pod.spec.node_selector == {}
@@ -1122,10 +1119,7 @@ async def test_start_applies_configured_pod_annotations() -> None:
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     assert pod.metadata.annotations["descheduler/no-evict"] == "true"
     assert "azents/workspace-path" not in pod.metadata.annotations
-    assert (
-        pod.metadata.annotations["azents/runtime-configuration-revision-id"]
-        == "revision-1"
-    )
+    assert pod.metadata.annotations["azents/runtime-configuration-sequence"] == "1"
 
 
 @pytest.mark.asyncio
@@ -1536,7 +1530,7 @@ async def test_legacy_resources_are_skipped_until_command_replaces_them() -> Non
     for resource in (pod, pvc):
         annotations = cast(dict[str, str], resource.metadata.annotations)
         for key in (
-            "azents/runtime-configuration-revision-id",
+            "azents/runtime-configuration-sequence",
             "azents/runtime-configuration-digest",
         ):
             annotations.pop(key)
@@ -1549,10 +1543,7 @@ async def test_legacy_resources_are_skipped_until_command_replaces_them() -> Non
 
     assert result.report.runtime_configuration == command.runtime_configuration.evidence
     replaced = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
-    assert (
-        replaced.metadata.annotations["azents/runtime-configuration-revision-id"]
-        == "revision-1"
-    )
+    assert replaced.metadata.annotations["azents/runtime-configuration-sequence"] == "1"
 
 
 @pytest.mark.asyncio
@@ -1613,10 +1604,7 @@ async def test_runtime_configuration_evidence_is_persisted_and_reported() -> Non
     )
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
-    assert (
-        pod.metadata.annotations["azents/runtime-configuration-revision-id"]
-        == "revision-1"
-    )
+    assert pod.metadata.annotations["azents/runtime-configuration-sequence"] == "1"
     assert result.report.runtime_configuration == configuration.evidence
 
 
@@ -1922,7 +1910,7 @@ async def test_configuration_update_changes_only_network_policy() -> None:
     updated_configuration = _runtime_configuration(
         allowed_cidrs=["10.20.0.0/16"],
         denied_cidrs=["10.20.1.0/24"],
-        revision_id="revision-2",
+        configuration_sequence=2,
         digest="e" * 64,
     )
 
@@ -1939,9 +1927,7 @@ async def test_configuration_update_changes_only_network_policy() -> None:
     assert api.deleted_pods == []
     assert api.deleted_pvcs == []
     policy = api.network_policies[policy_key]
-    assert policy.metadata.annotations["azents/runtime-configuration-revision-id"] == (
-        "revision-2"
-    )
+    assert policy.metadata.annotations["azents/runtime-configuration-sequence"] == ("2")
     assert result.report.runtime_configuration == updated_configuration.evidence
 
 
@@ -2009,7 +1995,7 @@ def _runtime_configuration(
     persistent_storage_bytes: int | None = None,
     allowed_cidrs: list[str] | None = None,
     denied_cidrs: list[str] | None = None,
-    revision_id: str = "revision-1",
+    configuration_sequence: int = 1,
     digest: str = "d" * 64,
 ) -> RuntimeConfigurationEnvelope:
     docker_configured = docker_enabled and bounded
@@ -2123,7 +2109,7 @@ def _runtime_configuration(
     }
     return RuntimeConfigurationEnvelope(
         evidence=RuntimeConfigurationEvidence(
-            revision_id=revision_id,
+            configuration_sequence=configuration_sequence,
             digest=digest,
             desired_generation=desired_generation,
         ),

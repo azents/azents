@@ -15,7 +15,7 @@ import azents.rdb.models.user as _user  # noqa: F401
 import azents.rdb.models.workspace as _workspace  # noqa: F401
 import azents.rdb.models.workspace_user as _workspace_user  # noqa: F401
 from azents.core.runtime_profile import (
-    RuntimeConfigurationResolutionStatus,
+    RuntimeConfigurationStateStatus,
     RuntimeInfrastructureProfileKind,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
@@ -45,9 +45,9 @@ runtime_profile_lifecycle_enum = ENUM(
     create_type=False,
     values_callable=_enum_values,
 )
-runtime_configuration_resolution_status_enum = ENUM(
-    RuntimeConfigurationResolutionStatus,
-    name="runtime_configuration_resolution_status",
+runtime_configuration_state_status_enum = ENUM(
+    RuntimeConfigurationStateStatus,
+    name="runtime_configuration_state_status",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -242,98 +242,32 @@ class RDBWorkspaceRuntimeProfile(RDBModel):
     )
 
 
-class RDBRuntimeConfigurationRevision(RDBModel):
-    """Immutable desired or applied full Runtime configuration evidence."""
+class RDBRuntimeConfigurationState(RDBModel):
+    """One bounded desired/applied Runtime configuration state row."""
 
-    __tablename__ = "runtime_configuration_revisions"
+    __tablename__ = "runtime_configuration_states"
 
-    UQ_RUNTIME_DIGEST_GENERATION = sa.UniqueConstraint(
-        "runtime_id",
-        "digest",
-        "target_desired_generation",
-        name="uq_runtime_configuration_revisions_runtime_digest_generation",
-    )
-    CK_RESOLUTION_DOCUMENT = sa.CheckConstraint(
-        "(resolution_status = 'ready' AND resolved_configuration IS NOT NULL "
-        "AND reason_code IS NULL) OR "
-        "(resolution_status = 'blocked' AND resolved_configuration IS NULL "
-        "AND reason_code IS NOT NULL)",
-        name="ck_runtime_configuration_revisions_resolution_document",
-    )
-    CK_TARGET_GENERATION = sa.CheckConstraint(
-        "target_desired_generation >= 0",
-        name="ck_runtime_configuration_revisions_target_generation",
-    )
-    CK_AGENT_SELECTION_VERSION = sa.CheckConstraint(
-        "agent_selection_version >= 1",
-        name="ck_runtime_configuration_revisions_agent_selection_version",
-    )
-    CK_READY_CAPABILITY = sa.CheckConstraint(
-        "resolution_status = 'blocked' OR provider_capability_revision_id IS NOT NULL",
-        name="ck_runtime_configuration_revisions_ready_capability",
-    )
-    IX_RUNTIME_CREATED = sa.Index(
-        "ix_runtime_configuration_revisions_runtime_created",
-        "runtime_id",
-        "created_at",
-    )
-    IX_PROVIDER = sa.Index(
-        "ix_runtime_configuration_revisions_provider_id", "provider_id"
-    )
-    IX_WORKSPACE_PROFILE = sa.Index(
-        "ix_runtime_configuration_revisions_workspace_profile",
-        "workspace_runtime_profile_id",
-    )
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32), primary_key=True, init=False, default_factory=lambda: uuid7().hex
-    )
     runtime_id: Mapped[str] = mapped_column(
         sa.String(32),
-        sa.ForeignKey("agent_runtimes.id", ondelete="RESTRICT"),
+        sa.ForeignKey("agent_runtimes.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    desired_sequence: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    desired_status: Mapped[RuntimeConfigurationStateStatus] = mapped_column(
+        runtime_configuration_state_status_enum,
         nullable=False,
     )
-    provider_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_providers.id", ondelete="RESTRICT"),
-        nullable=False,
+    desired_target_generation: Mapped[int] = mapped_column(
+        sa.BigInteger, nullable=False
     )
-    provider_capability_revision_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_provider_contract_revisions.id", ondelete="RESTRICT"),
-        nullable=True,
+    desired_digest: Mapped[str | None] = mapped_column(
+        sa.String(64), nullable=True, default=None
     )
-    infrastructure_profile_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_infrastructure_profiles.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    infrastructure_profile_version: Mapped[int] = mapped_column(
-        sa.Integer, nullable=False
-    )
-    workspace_runtime_profile_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("workspace_runtime_profiles.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    workspace_runtime_profile_version: Mapped[int] = mapped_column(
-        sa.Integer, nullable=False
-    )
-    agent_selection_version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    resolution_status: Mapped[RuntimeConfigurationResolutionStatus] = mapped_column(
-        runtime_configuration_resolution_status_enum,
-        nullable=False,
-    )
-    required_capabilities: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
-    missing_capabilities: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
-    source_trace: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    digest: Mapped[str] = mapped_column(sa.String(64), nullable=False)
-    target_desired_generation: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    reason_code: Mapped[str | None] = mapped_column(
-        sa.String(120), nullable=True, default=None
-    )
-    resolved_configuration: Mapped[dict[str, Any] | None] = mapped_column(
+    desired_document: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB(none_as_null=True), nullable=True, default=None
+    )
+    desired_reason_code: Mapped[str | None] = mapped_column(
+        sa.String(120), nullable=True, default=None
     )
     provider_reported_digest: Mapped[str | None] = mapped_column(
         sa.String(64), nullable=True, default=None
@@ -344,23 +278,59 @@ class RDBRuntimeConfigurationRevision(RDBModel):
     provider_acknowledged_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime, nullable=True, default=None
     )
-    runtime_observed_at: Mapped[datetime.datetime | None] = mapped_column(
+    runner_observed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime, nullable=True, default=None
+    )
+    applied_sequence: Mapped[int | None] = mapped_column(
+        sa.BigInteger, nullable=True, default=None
+    )
+    applied_target_generation: Mapped[int | None] = mapped_column(
+        sa.BigInteger, nullable=True, default=None
+    )
+    applied_digest: Mapped[str | None] = mapped_column(
+        sa.String(64), nullable=True, default=None
+    )
+    applied_document: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True, default=None
+    )
+    applied_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime, nullable=True, default=None
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime, init=False, server_default=sa.func.now(), nullable=False
     )
-
-    __table_args__ = (
-        UQ_RUNTIME_DIGEST_GENERATION,
-        CK_RESOLUTION_DOCUMENT,
-        CK_TARGET_GENERATION,
-        CK_AGENT_SELECTION_VERSION,
-        CK_READY_CAPABILITY,
-        IX_RUNTIME_CREATED,
-        IX_PROVIDER,
-        IX_WORKSPACE_PROFILE,
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+        nullable=False,
     )
+
+    CK_DESIRED = sa.CheckConstraint(
+        "(desired_status = 'unconfigured' AND desired_digest IS NULL "
+        "AND desired_document IS NULL "
+        "AND desired_reason_code = 'runtime_profile_required') "
+        "OR (desired_status = 'blocked' AND desired_reason_code IS NOT NULL) "
+        "OR (desired_status = 'ready' AND desired_digest IS NOT NULL "
+        "AND desired_document IS NOT NULL AND desired_reason_code IS NULL)",
+        name="ck_runtime_configuration_states_desired",
+    )
+    CK_SEQUENCE = sa.CheckConstraint(
+        "desired_sequence >= 1 AND (applied_sequence IS NULL OR applied_sequence >= 1)",
+        name="ck_runtime_configuration_states_sequence",
+    )
+    CK_APPLIED = sa.CheckConstraint(
+        "(applied_sequence IS NULL AND applied_target_generation IS NULL "
+        "AND applied_digest IS NULL "
+        "AND applied_document IS NULL AND applied_at IS NULL) "
+        "OR (applied_sequence IS NOT NULL AND applied_target_generation IS NOT NULL "
+        "AND applied_digest IS NOT NULL AND applied_document IS NOT NULL "
+        "AND applied_at IS NOT NULL)",
+        name="ck_runtime_configuration_states_applied",
+    )
+
+    __table_args__ = (CK_DESIRED, CK_SEQUENCE, CK_APPLIED)
 
 
 class RDBRuntimeConfigurationReconcileTask(RDBModel):
@@ -532,10 +502,14 @@ class RDBRuntimeRecreationOperationItem(RDBModel):
         sa.ForeignKey("agent_runtimes.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    expected_configuration_revision_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("runtime_configuration_revisions.id", ondelete="RESTRICT"),
-        nullable=False,
+    expected_configuration_sequence: Mapped[int] = mapped_column(
+        sa.BigInteger, nullable=False
+    )
+    expected_configuration_digest: Mapped[str] = mapped_column(
+        sa.String(64), nullable=False
+    )
+    expected_desired_generation: Mapped[int] = mapped_column(
+        sa.BigInteger, nullable=False
     )
     status: Mapped[RuntimeRecreationItemStatus] = mapped_column(
         runtime_recreation_item_status_enum,
@@ -564,4 +538,14 @@ class RDBRuntimeRecreationOperationItem(RDBModel):
         nullable=False,
     )
 
-    __table_args__ = (UQ_OPERATION_RUNTIME, CK_ATTEMPT, IX_OPERATION_STATUS)
+    CK_EXPECTED_EVIDENCE = sa.CheckConstraint(
+        "expected_configuration_sequence >= 1 AND expected_desired_generation >= 0",
+        name="ck_runtime_recreation_operation_items_expected_evidence",
+    )
+
+    __table_args__ = (
+        UQ_OPERATION_RUNTIME,
+        CK_ATTEMPT,
+        IX_OPERATION_STATUS,
+        CK_EXPECTED_EVIDENCE,
+    )
