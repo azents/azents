@@ -65,7 +65,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-11
-spec_version: 56
+spec_version: 57
 ---
 
 # External Channel
@@ -214,8 +214,9 @@ contain multiple independent bindings.
   active Session, Agent, binding, route, connection, and resource validation as other
   Channel Actions. It finishes existing active Work regardless of recorded task
   status: desired progress is cleared, current provider projection observation is
-  retained, and no reply, progress update, file, Tracker deletion, or other provider
-  effect is planned.
+  retained until its outcome settles, and each current `PRESENT` Activity Tracker for
+  only that binding receives one post-commit deletion effect. No reply, progress
+  create/update, file, or unrelated provider effect is planned.
 - Connection capabilities expose `download_files` and `upload_files` independently.
   Missing legacy fields are unavailable. A model-visible file key directly contains
   its provider request coordinates. It is valid only for the current Agent, Session,
@@ -458,6 +459,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-11** (spec_version 57) — Made `channel_action ignore` delete the
+  requested binding's current Activity Tracker without a final reply while preserving
+  `finish` reply-delivery gating and existing best-effort provider outcomes.
 - **2026-08-11** (spec_version 56) — Reused one authenticated pinned `discord.py`
   Client session across caller-owned Discord REST workflows and isolated supported
   private HTTP calls behind signature-checked typed payload validation while retaining

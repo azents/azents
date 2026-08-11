@@ -36,7 +36,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-11
-spec_version: 41
+spec_version: 42
 ---
 
 # External Channel Delivery and Channel Work
@@ -68,9 +68,10 @@ model input boundary exposes three atomic modes:
 - `ignore`: finish existing active Work silently, regardless of recorded task status.
   It accepts no message, title, task update, or files. The transition advances the
   existing Work revisions, sets its finish time, and clears desired progress while
-  retaining current provider projection observation. The returned effect plan and
-  outcomes are empty, so no reply, progress update, file, Tracker deletion, or other
-  provider request occurs.
+  retaining current provider projection observation until cleanup settles. It returns
+  one deletion effect for each current `PRESENT` Activity Tracker on only the selected
+  binding and executes those effects without a final reply. No reply, progress
+  create/update, file, or unrelated provider request occurs.
 
 Within one Run, `channel_action` rejects the same `(binding, mode)` when it
 completed in the immediately preceding model turn. Rejected and failed calls do
@@ -413,6 +414,9 @@ not roll back the terminal lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-11** (spec_version 42) — Made silent `ignore` completion delete the
+  selected binding's current Slack or Discord Activity Tracker without a final reply,
+  while retaining `finish` cleanup gating on delivered final replies.
 - **2026-08-11** (spec_version 41) — Reused one authenticated pinned `discord.py`
   session across each multi-operation Discord delivery effect and moved supported
   text, thread, message, history, and attachment operations to the isolated private

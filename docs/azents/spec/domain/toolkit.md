@@ -53,8 +53,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-08-10
-spec_version: 88
+last_verified_at: 2026-08-11
+spec_version: 89
 ---
 
 # Toolkit
@@ -774,13 +774,17 @@ only after the direct reply effect is delivered. An
 `ignore` is always present beside `finish` and `continue`. It accepts no message,
 title, task update, or files and finishes existing active Work regardless of recorded
 task status. The transition clears desired progress, retains current provider
-projection observation, and returns an empty outcome list. It sends no reply, progress
-update, file, Tracker deletion, or other provider effect, and the finished Work is no
-longer eligible for idle continuation. Ordinary Session Todo state remains separate
-and never becomes the Channel Work source of truth.
+projection observation until cleanup settles, and attempts deletion of each current
+`PRESENT` Activity Tracker for only the selected binding without requiring a final
+reply. It sends no reply, progress create/update, file, or unrelated provider effect.
+The finished Work is no longer eligible for idle continuation. Ordinary Session Todo
+state remains separate and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-08-11** (spec_version 89) — Made `channel_action ignore` return and execute
+  binding-scoped Activity Tracker deletion outcomes without weakening `finish` final
+  reply gating.
 - **2026-08-10** (spec_version 88) — Separated Runtime-independent auto-bound and remote Toolkit
   capabilities from managed Runtime capabilities, added capability/version admission before
   Runtime/credential effects, and removed Runtime tool/prompt projection for Runtime-free and
