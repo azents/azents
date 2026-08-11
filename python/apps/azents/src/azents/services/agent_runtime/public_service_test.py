@@ -24,9 +24,14 @@ from azents.core.enums import (
     RuntimeRunnerState,
     WorkspaceUserRole,
 )
+from azents.core.runtime_profile import RuntimeConfigurationStateStatus
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
+from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationSlot,
+    RuntimeConfigurationState,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -111,6 +116,28 @@ def _running_runtime() -> AgentRuntime:
     )
 
 
+def _unconfigured_state() -> RuntimeConfigurationState:
+    """Create retained current-state evidence for an unconfigured Runtime."""
+    return RuntimeConfigurationState(
+        runtime_id="runtime-1",
+        desired=RuntimeConfigurationSlot(
+            sequence=1,
+            status=RuntimeConfigurationStateStatus.UNCONFIGURED,
+            target_generation=2,
+            digest=None,
+            document=None,
+            reason_code="runtime_profile_required",
+            provider_reported_digest=None,
+            runner_reported_digest=None,
+            provider_acknowledged_at=None,
+            runner_observed_at=None,
+        ),
+        applied=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+
+
 def _service(
     agent: Agent,
     *,
@@ -161,7 +188,14 @@ def _service(
         Any,
         SimpleNamespace(get_profile=get_profile),
     )
-    service.runtime_profile_repository = cast(Any, AsyncMock())
+    service.runtime_profile_repository = cast(
+        Any,
+        SimpleNamespace(
+            get_configuration_state=AsyncMock(
+                return_value=_unconfigured_state() if runtime is not None else None
+            )
+        ),
+    )
     service.transition_service = cast(Any, AsyncMock())
     return _ServiceFixture(
         service=service,

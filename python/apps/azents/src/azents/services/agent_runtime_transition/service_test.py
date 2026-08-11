@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import sqlalchemy as sa
@@ -85,7 +86,7 @@ class _RuntimeFreeAgentFixture:
 
 
 class _SourceRacingResolutionService(RuntimeProfileResolutionService):
-    """Advance one source version immediately before the final attachment CAS."""
+    """Force the exact-source CAS to lose immediately before final attachment."""
 
     async def attach_prepared_selection(
         self,
@@ -96,19 +97,18 @@ class _SourceRacingResolutionService(RuntimeProfileResolutionService):
         prepared: PreparedRuntimeProfileSelection,
         runtime_created: bool,
     ) -> RuntimeProfileResolutionResult | None:
-        await session.execute(
-            sa.update(RDBWorkspaceRuntimeProfile)
-            .where(RDBWorkspaceRuntimeProfile.id == prepared.profile.id)
-            .values(version=RDBWorkspaceRuntimeProfile.version + 1)
-            .execution_options(synchronize_session=False)
-        )
-        return await super().attach_prepared_selection(
-            session,
-            agent=agent,
-            runtime=runtime,
-            prepared=prepared,
-            runtime_created=runtime_created,
-        )
+        with patch.object(
+            self.runtime_repository,
+            "attach_desired_configuration_state",
+            AsyncMock(return_value=None),
+        ):
+            return await super().attach_prepared_selection(
+                session,
+                agent=agent,
+                runtime=runtime,
+                prepared=prepared,
+                runtime_created=runtime_created,
+            )
 
 
 def _contract_payload() -> dict[str, object]:
