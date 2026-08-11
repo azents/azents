@@ -83,6 +83,11 @@ from azents.services.external_channel.ingress_provisioning import (
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
 )
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
+    get_external_channel_provider_control_service,
+)
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.mailbox import (
     MailboxEnqueue,
     MailboxService,
@@ -215,6 +220,10 @@ class ExternalChannelIngressDrainService:
         ExternalChannelMailboxWakeDispatcher,
         Depends(ExternalChannelMailboxWakeDispatcher),
     ]
+    provider_control: Annotated[
+        ExternalChannelProviderControlService,
+        Depends(get_external_channel_provider_control_service),
+    ]
     metrics: Annotated[
         ExternalChannelIngressMetrics,
         Depends(get_external_channel_ingress_metrics),
@@ -321,7 +330,7 @@ class ExternalChannelIngressDrainService:
                 if locked is None:
                     await session.rollback()
                     return False
-                binding = await self.provisioning_service.complete(
+                completion = await self.provisioning_service.complete(
                     session,
                     owner=ExternalChannelIngressOwner.model_validate(locked),
                     preparation=preparation,
@@ -329,10 +338,12 @@ class ExternalChannelIngressDrainService:
                 await self.queue_repository.mark_owner_ready(
                     session,
                     owner=locked,
-                    binding_id=binding.id,
-                    session_id=binding.agent_session_id,
+                    binding_id=completion.binding.id,
+                    session_id=completion.binding.agent_session_id,
+                    initial_title_eligible=completion.session_created,
                 )
                 await session.commit()
+            await self._attempt_control_plans(completion.control_plans)
             return True
         except ExternalChannelIngressProvisioningError as error:
             return await self._record_preparation_failure(
@@ -341,6 +352,19 @@ class ExternalChannelIngressDrainService:
                 lease_generation=lease_generation,
                 error=error,
             )
+
+    async def _attempt_control_plans(
+        self,
+        plans: tuple[ProviderEffectPlan, ...],
+    ) -> None:
+        """Attempt committed Binding controls once without gating queue readiness."""
+        for plan in plans:
+            try:
+                await self.provider_control.attempt(plan)
+            except Exception:
+                logger.exception(
+                    "External Channel ingress provider control attempt failed"
+                )
 
     async def _record_preparation_failure(
         self,

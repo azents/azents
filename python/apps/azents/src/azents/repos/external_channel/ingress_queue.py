@@ -228,11 +228,25 @@ class ExternalChannelIngressQueueRepository:
         owner: RDBExternalChannelIngressOwner,
         binding_id: str,
         session_id: str,
+        initial_title_eligible: bool,
     ) -> None:
         """Record the immutable Binding and Session after provider preparation."""
         owner.binding_id = binding_id
         owner.session_id = session_id
         owner.preparation_next_attempt_at = None
+        if initial_title_eligible:
+            first_invocation = await session.scalar(
+                sa.select(RDBExternalChannelIngressItem)
+                .where(
+                    RDBExternalChannelIngressItem.owner_id == owner.id,
+                    RDBExternalChannelIngressItem.invocation.is_(True),
+                )
+                .order_by(RDBExternalChannelIngressItem.queue_key)
+                .limit(1)
+                .with_for_update()
+            )
+            if first_invocation is not None:
+                first_invocation.initial_title_eligible = True
         await session.flush()
 
     async def schedule_preparation_retry(

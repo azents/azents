@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import ExternalChannelResourceStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.external_channel.data import ExternalChannelBinding
 from azents.repos.external_channel.ingress_queue_data import ExternalChannelIngressOwner
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.conversation_provisioning import (
@@ -18,6 +17,7 @@ from azents.services.external_channel.conversation_provisioning import (
     ExternalChannelConversationProvisioningService,
 )
 from azents.services.external_channel.mailbox_ingestion_store import (
+    ExternalChannelConfiguredBindingResult,
     ExternalChannelMailboxIngestionStore,
 )
 
@@ -63,7 +63,7 @@ class ExternalChannelIngressProvisioningService:
         *,
         owner: ExternalChannelIngressOwner,
         preparation: ExternalChannelIngressProviderPreparation,
-    ) -> ExternalChannelBinding:
+    ) -> ExternalChannelConfiguredBindingResult:
         """Atomically revalidate and create the configured Binding/Session state."""
         connection = await self.repository.lock_connection_for_routing(
             session,
