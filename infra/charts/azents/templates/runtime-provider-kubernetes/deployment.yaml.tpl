@@ -3,6 +3,22 @@
 {{- if ne .Values.runtimeProviderKubernetes.runtimePod.imagePullSecrets nil -}}
 {{- $runtimePodImagePullSecrets = .Values.runtimeProviderKubernetes.runtimePod.imagePullSecrets -}}
 {{- end -}}
+{{- $runtimeControlService := .Values.runtimeProviderKubernetes.strictNetwork.mandatoryServices.runtimeControl -}}
+{{- $runtimeTransferService := .Values.runtimeProviderKubernetes.strictNetwork.mandatoryServices.runtimeTransfer -}}
+{{- $mandatoryServices := list
+  (dict
+    "role" "runtime_control"
+    "namespace" (include "azents.runtimeProviderMandatoryServiceNamespace" (dict "root" . "service" $runtimeControlService))
+    "name" $runtimeControlService.name
+    "endpoint_hostnames" (include "azents.runtimeProviderMandatoryServiceHostnames" (dict "root" . "service" $runtimeControlService) | fromJsonArray)
+    "ports" $runtimeControlService.ports)
+  (dict
+    "role" "runtime_transfer"
+    "namespace" (include "azents.runtimeProviderMandatoryServiceNamespace" (dict "root" . "service" $runtimeTransferService))
+    "name" $runtimeTransferService.name
+    "endpoint_hostnames" (include "azents.runtimeProviderMandatoryServiceHostnames" (dict "root" . "service" $runtimeTransferService) | fromJsonArray)
+    "ports" $runtimeTransferService.ports)
+-}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -61,6 +77,8 @@ spec:
               value: {{ include "azents.runtimeProviderKubernetesNamespace" . | quote }}
             - name: AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE
               value: {{ include "azents.runtimeProviderKubernetesWorkloadNamespace" . | quote }}
+            - name: AZ_RUNTIME_PROVIDER_DEFAULT_DENY_LABELS
+              value: {{ dict "app.kubernetes.io/component" "runtime-provider-kubernetes" "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/managed-by" .Release.Service "app.kubernetes.io/name" (include "azents.name" .) "azents/network-policy-role" "runtime-execution-default-deny" | toJson | quote }}
             - name: AZ_RUNTIME_PROVIDER_LEASE_NAME
               value: {{ .Values.runtimeProviderKubernetes.leaderElection.leaseName | quote }}
             - name: AZ_RUNTIME_PROVIDER_LEASE_DURATION_SECONDS
@@ -79,6 +97,22 @@ spec:
               value: {{ dict "app.kubernetes.io/component" "runtime-control" "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/name" (include "azents.name" .) | toJson | quote }}
             - name: AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT
               value: "8030"
+            - name: AZ_RUNTIME_PROVIDER_ATTEST_PROXY_REQUIRED
+              value: {{ .Values.runtimeProviderKubernetes.strictNetwork.attestations.proxyRequired | quote }}
+            - name: AZ_RUNTIME_PROVIDER_ATTEST_NO_NETWORK
+              value: {{ .Values.runtimeProviderKubernetes.strictNetwork.attestations.noNetwork | quote }}
+            - name: AZ_RUNTIME_PROVIDER_MANDATORY_SERVICES
+              value: {{ $mandatoryServices | toJson | quote }}
+            - name: AZ_RUNTIME_PROVIDER_PROXY_IMAGE
+              value: {{ include "azents.runtimeProxyImage" . | quote }}
+            - name: AZ_RUNTIME_PROVIDER_PROXY_ADDON_DIGEST
+              value: {{ .Values.runtimeProviderKubernetes.strictNetwork.proxy.addonDigest | quote }}
+            - name: AZ_RUNTIME_PROVIDER_PROXY_PORT
+              value: {{ .Values.runtimeProviderKubernetes.strictNetwork.proxy.port | quote }}
+            - name: AZ_RUNTIME_PROVIDER_PROXY_READINESS_PORT
+              value: {{ .Values.runtimeProviderKubernetes.strictNetwork.proxy.readinessPort | quote }}
+            - name: AZ_RUNTIME_PROVIDER_DIAGNOSTIC_REFRESH_INTERVAL_SECONDS
+              value: {{ .Values.runtimeProviderKubernetes.strictNetwork.diagnostics.refreshIntervalSeconds | quote }}
             - name: AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_ALLOWED_CIDRS
               value: {{ ternary .Values.runtimeProviderKubernetes.networkPolicy.allowedCidrs (list) .Values.runtimeProviderKubernetes.networkPolicy.enabled | toJson | quote }}
             - name: AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_DENIED_CIDRS

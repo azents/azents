@@ -31,9 +31,11 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     KubernetesApi,
     KubernetesResourceQuantity,
     LabelSelector,
+    LabelSelectorRequirement,
     LeaseResource,
     LeaseSpec,
     LocalObjectReference,
+    NamespaceResource,
     NetworkPolicyEgressRule,
     NetworkPolicyIngressRule,
     NetworkPolicyPeer,
@@ -133,6 +135,85 @@ class KubernetesHttpApi(KubernetesApi):
     async def close(self) -> None:
         """Close the underlying HTTP session."""
         await self._session.close()
+
+    async def discover_api_resources(self, api_version: str) -> frozenset[str]:
+        """Return resource names advertised by one Kubernetes API version."""
+        path = (
+            f"/api/{api_version}" if "/" not in api_version else f"/apis/{api_version}"
+        )
+        data = await self._request_json("GET", path)
+        if data is None:
+            return frozenset()
+        resources = cast(list[JsonObject], data.get("resources") or [])
+        return frozenset(
+            str(item["name"])
+            for item in resources
+            if isinstance(item.get("name"), str) and "/" not in str(item["name"])
+        )
+
+    async def list_api_groups(self) -> frozenset[str]:
+        """Return Kubernetes API group names visible to the Provider."""
+        data = await self._request_json("GET", "/apis")
+        if data is None:
+            return frozenset()
+        groups = cast(list[JsonObject], data.get("groups") or [])
+        return frozenset(
+            str(item["name"]) for item in groups if isinstance(item.get("name"), str)
+        )
+
+    async def check_resource_access(
+        self,
+        *,
+        namespace: str | None,
+        api_group: str,
+        resource: str,
+        verb: str,
+        resource_name: str | None,
+    ) -> bool:
+        """Evaluate one exact Provider permission with SelfSubjectAccessReview."""
+        attributes: JsonObject = {
+            "group": api_group,
+            "resource": resource,
+            "verb": verb,
+        }
+        if namespace is not None:
+            attributes["namespace"] = namespace
+        if resource_name is not None:
+            attributes["name"] = resource_name
+        data = await self._request_json(
+            "POST",
+            "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
+            json={
+                "apiVersion": "authorization.k8s.io/v1",
+                "kind": "SelfSubjectAccessReview",
+                "spec": {"resourceAttributes": attributes},
+            },
+        )
+        if data is None:
+            return False
+        status = cast(JsonObject, data.get("status") or {})
+        return status.get("allowed") is True
+
+    async def get_namespace(self, name: str) -> NamespaceResource | None:
+        """Return one Namespace by exact name."""
+        data = await self._request_json(
+            "GET",
+            f"/api/v1/namespaces/{name}",
+            allow_not_found=True,
+        )
+        if data is None:
+            return None
+        metadata = cast(JsonObject, data["metadata"])
+        return NamespaceResource(
+            name=str(metadata["name"]),
+            labels={
+                str(key): str(value)
+                for key, value in cast(
+                    JsonObject,
+                    metadata.get("labels") or {},
+                ).items()
+            },
+        )
 
     async def get_pod(self, name: str, namespace: str) -> PodResource | None:
         data = await self._request_json(
@@ -925,7 +1006,17 @@ def _network_policy_peer_manifest(peer: NetworkPolicyPeer) -> JsonObject:
 
 
 def _label_selector_manifest(selector: LabelSelector) -> JsonObject:
-    return {"matchLabels": dict(selector.match_labels)}
+    manifest: JsonObject = {"matchLabels": dict(selector.match_labels)}
+    if selector.match_expressions:
+        manifest["matchExpressions"] = [
+            {
+                "key": requirement.key,
+                "operator": requirement.operator,
+                "values": list(requirement.values),
+            }
+            for requirement in selector.match_expressions
+        ]
+    return manifest
 
 
 def _container_resources_manifest(resources: ContainerResources) -> JsonObject:
@@ -1530,7 +1621,34 @@ def _label_selector_resource(data: JsonObject) -> LabelSelector:
                 JsonObject,
                 data.get("matchLabels") or {},
             ).items()
-        }
+        },
+        match_expressions=tuple(
+            _label_selector_requirement(cast(JsonObject, item))
+            for item in data.get("matchExpressions", [])
+        ),
+    )
+
+
+def _label_selector_requirement(data: JsonObject) -> LabelSelectorRequirement:
+    key = data.get("key")
+    operator = data.get("operator")
+    values = data.get("values", [])
+    if not isinstance(key, str) or not key:
+        raise RuntimeError("label selector requirement key must be a non-empty string")
+    if operator not in {"In", "NotIn", "Exists", "DoesNotExist"}:
+        raise RuntimeError("label selector requirement operator is unsupported")
+    if not isinstance(values, list) or any(
+        not isinstance(item, str) for item in values
+    ):
+        raise RuntimeError("label selector requirement values must be strings")
+    if operator in {"In", "NotIn"} and not values:
+        raise RuntimeError("set-based label selector requirements need values")
+    if operator in {"Exists", "DoesNotExist"} and values:
+        raise RuntimeError("existence label selector requirements cannot have values")
+    return LabelSelectorRequirement(
+        key=key,
+        operator=operator,
+        values=tuple(values),
     )
 
 

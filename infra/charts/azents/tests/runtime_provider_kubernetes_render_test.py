@@ -10,6 +10,8 @@ CHART_DIR = Path(__file__).resolve().parents[1]
 _RUNNER_DIGEST = f"sha256:{'a' * 64}"
 _ENGINE_DIGEST = f"sha256:{'c' * 64}"
 _PROVIDER_DIGEST = f"sha256:{'d' * 64}"
+_PROXY_DIGEST = f"sha256:{'e' * 64}"
+_ADDON_DIGEST = "f" * 64
 
 
 def _helm_template(*values: str) -> str:
@@ -104,6 +106,8 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "runtime-provider-credential" not in rendered
     assert "AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE" in rendered
+    assert "AZ_RUNTIME_PROVIDER_DEFAULT_DENY_LABELS" in rendered
+    assert '\\"app.kubernetes.io/managed-by\\":\\"Helm\\"' in rendered
     assert "AZ_RUNTIME_PROVIDER_STORAGE_CLASS" in rendered
     assert "AZ_RUNTIME_PROVIDER_WORKSPACE_PATH" in rendered
     assert "AZ_RUNTIME_PROVIDER_POD_NODE_SELECTOR" in rendered
@@ -137,6 +141,23 @@ def test_runtime_provider_kubernetes_enabled_render_contract() -> None:
     assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE" in rendered
     assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_LABELS" in rendered
     assert "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT" in rendered
+    assert (
+        "- name: AZ_RUNTIME_PROVIDER_ATTEST_PROXY_REQUIRED\n"
+        '              value: "false"'
+    ) in rendered
+    assert (
+        '- name: AZ_RUNTIME_PROVIDER_ATTEST_NO_NETWORK\n              value: "false"'
+    ) in rendered
+    assert (
+        '- name: AZ_RUNTIME_PROVIDER_PROXY_IMAGE\n              value: ""'
+    ) in rendered
+    assert "AZ_RUNTIME_PROVIDER_PROXY_ADDON_DIGEST" in rendered
+    assert "AZ_RUNTIME_PROVIDER_DIAGNOSTIC_REFRESH_INTERVAL_SECONDS" in rendered
+    assert "AZ_RUNTIME_PROVIDER_MANDATORY_SERVICES" in rendered
+    assert '\\"role\\":\\"runtime_control\\"' in rendered
+    assert '\\"role\\":\\"runtime_transfer\\"' in rendered
+    assert rendered.count('\\"name\\":\\"runtime-control\\"') >= 2
+    assert '\\"runtime-control.default.svc.cluster.local\\"' in rendered
     assert 'resources: ["runtimeclasses"]' not in rendered
     assert "192.168.0.0/16" in rendered
     assert 'namespace: "default"' in rendered
@@ -411,8 +432,84 @@ def test_runtime_execution_images_require_immutable_digests(
     assert "digest" in raised.value.stderr.lower()
 
 
-def test_runtime_provider_kubernetes_has_no_secret_or_tokenreview_authority() -> None:
-    """Provider RBAC excludes credential bootstrap, Secret, and TokenReview authority."""
+def test_proxy_required_attestation_requires_immutable_artifacts() -> None:
+    """Proxy-required cannot render without immutable image and addon identities."""
+    with pytest.raises(subprocess.CalledProcessError) as raised:
+        _helm_template(
+            "runtimeProviderKubernetes.enabled=true",
+            "runtimeProviderKubernetes.image.repository=repo/provider",
+            "runtimeProviderKubernetes.image.tag=sha",
+            "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+            "runtimeProviderKubernetes.runnerImage.tag=sha",
+            "runtimeProviderKubernetes.strictNetwork.attestations.proxyRequired=true",
+        )
+
+    assert "strictnetwork.proxy" in raised.value.stderr.lower()
+
+
+@pytest.mark.parametrize(
+    ("proxy_required", "no_network"),
+    [
+        (True, False),
+        (False, True),
+        (True, True),
+    ],
+)
+def test_strict_attestations_render_independently(
+    proxy_required: bool,
+    no_network: bool,
+) -> None:
+    """Independent attestations and optional proxy artifacts reach Provider env."""
+    values = [
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+        (
+            "runtimeProviderKubernetes.strictNetwork.attestations.proxyRequired="
+            f"{str(proxy_required).lower()}"
+        ),
+        (
+            "runtimeProviderKubernetes.strictNetwork.attestations.noNetwork="
+            f"{str(no_network).lower()}"
+        ),
+    ]
+    if proxy_required:
+        values.extend(
+            (
+                "runtimeProviderKubernetes.strictNetwork.proxy.image.repository=repo/proxy",
+                "runtimeProviderKubernetes.strictNetwork.proxy.image.tag=sha",
+                (
+                    "runtimeProviderKubernetes.strictNetwork.proxy.image.digest="
+                    f"{_PROXY_DIGEST}"
+                ),
+                (
+                    "runtimeProviderKubernetes.strictNetwork.proxy.addonDigest="
+                    f"{_ADDON_DIGEST}"
+                ),
+            )
+        )
+
+    rendered = _helm_template(*values)
+
+    assert (
+        "- name: AZ_RUNTIME_PROVIDER_ATTEST_PROXY_REQUIRED\n"
+        f'              value: "{str(proxy_required).lower()}"'
+    ) in rendered
+    assert (
+        "- name: AZ_RUNTIME_PROVIDER_ATTEST_NO_NETWORK\n"
+        f'              value: "{str(no_network).lower()}"'
+    ) in rendered
+    if proxy_required:
+        assert f"repo/proxy:sha@{_PROXY_DIGEST}" in rendered
+        assert f'value: "{_ADDON_DIGEST}"' in rendered
+    else:
+        assert "repo/proxy" not in rendered
+
+
+def test_runtime_provider_kubernetes_has_narrow_complete_resource_authority() -> None:
+    """Provider RBAC owns strict resources without broad credential authority."""
     rendered = _helm_template(
         "runtimeProviderKubernetes.enabled=true",
         "runtimeProviderKubernetes.image.repository=repo/provider",
@@ -422,7 +519,6 @@ def test_runtime_provider_kubernetes_has_no_secret_or_tokenreview_authority() ->
     )
 
     assert "kind: Job" not in rendered
-    assert 'resources: ["secrets"]' not in rendered
     assert "runtime-provider-credential-bootstrap" not in rendered
     provider_rbac = "\n".join(
         document
@@ -432,10 +528,42 @@ def test_runtime_provider_kubernetes_has_no_secret_or_tokenreview_authority() ->
     assert provider_rbac
     assert 'resources: ["pods"]' in provider_rbac
     assert 'resources: ["persistentvolumeclaims"]' in provider_rbac
+    assert 'resources: ["services", "configmaps"]' in provider_rbac
+    assert (
+        'resources: ["secrets"]\n    verbs: ["get", "create", "update", "delete"]'
+    ) in provider_rbac
     assert 'resources: ["networkpolicies"]' in provider_rbac
     assert 'resources: ["leases"]' in provider_rbac
+    assert 'resources: ["namespaces"]' in provider_rbac
+    assert 'resources: ["selfsubjectaccessreviews"]' in provider_rbac
+    assert "resourceNames:" in provider_rbac
+    assert '- "azents-runtime"' in provider_rbac
+    assert '- "runtime-control"' in provider_rbac
+    assert provider_rbac.count('resources: ["services"]') == 1
     assert "tokenreviews" not in provider_rbac
-    assert 'resources: ["secrets"]' not in provider_rbac
+    assert 'resources: ["subjectaccessreviews"]' not in provider_rbac
+    assert "impersonate" not in provider_rbac
+
+
+def test_runtime_provider_kubernetes_renders_no_network_controller() -> None:
+    """Strict packaging adds no DNS, proxy, or second reconciliation Deployment."""
+    rendered = _helm_template(
+        "runtimeProviderKubernetes.enabled=true",
+        "runtimeProviderKubernetes.image.repository=repo/provider",
+        "runtimeProviderKubernetes.image.tag=sha",
+        "runtimeProviderKubernetes.runnerImage.repository=repo/runner",
+        "runtimeProviderKubernetes.runnerImage.tag=sha",
+    )
+
+    provider_deployments = [
+        document
+        for document in rendered.split("---\n")
+        if "kind: Deployment" in document and "runtime-provider-kubernetes" in document
+    ]
+    assert len(provider_deployments) == 1
+    assert "dns-controller" not in rendered
+    assert "proxy-controller" not in rendered
+    assert "kind: CustomResourceDefinition" not in rendered
 
 
 def test_workload_identity_does_not_render_storage_or_privilege() -> None:

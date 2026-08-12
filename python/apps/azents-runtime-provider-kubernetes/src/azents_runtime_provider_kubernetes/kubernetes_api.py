@@ -316,6 +316,14 @@ class ServiceResource:
 
 
 @dataclasses.dataclass(frozen=True)
+class NamespaceResource:
+    """Observed Kubernetes Namespace identity."""
+
+    name: str
+    labels: Mapping[str, str]
+
+
+@dataclasses.dataclass(frozen=True)
 class ConfigMapResource:
     """Provider-owned Kubernetes ConfigMap."""
 
@@ -335,10 +343,20 @@ class SecretResource:
 
 
 @dataclasses.dataclass(frozen=True)
+class LabelSelectorRequirement:
+    """One Kubernetes label selector expression."""
+
+    key: str
+    operator: str
+    values: Sequence[str]
+
+
+@dataclasses.dataclass(frozen=True)
 class LabelSelector:
-    """Kubernetes label selector subset."""
+    """Kubernetes label selector."""
 
     match_labels: Mapping[str, str]
+    match_expressions: Sequence[LabelSelectorRequirement]
 
 
 @dataclasses.dataclass(frozen=True)

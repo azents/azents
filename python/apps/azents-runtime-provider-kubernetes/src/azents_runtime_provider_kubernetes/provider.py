@@ -248,8 +248,8 @@ class KubernetesRuntimeProviderConfig:
     runtime_control_labels: Mapping[str, str]
     runtime_control_port: int
     mandatory_services: tuple[MandatoryServiceReference, ...]
-    proxy_image: str
-    proxy_addon_digest: str
+    proxy_image: str | None
+    proxy_addon_digest: str | None
     proxy_port: int
     proxy_readiness_port: int
     workspace_mount_path: str
@@ -286,9 +286,6 @@ class KubernetesRuntimeProvider:
                 "Runtime Control and transfer mandatory Service references are "
                 "required."
             )
-        _immutable_image_reference(config.proxy_image, "proxy image")
-        if re.fullmatch(r"[0-9a-f]{64}", config.proxy_addon_digest) is None:
-            raise ValueError("proxy addon artifact digest is invalid")
         if not 1 <= config.proxy_port <= 65_535:
             raise ValueError("proxy port is invalid")
         if not 1 <= config.proxy_readiness_port <= 65_535:
@@ -1068,6 +1065,13 @@ class KubernetesRuntimeProvider:
         network_access = policy.network_access
         if not isinstance(network_access, RuntimeProxyRequiredNetworkAccess):
             raise AssertionError("proxy resources require proxy-required mode")
+        proxy_image = self._config.proxy_image
+        proxy_addon_digest = self._config.proxy_addon_digest
+        if proxy_image is None or proxy_addon_digest is None:
+            raise UnsupportedRuntimeConfiguration(
+                "Proxy-required Runtime configuration requires immutable Provider "
+                "proxy artifacts."
+            )
         return build_proxy_resources(
             ProxyResourceInputs(
                 namespace=self._config.namespace,
@@ -1079,8 +1083,8 @@ class KubernetesRuntimeProvider:
                 configuration_digest=command.runtime_configuration.evidence.digest,
                 network_access=network_access,
                 ca=ca,
-                proxy_image=self._config.proxy_image,
-                addon_digest=self._config.proxy_addon_digest,
+                proxy_image=proxy_image,
+                addon_digest=proxy_addon_digest,
                 proxy_port=self._config.proxy_port,
                 readiness_port=self._config.proxy_readiness_port,
                 image_pull_secrets=self._config.image_pull_secrets,
@@ -2215,7 +2219,8 @@ class KubernetesRuntimeProvider:
                         _LABEL_MANAGED_BY: "azents-runtime-provider-kubernetes",
                         _LABEL_RUNTIME_ID: command.identity.runtime_id,
                         _LABEL_CONFIGURATION_MANAGED: "true",
-                    }
+                    },
+                    match_expressions=(),
                 ),
                 policy_types=("Ingress", "Egress"),
                 ingress=(),
@@ -2467,6 +2472,38 @@ class KubernetesRuntimeProvider:
             raise UnsupportedRuntimeConfiguration(
                 "Kubernetes Runtime Provider requires a Kubernetes Pod Profile."
             )
+        if (
+            isinstance(policy, KubernetesPodProfileV3)
+            and policy.network_access.mode is RuntimeNetworkMode.PROXY_REQUIRED
+            and (
+                self._config.proxy_image is None
+                or self._config.proxy_addon_digest is None
+            )
+        ):
+            raise UnsupportedRuntimeConfiguration(
+                "Proxy-required Runtime configuration requires immutable Provider "
+                "proxy artifacts."
+            )
+        if (
+            isinstance(policy, KubernetesPodProfileV3)
+            and policy.network_access.mode is RuntimeNetworkMode.PROXY_REQUIRED
+        ):
+            proxy_image = self._config.proxy_image
+            proxy_addon_digest = self._config.proxy_addon_digest
+            if proxy_image is None or proxy_addon_digest is None:
+                raise AssertionError("proxy artifact presence was validated above")
+            try:
+                _immutable_image_reference(proxy_image, "proxy image")
+            except ValueError as error:
+                raise UnsupportedRuntimeConfiguration(
+                    "Proxy-required Runtime configuration requires immutable "
+                    "Provider proxy artifacts."
+                ) from error
+            if re.fullmatch(r"[0-9a-f]{64}", proxy_addon_digest) is None:
+                raise UnsupportedRuntimeConfiguration(
+                    "Proxy-required Runtime configuration requires immutable "
+                    "Provider proxy artifacts."
+                )
         if policy.dind is not None:
             _immutable_image_reference(command.runner_image, "Runner image")
         return policy
@@ -2840,9 +2877,13 @@ def _dns_egress_rule() -> NetworkPolicyEgressRule:
         peers=(
             NetworkPolicyPeer(
                 namespace_selector=LabelSelector(
-                    match_labels={"kubernetes.io/metadata.name": "kube-system"}
+                    match_labels={"kubernetes.io/metadata.name": "kube-system"},
+                    match_expressions=(),
                 ),
-                pod_selector=LabelSelector(match_labels={"k8s-app": "kube-dns"}),
+                pod_selector=LabelSelector(
+                    match_labels={"k8s-app": "kube-dns"},
+                    match_expressions=(),
+                ),
                 ip_block=None,
             ),
         ),
@@ -2864,9 +2905,13 @@ def _runtime_control_egress_rule(
                         "kubernetes.io/metadata.name": (
                             config.runtime_control_namespace
                         )
-                    }
+                    },
+                    match_expressions=(),
                 ),
-                pod_selector=LabelSelector(match_labels=config.runtime_control_labels),
+                pod_selector=LabelSelector(
+                    match_labels=config.runtime_control_labels,
+                    match_expressions=(),
+                ),
                 ip_block=None,
             ),
         ),

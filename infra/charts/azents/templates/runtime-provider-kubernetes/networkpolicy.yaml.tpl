@@ -8,6 +8,7 @@ metadata:
   labels:
     {{- include "azents.componentLabels" (dict "root" . "component" "runtime-provider-kubernetes") | nindent 4 }}
     app.kubernetes.io/part-of: "azents"
+    azents/network-policy-role: "runtime-legacy-workload-egress"
 spec:
   podSelector:
     matchLabels:
@@ -67,6 +68,7 @@ metadata:
   labels:
     {{- include "azents.componentLabels" (dict "root" . "component" "runtime-provider-kubernetes") | nindent 4 }}
     app.kubernetes.io/part-of: "azents"
+    azents/network-policy-role: "runtime-execution-default-deny"
 spec:
   podSelector:
     matchLabels:

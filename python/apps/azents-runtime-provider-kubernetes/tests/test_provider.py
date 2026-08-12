@@ -643,6 +643,41 @@ async def test_direct_v2_preserves_direct_runner_contract() -> None:
 
 
 @pytest.mark.asyncio
+async def test_proxy_required_rejects_invalid_artifacts_before_mutation() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = KubernetesRuntimeProvider(
+        api,
+        dataclasses.replace(
+            _provider_config(),
+            proxy_image="mutable:latest",
+            proxy_addon_digest="invalid",
+        ),
+    )
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+
+    with pytest.raises(
+        UnsupportedRuntimeConfiguration,
+        match="immutable Provider proxy artifacts",
+    ):
+        await provider.start(command)
+
+    assert api.operations == []
+    assert api.pods == {}
+    assert api.pvcs == {}
+    assert api.services.keys() == {
+        ("azents", "runtime-control"),
+        ("azents", "runtime-transfer"),
+    }
+
+
+@pytest.mark.asyncio
 async def test_active_removed_v2_field_is_rejected_before_resource_mutation() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
@@ -2679,10 +2714,12 @@ async def test_direct_network_policy_is_bounded_by_deployment_hard_cap() -> None
         peers=(
             NetworkPolicyPeer(
                 namespace_selector=LabelSelector(
-                    match_labels={"kubernetes.io/metadata.name": "ingress"}
+                    match_labels={"kubernetes.io/metadata.name": "ingress"},
+                    match_expressions=(),
                 ),
                 pod_selector=LabelSelector(
-                    match_labels={"app.kubernetes.io/name": "traefik"}
+                    match_labels={"app.kubernetes.io/name": "traefik"},
+                    match_expressions=(),
                 ),
                 ip_block=None,
             ),

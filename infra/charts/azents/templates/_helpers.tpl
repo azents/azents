@@ -349,6 +349,38 @@ Return the fixed nested engine image for Kubernetes Runtime Pods.
 {{- end -}}
 
 {{/*
+Return the immutable Runtime proxy image when proxy-required is attested.
+*/}}
+{{- define "azents.runtimeProxyImage" -}}
+{{- if .Values.runtimeProviderKubernetes.strictNetwork.attestations.proxyRequired -}}
+{{- include "azents.immutableImageReference" (dict "image" .Values.runtimeProviderKubernetes.strictNetwork.proxy.image "repositoryRequiredMessage" "runtimeProviderKubernetes.strictNetwork.proxy.image.repository is required when proxyRequired is attested" "tagRequiredMessage" "runtimeProviderKubernetes.strictNetwork.proxy.image.tag is required when proxyRequired is attested" "digestRequiredMessage" "runtimeProviderKubernetes.strictNetwork.proxy.image.digest is required when proxyRequired is attested" "digestInvalidMessage" "runtimeProviderKubernetes.strictNetwork.proxy.image.digest must be a sha256 digest") -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return one mandatory Service namespace, defaulting to the server namespace.
+*/}}
+{{- define "azents.runtimeProviderMandatoryServiceNamespace" -}}
+{{- if .service.namespace -}}
+{{- .service.namespace -}}
+{{- else -}}
+{{- include "azents.serverNamespace" .root -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Return explicit or chart-derived endpoint hostnames for one mandatory Service.
+*/}}
+{{- define "azents.runtimeProviderMandatoryServiceHostnames" -}}
+{{- if .service.endpointHostnames -}}
+{{- toJson .service.endpointHostnames -}}
+{{- else -}}
+{{- $namespace := include "azents.runtimeProviderMandatoryServiceNamespace" . -}}
+{{- list .service.name (printf "%s.%s.svc" .service.name $namespace) (printf "%s.%s.svc.cluster.local" .service.name $namespace) | toJson -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Return the Runtime Runner image for server-side Runtime Control.
 */}}
 {{- define "azents.serverRuntimeRunnerImage" -}}
