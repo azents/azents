@@ -256,6 +256,7 @@ class GitWorktreePathClaimOwnerKind(enum.StrEnum):
 
     MANUAL_ACTION = "manual_action"
     ARCHIVE_CLEANUP = "archive_cleanup"
+    AGENT_ACTION = "agent_action"
 
 
 class GitWorktreePathClaimState(enum.StrEnum):

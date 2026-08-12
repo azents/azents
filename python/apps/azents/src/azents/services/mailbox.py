@@ -180,6 +180,7 @@ class OperationActionInput:
         | CleanupOrphanGitWorktreesAction
         | CreateSessionWorkingFolderAction
         | AgentCreateGitWorktreeAction
+        | AgentRemoveGitWorktreeAction
     )
     execution: ActionExecution | None
 
@@ -1063,12 +1064,9 @@ class MailboxService:
                         | CleanupOrphanGitWorktreesAction()
                         | CreateSessionWorkingFolderAction()
                         | AgentCreateGitWorktreeAction()
+                        | AgentRemoveGitWorktreeAction()
                     ):
                         return _OperationActionMailboxProcessor(action)
-                    case AgentRemoveGitWorktreeAction():
-                        raise RuntimeError(
-                            "Agent worktree removal execution is not enabled"
-                        )
                     case _:
                         assert_never(action)  # ty: ignore[type-assertion-failure] — persisted action validation excludes CommandAction at this mailbox boundary, but TypeAdapter retains its broader union.
             case _:
@@ -1669,6 +1667,7 @@ class _OperationActionMailboxProcessor:
         | CleanupOrphanGitWorktreesAction
         | CreateSessionWorkingFolderAction
         | AgentCreateGitWorktreeAction
+        | AgentRemoveGitWorktreeAction
     )
 
     async def process(

@@ -117,6 +117,32 @@ class SessionGitWorktreeRepository:
             return None
         return self._build(rdb)
 
+    async def lock_by_id_for_session(
+        self,
+        session: AsyncSession,
+        *,
+        worktree_id: str,
+        session_id: str,
+    ) -> SessionGitWorktree | None:
+        """Lock one worktree allocation by ID and current Session context."""
+        context_id = await self._get_context_id_by_session_id(
+            session,
+            session_id=session_id,
+        )
+        result = await session.execute(
+            sa.select(RDBSessionAgentContextGitWorktree)
+            .where(
+                RDBSessionAgentContextGitWorktree.id == worktree_id,
+                RDBSessionAgentContextGitWorktree.session_agent_context_id
+                == context_id,
+            )
+            .with_for_update()
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
     async def exists_by_worktree_path(
         self,
         session: AsyncSession,

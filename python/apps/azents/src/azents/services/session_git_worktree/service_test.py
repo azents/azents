@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from typing import Literal, cast
 
 import pytest
+import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,7 @@ from azents.core.enums import (
     AgentProjectCatalogStatus,
     AgentSessionKind,
     AgentSessionProductMode,
+    AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
     EventKind,
@@ -31,6 +33,7 @@ from azents.core.enums import (
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
+    AgentRemoveGitWorktreeAction,
     CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
     CreateSessionWorkingFolderAction,
@@ -43,6 +46,7 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
+from azents.rdb.models.git_worktree_cleanup_claim import RDBGitWorktreePathClaim
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent_context import (
     RDBSessionAgentContext,
@@ -65,7 +69,10 @@ from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import TurnActionContinuationMailboxPayload
+from azents.repos.mailbox.data import (
+    AgentRemoveGitWorktreeContinuationResult,
+    TurnActionContinuationMailboxPayload,
+)
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -678,6 +685,21 @@ class _FailingCatalogRepository(AgentProjectCatalogRepository):
         raise RuntimeError("catalog upsert failed")
 
 
+class _FailingProjectRemovalRepository(SessionWorkspaceProjectRepository):
+    """Project repository double that fails generated Project removal."""
+
+    async def delete_project(
+        self,
+        session: AsyncSession,
+        project_id: str,
+        *,
+        session_id: str,
+    ) -> bool:
+        """Fail one Project deletion after confirmed checkout removal."""
+        del session, project_id, session_id
+        raise RuntimeError("project removal failed")
+
+
 class _FailingSkillStateStore(SkillStateStore):
     """Skill state store double that fails projection loading."""
 
@@ -685,6 +707,54 @@ class _FailingSkillStateStore(SkillStateStore):
         """Fail the Agent creation projection refresh."""
         del agent_id, session_id
         raise RuntimeError("skill projection failed")
+
+
+class _FailingRemovalSkillStateStore(SkillStateStore):
+    """Skill state store double that fails only removal invalidation."""
+
+    async def invalidate_project(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        project_id: str,
+        project_path: str,
+        session_run_state: AgentSessionRunState,
+    ) -> SkillProjectionState:
+        """Fail after the checkout and Project state have been removed."""
+        del agent_id, session_id, project_id, project_path, session_run_state
+        raise RuntimeError("removal Skill projection failed")
+
+
+class _TrackingSkillStateStore(SkillStateStore):
+    """Skill state store recording exact Project invalidation."""
+
+    def __init__(
+        self,
+        *,
+        session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        super().__init__(session_manager=session_manager)
+        self.invalidated: list[tuple[str, str, str, str]] = []
+
+    async def invalidate_project(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        project_id: str,
+        project_path: str,
+        session_run_state: AgentSessionRunState,
+    ) -> SkillProjectionState:
+        """Record and delegate one exact Project invalidation."""
+        self.invalidated.append((agent_id, session_id, project_id, project_path))
+        return await super().invalidate_project(
+            agent_id,
+            session_id,
+            project_id=project_id,
+            project_path=project_path,
+            session_run_state=session_run_state,
+        )
 
 
 class _ExchangeFileService(ExchangeFileService):
@@ -764,6 +834,8 @@ def _service(
     runner: _RunnerOperations,
     *,
     catalog_repository: AgentProjectCatalogRepository | None = None,
+    session_workspace_project_repository: SessionWorkspaceProjectRepository
+    | None = None,
     refresh_status: AgentProjectCatalogStatus = AgentProjectCatalogStatus.AVAILABLE,
 ) -> SessionGitWorktreeService:
     """Build the service under test."""
@@ -779,7 +851,9 @@ def _service(
         workspace_user_repository=WorkspaceUserRepository(),
         agent_runtime_repository=runtime_repository,
         session_git_worktree_repository=SessionGitWorktreeRepository(),
-        session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+        session_workspace_project_repository=(
+            session_workspace_project_repository or SessionWorkspaceProjectRepository()
+        ),
         agent_project_catalog_repository=catalog_repository
         or AgentProjectCatalogRepository(),
         agent_project_catalog_service=_CatalogRefreshService(refresh_status),
@@ -1043,6 +1117,8 @@ async def _create_agent_worktree_session(
     runner: _RunnerOperations,
     source_project_path: str = "/workspace/agent/linked",
     catalog_repository: AgentProjectCatalogRepository | None = None,
+    session_workspace_project_repository: SessionWorkspaceProjectRepository
+    | None = None,
     skill_store: SkillStateStore | None = None,
     include_skill_store: bool = True,
 ) -> _AgentCreateSessionFixture:
@@ -1053,6 +1129,7 @@ async def _create_agent_worktree_session(
         rdb_session_manager,
         runner,
         catalog_repository=catalog_repository,
+        session_workspace_project_repository=session_workspace_project_repository,
     )
     service.skill_store = (
         skill_store
@@ -1154,6 +1231,87 @@ async def _admit_and_promote_agent_create(
     return operation.action, operation.execution
 
 
+async def _create_agent_managed_worktree(
+    rdb_session_manager: SessionManager[AsyncSession],
+    fixture: _AgentCreateSessionFixture,
+    *,
+    client_tool_call_id: str,
+) -> tuple[SessionGitWorktreeCreate, str]:
+    """Create one ready Agent-managed worktree and clear its continuation."""
+    action, execution = await _admit_and_promote_agent_create(
+        rdb_session_manager,
+        fixture,
+        client_tool_call_id=client_tool_call_id,
+    )
+    result = await fixture.service.run_agent_create_git_worktree_action(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        execution=execution,
+        action=action,
+        owner_generation=execution.owner_generation,
+        predecessor_run_id="processing-run-001",
+    )
+    assert result.complete_run is True
+    async with rdb_session_manager() as session:
+        allocations = await SessionGitWorktreeRepository().list_by_session_id(
+            session,
+            session_id=fixture.session_id,
+        )
+        assert len(allocations) == 1
+        allocation = allocations[0]
+        assert allocation.status is SessionGitWorktreeStatus.READY
+        assert allocation.session_workspace_project_id is not None
+        await MailboxRepository().delete_by_session_id(
+            session,
+            fixture.session_id,
+        )
+    return (
+        SessionGitWorktreeCreate(
+            id=allocation.id,
+            session_id=allocation.session_id,
+            action_execution_id=allocation.action_execution_id,
+            session_workspace_project_id=allocation.session_workspace_project_id,
+            source_project_path=allocation.source_project_path,
+            starting_ref=allocation.starting_ref,
+            worktree_path=allocation.worktree_path,
+            branch_name=allocation.branch_name,
+            branch_created_by=allocation.branch_created_by,
+            status=allocation.status,
+        ),
+        allocation.session_workspace_project_id,
+    )
+
+
+async def _admit_and_promote_agent_remove(
+    rdb_session_manager: SessionManager[AsyncSession],
+    fixture: _AgentCreateSessionFixture,
+    *,
+    worktree_path: str,
+    client_tool_call_id: str,
+    force: bool,
+) -> tuple[AgentRemoveGitWorktreeAction, ActionExecution]:
+    """Admit and claim one Agent removal through the mailbox boundary."""
+    admission = await fixture.service.admit_agent_remove_git_worktree(
+        agent_id=fixture.agent_id,
+        session_id=fixture.session_id,
+        originating_run_id="originating-remove-run-001",
+        client_tool_call_id=client_tool_call_id,
+        worktree_project_path=worktree_path,
+        force=force,
+    )
+    promoted = await _promote_oldest_mailbox_item(
+        rdb_session_manager,
+        session_id=fixture.session_id,
+        active_run_id="processing-remove-run-001",
+    )
+    operation = promoted.operation_action
+    assert operation is not None
+    assert operation.execution is not None
+    assert operation.buffer.id == admission.mailbox_item_id
+    assert isinstance(operation.action, AgentRemoveGitWorktreeAction)
+    return operation.action, operation.execution
+
+
 class TestSessionGitWorktreeService:
     """Session Git worktree service tests."""
 
@@ -1213,6 +1371,607 @@ class TestSessionGitWorktreeService:
         assert admitted_action.source_project_path == fixture.source_project_path
         assert admitted_action.starting_ref == "main"
         assert admitted_action.branch_name == "feature/test"
+
+    async def test_agent_remove_admission_rejects_ordinary_project(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Removal admission never accepts an ordinary current Project."""
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-remove-ordinary",
+            runner=_RunnerOperations(),
+        )
+
+        with pytest.raises(ValueError, match="Agent-managed worktree Project"):
+            await fixture.service.admit_agent_remove_git_worktree(
+                agent_id=fixture.agent_id,
+                session_id=fixture.session_id,
+                originating_run_id="originating-remove-run-001",
+                client_tool_call_id="call-remove-ordinary",
+                worktree_project_path=fixture.source_project_path,
+                force=False,
+            )
+
+        async with rdb_session_manager() as session:
+            assert (
+                await MailboxRepository().list_by_session_id(
+                    session,
+                    fixture.session_id,
+                )
+                == []
+            )
+
+    async def test_agent_remove_admission_is_idempotent_and_payload_stable(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """One removal client call identity owns one exact durable request."""
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-remove-admission",
+            runner=_RunnerOperations(),
+        )
+        allocation_create, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-create-remove-admission",
+        )
+
+        first = await fixture.service.admit_agent_remove_git_worktree(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            originating_run_id="originating-remove-run-001",
+            client_tool_call_id="call-remove-admission",
+            worktree_project_path=f" {allocation_create.worktree_path} ",
+            force=False,
+        )
+        replay = await fixture.service.admit_agent_remove_git_worktree(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            originating_run_id="originating-remove-run-001",
+            client_tool_call_id="call-remove-admission",
+            worktree_project_path=allocation_create.worktree_path,
+            force=False,
+        )
+
+        assert replay == first
+        with pytest.raises(ValueError, match="already bound to another request"):
+            await fixture.service.admit_agent_remove_git_worktree(
+                agent_id=fixture.agent_id,
+                session_id=fixture.session_id,
+                originating_run_id="originating-remove-run-001",
+                client_tool_call_id="call-remove-admission",
+                worktree_project_path=allocation_create.worktree_path,
+                force=True,
+            )
+        async with rdb_session_manager() as session:
+            mailbox_items = await MailboxRepository().list_by_session_id(
+                session,
+                fixture.session_id,
+            )
+        assert len(mailbox_items) == 1
+        admitted_action = AgentRemoveGitWorktreeAction.model_validate(
+            mailbox_items[0].presentation.action
+        )
+        assert admitted_action.worktree_path == allocation_create.worktree_path
+        assert admitted_action.force is False
+
+    async def test_agent_remove_clean_checkout_preserves_branch_and_context(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Clean removal deletes checkout Project state but not its Git branch."""
+        runner = _RunnerOperations()
+        skill_store = _TrackingSkillStateStore(
+            session_manager=rdb_session_manager,
+        )
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-remove-clean",
+            runner=runner,
+            skill_store=skill_store,
+        )
+        allocation_create, project_id = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-create-remove-clean",
+        )
+        runner.inspect_result = RuntimeGitInspectWorktreeResult(
+            worktree_path=allocation_create.worktree_path,
+            registered=True,
+            registered_branch_name=allocation_create.branch_name,
+            target_kind="directory",
+            dirty=False,
+            final_cursor="cursor-inspect-clean",
+        )
+        action, execution = await _admit_and_promote_agent_remove(
+            rdb_session_manager,
+            fixture,
+            worktree_path=allocation_create.worktree_path,
+            client_tool_call_id="call-remove-clean",
+            force=False,
+        )
+
+        result = await fixture.service.run_agent_remove_git_worktree_action(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+            predecessor_run_id="processing-remove-run-001",
+        )
+
+        assert result.complete_run is True
+        removal_calls = [
+            call for call in runner.calls if call["operation"] == "remove_git_worktree"
+        ]
+        assert len(removal_calls) == 1
+        assert removal_calls[0]["force"] is False
+        assert not any(
+            call["operation"] == "delete_git_branch" for call in runner.calls
+        )
+        async with rdb_session_manager() as session:
+            projects = await SessionWorkspaceProjectRepository().list_projects(
+                session,
+                session_id=fixture.session_id,
+            )
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=fixture.session_id,
+            )
+            catalog = await AgentProjectCatalogRepository().list_entries(
+                session,
+                agent_id=fixture.agent_id,
+            )
+            continuations = [
+                item
+                for item in await MailboxRepository().list_by_session_id(
+                    session,
+                    fixture.session_id,
+                )
+                if item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION
+            ]
+        assert [project.path for project in projects] == [fixture.source_project_path]
+        assert len(allocations) == 1
+        assert allocations[0].status is SessionGitWorktreeStatus.CLEANED
+        assert "branch_preserved" in (allocations[0].cleanup_summary or "")
+        assert allocation_create.worktree_path not in {entry.path for entry in catalog}
+        assert skill_store.invalidated == [
+            (
+                fixture.agent_id,
+                fixture.session_id,
+                project_id,
+                allocation_create.worktree_path,
+            )
+        ]
+        assert len(continuations) == 1
+        payload = continuations[0].payload
+        assert isinstance(payload, TurnActionContinuationMailboxPayload)
+        assert payload.terminal_status is ActionExecutionStatus.COMPLETED
+        continuation_result = payload.result
+        assert isinstance(
+            continuation_result,
+            AgentRemoveGitWorktreeContinuationResult,
+        )
+        assert continuation_result.preserved_branch_name == (
+            allocation_create.branch_name
+        )
+        assert continuation_result.dirty_content_discarded is False
+
+    async def test_agent_remove_dirty_nonforce_preserves_registration(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Dirty non-force removal fails with retry guidance and no mutation."""
+        runner = _RunnerOperations()
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-remove-dirty",
+            runner=runner,
+        )
+        allocation_create, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-create-remove-dirty",
+        )
+        action, execution = await _admit_and_promote_agent_remove(
+            rdb_session_manager,
+            fixture,
+            worktree_path=allocation_create.worktree_path,
+            client_tool_call_id="call-remove-dirty",
+            force=False,
+        )
+
+        result = await fixture.service.run_agent_remove_git_worktree_action(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+            predecessor_run_id="processing-remove-run-001",
+        )
+
+        assert result.complete_run is True
+        assert not any(
+            call["operation"] == "remove_git_worktree" for call in runner.calls
+        )
+        async with rdb_session_manager() as session:
+            projects = await SessionWorkspaceProjectRepository().list_projects(
+                session,
+                session_id=fixture.session_id,
+            )
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=fixture.session_id,
+            )
+            continuations = [
+                item
+                for item in await MailboxRepository().list_by_session_id(
+                    session,
+                    fixture.session_id,
+                )
+                if item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION
+            ]
+        assert allocation_create.worktree_path in {project.path for project in projects}
+        assert allocations[0].status is SessionGitWorktreeStatus.READY
+        assert len(continuations) == 1
+        payload = continuations[0].payload
+        assert isinstance(payload, TurnActionContinuationMailboxPayload)
+        assert payload.terminal_status is ActionExecutionStatus.FAILED
+        assert payload.reason_code == "dirty_worktree"
+        continuation_result = payload.result
+        assert isinstance(
+            continuation_result,
+            AgentRemoveGitWorktreeContinuationResult,
+        )
+        assert continuation_result.retry_guidance is not None
+        assert "force=true" in continuation_result.retry_guidance
+
+    async def test_agent_remove_force_discards_dirty_checkout_only(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Explicit force discards dirty checkout content while preserving branch."""
+        runner = _RunnerOperations()
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-remove-force",
+            runner=runner,
+        )
+        allocation_create, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-create-remove-force",
+        )
+        action, execution = await _admit_and_promote_agent_remove(
+            rdb_session_manager,
+            fixture,
+            worktree_path=allocation_create.worktree_path,
+            client_tool_call_id="call-remove-force",
+            force=True,
+        )
+
+        await fixture.service.run_agent_remove_git_worktree_action(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+            predecessor_run_id="processing-remove-run-001",
+        )
+
+        removal_call = next(
+            call for call in runner.calls if call["operation"] == "remove_git_worktree"
+        )
+        assert removal_call["force"] is True
+        assert not any(
+            call["operation"] == "delete_git_branch" for call in runner.calls
+        )
+        async with rdb_session_manager() as session:
+            continuation = next(
+                item
+                for item in await MailboxRepository().list_by_session_id(
+                    session,
+                    fixture.session_id,
+                )
+                if item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION
+            )
+        payload = continuation.payload
+        assert isinstance(payload, TurnActionContinuationMailboxPayload)
+        assert payload.terminal_status is ActionExecutionStatus.COMPLETED
+        continuation_result = payload.result
+        assert isinstance(
+            continuation_result,
+            AgentRemoveGitWorktreeContinuationResult,
+        )
+        assert continuation_result.dirty_content_discarded is True
+
+    async def test_agent_remove_project_failure_records_confirmed_checkout_removal(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Project failure preserves checkout-removal recovery evidence."""
+        runner = _RunnerOperations()
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-remove-project-failure",
+            runner=runner,
+            session_workspace_project_repository=_FailingProjectRemovalRepository(),
+        )
+        allocation_create, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-create-remove-project-failure",
+        )
+        runner.inspect_result = RuntimeGitInspectWorktreeResult(
+            worktree_path=allocation_create.worktree_path,
+            registered=True,
+            registered_branch_name=allocation_create.branch_name,
+            target_kind="directory",
+            dirty=False,
+            final_cursor="cursor-inspect-project-failure",
+        )
+        action, execution = await _admit_and_promote_agent_remove(
+            rdb_session_manager,
+            fixture,
+            worktree_path=allocation_create.worktree_path,
+            client_tool_call_id="call-remove-project-failure",
+            force=False,
+        )
+
+        result = await fixture.service.run_agent_remove_git_worktree_action(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+            predecessor_run_id="processing-remove-run-001",
+        )
+
+        assert result.complete_run is True
+        assert any(call["operation"] == "remove_git_worktree" for call in runner.calls)
+        async with rdb_session_manager() as session:
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=fixture.session_id,
+            )
+            claim = await session.scalar(
+                sa.select(RDBGitWorktreePathClaim).where(
+                    RDBGitWorktreePathClaim.action_execution_id == execution.id
+                )
+            )
+            continuations = [
+                item
+                for item in await MailboxRepository().list_by_session_id(
+                    session,
+                    fixture.session_id,
+                )
+                if item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION
+            ]
+        assert len(allocations) == 1
+        assert allocations[0].status is SessionGitWorktreeStatus.CLEANUP_FAILED
+        assert claim is None
+        assert len(continuations) == 1
+        payload = continuations[0].payload
+        assert isinstance(payload, TurnActionContinuationMailboxPayload)
+        assert payload.terminal_status is ActionExecutionStatus.FAILED
+        assert payload.reason_code == "project_state_update_failed"
+
+    async def test_agent_remove_skill_failure_preserves_cleaned_allocation(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Skill failure does not relabel confirmed checkout removal as failed."""
+        runner = _RunnerOperations()
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-remove-skill-failure",
+            runner=runner,
+            skill_store=_FailingRemovalSkillStateStore(
+                session_manager=rdb_session_manager,
+            ),
+        )
+        allocation_create, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-create-remove-skill-failure",
+        )
+        runner.inspect_result = RuntimeGitInspectWorktreeResult(
+            worktree_path=allocation_create.worktree_path,
+            registered=True,
+            registered_branch_name=allocation_create.branch_name,
+            target_kind="directory",
+            dirty=False,
+            final_cursor="cursor-inspect-skill-failure",
+        )
+        action, execution = await _admit_and_promote_agent_remove(
+            rdb_session_manager,
+            fixture,
+            worktree_path=allocation_create.worktree_path,
+            client_tool_call_id="call-remove-skill-failure",
+            force=False,
+        )
+
+        result = await fixture.service.run_agent_remove_git_worktree_action(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+            predecessor_run_id="processing-remove-run-001",
+        )
+
+        assert result.complete_run is True
+        async with rdb_session_manager() as session:
+            projects = await SessionWorkspaceProjectRepository().list_projects(
+                session,
+                session_id=fixture.session_id,
+            )
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=fixture.session_id,
+            )
+            claim = await session.scalar(
+                sa.select(RDBGitWorktreePathClaim).where(
+                    RDBGitWorktreePathClaim.action_execution_id == execution.id
+                )
+            )
+            continuations = [
+                item
+                for item in await MailboxRepository().list_by_session_id(
+                    session,
+                    fixture.session_id,
+                )
+                if item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION
+            ]
+        assert [project.path for project in projects] == [fixture.source_project_path]
+        assert len(allocations) == 1
+        assert allocations[0].status is SessionGitWorktreeStatus.CLEANED
+        assert claim is None
+        assert len(continuations) == 1
+        payload = continuations[0].payload
+        assert isinstance(payload, TurnActionContinuationMailboxPayload)
+        assert payload.terminal_status is ActionExecutionStatus.FAILED
+        assert payload.reason_code == "skill_projection_failed"
+
+    async def test_agent_remove_ambiguous_inspection_preserves_registration(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Ambiguous Runner identity never mutates Project or allocation state."""
+        runner = _RunnerOperations()
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-remove-ambiguous",
+            runner=runner,
+        )
+        allocation_create, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-create-remove-ambiguous",
+        )
+        runner.inspect_result = RuntimeGitInspectWorktreeResult(
+            worktree_path=allocation_create.worktree_path,
+            registered=False,
+            registered_branch_name=None,
+            target_kind="directory",
+            dirty=False,
+            final_cursor="cursor-inspect-ambiguous",
+        )
+        action, execution = await _admit_and_promote_agent_remove(
+            rdb_session_manager,
+            fixture,
+            worktree_path=allocation_create.worktree_path,
+            client_tool_call_id="call-remove-ambiguous",
+            force=True,
+        )
+
+        await fixture.service.run_agent_remove_git_worktree_action(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+            predecessor_run_id="processing-remove-run-001",
+        )
+
+        assert not any(
+            call["operation"] == "remove_git_worktree" for call in runner.calls
+        )
+        async with rdb_session_manager() as session:
+            projects = await SessionWorkspaceProjectRepository().list_projects(
+                session,
+                session_id=fixture.session_id,
+            )
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=fixture.session_id,
+            )
+        assert allocation_create.worktree_path in {project.path for project in projects}
+        assert allocations[0].status is SessionGitWorktreeStatus.READY
+
+    async def test_agent_remove_claim_contention_preserves_target(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A second removal cannot bypass the first action-owned path claim."""
+        runner = _RunnerOperations()
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-remove-contention",
+            runner=runner,
+        )
+        allocation_create, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-create-remove-contention",
+        )
+        first_action, first_execution = await _admit_and_promote_agent_remove(
+            rdb_session_manager,
+            fixture,
+            worktree_path=allocation_create.worktree_path,
+            client_tool_call_id="call-remove-contention-first",
+            force=True,
+        )
+        second_action, second_execution = await _admit_and_promote_agent_remove(
+            rdb_session_manager,
+            fixture,
+            worktree_path=allocation_create.worktree_path,
+            client_tool_call_id="call-remove-contention-second",
+            force=True,
+        )
+        async with rdb_session_manager() as session:
+            repository = SessionWorkspaceProjectRepository()
+            runtime_id = await repository.get_runtime_id_by_session_id(
+                session,
+                session_id=fixture.session_id,
+            )
+            assert runtime_id is not None
+            claimed = await repository.try_claim_agent_git_worktree(
+                session,
+                runtime_id=runtime_id,
+                action_execution_id=first_execution.id,
+                owner_generation=first_execution.owner_generation,
+                worktree_path=first_action.worktree_path,
+            )
+        assert claimed is True
+
+        await fixture.service.run_agent_remove_git_worktree_action(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            execution=second_execution,
+            action=second_action,
+            owner_generation=second_execution.owner_generation,
+            predecessor_run_id="processing-remove-run-001",
+        )
+
+        assert not any(
+            call["operation"] == "remove_git_worktree" for call in runner.calls
+        )
+        async with rdb_session_manager() as session:
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=fixture.session_id,
+            )
+            projects = await SessionWorkspaceProjectRepository().list_projects(
+                session,
+                session_id=fixture.session_id,
+            )
+            continuations = [
+                item
+                for item in await MailboxRepository().list_by_session_id(
+                    session,
+                    fixture.session_id,
+                )
+                if item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION
+            ]
+        assert allocations[0].status is SessionGitWorktreeStatus.READY
+        assert allocation_create.worktree_path in {project.path for project in projects}
+        assert len(continuations) == 1
+        payload = continuations[0].payload
+        assert isinstance(payload, TurnActionContinuationMailboxPayload)
+        assert payload.reason_code == "removal_in_progress"
 
     async def test_agent_create_admission_rejects_unregistered_project_path(
         self,

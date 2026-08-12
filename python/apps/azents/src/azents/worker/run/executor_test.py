@@ -42,6 +42,7 @@ from azents.core.tools import ToolkitContext, ToolkitProvider
 from azents.core.vfs import VfsProjection, make_vfs_projection
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
+    AgentRemoveGitWorktreeAction,
     CreateGitWorktreeAction,
 )
 from azents.engine.events.engine_events import (
@@ -1150,6 +1151,35 @@ class _SessionGitWorktreeService:
             complete_run=True,
         )
 
+    async def run_agent_remove_git_worktree_action(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        execution: ActionExecution,
+        action: AgentRemoveGitWorktreeAction,
+        owner_generation: int,
+        predecessor_run_id: str,
+        on_projection_updated: object,
+        on_history_event_appended: object,
+    ) -> GitWorktreeActionExecutionResult:
+        """Record one admitted Agent removal bridge operation."""
+        del (
+            agent_id,
+            session_id,
+            action,
+            owner_generation,
+            on_projection_updated,
+            on_history_event_appended,
+        )
+        self.executed_execution_ids.append(execution.id)
+        self.executed_predecessor_run_ids.append(predecessor_run_id)
+        return GitWorktreeActionExecutionResult(
+            completed=True,
+            context_invalidated=False,
+            complete_run=True,
+        )
+
 
 class _FailedRunFinalizer:
     """Failed-run finalizer test double."""
@@ -1594,6 +1624,43 @@ def _agent_create_action_execution(
         id="agent-action-execution-001",
         session_id="session-001",
         mailbox_item_id="agent-input-buffer-001",
+        sender_user_id=None,
+        action_type=action.type,
+        action=action.model_dump(mode="json"),
+        status=ActionExecutionStatus.PENDING,
+        owner_generation=owner_generation,
+        failure_summary=None,
+        cancellation_summary=None,
+        started_at=None,
+        completed_at=None,
+        failed_at=None,
+        cancelled_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _agent_remove_action_execution(
+    *,
+    owner_generation: int = 1,
+) -> ActionExecution:
+    """Create an admitted Agent worktree removal bridge execution."""
+    now = datetime.datetime.now(datetime.UTC)
+    action = AgentRemoveGitWorktreeAction(
+        bridge_identity="bridge-remove-001",
+        originating_run_id="originating-remove-run-001",
+        client_tool_call_id="call-remove-001",
+        session_agent_context_id="context-001",
+        originating_agent_session_id="session-001",
+        worktree_project_id="project-worktree-001",
+        worktree_allocation_id="allocation-001",
+        worktree_path="/workspace/agent/worktree",
+        force=False,
+    )
+    return ActionExecution(
+        id="agent-remove-action-execution-001",
+        session_id="session-001",
+        mailbox_item_id="agent-remove-input-buffer-001",
         sender_user_id=None,
         action_type=action.type,
         action=action.model_dump(mode="json"),
@@ -2639,6 +2706,31 @@ async def test_agent_create_operation_requires_active_processing_run() -> None:
 
     assert service.executed_execution_ids == []
     assert service.executed_predecessor_run_ids == []
+
+
+@pytest.mark.asyncio
+async def test_agent_remove_operation_uses_active_processing_run_as_predecessor() -> (
+    None
+):
+    """Agent removal dispatch carries the Run that executes its terminal action."""
+    service = _SessionGitWorktreeService()
+    executor = _executor(session_git_worktree_service=service)
+    execution = _agent_remove_action_execution()
+    action = AgentRemoveGitWorktreeAction.model_validate(execution.action)
+
+    result = await executor._process_operation_action(
+        agent_id="agent-001",
+        session_id="session-001",
+        active_run_id="processing-remove-run-001",
+        execution=execution,
+        action=action,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+    )
+
+    assert result.complete_run is True
+    assert service.executed_execution_ids == [execution.id]
+    assert service.executed_predecessor_run_ids == ["processing-remove-run-001"]
 
 
 @pytest.mark.asyncio

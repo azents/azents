@@ -42,7 +42,11 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.vfs import make_vfs_projection, make_vfs_source_revision
-from azents.engine.events.action_messages import GoalAction, SkillAction
+from azents.engine.events.action_messages import (
+    AgentRemoveGitWorktreeAction,
+    GoalAction,
+    SkillAction,
+)
 from azents.engine.events.types import (
     AgentMessagePayload,
     AgentRunState,
@@ -278,7 +282,7 @@ async def _create_action_buffer(
     session_id: str,
     user_id: str,
     content: str,
-    action: GoalAction | SkillAction,
+    action: GoalAction | SkillAction | AgentRemoveGitWorktreeAction,
 ) -> str:
     """Create action MailboxItem for tests."""
     async with rdb_session_manager() as session:
@@ -1162,6 +1166,54 @@ async def test_cancelled_attachment_preparation_discards_partial_model_files() -
 
 class TestMailboxService:
     """Validate MailboxService behavior."""
+
+    async def test_flush_admits_agent_remove_as_operation_action(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Removal stays outside model input and enters durable operation execution."""
+        session_id, user_id = await _create_fixture(
+            rdb_session_manager,
+            "input-buffer-agent-remove",
+        )
+        action = AgentRemoveGitWorktreeAction(
+            bridge_identity="bridge-remove-001",
+            originating_run_id="originating-remove-run-001",
+            client_tool_call_id="call-remove-001",
+            session_agent_context_id="context-remove-001",
+            originating_agent_session_id=session_id,
+            worktree_project_id="project-remove-001",
+            worktree_allocation_id="allocation-remove-001",
+            worktree_path="/workspace/agent/worktree",
+            force=False,
+        )
+        buffer_id = await _create_action_buffer(
+            rdb_session_manager,
+            session_id=session_id,
+            user_id=user_id,
+            content="",
+            action=action,
+        )
+
+        result = await _mailbox_item_service(
+            rdb_session_manager
+        ).flush_session_mailbox_items(
+            session_id=session_id,
+            owner_generation=0,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer_id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        assert result.operation_action is not None
+        assert result.operation_action.action == action
+        assert result.operation_action.execution is not None
+        assert result.operation_action.execution.action_type == action.type
+        assert result.events == []
+        assert result.deleted_buffer_ids == [buffer_id]
 
     async def test_enqueue_creates_buffer_without_marking_session_running(
         self,

@@ -363,6 +363,14 @@ class AgentCreateGitWorktreeAdmission:
     bridge_identity: str
 
 
+@dataclasses.dataclass(frozen=True)
+class AgentRemoveGitWorktreeAdmission:
+    """Durable acceptance result for one Agent removal bridge call."""
+
+    mailbox_item_id: str
+    bridge_identity: str
+
+
 @dataclasses.dataclass
 class SessionGitWorktreeService:
     """Orchestrate session Git worktree allocation and initialization."""
@@ -584,6 +592,193 @@ class SessionGitWorktreeService:
             bridge_identity=bridge_identity,
         )
 
+    async def agent_remove_git_worktree_available(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+    ) -> bool:
+        """Return whether the current context has a removable managed Project."""
+        if self.runner_operations is None or self.skill_store is None:
+            return False
+        try:
+            await self.session_working_folder_binding_service.require_bindable_context(
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+            await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                wait_timeout_seconds=0,
+                start_if_stopped=False,
+            )
+        except RuntimeStorageError, SessionWorkingFolderBindingError:
+            return False
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if (
+                agent_session is None
+                or agent_session.agent_id != agent_id
+                or agent_session.status is not AgentSessionStatus.ACTIVE
+            ):
+                return False
+            allocations = await self.session_git_worktree_repository.list_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        return any(
+            allocation.status is SessionGitWorktreeStatus.READY
+            and allocation.session_workspace_project_id is not None
+            for allocation in allocations
+        )
+
+    async def admit_agent_remove_git_worktree(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        originating_run_id: str,
+        client_tool_call_id: str,
+        worktree_project_path: str,
+        force: bool,
+    ) -> AgentRemoveGitWorktreeAdmission:
+        """Pin one exact current-context managed worktree removal request."""
+        if self.runner_operations is None or self.skill_store is None:
+            raise ValueError("Agent-managed worktree removal is unavailable")
+        try:
+            await self.session_working_folder_binding_service.require_bindable_context(
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                start_if_stopped=False,
+            )
+            binding_service = self.session_working_folder_binding_service
+            authority = await binding_service.resolve_authority_for_target(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime_target=runtime,
+            )
+            workspace_root = normalize_agent_workspace_root(
+                runtime.workspace_path
+            ).as_posix()
+            normalized_worktree_path = normalize_session_workspace_path(
+                worktree_project_path,
+                workspace_root=workspace_root,
+            )
+        except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
+            raise ValueError(str(error)) from None
+        except ValueError as error:
+            raise ValueError(str(error)) from None
+
+        bridge_identity = _worktree_bridge_identity(
+            session_id=session_id,
+            run_id=originating_run_id,
+            tool_name="remove_git_worktree",
+            client_tool_call_id=client_tool_call_id,
+        )
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            session_agent = (
+                await self.agent_session_repository.get_session_agent_by_session_id(
+                    session,
+                    session_id,
+                )
+            )
+            project = (
+                await self.session_workspace_project_repository.get_project_by_path(
+                    session,
+                    session_id=session_id,
+                    path=normalized_worktree_path,
+                )
+            )
+            allocations = await self.session_git_worktree_repository.list_by_session_id(
+                session,
+                session_id=session_id,
+            )
+            allocation = next(
+                (
+                    candidate
+                    for candidate in allocations
+                    if project is not None
+                    and candidate.session_workspace_project_id == project.id
+                    and candidate.worktree_path == normalized_worktree_path
+                    and candidate.status is SessionGitWorktreeStatus.READY
+                ),
+                None,
+            )
+            if (
+                agent_session is None
+                or agent_session.agent_id != agent_id
+                or agent_session.status is not AgentSessionStatus.ACTIVE
+                or session_agent is None
+                or session_agent.context_id != authority.context_id
+            ):
+                raise ValueError("The current Session context is unavailable.")
+            if (
+                project is None
+                or project.session_agent_context_id != authority.context_id
+                or allocation is None
+            ):
+                raise ValueError(
+                    "worktree_project_path must identify a current Session "
+                    "Agent-managed worktree Project."
+                )
+            action = AgentRemoveGitWorktreeAction(
+                bridge_identity=bridge_identity,
+                originating_run_id=originating_run_id,
+                client_tool_call_id=client_tool_call_id,
+                session_agent_context_id=authority.context_id,
+                originating_agent_session_id=session_id,
+                worktree_project_id=project.id,
+                worktree_allocation_id=allocation.id,
+                worktree_path=normalized_worktree_path,
+                force=force,
+            )
+            existing = await self.mailbox_item_repository.get_by_idempotency_key(
+                session,
+                session_id=session_id,
+                kind=MailboxItemKind.ACTION_MESSAGE,
+                idempotency_key=bridge_identity,
+            )
+            admission = existing
+            if admission is None:
+                admission = await self.mailbox_item_repository.create_idempotent(
+                    session,
+                    MailboxItemCreate(
+                        session_id=session_id,
+                        kind=MailboxItemKind.ACTION_MESSAGE,
+                        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                        requested_model_target_label=None,
+                        requested_reasoning_effort=None,
+                        sender_user_id=None,
+                        order_group=None,
+                        order_sequence=0,
+                        content="",
+                        idempotency_key=bridge_identity,
+                        metadata={"source": "agent_tool"},
+                        action=action.model_dump(mode="json"),
+                        attachments=[],
+                        file_parts=[],
+                        payload=None,
+                    ),
+                    idempotency_key=bridge_identity,
+                )
+            if admission.presentation.action != action.model_dump(mode="json"):
+                raise ValueError(
+                    "The client tool call identity is already bound to another request."
+                )
+        return AgentRemoveGitWorktreeAdmission(
+            mailbox_item_id=admission.id,
+            bridge_identity=bridge_identity,
+        )
+
     async def preview_git_refs(
         self,
         *,
@@ -736,6 +931,46 @@ class SessionGitWorktreeService:
                 on_history_event_appended=on_history_event_appended,
             )
         except asyncio.CancelledError as exc:
+            await asyncio.shield(
+                self.cancel_action_execution(
+                    execution=execution,
+                    reason=_action_cancellation_reason(exc),
+                    on_history_event_appended=on_history_event_appended,
+                    predecessor_run_id=predecessor_run_id,
+                )
+            )
+            raise
+
+    async def run_agent_remove_git_worktree_action(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        execution: ActionExecution,
+        action: AgentRemoveGitWorktreeAction,
+        owner_generation: int,
+        predecessor_run_id: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None = None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None = None,
+    ) -> GitWorktreeActionExecutionResult:
+        """Execute one admitted Agent removal while preserving its Git branch."""
+        try:
+            return await self._execute_agent_remove_git_worktree_action(
+                agent_id=agent_id,
+                session_id=session_id,
+                execution=execution,
+                action=action,
+                owner_generation=owner_generation,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+        except asyncio.CancelledError as exc:
+            await asyncio.shield(
+                self._release_nonremoving_agent_removal_claims(
+                    action_execution_id=execution.id,
+                )
+            )
             await asyncio.shield(
                 self.cancel_action_execution(
                     execution=execution,
@@ -1702,6 +1937,38 @@ class SessionGitWorktreeService:
             )
             await session.commit()
 
+    async def _release_agent_removal_claim(
+        self,
+        *,
+        action_execution_id: str,
+        worktree_path: str,
+        state: GitWorktreePathClaimState,
+    ) -> None:
+        """Release one Agent removal claim after a settled outcome."""
+        async with self.session_manager() as session:
+            project_repository = self.session_workspace_project_repository
+            await project_repository.release_agent_git_worktree_claim(
+                session,
+                action_execution_id=action_execution_id,
+                worktree_path=worktree_path,
+                state=state,
+            )
+            await session.commit()
+
+    async def _release_nonremoving_agent_removal_claims(
+        self,
+        *,
+        action_execution_id: str,
+    ) -> None:
+        """Release Agent claims that cannot still own Runner removal."""
+        async with self.session_manager() as session:
+            project_repository = self.session_workspace_project_repository
+            await project_repository.release_nonremoving_agent_git_worktree_claims(
+                session,
+                action_execution_id=action_execution_id,
+            )
+            await session.commit()
+
     async def _claim_archive_cleanup_path(
         self,
         *,
@@ -1834,6 +2101,638 @@ class SessionGitWorktreeService:
             execution=updated,
             on_projection_updated=on_projection_updated,
         )
+
+    async def _execute_agent_remove_git_worktree_action(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        execution: ActionExecution,
+        action: AgentRemoveGitWorktreeAction,
+        owner_generation: int,
+        predecessor_run_id: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+    ) -> GitWorktreeActionExecutionResult:
+        """Execute one exact managed-worktree removal without deleting its branch."""
+        if execution.session_id != session_id:
+            raise ValueError("ActionExecution belongs to another session")
+        if execution.owner_generation != owner_generation:
+            raise RuntimeError("ActionExecution belongs to another Session owner")
+        if execution.status is not ActionExecutionStatus.PENDING:
+            raise RuntimeError("Only newly admitted pending operations may execute")
+
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            session_agent = (
+                await self.agent_session_repository.get_session_agent_by_session_id(
+                    session,
+                    session_id,
+                )
+            )
+        if (
+            agent_session is None
+            or agent_session.agent_id != agent_id
+            or agent_session.status is not AgentSessionStatus.ACTIVE
+            or agent is None
+            or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+            or session_agent is None
+            or action.originating_agent_session_id != session_id
+            or session_agent.context_id != action.session_agent_context_id
+        ):
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=None,
+                action=action,
+                reason_code="target_context_changed",
+                reason="The admitted managed worktree context is no longer available.",
+                retry_guidance=None,
+                dirty_content_discarded=False,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_remove_terminal_result()
+        if self.skill_store is None:
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=None,
+                action=action,
+                reason_code="skill_projection_unavailable",
+                reason="Skill projection storage is unavailable.",
+                retry_guidance=None,
+                dirty_content_discarded=False,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_remove_terminal_result()
+        runner_operations = self.runner_operations
+        if runner_operations is None:
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=None,
+                action=action,
+                reason_code="runner_operations_unavailable",
+                reason="Runtime runner operations are unavailable.",
+                retry_guidance=None,
+                dirty_content_discarded=False,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_remove_terminal_result()
+
+        async with self.session_manager() as session:
+            execution = await self.action_execution_repository.mark_running(
+                session,
+                action_execution_id=execution.id,
+                started_at=datetime.now(UTC),
+            )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="resolve_managed_worktree",
+            command_argv=None,
+            content="Resolving the admitted Agent-managed worktree.",
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+
+        try:
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bindable_context(
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                start_if_stopped=False,
+            )
+            binding = await binding_service.resolve_authority_for_target(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime_target=runtime,
+            )
+            workspace_root = normalize_agent_workspace_root(
+                runtime.workspace_path
+            ).as_posix()
+            normalized_worktree_path = normalize_session_workspace_path(
+                action.worktree_path,
+                workspace_root=workspace_root,
+            )
+        except (
+            RuntimeStorageError,
+            SessionWorkingFolderBindingError,
+            ValueError,
+        ) as error:
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=None,
+                action=action,
+                reason_code="runtime_authority_changed",
+                reason=str(error),
+                retry_guidance=None,
+                dirty_content_discarded=False,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_remove_terminal_result()
+        if (
+            runtime.runtime_capability_version != agent.runtime_capability_version
+            or normalized_worktree_path != action.worktree_path
+        ):
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=None,
+                action=action,
+                reason_code="runtime_authority_changed",
+                reason="Agent Runtime authority changed after admission.",
+                retry_guidance=None,
+                dirty_content_discarded=False,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_remove_terminal_result()
+
+        allocation: SessionGitWorktree | None = None
+        project: SessionWorkspaceProject | None = None
+        try:
+            async with self.session_manager() as session:
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    runtime_target=runtime,
+                )
+                allocation = (
+                    await self.session_git_worktree_repository.lock_by_id_for_session(
+                        session,
+                        worktree_id=action.worktree_allocation_id,
+                        session_id=session_id,
+                    )
+                )
+                project = (
+                    await self.session_workspace_project_repository.lock_project_by_id(
+                        session,
+                        project_id=action.worktree_project_id,
+                        context_id=action.session_agent_context_id,
+                        session_id=session_id,
+                    )
+                )
+                if (
+                    allocation is None
+                    or project is None
+                    or allocation.session_agent_context_id
+                    != action.session_agent_context_id
+                    or allocation.session_workspace_project_id != project.id
+                    or allocation.worktree_path != action.worktree_path
+                    or project.path != action.worktree_path
+                    or allocation.status is not SessionGitWorktreeStatus.READY
+                ):
+                    raise ValueError(
+                        "The admitted managed worktree changed before removal."
+                    )
+                _, ownership_error = _cleanup_classification(
+                    allocation=allocation,
+                    session_id=allocation.session_id,
+                    workspace_root=workspace_root,
+                    working_folder_path=binding.working_folder_path,
+                )
+                if ownership_error is not None:
+                    raise ValueError(ownership_error)
+                normalized_source_path = normalize_session_workspace_path(
+                    allocation.source_project_path,
+                    workspace_root=workspace_root,
+                )
+                if normalized_source_path != allocation.source_project_path:
+                    raise ValueError("Recorded source Project path changed.")
+                project_repository = self.session_workspace_project_repository
+                claimed = await project_repository.try_claim_agent_git_worktree(
+                    session,
+                    runtime_id=runtime.id,
+                    action_execution_id=execution.id,
+                    owner_generation=owner_generation,
+                    worktree_path=action.worktree_path,
+                )
+                if not claimed:
+                    raise _AgentWorktreeRemovalClaimConflict
+        except _AgentWorktreeRemovalClaimConflict:
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=allocation,
+                action=action,
+                reason_code="removal_in_progress",
+                reason="Another destructive operation currently owns this path.",
+                retry_guidance="Retry after the other worktree operation completes.",
+                dirty_content_discarded=False,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_remove_terminal_result()
+        except (SessionWorkingFolderBindingError, ValueError) as error:
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=allocation,
+                action=action,
+                reason_code="target_context_changed",
+                reason=str(error),
+                retry_guidance=None,
+                dirty_content_discarded=False,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_remove_terminal_result()
+        if allocation is None or project is None:
+            raise RuntimeError("Managed worktree removal authority is missing")
+
+        claim_state = GitWorktreePathClaimState.UNRESOLVED
+        try:
+            await self._append_action_execution_event(
+                execution=execution,
+                kind=ActionExecutionEventKind.STEP_STARTED,
+                step_key="inspect_git_worktree",
+                command_argv=None,
+                content="Inspecting the managed Git worktree.",
+                exit_code=None,
+                on_projection_updated=on_projection_updated,
+            )
+            inspection = await runner_operations.inspect_git_worktree(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                owner_session_id=session_id,
+                source_project_path=allocation.source_project_path,
+                worktree_path=allocation.worktree_path,
+                branch_name=allocation.branch_name,
+                deadline_at=_git_operation_deadline(),
+                text_output_callback=None,
+            )
+            inspection_error = _agent_removal_inspection_error(
+                allocation=allocation,
+                inspection_worktree_path=inspection.worktree_path,
+                registered=inspection.registered,
+                registered_branch_name=inspection.registered_branch_name,
+                target_kind=inspection.target_kind,
+                dirty=inspection.dirty,
+            )
+            if inspection_error is not None:
+                claim_state = GitWorktreePathClaimState.UNRESOLVED
+                await self._fail_agent_remove_git_worktree(
+                    execution=execution,
+                    allocation=allocation,
+                    action=action,
+                    reason_code="worktree_ownership_ambiguous",
+                    reason=inspection_error,
+                    retry_guidance=(
+                        "Inspect the recorded worktree and retry only after its "
+                        "identity is unambiguous."
+                    ),
+                    dirty_content_discarded=False,
+                    predecessor_run_id=predecessor_run_id,
+                    on_projection_updated=on_projection_updated,
+                    on_history_event_appended=on_history_event_appended,
+                )
+                return _bridge_remove_terminal_result()
+            if inspection.dirty is True and not action.force:
+                claim_state = GitWorktreePathClaimState.FAILED
+                await self._fail_agent_remove_git_worktree(
+                    execution=execution,
+                    allocation=allocation,
+                    action=action,
+                    reason_code="dirty_worktree",
+                    reason=(
+                        "The managed worktree has dirty or untracked content and "
+                        "was not removed."
+                    ),
+                    retry_guidance=(
+                        "Retry with force=true only when discarding all dirty and "
+                        "untracked worktree content is intended."
+                    ),
+                    dirty_content_discarded=False,
+                    predecessor_run_id=predecessor_run_id,
+                    on_projection_updated=on_projection_updated,
+                    on_history_event_appended=on_history_event_appended,
+                )
+                return _bridge_remove_terminal_result()
+
+            expected_authority = RuntimeOperationAuthority(
+                configuration_sequence=runtime.configuration_sequence,
+                configuration_digest=runtime.configuration_digest,
+                desired_generation=runtime.desired_generation,
+            )
+            current_runtime = (
+                await self.runtime_target_resolver.resolve_operation_target(
+                    agent_id,
+                    expected_authority=expected_authority,
+                    start_if_stopped=False,
+                )
+            )
+            async with self.session_manager() as session:
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    runtime_target=current_runtime,
+                )
+                current_allocation = (
+                    await self.session_git_worktree_repository.lock_by_id_for_session(
+                        session,
+                        worktree_id=action.worktree_allocation_id,
+                        session_id=session_id,
+                    )
+                )
+                current_project = (
+                    await self.session_workspace_project_repository.lock_project_by_id(
+                        session,
+                        project_id=action.worktree_project_id,
+                        context_id=action.session_agent_context_id,
+                        session_id=session_id,
+                    )
+                )
+                if (
+                    current_allocation is None
+                    or current_project is None
+                    or current_allocation.status is not SessionGitWorktreeStatus.READY
+                    or current_allocation.session_workspace_project_id
+                    != current_project.id
+                    or current_allocation.worktree_path != action.worktree_path
+                    or current_project.path != action.worktree_path
+                    or current_allocation.source_project_path
+                    != allocation.source_project_path
+                    or current_allocation.branch_name != allocation.branch_name
+                ):
+                    raise ValueError("The managed worktree changed before Git removal.")
+                project_repository = self.session_workspace_project_repository
+                await project_repository.mark_agent_git_worktree_claim_removing(
+                    session,
+                    action_execution_id=execution.id,
+                    worktree_path=action.worktree_path,
+                )
+            claim_state = GitWorktreePathClaimState.REMOVING
+            await self._append_action_execution_event(
+                execution=execution,
+                kind=ActionExecutionEventKind.COMMAND_STARTED,
+                step_key="remove_git_worktree",
+                command_argv=_remove_worktree_command_argv(
+                    worktree_path=allocation.worktree_path,
+                    force=action.force,
+                ),
+                content="Removing the Agent-managed Git worktree checkout.",
+                exit_code=None,
+                on_projection_updated=on_projection_updated,
+            )
+            removal = await runner_operations.remove_git_worktree(
+                runtime_id=current_runtime.id,
+                runner_generation=current_runtime.runner_generation,
+                owner_session_id=session_id,
+                source_project_path=allocation.source_project_path,
+                worktree_path=allocation.worktree_path,
+                branch_name=allocation.branch_name,
+                force=action.force,
+                deadline_at=_git_operation_deadline(),
+                text_output_callback=None,
+            )
+            if removal.worktree_path != allocation.worktree_path:
+                raise ValueError("Runner returned a different worktree path.")
+            claim_state = (
+                GitWorktreePathClaimState.REMOVED
+                if removal.outcome == "removed"
+                else GitWorktreePathClaimState.ALREADY_ABSENT
+            )
+            await self._append_action_execution_event(
+                execution=execution,
+                kind=ActionExecutionEventKind.COMMAND_COMPLETED,
+                step_key="remove_git_worktree",
+                command_argv=None,
+                content="Agent-managed Git worktree checkout removal completed.",
+                exit_code=0,
+                on_projection_updated=on_projection_updated,
+            )
+        except asyncio.CancelledError:
+            raise
+        except (
+            RuntimeStorageError,
+            SessionWorkingFolderBindingError,
+            RuntimeRunnerOperationCanceledError,
+            RuntimeRunnerOperationFailedError,
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+            ValueError,
+        ) as error:
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=allocation,
+                action=action,
+                reason_code=(
+                    error.code
+                    if isinstance(error, RuntimeRunnerOperationFailedError)
+                    and error.code
+                    else "removal_outcome_ambiguous"
+                ),
+                reason=str(error) or type(error).__name__,
+                retry_guidance=(
+                    "Inspect the recorded worktree state before an explicit retry."
+                ),
+                dirty_content_discarded=False,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_remove_terminal_result()
+
+        cleaned_at = datetime.now(UTC)
+        try:
+            async with self.session_manager() as session:
+                current_allocation = (
+                    await self.session_git_worktree_repository.lock_by_id_for_session(
+                        session,
+                        worktree_id=allocation.id,
+                        session_id=session_id,
+                    )
+                )
+                current_project = (
+                    await self.session_workspace_project_repository.lock_project_by_id(
+                        session,
+                        project_id=project.id,
+                        context_id=action.session_agent_context_id,
+                        session_id=session_id,
+                    )
+                )
+                if (
+                    current_allocation is None
+                    or current_project is None
+                    or current_allocation.status is not SessionGitWorktreeStatus.READY
+                    or current_allocation.session_workspace_project_id
+                    != current_project.id
+                    or current_allocation.worktree_path != action.worktree_path
+                    or current_project.path != action.worktree_path
+                ):
+                    raise RuntimeError(
+                        "Managed worktree ownership changed after confirmed removal."
+                    )
+                await self.agent_project_catalog_repository.delete_entry_by_path(
+                    session,
+                    agent_id=agent_id,
+                    path=action.worktree_path,
+                )
+                deleted = (
+                    await self.session_workspace_project_repository.delete_project(
+                        session,
+                        project.id,
+                        session_id=session_id,
+                    )
+                )
+                if not deleted:
+                    raise RuntimeError(
+                        "Managed worktree Project removal was not confirmed."
+                    )
+                cleaned = await self.session_git_worktree_repository.mark_cleaned(
+                    session,
+                    worktree_id=allocation.id,
+                    cleanup_summary=_agent_removal_terminal_summary(
+                        removal_outcome=removal.outcome,
+                        force=action.force,
+                    ),
+                    cleaned_at=cleaned_at,
+                )
+                project_repository = self.session_workspace_project_repository
+                await project_repository.release_agent_git_worktree_claim(
+                    session,
+                    action_execution_id=execution.id,
+                    worktree_path=action.worktree_path,
+                    state=claim_state,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            await self._record_agent_removal_projection_failure(
+                execution=execution,
+                allocation=allocation,
+                worktree_path=action.worktree_path,
+                claim_state=claim_state,
+                reason=(
+                    "Agent-managed checkout removal was confirmed, but Session "
+                    "Project cleanup requires recovery."
+                ),
+            )
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=allocation,
+                action=action,
+                reason_code="project_state_update_failed",
+                reason=str(error) or type(error).__name__,
+                retry_guidance=(
+                    "The checkout removal was confirmed; inspect Session Project "
+                    "state before further work."
+                ),
+                dirty_content_discarded=(action.force and inspection.dirty is True),
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+                release_nonremoving_claim=False,
+            )
+            return _bridge_remove_terminal_result()
+
+        skill_store = self.skill_store
+        if skill_store is None:
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=cleaned,
+                action=action,
+                reason_code="skill_projection_failed",
+                reason="Skill projection storage became unavailable.",
+                retry_guidance=(
+                    "The checkout was removed and its branch was preserved, but "
+                    "the Skill projection could not be refreshed."
+                ),
+                dirty_content_discarded=(action.force and inspection.dirty is True),
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+                release_nonremoving_claim=False,
+            )
+            return _bridge_remove_terminal_result()
+        try:
+            await skill_store.invalidate_project(
+                agent_id,
+                session_id,
+                project_id=project.id,
+                project_path=project.path,
+                session_run_state=agent_session.run_state,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            await self._fail_agent_remove_git_worktree(
+                execution=execution,
+                allocation=cleaned,
+                action=action,
+                reason_code="skill_projection_failed",
+                reason=str(error) or type(error).__name__,
+                retry_guidance=(
+                    "The checkout was removed and its branch was preserved, but "
+                    "the Skill projection could not be refreshed."
+                ),
+                dirty_content_discarded=(action.force and inspection.dirty is True),
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+                release_nonremoving_claim=False,
+            )
+            return _bridge_remove_terminal_result()
+
+        execution = await self._update_action_result(
+            execution=execution,
+            result={
+                "worktree_project_id": project.id,
+                "worktree_allocation_id": allocation.id,
+                "worktree_path": allocation.worktree_path,
+                "branch_name": allocation.branch_name,
+                "force": action.force,
+                "dirty_content_discarded": (action.force and inspection.dirty is True),
+                "removal_outcome": removal.outcome,
+                "retry_guidance": (
+                    f"The branch {allocation.branch_name} was preserved. Delete "
+                    "it separately when it is no longer needed."
+                ),
+                "reason_code": None,
+            },
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.COMPLETED,
+            step_key=None,
+            command_argv=None,
+            content=(
+                "Agent-managed Git worktree removal completed. The Git branch "
+                "was preserved."
+            ),
+            exit_code=0,
+            on_projection_updated=on_projection_updated,
+        )
+        await self.commit_bridge_action_execution_terminal_handoff(
+            execution=execution,
+            status=ActionExecutionStatus.COMPLETED,
+            failure_summary=None,
+            cancellation_summary=None,
+            predecessor_run_id=predecessor_run_id,
+            allocation=None,
+            on_history_event_appended=on_history_event_appended,
+        )
+        return _bridge_remove_terminal_result()
 
     async def _execute_agent_create_git_worktree_action(
         self,
@@ -3540,6 +4439,10 @@ class SessionGitWorktreeService:
             await self._release_nonremoving_cleanup_claims(
                 action_execution_id=execution.id
             )
+        if execution.action_type == "agent_remove_git_worktree":
+            await self._release_nonremoving_agent_removal_claims(
+                action_execution_id=execution.id
+            )
         async with self.session_manager() as session:
             allocation = (
                 await self.session_git_worktree_repository.get_by_action_execution_id(
@@ -3554,8 +4457,10 @@ class SessionGitWorktreeService:
                     execution=execution,
                     allocation=allocation,
                 )
+                terminal_allocation = allocation
             else:
                 action = AgentRemoveGitWorktreeAction.model_validate(execution.action)
+                terminal_allocation = None
             resolved_predecessor_run_id = (
                 predecessor_run_id or action.originating_run_id
             )
@@ -3565,7 +4470,7 @@ class SessionGitWorktreeService:
                 failure_summary=None,
                 cancellation_summary=reason,
                 predecessor_run_id=resolved_predecessor_run_id,
-                allocation=allocation,
+                allocation=terminal_allocation,
                 on_history_event_appended=on_history_event_appended,
             )
         return await self._commit_action_execution_history_event(
@@ -3715,6 +4620,86 @@ class SessionGitWorktreeService:
             allocation=allocation,
             on_history_event_appended=on_history_event_appended,
         )
+
+    async def _fail_agent_remove_git_worktree(
+        self,
+        *,
+        execution: ActionExecution,
+        allocation: SessionGitWorktree | None,
+        action: AgentRemoveGitWorktreeAction,
+        reason_code: str,
+        reason: str,
+        retry_guidance: str | None,
+        dirty_content_discarded: bool,
+        predecessor_run_id: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+        release_nonremoving_claim: bool = True,
+    ) -> None:
+        """Persist a removal failure without changing allocation ownership."""
+        if release_nonremoving_claim:
+            await self._release_nonremoving_agent_removal_claims(
+                action_execution_id=execution.id,
+            )
+        execution = await self._update_action_result(
+            execution=execution,
+            result={
+                "reason_code": reason_code,
+                "worktree_project_id": action.worktree_project_id,
+                "worktree_allocation_id": action.worktree_allocation_id,
+                "worktree_path": action.worktree_path,
+                "branch_name": (
+                    allocation.branch_name if allocation is not None else None
+                ),
+                "force": action.force,
+                "dirty_content_discarded": dirty_content_discarded,
+                "retry_guidance": retry_guidance,
+            },
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.FAILED,
+            step_key=None,
+            command_argv=None,
+            content=reason,
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+        await self.commit_bridge_action_execution_terminal_handoff(
+            execution=execution,
+            status=ActionExecutionStatus.FAILED,
+            failure_summary=reason,
+            cancellation_summary=None,
+            predecessor_run_id=predecessor_run_id,
+            allocation=None,
+            on_history_event_appended=on_history_event_appended,
+        )
+
+    async def _record_agent_removal_projection_failure(
+        self,
+        *,
+        execution: ActionExecution,
+        allocation: SessionGitWorktree,
+        worktree_path: str,
+        claim_state: GitWorktreePathClaimState,
+        reason: str,
+    ) -> None:
+        """Record confirmed checkout removal when later Project cleanup fails."""
+        async with self.session_manager() as session:
+            await self.session_git_worktree_repository.mark_cleanup_failed(
+                session,
+                worktree_id=allocation.id,
+                cleanup_summary=reason,
+                failed_at=datetime.now(UTC),
+            )
+            project_repository = self.session_workspace_project_repository
+            await project_repository.release_agent_git_worktree_claim(
+                session,
+                action_execution_id=execution.id,
+                worktree_path=worktree_path,
+                state=claim_state,
+            )
 
     async def _compensate_agent_created_project(
         self,
@@ -4422,6 +5407,10 @@ class _CreateWorktreeSuccess:
     base_commit: str
 
 
+class _AgentWorktreeRemovalClaimConflict(RuntimeError):
+    """Another destructive operation currently owns the requested path."""
+
+
 def _bridge_create_terminal_result() -> GitWorktreeActionExecutionResult:
     """Return the terminal fresh-Run outcome for an Agent create bridge."""
     return GitWorktreeActionExecutionResult(
@@ -4429,6 +5418,68 @@ def _bridge_create_terminal_result() -> GitWorktreeActionExecutionResult:
         context_invalidated=False,
         complete_run=True,
     )
+
+
+def _bridge_remove_terminal_result() -> GitWorktreeActionExecutionResult:
+    """Return the terminal fresh-Run outcome for an Agent removal bridge."""
+    return GitWorktreeActionExecutionResult(
+        completed=True,
+        context_invalidated=False,
+        complete_run=True,
+    )
+
+
+def _agent_removal_inspection_error(
+    *,
+    allocation: SessionGitWorktree,
+    inspection_worktree_path: str,
+    registered: bool,
+    registered_branch_name: str | None,
+    target_kind: Literal["directory", "missing", "other"],
+    dirty: bool | None,
+) -> str | None:
+    """Return why Runner inspection cannot authorize exact removal."""
+    if inspection_worktree_path != allocation.worktree_path:
+        return "Runner inspected a different worktree path."
+    if target_kind == "missing":
+        if registered or registered_branch_name is not None or dirty is not None:
+            return "Runner returned inconsistent missing-worktree evidence."
+        return None
+    if target_kind != "directory":
+        return "The recorded worktree path is not a removable directory."
+    if not registered:
+        return "The recorded checkout is not registered as a Git worktree."
+    if registered_branch_name != allocation.branch_name:
+        return "The registered Git worktree branch does not match the allocation."
+    if dirty is None:
+        return "Runner could not determine the worktree dirty state."
+    return None
+
+
+def _remove_worktree_command_argv(
+    *,
+    worktree_path: str,
+    force: bool,
+) -> list[str]:
+    """Build a content-free progress argv for checkout-only removal."""
+    argv = ["git", "worktree", "remove"]
+    if force:
+        argv.append("--force")
+    argv.append(worktree_path)
+    return argv
+
+
+def _agent_removal_terminal_summary(
+    *,
+    removal_outcome: Literal["removed", "already_absent"],
+    force: bool,
+) -> str:
+    """Return durable evidence that Agent removal preserved the branch."""
+    if removal_outcome == "already_absent":
+        return "Agent removal completed: checkout_confirmed_absent; branch_preserved."
+    if force:
+        return "Agent removal completed: checkout_removed_force; branch_preserved."
+    return "Agent removal completed: checkout_removed; branch_preserved."
 
 
 def _git_operation_deadline() -> datetime:

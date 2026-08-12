@@ -47,6 +47,23 @@ class CreateGitWorktreeInput(BaseModel):
     )
 
 
+class RemoveGitWorktreeInput(BaseModel):
+    """Remove one current Session Agent-managed Git worktree."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    worktree_project_path: str = Field(
+        min_length=1,
+        description="Exact current Session managed-worktree Project path.",
+    )
+    force: bool = Field(
+        default=False,
+        description=(
+            "Explicitly discard dirty or untracked worktree content. Defaults to false."
+        ),
+    )
+
+
 class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
     """Expose durable Agent-managed worktree operations when currently eligible."""
 
@@ -77,16 +94,22 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
         self.turn_action_bridge_boundary = turn_action_bridge_boundary
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
-        """Project creation only while current Session Runtime authority is eligible."""
+        """Project only currently eligible Agent-managed worktree operations."""
         del context
-        if not await self.service.agent_create_git_worktree_available(
+        tools: list[FunctionTool] = []
+        if await self.service.agent_create_git_worktree_available(
             agent_id=self.agent_id,
             session_id=self.session_id,
         ):
-            return ToolkitState(status=ToolkitStatus.ENABLED, tools=[])
+            tools.append(self._create_git_worktree_tool())
+        if await self.service.agent_remove_git_worktree_available(
+            agent_id=self.agent_id,
+            session_id=self.session_id,
+        ):
+            tools.append(self._remove_git_worktree_tool())
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
-            tools=[self._create_git_worktree_tool()],
+            tools=tools,
         )
 
     def _create_git_worktree_tool(self) -> FunctionTool:
@@ -136,6 +159,53 @@ class DynamicWorktreeToolkit(Toolkit[DynamicWorktreeToolkitConfig]):
             input_model=CreateGitWorktreeInput,
         )
 
+    def _remove_git_worktree_tool(self) -> FunctionTool:
+        async def remove_git_worktree(input: RemoveGitWorktreeInput) -> str:
+            """Durably request removal of an exact managed worktree Project."""
+            run_id = self.run_id
+            boundary = self.turn_action_bridge_boundary
+            if run_id is None or boundary is None:
+                raise FunctionToolError(
+                    "Dynamic worktree authority is unavailable for this Run."
+                )
+            execution = get_client_tool_execution_context()
+            try:
+                admission = await self.service.admit_agent_remove_git_worktree(
+                    agent_id=self.agent_id,
+                    session_id=self.session_id,
+                    originating_run_id=run_id,
+                    client_tool_call_id=execution.call_id,
+                    worktree_project_path=input.worktree_project_path,
+                    force=input.force,
+                )
+            except ValueError as error:
+                raise FunctionToolError(str(error)) from None
+            boundary.mark_admitted(execution.call_id)
+            await self.broker.notify_mailbox_activity(self.session_id)
+            await self.broker.send_message(SessionWakeUp(session_id=self.session_id))
+            return json.dumps(
+                {
+                    "accepted": True,
+                    "request_id": admission.mailbox_item_id,
+                    "message": (
+                        "The worktree removal request was accepted. The "
+                        "authoritative result will arrive through a fresh "
+                        "continuation Run."
+                    ),
+                },
+                sort_keys=True,
+            )
+
+        return make_tool(
+            remove_git_worktree,
+            description=(
+                "Durably remove an exact Agent-managed worktree Project from the "
+                "current Session while preserving its Git branch. Dirty or "
+                "untracked content is protected unless force is explicitly true."
+            ),
+            input_model=RemoveGitWorktreeInput,
+        )
+
 
 class DynamicWorktreeToolkitProvider(
     ToolkitProvider[DynamicWorktreeToolkitConfig],
@@ -144,7 +214,7 @@ class DynamicWorktreeToolkitProvider(
 
     slug = "dynamic_worktree"
     name = "Dynamic Worktree"
-    description = "Create managed Git worktrees from current Session Projects"
+    description = "Create and remove Agent-managed Git worktrees"
     system_prompt = ""
     config_model = DynamicWorktreeToolkitConfig
 
