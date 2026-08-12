@@ -76,6 +76,18 @@ class WorkspaceRepository:
             return None
         return self._build_workspace(rdb_workspace)
 
+    async def get_with_id_by_handle(
+        self, session: AsyncSession, handle: str
+    ) -> tuple[str, Workspace] | None:
+        """Fetch one Workspace ID and projection from the same row read."""
+        result = await session.execute(
+            sa.select(RDBWorkspace).where(RDBWorkspace.handle == handle)
+        )
+        rdb_workspace = result.scalar_one_or_none()
+        if rdb_workspace is None:
+            return None
+        return rdb_workspace.id, self._build_workspace(rdb_workspace)
+
     async def get_by_id_for_update(
         self, session: AsyncSession, workspace_id: str
     ) -> Workspace | None:

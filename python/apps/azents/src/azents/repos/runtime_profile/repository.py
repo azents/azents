@@ -8,6 +8,7 @@ from azcommon.uuid import uuid7
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from azents.core.enums import (
     AgentRuntimeCapability,
@@ -44,6 +45,10 @@ from .data import (
     RuntimeConfigurationState,
     RuntimeInfrastructureProfile,
     RuntimeInfrastructureProfileCreate,
+    RuntimeInfrastructureProfileDeleteOutcome,
+    RuntimeInfrastructureProfileDeletion,
+    RuntimeInfrastructureProfileDeletionImpact,
+    RuntimeInfrastructureProfileReference,
     RuntimeInfrastructureProfileReplace,
     RuntimeRecreationOperation,
     RuntimeRecreationOperationItem,
@@ -52,6 +57,7 @@ from .data import (
     WorkspaceRuntimeProfileDeleteOutcome,
     WorkspaceRuntimeProfileDeletion,
     WorkspaceRuntimeProfileReplace,
+    WorkspaceRuntimeProfileUsage,
 )
 
 
@@ -162,6 +168,272 @@ class RuntimeProfileRepository:
         rdb = result.scalar_one_or_none()
         await session.flush()
         return self._build_infrastructure_profile(rdb) if rdb is not None else None
+
+    async def get_infrastructure_profile_deletion_impact(
+        self,
+        session: AsyncSession,
+        *,
+        profile_id: str,
+        offset: int,
+        limit: int,
+    ) -> RuntimeInfrastructureProfileDeletionImpact:
+        """Project current blocking references and applied-only running usage."""
+        if offset < 0 or limit < 1:
+            raise ValueError("Infrastructure Profile impact pagination is invalid.")
+
+        usage = (
+            sa.select(
+                RDBAgent.runtime_profile_id.label("runtime_profile_id"),
+                sa.func.count(RDBAgent.id).label("selected_agent_count"),
+                sa.func.count(RDBAgentRuntime.id)
+                .filter(
+                    RDBAgentRuntime.provider_observed_state
+                    == RuntimeProviderObservedState.RUNNING
+                )
+                .label("running_runtime_count"),
+            )
+            .outerjoin(RDBAgentRuntime, RDBAgentRuntime.agent_id == RDBAgent.id)
+            .where(RDBAgent.runtime_profile_id.is_not(None))
+            .group_by(RDBAgent.runtime_profile_id)
+            .subquery()
+        )
+        blocking_reference_count = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBWorkspaceRuntimeProfile)
+                .where(
+                    RDBWorkspaceRuntimeProfile.infrastructure_profile_id == profile_id
+                )
+            )
+            or 0
+        )
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBWorkspace,
+                    RDBWorkspaceRuntimeProfile,
+                    sa.func.coalesce(usage.c.selected_agent_count, 0),
+                    sa.func.coalesce(usage.c.running_runtime_count, 0),
+                )
+                .join(
+                    RDBWorkspaceRuntimeProfile,
+                    RDBWorkspaceRuntimeProfile.workspace_id == RDBWorkspace.id,
+                )
+                .outerjoin(
+                    usage,
+                    usage.c.runtime_profile_id == RDBWorkspaceRuntimeProfile.id,
+                )
+                .where(
+                    RDBWorkspaceRuntimeProfile.infrastructure_profile_id == profile_id
+                )
+                .order_by(
+                    RDBWorkspace.name,
+                    RDBWorkspace.handle,
+                    RDBWorkspaceRuntimeProfile.display_name,
+                    RDBWorkspaceRuntimeProfile.id,
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).all()
+
+        current_profile = aliased(RDBWorkspaceRuntimeProfile)
+        applied_only_running_runtime_count = int(
+            await session.scalar(
+                sa.select(sa.func.count(RDBAgentRuntime.id))
+                .select_from(RDBAgentRuntime)
+                .join(
+                    RDBRuntimeConfigurationState,
+                    RDBRuntimeConfigurationState.runtime_id == RDBAgentRuntime.id,
+                )
+                .join(RDBAgent, RDBAgent.id == RDBAgentRuntime.agent_id)
+                .outerjoin(
+                    current_profile,
+                    current_profile.id == RDBAgent.runtime_profile_id,
+                )
+                .where(
+                    RDBAgentRuntime.provider_observed_state
+                    == RuntimeProviderObservedState.RUNNING,
+                    RDBRuntimeConfigurationState.applied_document.is_not(None),
+                    RDBRuntimeConfigurationState.applied_document[
+                        "infrastructure_profile_id"
+                    ].astext
+                    == profile_id,
+                    sa.or_(
+                        RDBAgent.runtime_profile_id.is_(None),
+                        current_profile.infrastructure_profile_id != profile_id,
+                    ),
+                )
+            )
+            or 0
+        )
+        return RuntimeInfrastructureProfileDeletionImpact(
+            blocking_reference_count=blocking_reference_count,
+            references=tuple(
+                RuntimeInfrastructureProfileReference(
+                    workspace_id=workspace.id,
+                    workspace_name=workspace.name,
+                    workspace_handle=workspace.handle,
+                    workspace_runtime_profile_id=workspace_profile.id,
+                    workspace_runtime_profile_display_name=(
+                        workspace_profile.display_name
+                    ),
+                    workspace_runtime_profile_lifecycle=workspace_profile.lifecycle,
+                    workspace_runtime_profile_version=workspace_profile.version,
+                    selected_agent_count=int(selected_agent_count),
+                    running_runtime_count=int(running_runtime_count),
+                )
+                for (
+                    workspace,
+                    workspace_profile,
+                    selected_agent_count,
+                    running_runtime_count,
+                ) in rows
+            ),
+            applied_only_running_runtime_count=applied_only_running_runtime_count,
+            offset=offset,
+            limit=limit,
+        )
+
+    async def get_workspace_runtime_profile_usage(
+        self,
+        session: AsyncSession,
+        *,
+        profile_id: str,
+    ) -> WorkspaceRuntimeProfileUsage:
+        """Return current Agent selection and running Runtime counts."""
+        row = (
+            await session.execute(
+                sa.select(
+                    sa.func.count(RDBAgent.id),
+                    sa.func.count(RDBAgentRuntime.id).filter(
+                        RDBAgentRuntime.provider_observed_state
+                        == RuntimeProviderObservedState.RUNNING
+                    ),
+                )
+                .select_from(RDBAgent)
+                .outerjoin(RDBAgentRuntime, RDBAgentRuntime.agent_id == RDBAgent.id)
+                .where(RDBAgent.runtime_profile_id == profile_id)
+            )
+        ).one()
+        return WorkspaceRuntimeProfileUsage(
+            selected_agent_count=int(row[0]),
+            running_runtime_count=int(row[1]),
+        )
+
+    async def delete_infrastructure_profile(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        profile_id: str,
+        expected_version: int,
+    ) -> RuntimeInfrastructureProfileDeleteOutcome:
+        """Delete one unreferenced Profile and terminalize target recreation."""
+        profile = await session.scalar(
+            sa.select(RDBRuntimeInfrastructureProfile)
+            .where(
+                RDBRuntimeInfrastructureProfile.id == profile_id,
+                RDBRuntimeInfrastructureProfile.provider_id == provider_id,
+            )
+            .with_for_update()
+        )
+        if profile is None:
+            return RuntimeInfrastructureProfileDeleteOutcome(
+                deletion=None,
+                current_profile=None,
+                blocking_reference_count=0,
+            )
+        current_profile = self._build_infrastructure_profile(profile)
+        if profile.version != expected_version:
+            return RuntimeInfrastructureProfileDeleteOutcome(
+                deletion=None,
+                current_profile=current_profile,
+                blocking_reference_count=0,
+            )
+
+        blocking_reference_count = int(
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBWorkspaceRuntimeProfile)
+                .where(
+                    RDBWorkspaceRuntimeProfile.infrastructure_profile_id == profile_id
+                )
+            )
+            or 0
+        )
+        if blocking_reference_count:
+            return RuntimeInfrastructureProfileDeleteOutcome(
+                deletion=None,
+                current_profile=current_profile,
+                blocking_reference_count=blocking_reference_count,
+            )
+
+        operations = list(
+            (
+                await session.scalars(
+                    sa.select(RDBRuntimeRecreationOperation)
+                    .where(
+                        RDBRuntimeRecreationOperation.target_kind
+                        == RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE,
+                        RDBRuntimeRecreationOperation.target_id == profile_id,
+                        RDBRuntimeRecreationOperation.status.in_(
+                            (
+                                RuntimeRecreationOperationStatus.PENDING,
+                                RuntimeRecreationOperationStatus.RUNNING,
+                            )
+                        ),
+                    )
+                    .order_by(RDBRuntimeRecreationOperation.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        skipped_item_count = 0
+        now = tznow()
+        for operation in operations:
+            items = list(
+                (
+                    await session.scalars(
+                        sa.select(RDBRuntimeRecreationOperationItem)
+                        .where(
+                            RDBRuntimeRecreationOperationItem.operation_id
+                            == operation.id,
+                            RDBRuntimeRecreationOperationItem.status.in_(
+                                (
+                                    RuntimeRecreationItemStatus.PENDING,
+                                    RuntimeRecreationItemStatus.RUNNING,
+                                )
+                            ),
+                        )
+                        .order_by(RDBRuntimeRecreationOperationItem.id)
+                        .with_for_update()
+                    )
+                ).all()
+            )
+            for item in items:
+                item.status = RuntimeRecreationItemStatus.SKIPPED
+                item.failure_code = "target_deleted"
+                item.failure_message = "Infrastructure Profile was deleted."
+                item.updated_at = now
+            skipped_item_count += len(items)
+            operation.pending_count = 0
+            operation.running_count = 0
+            operation.skipped_count += len(items)
+            operation.status = RuntimeRecreationOperationStatus.COMPLETED
+            operation.completed_at = now
+
+        await session.delete(profile)
+        await session.flush()
+        return RuntimeInfrastructureProfileDeleteOutcome(
+            deletion=RuntimeInfrastructureProfileDeletion(
+                profile_id=profile_id,
+                superseded_recreation_operation_count=len(operations),
+                skipped_recreation_item_count=skipped_item_count,
+            ),
+            current_profile=None,
+            blocking_reference_count=0,
+        )
 
     async def create_workspace_runtime_profile(
         self,

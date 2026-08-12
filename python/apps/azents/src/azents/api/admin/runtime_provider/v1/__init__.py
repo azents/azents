@@ -34,7 +34,11 @@ from azents.services.runtime_recreation.service import (
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    AdminWorkspaceRuntimeProfileDetailResponse,
     RuntimeInfrastructureProfileCreateRequest,
+    RuntimeInfrastructureProfileDeleteRequest,
+    RuntimeInfrastructureProfileDeleteResponse,
+    RuntimeInfrastructureProfileDeletionImpactResponse,
     RuntimeInfrastructureProfileListResponse,
     RuntimeInfrastructureProfileReplaceRequest,
     RuntimeInfrastructureProfileResponse,
@@ -77,6 +81,56 @@ async def _list_infrastructure_profiles(
             RuntimeInfrastructureProfileResponse.convert_from(profile)
             for profile in profiles
         ]
+    )
+
+
+async def _get_infrastructure_profile_deletion_impact(
+    service: RuntimeProfileAdminService,
+    *,
+    provider_id: str,
+    profile_id: str,
+    profile_kind: RuntimeInfrastructureProfileKind,
+    offset: int,
+    limit: int,
+) -> RuntimeInfrastructureProfileDeletionImpactResponse:
+    try:
+        impact = await service.get_profile_deletion_impact(
+            provider_id,
+            profile_id,
+            profile_kind=profile_kind,
+            offset=offset,
+            limit=limit,
+        )
+    except RuntimeProfileAdminUnavailable as error:
+        _raise_profile_unavailable(error)
+    return RuntimeInfrastructureProfileDeletionImpactResponse.convert_from(impact)
+
+
+async def _delete_infrastructure_profile(
+    system_admin: SystemAdmin,
+    service: RuntimeProfileAdminService,
+    request_body: RuntimeInfrastructureProfileDeleteRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+    profile_kind: RuntimeInfrastructureProfileKind,
+) -> RuntimeInfrastructureProfileDeleteResponse:
+    try:
+        deletion = await service.delete_profile(
+            provider_id,
+            profile_id,
+            profile_kind=profile_kind,
+            expected_version=request_body.expected_version,
+            actor_user_id=system_admin.user_id,
+        )
+    except RuntimeProfileAdminUnavailable as error:
+        _raise_profile_unavailable(error)
+    return RuntimeInfrastructureProfileDeleteResponse(
+        profile_id=deletion.profile_id,
+        superseded_recreation_operation_count=(
+            deletion.superseded_recreation_operation_count
+        ),
+        skipped_recreation_item_count=deletion.skipped_recreation_item_count,
     )
 
 
@@ -202,6 +256,101 @@ async def get_container_profile(
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileResponse.convert_from(profile)
+
+
+@router.get("/providers/{provider_id}/pod-profiles/{profile_id}/deletion-impact")
+async def get_pod_profile_deletion_impact(
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    *,
+    provider_id: str,
+    profile_id: str,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> RuntimeInfrastructureProfileDeletionImpactResponse:
+    """Preview current references before deleting one Pod Profile."""
+    return await _get_infrastructure_profile_deletion_impact(
+        service,
+        provider_id=provider_id,
+        profile_id=profile_id,
+        profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@router.get("/providers/{provider_id}/container-profiles/{profile_id}/deletion-impact")
+async def get_container_profile_deletion_impact(
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    *,
+    provider_id: str,
+    profile_id: str,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> RuntimeInfrastructureProfileDeletionImpactResponse:
+    """Preview current references before deleting one Container Profile."""
+    return await _get_infrastructure_profile_deletion_impact(
+        service,
+        provider_id=provider_id,
+        profile_id=profile_id,
+        profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@router.delete("/providers/{provider_id}/pod-profiles/{profile_id}")
+async def delete_pod_profile(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    request_body: RuntimeInfrastructureProfileDeleteRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+) -> RuntimeInfrastructureProfileDeleteResponse:
+    """Permanently delete one exact unreferenced Pod Profile."""
+    return await _delete_infrastructure_profile(
+        system_admin,
+        service,
+        request_body,
+        provider_id=provider_id,
+        profile_id=profile_id,
+        profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+    )
+
+
+@router.delete("/providers/{provider_id}/container-profiles/{profile_id}")
+async def delete_container_profile(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    request_body: RuntimeInfrastructureProfileDeleteRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+) -> RuntimeInfrastructureProfileDeleteResponse:
+    """Permanently delete one exact unreferenced Container Profile."""
+    return await _delete_infrastructure_profile(
+        system_admin,
+        service,
+        request_body,
+        provider_id=provider_id,
+        profile_id=profile_id,
+        profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
+    )
+
+
+@router.get("/workspaces/{handle}/runtime-profiles/{profile_id}")
+async def get_workspace_profile_admin_detail(
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    *,
+    handle: str,
+    profile_id: str,
+) -> AdminWorkspaceRuntimeProfileDetailResponse:
+    """Inspect one Workspace Runtime Profile with System Admin authority."""
+    try:
+        detail = await service.get_workspace_profile_admin_detail(handle, profile_id)
+    except RuntimeProfileAdminUnavailable as error:
+        _raise_profile_unavailable(error)
+    return AdminWorkspaceRuntimeProfileDetailResponse.convert_from(detail)
 
 
 @router.put("/providers/{provider_id}/pod-profiles/{profile_id}")
@@ -592,7 +741,11 @@ def _raise_profile_unavailable(
     error: RuntimeProfileAdminUnavailable,
 ) -> NoReturn:
     """Convert infrastructure Profile failures to bounded Admin API errors."""
-    if error.code in {"provider_not_found", "profile_not_found"}:
+    if error.code in {
+        "provider_not_found",
+        "profile_not_found",
+        "workspace_profile_not_found",
+    }:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": error.code},
@@ -605,6 +758,8 @@ def _raise_profile_unavailable(
     detail: dict[str, Any] = {"code": error.code}
     if error.current_profile is not None:
         detail["current_version"] = error.current_profile.version
+    if error.blocking_reference_count is not None:
+        detail["blocking_reference_count"] = error.blocking_reference_count
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=detail,

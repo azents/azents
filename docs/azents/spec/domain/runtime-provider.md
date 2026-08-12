@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
-last_verified_at: 2026-08-11
-spec_version: 24
+last_verified_at: 2026-08-12
+spec_version: 25
 ---
 
 # Runtime Provider
@@ -186,6 +186,35 @@ Infrastructure Profile writes are Provider-kind-specific, expected-version-fence
 against the Provider's current capability contract. Missing or removed capability makes dependent
 Profiles unavailable; the server never drops an unsupported field or lowers to a weaker Profile.
 
+A System Administrator may permanently delete one Provider-owned infrastructure Profile through
+the matching Pod- or Container-Profile Admin route. Opening the deletion review reads a fresh,
+bounded PostgreSQL projection of every current Workspace Runtime Profile reference plus the count
+of currently running Runtimes that retain the target only in applied configuration. Current
+Workspace Runtime Profile references, including disabled Profiles, block deletion. Applied-only
+Runtime evidence is informational and never creates a reference or lifecycle authority.
+
+Deletion submits the exact reviewed Profile version. In one PostgreSQL transaction the repository
+locks the exact Provider/Profile row, rechecks current Workspace Runtime Profile references,
+terminalizes active target-scoped recreation operations with non-terminal items skipped as
+`target_deleted`, and physically removes only the infrastructure Profile. The restrictive
+Workspace-Profile foreign key remains the final concurrency backstop. Stale version, new reference,
+already-absent target, kind mismatch, and unexpected integrity conflict are distinct bounded
+outcomes, and every failure rolls back without partial mutation.
+
+Infrastructure Profile deletion does not rewrite Workspace Runtime Profiles, defaults, Agent
+selections, desired or applied Runtime configuration, Provider bindings, running workloads,
+Runner-reported Agent Workspace paths, or Agent Workspace storage. A deletion can therefore succeed
+while a running Runtime retains the deleted Profile ID as applied historical evidence. Future
+create, start, restart, reset, or recreation still requires current Profile authority and cannot
+restore or substitute the deleted resource. The deleted Provider-scoped display name becomes
+available for a new Profile.
+
+A separate System-Admin-only read route exposes one exact Workspace Runtime Profile with Workspace,
+Provider, infrastructure Profile, lifecycle, policy, version, selected-Agent count, and running
+Runtime count. It is read-only, does not require Workspace membership, and grants no customer
+Workspace mutation authority. The Admin deletion review links blocking references to this detail
+surface while retaining the Provider-page deletion context.
+
 A Workspace Runtime Profile is the complete customer choice. It selects one infrastructure Profile
 and may add only the Workspace policy supported by that contract. Kubernetes network policy is
 restrictive-only and composes with Provider and infrastructure hard boundaries. Required DNS and
@@ -274,6 +303,10 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **25 (2026-08-12):** Added System-Admin exact-version infrastructure Profile hard deletion,
+  fresh blocking-reference and applied-only impact projection, target-scoped recreation
+  terminalization, Runtime/Workspace preservation, and membership-independent Admin Workspace
+  Runtime Profile detail.
 - **24 (2026-08-11):** Replaced Agent Runtime configuration-history references with bounded
   desired/applied state slots, positive sequence/digest/generation fencing, exact promotion and
   cleanup, and Owner hard-delete behavior without fallback or running-Workspace disruption.

@@ -72,6 +72,58 @@ class RuntimeInfrastructureProfileReplace:
 
 
 @dataclass(frozen=True)
+class RuntimeInfrastructureProfileReference:
+    """One current Workspace Runtime Profile reference and bounded usage."""
+
+    workspace_id: str
+    workspace_name: str
+    workspace_handle: str
+    workspace_runtime_profile_id: str
+    workspace_runtime_profile_display_name: str
+    workspace_runtime_profile_lifecycle: RuntimeProfileLifecycle
+    workspace_runtime_profile_version: int
+    selected_agent_count: int
+    running_runtime_count: int
+
+
+@dataclass(frozen=True)
+class RuntimeInfrastructureProfileDeletionImpact:
+    """Current blocking and applied-only impact for one infrastructure Profile."""
+
+    blocking_reference_count: int
+    references: tuple[RuntimeInfrastructureProfileReference, ...]
+    applied_only_running_runtime_count: int
+    offset: int
+    limit: int
+
+
+@dataclass(frozen=True)
+class RuntimeInfrastructureProfileDeletion:
+    """Bounded outcome from one committed infrastructure Profile deletion."""
+
+    profile_id: str
+    superseded_recreation_operation_count: int
+    skipped_recreation_item_count: int
+
+
+@dataclass(frozen=True)
+class RuntimeInfrastructureProfileDeleteOutcome:
+    """Exact deletion result or current conflict evidence."""
+
+    deletion: RuntimeInfrastructureProfileDeletion | None
+    current_profile: RuntimeInfrastructureProfile | None
+    blocking_reference_count: int
+
+
+@dataclass(frozen=True)
+class WorkspaceRuntimeProfileUsage:
+    """Current Agent selection and running Runtime counts."""
+
+    selected_agent_count: int
+    running_runtime_count: int
+
+
+@dataclass(frozen=True)
 class WorkspaceRuntimeProfile:
     """One complete Runtime choice owned by one Workspace."""
 

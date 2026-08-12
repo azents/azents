@@ -10,11 +10,16 @@ Method | HTTP request | Description
 [**runtime_provider_v1_create_pod_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_create_pod_profile) | **POST** /runtime-provider/v1/providers/{provider_id}/pod-profiles | Create Pod Profile
 [**runtime_provider_v1_create_pod_profile_recreation**](RuntimeProviderV1Api.md#runtime_provider_v1_create_pod_profile_recreation) | **POST** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/recreation-operations | Create Pod Profile Recreation
 [**runtime_provider_v1_create_provider_recreation**](RuntimeProviderV1Api.md#runtime_provider_v1_create_provider_recreation) | **POST** /runtime-provider/v1/providers/{provider_id}/recreation-operations | Create Provider Recreation
+[**runtime_provider_v1_delete_container_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_delete_container_profile) | **DELETE** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id} | Delete Container Profile
+[**runtime_provider_v1_delete_pod_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_delete_pod_profile) | **DELETE** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Delete Pod Profile
 [**runtime_provider_v1_get_auth_binding**](RuntimeProviderV1Api.md#runtime_provider_v1_get_auth_binding) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id} | Get Auth Binding
 [**runtime_provider_v1_get_container_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_get_container_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id} | Get Container Profile
+[**runtime_provider_v1_get_container_profile_deletion_impact**](RuntimeProviderV1Api.md#runtime_provider_v1_get_container_profile_deletion_impact) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id}/deletion-impact | Get Container Profile Deletion Impact
 [**runtime_provider_v1_get_platform_recreation**](RuntimeProviderV1Api.md#runtime_provider_v1_get_platform_recreation) | **GET** /runtime-provider/v1/recreation-operations/{operation_id} | Get Platform Recreation
 [**runtime_provider_v1_get_pod_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Get Pod Profile
+[**runtime_provider_v1_get_pod_profile_deletion_impact**](RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile_deletion_impact) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/deletion-impact | Get Pod Profile Deletion Impact
 [**runtime_provider_v1_get_runtime_provider**](RuntimeProviderV1Api.md#runtime_provider_v1_get_runtime_provider) | **GET** /runtime-provider/v1/providers/{provider_id} | Get Runtime Provider
+[**runtime_provider_v1_get_workspace_profile_admin_detail**](RuntimeProviderV1Api.md#runtime_provider_v1_get_workspace_profile_admin_detail) | **GET** /runtime-provider/v1/workspaces/{handle}/runtime-profiles/{profile_id} | Get Workspace Profile Admin Detail
 [**runtime_provider_v1_list_auth_binding_audit_events**](RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_binding_audit_events) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id}/audit-events | List Auth Binding Audit Events
 [**runtime_provider_v1_list_auth_bindings**](RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_bindings) | **GET** /runtime-provider/v1/providers/{provider_id}/authentication-bindings | List Auth Bindings
 [**runtime_provider_v1_list_container_profiles**](RuntimeProviderV1Api.md#runtime_provider_v1_list_container_profiles) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles | List Container Profiles
@@ -525,6 +530,174 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **runtime_provider_v1_delete_container_profile**
+> RuntimeInfrastructureProfileDeleteResponse runtime_provider_v1_delete_container_profile(provider_id, profile_id, runtime_infrastructure_profile_delete_request)
+
+Delete Container Profile
+
+Permanently delete one exact unreferenced Container Profile.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_delete_request import RuntimeInfrastructureProfileDeleteRequest
+from azentsadminclient.models.runtime_infrastructure_profile_delete_response import RuntimeInfrastructureProfileDeleteResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    profile_id = 'profile_id_example' # str | 
+    runtime_infrastructure_profile_delete_request = azentsadminclient.RuntimeInfrastructureProfileDeleteRequest() # RuntimeInfrastructureProfileDeleteRequest | 
+
+    try:
+        # Delete Container Profile
+        api_response = api_instance.runtime_provider_v1_delete_container_profile(provider_id, profile_id, runtime_infrastructure_profile_delete_request)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_delete_container_profile:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_delete_container_profile: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **profile_id** | **str**|  | 
+ **runtime_infrastructure_profile_delete_request** | [**RuntimeInfrastructureProfileDeleteRequest**](RuntimeInfrastructureProfileDeleteRequest.md)|  | 
+
+### Return type
+
+[**RuntimeInfrastructureProfileDeleteResponse**](RuntimeInfrastructureProfileDeleteResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_provider_v1_delete_pod_profile**
+> RuntimeInfrastructureProfileDeleteResponse runtime_provider_v1_delete_pod_profile(provider_id, profile_id, runtime_infrastructure_profile_delete_request)
+
+Delete Pod Profile
+
+Permanently delete one exact unreferenced Pod Profile.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_delete_request import RuntimeInfrastructureProfileDeleteRequest
+from azentsadminclient.models.runtime_infrastructure_profile_delete_response import RuntimeInfrastructureProfileDeleteResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    profile_id = 'profile_id_example' # str | 
+    runtime_infrastructure_profile_delete_request = azentsadminclient.RuntimeInfrastructureProfileDeleteRequest() # RuntimeInfrastructureProfileDeleteRequest | 
+
+    try:
+        # Delete Pod Profile
+        api_response = api_instance.runtime_provider_v1_delete_pod_profile(provider_id, profile_id, runtime_infrastructure_profile_delete_request)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_delete_pod_profile:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_delete_pod_profile: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **profile_id** | **str**|  | 
+ **runtime_infrastructure_profile_delete_request** | [**RuntimeInfrastructureProfileDeleteRequest**](RuntimeInfrastructureProfileDeleteRequest.md)|  | 
+
+### Return type
+
+[**RuntimeInfrastructureProfileDeleteResponse**](RuntimeInfrastructureProfileDeleteResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **runtime_provider_v1_get_auth_binding**
 > RuntimeProviderAuthenticationBindingResponse runtime_provider_v1_get_auth_binding(binding_id)
 
@@ -666,6 +839,91 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**RuntimeInfrastructureProfileResponse**](RuntimeInfrastructureProfileResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_provider_v1_get_container_profile_deletion_impact**
+> RuntimeInfrastructureProfileDeletionImpactResponse runtime_provider_v1_get_container_profile_deletion_impact(provider_id, profile_id, offset=offset, limit=limit)
+
+Get Container Profile Deletion Impact
+
+Preview current references before deleting one Container Profile.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_deletion_impact_response import RuntimeInfrastructureProfileDeletionImpactResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    profile_id = 'profile_id_example' # str | 
+    offset = 0 # int |  (optional) (default to 0)
+    limit = 50 # int |  (optional) (default to 50)
+
+    try:
+        # Get Container Profile Deletion Impact
+        api_response = api_instance.runtime_provider_v1_get_container_profile_deletion_impact(provider_id, profile_id, offset=offset, limit=limit)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_get_container_profile_deletion_impact:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_get_container_profile_deletion_impact: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **profile_id** | **str**|  | 
+ **offset** | **int**|  | [optional] [default to 0]
+ **limit** | **int**|  | [optional] [default to 50]
+
+### Return type
+
+[**RuntimeInfrastructureProfileDeletionImpactResponse**](RuntimeInfrastructureProfileDeletionImpactResponse.md)
 
 ### Authorization
 
@@ -849,6 +1107,91 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **runtime_provider_v1_get_pod_profile_deletion_impact**
+> RuntimeInfrastructureProfileDeletionImpactResponse runtime_provider_v1_get_pod_profile_deletion_impact(provider_id, profile_id, offset=offset, limit=limit)
+
+Get Pod Profile Deletion Impact
+
+Preview current references before deleting one Pod Profile.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_deletion_impact_response import RuntimeInfrastructureProfileDeletionImpactResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    profile_id = 'profile_id_example' # str | 
+    offset = 0 # int |  (optional) (default to 0)
+    limit = 50 # int |  (optional) (default to 50)
+
+    try:
+        # Get Pod Profile Deletion Impact
+        api_response = api_instance.runtime_provider_v1_get_pod_profile_deletion_impact(provider_id, profile_id, offset=offset, limit=limit)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_get_pod_profile_deletion_impact:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_get_pod_profile_deletion_impact: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **profile_id** | **str**|  | 
+ **offset** | **int**|  | [optional] [default to 0]
+ **limit** | **int**|  | [optional] [default to 50]
+
+### Return type
+
+[**RuntimeInfrastructureProfileDeletionImpactResponse**](RuntimeInfrastructureProfileDeletionImpactResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **runtime_provider_v1_get_runtime_provider**
 > RuntimeProviderResponse runtime_provider_v1_get_runtime_provider(provider_id)
 
@@ -909,6 +1252,87 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**RuntimeProviderResponse**](RuntimeProviderResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_provider_v1_get_workspace_profile_admin_detail**
+> AdminWorkspaceRuntimeProfileDetailResponse runtime_provider_v1_get_workspace_profile_admin_detail(handle, profile_id)
+
+Get Workspace Profile Admin Detail
+
+Inspect one Workspace Runtime Profile with System Admin authority.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.admin_workspace_runtime_profile_detail_response import AdminWorkspaceRuntimeProfileDetailResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    handle = 'handle_example' # str | 
+    profile_id = 'profile_id_example' # str | 
+
+    try:
+        # Get Workspace Profile Admin Detail
+        api_response = api_instance.runtime_provider_v1_get_workspace_profile_admin_detail(handle, profile_id)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_get_workspace_profile_admin_detail:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_get_workspace_profile_admin_detail: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **profile_id** | **str**|  | 
+
+### Return type
+
+[**AdminWorkspaceRuntimeProfileDetailResponse**](AdminWorkspaceRuntimeProfileDetailResponse.md)
 
 ### Authorization
 

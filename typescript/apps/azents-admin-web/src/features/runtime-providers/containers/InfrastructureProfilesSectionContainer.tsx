@@ -1,11 +1,19 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { notifications } from "@mantine/notifications";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { InfrastructureProfilesSection } from "../components/InfrastructureProfilesSection";
+import {
+  infrastructureProfileDeletionConfirmationEnabled,
+  infrastructureProfileDeletionFailureMessage,
+  nextDeletionReferenceOffset,
+  previousDeletionReferenceOffset,
+} from "../infrastructureProfileDeletion";
 import { infrastructureProfileKindForProvider } from "../runtimeProviderPresentation";
 import type { InfrastructureProfileKind } from "../runtimeProviderPresentation";
 import type {
+  RuntimeInfrastructureProfileDeletionImpactResponse,
   RuntimeInfrastructureProfileResponse,
   RuntimeInfrastructureProfileSpec,
   RuntimeProfileLifecycle,
@@ -29,6 +37,36 @@ export type InfrastructureProfileOperationState =
   | { type: "ERROR"; message: string }
   | { type: "LOADED"; operation: RuntimeRecreationOperationResponse };
 
+export type InfrastructureProfileDeletionState =
+  | { type: "CLOSED" }
+  | { type: "LOADING"; profile: RuntimeInfrastructureProfileResponse }
+  | {
+      type: "READY";
+      profile: RuntimeInfrastructureProfileResponse;
+      impact: RuntimeInfrastructureProfileDeletionImpactResponse;
+    }
+  | {
+      type: "BLOCKED";
+      profile: RuntimeInfrastructureProfileResponse;
+      impact: RuntimeInfrastructureProfileDeletionImpactResponse;
+    }
+  | {
+      type: "IMPACT_ERROR";
+      profile: RuntimeInfrastructureProfileResponse;
+      message: string;
+    }
+  | {
+      type: "DELETING";
+      profile: RuntimeInfrastructureProfileResponse;
+      impact: RuntimeInfrastructureProfileDeletionImpactResponse;
+    }
+  | {
+      type: "DELETE_ERROR";
+      profile: RuntimeInfrastructureProfileResponse;
+      impact: RuntimeInfrastructureProfileDeletionImpactResponse;
+      message: string;
+    };
+
 export interface InfrastructureProfileSubmission {
   displayName: string;
   description: string;
@@ -41,6 +79,7 @@ export interface InfrastructureProfilesSectionProps {
   state: InfrastructureProfilesState;
   editorState: InfrastructureProfileEditorState;
   operationState: InfrastructureProfileOperationState;
+  deletionState: InfrastructureProfileDeletionState;
   submitting: boolean;
   errorMessage: string | null;
   onOpenCreate: () => void;
@@ -49,6 +88,12 @@ export interface InfrastructureProfilesSectionProps {
   onSubmit: (submission: InfrastructureProfileSubmission) => void;
   onRecreate: (profile: RuntimeInfrastructureProfileResponse) => void;
   onRecreateProvider: () => void;
+  onOpenDelete: (profile: RuntimeInfrastructureProfileResponse) => void;
+  onCloseDeletion: () => void;
+  onRetryDeletionImpact: () => void;
+  onPreviousDeletionReferences: () => void;
+  onNextDeletionReferences: () => void;
+  onConfirmDeletion: () => void;
 }
 
 interface InfrastructureProfilesSectionContainerProps {
@@ -68,6 +113,14 @@ export function InfrastructureProfilesSectionContainer({
     useState<InfrastructureProfileEditorState>({ type: "CLOSED" });
   const [operationId, setOperationId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [selectedDeletionProfile, setSelectedDeletionProfile] =
+    useState<RuntimeInfrastructureProfileResponse | null>(null);
+  const [deletionError, setDeletionError] = useState<string | null>(null);
+  const [deletionOffset, setDeletionOffset] = useState(0);
+  const [deletionImpactRefreshToken, setDeletionImpactRefreshToken] =
+    useState(0);
+  const [deletionImpactRefreshPending, setDeletionImpactRefreshPending] =
+    useState(false);
 
   const profilesQuery =
     trpc.runtimeProvider.listInfrastructureProfiles.useQuery(
@@ -90,6 +143,43 @@ export function InfrastructureProfilesSectionContainer({
       },
     },
   );
+  const deletionImpactQuery =
+    trpc.runtimeProvider.getInfrastructureProfileDeletionImpact.useQuery(
+      {
+        providerId,
+        profileId: selectedDeletionProfile?.id ?? "",
+        profileKind: profileKind ?? "kubernetes_pod",
+        offset: deletionOffset,
+        limit: 50,
+      },
+      {
+        enabled: false,
+        retry: false,
+      },
+    );
+  const refetchDeletionImpact = deletionImpactQuery.refetch;
+
+  useEffect(() => {
+    if (selectedDeletionProfile === null || profileKind === null) {
+      return;
+    }
+    let active = true;
+    setDeletionImpactRefreshPending(true);
+    void refetchDeletionImpact().finally(() => {
+      if (active) {
+        setDeletionImpactRefreshPending(false);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [
+    deletionImpactRefreshToken,
+    deletionOffset,
+    profileKind,
+    refetchDeletionImpact,
+    selectedDeletionProfile,
+  ]);
 
   const state: InfrastructureProfilesState = useMemo(() => {
     if (profileKind === null) {
@@ -168,6 +258,88 @@ export function InfrastructureProfilesSectionContainer({
       },
       onError: (error) => setErrorMessage(error.message),
     });
+  const deleteMutation =
+    trpc.runtimeProvider.deleteInfrastructureProfile.useMutation({
+      onSuccess: async () => {
+        const deletedProfile = selectedDeletionProfile;
+        setSelectedDeletionProfile(null);
+        setDeletionError(null);
+        setDeletionImpactRefreshPending(false);
+        notifications.show({
+          color: "green",
+          title: "Profile deleted",
+          message:
+            deletedProfile === null
+              ? "The infrastructure Profile was permanently deleted."
+              : `${deletedProfile.display_name} was permanently deleted.`,
+        });
+        await invalidateProfiles();
+      },
+      onError: async (error) => {
+        setDeletionError(
+          infrastructureProfileDeletionFailureMessage(error.message),
+        );
+        setDeletionOffset(0);
+        setDeletionImpactRefreshPending(true);
+        setDeletionImpactRefreshToken((value) => value + 1);
+        await invalidateProfiles();
+      },
+    });
+
+  const deletionState: InfrastructureProfileDeletionState = useMemo(() => {
+    if (selectedDeletionProfile === null) {
+      return { type: "CLOSED" };
+    }
+    if (deleteMutation.isPending && deletionImpactQuery.data != null) {
+      return {
+        type: "DELETING",
+        profile: selectedDeletionProfile,
+        impact: deletionImpactQuery.data,
+      };
+    }
+    if (deletionImpactRefreshPending || deletionImpactQuery.isFetching) {
+      return { type: "LOADING", profile: selectedDeletionProfile };
+    }
+    if (deletionImpactQuery.isError) {
+      return {
+        type: "IMPACT_ERROR",
+        profile: selectedDeletionProfile,
+        message: deletionImpactQuery.error.message,
+      };
+    }
+    if (deletionError !== null && deletionImpactQuery.data != null) {
+      return {
+        type: "DELETE_ERROR",
+        profile: selectedDeletionProfile,
+        impact: deletionImpactQuery.data,
+        message: deletionError,
+      };
+    }
+    if (deletionImpactQuery.data == null) {
+      return { type: "LOADING", profile: selectedDeletionProfile };
+    }
+    if (deletionImpactQuery.data.blocking_reference_count > 0) {
+      return {
+        type: "BLOCKED",
+        profile: selectedDeletionProfile,
+        impact: deletionImpactQuery.data,
+      };
+    }
+    return {
+      type: "READY",
+      profile: selectedDeletionProfile,
+      impact: deletionImpactQuery.data,
+    };
+  }, [
+    deleteMutation.isPending,
+    deletionError,
+    deletionImpactQuery.data,
+    deletionImpactQuery.error?.message,
+    deletionImpactQuery.isError,
+    deletionImpactQuery.isFetching,
+    deletionImpactRefreshPending,
+    selectedDeletionProfile,
+  ]);
 
   const onOpenCreate = useCallback((): void => {
     setEditorState({ type: "CREATE" });
@@ -228,6 +400,86 @@ export function InfrastructureProfilesSectionContainer({
       expectedVersion: providerVersion,
     });
   }, [providerId, providerRecreationMutation, providerVersion]);
+  const onOpenDelete = useCallback(
+    (profile: RuntimeInfrastructureProfileResponse): void => {
+      setSelectedDeletionProfile(profile);
+      setDeletionError(null);
+      setDeletionOffset(0);
+      setDeletionImpactRefreshPending(true);
+      setDeletionImpactRefreshToken((value) => value + 1);
+    },
+    [],
+  );
+  const onCloseDeletion = useCallback((): void => {
+    if (!deleteMutation.isPending) {
+      setSelectedDeletionProfile(null);
+      setDeletionError(null);
+      setDeletionOffset(0);
+      setDeletionImpactRefreshPending(false);
+    }
+  }, [deleteMutation.isPending]);
+  const onRetryDeletionImpact = useCallback((): void => {
+    setDeletionError(null);
+    setDeletionImpactRefreshPending(true);
+    setDeletionImpactRefreshToken((value) => value + 1);
+  }, []);
+  const onPreviousDeletionReferences = useCallback((): void => {
+    const impact = deletionImpactQuery.data;
+    if (impact == null) {
+      return;
+    }
+    setDeletionImpactRefreshPending(true);
+    setDeletionOffset(
+      previousDeletionReferenceOffset(impact.offset, impact.limit),
+    );
+  }, [deletionImpactQuery.data]);
+  const onNextDeletionReferences = useCallback((): void => {
+    const impact = deletionImpactQuery.data;
+    if (impact == null) {
+      return;
+    }
+    setDeletionImpactRefreshPending(true);
+    setDeletionOffset(
+      nextDeletionReferenceOffset(
+        impact.offset,
+        impact.limit,
+        impact.references.length,
+        impact.blocking_reference_count,
+      ),
+    );
+  }, [deletionImpactQuery.data]);
+  const onConfirmDeletion = useCallback((): void => {
+    if (
+      selectedDeletionProfile === null ||
+      profileKind === null ||
+      deletionImpactQuery.data == null ||
+      !infrastructureProfileDeletionConfirmationEnabled({
+        refreshPending:
+          deletionImpactRefreshPending || deletionImpactQuery.isFetching,
+        impactError: deletionImpactQuery.isError,
+        blockingReferenceCount:
+          deletionImpactQuery.data.blocking_reference_count,
+      })
+    ) {
+      return;
+    }
+    setDeletionError(null);
+    deleteMutation.mutate({
+      providerId,
+      profileId: selectedDeletionProfile.id,
+      profileKind,
+      expectedVersion: deletionImpactQuery.data.version,
+    });
+  }, [
+    deleteMutation,
+    deletionImpactQuery.data,
+    deletionImpactQuery.isError,
+    deletionImpactQuery.isFetching,
+    deletionImpactRefreshPending,
+    profileKind,
+    providerId,
+    selectedDeletionProfile,
+  ]);
 
   return (
     <InfrastructureProfilesSection
@@ -235,11 +487,13 @@ export function InfrastructureProfilesSectionContainer({
       state={state}
       editorState={editorState}
       operationState={operationState}
+      deletionState={deletionState}
       submitting={
         createMutation.isPending ||
         replaceMutation.isPending ||
         recreationMutation.isPending ||
-        providerRecreationMutation.isPending
+        providerRecreationMutation.isPending ||
+        deleteMutation.isPending
       }
       errorMessage={errorMessage}
       onOpenCreate={onOpenCreate}
@@ -248,6 +502,12 @@ export function InfrastructureProfilesSectionContainer({
       onSubmit={onSubmit}
       onRecreate={onRecreate}
       onRecreateProvider={onRecreateProvider}
+      onOpenDelete={onOpenDelete}
+      onCloseDeletion={onCloseDeletion}
+      onRetryDeletionImpact={onRetryDeletionImpact}
+      onPreviousDeletionReferences={onPreviousDeletionReferences}
+      onNextDeletionReferences={onNextDeletionReferences}
+      onConfirmDeletion={onConfirmDeletion}
     />
   );
 }

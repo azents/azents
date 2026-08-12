@@ -26,8 +26,8 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-11
-spec_version: 24
+last_verified_at: 2026-08-12
+spec_version: 25
 ---
 
 # Agent Runtime Persistence
@@ -104,6 +104,14 @@ advances their versions, supersedes Profile-targeted recreation, and writes affe
 Runtimes' desired slot as higher-sequence `unconfigured/runtime_profile_required`. No fallback is
 selected. Existing applied state, Provider binding, running compute, Runner-reported Workspace
 path, and Agent Workspace storage remain until explicit replacement or terminal Runtime removal.
+
+A System-Admin exact-version infrastructure Profile hard delete is permitted only when no current
+Workspace Runtime Profile references the target. The transaction physically removes only the
+Provider-owned Profile and terminalizes target-scoped pending or running recreation; it does not
+rewrite Runtime desired or applied slots, Provider bindings, workloads, Runner-reported Workspace
+paths, or Agent Workspace storage. A running Runtime may therefore retain the deleted Profile ID
+inside its applied document as bounded historical evidence. That evidence is not a foreign key,
+does not block deletion, and cannot authorize future create, start, restart, reset, or recreation.
 
 ## Event Persistence
 
@@ -290,6 +298,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-08-12 (spec_version=25)** — Added infrastructure Profile hard deletion with current
+  Workspace-reference blocking, applied-only Runtime evidence retention, recreation
+  terminalization, and no Runtime or Agent Workspace mutation.
 - **2026-08-11 (spec_version=24)** — Replaced configuration revision history with one bounded
   desired/applied current-state row and Runtime-owned sequence high-water, added exact
   sequence/digest/generation promotion and cleanup, and documented Owner hard delete without

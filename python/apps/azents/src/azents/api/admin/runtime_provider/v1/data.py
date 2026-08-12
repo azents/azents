@@ -16,6 +16,7 @@ from azents.core.enums import (
 from azents.core.runtime_profile import (
     RuntimeInfrastructureProfileSpec,
     RuntimeProfileLifecycle,
+    WorkspaceRuntimeProfilePolicyV1,
     parse_runtime_infrastructure_profile_spec,
 )
 from azents.repos.runtime_provider.data import RuntimeProvider
@@ -26,6 +27,8 @@ from azents.repos.runtime_provider_policy.data import (
     RuntimeProviderContractRevision,
 )
 from azents.services.runtime_profile_admin.service import (
+    AdminWorkspaceRuntimeProfileDetailProjection,
+    RuntimeInfrastructureProfileDeletionImpactProjection,
     RuntimeInfrastructureProfileProjection,
 )
 from azents.services.runtime_provider_binding_admin.service import (
@@ -177,6 +180,152 @@ class RuntimeInfrastructureProfileListResponse(BaseModel):
     """Provider-scoped infrastructure Profile list."""
 
     items: list[RuntimeInfrastructureProfileResponse]
+
+
+class RuntimeInfrastructureProfileDeletionReferenceResponse(BaseModel):
+    """One current Workspace Runtime Profile reference and bounded usage."""
+
+    workspace_id: str
+    workspace_name: str
+    workspace_handle: str
+    workspace_runtime_profile_id: str
+    workspace_runtime_profile_display_name: str
+    workspace_runtime_profile_lifecycle: RuntimeProfileLifecycle
+    workspace_runtime_profile_version: int = Field(ge=1)
+    selected_agent_count: int = Field(ge=0)
+    running_runtime_count: int = Field(ge=0)
+
+
+class RuntimeInfrastructureProfileDeletionImpactResponse(BaseModel):
+    """Fresh deletion impact for one exact infrastructure Profile."""
+
+    profile_id: str
+    profile_kind: str
+    display_name: str
+    version: int = Field(ge=1)
+    blocking_reference_count: int = Field(ge=0)
+    references: list[RuntimeInfrastructureProfileDeletionReferenceResponse]
+    applied_only_running_runtime_count: int = Field(ge=0)
+    offset: int = Field(ge=0)
+    limit: int = Field(ge=1)
+
+    @classmethod
+    def convert_from(
+        cls,
+        projection: RuntimeInfrastructureProfileDeletionImpactProjection,
+    ) -> "RuntimeInfrastructureProfileDeletionImpactResponse":
+        """Convert current Profile deletion impact to an Admin response."""
+        profile = projection.profile
+        impact = projection.impact
+        return cls(
+            profile_id=profile.id,
+            profile_kind=profile.profile_kind.value,
+            display_name=profile.display_name,
+            version=profile.version,
+            blocking_reference_count=impact.blocking_reference_count,
+            references=[
+                RuntimeInfrastructureProfileDeletionReferenceResponse(
+                    workspace_id=reference.workspace_id,
+                    workspace_name=reference.workspace_name,
+                    workspace_handle=reference.workspace_handle,
+                    workspace_runtime_profile_id=(
+                        reference.workspace_runtime_profile_id
+                    ),
+                    workspace_runtime_profile_display_name=(
+                        reference.workspace_runtime_profile_display_name
+                    ),
+                    workspace_runtime_profile_lifecycle=(
+                        reference.workspace_runtime_profile_lifecycle
+                    ),
+                    workspace_runtime_profile_version=(
+                        reference.workspace_runtime_profile_version
+                    ),
+                    selected_agent_count=reference.selected_agent_count,
+                    running_runtime_count=reference.running_runtime_count,
+                )
+                for reference in impact.references
+            ],
+            applied_only_running_runtime_count=(
+                impact.applied_only_running_runtime_count
+            ),
+            offset=impact.offset,
+            limit=impact.limit,
+        )
+
+
+class RuntimeInfrastructureProfileDeleteRequest(BaseModel):
+    """Exact optimistic infrastructure Profile deletion request."""
+
+    expected_version: int = Field(ge=1)
+
+
+class RuntimeInfrastructureProfileDeleteResponse(BaseModel):
+    """Bounded outcome from one infrastructure Profile deletion."""
+
+    profile_id: str
+    superseded_recreation_operation_count: int = Field(ge=0)
+    skipped_recreation_item_count: int = Field(ge=0)
+
+
+class AdminWorkspaceRuntimeProfileDetailResponse(BaseModel):
+    """System-Admin read-only Workspace Runtime Profile detail."""
+
+    workspace_id: str
+    workspace_name: str
+    workspace_handle: str
+    profile_id: str
+    display_name: str
+    description: str
+    lifecycle: RuntimeProfileLifecycle
+    policy: WorkspaceRuntimeProfilePolicyV1
+    version: int = Field(ge=1)
+    digest: str
+    provider_id: str
+    provider_display_name: str
+    provider_kind: str
+    infrastructure_profile_id: str
+    infrastructure_profile_display_name: str
+    infrastructure_profile_kind: str
+    infrastructure_profile_lifecycle: RuntimeProfileLifecycle
+    infrastructure_profile_version: int = Field(ge=1)
+    selected_agent_count: int = Field(ge=0)
+    running_runtime_count: int = Field(ge=0)
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    @classmethod
+    def convert_from(
+        cls,
+        projection: AdminWorkspaceRuntimeProfileDetailProjection,
+    ) -> "AdminWorkspaceRuntimeProfileDetailResponse":
+        """Convert the System Admin read-only Workspace Profile projection."""
+        profile = projection.profile
+        infrastructure = projection.infrastructure_profile
+        provider = projection.provider
+        return cls(
+            workspace_id=projection.workspace_id,
+            workspace_name=projection.workspace.name,
+            workspace_handle=projection.workspace.handle,
+            profile_id=profile.id,
+            display_name=profile.display_name,
+            description=profile.description,
+            lifecycle=profile.lifecycle,
+            policy=WorkspaceRuntimeProfilePolicyV1.model_validate(profile.policy),
+            version=profile.version,
+            digest=profile.digest,
+            provider_id=provider.provider_id,
+            provider_display_name=provider.display_name,
+            provider_kind=provider.kind.value,
+            infrastructure_profile_id=infrastructure.id,
+            infrastructure_profile_display_name=infrastructure.display_name,
+            infrastructure_profile_kind=infrastructure.profile_kind.value,
+            infrastructure_profile_lifecycle=infrastructure.lifecycle,
+            infrastructure_profile_version=infrastructure.version,
+            selected_agent_count=projection.usage.selected_agent_count,
+            running_runtime_count=projection.usage.running_runtime_count,
+            created_at=profile.created_at,
+            updated_at=profile.updated_at,
+        )
 
 
 class RuntimeInfrastructureProfileCreateRequest(BaseModel):

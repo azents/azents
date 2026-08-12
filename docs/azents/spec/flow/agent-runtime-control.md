@@ -36,8 +36,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-11
-spec_version: 59
+last_verified_at: 2026-08-12
+spec_version: 60
 ---
 
 # Agent Runtime Control
@@ -257,6 +257,15 @@ evidence to the Runner through the ordinary heartbeat acknowledgement, wait for 
 state report, adopt a NetworkPolicy-only change in place, wait for explicit recreation, or do
 nothing. Independent loops must not select competing lifecycle and configuration actions for the
 same observation.
+
+Infrastructure-Profile hard deletion and Runtime recreation use one target-first lock hierarchy.
+The recreation worker resolves and share-locks the exact current target and version before claiming
+an operation item, then revalidates the operation, Runtime, configuration, target identity, and
+target version before dispatch. The delete transaction exclusively locks the target first, rechecks
+all current Workspace Runtime Profile references, and completes target-scoped pending or running
+recreation with remaining items skipped as `target_deleted` before removing the Profile. A restart
+already dispatched before the delete lock was acquired settles through ordinary generation fencing;
+deletion schedules no cancellation, compensating lifecycle command, or new Runtime work.
 
 Provider and Runner request streams use explicit claim/ack delivery. Control returns each claimed
 request with the stream cursor and consumer-group metadata needed to acknowledge the request only
@@ -611,6 +620,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-12** (spec_version 60) — Added target-first recreation locking and atomic
+  infrastructure Profile deletion terminalization so deleted authority cannot dispatch later
+  Runtime restarts while already-dispatched work remains generation-fenced.
 - **2026-08-11** (spec_version 59) — Replaced Runtime configuration revisions with bounded
   desired/applied current state, monotonic sequence/digest/generation fencing, exact promotion and
   terminal cleanup, and Owner hard-delete behavior that preserves applied running Workspace state.

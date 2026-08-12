@@ -8,6 +8,26 @@ from typing import Any, cast
 import azentsadminclient
 import azentspublicclient
 import pytest
+from azentsadminclient.api.runtime_provider_v1_api import RuntimeProviderV1Api
+from azentsadminclient.exceptions import ApiException as AdminApiException
+from azentsadminclient.models.docker_container_profile_spec_v1 import (
+    DockerContainerProfileSpecV1,
+)
+from azentsadminclient.models.docker_container_resources import (
+    DockerContainerResources,
+)
+from azentsadminclient.models.runtime_infrastructure_profile_create_request import (
+    RuntimeInfrastructureProfileCreateRequest,
+)
+from azentsadminclient.models.runtime_infrastructure_profile_delete_request import (
+    RuntimeInfrastructureProfileDeleteRequest,
+)
+from azentsadminclient.models.runtime_infrastructure_profile_deletion_impact_response import (  # noqa: E501
+    RuntimeInfrastructureProfileDeletionImpactResponse,
+)
+from azentsadminclient.models.runtime_infrastructure_profile_spec import (
+    RuntimeInfrastructureProfileSpec,
+)
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
@@ -37,8 +57,17 @@ from azentspublicclient.models.runtime_recreation_operation_status import (
 )
 from azentspublicclient.models.runtime_summary import RuntimeSummary
 from azentspublicclient.models.secrets import Secrets
+from azentspublicclient.models.workspace_runtime_profile_create_request import (
+    WorkspaceRuntimeProfileCreateRequest,
+)
 from azentspublicclient.models.workspace_runtime_profile_default_replace_request import (  # noqa: E501
     WorkspaceRuntimeProfileDefaultReplaceRequest,
+)
+from azentspublicclient.models.workspace_runtime_profile_policy_v1 import (
+    WorkspaceRuntimeProfilePolicyV1,
+)
+from azentspublicclient.models.workspace_runtime_profile_replace_request import (
+    WorkspaceRuntimeProfileReplaceRequest,
 )
 from azentspublicclient.models.workspace_runtime_profile_response import (
     WorkspaceRuntimeProfileResponse,
@@ -49,6 +78,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 from testcontainers.core.container import DockerContainer
+from testcontainers.core.network import Network
 
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
@@ -469,6 +499,269 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
         interval=1,
         message="Selected Runtime Profile did not recover with its Provider",
     )
+
+
+@pytest.mark.runtime_provider
+def test_admin_deletes_unreferenced_infrastructure_profile_without_runtime_disruption(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_runtime_provider_docker_container: DockerContainer,
+    azents_engine_worker_container: DockerContainer,
+    container_network: Network,
+) -> None:
+    """Delete applied-only infrastructure authority and retain the Runtime."""
+    del azents_runtime_provider_docker_container, azents_engine_worker_container
+    suffix = unique()
+    admin_profiles = RuntimeProviderV1Api(admin_api_client)
+    existing_profiles = admin_profiles.runtime_provider_v1_list_container_profiles(
+        provider_id=_RUNTIME_PROVIDER_ID,
+        include_disabled=True,
+    )
+    replacement_infrastructure = next(
+        profile for profile in existing_profiles.items if profile.compatible
+    )
+    display_name = f"Deletion E2E {suffix}"
+    container_spec = DockerContainerProfileSpecV1(
+        profile_kind="docker_container",
+        contract_family="docker.container-profile",
+        schema_version=1,
+        runner_resources=DockerContainerResources(
+            cpu_reservation_millicores=None,
+            cpu_limit_millicores=None,
+            memory_reservation_bytes=None,
+            memory_limit_bytes=None,
+        ),
+        network_name=container_network.name,
+    )
+    infrastructure = admin_profiles.runtime_provider_v1_create_container_profile(
+        provider_id=_RUNTIME_PROVIDER_ID,
+        runtime_infrastructure_profile_create_request=(
+            RuntimeInfrastructureProfileCreateRequest(
+                display_name=display_name,
+                description="Temporary infrastructure deletion E2E Profile.",
+                spec=RuntimeInfrastructureProfileSpec(container_spec),
+            )
+        ),
+    )
+
+    token, _, _ = authenticate_user(
+        public_api_client,
+        admin_api_client,
+        email=f"infrastructure-profile-delete-{suffix}@example.com",
+    )
+    handle = f"infrastructure-profile-delete-{suffix}"
+    headers = _headers(token)
+    WorkspaceV1Api(public_api_client).workspace_v1_create_workspace(
+        CreateWorkspaceRequest(
+            workspace_name=f"Infrastructure Profile Delete {suffix}",
+            workspace_handle=handle,
+            owner_name=f"Owner {suffix}",
+        ),
+        _headers=headers,
+    )
+    integration = LLMProviderIntegrationV1Api(
+        public_api_client
+    ).llm_provider_integration_v1_create_integration(
+        handle=handle,
+        llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+            provider=LLMProvider.OPENAI,
+            name="__testenv_model_listing:deterministic-success",
+            secrets=Secrets(ApiKeySecrets(api_key="sk-infrastructure-profile-delete")),
+        ),
+        _headers=headers,
+    )
+    model_selection = model_selection_from_first_candidate(
+        azents_public_server_url,
+        token,
+        handle,
+        integration.id,
+    )
+    profile_api = RuntimeProfileV1Api(public_api_client)
+    workspace_profile = profile_api.runtime_profile_v1_create_workspace_runtime_profile(
+        handle=handle,
+        workspace_runtime_profile_create_request=(
+            WorkspaceRuntimeProfileCreateRequest(
+                infrastructure_profile_id=infrastructure.id,
+                display_name=f"Deletion Target {suffix}",
+                description="Current reference for infrastructure deletion E2E.",
+                policy=WorkspaceRuntimeProfilePolicyV1(
+                    schema_version=1,
+                    network_restriction=None,
+                ),
+            )
+        ),
+        _headers=headers,
+    )
+    agent = AgentV1Api(public_api_client).agent_v1_create_agent(
+        handle=handle,
+        agent_create_request=AgentCreateRequest(
+            name=f"Infrastructure Delete Agent {suffix}",
+            model_selection=model_selection,
+            lightweight_model_selection=model_selection,
+            type=AgentType.PUBLIC,
+            runtime_profile_id=workspace_profile.id,
+        ),
+        _headers=headers,
+    )
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        agent_id=agent.id,
+    )
+    runtime_api = AgentRuntimeV1Api(public_api_client)
+    runtime_before = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert runtime_before.runtime is not None
+    assert runtime_before.runtime.workspace_path
+    assert runtime_before.state is not None
+    assert runtime_before.state.summary == RuntimeSummary.RUNNING
+    assert runtime_before.configuration is not None
+    assert runtime_before.configuration.applied is not None
+    assert (
+        runtime_before.configuration.applied.infrastructure_profile_id
+        == infrastructure.id
+    )
+    prior_runtime_id = runtime_before.runtime.id
+    prior_workspace_path = runtime_before.runtime.workspace_path
+    prior_applied_sequence = runtime_before.configuration.applied.sequence
+    prior_applied_digest = runtime_before.configuration.applied.digest
+
+    blocked_impact = (
+        admin_profiles.runtime_provider_v1_get_container_profile_deletion_impact(
+            provider_id=_RUNTIME_PROVIDER_ID,
+            profile_id=infrastructure.id,
+            offset=0,
+            limit=50,
+        )
+    )
+    assert blocked_impact.blocking_reference_count == 1
+    assert blocked_impact.applied_only_running_runtime_count == 0
+    assert len(blocked_impact.references) == 1
+    reference = blocked_impact.references[0]
+    assert reference.workspace_handle == handle
+    assert reference.workspace_runtime_profile_id == workspace_profile.id
+    assert reference.selected_agent_count == 1
+    assert reference.running_runtime_count == 1
+    detail = admin_profiles.runtime_provider_v1_get_workspace_profile_admin_detail(
+        handle=handle,
+        profile_id=workspace_profile.id,
+    )
+    assert detail.infrastructure_profile_id == infrastructure.id
+    assert detail.selected_agent_count == 1
+    assert detail.running_runtime_count == 1
+
+    with pytest.raises(AdminApiException) as blocked_delete:
+        admin_profiles.runtime_provider_v1_delete_container_profile(
+            provider_id=_RUNTIME_PROVIDER_ID,
+            profile_id=infrastructure.id,
+            runtime_infrastructure_profile_delete_request=(
+                RuntimeInfrastructureProfileDeleteRequest(
+                    expected_version=infrastructure.version,
+                )
+            ),
+        )
+    assert cast(Any, blocked_delete.value).status == 409
+
+    replaced_profile = profile_api.runtime_profile_v1_replace_workspace_runtime_profile(
+        profile_id=workspace_profile.id,
+        handle=handle,
+        workspace_runtime_profile_replace_request=(
+            WorkspaceRuntimeProfileReplaceRequest(
+                expected_version=workspace_profile.version,
+                infrastructure_profile_id=replacement_infrastructure.id,
+                display_name=workspace_profile.display_name,
+                description=workspace_profile.description,
+                lifecycle=workspace_profile.lifecycle,
+                policy=workspace_profile.policy,
+            )
+        ),
+        _headers=headers,
+    )
+    assert replaced_profile.infrastructure_profile_id == replacement_infrastructure.id
+
+    ready_impact: RuntimeInfrastructureProfileDeletionImpactResponse | None = None
+
+    def deletion_ready() -> bool:
+        nonlocal ready_impact
+        ready_impact = (
+            admin_profiles.runtime_provider_v1_get_container_profile_deletion_impact(
+                provider_id=_RUNTIME_PROVIDER_ID,
+                profile_id=infrastructure.id,
+                offset=0,
+                limit=50,
+            )
+        )
+        return (
+            ready_impact.blocking_reference_count == 0
+            and ready_impact.applied_only_running_runtime_count == 1
+        )
+
+    wait_until(
+        deletion_ready,
+        timeout=60,
+        interval=1,
+        message="Infrastructure Profile deletion impact did not become applied-only",
+    )
+    deletion = admin_profiles.runtime_provider_v1_delete_container_profile(
+        provider_id=_RUNTIME_PROVIDER_ID,
+        profile_id=infrastructure.id,
+        runtime_infrastructure_profile_delete_request=(
+            RuntimeInfrastructureProfileDeleteRequest(
+                expected_version=infrastructure.version,
+            )
+        ),
+    )
+    assert deletion.profile_id == infrastructure.id
+
+    runtime_after = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert runtime_after.runtime is not None
+    assert runtime_after.runtime.id == prior_runtime_id
+    assert runtime_after.runtime.workspace_path == prior_workspace_path
+    assert runtime_after.state is not None
+    assert runtime_after.state.summary == RuntimeSummary.RUNNING
+    assert runtime_after.configuration is not None
+    assert runtime_after.configuration.applied is not None
+    assert runtime_after.configuration.applied.sequence == prior_applied_sequence
+    assert runtime_after.configuration.applied.digest == prior_applied_digest
+    assert (
+        runtime_after.configuration.applied.infrastructure_profile_id
+        == infrastructure.id
+    )
+    detail_after = (
+        admin_profiles.runtime_provider_v1_get_workspace_profile_admin_detail(
+            handle=handle,
+            profile_id=workspace_profile.id,
+        )
+    )
+    assert detail_after.infrastructure_profile_id == replacement_infrastructure.id
+
+    with pytest.raises(AdminApiException) as absent_profile:
+        admin_profiles.runtime_provider_v1_get_container_profile(
+            provider_id=_RUNTIME_PROVIDER_ID,
+            profile_id=infrastructure.id,
+        )
+    assert cast(Any, absent_profile.value).status == 404
+    recreated = admin_profiles.runtime_provider_v1_create_container_profile(
+        provider_id=_RUNTIME_PROVIDER_ID,
+        runtime_infrastructure_profile_create_request=(
+            RuntimeInfrastructureProfileCreateRequest(
+                display_name=display_name,
+                description="Recreated infrastructure deletion E2E Profile.",
+                spec=RuntimeInfrastructureProfileSpec(container_spec),
+            )
+        ),
+    )
+    assert recreated.id != infrastructure.id
+    assert recreated.display_name == display_name
 
 
 @pytest.mark.web_surface

@@ -68,6 +68,20 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_provider_v1_delete_container_profile(self) -> None:
+        """Test case for runtime_provider_v1_delete_container_profile
+
+        Delete Container Profile
+        """
+        pass
+
+    def test_runtime_provider_v1_delete_pod_profile(self) -> None:
+        """Test case for runtime_provider_v1_delete_pod_profile
+
+        Delete Pod Profile
+        """
+        pass
+
     def test_runtime_provider_v1_get_auth_binding(self) -> None:
         """Test case for runtime_provider_v1_get_auth_binding
 
@@ -79,6 +93,13 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
         """Test case for runtime_provider_v1_get_container_profile
 
         Get Container Profile
+        """
+        pass
+
+    def test_runtime_provider_v1_get_container_profile_deletion_impact(self) -> None:
+        """Test case for runtime_provider_v1_get_container_profile_deletion_impact
+
+        Get Container Profile Deletion Impact
         """
         pass
 
@@ -96,10 +117,24 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_provider_v1_get_pod_profile_deletion_impact(self) -> None:
+        """Test case for runtime_provider_v1_get_pod_profile_deletion_impact
+
+        Get Pod Profile Deletion Impact
+        """
+        pass
+
     def test_runtime_provider_v1_get_runtime_provider(self) -> None:
         """Test case for runtime_provider_v1_get_runtime_provider
 
         Get Runtime Provider
+        """
+        pass
+
+    def test_runtime_provider_v1_get_workspace_profile_admin_detail(self) -> None:
+        """Test case for runtime_provider_v1_get_workspace_profile_admin_detail
+
+        Get Workspace Profile Admin Detail
         """
         pass
 

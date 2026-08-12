@@ -1234,6 +1234,71 @@
           }
         }
       },
+      "delete": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Delete Pod Profile",
+        "description": "Permanently delete one exact unreferenced Pod Profile.",
+        "operationId": "runtime_provider_v1_delete_pod_profile",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeInfrastructureProfileDeleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileDeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "put": {
         "tags": [
           "Runtime Provider v1"
@@ -1356,6 +1421,71 @@
           }
         }
       },
+      "delete": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Delete Container Profile",
+        "description": "Permanently delete one exact unreferenced Container Profile.",
+        "operationId": "runtime_provider_v1_delete_container_profile",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeInfrastructureProfileDeleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileDeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "put": {
         "tags": [
           "Runtime Provider v1"
@@ -1405,6 +1535,223 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RuntimeInfrastructureProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/deletion-impact": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Get Pod Profile Deletion Impact",
+        "description": "Preview current references before deleting one Pod Profile.",
+        "operationId": "runtime_provider_v1_get_pod_profile_deletion_impact",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileDeletionImpactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id}/deletion-impact": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Get Container Profile Deletion Impact",
+        "description": "Preview current references before deleting one Container Profile.",
+        "operationId": "runtime_provider_v1_get_container_profile_deletion_impact",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileDeletionImpactResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/workspaces/{handle}/runtime-profiles/{profile_id}": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Get Workspace Profile Admin Detail",
+        "description": "Inspect one Workspace Runtime Profile with System Admin authority.",
+        "operationId": "runtime_provider_v1_get_workspace_profile_admin_detail",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminWorkspaceRuntimeProfileDetailResponse"
                 }
               }
             }
@@ -3810,6 +4157,128 @@
   },
   "components": {
     "schemas": {
+      "AdminWorkspaceRuntimeProfileDetailResponse": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "workspace_name": {
+            "type": "string",
+            "title": "Workspace Name"
+          },
+          "workspace_handle": {
+            "type": "string",
+            "title": "Workspace Handle"
+          },
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicyV1"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "provider_display_name": {
+            "type": "string",
+            "title": "Provider Display Name"
+          },
+          "provider_kind": {
+            "type": "string",
+            "title": "Provider Kind"
+          },
+          "infrastructure_profile_id": {
+            "type": "string",
+            "title": "Infrastructure Profile Id"
+          },
+          "infrastructure_profile_display_name": {
+            "type": "string",
+            "title": "Infrastructure Profile Display Name"
+          },
+          "infrastructure_profile_kind": {
+            "type": "string",
+            "title": "Infrastructure Profile Kind"
+          },
+          "infrastructure_profile_lifecycle": {
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle"
+          },
+          "infrastructure_profile_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Infrastructure Profile Version"
+          },
+          "selected_agent_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Selected Agent Count"
+          },
+          "running_runtime_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Running Runtime Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "workspace_name",
+          "workspace_handle",
+          "profile_id",
+          "display_name",
+          "description",
+          "lifecycle",
+          "policy",
+          "version",
+          "digest",
+          "provider_id",
+          "provider_display_name",
+          "provider_kind",
+          "infrastructure_profile_id",
+          "infrastructure_profile_display_name",
+          "infrastructure_profile_kind",
+          "infrastructure_profile_lifecycle",
+          "infrastructure_profile_version",
+          "selected_agent_count",
+          "running_runtime_count",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminWorkspaceRuntimeProfileDetailResponse",
+        "description": "System-Admin read-only Workspace Runtime Profile detail."
+      },
       "ArchiveRetentionApplicationResponse": {
         "properties": {
           "id": {
@@ -5716,6 +6185,165 @@
         ],
         "title": "RuntimeInfrastructureProfileCreateRequest",
         "description": "Create one Provider-owned typed infrastructure Profile."
+      },
+      "RuntimeInfrastructureProfileDeleteRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "RuntimeInfrastructureProfileDeleteRequest",
+        "description": "Exact optimistic infrastructure Profile deletion request."
+      },
+      "RuntimeInfrastructureProfileDeleteResponse": {
+        "properties": {
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id"
+          },
+          "superseded_recreation_operation_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Superseded Recreation Operation Count"
+          },
+          "skipped_recreation_item_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Skipped Recreation Item Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_id",
+          "superseded_recreation_operation_count",
+          "skipped_recreation_item_count"
+        ],
+        "title": "RuntimeInfrastructureProfileDeleteResponse",
+        "description": "Bounded outcome from one infrastructure Profile deletion."
+      },
+      "RuntimeInfrastructureProfileDeletionImpactResponse": {
+        "properties": {
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id"
+          },
+          "profile_kind": {
+            "type": "string",
+            "title": "Profile Kind"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "blocking_reference_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Blocking Reference Count"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeInfrastructureProfileDeletionReferenceResponse"
+            },
+            "type": "array",
+            "title": "References"
+          },
+          "applied_only_running_runtime_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Applied Only Running Runtime Count"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profile_id",
+          "profile_kind",
+          "display_name",
+          "version",
+          "blocking_reference_count",
+          "references",
+          "applied_only_running_runtime_count",
+          "offset",
+          "limit"
+        ],
+        "title": "RuntimeInfrastructureProfileDeletionImpactResponse",
+        "description": "Fresh deletion impact for one exact infrastructure Profile."
+      },
+      "RuntimeInfrastructureProfileDeletionReferenceResponse": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "title": "Workspace Id"
+          },
+          "workspace_name": {
+            "type": "string",
+            "title": "Workspace Name"
+          },
+          "workspace_handle": {
+            "type": "string",
+            "title": "Workspace Handle"
+          },
+          "workspace_runtime_profile_id": {
+            "type": "string",
+            "title": "Workspace Runtime Profile Id"
+          },
+          "workspace_runtime_profile_display_name": {
+            "type": "string",
+            "title": "Workspace Runtime Profile Display Name"
+          },
+          "workspace_runtime_profile_lifecycle": {
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle"
+          },
+          "workspace_runtime_profile_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Workspace Runtime Profile Version"
+          },
+          "selected_agent_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Selected Agent Count"
+          },
+          "running_runtime_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Running Runtime Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "workspace_name",
+          "workspace_handle",
+          "workspace_runtime_profile_id",
+          "workspace_runtime_profile_display_name",
+          "workspace_runtime_profile_lifecycle",
+          "workspace_runtime_profile_version",
+          "selected_agent_count",
+          "running_runtime_count"
+        ],
+        "title": "RuntimeInfrastructureProfileDeletionReferenceResponse",
+        "description": "One current Workspace Runtime Profile reference and bounded usage."
       },
       "RuntimeInfrastructureProfileListResponse": {
         "properties": {
@@ -8101,6 +8729,33 @@
         ],
         "title": "WorkspaceResponse",
         "description": "Workspace response schema."
+      },
+      "WorkspaceRuntimeProfilePolicyV1": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          },
+          "network_restriction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeNetworkPolicyModule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schema_version",
+          "network_restriction"
+        ],
+        "title": "WorkspaceRuntimeProfilePolicyV1",
+        "description": "Workspace-owned restrictions attached to one Runtime Profile."
       },
       "WorkspaceUpdateRequest": {
         "properties": {

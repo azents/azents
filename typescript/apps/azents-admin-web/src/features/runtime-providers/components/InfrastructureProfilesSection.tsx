@@ -2,6 +2,7 @@
 
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Divider,
@@ -23,6 +24,8 @@ import {
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useEffect, useState } from "react";
+import { useConfig } from "@/config/client";
+import { getPublicRoutePath } from "@/shared/lib/auth-policy";
 import {
   baseResourceValue,
   byteUnits,
@@ -32,12 +35,14 @@ import {
   resourceUnitValue,
 } from "../resourceUnits";
 import type {
+  InfrastructureProfileDeletionState,
   InfrastructureProfilesSectionProps,
   InfrastructureProfileSubmission,
 } from "../containers/InfrastructureProfilesSectionContainer";
 import type { InfrastructureProfileKind } from "../runtimeProviderPresentation";
 import type {
   KubernetesToleration,
+  RuntimeInfrastructureProfileDeletionImpactResponse,
   RuntimeInfrastructureProfileResponse,
 } from "@azents/admin-client";
 
@@ -904,11 +909,281 @@ function InfrastructureProfileEditor({
   );
 }
 
+function DeletionImpactSummary({
+  impact,
+  onPreviousReferences,
+  onNextReferences,
+}: {
+  impact: RuntimeInfrastructureProfileDeletionImpactResponse;
+  onPreviousReferences: () => void;
+  onNextReferences: () => void;
+}): React.ReactElement {
+  const { publicBaseUrl } = useConfig();
+
+  return (
+    <Stack gap="sm">
+      {impact.applied_only_running_runtime_count > 0 ? (
+        <Alert color="yellow" title="Running Runtimes retain this Profile">
+          {impact.applied_only_running_runtime_count} currently running{" "}
+          {impact.applied_only_running_runtime_count === 1
+            ? "Runtime retains"
+            : "Runtimes retain"}{" "}
+          this Profile only in applied configuration. Deletion will not stop,
+          restart, recreate, reset, or change those Runtimes or their Workspace
+          storage.
+        </Alert>
+      ) : (
+        <Text size="sm" c="dimmed">
+          No currently running Runtime retains this Profile only in applied
+          configuration.
+        </Text>
+      )}
+
+      {impact.blocking_reference_count > 0 && (
+        <>
+          <Alert color="red" title="Deletion is blocked">
+            {impact.blocking_reference_count} current Workspace Runtime{" "}
+            {impact.blocking_reference_count === 1
+              ? "Profile references"
+              : "Profiles reference"}{" "}
+            this infrastructure Profile. Move every current reference before
+            deleting.
+          </Alert>
+          <Text size="xs" c="dimmed">
+            Showing {impact.offset + 1}–
+            {impact.offset + impact.references.length} of{" "}
+            {impact.blocking_reference_count} current references.
+          </Text>
+          <ScrollArea mah={rem(320)} type="auto">
+            <Stack gap="xs">
+              {impact.references.map((reference) => (
+                <Paper
+                  key={reference.workspace_runtime_profile_id}
+                  withBorder
+                  p="sm"
+                >
+                  <Stack gap={4}>
+                    <Group justify="space-between" align="flex-start">
+                      <Stack gap={0}>
+                        <Text fw={600} style={{ overflowWrap: "anywhere" }}>
+                          {reference.workspace_name}
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          @{reference.workspace_handle}
+                        </Text>
+                      </Stack>
+                      <Badge
+                        color={
+                          reference.workspace_runtime_profile_lifecycle ===
+                          "active"
+                            ? "green"
+                            : "gray"
+                        }
+                        variant="light"
+                      >
+                        {reference.workspace_runtime_profile_lifecycle}
+                      </Badge>
+                    </Group>
+                    <Text
+                      size="sm"
+                      fw={500}
+                      style={{ overflowWrap: "anywhere" }}
+                    >
+                      {reference.workspace_runtime_profile_display_name}
+                    </Text>
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      ff="monospace"
+                      style={{ overflowWrap: "anywhere" }}
+                    >
+                      {reference.workspace_runtime_profile_id}
+                    </Text>
+                    <Group gap="xs">
+                      <Badge variant="outline">
+                        {reference.selected_agent_count} selected{" "}
+                        {reference.selected_agent_count === 1
+                          ? "Agent"
+                          : "Agents"}
+                      </Badge>
+                      <Badge variant="outline">
+                        {reference.running_runtime_count} running{" "}
+                        {reference.running_runtime_count === 1
+                          ? "Runtime"
+                          : "Runtimes"}
+                      </Badge>
+                    </Group>
+                    <Anchor
+                      href={getPublicRoutePath(
+                        publicBaseUrl,
+                        `/workspaces/${encodeURIComponent(reference.workspace_handle)}/runtime-profiles/${encodeURIComponent(reference.workspace_runtime_profile_id)}`,
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      size="sm"
+                    >
+                      Open details in new tab
+                    </Anchor>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          </ScrollArea>
+          <Group justify="space-between">
+            <Button
+              size="xs"
+              variant="default"
+              disabled={impact.offset === 0}
+              onClick={onPreviousReferences}
+            >
+              Previous references
+            </Button>
+            <Button
+              size="xs"
+              variant="default"
+              disabled={
+                impact.offset + impact.references.length >=
+                impact.blocking_reference_count
+              }
+              onClick={onNextReferences}
+            >
+              Next references
+            </Button>
+          </Group>
+        </>
+      )}
+    </Stack>
+  );
+}
+
+function InfrastructureProfileDeletionModal({
+  state,
+  onClose,
+  onRetryImpact,
+  onPreviousReferences,
+  onNextReferences,
+  onConfirm,
+}: {
+  state: InfrastructureProfileDeletionState;
+  onClose: () => void;
+  onRetryImpact: () => void;
+  onPreviousReferences: () => void;
+  onNextReferences: () => void;
+  onConfirm: () => void;
+}): React.ReactElement | null {
+  if (state.type === "CLOSED") {
+    return null;
+  }
+  const deleting = state.type === "DELETING";
+  const impact =
+    state.type === "READY" ||
+    state.type === "BLOCKED" ||
+    state.type === "DELETING" ||
+    state.type === "DELETE_ERROR"
+      ? state.impact
+      : null;
+
+  return (
+    <Modal
+      opened
+      onClose={onClose}
+      title={`Delete ${state.profile.display_name}`}
+      size="lg"
+      closeOnClickOutside={!deleting}
+      closeOnEscape={!deleting}
+      withCloseButton={!deleting}
+    >
+      <Stack gap="md">
+        <Stack gap={2}>
+          <Text size="sm">
+            Permanently delete this{" "}
+            {state.profile.profile_kind === "kubernetes_pod"
+              ? "Pod Profile"
+              : "Container Profile"}
+            .
+          </Text>
+          <Text
+            size="xs"
+            c="dimmed"
+            ff="monospace"
+            style={{ overflowWrap: "anywhere" }}
+          >
+            {state.profile.id}
+          </Text>
+        </Stack>
+
+        {state.type === "LOADING" && (
+          <Group gap="sm">
+            <Loader size="sm" />
+            <Text size="sm">Loading current deletion impact…</Text>
+          </Group>
+        )}
+        {state.type === "IMPACT_ERROR" && (
+          <Alert color="red" title="Could not load current impact">
+            {state.message}
+          </Alert>
+        )}
+        {state.type === "DELETE_ERROR" && (
+          <Alert color="red" title="Profile was not deleted">
+            {state.message}
+          </Alert>
+        )}
+        {state.type === "READY" && (
+          <Alert color="red" title="Permanent deletion">
+            No current Workspace Runtime Profile references this Profile. This
+            action permanently removes only the infrastructure Profile and
+            cannot be undone.
+          </Alert>
+        )}
+        {state.type === "DELETING" && (
+          <Alert color="blue" title="Deleting Profile">
+            Current references are being rechecked atomically before the Profile
+            is removed.
+          </Alert>
+        )}
+        {impact !== null && (
+          <DeletionImpactSummary
+            impact={impact}
+            onPreviousReferences={onPreviousReferences}
+            onNextReferences={onNextReferences}
+          />
+        )}
+
+        <Group justify="flex-end">
+          {!deleting && (
+            <Button variant="default" onClick={onClose}>
+              Cancel
+            </Button>
+          )}
+          {(state.type === "IMPACT_ERROR" ||
+            state.type === "BLOCKED" ||
+            state.type === "DELETE_ERROR") && (
+            <Button variant="light" onClick={onRetryImpact}>
+              Refresh impact
+            </Button>
+          )}
+          {state.type === "READY" && (
+            <Button color="red" onClick={onConfirm}>
+              Delete permanently
+            </Button>
+          )}
+          {state.type === "DELETING" && (
+            <Button color="red" loading>
+              Deleting
+            </Button>
+          )}
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
 export function InfrastructureProfilesSection({
   profileKind,
   state,
   editorState,
   operationState,
+  deletionState,
   submitting,
   errorMessage,
   onOpenCreate,
@@ -917,6 +1192,12 @@ export function InfrastructureProfilesSection({
   onSubmit,
   onRecreate,
   onRecreateProvider,
+  onOpenDelete,
+  onCloseDeletion,
+  onRetryDeletionImpact,
+  onPreviousDeletionReferences,
+  onNextDeletionReferences,
+  onConfirmDeletion,
 }: InfrastructureProfilesSectionProps): React.ReactElement {
   if (profileKind === null || state.type === "IDLE") {
     return (
@@ -1027,6 +1308,15 @@ export function InfrastructureProfilesSection({
                   >
                     Recreate Runtimes
                   </Button>
+                  <Button
+                    size="xs"
+                    color="red"
+                    variant="subtle"
+                    disabled={submitting}
+                    onClick={() => onOpenDelete(profile)}
+                  >
+                    Delete
+                  </Button>
                 </Group>
               </Group>
             </Stack>
@@ -1103,6 +1393,14 @@ export function InfrastructureProfilesSection({
         onCloseEditor={onCloseEditor}
         onClose={onCloseEditor}
         onSubmit={onSubmit}
+      />
+      <InfrastructureProfileDeletionModal
+        state={deletionState}
+        onClose={onCloseDeletion}
+        onRetryImpact={onRetryDeletionImpact}
+        onPreviousReferences={onPreviousDeletionReferences}
+        onNextReferences={onNextDeletionReferences}
+        onConfirm={onConfirmDeletion}
       />
     </Stack>
   );

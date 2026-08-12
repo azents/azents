@@ -98,11 +98,16 @@ Class | Method | HTTP request | Description
 *RuntimeProviderV1Api* | [**runtime_provider_v1_create_pod_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_pod_profile) | **POST** /runtime-provider/v1/providers/{provider_id}/pod-profiles | Create Pod Profile
 *RuntimeProviderV1Api* | [**runtime_provider_v1_create_pod_profile_recreation**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_pod_profile_recreation) | **POST** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/recreation-operations | Create Pod Profile Recreation
 *RuntimeProviderV1Api* | [**runtime_provider_v1_create_provider_recreation**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_provider_recreation) | **POST** /runtime-provider/v1/providers/{provider_id}/recreation-operations | Create Provider Recreation
+*RuntimeProviderV1Api* | [**runtime_provider_v1_delete_container_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_delete_container_profile) | **DELETE** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id} | Delete Container Profile
+*RuntimeProviderV1Api* | [**runtime_provider_v1_delete_pod_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_delete_pod_profile) | **DELETE** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Delete Pod Profile
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_auth_binding) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id} | Get Auth Binding
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_container_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_container_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id} | Get Container Profile
+*RuntimeProviderV1Api* | [**runtime_provider_v1_get_container_profile_deletion_impact**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_container_profile_deletion_impact) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id}/deletion-impact | Get Container Profile Deletion Impact
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_platform_recreation**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_platform_recreation) | **GET** /runtime-provider/v1/recreation-operations/{operation_id} | Get Platform Recreation
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_pod_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Get Pod Profile
+*RuntimeProviderV1Api* | [**runtime_provider_v1_get_pod_profile_deletion_impact**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile_deletion_impact) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/deletion-impact | Get Pod Profile Deletion Impact
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_runtime_provider**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_runtime_provider) | **GET** /runtime-provider/v1/providers/{provider_id} | Get Runtime Provider
+*RuntimeProviderV1Api* | [**runtime_provider_v1_get_workspace_profile_admin_detail**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_workspace_profile_admin_detail) | **GET** /runtime-provider/v1/workspaces/{handle}/runtime-profiles/{profile_id} | Get Workspace Profile Admin Detail
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_auth_binding_audit_events**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_binding_audit_events) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id}/audit-events | List Auth Binding Audit Events
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_auth_bindings**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_bindings) | **GET** /runtime-provider/v1/providers/{provider_id}/authentication-bindings | List Auth Bindings
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_container_profiles**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_container_profiles) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles | List Container Profiles
@@ -156,6 +161,7 @@ Class | Method | HTTP request | Description
 
 ## Documentation For Models
 
+ - [AdminWorkspaceRuntimeProfileDetailResponse](azentsadminclient/docs/AdminWorkspaceRuntimeProfileDetailResponse.md)
  - [ArchiveRetentionApplicationResponse](azentsadminclient/docs/ArchiveRetentionApplicationResponse.md)
  - [ArchiveRetentionPreviewRequest](azentsadminclient/docs/ArchiveRetentionPreviewRequest.md)
  - [ArchiveRetentionPreviewResponse](azentsadminclient/docs/ArchiveRetentionPreviewResponse.md)
@@ -200,6 +206,10 @@ Class | Method | HTTP request | Description
  - [PlatformGitHubAppHealthResponse](azentsadminclient/docs/PlatformGitHubAppHealthResponse.md)
  - [PlatformGitHubAppPatchRequest](azentsadminclient/docs/PlatformGitHubAppPatchRequest.md)
  - [RuntimeInfrastructureProfileCreateRequest](azentsadminclient/docs/RuntimeInfrastructureProfileCreateRequest.md)
+ - [RuntimeInfrastructureProfileDeleteRequest](azentsadminclient/docs/RuntimeInfrastructureProfileDeleteRequest.md)
+ - [RuntimeInfrastructureProfileDeleteResponse](azentsadminclient/docs/RuntimeInfrastructureProfileDeleteResponse.md)
+ - [RuntimeInfrastructureProfileDeletionImpactResponse](azentsadminclient/docs/RuntimeInfrastructureProfileDeletionImpactResponse.md)
+ - [RuntimeInfrastructureProfileDeletionReferenceResponse](azentsadminclient/docs/RuntimeInfrastructureProfileDeletionReferenceResponse.md)
  - [RuntimeInfrastructureProfileListResponse](azentsadminclient/docs/RuntimeInfrastructureProfileListResponse.md)
  - [RuntimeInfrastructureProfileReplaceRequest](azentsadminclient/docs/RuntimeInfrastructureProfileReplaceRequest.md)
  - [RuntimeInfrastructureProfileResponse](azentsadminclient/docs/RuntimeInfrastructureProfileResponse.md)
@@ -273,6 +283,7 @@ Class | Method | HTTP request | Description
  - [WorkspaceCreateRequest](azentsadminclient/docs/WorkspaceCreateRequest.md)
  - [WorkspaceListResponse](azentsadminclient/docs/WorkspaceListResponse.md)
  - [WorkspaceResponse](azentsadminclient/docs/WorkspaceResponse.md)
+ - [WorkspaceRuntimeProfilePolicyV1](azentsadminclient/docs/WorkspaceRuntimeProfilePolicyV1.md)
  - [WorkspaceUpdateRequest](azentsadminclient/docs/WorkspaceUpdateRequest.md)
  - [WorkspaceUserCreateRequest](azentsadminclient/docs/WorkspaceUserCreateRequest.md)
  - [WorkspaceUserListResponse](azentsadminclient/docs/WorkspaceUserListResponse.md)
