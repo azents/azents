@@ -19,6 +19,7 @@ from azents.engine.events.types import Event
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.emit import Emit
 from azents.engine.run.model_transport import ModelTransportState
+from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import (
     BuiltinToolSpec,
     CheckStop,
@@ -191,6 +192,7 @@ class RunContext:
     run_id: str
     owner_generation: int
     tool_admission_barrier: ToolAdmissionBarrier
+    turn_action_bridge_boundary: TurnActionBridgeBoundary
     model_transport_state: ModelTransportState
     publish_event: PublishEventFn
     resource_authority: SessionResourceAuthority | None = None

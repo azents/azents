@@ -23,11 +23,15 @@ from azents.core.enums import (
     AgentSessionStatus,
     EventKind,
     GitWorktreePathClaimState,
+    MailboxItemKind,
+    MailboxSchedulingMode,
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
 )
 from azents.core.session_working_folder import validate_session_working_folder_path
 from azents.engine.events.action_messages import (
+    AgentCreateGitWorktreeAction,
+    AgentRemoveGitWorktreeAction,
     CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
     CreateSessionWorkingFolderAction,
@@ -52,6 +56,14 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.data import (
+    AgentCreateGitWorktreeContinuationResult,
+    AgentRemoveGitWorktreeContinuationResult,
+    MailboxItemCreate,
+    MailboxPresentationItem,
+    TurnActionContinuationMailboxPayload,
+)
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import (
     SessionGitWorktree,
@@ -93,6 +105,116 @@ from azents.services.session_workspace_project import (
 _GIT_OPERATION_TIMEOUT_SECONDS = 300
 _MAX_COLLISION_ATTEMPTS = 20
 logger = logging.getLogger(__name__)
+_AGENT_WORKTREE_BRIDGE_ACTION_TYPES = frozenset(
+    {"agent_create_git_worktree", "agent_remove_git_worktree"}
+)
+_MAX_CONTINUATION_SUMMARY_LENGTH = 1000
+
+
+def _is_agent_worktree_bridge_action(action_type: str) -> bool:
+    """Return whether terminalization requires a fresh-Run continuation."""
+    return action_type in _AGENT_WORKTREE_BRIDGE_ACTION_TYPES
+
+
+def _optional_result_string(
+    result: dict[str, JSONValue] | None,
+    key: str,
+) -> str | None:
+    """Read one optional bounded string from an action result."""
+    if result is None:
+        return None
+    value = result.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _bounded_terminal_summary(value: str | None) -> str | None:
+    """Bound one terminal explanation before exposing it to model continuation."""
+    if value is None:
+        return None
+    summary = value.strip()
+    return summary[:_MAX_CONTINUATION_SUMMARY_LENGTH] if summary else None
+
+
+def _bridge_continuation_payload(
+    projection: ActionExecutionProjection,
+    *,
+    predecessor_run_id: str,
+) -> TurnActionContinuationMailboxPayload:
+    """Build a closed bounded continuation from one terminal bridge projection."""
+    execution = projection.execution
+    match execution.status:
+        case ActionExecutionStatus.COMPLETED:
+            terminal_status = ActionExecutionStatus.COMPLETED
+        case ActionExecutionStatus.FAILED:
+            terminal_status = ActionExecutionStatus.FAILED
+        case ActionExecutionStatus.CANCELLED:
+            terminal_status = ActionExecutionStatus.CANCELLED
+        case _:
+            raise ValueError("Bridge continuation requires terminal execution status")
+    reason_code = _optional_result_string(execution.result, "reason_code")
+    presentation = MailboxPresentationItem(
+        item_key="turn_action_continuation:0",
+        presentation_kind="turn_action_continuation",
+    )
+    match execution.action_type:
+        case "agent_create_git_worktree":
+            action = AgentCreateGitWorktreeAction.model_validate(execution.action)
+            result = AgentCreateGitWorktreeContinuationResult(
+                type=action.type,
+                source_project_path=action.source_project_path,
+                generated_worktree_path=_optional_result_string(
+                    execution.result,
+                    "worktree_path",
+                ),
+                requested_starting_ref=action.starting_ref,
+                resolved_base_commit=_optional_result_string(
+                    execution.result,
+                    "base_commit",
+                ),
+                branch_name=_optional_result_string(
+                    execution.result,
+                    "branch_name",
+                ),
+            )
+            bridge_identity = action.bridge_identity
+            originating_run_id = action.originating_run_id
+        case "agent_remove_git_worktree":
+            action = AgentRemoveGitWorktreeAction.model_validate(execution.action)
+            dirty_content_discarded = (
+                execution.result is not None
+                and execution.result.get("dirty_content_discarded") is True
+            )
+            result = AgentRemoveGitWorktreeContinuationResult(
+                type=action.type,
+                worktree_path=action.worktree_path,
+                preserved_branch_name=_optional_result_string(
+                    execution.result,
+                    "branch_name",
+                ),
+                force=action.force,
+                dirty_content_discarded=dirty_content_discarded,
+                retry_guidance=_optional_result_string(
+                    execution.result,
+                    "retry_guidance",
+                ),
+            )
+            bridge_identity = action.bridge_identity
+            originating_run_id = action.originating_run_id
+        case _:
+            raise ValueError("ActionExecution is not a registered worktree bridge")
+    return TurnActionContinuationMailboxPayload(
+        type="turn_action_continuation",
+        items=[presentation],
+        bridge_identity=bridge_identity,
+        action_execution_id=execution.id,
+        originating_run_id=originating_run_id,
+        predecessor_run_id=predecessor_run_id,
+        terminal_status=terminal_status,
+        reason_code=reason_code,
+        failure_summary=_bounded_terminal_summary(execution.failure_summary),
+        cancellation_summary=_bounded_terminal_summary(execution.cancellation_summary),
+        result=result,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -224,6 +346,7 @@ class GitWorktreeActionExecutionResult:
 
     completed: bool
     context_invalidated: bool
+    complete_run: bool
 
 
 @dataclasses.dataclass
@@ -255,6 +378,7 @@ class SessionGitWorktreeService:
     action_execution_repository: Annotated[
         ActionExecutionRepository, Depends(ActionExecutionRepository)
     ]
+    mailbox_item_repository: Annotated[MailboxRepository, Depends(MailboxRepository)]
     event_transcript_repository: Annotated[
         EventTranscriptRepository, Depends(EventTranscriptRepository)
     ]
@@ -398,6 +522,7 @@ class SessionGitWorktreeService:
                     execution=execution,
                     reason=_action_cancellation_reason(exc),
                     on_history_event_appended=on_history_event_appended,
+                    predecessor_run_id=None,
                 )
             )
             raise
@@ -442,6 +567,7 @@ class SessionGitWorktreeService:
                     execution=execution,
                     reason=_action_cancellation_reason(exc),
                     on_history_event_appended=on_history_event_appended,
+                    predecessor_run_id=None,
                 )
             )
             raise
@@ -474,6 +600,7 @@ class SessionGitWorktreeService:
                     execution=execution,
                     reason=_action_cancellation_reason(exc),
                     on_history_event_appended=on_history_event_appended,
+                    predecessor_run_id=None,
                 )
             )
             raise
@@ -511,6 +638,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         async with self.session_manager() as session:
             execution = await self.action_execution_repository.mark_running(
@@ -555,6 +683,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         except SessionWorkingFolderBindingError as error:
             await self._mark_session_working_folder_action_failed(
@@ -570,6 +699,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         working_folder_path = binding.working_folder_path
         if self.runner_operations is None:
@@ -582,6 +712,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         try:
             await self.runner_operations.mkdir_file(
@@ -605,6 +736,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         except RuntimeRunnerOperationCanceledError:
             await self._mark_session_working_folder_action_failed(
@@ -616,6 +748,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         except RuntimeRunnerOperationFailedError as exc:
             await self._mark_session_working_folder_action_failed(
@@ -627,6 +760,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
 
         execution = await self._update_session_working_folder_result(
@@ -657,6 +791,7 @@ class SessionGitWorktreeService:
         return GitWorktreeActionExecutionResult(
             completed=True,
             context_invalidated=False,
+            complete_run=False,
         )
 
     async def _update_session_working_folder_result(
@@ -796,6 +931,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         try:
             binding_service = self.session_working_folder_binding_service
@@ -830,6 +966,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         if runtime.id != context_runtime_id:
             L.warning(
@@ -853,6 +990,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         if self.runner_operations is None:
             L.warning(
@@ -873,6 +1011,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
 
         await self._append_action_execution_event(
@@ -922,6 +1061,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         except RuntimeRunnerOperationFailedError as exc:
             L.warning(
@@ -951,6 +1091,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
 
         L.info(
@@ -1258,6 +1399,7 @@ class SessionGitWorktreeService:
         return GitWorktreeActionExecutionResult(
             completed=True,
             context_invalidated=False,
+            complete_run=False,
         )
 
     async def _claim_cleanup_candidate(
@@ -1513,6 +1655,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         async with self.session_manager() as session:
             execution = await self.action_execution_repository.mark_running(
@@ -1558,6 +1701,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         try:
             workspace_root = normalize_agent_workspace_root(
@@ -1578,6 +1722,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         working_folder_path = binding.working_folder_path
         try:
@@ -1609,6 +1754,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         await self._publish_action_execution_projection(
             execution=execution,
@@ -1635,6 +1781,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
 
         if allocation.status in {
@@ -1653,6 +1800,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         if allocation.status is SessionGitWorktreeStatus.READY:
             if allocation.base_commit is None:
@@ -1674,6 +1822,7 @@ class SessionGitWorktreeService:
                 return GitWorktreeActionExecutionResult(
                     completed=True,
                     context_invalidated=False,
+                    complete_run=False,
                 )
         if not await self._run_action_register_project_step(
             agent_id=agent_id,
@@ -1687,6 +1836,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         if not await self._run_action_catalog_step(
             agent_id=agent_id,
@@ -1700,6 +1850,7 @@ class SessionGitWorktreeService:
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
         await self._run_action_refresh_project_status_step(
             agent_id=agent_id,
@@ -1730,6 +1881,7 @@ class SessionGitWorktreeService:
         return GitWorktreeActionExecutionResult(
             completed=True,
             context_invalidated=True,
+            complete_run=False,
         )
 
     async def _ensure_action_worktree_allocation(
@@ -2160,6 +2312,50 @@ class SessionGitWorktreeService:
         allocation: SessionGitWorktree | None = None,
     ) -> Event:
         """Atomically append one terminal snapshot and delete its live row."""
+        return await self._commit_action_execution_terminal_handoff(
+            execution=execution,
+            status=status,
+            failure_summary=failure_summary,
+            cancellation_summary=cancellation_summary,
+            on_history_event_appended=on_history_event_appended,
+            allocation=allocation,
+            predecessor_run_id=None,
+        )
+
+    async def commit_bridge_action_execution_terminal_handoff(
+        self,
+        *,
+        execution: ActionExecution,
+        status: ActionExecutionStatus,
+        failure_summary: str | None,
+        cancellation_summary: str | None,
+        predecessor_run_id: str,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+        allocation: SessionGitWorktree | None = None,
+    ) -> Event:
+        """Atomically terminalize a registered bridge and enqueue continuation."""
+        return await self._commit_action_execution_terminal_handoff(
+            execution=execution,
+            status=status,
+            failure_summary=failure_summary,
+            cancellation_summary=cancellation_summary,
+            on_history_event_appended=on_history_event_appended,
+            allocation=allocation,
+            predecessor_run_id=predecessor_run_id,
+        )
+
+    async def _commit_action_execution_terminal_handoff(
+        self,
+        *,
+        execution: ActionExecution,
+        status: ActionExecutionStatus,
+        failure_summary: str | None,
+        cancellation_summary: str | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+        allocation: SessionGitWorktree | None,
+        predecessor_run_id: str | None,
+    ) -> Event:
+        """Commit terminal history, optional continuation, and live-state removal."""
         if status not in {
             ActionExecutionStatus.COMPLETED,
             ActionExecutionStatus.FAILED,
@@ -2167,6 +2363,7 @@ class SessionGitWorktreeService:
         }:
             raise ValueError("ActionExecution terminal status is required")
         external_id = f"action_execution_result:{execution.id}"
+        continuation_idempotency_key = f"turn_action_continuation:{execution.id}"
         terminal_at = datetime.now(UTC)
         async with self.session_manager() as session:
             projection = await self.action_execution_repository.lock_projection_by_id(
@@ -2183,6 +2380,26 @@ class SessionGitWorktreeService:
                 if existing is None:
                     raise RuntimeError("ActionExecution terminal state is missing")
                 event = existing
+                if _is_agent_worktree_bridge_action(execution.action_type):
+                    pending_continuation = (
+                        await self.mailbox_item_repository.get_by_idempotency_key(
+                            session,
+                            session_id=execution.session_id,
+                            kind=MailboxItemKind.TURN_ACTION_CONTINUATION,
+                            idempotency_key=continuation_idempotency_key,
+                        )
+                    )
+                    promoted_continuation = (
+                        await self.event_transcript_repository.get_by_external_id(
+                            session,
+                            execution.session_id,
+                            continuation_idempotency_key,
+                        )
+                    )
+                    if pending_continuation is None and promoted_continuation is None:
+                        raise RuntimeError(
+                            "Bridge terminal continuation state is missing"
+                        )
             else:
                 terminal_execution = projection.execution.model_copy(
                     update={
@@ -2236,6 +2453,36 @@ class SessionGitWorktreeService:
                         external_id=external_id,
                     ),
                 )
+                if _is_agent_worktree_bridge_action(execution.action_type):
+                    if predecessor_run_id is None:
+                        raise RuntimeError(
+                            "Bridge terminal handoff requires predecessor Run"
+                        )
+                    continuation_payload = _bridge_continuation_payload(
+                        terminal_projection,
+                        predecessor_run_id=predecessor_run_id,
+                    )
+                    await self.mailbox_item_repository.create_idempotent(
+                        session,
+                        MailboxItemCreate(
+                            session_id=execution.session_id,
+                            kind=MailboxItemKind.TURN_ACTION_CONTINUATION,
+                            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                            requested_model_target_label=None,
+                            requested_reasoning_effort=None,
+                            sender_user_id=None,
+                            order_group=None,
+                            order_sequence=0,
+                            content="",
+                            idempotency_key=continuation_idempotency_key,
+                            metadata={},
+                            action=None,
+                            attachments=[],
+                            file_parts=[],
+                            payload=continuation_payload,
+                        ),
+                        idempotency_key=continuation_idempotency_key,
+                    )
                 await self.action_execution_repository.delete_by_id(
                     session,
                     action_execution_id=execution.id,
@@ -2250,6 +2497,7 @@ class SessionGitWorktreeService:
         execution: ActionExecution,
         reason: str,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+        predecessor_run_id: str | None,
     ) -> Event:
         """Cancel one active operation without re-executing its side effect."""
         if execution.action_type == "cleanup_orphan_git_worktrees":
@@ -2268,6 +2516,23 @@ class SessionGitWorktreeService:
                     action_execution_id=execution.id,
                 )
             )
+        if _is_agent_worktree_bridge_action(execution.action_type):
+            if execution.action_type == "agent_create_git_worktree":
+                action = AgentCreateGitWorktreeAction.model_validate(execution.action)
+            else:
+                action = AgentRemoveGitWorktreeAction.model_validate(execution.action)
+            resolved_predecessor_run_id = (
+                predecessor_run_id or action.originating_run_id
+            )
+            return await self.commit_bridge_action_execution_terminal_handoff(
+                execution=execution,
+                status=ActionExecutionStatus.CANCELLED,
+                failure_summary=None,
+                cancellation_summary=reason,
+                predecessor_run_id=resolved_predecessor_run_id,
+                allocation=allocation,
+                on_history_event_appended=on_history_event_appended,
+            )
         return await self._commit_action_execution_history_event(
             execution=execution,
             status=ActionExecutionStatus.CANCELLED,
@@ -2284,6 +2549,7 @@ class SessionGitWorktreeService:
         reason: str,
         on_history_event_appended: ActionExecutionHistoryEventCallback | None,
         on_action_execution_removed: ActionExecutionRemovedCallback | None,
+        predecessor_run_id: str | None,
     ) -> list[Event]:
         """Cancel leftover live executions before a processing boundary starts."""
         async with self.session_manager() as session:
@@ -2301,6 +2567,7 @@ class SessionGitWorktreeService:
                     execution=execution,
                     reason=reason,
                     on_history_event_appended=on_history_event_appended,
+                    predecessor_run_id=predecessor_run_id,
                 )
             else:
                 event = await self._commit_action_execution_history_event(

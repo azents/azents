@@ -188,6 +188,7 @@ class SessionRunner:
                 user_messages=[],
                 context_invalidated=False,
                 complete_run=False,
+                suppress_parent_result=False,
             )
 
         return poll

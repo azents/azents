@@ -182,6 +182,8 @@ class _MailboxService:
                 claimed_count=0,
                 inserted_count=0,
                 deduped_count=0,
+                complete_run=False,
+                suppress_parent_result=False,
             )
         self.consumed = True
         return self.promoted
@@ -1635,6 +1637,8 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         )
     )
     executor.mailbox_item_service = cast(
@@ -1654,7 +1658,10 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
 
     async def process_operation_actions(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        return OperationActionProcessResult(context_invalidated=False)
+        return OperationActionProcessResult(
+            context_invalidated=False,
+            complete_run=False,
+        )
 
     monkeypatch.setattr(
         executor,

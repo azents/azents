@@ -5,7 +5,7 @@ import datetime
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
-from typing import AsyncContextManager
+from typing import AsyncContextManager, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +52,7 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.engine.run.errors import ModelCallError
+from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.repos.agent_execution.data import EventCreate
 from azents.testing.model_selection import (
@@ -152,6 +153,7 @@ class _RunRepo:
         self.model_call_started_at: datetime.datetime | None = None
         self.terminal_result_event_id: str | None = None
         self.terminal_result_message: str | None = None
+        self.parent_result_suppressed = False
         self.retry_states: list[object | None] = []
 
     async def get_by_id(
@@ -234,6 +236,18 @@ class _RunRepo:
         del session, run_id
         self.retry_states.append(retry_state)
         return object()
+
+    async def mark_parent_result_suppressed(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        finalized_at: datetime.datetime,
+    ) -> AgentRunState:
+        """Record suppression of an intermediate bridge predecessor result."""
+        del session, finalized_at
+        self.parent_result_suppressed = True
+        return await self.get_by_id(cast(AsyncSession, object()), run_id)
 
 
 class _TranscriptRepo:
@@ -856,6 +870,21 @@ class _ToolExecutor:
         self.cancelled_calls.append(call)
 
 
+class _BridgeToolExecutor(_ToolExecutor):
+    """Mark every completed test call as a registered bridge admission."""
+
+    def __init__(self, boundary: TurnActionBridgeBoundary) -> None:
+        """Share the Run-scoped boundary with the execution request."""
+        super().__init__()
+        self.boundary = boundary
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Return the ordinary result after marking durable bridge admission."""
+        result = await super().execute(call)
+        self.boundary.mark_admitted(call.call_id)
+        return result
+
+
 class _GeneratedFileToolExecutor(_ToolExecutor):
     """Return a result containing transient generated image bytes."""
 
@@ -1156,6 +1185,7 @@ async def test_text_run_completes() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1218,6 +1248,7 @@ async def test_dialect_follow_up_continues_without_tool_call() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1322,6 +1353,7 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1366,6 +1398,7 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -1425,6 +1458,7 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1458,6 +1492,7 @@ async def test_provider_output_shares_event_admission_transaction() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1497,6 +1532,7 @@ async def test_provider_output_cleans_up_after_event_admission_failure() -> None
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -1535,6 +1571,7 @@ async def test_provider_output_admits_terminal_turn_without_durable_event() -> N
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1585,6 +1622,7 @@ async def test_output_without_usage_clears_retry_state_before_publish() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1634,6 +1672,7 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1712,6 +1751,7 @@ async def test_model_usage_is_appended_as_turn_marker(
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -1792,6 +1832,7 @@ async def test_model_output_without_system_prompt_clears_session_snapshot() -> N
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1826,6 +1867,7 @@ async def test_model_input_uses_session_head_event_id() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1861,6 +1903,7 @@ async def test_closed_admission_barrier_prevents_call_and_handler_start() -> Non
         AgentRunExecutionRequest(
             owner_generation=2,
             tool_admission_barrier=_ClosedToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1897,6 +1940,7 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -1915,6 +1959,195 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
         "tool-call:run-1:call-1",
         "tool-result:run-1:call-1",
     ]
+
+
+@pytest.mark.parametrize("needs_follow_up", [True, False])
+async def test_bridge_tool_batch_forces_post_tool_poll(
+    needs_follow_up: bool,
+) -> None:
+    """A registered bridge forces polling before provider follow-up semantics."""
+    boundary = TurnActionBridgeBoundary()
+    tool_executor = _BridgeToolExecutor(boundary)
+    run_repo = _RunRepo()
+    poll_results = [
+        InputPollResult(
+            events=[],
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+        ),
+        InputPollResult(
+            events=[],
+            context_invalidated=False,
+            complete_run=True,
+            suppress_parent_result=False,
+        ),
+    ]
+    poll_calls: list[str] = []
+
+    async def poll_input_events(session_id: str) -> InputPollResult:
+        poll_calls.append(session_id)
+        return poll_results.pop(0)
+
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_OutputSequenceNormalizer(
+            [
+                NormalizedAdapterOutput(
+                    needs_follow_up=needs_follow_up,
+                    events=[_tool_call_event()],
+                    usage=_usage(),
+                )
+            ]
+        ),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=tool_executor,
+        ),
+        run_repo=run_repo,
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=boundary,
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+        poll_input_events=poll_input_events,
+    )
+
+    assert status is AgentRunStatus.COMPLETED
+    assert poll_calls == ["session-1", "session-1"]
+    assert [call.call_id for call in tool_executor.executed_calls] == ["call-1"]
+    assert run_repo.parent_result_suppressed is True
+
+
+async def test_multiple_bridge_calls_in_one_batch_force_one_post_tool_poll() -> None:
+    """Multiple registered bridge calls share one post-tool poll revision."""
+    boundary = TurnActionBridgeBoundary()
+    tool_executor = _BridgeToolExecutor(boundary)
+    poll_results = [
+        InputPollResult(
+            events=[],
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+        ),
+        InputPollResult(
+            events=[],
+            context_invalidated=False,
+            complete_run=True,
+            suppress_parent_result=False,
+        ),
+    ]
+    poll_count = 0
+
+    async def poll_input_events(session_id: str) -> InputPollResult:
+        nonlocal poll_count
+        assert session_id == "session-1"
+        poll_count += 1
+        return poll_results.pop(0)
+
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_OutputSequenceNormalizer(
+            [
+                NormalizedAdapterOutput(
+                    needs_follow_up=True,
+                    events=[
+                        _tool_call_event("call-1"),
+                        _tool_call_event("call-2"),
+                    ],
+                    usage=_usage(),
+                )
+            ]
+        ),
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=tool_executor,
+        ),
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=boundary,
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+        poll_input_events=poll_input_events,
+    )
+
+    assert status is AgentRunStatus.COMPLETED
+    assert poll_count == 2
+    assert {call.call_id for call in tool_executor.executed_calls} == {
+        "call-1",
+        "call-2",
+    }
+
+
+async def test_pre_model_bridge_recovery_suppresses_parent_result() -> None:
+    """Recovery completion before model dispatch suppresses the interim result."""
+    run_repo = _RunRepo()
+
+    async def poll_input_events(session_id: str) -> InputPollResult:
+        assert session_id == "session-1"
+        return InputPollResult(
+            events=[],
+            context_invalidated=False,
+            complete_run=True,
+            suppress_parent_result=True,
+        )
+
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_FailingModelAdapter(),
+        output_normalizer=_Normalizer([_assistant_event()]),
+        model_call_preparer=_model_call_preparer(),
+        run_repo=run_repo,
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        ),
+        poll_input_events=poll_input_events,
+    )
+
+    assert status is AgentRunStatus.COMPLETED
+    assert run_repo.terminal is AgentRunStatus.COMPLETED
+    assert run_repo.parent_result_suppressed is True
 
 
 async def test_parallel_calls_finalize_independently() -> None:
@@ -1945,6 +2178,7 @@ async def test_parallel_calls_finalize_independently() -> None:
             AgentRunExecutionRequest(
                 owner_generation=3,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -2011,6 +2245,7 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
             AgentRunExecutionRequest(
                 owner_generation=4,
                 tool_admission_barrier=barrier,
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -2065,6 +2300,7 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2117,6 +2353,7 @@ async def test_tool_run_completes_after_empty_terminal_model_turn() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2171,6 +2408,7 @@ async def test_final_tool_turn_executes_tool_then_completes() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="grok-4.5",
@@ -2230,6 +2468,7 @@ async def test_client_tool_source_snapshot_is_shared_by_durable_and_active() -> 
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2278,6 +2517,7 @@ async def test_generated_client_result_materializes_in_result_transaction() -> N
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="grok-4",
@@ -2341,6 +2581,7 @@ async def test_generated_client_result_cleans_up_after_admission_failure() -> No
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="grok-4",
@@ -2399,6 +2640,7 @@ async def test_generated_client_result_without_materializer_fails_safely(
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="grok-4",
@@ -2475,6 +2717,7 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2537,6 +2780,7 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -2574,6 +2818,7 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2618,6 +2863,7 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2659,6 +2905,7 @@ async def test_auto_compaction_does_not_publish_phase_when_threshold_is_not_met(
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2691,6 +2938,7 @@ async def test_auto_compaction_restores_preparing_phase_after_success() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2728,6 +2976,7 @@ async def test_auto_compaction_keeps_compacting_phase_after_failure() -> None:
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -2782,6 +3031,7 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2811,6 +3061,7 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
                 events=[],
                 context_invalidated=False,
                 complete_run=False,
+                suppress_parent_result=False,
             )
         async with _session_context() as session:
             event = await transcript_repo.append(
@@ -2827,6 +3078,7 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
         return InputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             events=[event],
         )
 
@@ -2856,6 +3108,7 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2897,6 +3150,7 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
             events=[],
             context_invalidated=poll_count == 2,
             complete_run=False,
+            suppress_parent_result=False,
         )
 
     execution = AgentRunExecution(
@@ -2925,6 +3179,7 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -2968,6 +3223,7 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3024,6 +3280,7 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3076,6 +3333,7 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
         AgentRunExecutionRequest(
             owner_generation=2,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3127,6 +3385,7 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
             AgentRunExecutionRequest(
                 owner_generation=2,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -3168,6 +3427,7 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3209,6 +3469,7 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3247,6 +3508,7 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -3292,6 +3554,7 @@ async def test_tool_user_stop_preserves_settled_terminal_result() -> None:
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -3343,6 +3606,7 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3401,6 +3665,7 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3436,6 +3701,7 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3481,6 +3747,7 @@ async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3528,6 +3795,7 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3565,6 +3833,7 @@ async def test_model_completion_error_propagates_for_retry() -> None:
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -3600,6 +3869,7 @@ async def test_empty_terminal_model_output_completes_run() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3645,6 +3915,7 @@ async def test_blank_terminal_assistant_message_completes_run() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3700,6 +3971,7 @@ async def test_empty_dialect_follow_up_continues_to_terminal_response() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
@@ -3741,6 +4013,7 @@ async def test_model_call_error_propagates_for_retry() -> None:
             AgentRunExecutionRequest(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
@@ -3776,6 +4049,7 @@ async def test_execution_closes_operation_scoped_adapter() -> None:
         AgentRunExecutionRequest(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",

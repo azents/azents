@@ -8,6 +8,7 @@ import pytest_asyncio
 from redis.asyncio import Redis
 
 from azents.core.enums import (
+    ActionExecutionStatus,
     AgentRunStatus,
     EventKind,
     ExternalChannelPrincipalAuthorType,
@@ -30,9 +31,11 @@ from azents.engine.events.types import (
     UserMessagePayload,
 )
 from azents.repos.mailbox.data import (
+    AgentCreateGitWorktreeContinuationResult,
     ExternalChannelMessageMailboxPayload,
     MailboxItem,
     MailboxPresentationItem,
+    TurnActionContinuationMailboxPayload,
 )
 
 from .live_events import (
@@ -40,6 +43,7 @@ from .live_events import (
     LiveEventStore,
     RedisLiveEventStore,
     active_tool_call_to_live_event,
+    mailbox_item_is_publicly_presentable,
     mailbox_item_to_live_event,
     mailbox_item_to_pending_projection,
 )
@@ -110,6 +114,61 @@ def test_external_channel_continuation_has_dedicated_live_projections() -> None:
     assert event.payload.metadata["source"] == "external_channel"
     assert projection.kind == "external_channel_continuation"
     assert projection.items[0].presentation.type == ("external_channel_continuation")
+
+
+def test_turn_action_continuation_is_hidden_from_public_live_projections() -> None:
+    """Internal bridge continuation never appears as pending user-visible input."""
+    mailbox_item = MailboxItem(
+        id="0623456789abcdef0123456789abcdef",
+        session_id="1123456789abcdef0123456789abcdef",
+        kind=MailboxItemKind.TURN_ACTION_CONTINUATION,
+        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
+        sender_user_id=None,
+        order_group="0623456789abcdef0123456789abcdef",
+        order_sequence=0,
+        content="",
+        idempotency_key="turn_action_continuation:execution-001",
+        metadata={},
+        action=None,
+        attachments=[],
+        file_parts=[],
+        payload=TurnActionContinuationMailboxPayload(
+            type="turn_action_continuation",
+            items=[
+                MailboxPresentationItem(
+                    item_key="turn_action_continuation:0",
+                    presentation_kind="turn_action_continuation",
+                )
+            ],
+            bridge_identity="bridge-001",
+            action_execution_id="execution-001",
+            originating_run_id="run-001",
+            predecessor_run_id="run-001",
+            terminal_status=ActionExecutionStatus.COMPLETED,
+            reason_code=None,
+            failure_summary=None,
+            cancellation_summary=None,
+            result=AgentCreateGitWorktreeContinuationResult(
+                type="agent_create_git_worktree",
+                source_project_path="/workspace/agent/repo",
+                generated_worktree_path="/workspace/agent/generated",
+                requested_starting_ref=None,
+                resolved_base_commit="a" * 40,
+                branch_name="agent/generated",
+            ),
+        ),
+        created_at=datetime.datetime(2026, 8, 12, tzinfo=datetime.UTC),
+    )
+
+    assert mailbox_item_is_publicly_presentable(mailbox_item) is False
+    assert mailbox_item_to_live_event(mailbox_item) is None
+    with pytest.raises(
+        ValueError,
+        match="TurnAction continuation is not publicly presentable",
+    ):
+        mailbox_item_to_pending_projection(mailbox_item)
 
 
 def test_agent_result_mailbox_item_live_event_restores_terminal_metadata() -> None:

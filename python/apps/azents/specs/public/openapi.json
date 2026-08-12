@@ -13070,6 +13070,12 @@
               },
               {
                 "$ref": "#/components/schemas/CreateSessionWorkingFolderAction"
+              },
+              {
+                "$ref": "#/components/schemas/AgentCreateGitWorktreeAction"
+              },
+              {
+                "$ref": "#/components/schemas/AgentRemoveGitWorktreeAction"
               }
             ],
             "title": "Action",
@@ -13077,6 +13083,8 @@
             "discriminator": {
               "propertyName": "type",
               "mapping": {
+                "agent_create_git_worktree": "#/components/schemas/AgentCreateGitWorktreeAction",
+                "agent_remove_git_worktree": "#/components/schemas/AgentRemoveGitWorktreeAction",
                 "cleanup_orphan_git_worktrees": "#/components/schemas/CleanupOrphanGitWorktreesAction",
                 "command": "#/components/schemas/CommandAction",
                 "create_git_worktree": "#/components/schemas/CreateGitWorktreeAction",
@@ -13303,6 +13311,87 @@
         ],
         "title": "AgentAdminResponse",
         "description": "AgentAdmin response."
+      },
+      "AgentCreateGitWorktreeAction": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "agent_create_git_worktree",
+            "title": "Type",
+            "default": "agent_create_git_worktree"
+          },
+          "bridge_identity": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Bridge Identity"
+          },
+          "originating_run_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Originating Run Id"
+          },
+          "client_tool_call_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Client Tool Call Id"
+          },
+          "session_agent_context_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Session Agent Context Id"
+          },
+          "originating_agent_session_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Originating Agent Session Id"
+          },
+          "source_project_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source Project Id"
+          },
+          "source_project_path": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source Project Path"
+          },
+          "starting_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starting Ref"
+          },
+          "branch_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bridge_identity",
+          "originating_run_id",
+          "client_tool_call_id",
+          "session_agent_context_id",
+          "originating_agent_session_id",
+          "source_project_id",
+          "source_project_path",
+          "starting_ref",
+          "branch_name"
+        ],
+        "title": "AgentCreateGitWorktreeAction",
+        "description": "Create a managed worktree from an admission-pinned Session Project."
       },
       "AgentCreateRequest": {
         "properties": {
@@ -13684,6 +13773,74 @@
         ],
         "title": "AgentProjectPresetResponse",
         "description": "Agent Project preset response."
+      },
+      "AgentRemoveGitWorktreeAction": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "agent_remove_git_worktree",
+            "title": "Type",
+            "default": "agent_remove_git_worktree"
+          },
+          "bridge_identity": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Bridge Identity"
+          },
+          "originating_run_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Originating Run Id"
+          },
+          "client_tool_call_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Client Tool Call Id"
+          },
+          "session_agent_context_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Session Agent Context Id"
+          },
+          "originating_agent_session_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Originating Agent Session Id"
+          },
+          "worktree_project_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Worktree Project Id"
+          },
+          "worktree_allocation_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Worktree Allocation Id"
+          },
+          "worktree_path": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Worktree Path"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bridge_identity",
+          "originating_run_id",
+          "client_tool_call_id",
+          "session_agent_context_id",
+          "originating_agent_session_id",
+          "worktree_project_id",
+          "worktree_allocation_id",
+          "worktree_path",
+          "force"
+        ],
+        "title": "AgentRemoveGitWorktreeAction",
+        "description": "Remove an admission-pinned managed worktree while preserving its branch."
       },
       "AgentResponse": {
         "properties": {

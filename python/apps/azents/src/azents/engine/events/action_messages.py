@@ -72,6 +72,40 @@ class CreateSessionWorkingFolderAction(BaseModel):
     type: Literal["create_session_working_folder"] = "create_session_working_folder"
 
 
+class AgentCreateGitWorktreeAction(BaseModel):
+    """Create a managed worktree from an admission-pinned Session Project."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["agent_create_git_worktree"] = "agent_create_git_worktree"
+    bridge_identity: str = Field(min_length=1)
+    originating_run_id: str = Field(min_length=1)
+    client_tool_call_id: str = Field(min_length=1)
+    session_agent_context_id: str = Field(min_length=1)
+    originating_agent_session_id: str = Field(min_length=1)
+    source_project_id: str = Field(min_length=1)
+    source_project_path: str = Field(min_length=1)
+    starting_ref: str | None
+    branch_name: str | None
+
+
+class AgentRemoveGitWorktreeAction(BaseModel):
+    """Remove an admission-pinned managed worktree while preserving its branch."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["agent_remove_git_worktree"] = "agent_remove_git_worktree"
+    bridge_identity: str = Field(min_length=1)
+    originating_run_id: str = Field(min_length=1)
+    client_tool_call_id: str = Field(min_length=1)
+    session_agent_context_id: str = Field(min_length=1)
+    originating_agent_session_id: str = Field(min_length=1)
+    worktree_project_id: str = Field(min_length=1)
+    worktree_allocation_id: str = Field(min_length=1)
+    worktree_path: str = Field(min_length=1)
+    force: bool
+
+
 ChatAction = Annotated[
     CommandAction
     | GoalAction
@@ -86,7 +120,9 @@ PersistedChatAction = Annotated[
     | SkillAction
     | CreateGitWorktreeAction
     | CleanupOrphanGitWorktreesAction
-    | CreateSessionWorkingFolderAction,
+    | CreateSessionWorkingFolderAction
+    | AgentCreateGitWorktreeAction
+    | AgentRemoveGitWorktreeAction,
     Field(discriminator="type"),
 ]
 TurnAction = Annotated[
@@ -94,7 +130,9 @@ TurnAction = Annotated[
     | SkillAction
     | CreateGitWorktreeAction
     | CleanupOrphanGitWorktreesAction
-    | CreateSessionWorkingFolderAction,
+    | CreateSessionWorkingFolderAction
+    | AgentCreateGitWorktreeAction
+    | AgentRemoveGitWorktreeAction,
     Field(discriminator="type"),
 ]
 

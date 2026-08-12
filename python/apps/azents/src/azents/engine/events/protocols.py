@@ -356,6 +356,16 @@ class RunStateRepository(Protocol):
         """Record run terminal state."""
         ...
 
+    async def mark_parent_result_suppressed(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        finalized_at: datetime.datetime,
+    ) -> AgentRunState:
+        """Suppress direct-parent delivery for an intermediate terminal Run."""
+        ...
+
     async def update_retry_state(
         self,
         session: AsyncSession,

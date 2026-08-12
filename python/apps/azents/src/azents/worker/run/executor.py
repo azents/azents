@@ -112,6 +112,7 @@ from azents.engine.run.resolve import (
     resolve_invoke_input_with_profile,
     resolve_invoke_input_with_resolved_profile,
 )
+from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import (
     SHUTDOWN_CANCEL_MESSAGE,
     USER_STOP_CANCEL_MESSAGE,
@@ -251,6 +252,7 @@ class RunInputPollResult:
     has_actionable_work: bool
     context_invalidated: bool
     complete_run: bool
+    suppress_parent_result: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -288,6 +290,7 @@ class OperationActionProcessResult:
     """Result of processing promoted operation actions."""
 
     context_invalidated: bool
+    complete_run: bool
 
 
 def _operation_cancellation_reason(exc: asyncio.CancelledError) -> str:
@@ -407,6 +410,8 @@ class RunExecutor:
         session_id: str,
         *,
         reason: str,
+        owner_generation: int,
+        predecessor_run_id: str | None,
     ) -> None:
         """Cancel live operations left by a processing boundary."""
 
@@ -440,11 +445,18 @@ class RunExecutor:
                     },
                 )
 
+        if predecessor_run_id is None:
+            active_run = await self.session_lifecycle.get_active_agent_run(
+                session_id,
+                owner_generation=owner_generation,
+            )
+            predecessor_run_id = active_run.id if active_run is not None else None
         await self.session_git_worktree_service.cancel_live_action_executions(
             session_id=session_id,
             reason=reason,
             on_history_event_appended=publish_history_event,
             on_action_execution_removed=publish_removal,
+            predecessor_run_id=predecessor_run_id,
         )
 
     async def finalize_unhandled_active_run(
@@ -660,6 +672,8 @@ class RunExecutor:
                 self._cancel_leftover_action_executions(
                     snapshot.session_id,
                     reason=_operation_cancellation_reason(exc),
+                    owner_generation=snapshot.owner_generation,
+                    predecessor_run_id=None,
                 )
             )
             raise
@@ -691,6 +705,8 @@ class RunExecutor:
         await self._cancel_leftover_action_executions(
             snapshot.session_id,
             reason="Operation cancelled during Session ownership handover.",
+            owner_generation=owner_generation,
+            predecessor_run_id=snapshot.recoverable_run_id,
         )
         command_handler: CommandHandler | None = None
         command = (
@@ -877,7 +893,15 @@ class RunExecutor:
                     source=InferenceProfileSource.EXPLICIT_INPUT,
                 )
             if initial_input.complete_run:
-                if agent_run.status is AgentRunStatus.PENDING:
+                if initial_input.suppress_parent_result:
+                    terminal_run_status = (
+                        await self.session_lifecycle.complete_bridge_predecessor_run(
+                            snapshot.session_id,
+                            owner_generation=owner_generation,
+                            run_id=run_id,
+                        )
+                    )
+                elif agent_run.status is AgentRunStatus.PENDING:
                     await self.session_lifecycle.cancel_pending_agent_run(
                         snapshot.session_id,
                         owner_generation=owner_generation,
@@ -1137,10 +1161,12 @@ class RunExecutor:
             if isinstance(event, SubagentTreeChanged):
                 await dispatch_tree_change_to_tree(event)
 
+        turn_action_bridge_boundary = TurnActionBridgeBoundary()
         run_context = RunContext(
             run_id=run_id,
             owner_generation=owner_generation,
             tool_admission_barrier=tool_admission_barrier,
+            turn_action_bridge_boundary=turn_action_bridge_boundary,
             model_transport_state=model_transport_state,
             publish_event=publish_event,
             resource_authority=SessionResourceAuthority(
@@ -2313,6 +2339,7 @@ class RunExecutor:
                 user_messages=result.user_messages,
                 context_invalidated=result.context_invalidated,
                 complete_run=result.complete_run,
+                suppress_parent_result=result.suppress_parent_result,
             )
 
         return poll
@@ -2339,6 +2366,8 @@ class RunExecutor:
         promoted_event_ids: list[str] = []
         selected_profile = required_inference_profile
         context_invalidated = False
+        complete_run = False
+        suppress_parent_result = False
         turn_eligible = initial_turn_eligible
         preparation_failed = False
         first_promotion = True
@@ -2387,6 +2416,10 @@ class RunExecutor:
                 promoted.changed_session_agent_ids,
                 dispatch_event=dispatch_event,
             )
+            if promoted.complete_run:
+                complete_run = True
+                suppress_parent_result = promoted.suppress_parent_result
+                break
             if not promoted.deleted_buffer_ids:
                 break
             if promoted.requested_inference_profile is not None:
@@ -2409,31 +2442,45 @@ class RunExecutor:
                     operation_action=promoted.operation_action,
                 )
                 if process_actions
-                else OperationActionProcessResult(context_invalidated=False)
+                else OperationActionProcessResult(
+                    context_invalidated=False,
+                    complete_run=False,
+                )
             )
             context_invalidated = (
                 context_invalidated
                 or action_result.context_invalidated
                 or (profile_changed and promoted.turn_effect is not TurnEffect.FAILED)
             )
-            if context_invalidated:
+            complete_run = complete_run or action_result.complete_run
+            if context_invalidated or complete_run:
                 break
 
         queued_result = (
             await poll_fn()
-            if poll_fn is not None and not context_invalidated
+            if poll_fn is not None and not context_invalidated and not complete_run
             else PollMessagesResult(
                 user_messages=[],
                 context_invalidated=False,
                 complete_run=False,
+                suppress_parent_result=False,
             )
         )
         user_messages.extend(queued_result.user_messages)
         context_invalidated = context_invalidated or queued_result.context_invalidated
-        has_actionable_work = turn_eligible and (
-            bool(user_messages) or await self._has_actionable_model_input(session_id)
+        complete_run = complete_run or queued_result.complete_run
+        suppress_parent_result = (
+            suppress_parent_result or queued_result.suppress_parent_result
         )
-        complete_run = (
+        has_actionable_work = (
+            not complete_run
+            and turn_eligible
+            and (
+                bool(user_messages)
+                or await self._has_actionable_model_input(session_id)
+            )
+        )
+        complete_run = complete_run or (
             preparation_failed and not turn_eligible and not context_invalidated
         )
         return RunInputPollResult(
@@ -2443,6 +2490,7 @@ class RunExecutor:
             has_actionable_work=has_actionable_work,
             context_invalidated=context_invalidated,
             complete_run=complete_run,
+            suppress_parent_result=suppress_parent_result,
         )
 
     async def _process_operation_actions(
@@ -2456,6 +2504,7 @@ class RunExecutor:
     ) -> OperationActionProcessResult:
         """Execute atomically claimed operation TurnActions before model dispatch."""
         context_invalidated = False
+        complete_run = False
         processed_mailbox_item_ids: set[str] = set()
         if operation_action is not None:
             if operation_action.execution is None:
@@ -2470,9 +2519,13 @@ class RunExecutor:
             )
             processed_mailbox_item_ids.add(operation_action.buffer.id)
             context_invalidated = result.context_invalidated
+            complete_run = result.complete_run
 
-        if context_invalidated:
-            return OperationActionProcessResult(context_invalidated=True)
+        if context_invalidated or complete_run:
+            return OperationActionProcessResult(
+                context_invalidated=context_invalidated,
+                complete_run=complete_run,
+            )
 
         async with self.session_manager() as session:
             list_projections = (
@@ -2522,10 +2575,12 @@ class RunExecutor:
                 case _:
                     assert_never(action)  # ty: ignore[type-assertion-failure] — persisted action validation is broader than the operation-action execution queue.
             context_invalidated = context_invalidated or result.context_invalidated
-            if context_invalidated:
+            complete_run = complete_run or result.complete_run
+            if context_invalidated or complete_run:
                 break
         return OperationActionProcessResult(
             context_invalidated=context_invalidated,
+            complete_run=complete_run,
         )
 
     async def _process_operation_action(
@@ -2591,10 +2646,12 @@ class RunExecutor:
                 execution=execution,
                 reason="Operation cancelled during Session ownership handover.",
                 on_history_event_appended=publish_history_event,
+                predecessor_run_id=None,
             )
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
 
         async def admit_operation() -> None:
@@ -2606,10 +2663,12 @@ class RunExecutor:
                 execution=execution,
                 reason="Operation cancelled before worker shutdown.",
                 on_history_event_appended=publish_history_event,
+                predecessor_run_id=None,
             )
             return GitWorktreeActionExecutionResult(
                 completed=True,
                 context_invalidated=False,
+                complete_run=False,
             )
 
         match action:

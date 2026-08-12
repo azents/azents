@@ -106,6 +106,7 @@ from azents.engine.run.contracts import RunContext, RunRequest, ToolkitBinding
 from azents.engine.run.emit import Emit
 from azents.engine.run.errors import CompactionFailedError, ModelCallError
 from azents.engine.run.model_transport import InMemoryModelTransportState
+from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import (
     USER_STOP_CANCEL_MESSAGE,
     BuiltinToolSpec,
@@ -962,6 +963,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
@@ -1203,6 +1205,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
@@ -1447,6 +1450,7 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
@@ -1667,6 +1671,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
         RunContext(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
             run_id="0" * 32,
             publish_event=_noop_publish,
@@ -1716,6 +1721,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
@@ -1767,6 +1773,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
         RunContext(
             owner_generation=1,
             tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
             model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
             run_id="0" * 32,
             publish_event=_noop_publish,
@@ -1820,6 +1827,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
@@ -1873,6 +1881,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
@@ -1938,6 +1947,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
@@ -2014,6 +2024,7 @@ async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
@@ -2088,6 +2099,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
             RunContext(
                 owner_generation=1,
                 tool_admission_barrier=_OpenToolAdmissionBarrier(),
+                turn_action_bridge_boundary=TurnActionBridgeBoundary(),
                 model_transport_state=InMemoryModelTransportState(
                     websocket_enabled=False
                 ),
@@ -2573,6 +2585,7 @@ def _run_context() -> RunContext:
     return RunContext(
         owner_generation=1,
         tool_admission_barrier=_OpenToolAdmissionBarrier(),
+        turn_action_bridge_boundary=TurnActionBridgeBoundary(),
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
         run_id="0" * 32,
         publish_event=_noop_publish,
