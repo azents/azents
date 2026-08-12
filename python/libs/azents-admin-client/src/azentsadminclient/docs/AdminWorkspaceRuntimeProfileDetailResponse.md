@@ -13,7 +13,9 @@ Name | Type | Description | Notes
 **display_name** | **str** |  | 
 **description** | **str** |  | 
 **lifecycle** | [**RuntimeProfileLifecycle**](RuntimeProfileLifecycle.md) |  | 
-**policy** | [**WorkspaceRuntimeProfilePolicyV1**](WorkspaceRuntimeProfilePolicyV1.md) |  | 
+**policy** | [**WorkspaceRuntimeProfilePolicy**](WorkspaceRuntimeProfilePolicy.md) |  | 
+**infrastructure_network** | [**RuntimeNetworkProjection**](RuntimeNetworkProjection.md) |  | 
+**effective_network** | [**RuntimeNetworkProjection**](RuntimeNetworkProjection.md) |  | 
 **version** | **int** |  | 
 **digest** | **str** |  | 
 **provider_id** | **str** |  | 

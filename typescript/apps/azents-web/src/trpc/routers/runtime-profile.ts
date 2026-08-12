@@ -14,10 +14,140 @@ import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
 const lifecycleSchema = z.enum(["active", "disabled"]);
-const networkPolicySchema = z.object({
-  allowedCidrs: z.array(z.string().min(1)),
-  deniedCidrs: z.array(z.string().min(1)),
-});
+const legacyNetworkPolicySchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    networkRestriction: z
+      .object({
+        allowedCidrs: z.array(z.string().min(1)),
+        deniedCidrs: z.array(z.string().min(1)),
+      })
+      .nullable(),
+  })
+  .strict();
+const proxyDomainPolicySchema = z.union([
+  z
+    .object({
+      mode: z.literal("unrestricted"),
+      allowedDomains: z.array(z.string().min(1)).length(0),
+      deniedDomains: z.array(z.string().min(1)),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("allowlist"),
+      allowedDomains: z.array(z.string().min(1)),
+      deniedDomains: z.array(z.string().min(1)),
+    })
+    .strict(),
+]);
+const hierarchicalNetworkPolicySchema = z
+  .object({
+    schemaVersion: z.literal(2),
+    networkRestriction: z.union([
+      z.object({ mode: z.literal("inherit") }).strict(),
+      z
+        .object({
+          mode: z.literal("direct"),
+          allowedCidrs: z.array(z.string().min(1)),
+          deniedCidrs: z.array(z.string().min(1)),
+        })
+        .strict(),
+      z
+        .object({
+          mode: z.literal("proxy_required"),
+          allowedCidrs: z.array(z.string().min(1)),
+          deniedCidrs: z.array(z.string().min(1)),
+          domainPolicy: proxyDomainPolicySchema,
+        })
+        .strict(),
+      z.object({ mode: z.literal("no_network") }).strict(),
+    ]),
+  })
+  .strict();
+const workspacePolicySchema = z.union([
+  legacyNetworkPolicySchema,
+  hierarchicalNetworkPolicySchema,
+]);
+
+function workspacePolicyBody(policy: z.infer<typeof workspacePolicySchema>):
+  | {
+      schema_version: 1;
+      network_restriction: {
+        allowed_cidrs: string[];
+        denied_cidrs: string[];
+      } | null;
+    }
+  | {
+      schema_version: 2;
+      network_restriction:
+        | { mode: "inherit" }
+        | {
+            mode: "direct";
+            allowed_cidrs: string[];
+            denied_cidrs: string[];
+          }
+        | {
+            mode: "proxy_required";
+            allowed_cidrs: string[];
+            denied_cidrs: string[];
+            domain_policy:
+              | {
+                  mode: "unrestricted";
+                  allowed_domains: string[];
+                  denied_domains: string[];
+                }
+              | {
+                  mode: "allowlist";
+                  allowed_domains: string[];
+                  denied_domains: string[];
+                };
+          }
+        | { mode: "no_network" };
+    } {
+  if (policy.schemaVersion === 1) {
+    return {
+      schema_version: 1,
+      network_restriction:
+        policy.networkRestriction === null
+          ? null
+          : {
+              allowed_cidrs: policy.networkRestriction.allowedCidrs,
+              denied_cidrs: policy.networkRestriction.deniedCidrs,
+            },
+    };
+  }
+  const restriction = policy.networkRestriction;
+  if (restriction.mode === "inherit" || restriction.mode === "no_network") {
+    return {
+      schema_version: 2,
+      network_restriction: { mode: restriction.mode },
+    };
+  }
+  if (restriction.mode === "direct") {
+    return {
+      schema_version: 2,
+      network_restriction: {
+        mode: "direct",
+        allowed_cidrs: restriction.allowedCidrs,
+        denied_cidrs: restriction.deniedCidrs,
+      },
+    };
+  }
+  return {
+    schema_version: 2,
+    network_restriction: {
+      mode: "proxy_required",
+      allowed_cidrs: restriction.allowedCidrs,
+      denied_cidrs: restriction.deniedCidrs,
+      domain_policy: {
+        mode: restriction.domainPolicy.mode,
+        allowed_domains: restriction.domainPolicy.allowedDomains,
+        denied_domains: restriction.domainPolicy.deniedDomains,
+      },
+    },
+  };
+}
 
 export const runtimeProfileRouter = router({
   list: publicProcedure
@@ -90,7 +220,7 @@ export const runtimeProfileRouter = router({
         displayName: z.string().min(1).max(120),
         description: z.string().max(1000),
         lifecycle: lifecycleSchema,
-        networkPolicy: networkPolicySchema.nullable(),
+        policy: workspacePolicySchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -103,16 +233,7 @@ export const runtimeProfileRouter = router({
             display_name: input.displayName,
             description: input.description,
             lifecycle: input.lifecycle,
-            policy: {
-              schema_version: 1,
-              network_restriction:
-                input.networkPolicy === null
-                  ? null
-                  : {
-                      allowed_cidrs: input.networkPolicy.allowedCidrs,
-                      denied_cidrs: input.networkPolicy.deniedCidrs,
-                    },
-            },
+            policy: workspacePolicyBody(input.policy),
           },
           throwOnError: true,
         });
@@ -137,7 +258,7 @@ export const runtimeProfileRouter = router({
         displayName: z.string().min(1).max(120),
         description: z.string().max(1000),
         lifecycle: lifecycleSchema,
-        networkPolicy: networkPolicySchema.nullable(),
+        policy: workspacePolicySchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -154,16 +275,7 @@ export const runtimeProfileRouter = router({
             display_name: input.displayName,
             description: input.description,
             lifecycle: input.lifecycle,
-            policy: {
-              schema_version: 1,
-              network_restriction:
-                input.networkPolicy === null
-                  ? null
-                  : {
-                      allowed_cidrs: input.networkPolicy.allowedCidrs,
-                      denied_cidrs: input.networkPolicy.deniedCidrs,
-                    },
-            },
+            policy: workspacePolicyBody(input.policy),
           },
           throwOnError: true,
         });

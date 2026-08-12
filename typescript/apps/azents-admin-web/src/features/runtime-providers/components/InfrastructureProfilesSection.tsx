@@ -50,15 +50,19 @@ interface InfrastructureProfileFormValues {
   displayName: string;
   description: string;
   lifecycle: "active" | "disabled";
-  schemaVersion: 1 | 2;
+  schemaVersion: 1 | 2 | 3;
   runnerCpuRequest: number | null;
   runnerCpuLimit: number | null;
   runnerMemoryRequest: number | null;
   runnerMemoryLimit: number | null;
   storageClassName: string;
   storageRequestBytes: number;
+  networkMode: "direct" | "proxy_required" | "no_network";
   allowedCidrs: string;
   deniedCidrs: string;
+  proxyDomainMode: "unrestricted" | "allowlist";
+  allowedDomains: string;
+  deniedDomains: string;
   serviceAccountName: string;
   nodeSelector: string;
   tolerations: string;
@@ -129,20 +133,26 @@ function statusLabel(status: string): string {
     .join(" ");
 }
 
-function blankValues(): InfrastructureProfileFormValues {
+function blankValues(
+  kind: InfrastructureProfileKind,
+): InfrastructureProfileFormValues {
   return {
     displayName: "",
     description: "",
     lifecycle: "active",
-    schemaVersion: 1,
+    schemaVersion: kind === "kubernetes_pod" ? 3 : 1,
     runnerCpuRequest: null,
     runnerCpuLimit: null,
     runnerMemoryRequest: null,
     runnerMemoryLimit: null,
     storageClassName: "standard",
     storageRequestBytes: 10 * gibibyte,
+    networkMode: "direct",
     allowedCidrs: "",
     deniedCidrs: "",
+    proxyDomainMode: "unrestricted",
+    allowedDomains: "",
+    deniedDomains: "",
     serviceAccountName: "",
     nodeSelector: "",
     tolerations: "",
@@ -271,12 +281,20 @@ function tolerationsToText(tolerations?: KubernetesToleration[]): string {
 function valuesFromProfile(
   profile: RuntimeInfrastructureProfileResponse,
 ): InfrastructureProfileFormValues {
-  const base = blankValues();
   const spec = profile.spec;
   if (spec === null) {
     throw new Error("The infrastructure Profile document is unavailable.");
   }
+  const base = blankValues(spec.profile_kind);
   if (spec.profile_kind === "kubernetes_pod") {
+    const networkAccess =
+      spec.schema_version === 3
+        ? spec.network_access
+        : {
+            mode: "direct" as const,
+            allowed_cidrs: spec.network_policy.allowed_cidrs ?? [],
+            denied_cidrs: spec.network_policy.denied_cidrs ?? [],
+          };
     return {
       ...base,
       displayName: profile.display_name,
@@ -289,8 +307,27 @@ function valuesFromProfile(
       runnerMemoryLimit: spec.runner_resources.memory_limit_bytes,
       storageClassName: spec.workspace_volume.storage_class_name,
       storageRequestBytes: spec.workspace_volume.storage_request_bytes,
-      allowedCidrs: (spec.network_policy.allowed_cidrs ?? []).join("\n"),
-      deniedCidrs: (spec.network_policy.denied_cidrs ?? []).join("\n"),
+      networkMode: networkAccess.mode,
+      allowedCidrs:
+        networkAccess.mode === "no_network"
+          ? ""
+          : networkAccess.allowed_cidrs.join("\n"),
+      deniedCidrs:
+        networkAccess.mode === "no_network"
+          ? ""
+          : networkAccess.denied_cidrs.join("\n"),
+      proxyDomainMode:
+        networkAccess.mode === "proxy_required"
+          ? networkAccess.domain_policy.mode
+          : "unrestricted",
+      allowedDomains:
+        networkAccess.mode === "proxy_required"
+          ? networkAccess.domain_policy.allowed_domains.join("\n")
+          : "",
+      deniedDomains:
+        networkAccess.mode === "proxy_required"
+          ? networkAccess.domain_policy.denied_domains.join("\n")
+          : "",
       serviceAccountName: spec.service_account_name ?? "",
       nodeSelector: nodeSelectorToText(spec.scheduling.node_selector),
       tolerations: tolerationsToText(spec.scheduling.tolerations),
@@ -337,9 +374,11 @@ function buildSpec(
       storage_class_name: values.storageClassName,
       storage_request_bytes: values.storageRequestBytes,
     };
+    const allowedCidrs = lines(values.allowedCidrs);
+    const deniedCidrs = lines(values.deniedCidrs);
     const networkPolicy = {
-      allowed_cidrs: lines(values.allowedCidrs),
-      denied_cidrs: lines(values.deniedCidrs),
+      allowed_cidrs: allowedCidrs,
+      denied_cidrs: deniedCidrs,
     };
     const scheduling = {
       node_selector: nodeSelectorFromText(values.nodeSelector),
@@ -357,6 +396,47 @@ function buildSpec(
           shared_temporary_storage_bytes: values.sharedTemporaryStorageBytes,
         }
       : null;
+    if (values.schemaVersion === 3) {
+      const networkAccess =
+        values.networkMode === "no_network"
+          ? {
+              mode: "no_network" as const,
+            }
+          : values.networkMode === "proxy_required"
+            ? {
+                mode: "proxy_required" as const,
+                allowed_cidrs: allowedCidrs,
+                denied_cidrs: deniedCidrs,
+                domain_policy:
+                  values.proxyDomainMode === "allowlist"
+                    ? {
+                        mode: "allowlist" as const,
+                        allowed_domains: lines(values.allowedDomains),
+                        denied_domains: lines(values.deniedDomains),
+                      }
+                    : {
+                        mode: "unrestricted" as const,
+                        allowed_domains: [],
+                        denied_domains: lines(values.deniedDomains),
+                      },
+              }
+            : {
+                mode: "direct" as const,
+                allowed_cidrs: allowedCidrs,
+                denied_cidrs: deniedCidrs,
+              };
+      return {
+        profile_kind: "kubernetes_pod",
+        contract_family: "kubernetes.pod-profile",
+        schema_version: 3,
+        runner_resources: runnerResources,
+        workspace_volume: workspaceVolume,
+        network_access: networkAccess,
+        service_account_name: values.serviceAccountName.trim() || null,
+        scheduling,
+        dind,
+      };
+    }
     if (values.schemaVersion === 2) {
       return {
         profile_kind: "kubernetes_pod",
@@ -614,7 +694,7 @@ function InfrastructureProfileEditor({
   const labels = profileLabels(kind);
   const form = useForm<InfrastructureProfileFormValues>({
     mode: "controlled",
-    initialValues: blankValues(),
+    initialValues: blankValues(kind),
     validate: {
       displayName: (value) => (value.trim() ? null : "Name is required."),
       storageClassName: (value) =>
@@ -632,14 +712,14 @@ function InfrastructureProfileEditor({
     },
   });
   const [units, setUnits] = useState<InfrastructureProfileFormUnits>(() =>
-    resourceUnitsForValues(blankValues()),
+    resourceUnitsForValues(blankValues(kind)),
   );
 
   useEffect(() => {
     const nextValues =
       editorState.type === "EDIT"
         ? valuesFromProfile(editorState.profile)
-        : blankValues();
+        : blankValues(kind);
     form.setValues(nextValues);
     setUnits(resourceUnitsForValues(nextValues));
     form.resetDirty();
@@ -737,20 +817,99 @@ function InfrastructureProfileEditor({
                 />
               </SimpleGrid>
               <Divider label="Network and identity" />
-              <Textarea
-                label="Allowed CIDRs"
-                description="One CIDR per line."
-                minRows={2}
-                key={form.key("allowedCidrs")}
-                {...form.getInputProps("allowedCidrs")}
-              />
-              <Textarea
-                label="Denied CIDRs"
-                description="One CIDR per line."
-                minRows={2}
-                key={form.key("deniedCidrs")}
-                {...form.getInputProps("deniedCidrs")}
-              />
+              {form.values.schemaVersion === 3 && (
+                <>
+                  <Select
+                    label="Maximum network authority"
+                    description="Workspaces may preserve or narrow this authority. The server computes the effective policy."
+                    data={[
+                      {
+                        value: "direct",
+                        label: "Direct network",
+                      },
+                      {
+                        value: "proxy_required",
+                        label: "Inspected HTTP proxy required",
+                      },
+                      {
+                        value: "no_network",
+                        label: "No external network",
+                      },
+                    ]}
+                    allowDeselect={false}
+                    key={form.key("networkMode")}
+                    {...form.getInputProps("networkMode")}
+                  />
+                  {form.values.networkMode === "proxy_required" && (
+                    <Alert color="blue" title="Proxy limitations">
+                      External HTTP and HTTPS traffic must use the managed
+                      proxy. HTTPS connections are inspected using Runtime trust
+                      configuration. Other external protocols are unavailable.
+                    </Alert>
+                  )}
+                  {form.values.networkMode === "no_network" && (
+                    <Alert color="gray" title="Network disabled">
+                      The Runtime receives no customer or external network
+                      authority.
+                    </Alert>
+                  )}
+                </>
+              )}
+              {form.values.networkMode !== "no_network" && (
+                <>
+                  <Textarea
+                    label="Allowed CIDRs"
+                    description="One CIDR per line."
+                    minRows={2}
+                    key={form.key("allowedCidrs")}
+                    {...form.getInputProps("allowedCidrs")}
+                  />
+                  <Textarea
+                    label="Denied CIDRs"
+                    description="One CIDR per line. Denials take precedence."
+                    minRows={2}
+                    key={form.key("deniedCidrs")}
+                    {...form.getInputProps("deniedCidrs")}
+                  />
+                </>
+              )}
+              {form.values.schemaVersion === 3 &&
+                form.values.networkMode === "proxy_required" && (
+                  <>
+                    <Select
+                      label="Proxy domain authority"
+                      data={[
+                        {
+                          value: "unrestricted",
+                          label: "All domains except explicit denials",
+                        },
+                        {
+                          value: "allowlist",
+                          label: "Only explicitly allowed domains",
+                        },
+                      ]}
+                      allowDeselect={false}
+                      key={form.key("proxyDomainMode")}
+                      {...form.getInputProps("proxyDomainMode")}
+                    />
+                    {form.values.proxyDomainMode === "allowlist" && (
+                      <Textarea
+                        label="Allowed domains"
+                        description="One exact hostname or leading-label wildcard per line, such as api.example.com or *.example.com."
+                        minRows={2}
+                        key={form.key("allowedDomains")}
+                        {...form.getInputProps("allowedDomains")}
+                      />
+                    )}
+                    <Textarea
+                      label="Denied domains"
+                      description="One exact hostname or leading-label wildcard per line. Denials take precedence."
+                      minRows={2}
+                      key={form.key("deniedDomains")}
+                      {...form.getInputProps("deniedDomains")}
+                    />
+                  </>
+                )}
               <TextInput
                 label="ServiceAccount name"
                 key={form.key("serviceAccountName")}

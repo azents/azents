@@ -16,7 +16,7 @@ const networkPolicySchema = z.object({
   allowed_cidrs: z.array(z.string().min(1)).optional(),
   denied_cidrs: z.array(z.string().min(1)).optional(),
 });
-const kubernetesSpecBaseSchema = z.object({
+const kubernetesSpecCommonSchema = z.object({
   profile_kind: z.literal("kubernetes_pod"),
   contract_family: z.literal("kubernetes.pod-profile"),
   runner_resources: resourceSchema,
@@ -24,7 +24,6 @@ const kubernetesSpecBaseSchema = z.object({
     storage_class_name: z.string().min(1),
     storage_request_bytes: z.number().int().positive(),
   }),
-  network_policy: networkPolicySchema,
   service_account_name: z.string().min(1).nullable(),
   scheduling: z.object({
     node_selector: z.record(z.string(), z.string()).optional(),
@@ -50,15 +49,63 @@ const kubernetesSpecBaseSchema = z.object({
     })
     .nullable(),
 });
-const kubernetesSpecSchema = z.union([
-  kubernetesSpecBaseSchema
-    .extend({
-      schema_version: z.literal(1),
+const directNetworkAccessSchema = z
+  .object({
+    mode: z.literal("direct"),
+    allowed_cidrs: z.array(z.string().min(1)),
+    denied_cidrs: z.array(z.string().min(1)),
+  })
+  .strict();
+const proxyDomainPolicySchema = z.union([
+  z
+    .object({
+      mode: z.literal("unrestricted"),
+      allowed_domains: z.array(z.string().min(1)).length(0),
+      denied_domains: z.array(z.string().min(1)),
     })
     .strict(),
-  kubernetesSpecBaseSchema
+  z
+    .object({
+      mode: z.literal("allowlist"),
+      allowed_domains: z.array(z.string().min(1)),
+      denied_domains: z.array(z.string().min(1)),
+    })
+    .strict(),
+]);
+const proxyRequiredNetworkAccessSchema = z
+  .object({
+    mode: z.literal("proxy_required"),
+    allowed_cidrs: z.array(z.string().min(1)),
+    denied_cidrs: z.array(z.string().min(1)),
+    domain_policy: proxyDomainPolicySchema,
+  })
+  .strict();
+const noNetworkAccessSchema = z
+  .object({
+    mode: z.literal("no_network"),
+  })
+  .strict();
+const kubernetesSpecSchema = z.union([
+  kubernetesSpecCommonSchema
+    .extend({
+      schema_version: z.literal(1),
+      network_policy: networkPolicySchema,
+    })
+    .strict(),
+  kubernetesSpecCommonSchema
     .extend({
       schema_version: z.literal(2),
+      network_policy: networkPolicySchema,
+    })
+    .strict(),
+  kubernetesSpecCommonSchema
+    .extend({
+      schema_version: z.literal(3),
+      network_access: z.union([
+        directNetworkAccessSchema,
+        proxyRequiredNetworkAccessSchema,
+        noNetworkAccessSchema,
+      ]),
     })
     .strict(),
 ]);

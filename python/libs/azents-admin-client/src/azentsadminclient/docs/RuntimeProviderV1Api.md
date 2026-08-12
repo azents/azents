@@ -18,6 +18,7 @@ Method | HTTP request | Description
 [**runtime_provider_v1_get_platform_recreation**](RuntimeProviderV1Api.md#runtime_provider_v1_get_platform_recreation) | **GET** /runtime-provider/v1/recreation-operations/{operation_id} | Get Platform Recreation
 [**runtime_provider_v1_get_pod_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Get Pod Profile
 [**runtime_provider_v1_get_pod_profile_deletion_impact**](RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile_deletion_impact) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/deletion-impact | Get Pod Profile Deletion Impact
+[**runtime_provider_v1_get_provider_diagnostics**](RuntimeProviderV1Api.md#runtime_provider_v1_get_provider_diagnostics) | **GET** /runtime-provider/v1/providers/{provider_id}/operational-diagnostics | Get Provider Diagnostics
 [**runtime_provider_v1_get_runtime_provider**](RuntimeProviderV1Api.md#runtime_provider_v1_get_runtime_provider) | **GET** /runtime-provider/v1/providers/{provider_id} | Get Runtime Provider
 [**runtime_provider_v1_get_workspace_profile_admin_detail**](RuntimeProviderV1Api.md#runtime_provider_v1_get_workspace_profile_admin_detail) | **GET** /runtime-provider/v1/workspaces/{handle}/runtime-profiles/{profile_id} | Get Workspace Profile Admin Detail
 [**runtime_provider_v1_list_auth_binding_audit_events**](RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_binding_audit_events) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id}/audit-events | List Auth Binding Audit Events
@@ -1173,6 +1174,85 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**RuntimeInfrastructureProfileDeletionImpactResponse**](RuntimeInfrastructureProfileDeletionImpactResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_provider_v1_get_provider_diagnostics**
+> RuntimeProviderOperationalDiagnosticsResponse runtime_provider_v1_get_provider_diagnostics(provider_id)
+
+Get Provider Diagnostics
+
+Inspect warning-only diagnostics from the active Provider connection.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_provider_operational_diagnostics_response import RuntimeProviderOperationalDiagnosticsResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+
+    try:
+        # Get Provider Diagnostics
+        api_response = api_instance.runtime_provider_v1_get_provider_diagnostics(provider_id)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_get_provider_diagnostics:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_get_provider_diagnostics: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+
+### Return type
+
+[**RuntimeProviderOperationalDiagnosticsResponse**](RuntimeProviderOperationalDiagnosticsResponse.md)
 
 ### Authorization
 

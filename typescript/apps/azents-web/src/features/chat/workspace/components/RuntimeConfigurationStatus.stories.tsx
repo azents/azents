@@ -26,6 +26,13 @@ const desiredState: RuntimeConfigurationStateResponse = {
   provider_acknowledged_at: null,
   runner_observed_at: null,
   applied_at: null,
+  network: {
+    mode: "proxy_required",
+    domain_mode: "allowlist",
+    protocol_summary: "http_https_websocket",
+    https_inspection: true,
+    enforcement_status: "configured_not_created",
+  },
 };
 
 const appliedState: RuntimeConfigurationStateResponse = {
@@ -35,6 +42,13 @@ const appliedState: RuntimeConfigurationStateResponse = {
   provider_acknowledged_at: "2026-07-31T06:01:00Z",
   runner_observed_at: "2026-07-31T06:02:00Z",
   applied_at: "2026-07-31T06:02:00Z",
+  network: {
+    mode: "proxy_required",
+    domain_mode: "allowlist",
+    protocol_summary: "http_https_websocket",
+    https_inspection: true,
+    enforcement_status: "applied",
+  },
 };
 
 const meta = {
@@ -81,6 +95,13 @@ export const ConfigurationBlocked = {
           digest: null,
           reason_code: "provider_capability_missing",
           missing_capabilities: ["runtime.kubernetes.pod-profile.v1"],
+          network: {
+            mode: "proxy_required",
+            domain_mode: "allowlist",
+            protocol_summary: "http_https_websocket",
+            https_inspection: true,
+            enforcement_status: "configuration_blocked",
+          },
         },
         applied: null,
       },
@@ -142,8 +163,26 @@ export const DirectRuntimeApplied = {
       type: "LOADED",
       configuration: {
         status: "applied",
-        desired: desiredState,
-        applied: appliedState,
+        desired: {
+          ...desiredState,
+          network: {
+            mode: "direct",
+            domain_mode: null,
+            protocol_summary: "direct_ip",
+            https_inspection: false,
+            enforcement_status: "applied",
+          },
+        },
+        applied: {
+          ...appliedState,
+          network: {
+            mode: "direct",
+            domain_mode: null,
+            protocol_summary: "direct_ip",
+            https_inspection: false,
+            enforcement_status: "applied",
+          },
+        },
       },
     },
   },

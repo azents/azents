@@ -24,6 +24,7 @@ import { RuntimeProfileDeleteModal } from "./RuntimeProfileDeleteModal";
 import { RuntimeProfileFormModal } from "./RuntimeProfileFormModal";
 import type { RuntimeProfilesContainerOutput } from "../containers/useRuntimeProfilesContainer";
 import type {
+  RuntimeNetworkProjection,
   SelectableInfrastructureProfileResponse,
   WorkspaceRuntimeProfileResponse,
 } from "@azents/public-client";
@@ -39,6 +40,52 @@ function infrastructureLabel(
     return profile.infrastructure_profile_id;
   }
   return `${infrastructureProfile.provider_display_name} · ${infrastructureProfile.display_name}`;
+}
+
+function NetworkProjectionSummary({
+  network,
+}: {
+  network: RuntimeNetworkProjection;
+}): React.ReactElement {
+  const t = useTranslations("workspace.runtimeProfiles");
+  const details = [
+    network.allowed_cidrs.length > 0
+      ? t("networkAllowedCidrs", {
+          values: network.allowed_cidrs.join(", "),
+        })
+      : null,
+    network.denied_cidrs.length > 0
+      ? t("networkDeniedCidrs", {
+          values: network.denied_cidrs.join(", "),
+        })
+      : null,
+    network.domain_mode !== null
+      ? t("networkDomainMode", {
+          mode: t(`proxyDomainMode.${network.domain_mode}`),
+        })
+      : null,
+    network.allowed_domains.length > 0
+      ? t("networkAllowedDomains", {
+          values: network.allowed_domains.join(", "),
+        })
+      : null,
+    network.denied_domains.length > 0
+      ? t("networkDeniedDomains", {
+          values: network.denied_domains.join(", "),
+        })
+      : null,
+  ].filter((item) => item !== null);
+
+  return (
+    <Stack gap={2}>
+      <Badge variant="light">{t(`networkMode.${network.mode}`)}</Badge>
+      {details.map((detail) => (
+        <Text key={detail} size="xs" c="dimmed">
+          {detail}
+        </Text>
+      ))}
+    </Stack>
+  );
 }
 
 export function RuntimeProfiles(
@@ -189,6 +236,7 @@ export function RuntimeProfiles(
                   <Table.Tr>
                     <Table.Th>{t("nameColumn")}</Table.Th>
                     <Table.Th>{t("infrastructureColumn")}</Table.Th>
+                    <Table.Th>{t("networkColumn")}</Table.Th>
                     <Table.Th>{t("statusColumn")}</Table.Th>
                     <Table.Th>{t("versionColumn")}</Table.Th>
                     <Table.Th>{t("actionsColumn")}</Table.Th>
@@ -220,6 +268,17 @@ export function RuntimeProfiles(
                             state.infrastructureProfiles,
                           )}
                         </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        {profile.effective_network === null ? (
+                          <Text size="xs" c="dimmed">
+                            {t("networkUnavailable")}
+                          </Text>
+                        ) : (
+                          <NetworkProjectionSummary
+                            network={profile.effective_network}
+                          />
+                        )}
                       </Table.Td>
                       <Table.Td>
                         <Group gap="xs" wrap="wrap">

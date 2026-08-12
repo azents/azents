@@ -11,7 +11,7 @@ Name | Type | Description | Notes
 **display_name** | **str** |  | 
 **description** | **str** |  | 
 **lifecycle** | [**RuntimeProfileLifecycle**](RuntimeProfileLifecycle.md) |  | 
-**policy** | [**WorkspaceRuntimeProfilePolicyV1**](WorkspaceRuntimeProfilePolicyV1.md) |  | 
+**policy** | [**WorkspaceRuntimeProfilePolicy**](WorkspaceRuntimeProfilePolicy.md) |  | 
 
 ## Example
 

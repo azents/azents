@@ -14,6 +14,7 @@ Name | Type | Description | Notes
 **display_name** | **str** |  | 
 **description** | **str** |  | 
 **spec** | [**RuntimeInfrastructureProfileSpec**](RuntimeInfrastructureProfileSpec.md) |  | 
+**infrastructure_network** | [**RuntimeNetworkProjection**](RuntimeNetworkProjection.md) |  | 
 **required_capabilities** | **List[str]** |  | 
 **version** | **int** |  | 
 **digest** | **str** |  | 

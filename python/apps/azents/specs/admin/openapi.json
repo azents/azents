@@ -2494,6 +2494,54 @@
         }
       }
     },
+    "/runtime-provider/v1/providers/{provider_id}/operational-diagnostics": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Get Provider Diagnostics",
+        "description": "Inspect warning-only diagnostics from the active Provider connection.",
+        "operationId": "runtime_provider_v1_get_provider_diagnostics",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProviderOperationalDiagnosticsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runtime-provider/v1/providers/{provider_id}/policy": {
       "patch": {
         "tags": [
@@ -4187,7 +4235,27 @@
             "$ref": "#/components/schemas/RuntimeProfileLifecycle"
           },
           "policy": {
-            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicyV1"
+            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicy"
+          },
+          "infrastructure_network": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeNetworkProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effective_network": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeNetworkProjection"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "version": {
             "type": "integer",
@@ -4261,6 +4329,8 @@
           "description",
           "lifecycle",
           "policy",
+          "infrastructure_network",
+          "effective_network",
           "version",
           "digest",
           "provider_id",
@@ -5497,6 +5567,74 @@
         "title": "KubernetesPodProfileSpecV2",
         "description": "Kubernetes Pod Profile contract version 2."
       },
+      "KubernetesPodProfileSpecV3": {
+        "properties": {
+          "profile_kind": {
+            "type": "string",
+            "const": "kubernetes_pod",
+            "title": "Profile Kind"
+          },
+          "contract_family": {
+            "type": "string",
+            "const": "kubernetes.pod-profile",
+            "title": "Contract Family"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 3,
+            "title": "Schema Version"
+          },
+          "runner_resources": {
+            "$ref": "#/components/schemas/KubernetesContainerResources"
+          },
+          "workspace_volume": {
+            "$ref": "#/components/schemas/KubernetesWorkspaceVolume"
+          },
+          "network_access": {
+            "$ref": "#/components/schemas/RuntimeNetworkAccess"
+          },
+          "service_account_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 253
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Account Name"
+          },
+          "scheduling": {
+            "$ref": "#/components/schemas/KubernetesSchedulingModule"
+          },
+          "dind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KubernetesDinDModule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_kind",
+          "contract_family",
+          "schema_version",
+          "runner_resources",
+          "workspace_volume",
+          "network_access",
+          "service_account_name",
+          "scheduling",
+          "dind"
+        ],
+        "title": "KubernetesPodProfileSpecV3",
+        "description": "Kubernetes Pod Profile contract version 3."
+      },
       "KubernetesSchedulingModule": {
         "properties": {
           "node_selector": {
@@ -6156,6 +6294,38 @@
         "title": "PlatformGitHubAppPatchRequest",
         "description": "Optimistic partial update for the Platform GitHub App Admin base."
       },
+      "RuntimeDirectNetworkAccess": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "direct",
+            "title": "Mode"
+          },
+          "allowed_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Cidrs"
+          },
+          "denied_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Cidrs"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode",
+          "allowed_cidrs",
+          "denied_cidrs"
+        ],
+        "title": "RuntimeDirectNetworkAccess",
+        "description": "Direct customer egress within one CIDR boundary."
+      },
       "RuntimeInfrastructureProfileCreateRequest": {
         "properties": {
           "display_name": {
@@ -6536,12 +6706,46 @@
             "$ref": "#/components/schemas/KubernetesPodProfileSpecV2"
           },
           {
+            "$ref": "#/components/schemas/KubernetesPodProfileSpecV3"
+          },
+          {
             "$ref": "#/components/schemas/DockerContainerProfileSpecV1"
           },
           {
             "$ref": "#/components/schemas/DockerContainerProfileSpecV2"
           }
         ]
+      },
+      "RuntimeNetworkAccess": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RuntimeDirectNetworkAccess"
+          },
+          {
+            "$ref": "#/components/schemas/RuntimeProxyRequiredNetworkAccess"
+          },
+          {
+            "$ref": "#/components/schemas/RuntimeNoNetworkAccess"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "mode",
+          "mapping": {
+            "direct": "#/components/schemas/RuntimeDirectNetworkAccess",
+            "no_network": "#/components/schemas/RuntimeNoNetworkAccess",
+            "proxy_required": "#/components/schemas/RuntimeProxyRequiredNetworkAccess"
+          }
+        }
+      },
+      "RuntimeNetworkMode": {
+        "type": "string",
+        "enum": [
+          "direct",
+          "proxy_required",
+          "no_network"
+        ],
+        "title": "RuntimeNetworkMode",
+        "description": "Ordered Runtime network authority."
       },
       "RuntimeNetworkPolicyModule": {
         "properties": {
@@ -6566,6 +6770,79 @@
         "type": "object",
         "title": "RuntimeNetworkPolicyModule",
         "description": "Typed customer-traffic network boundary."
+      },
+      "RuntimeNetworkProjection": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/RuntimeNetworkMode"
+          },
+          "allowed_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Cidrs"
+          },
+          "denied_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Cidrs"
+          },
+          "domain_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProxyDomainMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowed_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Domains"
+          },
+          "denied_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Domains"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode",
+          "allowed_cidrs",
+          "denied_cidrs",
+          "domain_mode",
+          "allowed_domains",
+          "denied_domains"
+        ],
+        "title": "RuntimeNetworkProjection",
+        "description": "Safe server-authored Runtime network authority projection."
+      },
+      "RuntimeNoNetworkAccess": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "no_network",
+            "title": "Mode"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "title": "RuntimeNoNetworkAccess",
+        "description": "No customer or external network authority."
       },
       "RuntimeProfileLifecycle": {
         "type": "string",
@@ -7102,6 +7379,92 @@
         "title": "RuntimeProviderListResponse",
         "description": "Provider inventory response."
       },
+      "RuntimeProviderOperationalDiagnosticsResponse": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation"
+          },
+          "protocol_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol Version"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProviderOperationalWarningResponse"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available",
+          "generation",
+          "protocol_version",
+          "checked_at",
+          "warnings"
+        ],
+        "title": "RuntimeProviderOperationalDiagnosticsResponse",
+        "description": "Active-generation Provider diagnostics or explicit unavailability."
+      },
+      "RuntimeProviderOperationalWarningResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "metadata"
+        ],
+        "title": "RuntimeProviderOperationalWarningResponse",
+        "description": "One bounded warning-only Provider deployment diagnostic."
+      },
       "RuntimeProviderPolicyUpdateRequest": {
         "properties": {
           "enabled": {
@@ -7248,6 +7611,132 @@
         ],
         "title": "RuntimeProviderResponse",
         "description": "Durable Runtime Provider inventory item."
+      },
+      "RuntimeProxyDomainMode": {
+        "type": "string",
+        "enum": [
+          "unrestricted",
+          "allowlist"
+        ],
+        "title": "RuntimeProxyDomainMode",
+        "description": "Ordered proxy domain authority."
+      },
+      "RuntimeProxyDomainPolicy": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/RuntimeProxyDomainPolicyUnrestricted"
+          },
+          {
+            "$ref": "#/components/schemas/RuntimeProxyDomainPolicyAllowlist"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "mode",
+          "mapping": {
+            "allowlist": "#/components/schemas/RuntimeProxyDomainPolicyAllowlist",
+            "unrestricted": "#/components/schemas/RuntimeProxyDomainPolicyUnrestricted"
+          }
+        }
+      },
+      "RuntimeProxyDomainPolicyAllowlist": {
+        "properties": {
+          "allowed_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Domains"
+          },
+          "denied_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Domains"
+          },
+          "mode": {
+            "type": "string",
+            "const": "allowlist",
+            "title": "Mode"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "allowed_domains",
+          "denied_domains",
+          "mode"
+        ],
+        "title": "RuntimeProxyDomainPolicyAllowlist",
+        "description": "Explicit allowlist hostname authority with final denials."
+      },
+      "RuntimeProxyDomainPolicyUnrestricted": {
+        "properties": {
+          "allowed_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Domains"
+          },
+          "denied_domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Domains"
+          },
+          "mode": {
+            "type": "string",
+            "const": "unrestricted",
+            "title": "Mode"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "allowed_domains",
+          "denied_domains",
+          "mode"
+        ],
+        "title": "RuntimeProxyDomainPolicyUnrestricted",
+        "description": "Unrestricted hostname authority before final denials."
+      },
+      "RuntimeProxyRequiredNetworkAccess": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "proxy_required",
+            "title": "Mode"
+          },
+          "allowed_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Cidrs"
+          },
+          "denied_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Cidrs"
+          },
+          "domain_policy": {
+            "$ref": "#/components/schemas/RuntimeProxyDomainPolicy"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode",
+          "allowed_cidrs",
+          "denied_cidrs",
+          "domain_policy"
+        ],
+        "title": "RuntimeProxyRequiredNetworkAccess",
+        "description": "Inspected HTTP proxy authority within CIDR and domain boundaries."
       },
       "RuntimeRecreationCreateRequest": {
         "properties": {
@@ -8730,6 +9219,148 @@
         "title": "WorkspaceResponse",
         "description": "Workspace response schema."
       },
+      "WorkspaceRuntimeNetworkRestriction": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WorkspaceRuntimeNetworkRestrictionInherit"
+          },
+          {
+            "$ref": "#/components/schemas/WorkspaceRuntimeNetworkRestrictionDirect"
+          },
+          {
+            "$ref": "#/components/schemas/WorkspaceRuntimeNetworkRestrictionProxyRequired"
+          },
+          {
+            "$ref": "#/components/schemas/WorkspaceRuntimeNetworkRestrictionNoNetwork"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "mode",
+          "mapping": {
+            "direct": "#/components/schemas/WorkspaceRuntimeNetworkRestrictionDirect",
+            "inherit": "#/components/schemas/WorkspaceRuntimeNetworkRestrictionInherit",
+            "no_network": "#/components/schemas/WorkspaceRuntimeNetworkRestrictionNoNetwork",
+            "proxy_required": "#/components/schemas/WorkspaceRuntimeNetworkRestrictionProxyRequired"
+          }
+        }
+      },
+      "WorkspaceRuntimeNetworkRestrictionDirect": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "direct",
+            "title": "Mode"
+          },
+          "allowed_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Cidrs"
+          },
+          "denied_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Cidrs"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode",
+          "allowed_cidrs",
+          "denied_cidrs"
+        ],
+        "title": "WorkspaceRuntimeNetworkRestrictionDirect",
+        "description": "Retain direct mode while narrowing its CIDR authority."
+      },
+      "WorkspaceRuntimeNetworkRestrictionInherit": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "inherit",
+            "title": "Mode"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "title": "WorkspaceRuntimeNetworkRestrictionInherit",
+        "description": "Preserve the infrastructure Profile network authority."
+      },
+      "WorkspaceRuntimeNetworkRestrictionNoNetwork": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "no_network",
+            "title": "Mode"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "title": "WorkspaceRuntimeNetworkRestrictionNoNetwork",
+        "description": "Select no customer or external network authority."
+      },
+      "WorkspaceRuntimeNetworkRestrictionProxyRequired": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "proxy_required",
+            "title": "Mode"
+          },
+          "allowed_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Cidrs"
+          },
+          "denied_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Cidrs"
+          },
+          "domain_policy": {
+            "$ref": "#/components/schemas/RuntimeProxyDomainPolicy"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode",
+          "allowed_cidrs",
+          "denied_cidrs",
+          "domain_policy"
+        ],
+        "title": "WorkspaceRuntimeNetworkRestrictionProxyRequired",
+        "description": "Select proxy-required mode and restrictive destination policy."
+      },
+      "WorkspaceRuntimeProfilePolicy": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicyV1"
+          },
+          {
+            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicyV2"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "schema_version",
+          "mapping": {
+            "1": "#/components/schemas/WorkspaceRuntimeProfilePolicyV1",
+            "2": "#/components/schemas/WorkspaceRuntimeProfilePolicyV2"
+          }
+        }
+      },
       "WorkspaceRuntimeProfilePolicyV1": {
         "properties": {
           "schema_version": {
@@ -8756,6 +9387,26 @@
         ],
         "title": "WorkspaceRuntimeProfilePolicyV1",
         "description": "Workspace-owned restrictions attached to one Runtime Profile."
+      },
+      "WorkspaceRuntimeProfilePolicyV2": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 2,
+            "title": "Schema Version"
+          },
+          "network_restriction": {
+            "$ref": "#/components/schemas/WorkspaceRuntimeNetworkRestriction"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schema_version",
+          "network_restriction"
+        ],
+        "title": "WorkspaceRuntimeProfilePolicyV2",
+        "description": "Workspace-owned hierarchical network restriction."
       },
       "WorkspaceUpdateRequest": {
         "properties": {

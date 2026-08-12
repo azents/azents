@@ -42,15 +42,37 @@ class TestAdminWorkspaceRuntimeProfileDetailResponse(unittest.TestCase):
                 display_name = '',
                 description = '',
                 lifecycle = 'active',
-                policy = azentsadminclient.models.workspace_runtime_profile_policy_v1.WorkspaceRuntimeProfilePolicyV1(
-                    schema_version = 1, 
-                    network_restriction = azentsadminclient.models.runtime_network_policy_module.RuntimeNetworkPolicyModule(
-                        allowed_cidrs = [
-                            ''
-                            ], 
-                        denied_cidrs = [
-                            ''
-                            ], ), ),
+                policy = None,
+                infrastructure_network = azentsadminclient.models.runtime_network_projection.RuntimeNetworkProjection(
+                    mode = 'direct', 
+                    allowed_cidrs = [
+                        ''
+                        ], 
+                    denied_cidrs = [
+                        ''
+                        ], 
+                    domain_mode = 'unrestricted', 
+                    allowed_domains = [
+                        ''
+                        ], 
+                    denied_domains = [
+                        ''
+                        ], ),
+                effective_network = azentsadminclient.models.runtime_network_projection.RuntimeNetworkProjection(
+                    mode = 'direct', 
+                    allowed_cidrs = [
+                        ''
+                        ], 
+                    denied_cidrs = [
+                        ''
+                        ], 
+                    domain_mode = 'unrestricted', 
+                    allowed_domains = [
+                        ''
+                        ], 
+                    denied_domains = [
+                        ''
+                        ], ),
                 version = 1.0,
                 digest = '',
                 provider_id = '',
@@ -75,15 +97,37 @@ class TestAdminWorkspaceRuntimeProfileDetailResponse(unittest.TestCase):
                 display_name = '',
                 description = '',
                 lifecycle = 'active',
-                policy = azentsadminclient.models.workspace_runtime_profile_policy_v1.WorkspaceRuntimeProfilePolicyV1(
-                    schema_version = 1, 
-                    network_restriction = azentsadminclient.models.runtime_network_policy_module.RuntimeNetworkPolicyModule(
-                        allowed_cidrs = [
-                            ''
-                            ], 
-                        denied_cidrs = [
-                            ''
-                            ], ), ),
+                policy = None,
+                infrastructure_network = azentsadminclient.models.runtime_network_projection.RuntimeNetworkProjection(
+                    mode = 'direct', 
+                    allowed_cidrs = [
+                        ''
+                        ], 
+                    denied_cidrs = [
+                        ''
+                        ], 
+                    domain_mode = 'unrestricted', 
+                    allowed_domains = [
+                        ''
+                        ], 
+                    denied_domains = [
+                        ''
+                        ], ),
+                effective_network = azentsadminclient.models.runtime_network_projection.RuntimeNetworkProjection(
+                    mode = 'direct', 
+                    allowed_cidrs = [
+                        ''
+                        ], 
+                    denied_cidrs = [
+                        ''
+                        ], 
+                    domain_mode = 'unrestricted', 
+                    allowed_domains = [
+                        ''
+                        ], 
+                    denied_domains = [
+                        ''
+                        ], ),
                 version = 1.0,
                 digest = '',
                 provider_id = '',

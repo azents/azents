@@ -20,6 +20,7 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.runtime_configuration_network_response import RuntimeConfigurationNetworkResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -46,8 +47,9 @@ class RuntimeConfigurationStateResponse(BaseModel):
     provider_acknowledged_at: Optional[datetime]
     runner_observed_at: Optional[datetime]
     applied_at: Optional[datetime]
+    network: Optional[RuntimeConfigurationNetworkResponse]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["sequence", "status", "target_generation", "digest", "provider_id", "provider_capability_revision_id", "infrastructure_profile_id", "infrastructure_profile_version", "workspace_runtime_profile_id", "workspace_runtime_profile_version", "agent_selection_version", "required_capabilities", "missing_capabilities", "reason_code", "provider_reported_digest", "runner_reported_digest", "provider_acknowledged_at", "runner_observed_at", "applied_at"]
+    __properties: ClassVar[List[str]] = ["sequence", "status", "target_generation", "digest", "provider_id", "provider_capability_revision_id", "infrastructure_profile_id", "infrastructure_profile_version", "workspace_runtime_profile_id", "workspace_runtime_profile_version", "agent_selection_version", "required_capabilities", "missing_capabilities", "reason_code", "provider_reported_digest", "runner_reported_digest", "provider_acknowledged_at", "runner_observed_at", "applied_at", "network"]
 
     @field_validator('status')
     def status_validate_enum(cls, value):
@@ -97,6 +99,9 @@ class RuntimeConfigurationStateResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of network
+        if self.network:
+            _dict['network'] = self.network.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -182,6 +187,11 @@ class RuntimeConfigurationStateResponse(BaseModel):
         if self.applied_at is None and "applied_at" in self.model_fields_set:
             _dict['applied_at'] = None
 
+        # set to None if network (nullable) is None
+        # and model_fields_set contains the field
+        if self.network is None and "network" in self.model_fields_set:
+            _dict['network'] = None
+
         return _dict
 
     @classmethod
@@ -212,7 +222,8 @@ class RuntimeConfigurationStateResponse(BaseModel):
             "runner_reported_digest": obj.get("runner_reported_digest"),
             "provider_acknowledged_at": obj.get("provider_acknowledged_at"),
             "runner_observed_at": obj.get("runner_observed_at"),
-            "applied_at": obj.get("applied_at")
+            "applied_at": obj.get("applied_at"),
+            "network": RuntimeConfigurationNetworkResponse.from_dict(obj["network"]) if obj.get("network") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

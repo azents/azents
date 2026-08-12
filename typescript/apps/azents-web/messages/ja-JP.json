@@ -664,9 +664,39 @@
       "infrastructureLabel": "ProviderのPod / Container Profile",
       "infrastructureDescription": "選択したProviderとProfileを正確に使用し、フォールバックは行いません。",
       "lifecycleLabel": "ライフサイクル",
+      "networkColumn": "実効ネットワーク",
+      "networkModeLabel": "ネットワークアクセス",
+      "networkModeDescription": "選択した Provider Profile の権限を維持または縮小します。実効ポリシーの検証と計算はサーバーが行います。",
+      "infrastructureAuthority": "Provider Profile の最大権限: {mode}",
+      "networkMode": {
+        "inherit": "Provider Profile を継承",
+        "direct": "直接ネットワーク",
+        "proxy_required": "検査付き HTTP プロキシ必須",
+        "no_network": "外部ネットワークなし"
+      },
+      "proxyLimitationsTitle": "プロキシの制限",
+      "proxyLimitationsDescription": "外部 HTTP、HTTPS、WebSocket トラフィックは管理対象プロキシを使用する必要があります。HTTPS 接続は Runtime の信頼設定を使用して検査され、その他の外部プロトコルは利用できません。",
+      "noNetworkTitle": "外部ネットワーク無効",
+      "noNetworkDescription": "Runtime に顧客用または外部ネットワークの権限を付与しません。",
       "allowedCidrsLabel": "許可するCIDR",
       "deniedCidrsLabel": "拒否するCIDR",
       "cidrsDescription": "1行に1つのCIDRを入力してください。ワークスペースの規則はプロバイダーのポリシーをさらに制限することだけができます。",
+      "deniedCidrsDescription": "1 行に 1 つの CIDR を入力してください。拒否ルールが優先されます。",
+      "proxyDomainModeLabel": "プロキシのドメイン権限",
+      "proxyDomainMode": {
+        "unrestricted": "明示的な拒否を除くすべてのドメイン",
+        "allowlist": "明示的に許可したドメインのみ"
+      },
+      "allowedDomainsLabel": "許可ドメイン",
+      "deniedDomainsLabel": "拒否ドメイン",
+      "domainsDescription": "api.example.com または *.example.com のような完全なホスト名か先頭ラベルのワイルドカードを 1 行に 1 つ入力してください。",
+      "deniedDomainsDescription": "完全なホスト名または先頭ラベルのワイルドカードを 1 行に 1 つ入力してください。拒否ルールが優先されます。",
+      "networkUnavailable": "実効ネットワークを確認できません",
+      "networkAllowedCidrs": "許可 CIDR: {values}",
+      "networkDeniedCidrs": "拒否 CIDR: {values}",
+      "networkDomainMode": "ドメイン権限: {mode}",
+      "networkAllowedDomains": "許可ドメイン: {values}",
+      "networkDeniedDomains": "拒否ドメイン: {values}",
       "cancel": "キャンセル",
       "save": "保存",
       "availabilityReasons": {
@@ -2156,6 +2186,28 @@
         "infrastructure": "インフラストラクチャ",
         "generation": "Generation",
         "digest": "Digest"
+      },
+      "configurationNetworkTitle": "実効ネットワーク",
+      "configurationNetworkMode": "モード: {mode}",
+      "configurationNetworkProtocol": "外部プロトコル範囲: {protocol}",
+      "configurationNetworkDomains": "ドメイン権限: {mode}",
+      "configurationNetworkHttpsInspected": "HTTPS トラフィックは Runtime の信頼設定を使用して検査されます。",
+      "configurationNetworkHttpsNotInspected": "HTTPS トラフィックは管理対象 Runtime プロキシでは検査されません。",
+      "configurationNetworkRecreationRequired": "このネットワーク構成を適用するには Runtime を再作成してください。",
+      "configurationNetworkBlocked": "このネットワーク構成は現在ブロックされています。",
+      "configurationNetworkModes": {
+        "direct": "直接ネットワーク",
+        "proxy_required": "検査付き HTTP プロキシ必須",
+        "no_network": "外部ネットワークなし"
+      },
+      "configurationNetworkProtocols": {
+        "direct_ip": "直接 IP 接続",
+        "http_https_websocket": "管理対象プロキシ経由の HTTP、HTTPS、WebSocket",
+        "platform_only": "プラットフォーム必須の接続のみ"
+      },
+      "configurationNetworkDomainModes": {
+        "unrestricted": "明示的な拒否を除くすべてのドメイン",
+        "allowlist": "明示的な許可リスト"
       },
       "configurationStatus": {
         "profile_required": {

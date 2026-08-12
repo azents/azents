@@ -106,6 +106,7 @@ Class | Method | HTTP request | Description
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_platform_recreation**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_platform_recreation) | **GET** /runtime-provider/v1/recreation-operations/{operation_id} | Get Platform Recreation
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_pod_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Get Pod Profile
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_pod_profile_deletion_impact**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile_deletion_impact) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/deletion-impact | Get Pod Profile Deletion Impact
+*RuntimeProviderV1Api* | [**runtime_provider_v1_get_provider_diagnostics**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_provider_diagnostics) | **GET** /runtime-provider/v1/providers/{provider_id}/operational-diagnostics | Get Provider Diagnostics
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_runtime_provider**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_runtime_provider) | **GET** /runtime-provider/v1/providers/{provider_id} | Get Runtime Provider
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_workspace_profile_admin_detail**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_workspace_profile_admin_detail) | **GET** /runtime-provider/v1/workspaces/{handle}/runtime-profiles/{profile_id} | Get Workspace Profile Admin Detail
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_auth_binding_audit_events**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_binding_audit_events) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id}/audit-events | List Auth Binding Audit Events
@@ -192,6 +193,7 @@ Class | Method | HTTP request | Description
  - [KubernetesDinDModule](azentsadminclient/docs/KubernetesDinDModule.md)
  - [KubernetesPodProfileSpecV1](azentsadminclient/docs/KubernetesPodProfileSpecV1.md)
  - [KubernetesPodProfileSpecV2](azentsadminclient/docs/KubernetesPodProfileSpecV2.md)
+ - [KubernetesPodProfileSpecV3](azentsadminclient/docs/KubernetesPodProfileSpecV3.md)
  - [KubernetesSchedulingModule](azentsadminclient/docs/KubernetesSchedulingModule.md)
  - [KubernetesToleration](azentsadminclient/docs/KubernetesToleration.md)
  - [KubernetesWorkspaceVolume](azentsadminclient/docs/KubernetesWorkspaceVolume.md)
@@ -205,6 +207,7 @@ Class | Method | HTTP request | Description
  - [PlatformGitHubAppFieldResponse](azentsadminclient/docs/PlatformGitHubAppFieldResponse.md)
  - [PlatformGitHubAppHealthResponse](azentsadminclient/docs/PlatformGitHubAppHealthResponse.md)
  - [PlatformGitHubAppPatchRequest](azentsadminclient/docs/PlatformGitHubAppPatchRequest.md)
+ - [RuntimeDirectNetworkAccess](azentsadminclient/docs/RuntimeDirectNetworkAccess.md)
  - [RuntimeInfrastructureProfileCreateRequest](azentsadminclient/docs/RuntimeInfrastructureProfileCreateRequest.md)
  - [RuntimeInfrastructureProfileDeleteRequest](azentsadminclient/docs/RuntimeInfrastructureProfileDeleteRequest.md)
  - [RuntimeInfrastructureProfileDeleteResponse](azentsadminclient/docs/RuntimeInfrastructureProfileDeleteResponse.md)
@@ -214,7 +217,11 @@ Class | Method | HTTP request | Description
  - [RuntimeInfrastructureProfileReplaceRequest](azentsadminclient/docs/RuntimeInfrastructureProfileReplaceRequest.md)
  - [RuntimeInfrastructureProfileResponse](azentsadminclient/docs/RuntimeInfrastructureProfileResponse.md)
  - [RuntimeInfrastructureProfileSpec](azentsadminclient/docs/RuntimeInfrastructureProfileSpec.md)
+ - [RuntimeNetworkAccess](azentsadminclient/docs/RuntimeNetworkAccess.md)
+ - [RuntimeNetworkMode](azentsadminclient/docs/RuntimeNetworkMode.md)
  - [RuntimeNetworkPolicyModule](azentsadminclient/docs/RuntimeNetworkPolicyModule.md)
+ - [RuntimeNetworkProjection](azentsadminclient/docs/RuntimeNetworkProjection.md)
+ - [RuntimeNoNetworkAccess](azentsadminclient/docs/RuntimeNoNetworkAccess.md)
  - [RuntimeProfileLifecycle](azentsadminclient/docs/RuntimeProfileLifecycle.md)
  - [RuntimeProviderAuthMethod](azentsadminclient/docs/RuntimeProviderAuthMethod.md)
  - [RuntimeProviderAuthenticationBindingAuditEventResponse](azentsadminclient/docs/RuntimeProviderAuthenticationBindingAuditEventResponse.md)
@@ -234,8 +241,15 @@ Class | Method | HTTP request | Description
  - [RuntimeProviderContractResponse](azentsadminclient/docs/RuntimeProviderContractResponse.md)
  - [RuntimeProviderLifecycleState](azentsadminclient/docs/RuntimeProviderLifecycleState.md)
  - [RuntimeProviderListResponse](azentsadminclient/docs/RuntimeProviderListResponse.md)
+ - [RuntimeProviderOperationalDiagnosticsResponse](azentsadminclient/docs/RuntimeProviderOperationalDiagnosticsResponse.md)
+ - [RuntimeProviderOperationalWarningResponse](azentsadminclient/docs/RuntimeProviderOperationalWarningResponse.md)
  - [RuntimeProviderPolicyUpdateRequest](azentsadminclient/docs/RuntimeProviderPolicyUpdateRequest.md)
  - [RuntimeProviderResponse](azentsadminclient/docs/RuntimeProviderResponse.md)
+ - [RuntimeProxyDomainMode](azentsadminclient/docs/RuntimeProxyDomainMode.md)
+ - [RuntimeProxyDomainPolicy](azentsadminclient/docs/RuntimeProxyDomainPolicy.md)
+ - [RuntimeProxyDomainPolicyAllowlist](azentsadminclient/docs/RuntimeProxyDomainPolicyAllowlist.md)
+ - [RuntimeProxyDomainPolicyUnrestricted](azentsadminclient/docs/RuntimeProxyDomainPolicyUnrestricted.md)
+ - [RuntimeProxyRequiredNetworkAccess](azentsadminclient/docs/RuntimeProxyRequiredNetworkAccess.md)
  - [RuntimeRecreationCreateRequest](azentsadminclient/docs/RuntimeRecreationCreateRequest.md)
  - [RuntimeRecreationItemResponse](azentsadminclient/docs/RuntimeRecreationItemResponse.md)
  - [RuntimeRecreationItemStatus](azentsadminclient/docs/RuntimeRecreationItemStatus.md)
@@ -283,7 +297,14 @@ Class | Method | HTTP request | Description
  - [WorkspaceCreateRequest](azentsadminclient/docs/WorkspaceCreateRequest.md)
  - [WorkspaceListResponse](azentsadminclient/docs/WorkspaceListResponse.md)
  - [WorkspaceResponse](azentsadminclient/docs/WorkspaceResponse.md)
+ - [WorkspaceRuntimeNetworkRestriction](azentsadminclient/docs/WorkspaceRuntimeNetworkRestriction.md)
+ - [WorkspaceRuntimeNetworkRestrictionDirect](azentsadminclient/docs/WorkspaceRuntimeNetworkRestrictionDirect.md)
+ - [WorkspaceRuntimeNetworkRestrictionInherit](azentsadminclient/docs/WorkspaceRuntimeNetworkRestrictionInherit.md)
+ - [WorkspaceRuntimeNetworkRestrictionNoNetwork](azentsadminclient/docs/WorkspaceRuntimeNetworkRestrictionNoNetwork.md)
+ - [WorkspaceRuntimeNetworkRestrictionProxyRequired](azentsadminclient/docs/WorkspaceRuntimeNetworkRestrictionProxyRequired.md)
+ - [WorkspaceRuntimeProfilePolicy](azentsadminclient/docs/WorkspaceRuntimeProfilePolicy.md)
  - [WorkspaceRuntimeProfilePolicyV1](azentsadminclient/docs/WorkspaceRuntimeProfilePolicyV1.md)
+ - [WorkspaceRuntimeProfilePolicyV2](azentsadminclient/docs/WorkspaceRuntimeProfilePolicyV2.md)
  - [WorkspaceUpdateRequest](azentsadminclient/docs/WorkspaceUpdateRequest.md)
  - [WorkspaceUserCreateRequest](azentsadminclient/docs/WorkspaceUserCreateRequest.md)
  - [WorkspaceUserListResponse](azentsadminclient/docs/WorkspaceUserListResponse.md)

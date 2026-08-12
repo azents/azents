@@ -25,6 +25,7 @@ import type {
   RuntimeProviderAuthBindingState,
   RuntimeProviderContractItem,
   RuntimeProviderContractState,
+  RuntimeProviderDiagnosticsState,
   RuntimeProviderItem,
   RuntimeProvidersPageContentProps,
 } from "../containers/useRuntimeProvidersPageContainer";
@@ -298,6 +299,64 @@ function ContractSection({
   );
 }
 
+function DiagnosticsSection({
+  state,
+}: {
+  state: RuntimeProviderDiagnosticsState;
+}): React.ReactElement {
+  return (
+    <Stack gap="sm">
+      <Stack gap={2}>
+        <Text size="sm" fw={600}>
+          Deployment diagnostics
+        </Text>
+        <Text size="xs" c="dimmed">
+          Warning-only checks from the active Provider connection. They do not
+          enable capabilities or prove Runtime network enforcement.
+        </Text>
+      </Stack>
+      {state.type === "IDLE" && (
+        <Text size="sm" c="dimmed">
+          Select a Provider to inspect diagnostics.
+        </Text>
+      )}
+      {state.type === "LOADING" && <Loader size="sm" />}
+      {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
+      {state.type === "LOADED" && !state.diagnostics.available && (
+        <Alert color="gray" title="Diagnostics unavailable">
+          The Provider is disconnected or its active connection has not supplied
+          a diagnostic snapshot.
+        </Alert>
+      )}
+      {state.type === "LOADED" && state.diagnostics.available && (
+        <Stack gap="xs">
+          <Text size="xs" c="dimmed">
+            Checked {state.diagnostics.checked_at ?? "Unknown"} · Connection
+            generation {state.diagnostics.generation ?? "Unknown"} · Protocol{" "}
+            {state.diagnostics.protocol_version ?? "Unknown"}
+          </Text>
+          {state.diagnostics.warnings.length === 0 ? (
+            <Alert color="green">No deployment warnings were reported.</Alert>
+          ) : (
+            state.diagnostics.warnings.map((warning) => (
+              <Alert key={warning.code} color="yellow" title={warning.code}>
+                <Stack gap={2}>
+                  <Text size="xs">Severity: {warning.severity}</Text>
+                  {Object.entries(warning.metadata).map(([key, value]) => (
+                    <Text key={key} size="xs" ff="monospace">
+                      {key}: {value}
+                    </Text>
+                  ))}
+                </Stack>
+              </Alert>
+            ))
+          )}
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
 function AuthenticationAudit({
   state,
 }: {
@@ -349,6 +408,7 @@ function AuthenticationAudit({
 function ProviderDetail({
   provider,
   contractState,
+  diagnosticsState,
   authBindingState,
   authMutating,
   updating,
@@ -360,6 +420,7 @@ function ProviderDetail({
 }: {
   provider: RuntimeProviderItem;
   contractState: RuntimeProviderContractState;
+  diagnosticsState: RuntimeProviderDiagnosticsState;
   authBindingState: RuntimeProviderAuthBindingState;
   authMutating: boolean;
   updating: boolean;
@@ -432,6 +493,9 @@ function ProviderDetail({
       <ContractSection provider={provider} state={contractState} />
 
       <Divider />
+      <DiagnosticsSection state={diagnosticsState} />
+
+      <Divider />
       <InfrastructureProfilesSectionContainer
         providerId={provider.provider_id}
         providerKind={provider.kind}
@@ -456,6 +520,7 @@ export function RuntimeProvidersPageContent({
   selectedProvider,
   detailOpen,
   contractState,
+  diagnosticsState,
   authBindingState,
   authAuditState,
   authMutating,
@@ -493,6 +558,7 @@ export function RuntimeProvidersPageContent({
         <ProviderDetail
           provider={selectedProvider}
           contractState={contractState}
+          diagnosticsState={diagnosticsState}
           authBindingState={authBindingState}
           authMutating={authMutating}
           updating={updating}

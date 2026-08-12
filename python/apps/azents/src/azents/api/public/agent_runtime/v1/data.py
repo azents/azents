@@ -18,6 +18,13 @@ from azents.core.enums import (
     RuntimeSummary,
     RuntimeTerminalDeleteAcknowledgementKind,
 )
+from azents.core.runtime_profile import (
+    RuntimeConfigurationDocument,
+    RuntimeNetworkMode,
+    RuntimeNetworkProjection,
+    parse_runtime_infrastructure_profile_spec,
+    project_runtime_network,
+)
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
 from azents.repos.runtime_profile.data import (
@@ -60,6 +67,75 @@ class AgentRuntimeSummaryResponse(BaseModel):
     failure: AgentRuntimeFailureResponse | None
 
 
+type RuntimeConfigurationStatus = Literal[
+    "profile_required",
+    "configuration_blocked",
+    "configured_not_created",
+    "waiting_for_recreation",
+    "applied",
+]
+
+
+class RuntimeConfigurationNetworkResponse(BaseModel):
+    """Bounded effective Runtime network presentation."""
+
+    mode: RuntimeNetworkMode
+    domain_mode: str | None
+    protocol_summary: Literal[
+        "direct_ip",
+        "http_https_websocket",
+        "platform_only",
+    ]
+    https_inspection: bool
+    enforcement_status: RuntimeConfigurationStatus
+
+    @classmethod
+    def convert_from(
+        cls,
+        projection: RuntimeNetworkProjection,
+        *,
+        enforcement_status: RuntimeConfigurationStatus,
+    ) -> "RuntimeConfigurationNetworkResponse":
+        """Convert safe network authority into Runtime status presentation."""
+        match projection.mode:
+            case RuntimeNetworkMode.DIRECT:
+                protocol_summary = "direct_ip"
+                https_inspection = False
+            case RuntimeNetworkMode.PROXY_REQUIRED:
+                protocol_summary = "http_https_websocket"
+                https_inspection = True
+            case RuntimeNetworkMode.NO_NETWORK:
+                protocol_summary = "platform_only"
+                https_inspection = False
+        return cls(
+            mode=projection.mode,
+            domain_mode=(
+                projection.domain_mode.value
+                if projection.domain_mode is not None
+                else None
+            ),
+            protocol_summary=protocol_summary,
+            https_inspection=https_inspection,
+            enforcement_status=enforcement_status,
+        )
+
+
+def _network_projection(
+    document: RuntimeConfigurationDocument | None,
+) -> RuntimeNetworkProjection | None:
+    """Extract only safe network authority from one resolved configuration."""
+    if document is None or document.resolved_configuration is None:
+        return None
+    effective_profile = document.resolved_configuration.get("effective_profile")
+    if not isinstance(effective_profile, dict):
+        return None
+    try:
+        spec = parse_runtime_infrastructure_profile_spec(effective_profile)
+    except ValueError:
+        return None
+    return project_runtime_network(spec)
+
+
 class RuntimeConfigurationStateResponse(BaseModel):
     """Bounded desired or applied Runtime configuration state."""
 
@@ -82,11 +158,18 @@ class RuntimeConfigurationStateResponse(BaseModel):
     provider_acknowledged_at: datetime.datetime | None
     runner_observed_at: datetime.datetime | None
     applied_at: datetime.datetime | None
+    network: RuntimeConfigurationNetworkResponse | None
 
     @classmethod
-    def convert_from_desired(cls, data: RuntimeConfigurationSlot) -> Self:
+    def convert_from_desired(
+        cls,
+        data: RuntimeConfigurationSlot,
+        *,
+        enforcement_status: RuntimeConfigurationStatus,
+    ) -> Self:
         """Convert desired state without stored configuration details."""
         document = data.document
+        network = _network_projection(document)
         return cls(
             sequence=data.sequence,
             status=data.status.value,
@@ -129,12 +212,26 @@ class RuntimeConfigurationStateResponse(BaseModel):
             provider_acknowledged_at=data.provider_acknowledged_at,
             runner_observed_at=data.runner_observed_at,
             applied_at=None,
+            network=(
+                RuntimeConfigurationNetworkResponse.convert_from(
+                    network,
+                    enforcement_status=enforcement_status,
+                )
+                if network is not None
+                else None
+            ),
         )
 
     @classmethod
-    def convert_from_applied(cls, data: RuntimeConfigurationAppliedSlot) -> Self:
+    def convert_from_applied(
+        cls,
+        data: RuntimeConfigurationAppliedSlot,
+        *,
+        enforcement_status: RuntimeConfigurationStatus,
+    ) -> Self:
         """Convert applied state without stored configuration details."""
         document = data.document
+        network = _network_projection(document)
         return cls(
             sequence=data.sequence,
             status="ready",
@@ -155,19 +252,21 @@ class RuntimeConfigurationStateResponse(BaseModel):
             provider_acknowledged_at=None,
             runner_observed_at=None,
             applied_at=data.applied_at,
+            network=(
+                RuntimeConfigurationNetworkResponse.convert_from(
+                    network,
+                    enforcement_status=enforcement_status,
+                )
+                if network is not None
+                else None
+            ),
         )
 
 
 class AgentRuntimeConfigurationStatusResponse(BaseModel):
     """Desired and applied Runtime configuration status."""
 
-    status: Literal[
-        "profile_required",
-        "configuration_blocked",
-        "configured_not_created",
-        "waiting_for_recreation",
-        "applied",
-    ]
+    status: RuntimeConfigurationStatus
     desired: RuntimeConfigurationStateResponse | None
     applied: RuntimeConfigurationStateResponse | None
 
@@ -177,12 +276,18 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
         return cls(
             status=data.status,
             desired=(
-                RuntimeConfigurationStateResponse.convert_from_desired(data.desired)
+                RuntimeConfigurationStateResponse.convert_from_desired(
+                    data.desired,
+                    enforcement_status=data.status,
+                )
                 if data.desired is not None
                 else None
             ),
             applied=(
-                RuntimeConfigurationStateResponse.convert_from_applied(data.applied)
+                RuntimeConfigurationStateResponse.convert_from_applied(
+                    data.applied,
+                    enforcement_status=data.status,
+                )
                 if data.applied is not None
                 else None
             ),

@@ -10,6 +10,7 @@ import {
   runtimeProviderV1GetContainerProfileDeletionImpact,
   runtimeProviderV1GetPlatformRecreation,
   runtimeProviderV1GetPodProfileDeletionImpact,
+  runtimeProviderV1GetProviderDiagnostics,
   runtimeProviderV1GetRuntimeProvider,
   runtimeProviderV1GetWorkspaceProfileAdminDetail,
   runtimeProviderV1ListAuthBindingAuditEvents,
@@ -464,6 +465,21 @@ export const runtimeProviderRouter = router({
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await runtimeProviderV1GetRuntimeProvider({
+          client: ctx.adminApiClient,
+          path: { provider_id: input.providerId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, { 404: "NOT_FOUND" });
+      }
+    }),
+
+  getDiagnostics: protectedProcedure
+    .input(z.object({ providerId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await runtimeProviderV1GetProviderDiagnostics({
           client: ctx.adminApiClient,
           path: { provider_id: input.providerId },
           throwOnError: true,

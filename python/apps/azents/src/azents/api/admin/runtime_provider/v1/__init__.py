@@ -54,6 +54,7 @@ from .data import (
     RuntimeProviderContractListResponse,
     RuntimeProviderContractResponse,
     RuntimeProviderListResponse,
+    RuntimeProviderOperationalDiagnosticsResponse,
     RuntimeProviderPolicyUpdateRequest,
     RuntimeProviderResponse,
 )
@@ -684,6 +685,20 @@ async def get_runtime_provider(
     except RuntimeProviderAdminUnavailable as error:
         _raise_unavailable(error)
     return RuntimeProviderResponse.convert_from(provider)
+
+
+@router.get("/providers/{provider_id}/operational-diagnostics")
+async def get_provider_diagnostics(
+    service: Annotated[RuntimeProviderAdminService, Depends()],
+    *,
+    provider_id: str,
+) -> RuntimeProviderOperationalDiagnosticsResponse:
+    """Inspect warning-only diagnostics from the active Provider connection."""
+    try:
+        projection = await service.get_operational_diagnostics(provider_id)
+    except RuntimeProviderAdminUnavailable as error:
+        _raise_unavailable(error)
+    return RuntimeProviderOperationalDiagnosticsResponse.convert_from(projection)
 
 
 @router.patch("/providers/{provider_id}/policy")

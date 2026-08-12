@@ -14,6 +14,7 @@ Name | Type | Description | Notes
 **service_account_name** | **str** |  | 
 **scheduling** | [**KubernetesSchedulingModule**](KubernetesSchedulingModule.md) |  | 
 **dind** | [**KubernetesDinDModule**](KubernetesDinDModule.md) |  | 
+**network_access** | [**RuntimeNetworkAccess**](RuntimeNetworkAccess.md) |  | 
 **network_name** | **str** |  | 
 
 ## Example

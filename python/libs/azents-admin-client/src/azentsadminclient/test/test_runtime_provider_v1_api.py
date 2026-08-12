@@ -124,6 +124,13 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_provider_v1_get_provider_diagnostics(self) -> None:
+        """Test case for runtime_provider_v1_get_provider_diagnostics
+
+        Get Provider Diagnostics
+        """
+        pass
+
     def test_runtime_provider_v1_get_runtime_provider(self) -> None:
         """Test case for runtime_provider_v1_get_runtime_provider
 

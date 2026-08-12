@@ -6,7 +6,7 @@ Desired and applied Runtime configuration status.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**status** | **str** |  | 
+**status** | [**RuntimeConfigurationStatus**](RuntimeConfigurationStatus.md) |  | 
 **desired** | [**RuntimeConfigurationStateResponse**](RuntimeConfigurationStateResponse.md) |  | 
 **applied** | [**RuntimeConfigurationStateResponse**](RuntimeConfigurationStateResponse.md) |  | 
 

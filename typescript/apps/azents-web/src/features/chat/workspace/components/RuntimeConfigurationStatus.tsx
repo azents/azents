@@ -12,7 +12,10 @@ import {
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
 import type { RuntimeConfigurationState } from "../types";
-import type { RuntimeConfigurationStateResponse } from "@azents/public-client";
+import type {
+  RuntimeConfigurationNetworkResponse,
+  RuntimeConfigurationStateResponse,
+} from "@azents/public-client";
 
 interface RuntimeConfigurationStatusProps {
   state: RuntimeConfigurationState;
@@ -25,6 +28,20 @@ type ConfigurationReason =
   | "capabilityUnavailable"
   | "profileInvalid"
   | "unknown";
+
+type ConfigurationNetworkDomainMode = "unrestricted" | "allowlist";
+
+function configurationNetworkDomainMode(
+  domainMode: string,
+): ConfigurationNetworkDomainMode | null {
+  switch (domainMode) {
+    case "unrestricted":
+    case "allowlist":
+      return domainMode;
+    default:
+      return null;
+  }
+}
 
 function configurationReason(reasonCode: string | null): ConfigurationReason {
   switch (reasonCode) {
@@ -98,6 +115,68 @@ function stateEvidence(
   ];
 }
 
+function NetworkSummary({
+  network,
+}: {
+  network: RuntimeConfigurationNetworkResponse;
+}): React.ReactElement {
+  const t = useTranslations("chat.workspacePanel");
+  const domainMode =
+    network.domain_mode === null
+      ? null
+      : configurationNetworkDomainMode(network.domain_mode);
+
+  return (
+    <Alert
+      color={
+        network.enforcement_status === "configuration_blocked"
+          ? "red"
+          : network.mode === "no_network"
+            ? "gray"
+            : "blue"
+      }
+      title={t("configurationNetworkTitle")}
+    >
+      <Stack gap={2}>
+        <Text size="xs">
+          {t("configurationNetworkMode", {
+            mode: t(`configurationNetworkModes.${network.mode}`),
+          })}
+        </Text>
+        <Text size="xs">
+          {t("configurationNetworkProtocol", {
+            protocol: t(
+              `configurationNetworkProtocols.${network.protocol_summary}`,
+            ),
+          })}
+        </Text>
+        {domainMode !== null && (
+          <Text size="xs">
+            {t("configurationNetworkDomains", {
+              mode: t(`configurationNetworkDomainModes.${domainMode}`),
+            })}
+          </Text>
+        )}
+        <Text size="xs">
+          {network.https_inspection
+            ? t("configurationNetworkHttpsInspected")
+            : t("configurationNetworkHttpsNotInspected")}
+        </Text>
+        {network.enforcement_status === "waiting_for_recreation" && (
+          <Text size="xs" fw={600}>
+            {t("configurationNetworkRecreationRequired")}
+          </Text>
+        )}
+        {network.enforcement_status === "configuration_blocked" && (
+          <Text size="xs" fw={600}>
+            {t("configurationNetworkBlocked")}
+          </Text>
+        )}
+      </Stack>
+    </Alert>
+  );
+}
+
 function StatePanel({
   title,
   configurationState,
@@ -113,6 +192,9 @@ function StatePanel({
         <Text size="sm" fw={600}>
           {title}
         </Text>
+        {configurationState.network !== null && (
+          <NetworkSummary network={configurationState.network} />
+        )}
         {stateEvidence(configurationState).map((item) => (
           <Stack key={item.label} gap={0}>
             <Text size="xs" fw={500}>

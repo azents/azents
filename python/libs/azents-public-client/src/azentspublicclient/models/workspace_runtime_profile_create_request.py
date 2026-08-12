@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
 from azentspublicclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle
-from azentspublicclient.models.workspace_runtime_profile_policy_v1 import WorkspaceRuntimeProfilePolicyV1
+from azentspublicclient.models.workspace_runtime_profile_policy import WorkspaceRuntimeProfilePolicy
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -33,7 +33,7 @@ class WorkspaceRuntimeProfileCreateRequest(BaseModel):
     display_name: Annotated[str, Field(min_length=1, strict=True, max_length=120)]
     description: Annotated[str, Field(strict=True, max_length=4000)]
     lifecycle: Optional[RuntimeProfileLifecycle] = None
-    policy: WorkspaceRuntimeProfilePolicyV1
+    policy: WorkspaceRuntimeProfilePolicy
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["infrastructure_profile_id", "display_name", "description", "lifecycle", "policy"]
 
@@ -102,7 +102,7 @@ class WorkspaceRuntimeProfileCreateRequest(BaseModel):
             "display_name": obj.get("display_name"),
             "description": obj.get("description"),
             "lifecycle": obj.get("lifecycle"),
-            "policy": WorkspaceRuntimeProfilePolicyV1.from_dict(obj["policy"]) if obj.get("policy") is not None else None
+            "policy": WorkspaceRuntimeProfilePolicy.from_dict(obj["policy"]) if obj.get("policy") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():
