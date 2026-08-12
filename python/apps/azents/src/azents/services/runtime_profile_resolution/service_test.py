@@ -209,12 +209,32 @@ class _SelectionRacingAgentRuntimeRepository(AgentRuntimeRepository):
         )
 
 
-def _contract_payload() -> dict[str, object]:
+def _contract_payload(
+    *,
+    strict_network: bool,
+    provider_protocol_version: str,
+) -> dict[str, object]:
+    capabilities = [
+        "kubernetes.pod-profile",
+        "runtime.resources",
+        "workspace.persistent-volume",
+        "runtime.network-policy",
+    ]
+    schema_versions = [1]
+    if strict_network:
+        capabilities.extend(
+            [
+                "runtime.external-network-denial",
+                "runtime.inspected-http-proxy",
+                "runtime.network-enforcement",
+            ]
+        )
+        schema_versions.extend([2, 3])
     return {
         "schema_version": 1,
         "implementation_key": "kubernetes",
         "implementation_version": "0.1.0",
-        "protocol_version": "agent-runtime-provider-kubernetes-v2",
+        "protocol_version": provider_protocol_version,
         "core_lifecycle_operations": [
             "start",
             "stop",
@@ -234,13 +254,8 @@ def _contract_payload() -> dict[str, object]:
             {
                 "profile_kind": "kubernetes_pod",
                 "contract_family": "kubernetes.pod-profile",
-                "schema_versions": [1],
-                "capabilities": [
-                    "kubernetes.pod-profile",
-                    "runtime.resources",
-                    "workspace.persistent-volume",
-                    "runtime.network-policy",
-                ],
+                "schema_versions": schema_versions,
+                "capabilities": capabilities,
                 "constraints": {},
             }
         ],
@@ -276,6 +291,9 @@ async def _seed_selected_agent(
     session: AsyncSession,
     *,
     handle: str,
+    provider_protocol_version: str,
+    workspace_policy: dict[str, object] | None = None,
+    strict_network_capabilities: bool = False,
 ) -> tuple[str, str]:
     workspace_repository = WorkspaceRepository()
     workspace_result = await workspace_repository.create(
@@ -309,8 +327,11 @@ async def _seed_selected_agent(
             provider_id=provider.id,
             digest="a" * 64,
             implementation_version="0.1.0",
-            protocol_version="agent-runtime-provider-kubernetes-v2",
-            contract=_contract_payload(),
+            protocol_version=provider_protocol_version,
+            contract=_contract_payload(
+                strict_network=strict_network_capabilities,
+                provider_protocol_version=provider_protocol_version,
+            ),
             compatibility={},
         ),
     )
@@ -345,7 +366,8 @@ async def _seed_selected_agent(
             display_name="Workspace Standard",
             description="Resolution test Workspace Profile",
             lifecycle=RuntimeProfileLifecycle.ACTIVE,
-            policy={
+            policy=workspace_policy
+            or {
                 "schema_version": 1,
                 "network_restriction": {
                     "allowed_cidrs": ["10.10.0.0/16"],
@@ -435,6 +457,7 @@ async def test_resolution_creates_ready_state_and_reuses_same_digest(
         agent_id, _ = await _seed_selected_agent(
             session,
             handle="runtime-resolution-ready",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v2",
         )
 
     service = _service(rdb_session_manager)
@@ -457,6 +480,99 @@ async def test_resolution_creates_ready_state_and_reuses_same_digest(
     )
 
 
+async def test_resolution_records_effective_proxy_profile_and_capabilities(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Legacy direct infrastructure can resolve to strict effective Profile v3."""
+    async with rdb_session_manager() as session:
+        agent_id, _ = await _seed_selected_agent(
+            session,
+            handle="runtime-resolution-proxy-required",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v3",
+            strict_network_capabilities=True,
+            workspace_policy={
+                "schema_version": 2,
+                "network_restriction": {
+                    "mode": "proxy_required",
+                    "allowed_cidrs": ["10.10.0.0/16"],
+                    "denied_cidrs": ["10.10.1.0/24"],
+                    "domain_policy": {
+                        "mode": "allowlist",
+                        "allowed_domains": ["*.example.com"],
+                        "denied_domains": ["blocked.example.com"],
+                    },
+                },
+            },
+        )
+
+    resolution = await _service(rdb_session_manager).ensure_for_agent(agent_id)
+
+    assert resolution.desired.status is RuntimeConfigurationStateStatus.READY
+    assert resolution.desired.document is not None
+    assert resolution.desired.document.required_capabilities == (
+        "kubernetes.pod-profile",
+        "runtime.inspected-http-proxy",
+        "runtime.network-enforcement",
+        "runtime.resources",
+        "workspace.persistent-volume",
+    )
+    assert resolution.desired.document.missing_capabilities == ()
+    resolved = resolution.desired.document.resolved_configuration
+    assert resolved is not None
+    effective = resolved["effective_profile"]
+    assert isinstance(effective, dict)
+    assert effective["schema_version"] == 3
+    assert effective["network_access"] == {
+        "mode": "proxy_required",
+        "allowed_cidrs": ["10.10.0.0/16"],
+        "denied_cidrs": ["10.10.1.0/24"],
+        "domain_policy": {
+            "mode": "allowlist",
+            "allowed_domains": ["*.example.com"],
+            "denied_domains": ["blocked.example.com"],
+        },
+    }
+
+
+async def test_resolution_blocks_effective_proxy_profile_without_capabilities(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Strict Workspace policy never falls back through a direct-only Provider."""
+    async with rdb_session_manager() as session:
+        agent_id, _ = await _seed_selected_agent(
+            session,
+            handle="runtime-resolution-proxy-incompatible",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v3",
+            workspace_policy={
+                "schema_version": 2,
+                "network_restriction": {
+                    "mode": "proxy_required",
+                    "allowed_cidrs": [],
+                    "denied_cidrs": [],
+                    "domain_policy": {
+                        "mode": "unrestricted",
+                        "allowed_domains": [],
+                        "denied_domains": [],
+                    },
+                },
+            },
+        )
+
+    resolution = await _service(rdb_session_manager).ensure_for_agent(agent_id)
+
+    assert resolution.desired.status is RuntimeConfigurationStateStatus.BLOCKED
+    assert resolution.desired.reason_code == "profile_schema_version_unsupported"
+    assert resolution.desired.document is not None
+    assert resolution.desired.document.required_capabilities == (
+        "kubernetes.pod-profile",
+        "runtime.inspected-http-proxy",
+        "runtime.network-enforcement",
+        "runtime.resources",
+        "workspace.persistent-volume",
+    )
+    assert resolution.desired.document.resolved_configuration is None
+
+
 async def test_resolution_recovers_transient_disconnection_blocked_state(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -465,6 +581,7 @@ async def test_resolution_recovers_transient_disconnection_blocked_state(
         agent_id, _ = await _seed_selected_agent(
             session,
             handle="runtime-resolution-provider-reconnect",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v2",
         )
 
     service = _service(rdb_session_manager)
@@ -500,6 +617,7 @@ async def test_resolution_reads_sources_without_row_locks(
         agent_id, _ = await _seed_selected_agent(
             session,
             handle="runtime-resolution-lock-free-sources",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v2",
         )
 
     source_read_count = [0]
@@ -538,6 +656,7 @@ async def test_runtime_resolution_lock_allows_session_context_fk_reference(
         agent_id, _ = await _seed_selected_agent(
             session,
             handle="runtime-resolution-session-context-fk",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v2",
         )
 
     service = _service(independent_session_manager)
@@ -593,6 +712,7 @@ async def test_runtime_reconciliation_lock_allows_session_context_fk_reference(
         agent_id, _ = await _seed_selected_agent(
             session,
             handle="runtime-reconciliation-session-context-fk",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v2",
         )
 
     service = _service(independent_session_manager)
@@ -650,6 +770,7 @@ async def test_resolution_selection_cas_loss_retries_and_reconcile_converges(
             agent_id, _ = await _seed_selected_agent(
                 session,
                 handle="runtime-resolution-selection-cas",
+                provider_protocol_version="agent-runtime-provider-kubernetes-v2",
             )
             agent = await AgentRepository().get_by_id(session, agent_id)
             assert agent is not None
@@ -738,6 +859,7 @@ async def test_resolution_records_blocked_state_without_losing_prior_desired(
         agent_id, provider_id = await _seed_selected_agent(
             session,
             handle="runtime-resolution-blocked",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v2",
         )
 
     service = _service(rdb_session_manager)
@@ -766,6 +888,7 @@ async def test_resolution_requires_explicit_agent_profile(
         agent_id, _ = await _seed_selected_agent(
             session,
             handle="runtime-resolution-required",
+            provider_protocol_version="agent-runtime-provider-kubernetes-v2",
         )
         await session.execute(
             sa.update(RDBAgent)

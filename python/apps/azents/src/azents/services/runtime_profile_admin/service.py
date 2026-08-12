@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import RuntimeProviderKind
 from azents.core.runtime_profile import (
+    RuntimeInfrastructureProfileInternalSpec,
     RuntimeInfrastructureProfileKind,
-    RuntimeInfrastructureProfileSpec,
     RuntimeProfileCompatibility,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
@@ -168,7 +168,7 @@ class RuntimeProfileAdminService:
         display_name: str,
         description: str,
         lifecycle: RuntimeProfileLifecycle,
-        spec: RuntimeInfrastructureProfileSpec,
+        spec: RuntimeInfrastructureProfileInternalSpec,
         actor_user_id: str,
     ) -> RuntimeInfrastructureProfileProjection:
         """Create one typed Profile and enqueue its first source version."""
@@ -217,6 +217,9 @@ class RuntimeProfileAdminService:
                 compatibility=evaluate_runtime_profile_compatibility(
                     spec,
                     contract.profile_contracts if contract is not None else [],
+                    provider_protocol_version=(
+                        contract.protocol_version if contract is not None else None
+                    ),
                 ),
                 capability_revision_id=revision_id,
             )
@@ -231,7 +234,7 @@ class RuntimeProfileAdminService:
         display_name: str,
         description: str,
         lifecycle: RuntimeProfileLifecycle,
-        spec: RuntimeInfrastructureProfileSpec,
+        spec: RuntimeInfrastructureProfileInternalSpec,
         actor_user_id: str,
     ) -> RuntimeInfrastructureProfileProjection:
         """Replace one Profile with optimistic version fencing."""
@@ -302,6 +305,9 @@ class RuntimeProfileAdminService:
                 compatibility=evaluate_runtime_profile_compatibility(
                     spec,
                     contract.profile_contracts if contract is not None else [],
+                    provider_protocol_version=(
+                        contract.protocol_version if contract is not None else None
+                    ),
                 ),
                 capability_revision_id=revision_id,
             )
@@ -560,6 +566,9 @@ class RuntimeProfileAdminService:
         return evaluate_runtime_profile_compatibility(
             spec,
             contract.profile_contracts if contract is not None else [],
+            provider_protocol_version=(
+                contract.protocol_version if contract is not None else None
+            ),
         )
 
     @staticmethod

@@ -10,12 +10,20 @@ from azents.core.runtime_profile import (
     KubernetesContainerResources,
     KubernetesPodProfileSpecV1,
     KubernetesPodProfileSpecV2,
+    KubernetesPodProfileSpecV3,
     KubernetesSchedulingModule,
     KubernetesWorkspaceVolume,
     RuntimeConfigurationApplicationImpact,
     RuntimeConfigurationResolutionStatus,
+    RuntimeDirectNetworkAccess,
     RuntimeInfrastructureProfileKind,
+    RuntimeNetworkMode,
     RuntimeNetworkPolicyModule,
+    RuntimeNoNetworkAccess,
+    RuntimeProxyDomainMode,
+    RuntimeProxyDomainPolicyAllowlist,
+    RuntimeProxyDomainPolicyUnrestricted,
+    RuntimeProxyRequiredNetworkAccess,
     WorkspaceRuntimeProfilePolicyV1,
     classify_runtime_configuration_application,
     compose_workspace_runtime_profile,
@@ -109,6 +117,65 @@ def _docker_spec() -> DockerContainerProfileSpecV1:
     )
 
 
+def _direct_network_access() -> RuntimeDirectNetworkAccess:
+    return RuntimeDirectNetworkAccess(
+        mode=RuntimeNetworkMode.DIRECT,
+        allowed_cidrs=("10.0.0.0/8",),
+        denied_cidrs=("10.1.0.0/16",),
+    )
+
+
+def _proxy_network_access(
+    *,
+    domain_policy: (
+        RuntimeProxyDomainPolicyUnrestricted | RuntimeProxyDomainPolicyAllowlist
+    )
+    | None = None,
+) -> RuntimeProxyRequiredNetworkAccess:
+    return RuntimeProxyRequiredNetworkAccess(
+        mode=RuntimeNetworkMode.PROXY_REQUIRED,
+        allowed_cidrs=("10.0.0.0/8",),
+        denied_cidrs=("10.1.0.0/16",),
+        domain_policy=domain_policy
+        or RuntimeProxyDomainPolicyUnrestricted(
+            mode=RuntimeProxyDomainMode.UNRESTRICTED,
+            allowed_domains=(),
+            denied_domains=(),
+        ),
+    )
+
+
+def _kubernetes_spec_v3(
+    network_access: (
+        RuntimeDirectNetworkAccess
+        | RuntimeProxyRequiredNetworkAccess
+        | RuntimeNoNetworkAccess
+    ),
+) -> KubernetesPodProfileSpecV3:
+    return KubernetesPodProfileSpecV3(
+        profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+        contract_family="kubernetes.pod-profile",
+        schema_version=3,
+        runner_resources=KubernetesContainerResources(
+            cpu_request_millicores=None,
+            cpu_limit_millicores=None,
+            memory_request_bytes=None,
+            memory_limit_bytes=None,
+        ),
+        workspace_volume=KubernetesWorkspaceVolume(
+            storage_class_name="standard",
+            storage_request_bytes=1,
+        ),
+        network_access=network_access,
+        service_account_name=None,
+        scheduling=KubernetesSchedulingModule(
+            node_selector={},
+            tolerations=(),
+        ),
+        dind=None,
+    )
+
+
 def test_kubernetes_profile_preserves_absent_requests_with_limits() -> None:
     """Profile parsing never copies limits into absent request fields."""
     payload = _kubernetes_spec().model_dump(mode="json")
@@ -137,6 +204,7 @@ def test_kubernetes_profile_preserves_absent_requests_with_limits() -> None:
     [
         (_kubernetes_spec(), KubernetesPodProfileSpecV1),
         (_kubernetes_spec_v2(), KubernetesPodProfileSpecV2),
+        (_kubernetes_spec_v3(_direct_network_access()), KubernetesPodProfileSpecV3),
         (_docker_spec(), DockerContainerProfileSpecV1),
         (_docker_spec_v2(), DockerContainerProfileSpecV2),
     ],
@@ -145,17 +213,19 @@ def test_profile_parser_dispatches_by_kind_and_schema_version(
     spec: (
         KubernetesPodProfileSpecV1
         | KubernetesPodProfileSpecV2
+        | KubernetesPodProfileSpecV3
         | DockerContainerProfileSpecV1
         | DockerContainerProfileSpecV2
     ),
     expected_type: type[
         KubernetesPodProfileSpecV1
         | KubernetesPodProfileSpecV2
+        | KubernetesPodProfileSpecV3
         | DockerContainerProfileSpecV1
         | DockerContainerProfileSpecV2
     ],
 ) -> None:
-    """Profile parsing distinguishes v2 without changing existing kind values."""
+    """Profile parsing distinguishes every supported kind and schema version."""
     parsed = parse_runtime_infrastructure_profile_spec(spec.model_dump(mode="json"))
 
     assert isinstance(parsed, expected_type)
