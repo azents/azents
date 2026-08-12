@@ -13,6 +13,7 @@ from typing import Protocol
 import grpc
 from azents_runtime_control.grpc_provider_client import (
     json_value_from_struct,
+    operational_diagnostics_from_message,
     provider_report_from_message,
 )
 from azents_runtime_control.proto import (
@@ -20,7 +21,15 @@ from azents_runtime_control.proto import (
     runtime_provider_control_pb2_grpc,
 )
 from azents_runtime_control.provider import (
+    RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_ENFORCEMENT,
+    RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY,
+    RuntimeProviderOperationalDiagnostics,
+)
+from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
+)
+from azents_runtime_control.provider import (
+    RuntimeProviderReconciliationStatus as SharedProviderReconciliationStatus,
 )
 from azents_runtime_control.provider import (
     RuntimeProviderReport as SharedRuntimeProviderReport,
@@ -59,7 +68,8 @@ from azents.services.runtime_provider_control.data import (
 )
 
 _DEFAULT_COMMAND_BLOCK_MS = 500
-_KUBERNETES_PROVIDER_PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v2"
+_KUBERNETES_PROVIDER_PROTOCOL_VERSION_V2 = "agent-runtime-provider-kubernetes-v2"
+_KUBERNETES_PROVIDER_PROTOCOL_VERSION_V3 = "agent-runtime-provider-kubernetes-v3"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -76,12 +86,22 @@ type _ProviderOutbound = (
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class _ValidatedProviderReport:
+    """Provider report plus its configuration-acknowledgement authority."""
+
+    report: SharedRuntimeProviderReport
+    configuration_acknowledgement_allowed: bool
+
+
 class RuntimeProviderReportSink(Protocol):
     """Durable Provider state sink used by the gRPC bridge."""
 
     async def record_provider_report(
         self,
         report: SharedRuntimeProviderReport,
+        *,
+        configuration_acknowledgement_allowed: bool,
     ) -> None:
         """Persist one Provider observed-state report."""
         ...
@@ -109,6 +129,7 @@ class RuntimeProviderConnectionTracker(Protocol):
         generation: int,
         reported_provider_type: str,
         reported_protocol_version: str,
+        operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
         connected_at: datetime,
     ) -> object:
         """Record a newly authenticated Provider stream."""
@@ -120,6 +141,7 @@ class RuntimeProviderConnectionTracker(Protocol):
         authentication: RuntimeProviderCredentialAuthentication,
         generation: int,
         heartbeat_at: datetime,
+        operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
     ) -> bool:
         """Refresh an authenticated Provider stream."""
         ...
@@ -215,10 +237,14 @@ class RuntimeProviderControlGrpcServicer(
         """Register a Provider, then bridge heartbeat/report/command messages."""
         authentication = await self._auth.authenticate(context)
         first_message = await _first_register_message(request_iterator, context)
-        registration = _registration(
-            first_message,
-            owner_replica_id=self._owner_replica_id,
-        )
+        try:
+            registration = _registration(
+                first_message,
+                owner_replica_id=self._owner_replica_id,
+            )
+        except ValueError as error:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, str(error))
+            raise AssertionError("unreachable") from None
         identity_error = _registration_identity_error(registration, authentication)
         if identity_error is not None:
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, identity_error)
@@ -265,6 +291,7 @@ class RuntimeProviderControlGrpcServicer(
                 generation=accepted.generation,
                 reported_provider_type=registration.provider_type,
                 reported_protocol_version=registration.protocol_version,
+                operational_diagnostics=registration.operational_diagnostics,
                 connected_at=now,
             )
         except RuntimeProviderCredentialUnavailable:
@@ -297,6 +324,7 @@ class RuntimeProviderControlGrpcServicer(
                 connection_id=accepted.connection_id,
                 authentication=authentication,
                 command_types_by_request_id=command_types_by_request_id,
+                protocol_version=registration.protocol_version,
             )
         )
         command_task = asyncio.create_task(
@@ -360,6 +388,7 @@ class RuntimeProviderControlGrpcServicer(
         connection_id: str,
         authentication: RuntimeProviderCredentialAuthentication,
         command_types_by_request_id: dict[str, RuntimeProviderCommandType],
+        protocol_version: str,
     ) -> None:
         async for message in request_iterator:
             payload = message.WhichOneof("payload")
@@ -374,12 +403,34 @@ class RuntimeProviderControlGrpcServicer(
                 )
                 return
             if payload == "heartbeat":
+                try:
+                    operational_diagnostics = (
+                        operational_diagnostics_from_message(
+                            message.heartbeat.operational_diagnostics
+                        )
+                        if message.heartbeat.HasField("operational_diagnostics")
+                        else None
+                    )
+                except ValueError:
+                    await outbound.put(
+                        _error(message.request_id, "INVALID_PROVIDER_DIAGNOSTICS")
+                    )
+                    return
+                if operational_diagnostics is not None and (
+                    authentication.provider_kind is not RuntimeProviderKind.KUBERNETES
+                    or protocol_version == _KUBERNETES_PROVIDER_PROTOCOL_VERSION_V2
+                ):
+                    await outbound.put(
+                        _error(message.request_id, "INVALID_PROVIDER_DIAGNOSTICS")
+                    )
+                    return
                 if not await self._provider_generation_current(
                     provider_id=provider_id,
                     generation=generation,
                     request_id=message.request_id,
                     outbound=outbound,
                     authentication=authentication,
+                    operational_diagnostics=operational_diagnostics,
                 ):
                     return
                 await outbound.put(
@@ -408,10 +459,25 @@ class RuntimeProviderControlGrpcServicer(
                     request_id=message.request_id,
                     outbound=outbound,
                     authentication=authentication,
+                    operational_diagnostics=None,
                 ):
                     return
+                try:
+                    validated_report = _shared_report(
+                        message.report,
+                        provider_kind=authentication.provider_kind,
+                        protocol_version=protocol_version,
+                    )
+                except ValueError:
+                    await outbound.put(
+                        _error(message.request_id, "INVALID_PROVIDER_REPORT")
+                    )
+                    return
                 await self._report_sink.record_provider_report(
-                    _shared_report(message.report)
+                    validated_report.report,
+                    configuration_acknowledgement_allowed=(
+                        validated_report.configuration_acknowledgement_allowed
+                    ),
                 )
                 continue
             if payload == "command_completion":
@@ -437,12 +503,26 @@ class RuntimeProviderControlGrpcServicer(
                         _error(message.request_id, "PROVIDER_IDENTITY_MISMATCH")
                     )
                     return
+                validated_report: _ValidatedProviderReport | None = None
+                if message.command_completion.report.runtime_id:
+                    try:
+                        validated_report = _shared_report(
+                            message.command_completion.report,
+                            provider_kind=authentication.provider_kind,
+                            protocol_version=protocol_version,
+                        )
+                    except ValueError:
+                        await outbound.put(
+                            _error(message.request_id, "INVALID_PROVIDER_REPORT")
+                        )
+                        return
                 if not await self._provider_generation_current(
                     provider_id=provider_id,
                     generation=generation,
                     request_id=message.request_id,
                     outbound=outbound,
                     authentication=authentication,
+                    operational_diagnostics=None,
                 ):
                     return
                 await self._complete_provider_command(
@@ -453,9 +533,14 @@ class RuntimeProviderControlGrpcServicer(
                     message.command_completion.request_id,
                     None,
                 )
-                if message.command_completion.report.runtime_id:
-                    report = _shared_report(message.command_completion.report)
-                    await self._report_sink.record_provider_report(report)
+                if validated_report is not None:
+                    report = validated_report.report
+                    await self._report_sink.record_provider_report(
+                        report,
+                        configuration_acknowledgement_allowed=(
+                            validated_report.configuration_acknowledgement_allowed
+                        ),
+                    )
                     if (
                         command_type is RuntimeProviderCommandType.OBSERVE
                         and message.command_completion.success
@@ -471,6 +556,7 @@ class RuntimeProviderControlGrpcServicer(
         request_id: str,
         outbound: asyncio.Queue[_ProviderOutbound],
         authentication: RuntimeProviderCredentialAuthentication,
+        operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
     ) -> bool:
         heartbeat_at = datetime.now(UTC)
         current = await self._control_protocol.heartbeat_provider(
@@ -482,6 +568,7 @@ class RuntimeProviderControlGrpcServicer(
             authentication=authentication,
             generation=generation,
             heartbeat_at=heartbeat_at,
+            operational_diagnostics=operational_diagnostics,
         )
         if not current:
             await outbound.put(_error(request_id, "STALE_PROVIDER_GENERATION"))
@@ -794,6 +881,11 @@ def _registration(
         config_schema_version=register.config_schema_version,
         metadata=json_value_from_struct(register.metadata),
         capability_contract=json_value_from_struct(register.capability_contract),
+        operational_diagnostics=(
+            operational_diagnostics_from_message(register.operational_diagnostics)
+            if register.HasField("operational_diagnostics")
+            else None
+        ),
         auth_credential_id=register.auth_credential_id,
         connection_id=message.connection_id,
         owner_replica_id=owner_replica_id,
@@ -822,12 +914,21 @@ def _registration_protocol_version_error(
 ) -> str | None:
     """Return unsupported authenticated Provider protocol errors."""
     if authentication.provider_kind is not RuntimeProviderKind.KUBERNETES:
+        if registration.operational_diagnostics is not None:
+            return "Only Kubernetes Runtime Providers can send diagnostics"
         return None
-    if registration.protocol_version == _KUBERNETES_PROVIDER_PROTOCOL_VERSION:
+    if registration.protocol_version == _KUBERNETES_PROVIDER_PROTOCOL_VERSION_V2:
+        if registration.operational_diagnostics is not None:
+            return "Kubernetes Runtime Provider protocol v2 cannot send diagnostics"
+        return None
+    if registration.protocol_version == _KUBERNETES_PROVIDER_PROTOCOL_VERSION_V3:
+        if registration.operational_diagnostics is None:
+            return "Kubernetes Runtime Provider protocol v3 requires diagnostics"
         return None
     return (
         "Kubernetes Runtime Provider protocol version must be "
-        f"{_KUBERNETES_PROVIDER_PROTOCOL_VERSION}"
+        f"{_KUBERNETES_PROVIDER_PROTOCOL_VERSION_V2} or "
+        f"{_KUBERNETES_PROVIDER_PROTOCOL_VERSION_V3}"
     )
 
 
@@ -906,8 +1007,42 @@ def _deadline_expired(envelope: RuntimeRequestEnvelope, now: datetime) -> bool:
 
 def _shared_report(
     message: runtime_provider_control_pb2.RuntimeProviderReport,
-) -> SharedRuntimeProviderReport:
-    return provider_report_from_message(message)
+    *,
+    provider_kind: RuntimeProviderKind,
+    protocol_version: str,
+) -> _ValidatedProviderReport:
+    report = provider_report_from_message(message)
+    evidence = report.reconciliation
+    if evidence is None:
+        return _ValidatedProviderReport(
+            report=report,
+            configuration_acknowledgement_allowed=(
+                provider_kind is not RuntimeProviderKind.KUBERNETES
+                or protocol_version == _KUBERNETES_PROVIDER_PROTOCOL_VERSION_V2
+            ),
+        )
+    if provider_kind is not RuntimeProviderKind.KUBERNETES:
+        raise ValueError(
+            "Only Kubernetes Runtime Providers can send reconciliation evidence"
+        )
+    if len(evidence.observations) != 1:
+        raise ValueError("Provider reconciliation evidence requires one observation")
+    kind = evidence.observations[0].kind
+    expected_kind = (
+        RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_ENFORCEMENT
+        if protocol_version == _KUBERNETES_PROVIDER_PROTOCOL_VERSION_V3
+        else RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY
+    )
+    if kind != expected_kind:
+        raise ValueError("Provider reconciliation evidence conflicts with protocol")
+    return _ValidatedProviderReport(
+        report=report,
+        configuration_acknowledgement_allowed=(
+            protocol_version == _KUBERNETES_PROVIDER_PROTOCOL_VERSION_V2
+            or evidence.observations[0].status
+            is SharedProviderReconciliationStatus.IN_SYNC
+        ),
+    )
 
 
 def _required_mapping(payload: dict[str, JsonValue], key: str) -> dict[str, JsonValue]:

@@ -5,6 +5,7 @@ import enum
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -285,6 +286,14 @@ class RDBRuntimeProviderConnection(RDBModel):
     reported_protocol_version: Mapped[str] = mapped_column(
         sa.String(120),
         nullable=False,
+    )
+    operational_diagnostics: Mapped[dict[str, object] | None] = mapped_column(
+        postgresql.JSONB,
+        nullable=True,
+    )
+    diagnostics_checked_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
     )
     connected_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,

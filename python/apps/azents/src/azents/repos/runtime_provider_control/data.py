@@ -3,6 +3,8 @@
 import datetime
 from dataclasses import dataclass
 
+from azents_runtime_control.provider import RuntimeProviderOperationalDiagnostics
+
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
     RuntimeProviderConnectionStatus,
@@ -86,6 +88,7 @@ class RuntimeProviderConnection:
     status: RuntimeProviderConnectionStatus
     reported_provider_type: str
     reported_protocol_version: str
+    operational_diagnostics: RuntimeProviderOperationalDiagnostics | None
     connected_at: datetime.datetime
     last_heartbeat_at: datetime.datetime
     disconnected_at: datetime.datetime | None
@@ -106,4 +109,5 @@ class RuntimeProviderConnectionCreate:
     generation: int
     reported_provider_type: str
     reported_protocol_version: str
+    operational_diagnostics: RuntimeProviderOperationalDiagnostics | None
     connected_at: datetime.datetime

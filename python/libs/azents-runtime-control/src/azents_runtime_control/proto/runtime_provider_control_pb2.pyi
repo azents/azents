@@ -184,6 +184,7 @@ class ProviderRegister(_message.Message):
     METADATA_FIELD_NUMBER: _builtins.int
     AUTH_CREDENTIAL_ID_FIELD_NUMBER: _builtins.int
     CAPABILITY_CONTRACT_FIELD_NUMBER: _builtins.int
+    OPERATIONAL_DIAGNOSTICS_FIELD_NUMBER: _builtins.int
     provider_id: _builtins.str
     provider_type: _builtins.str
     scope: _builtins.str
@@ -199,6 +200,8 @@ class ProviderRegister(_message.Message):
     def metadata(self) -> _struct_pb2.Struct: ...
     @_builtins.property
     def capability_contract(self) -> _struct_pb2.Struct: ...
+    @_builtins.property
+    def operational_diagnostics(self) -> Global___ProviderOperationalDiagnostics: ...
     def __init__(
         self,
         *,
@@ -212,9 +215,15 @@ class ProviderRegister(_message.Message):
         metadata: _struct_pb2.Struct | None = ...,
         auth_credential_id: _builtins.str = ...,
         capability_contract: _struct_pb2.Struct | None = ...,
+        operational_diagnostics: Global___ProviderOperationalDiagnostics | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
-        "capability_contract", b"capability_contract", "metadata", b"metadata"
+        "capability_contract",
+        b"capability_contract",
+        "metadata",
+        b"metadata",
+        "operational_diagnostics",
+        b"operational_diagnostics",
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
@@ -228,6 +237,8 @@ class ProviderRegister(_message.Message):
         b"config_schema_version",
         "metadata",
         b"metadata",
+        "operational_diagnostics",
+        b"operational_diagnostics",
         "protocol_version",
         b"protocol_version",
         "provider_id",
@@ -286,16 +297,25 @@ class ProviderHeartbeat(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
     MONOTONIC_SEQUENCE_FIELD_NUMBER: _builtins.int
+    OPERATIONAL_DIAGNOSTICS_FIELD_NUMBER: _builtins.int
     monotonic_sequence: _builtins.int
+    @_builtins.property
+    def operational_diagnostics(self) -> Global___ProviderOperationalDiagnostics: ...
     def __init__(
         self,
         *,
         monotonic_sequence: _builtins.int = ...,
+        operational_diagnostics: Global___ProviderOperationalDiagnostics | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _Never
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "operational_diagnostics", b"operational_diagnostics"
+    ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
-        "monotonic_sequence", b"monotonic_sequence"
+        "monotonic_sequence",
+        b"monotonic_sequence",
+        "operational_diagnostics",
+        b"operational_diagnostics",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
@@ -624,6 +644,86 @@ class RuntimeProviderReconciliationEvidence(_message.Message):
 Global___RuntimeProviderReconciliationEvidence: _TypeAlias = (
     RuntimeProviderReconciliationEvidence
 )
+
+@_typing.final
+class ProviderOperationalWarning(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    @_typing.final
+    class MetadataEntry(_message.Message):
+        DESCRIPTOR: _descriptor.Descriptor
+
+        KEY_FIELD_NUMBER: _builtins.int
+        VALUE_FIELD_NUMBER: _builtins.int
+        key: _builtins.str
+        value: _builtins.str
+        def __init__(
+            self,
+            *,
+            key: _builtins.str = ...,
+            value: _builtins.str = ...,
+        ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _Never
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+        _ClearFieldArgType: _TypeAlias = _typing.Literal[
+            "key", b"key", "value", b"value"
+        ]
+        def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+        def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+    CODE_FIELD_NUMBER: _builtins.int
+    SEVERITY_FIELD_NUMBER: _builtins.int
+    METADATA_FIELD_NUMBER: _builtins.int
+    code: _builtins.str
+    severity: _builtins.str
+    @_builtins.property
+    def metadata(self) -> _containers.ScalarMap[_builtins.str, _builtins.str]: ...
+    def __init__(
+        self,
+        *,
+        code: _builtins.str = ...,
+        severity: _builtins.str = ...,
+        metadata: _abc.Mapping[_builtins.str, _builtins.str] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "code", b"code", "metadata", b"metadata", "severity", b"severity"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___ProviderOperationalWarning: _TypeAlias = ProviderOperationalWarning
+
+@_typing.final
+class ProviderOperationalDiagnostics(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    CHECKED_AT_FIELD_NUMBER: _builtins.int
+    WARNINGS_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def checked_at(self) -> _timestamp_pb2.Timestamp: ...
+    @_builtins.property
+    def warnings(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___ProviderOperationalWarning
+    ]: ...
+    def __init__(
+        self,
+        *,
+        checked_at: _timestamp_pb2.Timestamp | None = ...,
+        warnings: _abc.Iterable[Global___ProviderOperationalWarning] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["checked_at", b"checked_at"]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "checked_at", b"checked_at", "warnings", b"warnings"
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___ProviderOperationalDiagnostics: _TypeAlias = ProviderOperationalDiagnostics
 
 @_typing.final
 class ProviderCommandCompletion(_message.Message):

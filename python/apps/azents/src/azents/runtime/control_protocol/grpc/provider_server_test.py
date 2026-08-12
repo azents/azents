@@ -17,6 +17,7 @@ from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
 )
 from azents_runtime_control.provider import (
+    RuntimeProviderOperationalDiagnostics,
     RuntimeProviderReconciliationEvidence,
     RuntimeProviderReconciliationObservation,
     RuntimeProviderReconciliationStatus,
@@ -71,10 +72,19 @@ class FakeReportSink:
     """Collect Provider reports delivered by the gRPC bridge."""
 
     reports: list[RuntimeProviderReport] = dataclasses.field(default_factory=list)
+    configuration_acknowledgements: list[bool] = dataclasses.field(default_factory=list)
 
-    async def record_provider_report(self, report: RuntimeProviderReport) -> None:
+    async def record_provider_report(
+        self,
+        report: RuntimeProviderReport,
+        *,
+        configuration_acknowledgement_allowed: bool,
+    ) -> None:
         """Record one Provider report."""
         self.reports.append(report)
+        self.configuration_acknowledgements.append(
+            configuration_acknowledgement_allowed
+        )
 
 
 @dataclasses.dataclass
@@ -108,6 +118,8 @@ class FakeProviderCredentialBridge:
             evidence_expires_at=None,
         )
     )
+    create_calls: list[dict[str, object]] = dataclasses.field(default_factory=list)
+    heartbeat_calls: list[dict[str, object]] = dataclasses.field(default_factory=list)
 
     async def authenticate_credential(
         self,
@@ -130,12 +142,14 @@ class FakeProviderCredentialBridge:
             raise RuntimeProviderCredentialUnavailable("auth_method_unavailable")
         return await self.authenticate_credential(secret=secret)
 
-    async def create_connection(self, **_: object) -> object:
+    async def create_connection(self, **kwargs: object) -> object:
         """Accept a test Provider stream."""
+        self.create_calls.append(kwargs)
         return object()
 
-    async def heartbeat_connection(self, **_: object) -> bool:
+    async def heartbeat_connection(self, **kwargs: object) -> bool:
         """Accept a test Provider stream heartbeat."""
+        self.heartbeat_calls.append(kwargs)
         return True
 
     async def connection_active(self, **_: object) -> bool:
@@ -430,9 +444,25 @@ async def test_provider_grpc_hands_only_observe_completion_to_reconciler() -> No
     )
     sink = FakeReportSink()
     handler = FakeObserveCompletionHandler()
-    servicer = _servicer(service, sink, observe_completion_handler=handler)
+    bridge = FakeProviderCredentialBridge(
+        authentication=dataclasses.replace(
+            FakeProviderCredentialBridge().authentication,
+            provider_kind=RuntimeProviderKind.KUBERNETES,
+        )
+    )
+    servicer = _servicer(
+        service,
+        sink,
+        bridge=bridge,
+        observe_completion_handler=handler,
+    )
     inbound = QueueIterator()
-    await inbound.put(_register_message())
+    await inbound.put(
+        _register_message(
+            provider_type="kubernetes",
+            protocol_version="agent-runtime-provider-kubernetes-v2",
+        )
+    )
 
     stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
     accepted = await anext(stream)
@@ -683,6 +713,270 @@ async def test_provider_grpc_accepts_kubernetes_v2_registration() -> None:
     assert accepted.register_accepted.provider_id == "provider-1"
 
 
+@pytest.mark.asyncio
+async def test_provider_grpc_persists_v3_registration_and_heartbeat_diagnostics() -> (
+    None
+):
+    """V3 diagnostics are generation-fenced snapshots outside capability authority."""
+    store = InMemoryRuntimeCoordinationStore()
+    bridge = FakeProviderCredentialBridge(
+        authentication=dataclasses.replace(
+            FakeProviderCredentialBridge().authentication,
+            provider_kind=RuntimeProviderKind.KUBERNETES,
+        )
+    )
+    servicer = _servicer(
+        RuntimeControlProtocolService(store),
+        FakeReportSink(),
+        bridge=bridge,
+    )
+    inbound = QueueIterator()
+    register = _register_message(
+        provider_type="kubernetes",
+        protocol_version="agent-runtime-provider-kubernetes-v3",
+    )
+    register.register.operational_diagnostics.CopyFrom(
+        _diagnostics_message(
+            checked_at=_now(),
+            code="cni_support_unconfirmed",
+        )
+    )
+    await inbound.put(register)
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    heartbeat = runtime_provider_control_pb2.ProviderHeartbeat(monotonic_sequence=1)
+    heartbeat.operational_diagnostics.CopyFrom(
+        _diagnostics_message(
+            checked_at=_now() + timedelta(minutes=5),
+            code="unexpected_network_policy",
+        )
+    )
+    await inbound.put(
+        runtime_provider_control_pb2.ProviderMessage(
+            connection_id="connection-1",
+            request_id="heartbeat-1",
+            generation=accepted.register_accepted.generation,
+            heartbeat=heartbeat,
+        )
+    )
+    ack = await anext(stream)
+    await _close_stream(stream)
+
+    created = bridge.create_calls[0]["operational_diagnostics"]
+    replaced = bridge.heartbeat_calls[0]["operational_diagnostics"]
+    assert isinstance(created, RuntimeProviderOperationalDiagnostics)
+    assert created.warnings[0].code == "cni_support_unconfirmed"
+    assert isinstance(replaced, RuntimeProviderOperationalDiagnostics)
+    assert replaced.warnings[0].code == "unexpected_network_policy"
+    assert ack.heartbeat_ack.monotonic_sequence == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "acknowledgement_allowed"),
+    [
+        (None, False),
+        ("drifted", False),
+        ("in_sync", True),
+    ],
+)
+async def test_provider_grpc_v3_enforcement_controls_configuration_acknowledgement(
+    status: str | None,
+    acknowledgement_allowed: bool,
+) -> None:
+    """Only aggregate in-sync v3 evidence can acknowledge configuration."""
+    bridge = FakeProviderCredentialBridge(
+        authentication=dataclasses.replace(
+            FakeProviderCredentialBridge().authentication,
+            provider_kind=RuntimeProviderKind.KUBERNETES,
+        )
+    )
+    sink = FakeReportSink()
+    inbound = QueueIterator()
+    register = _register_message(
+        provider_type="kubernetes",
+        protocol_version="agent-runtime-provider-kubernetes-v3",
+    )
+    register.register.operational_diagnostics.CopyFrom(
+        _diagnostics_message(
+            checked_at=_now(),
+            code="cni_support_unconfirmed",
+        )
+    )
+    await inbound.put(register)
+    stream = _servicer(
+        RuntimeControlProtocolService(InMemoryRuntimeCoordinationStore()),
+        sink,
+        bridge=bridge,
+    ).ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    report = _report_message()
+    if status is not None:
+        report.reconciliation.CopyFrom(
+            runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence(
+                observations=[
+                    runtime_provider_control_pb2.RuntimeProviderReconciliationObservation(
+                        kind="network_enforcement",
+                        status=status,
+                        reason=f"network_enforcement_{status}",
+                    )
+                ]
+            )
+        )
+    await inbound.put(
+        runtime_provider_control_pb2.ProviderMessage(
+            connection_id="connection-1",
+            request_id="report-1",
+            generation=accepted.register_accepted.generation,
+            report=report,
+        )
+    )
+    await asyncio.sleep(0)
+    await _close_stream(stream)
+
+    assert len(sink.reports) == 1
+    assert sink.configuration_acknowledgements == [acknowledgement_allowed]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", ["registration", "heartbeat", "report"])
+async def test_provider_grpc_rejects_kubernetes_payloads_from_docker(
+    payload: str,
+) -> None:
+    """Docker cannot submit Kubernetes diagnostics or reconciliation evidence."""
+    sink = FakeReportSink()
+    inbound = QueueIterator()
+    register = _register_message()
+    if payload == "registration":
+        register.register.operational_diagnostics.CopyFrom(
+            _diagnostics_message(
+                checked_at=_now(),
+                code="cni_support_unconfirmed",
+            )
+        )
+    await inbound.put(register)
+    stream = _servicer(
+        RuntimeControlProtocolService(InMemoryRuntimeCoordinationStore()),
+        sink,
+    ).ConnectProvider(inbound, FakeGrpcContext())
+    if payload == "registration":
+        with pytest.raises(RuntimeError, match="FAILED_PRECONDITION"):
+            await anext(stream)
+        return
+    accepted = await anext(stream)
+    if payload == "heartbeat":
+        heartbeat = runtime_provider_control_pb2.ProviderHeartbeat(monotonic_sequence=1)
+        heartbeat.operational_diagnostics.CopyFrom(
+            _diagnostics_message(
+                checked_at=_now(),
+                code="cni_support_unconfirmed",
+            )
+        )
+        message = runtime_provider_control_pb2.ProviderMessage(
+            connection_id="connection-1",
+            request_id="heartbeat-1",
+            generation=accepted.register_accepted.generation,
+            heartbeat=heartbeat,
+        )
+        expected_code = "INVALID_PROVIDER_DIAGNOSTICS"
+    else:
+        report = _report_message()
+        report.reconciliation.CopyFrom(
+            runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence(
+                observations=[
+                    runtime_provider_control_pb2.RuntimeProviderReconciliationObservation(
+                        kind="network_policy",
+                        status="in_sync",
+                        reason="network_policy_in_sync",
+                    )
+                ]
+            )
+        )
+        message = runtime_provider_control_pb2.ProviderMessage(
+            connection_id="connection-1",
+            request_id="report-1",
+            generation=accepted.register_accepted.generation,
+            report=report,
+        )
+        expected_code = "INVALID_PROVIDER_REPORT"
+    await inbound.put(message)
+    error = await anext(stream)
+    await _close_stream(stream)
+
+    assert error.error.code == expected_code
+    assert sink.reports == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("protocol_version", "kind"),
+    [
+        ("agent-runtime-provider-kubernetes-v2", "network_enforcement"),
+        ("agent-runtime-provider-kubernetes-v3", "network_policy"),
+    ],
+)
+async def test_provider_grpc_rejects_protocol_mismatched_reconciliation(
+    protocol_version: str,
+    kind: str,
+) -> None:
+    """V2 and v3 evidence cannot cross-authorize one another."""
+    store = InMemoryRuntimeCoordinationStore()
+    bridge = FakeProviderCredentialBridge(
+        authentication=dataclasses.replace(
+            FakeProviderCredentialBridge().authentication,
+            provider_kind=RuntimeProviderKind.KUBERNETES,
+        )
+    )
+    sink = FakeReportSink()
+    servicer = _servicer(
+        RuntimeControlProtocolService(store),
+        sink,
+        bridge=bridge,
+    )
+    inbound = QueueIterator()
+    register = _register_message(
+        provider_type="kubernetes",
+        protocol_version=protocol_version,
+    )
+    if protocol_version.endswith("-v3"):
+        register.register.operational_diagnostics.CopyFrom(
+            _diagnostics_message(
+                checked_at=_now(),
+                code="cni_support_unconfirmed",
+            )
+        )
+    await inbound.put(register)
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    report = _report_message()
+    report.reconciliation.CopyFrom(
+        runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence(
+            observations=[
+                runtime_provider_control_pb2.RuntimeProviderReconciliationObservation(
+                    kind=kind,
+                    status="drifted",
+                    reason="network_enforcement_mismatch",
+                )
+            ]
+        )
+    )
+    await inbound.put(
+        runtime_provider_control_pb2.ProviderMessage(
+            connection_id="connection-1",
+            request_id="report-1",
+            generation=accepted.register_accepted.generation,
+            report=report,
+        )
+    )
+    error = await anext(stream)
+    await _close_stream(stream)
+
+    assert error.error.code == "INVALID_PROVIDER_REPORT"
+    assert sink.reports == []
+
+
 def _servicer(
     service: RuntimeControlProtocolService,
     sink: FakeReportSink,
@@ -839,6 +1133,29 @@ def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
     timestamp = timestamp_pb2.Timestamp()
     timestamp.FromDatetime(value)
     return timestamp
+
+
+def _diagnostics_message(
+    *,
+    checked_at: datetime,
+    code: str,
+) -> runtime_provider_control_pb2.ProviderOperationalDiagnostics:
+    return runtime_provider_control_pb2.ProviderOperationalDiagnostics(
+        checked_at=_timestamp(checked_at),
+        warnings=[
+            runtime_provider_control_pb2.ProviderOperationalWarning(
+                code=code,
+                severity="warning",
+                metadata=_diagnostics_metadata(code),
+            )
+        ],
+    )
+
+
+def _diagnostics_metadata(code: str) -> dict[str, str]:
+    if code == "unexpected_network_policy":
+        return {"policy_count": "1"}
+    return {"reason": "api_discovery_unavailable"}
 
 
 def _now() -> datetime:

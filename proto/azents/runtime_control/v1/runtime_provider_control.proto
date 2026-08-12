@@ -47,6 +47,7 @@ message ProviderRegister {
   google.protobuf.Struct metadata = 8;
   string auth_credential_id = 9;
   google.protobuf.Struct capability_contract = 10;
+  ProviderOperationalDiagnostics operational_diagnostics = 11;
 }
 
 message ProviderRegisterAccepted {
@@ -58,6 +59,7 @@ message ProviderRegisterAccepted {
 
 message ProviderHeartbeat {
   uint64 monotonic_sequence = 1;
+  ProviderOperationalDiagnostics operational_diagnostics = 2;
 }
 
 message ProviderHeartbeatAck {
@@ -105,6 +107,17 @@ message RuntimeProviderReconciliationObservation {
 
 message RuntimeProviderReconciliationEvidence {
   repeated RuntimeProviderReconciliationObservation observations = 1;
+}
+
+message ProviderOperationalWarning {
+  string code = 1;
+  string severity = 2;
+  map<string, string> metadata = 3;
+}
+
+message ProviderOperationalDiagnostics {
+  google.protobuf.Timestamp checked_at = 1;
+  repeated ProviderOperationalWarning warnings = 2;
 }
 
 message ProviderCommandCompletion {

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from azents_runtime_control.provider import (
+    RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_ENFORCEMENT,
     RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY,
     RuntimeProviderReport,
 )
@@ -274,7 +275,7 @@ class RuntimeLifecycleReconciler:
         self,
         report: RuntimeProviderReport,
     ) -> bool:
-        """Immediately repair one current NetworkPolicy drift observation.
+        """Immediately repair one current actionable network drift observation.
 
         This method is invoked only by the gRPC stream for a correlated successful
         ``OBSERVE`` completion. It deliberately retains no repair state: lost
@@ -288,7 +289,11 @@ class RuntimeLifecycleReconciler:
             return False
         observation = evidence.observations[0]
         if (
-            observation.kind != RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY
+            observation.kind
+            not in {
+                RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY,
+                RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_ENFORCEMENT,
+            }
             or observation.status is not SharedProviderReconciliationStatus.DRIFTED
         ):
             return False
@@ -337,7 +342,7 @@ class RuntimeLifecycleReconciler:
             repair_target = runtime
         assert repair_target is not None
         _LOGGER.info(
-            "Runtime NetworkPolicy drift repair handed off",
+            "Runtime network enforcement drift repair handed off",
             extra={
                 "runtime_id": repair_target.id,
                 "provider_id": report.provider_id,

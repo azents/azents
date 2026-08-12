@@ -50,7 +50,12 @@ class RuntimeProviderReportRepositorySink:
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
 
-    async def record_provider_report(self, report: SharedRuntimeProviderReport) -> None:
+    async def record_provider_report(
+        self,
+        report: SharedRuntimeProviderReport,
+        *,
+        configuration_acknowledgement_allowed: bool,
+    ) -> None:
         """Persist one Provider report."""
         async with self.session_manager() as session:
             runtime = await self.runtime_repository.get_by_id(
@@ -97,6 +102,9 @@ class RuntimeProviderReportRepositorySink:
                 session,
                 runtime=runtime,
                 report=report,
+                configuration_acknowledgement_allowed=(
+                    configuration_acknowledgement_allowed
+                ),
             )
             persisted = await self.runtime_repository.record_provider_observed_state(
                 session,
@@ -109,6 +117,9 @@ class RuntimeProviderReportRepositorySink:
                     report=report,
                     desired_generation=runtime.desired_generation,
                     failure_code=runtime.failure_code,
+                    configuration_acknowledgement_allowed=(
+                        configuration_acknowledgement_allowed
+                    ),
                 ),
             )
             if persisted is None:
@@ -125,8 +136,11 @@ class RuntimeProviderReportRepositorySink:
         *,
         runtime: AgentRuntime,
         report: SharedRuntimeProviderReport,
+        configuration_acknowledgement_allowed: bool,
     ) -> AgentRuntimeFailurePatch | None:
         if report.observed_state is not SharedProviderObservedState.RUNNING:
+            return None
+        if not configuration_acknowledgement_allowed:
             return None
         provider_id = runtime.runtime_provider_resource_id
         if provider_id is None:
@@ -401,6 +415,7 @@ def _provider_report_clears_failure(
     report: SharedRuntimeProviderReport,
     desired_generation: int,
     failure_code: str | None,
+    configuration_acknowledgement_allowed: bool,
 ) -> bool:
     return (
         report.observed_state == SharedProviderObservedState.RUNNING
@@ -409,7 +424,10 @@ def _provider_report_clears_failure(
             failure_code is None
             or failure_code == "START_TIMEOUT"
             or failure_code.startswith("PROVIDER_")
-            or failure_code.startswith("RUNTIME_CONFIGURATION_PROVIDER_")
+            or (
+                configuration_acknowledgement_allowed
+                and failure_code.startswith("RUNTIME_CONFIGURATION_PROVIDER_")
+            )
         )
     )
 

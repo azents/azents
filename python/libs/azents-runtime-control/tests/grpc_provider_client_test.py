@@ -12,6 +12,7 @@ from azents_runtime_control.grpc_provider_client import (
     PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT,
     GrpcProviderControlClient,
     RuntimeProviderControlStreamClosed,
+    operational_diagnostics_from_message,
     provider_report_from_message,
 )
 from azents_runtime_control.proto import (
@@ -22,6 +23,9 @@ from azents_runtime_control.provider import (
     ProviderCommandCompletion,
     ProviderRegistration,
     RuntimeProviderObservedState,
+    RuntimeProviderOperationalDiagnostics,
+    RuntimeProviderOperationalWarning,
+    RuntimeProviderOperationalWarningSeverity,
     RuntimeProviderReconciliationEvidence,
     RuntimeProviderReconciliationObservation,
     RuntimeProviderReconciliationStatus,
@@ -135,6 +139,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
         provider_id="provider-1",
         generation=accepted.generation,
         heartbeat_at=_now(),
+        operational_diagnostics=None,
     )
 
     await client.complete_provider_command(
@@ -257,6 +262,7 @@ def _registration() -> ProviderRegistration:
         config_schema_version="v1",
         metadata={"region": "test"},
         capability_contract={"schema_version": 1},
+        operational_diagnostics=None,
     )
 
 
@@ -362,6 +368,64 @@ def test_provider_wire_evidence_rejects_noncanonical_sequence() -> None:
 
     with pytest.raises(ValueError, match="canonical positive decimal"):
         provider_report_from_message(message)
+
+
+def test_operational_diagnostics_round_trip_preserves_safe_warning_snapshot() -> None:
+    """Registration and heartbeat diagnostics retain one bounded typed snapshot."""
+    checked_at = _now()
+    message = runtime_provider_control_pb2.ProviderOperationalDiagnostics(
+        checked_at=_timestamp_message(),
+        warnings=[
+            runtime_provider_control_pb2.ProviderOperationalWarning(
+                code="cni_support_unconfirmed",
+                severity="warning",
+                metadata={"reason": "api_discovery_unavailable"},
+            )
+        ],
+    )
+
+    diagnostics = operational_diagnostics_from_message(message)
+
+    assert diagnostics == RuntimeProviderOperationalDiagnostics(
+        checked_at=checked_at,
+        warnings=(
+            RuntimeProviderOperationalWarning(
+                code="cni_support_unconfirmed",
+                severity=RuntimeProviderOperationalWarningSeverity.WARNING,
+                metadata={"reason": "api_discovery_unavailable"},
+            ),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("message", "match"),
+    [
+        (
+            runtime_provider_control_pb2.ProviderOperationalDiagnostics(),
+            "checked_at is required",
+        ),
+        (
+            runtime_provider_control_pb2.ProviderOperationalDiagnostics(
+                checked_at=timestamp_pb2.Timestamp(),
+                warnings=[
+                    runtime_provider_control_pb2.ProviderOperationalWarning(
+                        code="warning-1",
+                        severity="error",
+                    )
+                ],
+            ),
+            "'error' is not a valid RuntimeProviderOperationalWarningSeverity",
+        ),
+    ],
+)
+def test_operational_diagnostics_rejects_malformed_wire_snapshot(
+    message: runtime_provider_control_pb2.ProviderOperationalDiagnostics,
+    match: str,
+) -> None:
+    """Malformed deployment warnings cannot become a persisted snapshot."""
+    with pytest.raises(ValueError, match=match):
+        operational_diagnostics_from_message(message)
 
 
 def _report() -> RuntimeProviderReport:

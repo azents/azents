@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 
 from azcommon.datetime import tznow
+from azents_runtime_control.provider import RuntimeProviderOperationalDiagnostics
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -326,6 +327,7 @@ class RuntimeProviderEnrollmentService:
         generation: int,
         reported_provider_type: str,
         reported_protocol_version: str,
+        operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
         connected_at: datetime.datetime,
     ) -> RuntimeProviderConnection:
         """Persist an authenticated Provider stream after control registration."""
@@ -381,6 +383,7 @@ class RuntimeProviderEnrollmentService:
                     generation=generation,
                     reported_provider_type=reported_provider_type,
                     reported_protocol_version=reported_protocol_version,
+                    operational_diagnostics=operational_diagnostics,
                     connected_at=connected_at,
                 ),
             )
@@ -427,6 +430,7 @@ class RuntimeProviderEnrollmentService:
         authentication: RuntimeProviderCredentialAuthentication,
         generation: int,
         heartbeat_at: datetime.datetime,
+        operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
     ) -> bool:
         """Refresh an authenticated connection after checking credential validity."""
         async with self.session_manager() as session:
@@ -439,6 +443,7 @@ class RuntimeProviderEnrollmentService:
                 auth_subject=authentication.auth_subject,
                 generation=generation,
                 heartbeat_at=heartbeat_at,
+                operational_diagnostics=operational_diagnostics,
             )
 
     async def connection_active(

@@ -4,6 +4,7 @@ import asyncio
 import dataclasses
 import enum
 import logging
+import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -59,12 +60,163 @@ class RuntimeProviderReconciliationStatus(enum.StrEnum):
     DRIFTED = "drifted"
 
 
+class RuntimeProviderOperationalWarningSeverity(enum.StrEnum):
+    """Severity of one warning-only Provider deployment diagnostic."""
+
+    WARNING = "warning"
+
+
 _RECONCILIATION_KIND_MAX_LENGTH = 128
 _RECONCILIATION_REASON_MAX_LENGTH = 256
 _RECONCILIATION_DIAGNOSTIC_MAX_ENTRIES = 16
 _RECONCILIATION_DIAGNOSTIC_KEY_MAX_LENGTH = 128
 _RECONCILIATION_DIAGNOSTIC_VALUE_MAX_LENGTH = 512
 RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY = "network_policy"
+RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_ENFORCEMENT = "network_enforcement"
+_OPERATIONAL_WARNING_MAX_COUNT = 32
+_OPERATIONAL_WARNING_CODE_MAX_LENGTH = 128
+_OPERATIONAL_WARNING_METADATA_MAX_ENTRIES = 16
+_OPERATIONAL_WARNING_METADATA_KEY_MAX_LENGTH = 128
+_OPERATIONAL_WARNING_METADATA_VALUE_MAX_LENGTH = 512
+_OPERATIONAL_WARNING_METADATA_KEYS = {
+    "cni_support_unconfirmed": frozenset({"reason"}),
+    "mandatory_service_unavailable": frozenset({"reason", "service_role"}),
+    "namespace_default_deny_unconfirmed": frozenset({"reason"}),
+    "namespace_identity_unconfirmed": frozenset({"reason"}),
+    "proxy_artifact_invalid": frozenset({"artifact_digest", "artifact_role", "reason"}),
+    "rbac_incomplete": frozenset({"required_verb", "resource_kind"}),
+    "unexpected_network_policy": frozenset({"policy_count"}),
+}
+_OPERATIONAL_WARNING_RESOURCE_KINDS = frozenset(
+    {
+        "configmaps",
+        "networkpolicies",
+        "persistentvolumeclaims",
+        "pods",
+        "secrets",
+        "services",
+    }
+)
+_OPERATIONAL_WARNING_REQUIRED_VERBS = frozenset(
+    {"create", "delete", "get", "list", "patch", "update", "watch"}
+)
+_OPERATIONAL_WARNING_ENUM_VALUES = {
+    ("cni_support_unconfirmed", "reason"): frozenset(
+        {
+            "api_discovery_unavailable",
+            "cni_identity_unavailable",
+            "network_policy_support_unconfirmed",
+        }
+    ),
+    ("mandatory_service_unavailable", "reason"): frozenset(
+        {
+            "cluster_ip_unavailable",
+            "endpoint_hostname_mismatch",
+            "service_missing",
+        }
+    ),
+    ("mandatory_service_unavailable", "service_role"): frozenset(
+        {
+            "runtime_control",
+            "runtime_proxy",
+            "runtime_transfer",
+        }
+    ),
+    ("namespace_default_deny_unconfirmed", "reason"): frozenset(
+        {
+            "policy_missing",
+            "policy_ownership_mismatch",
+            "policy_selector_mismatch",
+        }
+    ),
+    ("namespace_identity_unconfirmed", "reason"): frozenset(
+        {
+            "namespace_mismatch",
+            "namespace_unavailable",
+        }
+    ),
+    ("proxy_artifact_invalid", "artifact_role"): frozenset(
+        {
+            "policy_addon",
+            "proxy_image",
+        }
+    ),
+    ("proxy_artifact_invalid", "reason"): frozenset(
+        {
+            "configuration_missing",
+            "digest_mismatch",
+            "digest_missing",
+        }
+    ),
+}
+_SHA256_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+_SAFE_COUNT = re.compile(r"(0|[1-9][0-9]{0,8})")
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeProviderOperationalWarning:
+    """One bounded warning from Provider deployment validation."""
+
+    code: str
+    severity: RuntimeProviderOperationalWarningSeverity
+    metadata: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        """Validate one warning-only safe diagnostic."""
+        _bounded_string(
+            self.code,
+            "operational warning code",
+            _OPERATIONAL_WARNING_CODE_MAX_LENGTH,
+        )
+        if self.severity is not RuntimeProviderOperationalWarningSeverity.WARNING:
+            raise ValueError("operational diagnostic severity must be warning")
+        if len(self.metadata) > _OPERATIONAL_WARNING_METADATA_MAX_ENTRIES:
+            raise ValueError("operational warning metadata has too many entries")
+        allowed_keys = _OPERATIONAL_WARNING_METADATA_KEYS.get(self.code)
+        if allowed_keys is None:
+            if self.metadata:
+                raise ValueError(
+                    "unknown operational warning codes cannot include metadata"
+                )
+            return
+        unknown_keys = set(self.metadata) - allowed_keys
+        if unknown_keys:
+            raise ValueError(
+                "operational warning metadata contains unsupported keys: "
+                + ", ".join(sorted(unknown_keys))
+            )
+        for key, value in self.metadata.items():
+            _bounded_string(
+                key,
+                "operational warning metadata key",
+                _OPERATIONAL_WARNING_METADATA_KEY_MAX_LENGTH,
+            )
+            _bounded_string(
+                value,
+                "operational warning metadata value",
+                _OPERATIONAL_WARNING_METADATA_VALUE_MAX_LENGTH,
+            )
+            _validate_operational_warning_metadata_value(self.code, key, value)
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeProviderOperationalDiagnostics:
+    """Current warning-only deployment validation snapshot."""
+
+    checked_at: datetime
+    warnings: Sequence[RuntimeProviderOperationalWarning]
+
+    def __post_init__(self) -> None:
+        """Validate a bounded timezone-aware operational snapshot."""
+        if self.checked_at.tzinfo is None or self.checked_at.utcoffset() is None:
+            raise ValueError(
+                "operational diagnostics checked_at must be timezone-aware"
+            )
+        if len(self.warnings) > _OPERATIONAL_WARNING_MAX_COUNT:
+            raise ValueError("operational diagnostics has too many warnings")
+        codes = [warning.code for warning in self.warnings]
+        if len(codes) != len(set(codes)):
+            raise ValueError("operational warning codes must be unique")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -85,7 +237,10 @@ class RuntimeProviderReconciliationObservation:
             "reconciliation kind",
             _RECONCILIATION_KIND_MAX_LENGTH,
         )
-        if self.kind != RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY:
+        if self.kind not in {
+            RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY,
+            RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_ENFORCEMENT,
+        }:
             raise ValueError(f"reconciliation kind is unsupported: {self.kind}")
         _bounded_reconciliation_string(
             self.reason,
@@ -196,6 +351,7 @@ class ProviderRegistration:
     config_schema_version: str
     metadata: Mapping[str, JsonValue]
     capability_contract: Mapping[str, JsonValue]
+    operational_diagnostics: RuntimeProviderOperationalDiagnostics | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -257,6 +413,7 @@ class ProviderControlClient(Protocol):
         provider_id: str,
         generation: int,
         heartbeat_at: datetime,
+        operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
     ) -> bool:
         """Refresh Provider connection TTL for the accepted generation."""
         ...
@@ -328,6 +485,9 @@ class RuntimeProviderLifecycle(Protocol):
 
 Clock: TypeAlias = Callable[[], datetime]
 Monotonic: TypeAlias = Callable[[], float]
+OperationalDiagnosticsSupplier: TypeAlias = Callable[
+    [], RuntimeProviderOperationalDiagnostics | None
+]
 
 
 class ProviderRunLoop:
@@ -341,6 +501,7 @@ class ProviderRunLoop:
         registration: ProviderRegistration,
         connection_id: str,
         consumer_id: str,
+        operational_diagnostics: OperationalDiagnosticsSupplier,
         clock: Clock | None = None,
         monotonic: Monotonic | None = None,
     ) -> None:
@@ -350,6 +511,7 @@ class ProviderRunLoop:
         self._registration = registration
         self._connection_id = connection_id
         self._consumer_id = consumer_id
+        self._operational_diagnostics = operational_diagnostics
         self._clock = clock or _utc_now
         self._monotonic = monotonic or time.monotonic
         self._accepted: ProviderRegistrationAccepted | None = None
@@ -363,7 +525,10 @@ class ProviderRunLoop:
     async def start(self) -> ProviderRegistrationAccepted:
         """Register the Provider and report all known backend Runtime state."""
         accepted = await self._client.register_provider(
-            self._registration,
+            dataclasses.replace(
+                self._registration,
+                operational_diagnostics=self._operational_diagnostics(),
+            ),
             connection_id=self._connection_id,
             registered_at=self._clock(),
         )
@@ -414,6 +579,7 @@ class ProviderRunLoop:
             provider_id=accepted.provider_id,
             generation=accepted.generation,
             heartbeat_at=self._clock(),
+            operational_diagnostics=self._operational_diagnostics(),
         )
         if not ok:
             raise ProviderConnectionRejected(
@@ -604,8 +770,38 @@ def _deadline_expired(envelope: ProviderCommandEnvelope, now: datetime) -> bool:
     return envelope.deadline_at <= now
 
 
-def _bounded_reconciliation_string(value: str, name: str, maximum: int) -> None:
+def _bounded_string(value: str, name: str, maximum: int) -> None:
     if not value:
         raise ValueError(f"{name} must not be empty")
     if len(value) > maximum:
         raise ValueError(f"{name} must not exceed {maximum} characters")
+
+
+_bounded_reconciliation_string = _bounded_string
+
+
+def _validate_operational_warning_metadata_value(
+    code: str,
+    key: str,
+    value: str,
+) -> None:
+    """Validate one non-secret operational diagnostic scalar."""
+    if key == "resource_kind":
+        if value not in _OPERATIONAL_WARNING_RESOURCE_KINDS:
+            raise ValueError("operational warning resource_kind is unsupported")
+        return
+    if key == "required_verb":
+        if value not in _OPERATIONAL_WARNING_REQUIRED_VERBS:
+            raise ValueError("operational warning required_verb is unsupported")
+        return
+    if key == "artifact_digest":
+        if _SHA256_DIGEST.fullmatch(value) is None:
+            raise ValueError("operational warning artifact_digest must be sha256")
+        return
+    if key == "policy_count":
+        if _SAFE_COUNT.fullmatch(value) is None:
+            raise ValueError("operational warning policy_count must be a count")
+        return
+    allowed_values = _OPERATIONAL_WARNING_ENUM_VALUES.get((code, key))
+    if allowed_values is None or value not in allowed_values:
+        raise ValueError(f"operational warning {code}.{key} value is unsupported")

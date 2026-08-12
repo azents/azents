@@ -340,9 +340,14 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
     assert blocked_request is None
 
 
-async def test_reconciler_repairs_current_network_policy_drift_once(
+@pytest.mark.parametrize(
+    "reconciliation_kind",
+    ["network_policy", "network_enforcement"],
+)
+async def test_reconciler_repairs_current_network_drift_once(
     rdb_session_manager: SessionManager[AsyncSession],
     caplog: pytest.LogCaptureFixture,
+    reconciliation_kind: str,
 ) -> None:
     """One current OBSERVE result dispatches one in-place configuration repair."""
     runtime_repository = ReadTrackingAgentRuntimeRepository()
@@ -418,6 +423,7 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
                 runtime_id=runtime.id,
                 desired_generation=command.desired_generation,
                 configuration_sequence=state.desired.sequence,
+                reconciliation_kind=reconciliation_kind,
             )
         )
     claimed = await control_protocol.claim_next_provider_request(
@@ -436,7 +442,7 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
     handoff_log = next(
         record
         for record in caplog.records
-        if record.message == "Runtime NetworkPolicy drift repair handed off"
+        if record.message == "Runtime network enforcement drift repair handed off"
     )
     dispatch_log = next(
         record
@@ -450,7 +456,7 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
         assert record.__dict__["provider_generation"] == accepted.generation
         assert record.__dict__["desired_generation"] == command.desired_generation
         assert record.__dict__["configuration_sequence"] == state.desired.sequence
-        assert record.__dict__["reconciliation_kind"] == "network_policy"
+        assert record.__dict__["reconciliation_kind"] == reconciliation_kind
         assert record.__dict__["reconciliation_reason"] == "network_policy_mismatch"
 
 
@@ -1180,6 +1186,7 @@ def _network_policy_drift_report(
     desired_generation: int,
     configuration_sequence: int,
     provider_generation: int = 1,
+    reconciliation_kind: str = "network_policy",
 ) -> RuntimeProviderReport:
     """Build one current typed NetworkPolicy drift observation."""
     return RuntimeProviderReport(
@@ -1201,7 +1208,7 @@ def _network_policy_drift_report(
         reconciliation=RuntimeProviderReconciliationEvidence(
             observations=(
                 RuntimeProviderReconciliationObservation(
-                    kind="network_policy",
+                    kind=reconciliation_kind,
                     status=RuntimeProviderReconciliationStatus.DRIFTED,
                     reason="network_policy_mismatch",
                     diagnostic={},
@@ -1225,6 +1232,7 @@ def _provider_registration(
         config_schema_version="v1",
         metadata={},
         capability_contract={"schema_version": 1},
+        operational_diagnostics=None,
         auth_credential_id="provider:provider-1",
         connection_id=connection_id,
         owner_replica_id="control-a",
