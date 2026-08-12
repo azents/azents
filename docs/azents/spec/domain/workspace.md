@@ -98,7 +98,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-08-12
-spec_version: 65
+spec_version: 66
 ---
 
 # Workspace & Membership
@@ -522,6 +522,23 @@ A non-primary session can own a Git worktree allocation created by a `create_git
 
 Each created worktree is prompt-eligible only through its context-owned `SessionWorkspaceProject` projection, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Explicit user-requested cleanup remains session-scoped. After a Session archive transaction commits, archive makes one forced best-effort pass over every non-cleaned root-tree allocation. Successful cleanup removes the owned worktree and Azents-created branch, removes the session-scoped reserved worktree parent directory when it becomes empty, deletes catalog and linked Project rows, and marks the allocation cleaned. Failure is recorded and logged but does not fail archive or schedule retry. Durable purge does not inspect or remove physical worktrees and deletes allocation rows through database finalization regardless of cleanup status.
 
+An eligible root or subagent may also create a worktree on demand from an exact Git Project already
+registered in its shared current Session context. The Agent-facing action pins the source Project
+identity at admission, revalidates it before Runner mutation, defaults an omitted starting ref to that
+Project worktree's current `HEAD`, and may generate a collision-free branch. Confirmed creation leaves
+the source Project unchanged, registers the generated checkout as an additional shared Session
+Project, updates the Agent Project Catalog, and refreshes filesystem Skill projection for the fresh
+continuation Run.
+
+Agent-requested removal is authorized only for an exact non-cleaned `SessionGitWorktree` allocation
+linked to an exact current-context Project. It shares the managed-path claim boundary with manual and
+archive cleanup, but its semantics are branch-preserving. Non-force removal refuses dirty or
+untracked content without changing the Project or allocation. Explicit force may discard that
+checkout content. After Runner confirms removal or absence, the service removes the linked Project
+and catalog entry, refreshes Skill projection, and marks the allocation cleaned while retaining its
+source and preserved branch metadata. It never calls branch deletion. Archive skips that cleaned
+allocation, so it cannot later delete the branch preserved by the Agent-facing removal.
+
 ### Workspace External Channel Multi Apps
 
 Workspace is the Web management authority for Slack and Discord Multi Apps. Owners and Managers can
@@ -724,6 +741,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-12 (spec_version=66)** — Added on-demand Agent creation from exact current-context Git
+  Projects and branch-preserving managed removal with dirty refusal, explicit force, shared path
+  claims, Project/Catalog/Skill cleanup, and archive-safe branch retention.
 - **2026-08-12 (spec_version=65)** — Added the System-Admin-only, membership-independent,
   read-only Workspace Runtime Profile detail used to inspect infrastructure Profile deletion
   blockers without granting customer Workspace mutation authority.

@@ -55,6 +55,7 @@ _IMAGE_PATH = Path(
     )
 )
 _JOURNAL_PATH = "/v1/_image_generation_requests"
+_DYNAMIC_WORKTREE_JOURNAL_PATH = "/v1/_dynamic_worktree_requests"
 _EXTERNAL_CHANNEL_PROGRESS_JOURNAL_PATH = "/v1/_external_channel_progress_requests"
 _EXTERNAL_CHANNEL_FILE_JOURNAL_PATH = "/v1/_external_channel_file_requests"
 _XAI_IMAGINE_JOURNAL_PATH = "/v1/_xai_imagine_requests"
@@ -177,6 +178,155 @@ _APPLY_PATCH_TRAVERSAL_INSPECT_ARGUMENTS: dict[str, object] = {
     "yield_time_ms": 10000,
     "max_output_bytes": 1000,
 }
+_DYNAMIC_WORKTREE_CREATE_PREFIX = "Agent-managed worktree E2E create\nSource: "
+_DYNAMIC_WORKTREE_REMOVE_PREFIX = "Agent-managed worktree E2E remove\nPath: "
+_DYNAMIC_WORKTREE_FORCE_TRUE_SUFFIX = "\nForce: true"
+_DYNAMIC_WORKTREE_FORCE_FALSE_SUFFIX = "\nForce: false"
+_DYNAMIC_WORKTREE_CREATE_CALL_ID = "call_dynamic_worktree_create"
+_DYNAMIC_WORKTREE_LOAD_SKILL_CALL_ID = "call_dynamic_worktree_load_skill"
+_DYNAMIC_WORKTREE_REMOVE_DIRTY_CALL_ID = "call_dynamic_worktree_remove_dirty"
+_DYNAMIC_WORKTREE_REMOVE_FORCE_CALL_ID = "call_dynamic_worktree_remove_force"
+_DYNAMIC_WORKTREE_SKILL_PATH = re.compile(
+    r"(/workspace/agent/[^\s\"']+/"
+    r"\.claude/skills/worktree-e2e/SKILL\.md)"
+)
+_DYNAMIC_WORKTREE_EXTERNAL_MARKER = (
+    "Agent-managed worktree External Channel continuity E2E"
+)
+_DYNAMIC_WORKTREE_EXTERNAL_SOURCE = re.compile(
+    r"Source: (/workspace/agent/[^\s\\\"']+)"
+)
+_DYNAMIC_WORKTREE_EXTERNAL_CREATE_CALL_ID = "call_dynamic_worktree_external_create"
+_DYNAMIC_WORKTREE_EXTERNAL_LOAD_SKILL_CALL_ID = (
+    "call_dynamic_worktree_external_load_skill"
+)
+_DYNAMIC_WORKTREE_EXTERNAL_SEARCH_CALL_ID = "call_dynamic_worktree_external_tool_search"
+_DYNAMIC_WORKTREE_EXTERNAL_FINISH_CALL_ID = "call_dynamic_worktree_external_finish"
+
+
+def _dynamic_worktree_scenario(
+    request: dict[str, object],
+) -> tuple[str, str, bool] | None:
+    """Return the deterministic dynamic-worktree operation and exact path."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    create_prefix = json.dumps(
+        _DYNAMIC_WORKTREE_CREATE_PREFIX,
+        ensure_ascii=False,
+    )[1:-1]
+    remove_prefix = json.dumps(
+        _DYNAMIC_WORKTREE_REMOVE_PREFIX,
+        ensure_ascii=False,
+    )[1:-1]
+    user_text = _last_user_text(request)
+    if user_text is not None and user_text.startswith(_DYNAMIC_WORKTREE_CREATE_PREFIX):
+        source_path = user_text.removeprefix(_DYNAMIC_WORKTREE_CREATE_PREFIX).strip()
+        create_request_index = serialized.rfind(create_prefix)
+        create_reminder_index = serialized.rfind(
+            "Agent-managed Git worktree creation reached terminal status"
+        )
+        if source_path and create_request_index > create_reminder_index:
+            return ("create", source_path, False)
+    if user_text is not None and user_text.startswith(_DYNAMIC_WORKTREE_REMOVE_PREFIX):
+        path_and_force = user_text.removeprefix(_DYNAMIC_WORKTREE_REMOVE_PREFIX)
+        force = path_and_force.endswith(_DYNAMIC_WORKTREE_FORCE_TRUE_SUFFIX)
+        worktree_path = (
+            path_and_force.removesuffix(_DYNAMIC_WORKTREE_FORCE_TRUE_SUFFIX)
+            .removesuffix(_DYNAMIC_WORKTREE_FORCE_FALSE_SUFFIX)
+            .strip()
+        )
+        remove_request_index = serialized.rfind(remove_prefix)
+        remove_reminder_index = serialized.rfind(
+            "Agent-managed Git worktree removal reached terminal status"
+        )
+        if worktree_path and remove_request_index > remove_reminder_index:
+            return ("remove", worktree_path, force)
+    markers = (
+        (
+            serialized.rfind(_DYNAMIC_WORKTREE_CREATE_CALL_ID),
+            ("create", "", False),
+        ),
+        (
+            serialized.rfind(
+                "Agent-managed Git worktree creation reached terminal status"
+            ),
+            ("create", "", False),
+        ),
+        (
+            serialized.rfind(_DYNAMIC_WORKTREE_REMOVE_DIRTY_CALL_ID),
+            ("remove", "", False),
+        ),
+        (
+            serialized.rfind(_DYNAMIC_WORKTREE_REMOVE_FORCE_CALL_ID),
+            ("remove", "", True),
+        ),
+        (
+            serialized.rfind(
+                "Agent-managed Git worktree removal reached terminal status"
+            ),
+            (
+                "remove",
+                "",
+                serialized.rfind("Force used: true.")
+                > serialized.rfind("Force used: false."),
+            ),
+        ),
+    )
+    marker_index, scenario = max(markers, key=lambda item: item[0])
+    if marker_index >= 0:
+        return scenario
+    return None
+
+
+def _dynamic_worktree_external_source(
+    request: dict[str, object],
+) -> str | None:
+    """Return the current External Channel continuity source Project."""
+    user_text = _last_user_text(request)
+    if (
+        user_text is None
+        or _DYNAMIC_WORKTREE_EXTERNAL_MARKER not in user_text
+        or user_text.startswith(_DYNAMIC_WORKTREE_REMOVE_PREFIX)
+    ):
+        return None
+    match = _DYNAMIC_WORKTREE_EXTERNAL_SOURCE.search(user_text)
+    return None if match is None else match.group(1)
+
+
+def _dynamic_worktree_external_stage(
+    request: dict[str, object],
+) -> str | None:
+    """Return one deterministic External Channel worktree request stage."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    user_text = _last_user_text(request)
+    if (
+        _DYNAMIC_WORKTREE_EXTERNAL_MARKER not in serialized
+        or external_channel_binding(request) is None
+        or (
+            user_text is not None
+            and user_text.startswith(_DYNAMIC_WORKTREE_REMOVE_PREFIX)
+        )
+    ):
+        return None
+    if request_has_tool_output(
+        request,
+        _DYNAMIC_WORKTREE_EXTERNAL_FINISH_CALL_ID,
+    ):
+        return "after_finish"
+    if request_has_tool_output(
+        request,
+        _DYNAMIC_WORKTREE_EXTERNAL_SEARCH_CALL_ID,
+    ):
+        return "after_search"
+    if request_has_tool_output(
+        request,
+        _DYNAMIC_WORKTREE_EXTERNAL_LOAD_SKILL_CALL_ID,
+    ):
+        return "after_skill"
+    if "Agent-managed Git worktree creation reached terminal status" in serialized:
+        return "continuation"
+    if _dynamic_worktree_external_source(request) is not None:
+        return "initial"
+    return None
 
 
 def _last_user_text(request: dict[str, object]) -> str | None:
@@ -542,6 +692,7 @@ def _is_semantic_compaction_request(request: dict[str, object]) -> bool:
 
 class _State:
     requests: ClassVar[list[dict[str, object]]] = []
+    dynamic_worktree_requests: ClassVar[list[dict[str, object]]] = []
     external_channel_progress_requests: ClassVar[list[dict[str, object]]] = []
     external_channel_file_requests: ClassVar[list[dict[str, object]]] = []
     imagine_requests: ClassVar[list[dict[str, object]]] = []
@@ -701,6 +852,327 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 return
         serialized = json.dumps(request, ensure_ascii=False)
+        dynamic_worktree_external_stage = _dynamic_worktree_external_stage(request)
+        if self.path == "/v1/responses" and dynamic_worktree_external_stage is not None:
+            binding = external_channel_binding(request)
+            source_path = _dynamic_worktree_external_source(request)
+            skill_match = _DYNAMIC_WORKTREE_SKILL_PATH.search(serialized)
+            with _State.lock:
+                _State.dynamic_worktree_requests.append(
+                    {
+                        "operation": "external_channel_create",
+                        "binding": binding,
+                        "stage": dynamic_worktree_external_stage,
+                        "create_tool_available": _request_has_named_tool(
+                            request,
+                            "create_git_worktree",
+                        ),
+                        "load_skill_available": _request_has_named_tool(
+                            request,
+                            "load_skill",
+                        ),
+                        "search_tool_available": _request_has_named_tool(
+                            request,
+                            "tool_search",
+                        ),
+                        "channel_action_tool_available": _request_has_named_tool(
+                            request,
+                            "channel_action",
+                        ),
+                        "target_skill_present": skill_match is not None,
+                    }
+                )
+            if binding is None:
+                self._write_json(
+                    409,
+                    {
+                        "error": {
+                            "message": (
+                                "External Channel worktree continuity lost its "
+                                "active binding."
+                            )
+                        }
+                    },
+                )
+                return
+            if dynamic_worktree_external_stage == "after_finish":
+                self._write_text_response(
+                    request,
+                    "External Channel worktree continuity E2E completed.",
+                    response_id="resp_dynamic_worktree_external_completed",
+                )
+                return
+            if dynamic_worktree_external_stage == "after_search":
+                if _request_has_named_tool(request, "channel_action"):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_DYNAMIC_WORKTREE_EXTERNAL_FINISH_CALL_ID,
+                        name="channel_action",
+                        arguments={
+                            "mode": "finish",
+                            "binding": binding,
+                            "message": (
+                                "The Agent-managed worktree continuity check "
+                                "completed successfully."
+                            ),
+                        },
+                    )
+                    return
+            elif dynamic_worktree_external_stage == "after_skill":
+                if _request_has_named_tool(request, "channel_action"):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_DYNAMIC_WORKTREE_EXTERNAL_FINISH_CALL_ID,
+                        name="channel_action",
+                        arguments={
+                            "mode": "finish",
+                            "binding": binding,
+                            "message": (
+                                "The Agent-managed worktree continuity check "
+                                "completed successfully."
+                            ),
+                        },
+                    )
+                    return
+                if _request_has_named_tool(request, "tool_search"):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_DYNAMIC_WORKTREE_EXTERNAL_SEARCH_CALL_ID,
+                        name="tool_search",
+                        arguments={
+                            "query": "publish final External Channel result",
+                            "limit": 5,
+                        },
+                    )
+                    return
+            elif dynamic_worktree_external_stage == "continuation":
+                if skill_match is not None and _request_has_named_tool(
+                    request,
+                    "load_skill",
+                ):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_DYNAMIC_WORKTREE_EXTERNAL_LOAD_SKILL_CALL_ID,
+                        name="load_skill",
+                        arguments={"skill_path": skill_match.group(1)},
+                    )
+                    return
+            elif source_path is not None and _request_has_named_tool(
+                request, "create_git_worktree"
+            ):
+                self._write_function_call_response(
+                    request,
+                    call_id=_DYNAMIC_WORKTREE_EXTERNAL_CREATE_CALL_ID,
+                    name="create_git_worktree",
+                    arguments={
+                        "source_project_path": source_path,
+                        "starting_ref": "worktree-e2e-target",
+                        "branch_name": "e2e/external-channel-continuity",
+                    },
+                )
+                return
+            self._write_json(
+                409,
+                {
+                    "error": {
+                        "message": (
+                            "External Channel worktree continuity did not "
+                            "expose its required Agent tool."
+                        )
+                    }
+                },
+            )
+            return
+        dynamic_worktree = _dynamic_worktree_scenario(request)
+        if self.path == "/v1/responses" and dynamic_worktree is not None:
+            operation, exact_path, force = dynamic_worktree
+            create_continuation = (
+                operation == "create"
+                and exact_path == ""
+                and (
+                    "Agent-managed Git worktree creation reached terminal status"
+                    in serialized
+                )
+            )
+            remove_continuation = (
+                operation == "remove"
+                and exact_path == ""
+                and (
+                    "Agent-managed Git worktree removal reached terminal status"
+                    in serialized
+                )
+            )
+            skill_match = _DYNAMIC_WORKTREE_SKILL_PATH.search(serialized)
+            stage = "initial"
+            if create_continuation:
+                stage = (
+                    "after_skill"
+                    if request_has_tool_output(
+                        request,
+                        _DYNAMIC_WORKTREE_LOAD_SKILL_CALL_ID,
+                    )
+                    else "continuation"
+                )
+            elif remove_continuation:
+                stage = "continuation"
+            with _State.lock:
+                _State.dynamic_worktree_requests.append(
+                    {
+                        "operation": operation,
+                        "force": force,
+                        "stage": stage,
+                        "create_tool_available": _request_has_named_tool(
+                            request,
+                            "create_git_worktree",
+                        ),
+                        "remove_tool_available": _request_has_named_tool(
+                            request,
+                            "remove_git_worktree",
+                        ),
+                        "load_skill_available": _request_has_named_tool(
+                            request,
+                            "load_skill",
+                        ),
+                        "target_skill_present": skill_match is not None,
+                    }
+                )
+            if operation == "create":
+                if create_continuation:
+                    if request_has_tool_output(
+                        request,
+                        _DYNAMIC_WORKTREE_LOAD_SKILL_CALL_ID,
+                    ):
+                        self._write_text_response(
+                            request,
+                            "Agent-managed worktree creation continuation completed.",
+                            response_id="resp_dynamic_worktree_create_completed",
+                        )
+                        return
+                    if skill_match is not None and _request_has_named_tool(
+                        request, "load_skill"
+                    ):
+                        self._write_function_call_response(
+                            request,
+                            call_id=_DYNAMIC_WORKTREE_LOAD_SKILL_CALL_ID,
+                            name="load_skill",
+                            arguments={"skill_path": skill_match.group(1)},
+                        )
+                        return
+                    self._write_json(
+                        409,
+                        {
+                            "error": {
+                                "message": (
+                                    "Dynamic worktree continuation did not expose "
+                                    "the target-only Skill."
+                                )
+                            }
+                        },
+                    )
+                    return
+                if request_has_tool_output(
+                    request,
+                    _DYNAMIC_WORKTREE_CREATE_CALL_ID,
+                ):
+                    self._write_json(
+                        409,
+                        {
+                            "error": {
+                                "message": (
+                                    "Dynamic worktree creation continued without "
+                                    "the fresh-Run reminder."
+                                )
+                            }
+                        },
+                    )
+                    return
+                if _request_has_named_tool(request, "create_git_worktree"):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_DYNAMIC_WORKTREE_CREATE_CALL_ID,
+                        name="create_git_worktree",
+                        arguments={
+                            "source_project_path": exact_path,
+                            "starting_ref": "worktree-e2e-target",
+                            "branch_name": "e2e/agent-managed",
+                        },
+                    )
+                    return
+            else:
+                call_id = (
+                    _DYNAMIC_WORKTREE_REMOVE_FORCE_CALL_ID
+                    if force
+                    else _DYNAMIC_WORKTREE_REMOVE_DIRTY_CALL_ID
+                )
+                if remove_continuation:
+                    expected_force = f"Force used: {str(force).lower()}."
+                    if expected_force not in serialized:
+                        self._write_json(
+                            409,
+                            {
+                                "error": {
+                                    "message": (
+                                        "Dynamic worktree removal continuation "
+                                        "reported the wrong force value."
+                                    )
+                                }
+                            },
+                        )
+                        return
+                    self._write_text_response(
+                        request,
+                        (
+                            "Agent-managed worktree forced removal continuation "
+                            "completed."
+                            if force
+                            else (
+                                "Agent-managed worktree dirty removal refusal "
+                                "continuation completed."
+                            )
+                        ),
+                        response_id=(
+                            "resp_dynamic_worktree_remove_force_completed"
+                            if force
+                            else "resp_dynamic_worktree_remove_dirty_completed"
+                        ),
+                    )
+                    return
+                if request_has_tool_output(request, call_id):
+                    self._write_json(
+                        409,
+                        {
+                            "error": {
+                                "message": (
+                                    "Dynamic worktree removal continued without "
+                                    "the fresh-Run reminder."
+                                )
+                            }
+                        },
+                    )
+                    return
+                if _request_has_named_tool(request, "remove_git_worktree"):
+                    self._write_function_call_response(
+                        request,
+                        call_id=call_id,
+                        name="remove_git_worktree",
+                        arguments={
+                            "worktree_project_path": exact_path,
+                            "force": force,
+                        },
+                    )
+                    return
+            self._write_json(
+                409,
+                {
+                    "error": {
+                        "message": (
+                            "Dynamic worktree scenario did not expose its "
+                            "required Agent tool."
+                        )
+                    }
+                },
+            )
+            return
         if _EXTERNAL_CHANNEL_FILE_MARKER in serialized or bool(
             external_channel_file_locators(request)
         ):
@@ -1018,6 +1490,8 @@ class _Handler(BaseHTTPRequestHandler):
         """Return the journal selected by the current request path."""
         if self.path == _JOURNAL_PATH:
             return _State.requests
+        if self.path == _DYNAMIC_WORKTREE_JOURNAL_PATH:
+            return _State.dynamic_worktree_requests
         if self.path == _EXTERNAL_CHANNEL_PROGRESS_JOURNAL_PATH:
             return _State.external_channel_progress_requests
         if self.path == _EXTERNAL_CHANNEL_FILE_JOURNAL_PATH:

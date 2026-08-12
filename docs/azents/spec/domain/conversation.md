@@ -111,8 +111,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-08-10
-spec_version: 146
+last_verified_at: 2026-08-12
+spec_version: 147
 ---
 
 # Conversation & Events
@@ -503,6 +503,22 @@ atomically claimed as an `ActionExecution` before its source mailbox envelope is
 action that succeeds invalidates the prepared context; the same active `AgentRun` rebuilds its
 turn-local request from the updated Session inference snapshot before the next model call. Failed
 actions are terminal and do not block later FIFO input.
+
+The Agent-facing `create_git_worktree` and `remove_git_worktree` tools are a closed bridge exception
+to that ordinary same-Run invalidation contract. Their handlers enqueue internal
+`agent_create_git_worktree` or `agent_remove_git_worktree` action mailbox items under the current
+client-tool call identity and return only durable acceptance. The action terminal transaction appends
+the ordinary visible `action_execution_result`, enqueues one hidden
+`turn_action_continuation` mailbox item keyed by execution ID, and deletes live execution state
+atomically. Its bounded continuation payload contains terminal worktree facts but not raw command
+output, credentials, or internal exceptions.
+
+`turn_action_continuation` uses `wake_session` scheduling and is omitted from pending human-message
+presentation. It may promote only after its recorded predecessor Run is terminal. Promotion
+atomically deletes the mailbox row and appends one invisible `system_reminder` event with a
+deterministic external identity, making the turn eligible for inference. The action result remains
+the user-visible history authority; the reminder is model input only. Replay exposes either the
+pending mailbox row or the promoted event, never duplicate continuation input.
 
 `action_executions` stores live operation TurnAction state keyed by the source
 `source_mailbox_item_id` and
@@ -933,7 +949,7 @@ error message when diagram rendering fails.
 ## 6. Mailbox And Session Inputs
 
 Chat route and collaboration inputs are prepared before model-call boundaries. The supported
-Mailbox kinds are `user_message`, `goal_continuation`,
+Mailbox kinds are `user_message`, `goal_continuation`, `turn_action_continuation`,
 `external_channel_continuation`, `action_message`, `agent_message`, and
 `external_channel_invocation`. Every mailbox envelope carries explicit scheduling intent and an
 immutable typed payload whose ordered items use stable `(mailbox_item_id, item_key)` identity.
@@ -970,6 +986,7 @@ Canonical outcomes are:
 | `external_channel_continuation` | Durable `external_channel_continuation` event.                                                                    |
 | `agent_message`           | Durable `agent_message` event.                                                                                         |
 | `external_channel_invocation` | Contiguous source-attributed `external_channel_message` events.                                                   |
+| `turn_action_continuation` | Invisible deterministic `system_reminder` after its predecessor Run is terminal; the turn becomes inference-eligible. |
 | Goal `action_message`     | Goal side effect plus canonical goal/user events; no `action_message` event.                                           |
 | Skill `action_message`    | `skill_loaded` plus optional `user_message`; no `action_message` event.                                                |
 | Worktree `action_message` | Mailbox-item-keyed live `ActionExecution` claim with action payload and current owner generation; no `action_message` event. |
@@ -1150,6 +1167,8 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-12** — v147. Added Agent-managed worktree bridge actions, atomic terminal
+  history/continuation handoff, predecessor-Run fencing, and fresh-Run system-reminder promotion.
 - **2026-08-10** — v146. Made AgentRuntime optional for conversation execution, added nullable
   Session working-folder binding states, Runtime-free root creation, irreversible removal fencing
   across Team/User trees, and permanent stale-context invalidation after re-add.

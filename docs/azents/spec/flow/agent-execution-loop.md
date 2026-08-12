@@ -78,8 +78,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-11
-spec_version: 154
+last_verified_at: 2026-08-12
+spec_version: 155
 ---
 
 # Agent Execution Loop
@@ -1023,6 +1023,24 @@ seconds to finish. Timeout cancels the task and persists a cancelled snapshot be
 released. User stop cancels immediately through the existing foreground-task path; the operation
 records a user-stop cancellation snapshot while the Run follows normal preemptive stop semantics.
 
+The Agent-facing dynamic worktree tools use two closed bridge action types:
+`agent_create_git_worktree` and `agent_remove_git_worktree`. Their client-tool handlers admit
+idempotent action mailbox work and mark the current Run's internal bridge boundary. After the complete
+foreground tool batch, that boundary forces one input poll before the adapter's `needs_follow_up`
+decision. Action execution pins and revalidates current-context Project/allocation identities and
+uses typed Runner Git operations. Creation registers the generated Project and refreshes catalog and
+Skill projection. Removal refuses dirty content unless `force=true`, removes the managed checkout and
+Project boundary, and deliberately preserves the branch.
+
+Terminalization of either bridge action commits the visible `action_execution_result`, one hidden
+`turn_action_continuation`, and live-execution deletion together, then returns
+`complete_run=true`. Polling stops immediately and does not consume the newly enqueued continuation
+from the same Run. Input preparation fences that continuation until its predecessor Run is terminal.
+A later wake promotes it to one invisible system reminder and starts a fresh `AgentRun`; Toolkit
+bindings, Runtime Project prompt context, and filesystem Skills are rebuilt under the new Run ID.
+Ordinary Project-mutating TurnActions retain same-Run context invalidation, and no generic client tool
+or result flag can request this handoff.
+
 Stop uses the REST control endpoint `POST /chat/v1/sessions/{session_id}/stop`; it records a durable
 DB stop intent and sends a best-effort broker stop signal for immediate cancellation. WebSocket
 message/edit/command/stop
@@ -1254,6 +1272,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-12** (spec_version 155) — Added the closed Agent-managed worktree tool-to-TurnAction
+  bridge, forced post-tool polling, atomic terminal continuation, predecessor completion fence,
+  fresh-Run context/Skill adoption, dirty refusal, force removal, and branch preservation.
 - **2026-08-11** (spec_version 154) — Replaced Runtime revision-pointer prompt and
   operation authority with database-only bounded desired/applied current state, positive
   sequence/digest/generation evidence, and exact Provider/Runner-fenced target resolution.

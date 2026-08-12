@@ -53,8 +53,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-08-11
-spec_version: 91
+last_verified_at: 2026-08-12
+spec_version: 92
 ---
 
 # Toolkit
@@ -312,6 +312,33 @@ Calling `tool_search` activates the returned names for the immediately following
 The working set is session-bound Toolkit State with identity `tool_search/working_set`. Its versioned payload stores only an ordered most-recent-first list of final tool names; it does not copy descriptions, schemas, handlers, or MCP snapshots. Updates use the existing optimistic-lock retry contract. A missing name is skipped while unavailable but remains in recency state. If that final name returns, or its schema/handler changes, the current executable catalog entry is used without losing activation. The state survives model turns, AgentRuns, worker handoff/restart, and archive/unarchive until a successful context compaction. Manual and automatic compaction replace its `tool_names` with an empty list in the same transaction that appends the summary and moves the model-input head, regardless of the current Agent opt-in value. Skipped, failed, cancelled, or stale compaction leaves the working set unchanged. Other Session Toolkit State is not reset.
 
 Tool Search does not replace Toolkit attachment, credential validation, or MCP discovery. MCP-backed availability continues to come only from the latest successful session snapshot described above; Tool Search indexes the executable catalog produced from that snapshot and never performs `list_tools` on the model-call critical path.
+
+### Dynamic Worktree Toolkit
+
+The auto-bound, unprefixed Dynamic Worktree Toolkit is resolved for root and subagent turns only
+when the Session is active, the Agent has managed Runtime capability, the shared Session context has
+current bindable or bound Workspace authority, and no removal fence denies Runtime work. It is not
+restricted to External Channel Sessions and carries no requester identity.
+
+It exposes:
+
+- `create_git_worktree(source_project_path, starting_ref?, branch_name?)`, which accepts only an
+  exact Git Project already registered in the current shared Session context; and
+- `remove_git_worktree(worktree_path, force=false)`, which accepts only an exact current-context
+  Project linked to a non-cleaned Azents-managed worktree allocation.
+
+Both handlers normalize paths against current Runner Workspace evidence, pin Project/allocation,
+context, Session, Run, and client call identities, and enqueue a dedicated internal TurnAction. The
+tool result reports durable acceptance only. Git inspection and mutation occur later in the action
+executor under current authority. The bridge idempotency key is derived from Session ID, Run ID, tool
+name, and client call ID, so duplicate execution of one admitted call returns the same request.
+
+Each Run owns an internal `TurnActionBridgeBoundary` shared only by this Toolkit and Engine
+execution. After admission the boundary forces one action-input poll after the foreground tool batch,
+even when provider output requests no follow-up. It is not model-settable through arguments, result
+metadata, hooks, or generic Toolkit context. A registered bridge action terminates the current Run
+after atomic terminal handoff; its hidden continuation starts a fresh Run, allowing normal Toolkit
+reconciliation and filesystem Skill `latest` to `active` adoption before the next model call.
 
 ### Credential Isolation
 
@@ -783,6 +810,9 @@ state remains separate and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-08-12** (spec_version 92) — Added the auto-bound Dynamic Worktree Toolkit, exact
+  current-context create/remove authority, durable idempotent admission, and the closed
+  Run-scoped bridge boundary that hands terminal worktree results to a fresh Run.
 - **2026-08-11** (spec_version 91) — Replaced Runtime revision-pointer prompt and
   operation authority with bounded current desired/applied configuration state, positive
   sequence/digest/generation evidence, and exact Provider/Runner-fenced target checks.

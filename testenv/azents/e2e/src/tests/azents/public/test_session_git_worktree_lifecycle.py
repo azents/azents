@@ -268,6 +268,37 @@ def _create_source_repo(container: Container, *, name: str) -> str:
     return source_path
 
 
+def _create_agent_worktree_source_repo(container: Container, *, name: str) -> str:
+    """Create a source whose target ref alone contains one filesystem Skill."""
+    source_path = _create_source_repo(container, name=name)
+    quoted = shlex.quote(source_path)
+    _exec(
+        container,
+        "\n".join(
+            [
+                "set -eu",
+                f"cd {quoted}",
+                "git switch -c worktree-e2e-target",
+                "mkdir -p .claude/skills/worktree-e2e",
+                (
+                    "cat > .claude/skills/worktree-e2e/SKILL.md <<'EOF'\n"
+                    "---\n"
+                    "name: worktree-e2e\n"
+                    "description: Verify target-only dynamic worktree Skill adoption.\n"
+                    "---\n\n"
+                    "# Dynamic Worktree E2E Skill\n\n"
+                    "This Skill is available only from the generated worktree ref.\n"
+                    "EOF"
+                ),
+                "git add .claude/skills/worktree-e2e/SKILL.md",
+                "git commit -m 'add target-only worktree skill'",
+                "git switch main",
+            ]
+        ),
+    )
+    return source_path
+
+
 def _create_git_worktree_session(
     *,
     server_url: str,
@@ -361,6 +392,7 @@ def _terminal_action_execution_projection(
     history: dict[str, object],
     *,
     action_type: str,
+    client_tool_call_id: str | None = None,
 ) -> dict[str, object] | None:
     """Return the latest durable result projection for one action type."""
     events = _object_list(history.get("items"), label="history events")
@@ -373,8 +405,13 @@ def _terminal_action_execution_projection(
             raise AssertionError(f"action result projection is missing: {event!r}")
         action_projection = _OBJECT_ADAPTER.validate_python(projection)
         execution = _OBJECT_ADAPTER.validate_python(action_projection.get("execution"))
-        if execution.get("action_type") == action_type:
-            return action_projection
+        if execution.get("action_type") != action_type:
+            continue
+        if client_tool_call_id is not None:
+            action = _OBJECT_ADAPTER.validate_python(execution.get("action"))
+            if action.get("client_tool_call_id") != client_tool_call_id:
+                continue
+        return action_projection
     return None
 
 
@@ -385,6 +422,7 @@ def _wait_for_action_execution_status(
     session_id: str,
     status: str,
     action_type: str,
+    client_tool_call_id: str | None = None,
 ) -> dict[str, object]:
     """Wait for one session action execution to reach a status."""
     deadline = time.monotonic() + 90
@@ -400,6 +438,7 @@ def _wait_for_action_execution_status(
         projection = _terminal_action_execution_projection(
             history,
             action_type=action_type,
+            client_tool_call_id=client_tool_call_id,
         )
         if projection is None:
             time.sleep(0.5)
@@ -477,6 +516,149 @@ def _wait_for_worktree_project_path(
     raise TimeoutError(f"worktree Project was not registered: {last_projects!r}")
 
 
+def _wait_for_generated_worktree_project_path(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    source_project_path: str,
+) -> str:
+    """Wait for one generated Project in addition to the source Project."""
+    deadline = time.monotonic() + 60
+    last_projects: list[dict[str, object]] | None = None
+    while time.monotonic() < deadline:
+        projects = _list_session_projects(
+            server_url=server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+        last_projects = projects
+        generated_paths = [
+            path
+            for project in projects
+            if isinstance(path := project.get("path"), str)
+            and path != source_project_path
+        ]
+        if len(generated_paths) == 1:
+            return generated_paths[0]
+        time.sleep(0.5)
+    raise TimeoutError(
+        f"generated worktree Project was not registered: {last_projects!r}"
+    )
+
+
+def _run_message(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    message: str,
+) -> None:
+    """Submit one public chat input."""
+    _post_json(
+        server_url=server_url,
+        token=token,
+        path=f"/chat/v1/sessions/{session_id}/inputs",
+        payload={
+            "agent_id": agent_id,
+            "client_request_id": f"dynamic-worktree-e2e-{unique()}",
+            "message": message,
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
+        },
+    )
+
+
+def _wait_for_history_content(
+    *,
+    server_url: str,
+    token: str,
+    session_id: str,
+    content: str,
+    minimum_distinct_turn_runs: int = 0,
+) -> dict[str, object]:
+    """Wait for exact content and the required distinct model-turn Runs."""
+    deadline = time.monotonic() + 120
+    last_history: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        history = _get_json(
+            server_url=server_url,
+            token=token,
+            path=f"/chat/v1/sessions/{session_id}/history",
+            params={"limit": "100"},
+        )
+        last_history = history
+        events = _object_list(history.get("items"), label="history events")
+        content_present = any(
+            _OBJECT_ADAPTER.validate_python(event.get("payload")).get("content")
+            == content
+            for event in events
+            if event.get("kind") == "assistant_message"
+        )
+        turn_run_ids = {
+            run_id
+            for event in events
+            if event.get("kind") == "turn_marker"
+            and isinstance(
+                run_id := _OBJECT_ADAPTER.validate_python(event.get("payload")).get(
+                    "run_id"
+                ),
+                str,
+            )
+        }
+        if content_present and len(turn_run_ids) >= minimum_distinct_turn_runs:
+            return history
+        time.sleep(0.5)
+    raise TimeoutError(
+        f"history content was not observed: {content!r}, {last_history!r}"
+    )
+
+
+def _turn_run_ids(history: dict[str, object]) -> list[str]:
+    """Return model-turn Run IDs in durable history order."""
+    run_ids: list[str] = []
+    for event in _object_list(history.get("items"), label="history events"):
+        if event.get("kind") != "turn_marker":
+            continue
+        payload = _OBJECT_ADAPTER.validate_python(event.get("payload"))
+        run_id = payload.get("run_id")
+        if isinstance(run_id, str):
+            run_ids.append(run_id)
+    return run_ids
+
+
+def _tool_call_names(history: dict[str, object]) -> list[str]:
+    """Return model-visible tool names from durable history."""
+    names: list[str] = []
+    for event in _object_list(history.get("items"), label="history events"):
+        if event.get("kind") != "client_tool_call":
+            continue
+        payload = _OBJECT_ADAPTER.validate_python(event.get("payload"))
+        name = payload.get("name")
+        if isinstance(name, str):
+            names.append(name)
+    return names
+
+
+def _assert_branch_present(
+    container: Container,
+    *,
+    source_path: str,
+    branch_name: str,
+) -> None:
+    """Assert a branch remains in the source repository."""
+    _exec(
+        container,
+        f"cd {shlex.quote(source_path)} && "
+        f'test -n "$(git branch --list {shlex.quote(branch_name)})"',
+    )
+
+
 def _branch_name_from_worktree_path(worktree_path: str) -> str:
     """Return the default Azents branch name for a worktree path."""
     path = PurePosixPath(worktree_path)
@@ -541,6 +723,230 @@ def _set_retention(system_api: SystemV1Api, retention_days: int | None) -> None:
 
 class TestSessionGitWorktreeLifecycle:
     """Session Git worktree product behavior."""
+
+    def test_agent_managed_create_dirty_refusal_and_forced_removal(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+        openai_proxy_url: str,
+    ) -> None:
+        """Drive Agent-managed create/remove through public model execution."""
+        del azents_engine_worker_container
+        requests.delete(
+            f"{openai_proxy_url}/v1/_dynamic_worktree_requests",
+            timeout=10,
+        ).raise_for_status()
+        token, workspace_handle, agent_id = _create_runtime_agent(
+            public_api_client=public_api_client,
+            admin_api_client=admin_api_client,
+        )
+        _wait_for_runtime_runner_ready(
+            public_api_client,
+            token=token,
+            workspace_handle=workspace_handle,
+            agent_id=agent_id,
+        )
+        container = _runtime_container(agent_id)
+        source_path = _create_agent_worktree_source_repo(
+            container,
+            name=f"agent-source-{unique()}",
+        )
+        session = _get_json(
+            server_url=azents_public_server_url,
+            token=token,
+            path=f"/chat/v1/agents/{agent_id}/team-primary-session",
+        )
+        session_id = session.get("id")
+        if not isinstance(session_id, str):
+            raise AssertionError(f"team primary Session ID is missing: {session!r}")
+        registered = _post_json(
+            server_url=azents_public_server_url,
+            token=token,
+            path=(
+                f"/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register"
+            ),
+            payload={"path": source_path},
+        )
+        assert registered.get("path") == source_path
+
+        _run_message(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=f"Agent-managed worktree E2E create\nSource: {source_path}",
+        )
+        create_projection = _wait_for_action_execution_status(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            status="completed",
+            action_type="agent_create_git_worktree",
+            client_tool_call_id="call_dynamic_worktree_create",
+        )
+        worktree_path = _wait_for_generated_worktree_project_path(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            source_project_path=source_path,
+        )
+        create_history = _wait_for_history_content(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            content="Agent-managed worktree creation continuation completed.",
+            minimum_distinct_turn_runs=2,
+        )
+        create_run_ids = _turn_run_ids(create_history)
+        distinct_create_run_ids = set(create_run_ids)
+        assert len(distinct_create_run_ids) == 2
+        assert _tool_call_names(create_history).count("create_git_worktree") == 1
+        assert _tool_call_names(create_history).count("load_skill") == 1
+        create_execution = _OBJECT_ADAPTER.validate_python(
+            create_projection.get("execution")
+        )
+        create_action = _OBJECT_ADAPTER.validate_python(create_execution.get("action"))
+        assert create_action.get("originating_run_id") in distinct_create_run_ids
+        create_result = _OBJECT_ADAPTER.validate_python(create_execution.get("result"))
+        assert create_result.get("worktree_path") == worktree_path
+        assert create_result.get("branch_name") == "e2e/agent-managed"
+        _exec(
+            container,
+            f"test -f {shlex.quote(worktree_path)}/"
+            ".claude/skills/worktree-e2e/SKILL.md",
+        )
+
+        _exec(
+            container,
+            f"printf 'dirty agent removal e2e\\n' > "
+            f"{shlex.quote(worktree_path)}/dirty-agent-e2e.txt",
+        )
+        _run_message(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=(
+                f"Agent-managed worktree E2E remove\nPath: {worktree_path}"
+                "\nForce: false"
+            ),
+        )
+        dirty_projection = _wait_for_action_execution_status(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            status="failed",
+            action_type="agent_remove_git_worktree",
+            client_tool_call_id="call_dynamic_worktree_remove_dirty",
+        )
+        dirty_execution = _OBJECT_ADAPTER.validate_python(
+            dirty_projection.get("execution")
+        )
+        assert dirty_execution.get("failure_summary")
+        dirty_history = _wait_for_history_content(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            content=(
+                "Agent-managed worktree dirty removal refusal continuation completed."
+            ),
+        )
+        assert _tool_call_names(dirty_history).count("remove_git_worktree") == 1
+        assert {
+            project.get("path")
+            for project in _list_session_projects(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+        } == {source_path, worktree_path}
+        _assert_path_present(container, worktree_path)
+        _assert_branch_present(
+            container,
+            source_path=source_path,
+            branch_name="e2e/agent-managed",
+        )
+
+        _run_message(
+            server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+            message=(
+                f"Agent-managed worktree E2E remove\nPath: {worktree_path}\nForce: true"
+            ),
+        )
+        force_projection = _wait_for_action_execution_status(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            status="completed",
+            action_type="agent_remove_git_worktree",
+            client_tool_call_id="call_dynamic_worktree_remove_force",
+        )
+        force_execution = _OBJECT_ADAPTER.validate_python(
+            force_projection.get("execution")
+        )
+        force_result = _OBJECT_ADAPTER.validate_python(force_execution.get("result"))
+        assert force_result.get("dirty_content_discarded") is True
+        force_history = _wait_for_history_content(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            content=("Agent-managed worktree forced removal continuation completed."),
+        )
+        assert _tool_call_names(force_history).count("remove_git_worktree") == 2
+        _wait_for_path_absent(container, worktree_path)
+        assert [
+            project.get("path")
+            for project in _list_session_projects(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+        ] == [source_path]
+        _assert_branch_present(
+            container,
+            source_path=source_path,
+            branch_name="e2e/agent-managed",
+        )
+        journal = requests.get(
+            f"{openai_proxy_url}/v1/_dynamic_worktree_requests",
+            timeout=10,
+        )
+        journal.raise_for_status()
+        evidence = _object_list(journal.json(), label="dynamic worktree model evidence")
+        assert any(
+            item.get("operation") == "create"
+            and item.get("stage") == "continuation"
+            and item.get("load_skill_available") is True
+            and item.get("target_skill_present") is True
+            for item in evidence
+        ), evidence
+        assert any(
+            item.get("operation") == "create" and item.get("stage") == "after_skill"
+            for item in evidence
+        ), evidence
+        lifecycle_stages = [
+            (
+                item.get("operation"),
+                item.get("stage"),
+                item.get("force"),
+            )
+            for item in evidence
+        ]
+        for force in (False, True):
+            assert any(
+                item.get("operation") == "remove"
+                and item.get("stage") == "continuation"
+                and item.get("force") is force
+                for item in evidence
+            ), lifecycle_stages
 
     def test_git_ref_preview_worktree_archive_and_restore_cleanup(
         self,

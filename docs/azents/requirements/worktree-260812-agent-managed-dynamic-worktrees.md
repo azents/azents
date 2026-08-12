@@ -2,6 +2,7 @@
 title: "Agent-Managed Dynamic Worktrees Requirements"
 created: 2026-08-12
 updated: 2026-08-12
+implemented: 2026-08-12
 tags: [agent, session, workspace, project, git, worktree, external-channel]
 document_role: primary
 document_type: requirements

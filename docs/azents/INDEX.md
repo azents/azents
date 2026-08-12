@@ -16,22 +16,22 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-11 | 65 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-10 | 146 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-12 | 147 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-11 | 58 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-12 | 25 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-11 | 91 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-12 | 92 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-06 | 10 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-12 | 65 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-12 | 66 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-11 | 154 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-12 | 155 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-12 | 60 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-12 | 25 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
@@ -46,7 +46,7 @@ Design documents are accumulated records and are not listed individually in this
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-01 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-10 | 26 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-12 | 27 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-11 | 27 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-01 | 3 |
@@ -439,7 +439,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Session Worktree Archive and Purge Integrity Requirements](requirements/worktree-260722-archive-purge-integrity.md) | worktree-260722 | 2026-07-22 | 2026-07-22 |
 | [Archive-Owned Session Worktree Cleanup Requirements](requirements/worktree-260723-archive-owned-cleanup.md) | worktree-260723 | 2026-07-23 | 2026-07-23 |
 | [Manual Orphan Worktree Cleanup Requirements](requirements/worktree-260726-manual-orphan-cleanup.md) | worktree-260726 | 2026-07-26 | - |
-| [Agent-Managed Dynamic Worktrees Requirements](requirements/worktree-260812-agent-managed-dynamic-worktrees.md) | worktree-260812 | 2026-08-12 | - |
+| [Agent-Managed Dynamic Worktrees Requirements](requirements/worktree-260812-agent-managed-dynamic-worktrees.md) | worktree-260812 | 2026-08-12 | 2026-08-12 |
 | [Explicit AgentSession Write Target Historical Requirements Reconstruction](requirements/write-260625-write-target.md) | write-260625 | 2026-06-25 | - |
 | [xAI API Key Provider Historical Requirements Reconstruction](requirements/xai-260710-xai-api-key.md) | xai-260710 | 2026-07-10 | 2026-07-10 |
 
