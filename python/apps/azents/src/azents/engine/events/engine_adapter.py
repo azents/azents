@@ -1026,6 +1026,7 @@ class AgentEngineAdapter:
                     session_id=request.session_id,
                     owner_generation=context.owner_generation,
                     tool_admission_barrier=context.tool_admission_barrier,
+                    turn_action_bridge_boundary=(context.turn_action_bridge_boundary),
                     run_index=run_state.run_index,
                     model=request.model,
                     max_turns=request.max_turns,
@@ -1325,6 +1326,7 @@ def _make_input_poller(
                 events=[],
                 context_invalidated=result.context_invalidated,
                 complete_run=result.complete_run,
+                suppress_parent_result=result.suppress_parent_result,
             )
         async with session_manager() as session:
             events = await _append_run_user_messages(
@@ -1337,6 +1339,7 @@ def _make_input_poller(
             events=events,
             context_invalidated=result.context_invalidated,
             complete_run=result.complete_run,
+            suppress_parent_result=result.suppress_parent_result,
         )
 
     return poll

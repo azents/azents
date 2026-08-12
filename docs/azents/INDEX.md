@@ -439,6 +439,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Session Worktree Archive and Purge Integrity Requirements](requirements/worktree-260722-archive-purge-integrity.md) | worktree-260722 | 2026-07-22 | 2026-07-22 |
 | [Archive-Owned Session Worktree Cleanup Requirements](requirements/worktree-260723-archive-owned-cleanup.md) | worktree-260723 | 2026-07-23 | 2026-07-23 |
 | [Manual Orphan Worktree Cleanup Requirements](requirements/worktree-260726-manual-orphan-cleanup.md) | worktree-260726 | 2026-07-26 | - |
+| [Agent-Managed Dynamic Worktrees Requirements](requirements/worktree-260812-agent-managed-dynamic-worktrees.md) | worktree-260812 | 2026-08-12 | - |
 | [Explicit AgentSession Write Target Historical Requirements Reconstruction](requirements/write-260625-write-target.md) | write-260625 | 2026-06-25 | - |
 | [xAI API Key Provider Historical Requirements Reconstruction](requirements/xai-260710-xai-api-key.md) | xai-260710 | 2026-07-10 | 2026-07-10 |
 
@@ -827,6 +828,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Session Worktree Archive and Purge Integrity](adr/worktree-260722-archive-purge-integrity.md)
 - [Archive-Owned Session Worktree Cleanup](adr/worktree-260723-archive-owned-cleanup.md)
 - [Manual Orphan Worktree Cleanup](adr/worktree-260726-manual-orphan-cleanup.md)
+- [Agent-Managed Dynamic Worktrees](adr/worktree-260812-agent-managed-dynamic-worktrees.md)
 - [Explicit AgentSession Write Target Historical Decision Reconstruction](adr/write-260625-write-target.md)
 - [xAI API Key Provider Historical Decision Reconstruction](adr/xai-260710-xai-api-key.md)
 

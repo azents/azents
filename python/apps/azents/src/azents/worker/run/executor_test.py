@@ -255,6 +255,7 @@ class _SessionLifecycle:
         self.activation_phases: list[AgentRunPhase] = []
         self.inherited_activation_calls = 0
         self.cancelled_pending_run_ids: list[str] = []
+        self.completed_bridge_predecessors: list[str] = []
         self.cleared_commands: list[tuple[str, str]] = []
 
     async def set_session_activity(
@@ -349,6 +350,16 @@ class _SessionLifecycle:
             return self.recoverable_run
         return None
 
+    async def get_active_agent_run(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> _PendingRun | None:
+        """Return the configured pending or running Run without claiming it."""
+        del session_id, owner_generation
+        return self.recoverable_run
+
     async def claim_recoverable_agent_run(
         self,
         session_id: str,
@@ -389,6 +400,24 @@ class _SessionLifecycle:
         del session_id, owner_generation
         self.cancelled_pending_run_ids.append(run_id)
         return _PendingRun(status=AgentRunStatus.CANCELLED)
+
+    async def complete_bridge_predecessor_run(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+        run_id: str,
+    ) -> AgentRunStatus:
+        """Record one bridge predecessor terminalization boundary."""
+        del session_id, owner_generation
+        self.completed_bridge_predecessors.append(run_id)
+        if self.recoverable_run is None:
+            raise AssertionError("Bridge predecessor Run was not configured")
+        if self.recoverable_run.status is AgentRunStatus.PENDING:
+            return AgentRunStatus.CANCELLED
+        if self.recoverable_run.status is AgentRunStatus.RUNNING:
+            return AgentRunStatus.COMPLETED
+        raise AssertionError("Bridge predecessor Run is not active")
 
     async def activate_pending_agent_run(
         self,
@@ -1021,6 +1050,7 @@ class _SessionGitWorktreeService:
 
     def __init__(self) -> None:
         self.reconciled_session_ids: list[str] = []
+        self.reconciled_predecessor_run_ids: list[str | None] = []
         self.cancelled_execution_ids: list[str] = []
         self.executed_execution_ids: list[str] = []
 
@@ -1031,10 +1061,16 @@ class _SessionGitWorktreeService:
         reason: str,
         on_history_event_appended: object,
         on_action_execution_removed: object,
+        predecessor_run_id: str | None = None,
     ) -> list[Event]:
         """Record stale-operation reconciliation."""
-        del reason, on_history_event_appended, on_action_execution_removed
+        del (
+            reason,
+            on_history_event_appended,
+            on_action_execution_removed,
+        )
         self.reconciled_session_ids.append(session_id)
+        self.reconciled_predecessor_run_ids.append(predecessor_run_id)
         return []
 
     async def cancel_action_execution(
@@ -1043,9 +1079,10 @@ class _SessionGitWorktreeService:
         execution: ActionExecution,
         reason: str,
         on_history_event_appended: object,
+        predecessor_run_id: str | None,
     ) -> None:
         """Record one operation cancellation."""
-        del reason, on_history_event_appended
+        del reason, on_history_event_appended, predecessor_run_id
         self.cancelled_execution_ids.append(execution.id)
 
     async def run_git_worktree_action(
@@ -1072,6 +1109,7 @@ class _SessionGitWorktreeService:
         return GitWorktreeActionExecutionResult(
             completed=True,
             context_invalidated=True,
+            complete_run=False,
         )
 
 
@@ -1543,8 +1581,14 @@ async def test_boundary_cancellation_waits_for_live_action_handoff(
         reason: str,
         on_history_event_appended: object,
         on_action_execution_removed: object,
+        predecessor_run_id: str | None = None,
     ) -> list[Event]:
-        del session_id, on_history_event_appended, on_action_execution_removed
+        del (
+            session_id,
+            on_history_event_appended,
+            on_action_execution_removed,
+            predecessor_run_id,
+        )
         cancellation_reasons.append(reason)
         cleanup_started.set()
         await cleanup_release.wait()
@@ -1677,6 +1721,45 @@ async def test_execute_classifies_new_recoverable_run_as_snapshot_drift() -> Non
 
 
 @pytest.mark.asyncio
+async def test_takeover_cancellation_uses_pending_snapshot_run_as_predecessor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pending processing Run fences takeover continuation before it is claimed."""
+    recoverable = _PendingRun(id="pending-run-001", status=AgentRunStatus.PENDING)
+    lifecycle = _SessionLifecycle(recoverable_run=recoverable)
+    worktree_service = _SessionGitWorktreeService()
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        session_git_worktree_service=worktree_service,
+    )
+
+    async def stop_after_handoff(*args: object, **kwargs: object) -> _PendingRun:
+        del args, kwargs
+        raise RuntimeError("stop after predecessor capture")
+
+    monkeypatch.setattr(
+        lifecycle,
+        "claim_recoverable_agent_run",
+        stop_after_handoff,
+    )
+
+    with pytest.raises(RuntimeError, match="stop after predecessor capture"):
+        await executor.execute(
+            _message(recoverable_run=recoverable),
+            poll_fn=None,
+            check_stop=None,
+            prepare_toolkits=None,
+            shutdown_event=asyncio.Event(),
+            dispatch_event=_noop_dispatch_event,
+            owner_generation=1,
+            tool_admission_barrier=ToolAdmissionBarrier(),
+            model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+        )
+
+    assert worktree_service.reconciled_predecessor_run_ids == [recoverable.id]
+
+
+@pytest.mark.asyncio
 async def test_execute_reports_resolve_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1689,6 +1772,7 @@ async def test_execute_reports_resolve_failure(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -1780,6 +1864,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -1891,6 +1976,7 @@ async def test_execute_persists_recovered_profile_resolution_failure(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2053,6 +2139,7 @@ async def test_execute_recovers_durable_retry_budget(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2138,6 +2225,7 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=["event-001"],
             user_messages=[],
@@ -2205,6 +2293,7 @@ async def test_execute_activates_pending_child_from_session_snapshot(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=["event-001"],
             user_messages=[],
@@ -2303,6 +2392,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
             return RunInputPollResult(
                 context_invalidated=True,
                 complete_run=False,
+                suppress_parent_result=False,
                 requested_inference_profile=RequestedInferenceProfile(
                     model_target_label="planning",
                     reasoning_effort=ModelReasoningEffort.XHIGH,
@@ -2314,6 +2404,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=["event-001"],
             user_messages=[],
@@ -2360,6 +2451,7 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
         del args, kwargs
         return RunInputPollResult(
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2462,6 +2554,7 @@ async def test_boundary_poll_processes_turn_actions(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2489,6 +2582,7 @@ async def test_boundary_poll_processes_turn_actions(
         user_messages=[],
         context_invalidated=False,
         complete_run=False,
+        suppress_parent_result=False,
     )
     assert process_actions_values == [True]
 
@@ -2514,6 +2608,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
         del args, kwargs
         return RunInputPollResult(
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -2551,6 +2646,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
 
     assert await poll() == PollMessagesResult(
         complete_run=False,
+        suppress_parent_result=False,
         user_messages=[],
         context_invalidated=True,
     )
@@ -2635,6 +2731,8 @@ async def test_poll_run_inputs_requires_fresh_snapshot_for_next_fifo_head(
             claimed_count=1,
             inserted_count=0,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         )
 
     monkeypatch.setattr(
@@ -2692,6 +2790,8 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             claimed_count=1,
             inserted_count=0,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         ),
         PromotedMailboxItems(
             operation_action=None,
@@ -2713,6 +2813,8 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         ),
         PromotedMailboxItems(
             operation_action=None,
@@ -2726,6 +2828,8 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             claimed_count=0,
             inserted_count=0,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         ),
     ]
     processed_operation_actions: list[object | None] = []
@@ -2740,7 +2844,10 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
     ) -> OperationActionProcessResult:
         del args
         processed_operation_actions.append(kwargs["operation_action"])
-        return OperationActionProcessResult(context_invalidated=False)
+        return OperationActionProcessResult(
+            context_invalidated=False,
+            complete_run=False,
+        )
 
     async def has_actionable_model_input(session_id: str) -> bool:
         del session_id
@@ -2783,6 +2890,172 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
 
 
 @pytest.mark.asyncio
+async def test_poll_run_inputs_stops_fifo_after_bridge_action_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bridge terminal result stops FIFO promotion and queued polling."""
+    executor = _executor()
+    promoted_batches = [
+        PromotedMailboxItems(
+            operation_action=None,
+            turn_effect=TurnEffect.NEUTRAL,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=["buffer-action"],
+            changed_session_agent_ids=[],
+            claimed_count=1,
+            inserted_count=0,
+            deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
+        )
+    ]
+    process_calls = 0
+    queued_poll_calls = 0
+
+    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+        del args, kwargs
+        return promoted_batches.pop(0)
+
+    async def process_operation_actions(
+        *args: object,
+        **kwargs: object,
+    ) -> OperationActionProcessResult:
+        nonlocal process_calls
+        del args, kwargs
+        process_calls += 1
+        return OperationActionProcessResult(
+            context_invalidated=False,
+            complete_run=True,
+        )
+
+    async def queued_poll() -> PollMessagesResult:
+        nonlocal queued_poll_calls
+        queued_poll_calls += 1
+        return PollMessagesResult(
+            user_messages=[],
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+        )
+
+    async def has_actionable_model_input(session_id: str) -> bool:
+        del session_id
+        raise AssertionError("A completed bridge run has no same-Run model input")
+
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
+    monkeypatch.setattr(
+        executor,
+        "_process_operation_actions",
+        process_operation_actions,
+    )
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+
+    result = await executor.poll_run_inputs(
+        agent_id="agent-1",
+        session_id="session-1",
+        model="gpt-test",
+        required_inference_profile=None,
+        active_run_id="run-1",
+        owner_generation=1,
+        expected_mailbox_item_id=None,
+        enforce_snapshot_head=False,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        initial_turn_eligible=True,
+        poll_fn=queued_poll,
+        process_actions=True,
+        dispatch_event=_noop_dispatch_event,
+    )
+
+    assert result.complete_run is True
+    assert result.context_invalidated is False
+    assert result.has_actionable_work is False
+    assert process_calls == 1
+    assert queued_poll_calls == 0
+    assert promoted_batches == []
+
+
+@pytest.mark.asyncio
+async def test_poll_run_inputs_completes_predecessor_without_promoting_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recovery leaves a fenced continuation pending and completes its predecessor."""
+    executor = _executor()
+    promoted_batches = [
+        PromotedMailboxItems(
+            operation_action=None,
+            turn_effect=TurnEffect.NEUTRAL,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=[],
+            changed_session_agent_ids=[],
+            claimed_count=0,
+            inserted_count=0,
+            deduped_count=0,
+            complete_run=True,
+            suppress_parent_result=True,
+        )
+    ]
+    queued_poll_calls = 0
+
+    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+        del args, kwargs
+        return promoted_batches.pop(0)
+
+    async def queued_poll() -> PollMessagesResult:
+        nonlocal queued_poll_calls
+        queued_poll_calls += 1
+        return PollMessagesResult(
+            user_messages=[],
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+        )
+
+    async def has_actionable_model_input(session_id: str) -> bool:
+        del session_id
+        raise AssertionError("A fenced predecessor cannot continue model execution")
+
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+
+    result = await executor.poll_run_inputs(
+        agent_id="agent-1",
+        session_id="session-1",
+        model="gpt-test",
+        required_inference_profile=None,
+        active_run_id="run-1",
+        owner_generation=1,
+        expected_mailbox_item_id=None,
+        enforce_snapshot_head=False,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        initial_turn_eligible=True,
+        poll_fn=queued_poll,
+        process_actions=True,
+        dispatch_event=_noop_dispatch_event,
+    )
+
+    assert result.complete_run is True
+    assert result.suppress_parent_result is True
+    assert result.context_invalidated is False
+    assert result.has_actionable_work is False
+    assert queued_poll_calls == 0
+    assert promoted_batches == []
+
+
+@pytest.mark.asyncio
 async def test_poll_run_inputs_consumes_mixed_eligible_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2821,6 +3094,8 @@ async def test_poll_run_inputs_consumes_mixed_eligible_boundary(
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         ),
         PromotedMailboxItems(
             operation_action=None,
@@ -2834,6 +3109,8 @@ async def test_poll_run_inputs_consumes_mixed_eligible_boundary(
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         ),
         PromotedMailboxItems(
             operation_action=None,
@@ -2847,6 +3124,8 @@ async def test_poll_run_inputs_consumes_mixed_eligible_boundary(
             claimed_count=0,
             inserted_count=0,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         ),
     ]
 
@@ -2928,6 +3207,8 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         ),
         PromotedMailboxItems(
             operation_action=None,
@@ -2941,6 +3222,8 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
             claimed_count=0,
             inserted_count=0,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         ),
     ]
 
@@ -3011,6 +3294,8 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         ),
         PromotedMailboxItems(
             operation_action=None,
@@ -3024,6 +3309,8 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
             claimed_count=0,
             inserted_count=0,
             deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         ),
     ]
 
@@ -3078,6 +3365,7 @@ async def test_execute_cancels_pending_run_after_terminal_preparation_failure(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=True,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=["failure-event"],
             user_messages=[],
@@ -3114,6 +3402,89 @@ async def test_execute_cancels_pending_run_after_terminal_preparation_failure(
     assert lifecycle.cancelled_pending_run_ids == [result.run_id]
     assert lifecycle.terminal_runs == []
     assert result.terminal_run_status is AgentRunStatus.CANCELLED
+    assert any(isinstance(event, RunComplete) for event in dispatched)
+
+
+@pytest.mark.parametrize(
+    ("run_status", "expected_terminal_status"),
+    [
+        (AgentRunStatus.PENDING, AgentRunStatus.CANCELLED),
+        (AgentRunStatus.RUNNING, AgentRunStatus.COMPLETED),
+    ],
+)
+@pytest.mark.asyncio
+async def test_execute_suppresses_recovered_bridge_predecessor_result(
+    monkeypatch: pytest.MonkeyPatch,
+    run_status: AgentRunStatus,
+    expected_terminal_status: AgentRunStatus,
+) -> None:
+    """Recovery terminalizes a bridge predecessor without parent delivery."""
+    recoverable_run = _PendingRun(
+        status=run_status,
+        resolved_model_selection=(
+            make_test_model_selection()
+            if run_status is AgentRunStatus.RUNNING
+            else None
+        ),
+        effective_context_window_tokens=(
+            128_000 if run_status is AgentRunStatus.RUNNING else None
+        ),
+        effective_auto_compaction_threshold_tokens=(
+            102_400 if run_status is AgentRunStatus.RUNNING else None
+        ),
+        resolved_at=(
+            datetime.datetime.now(datetime.UTC)
+            if run_status is AgentRunStatus.RUNNING
+            else None
+        ),
+    )
+    lifecycle = _SessionLifecycle(recoverable_run=recoverable_run)
+    executor = _executor(session_lifecycle=lifecycle)
+    dispatched: list[PublishedEvent] = []
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            context_invalidated=False,
+            complete_run=True,
+            suppress_parent_result=True,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            has_actionable_work=False,
+        )
+
+    async def resolve_failure(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("resolve_invoke_input should not be called")
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_failure,
+    )
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id
+        dispatched.append(event)
+
+    result = await executor.execute(
+        _message(recoverable_run=recoverable_run),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+    )
+
+    assert lifecycle.completed_bridge_predecessors == [recoverable_run.id]
+    assert lifecycle.cancelled_pending_run_ids == []
+    assert lifecycle.terminal_runs == []
+    assert result.terminal_run_status is expected_terminal_status
     assert any(isinstance(event, RunComplete) for event in dispatched)
 
 
@@ -3165,6 +3536,7 @@ async def test_execute_preserves_actionable_transcript_eligibility(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -3218,6 +3590,7 @@ async def test_execute_ignores_wake_up_without_runtime_input(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -3534,6 +3907,7 @@ async def test_execute_clears_live_projection_after_run_complete(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -3823,6 +4197,7 @@ async def test_execute_retries_failed_run_without_durable_error(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -3911,6 +4286,7 @@ async def test_execute_resets_retry_budget_after_successful_model_turn(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -3987,6 +4363,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -4198,6 +4575,7 @@ async def test_execute_prioritizes_stop_over_provider_failure_persistence(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -4281,6 +4659,7 @@ async def test_execute_clears_retry_state_when_retry_emits_run_stopped(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -4339,6 +4718,7 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -4408,6 +4788,7 @@ async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],
@@ -4469,6 +4850,7 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
         return RunInputPollResult(
             context_invalidated=False,
             complete_run=False,
+            suppress_parent_result=False,
             requested_inference_profile=None,
             promoted_event_ids=[],
             user_messages=[],

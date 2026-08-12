@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
+    ActionExecutionStatus,
     AgentRunStatus,
     AgentSessionRunState,
     AgentSessionStatus,
@@ -74,7 +75,13 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
-from azents.repos.mailbox.data import MailboxItem, MailboxItemCreate
+from azents.repos.mailbox.data import (
+    AgentCreateGitWorktreeContinuationResult,
+    MailboxItem,
+    MailboxItemCreate,
+    MailboxPresentationItem,
+    TurnActionContinuationMailboxPayload,
+)
 from azents.repos.model_file.data import ModelFile
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -1507,6 +1514,119 @@ class TestMailboxService:
         assert result.user_messages[0].payload.metadata["source"] == (
             "external_channel"
         )
+
+    async def test_turn_action_continuation_waits_for_terminal_predecessor(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A continuation remains pending until its predecessor Run is terminal."""
+        session_id, _user_id = await _create_fixture(
+            rdb_session_manager,
+            "turn-action-continuation-predecessor",
+        )
+        run_repository = AgentRunRepository()
+        async with rdb_session_manager() as session:
+            predecessor = await run_repository.create_pending(
+                session,
+                session_id=session_id,
+                parent_agent_run_id=None,
+            )
+            predecessor = await run_repository.activate_pending(
+                session,
+                run_id=predecessor.id,
+                activated_at=tznow(),
+            )
+            buffer = await MailboxRepository().create(
+                session,
+                MailboxItemCreate(
+                    session_id=session_id,
+                    kind=MailboxItemKind.TURN_ACTION_CONTINUATION,
+                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
+                    sender_user_id=None,
+                    order_group=None,
+                    order_sequence=0,
+                    content="",
+                    idempotency_key="turn_action_continuation:execution-001",
+                    metadata={},
+                    action=None,
+                    attachments=[],
+                    file_parts=[],
+                    payload=TurnActionContinuationMailboxPayload(
+                        type="turn_action_continuation",
+                        items=[
+                            MailboxPresentationItem(
+                                item_key="turn_action_continuation:0",
+                                presentation_kind="turn_action_continuation",
+                            )
+                        ],
+                        bridge_identity="bridge-001",
+                        action_execution_id="execution-001",
+                        originating_run_id="originating-run-001",
+                        predecessor_run_id=predecessor.id,
+                        terminal_status=ActionExecutionStatus.COMPLETED,
+                        reason_code=None,
+                        failure_summary=None,
+                        cancellation_summary=None,
+                        result=AgentCreateGitWorktreeContinuationResult(
+                            type="agent_create_git_worktree",
+                            source_project_path="/workspace/agent/repo",
+                            generated_worktree_path="/workspace/agent/generated",
+                            requested_starting_ref=None,
+                            resolved_base_commit="a" * 40,
+                            branch_name="agent/generated",
+                        ),
+                    ),
+                ),
+            )
+
+        service = _mailbox_item_service(rdb_session_manager)
+        fenced = await service.flush_session_mailbox_items(
+            session_id=session_id,
+            owner_generation=0,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer.id,
+            prepared_inference_state=None,
+            profile_resolution_failure="Selected model is temporarily unavailable.",
+            active_run_id=predecessor.id,
+        )
+
+        assert fenced.complete_run is True
+        assert fenced.claimed_count == 0
+        assert fenced.deleted_buffer_ids == []
+        assert fenced.events == []
+        async with rdb_session_manager() as session:
+            assert await MailboxRepository().get_by_id(session, buffer.id) is not None
+            await run_repository.mark_terminal(
+                session,
+                predecessor.id,
+                AgentRunStatus.CANCELLED,
+                ended_at=tznow(),
+            )
+
+        promoted = await service.flush_session_mailbox_items(
+            session_id=session_id,
+            owner_generation=0,
+            model="gpt-5.4",
+            required_inference_profile=None,
+            expected_buffer_id=buffer.id,
+            prepared_inference_state=None,
+            profile_resolution_failure=None,
+            active_run_id=None,
+        )
+
+        assert promoted.complete_run is False
+        assert promoted.claimed_count == 1
+        assert promoted.deleted_buffer_ids == [buffer.id]
+        assert len(promoted.events) == 1
+        assert promoted.events[0].kind is EventKind.SYSTEM_REMINDER
+        assert promoted.events[0].external_id == (
+            "turn_action_continuation:execution-001"
+        )
+        async with rdb_session_manager() as session:
+            assert await MailboxRepository().get_by_id(session, buffer.id) is None
 
     async def test_flush_rejects_stale_preparation_snapshot(
         self,

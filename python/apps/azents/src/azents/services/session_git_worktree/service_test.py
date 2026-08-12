@@ -20,6 +20,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     EventKind,
     LLMProvider,
+    MailboxItemKind,
     RuntimeRunnerState,
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
@@ -28,6 +29,7 @@ from azents.core.enums import (
 )
 from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import (
+    AgentCreateGitWorktreeAction,
     CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
     CreateSessionWorkingFolderAction,
@@ -61,6 +63,7 @@ from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.data import TurnActionContinuationMailboxPayload
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -178,6 +181,7 @@ def _readonly_service() -> SessionGitWorktreeService:
         agent_project_catalog_repository=cast(AgentProjectCatalogRepository, object()),
         agent_project_catalog_service=cast(AgentProjectCatalogService, object()),
         action_execution_repository=cast(ActionExecutionRepository, object()),
+        mailbox_item_repository=cast(MailboxRepository, object()),
         event_transcript_repository=cast(EventTranscriptRepository, object()),
         session_manager=_session_manager_double,
         runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),
@@ -768,6 +772,7 @@ def _service(
         or AgentProjectCatalogRepository(),
         agent_project_catalog_service=_CatalogRefreshService(refresh_status),
         action_execution_repository=ActionExecutionRepository(),
+        mailbox_item_repository=MailboxRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         session_manager=session_manager,
         runtime_target_resolver=_RuntimeTargetResolver(
@@ -964,6 +969,119 @@ async def _create_ready_worktree_session(
 
 class TestSessionGitWorktreeService:
     """Session Git worktree service tests."""
+
+    @pytest.mark.parametrize(
+        ("predecessor_run_id", "expected_predecessor_run_id"),
+        [
+            ("processing-run-001", "processing-run-001"),
+            (None, "originating-run-001"),
+        ],
+        ids=["processing-run", "originating-run-fallback"],
+    )
+    async def test_bridge_cancellation_handoff_is_replay_idempotent(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        predecessor_run_id: str | None,
+        expected_predecessor_run_id: str,
+    ) -> None:
+        """Bridge cancellation creates one terminal event and continuation."""
+        suffix = "processing" if predecessor_run_id is not None else "originating"
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(
+                session,
+                f"bridge-cancel-{suffix}",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            action = AgentCreateGitWorktreeAction(
+                bridge_identity=f"bridge-{suffix}",
+                originating_run_id="originating-run-001",
+                client_tool_call_id="call-001",
+                session_agent_context_id="context-001",
+                originating_agent_session_id=agent_session.id,
+                source_project_id="project-001",
+                source_project_path="/workspace/agent/repo",
+                starting_ref=None,
+                branch_name=None,
+            )
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    sender_user_id=None,
+                    id=None,
+                    session_id=agent_session.id,
+                    mailbox_item_id=f"bridge-mailbox-{suffix}",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                    owner_generation=1,
+                ),
+            )
+        service = _service(rdb_session_manager, _RunnerOperations())
+
+        first = await service.cancel_action_execution(
+            execution=execution,
+            reason="Operation cancelled during Session ownership handover.",
+            on_history_event_appended=None,
+            predecessor_run_id=predecessor_run_id,
+        )
+        replay = await service.cancel_action_execution(
+            execution=execution,
+            reason="Operation cancelled during Session ownership handover.",
+            on_history_event_appended=None,
+            predecessor_run_id=predecessor_run_id,
+        )
+
+        assert replay.id == first.id
+        async with rdb_session_manager() as session:
+            assert (
+                await ActionExecutionRepository().get_by_id(
+                    session,
+                    action_execution_id=execution.id,
+                )
+                is None
+            )
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                agent_session.id,
+                limit=20,
+            )
+            continuations = [
+                item
+                for item in await MailboxRepository().list_by_session_id(
+                    session,
+                    agent_session.id,
+                )
+                if item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION
+            ]
+        terminal_events = [
+            event
+            for event in events
+            if event.external_id == f"action_execution_result:{execution.id}"
+        ]
+        assert len(terminal_events) == 1
+        assert len(continuations) == 1
+        continuation = continuations[0]
+        assert continuation.idempotency_key == (
+            f"turn_action_continuation:{execution.id}"
+        )
+        payload = continuation.payload
+        assert isinstance(payload, TurnActionContinuationMailboxPayload)
+        assert payload.predecessor_run_id == expected_predecessor_run_id
+        assert payload.originating_run_id == "originating-run-001"
+        assert payload.terminal_status is ActionExecutionStatus.CANCELLED
+        assert payload.failure_summary is None
+        assert payload.cancellation_summary == (
+            "Operation cancelled during Session ownership handover."
+        )
 
     async def test_create_session_working_folder_uses_stored_path(
         self,
@@ -1630,6 +1748,7 @@ class TestSessionGitWorktreeService:
             reason="Operation cancelled during Session ownership handover.",
             on_history_event_appended=None,
             on_action_execution_removed=None,
+            predecessor_run_id=None,
         )
 
         assert len(recovered_events) == 1

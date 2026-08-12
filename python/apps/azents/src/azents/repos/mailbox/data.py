@@ -5,7 +5,11 @@ from typing import Annotated, Literal, TypeAlias, cast
 
 from pydantic import BaseModel, Field, model_validator
 
-from azents.core.enums import MailboxItemKind, MailboxSchedulingMode
+from azents.core.enums import (
+    ActionExecutionStatus,
+    MailboxItemKind,
+    MailboxSchedulingMode,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import FileOutputPart
 from azents.rdb.models.event import JSONValue
@@ -55,6 +59,53 @@ class ExternalChannelContinuationMailboxPayload(MailboxPayloadBase):
     type: Literal["external_channel_continuation"]
 
 
+class AgentCreateGitWorktreeContinuationResult(BaseModel):
+    """Bounded model-facing result for an Agent worktree create action."""
+
+    type: Literal["agent_create_git_worktree"]
+    source_project_path: str = Field(min_length=1)
+    generated_worktree_path: str | None
+    requested_starting_ref: str | None
+    resolved_base_commit: str | None
+    branch_name: str | None
+
+
+class AgentRemoveGitWorktreeContinuationResult(BaseModel):
+    """Bounded model-facing result for an Agent worktree remove action."""
+
+    type: Literal["agent_remove_git_worktree"]
+    worktree_path: str = Field(min_length=1)
+    preserved_branch_name: str | None
+    force: bool
+    dirty_content_discarded: bool
+    retry_guidance: str | None
+
+
+TurnActionContinuationResult: TypeAlias = Annotated[
+    AgentCreateGitWorktreeContinuationResult | AgentRemoveGitWorktreeContinuationResult,
+    Field(discriminator="type"),
+]
+
+
+class TurnActionContinuationMailboxPayload(MailboxPayloadBase):
+    """Hidden one-shot model continuation for a terminal registered bridge."""
+
+    type: Literal["turn_action_continuation"]
+    bridge_identity: str = Field(min_length=1)
+    action_execution_id: str = Field(min_length=1)
+    originating_run_id: str = Field(min_length=1)
+    predecessor_run_id: str = Field(min_length=1)
+    terminal_status: Literal[
+        ActionExecutionStatus.COMPLETED,
+        ActionExecutionStatus.FAILED,
+        ActionExecutionStatus.CANCELLED,
+    ]
+    reason_code: str | None
+    failure_summary: str | None = Field(max_length=1000)
+    cancellation_summary: str | None = Field(max_length=1000)
+    result: TurnActionContinuationResult
+
+
 class AgentMessageMailboxPayload(MailboxPayloadBase):
     """Typed Agent-message mailbox payload."""
 
@@ -92,6 +143,7 @@ MailboxEnvelopePayload: TypeAlias = Annotated[
     UserMessageMailboxPayload
     | GoalContinuationMailboxPayload
     | ExternalChannelContinuationMailboxPayload
+    | TurnActionContinuationMailboxPayload
     | AgentMessageMailboxPayload
     | ExternalChannelMessageMailboxPayload
     | TurnActionMailboxPayload,
@@ -124,6 +176,10 @@ def mailbox_payload_from_fields(
         return GoalContinuationMailboxPayload(type=kind.value, items=[item])
     if kind is MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
         return ExternalChannelContinuationMailboxPayload(type=kind.value, items=[item])
+    if kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
+        raise ValueError(
+            "TurnAction continuation admission requires its closed typed payload"
+        )
     if kind is MailboxItemKind.AGENT_MESSAGE:
         return AgentMessageMailboxPayload(type=kind.value, items=[item])
     if kind is MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:

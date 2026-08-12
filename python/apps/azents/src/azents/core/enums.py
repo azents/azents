@@ -346,6 +346,7 @@ class MailboxItemKind(enum.StrEnum):
     USER_MESSAGE = "user_message"
     GOAL_CONTINUATION = "goal_continuation"
     EXTERNAL_CHANNEL_CONTINUATION = "external_channel_continuation"
+    TURN_ACTION_CONTINUATION = "turn_action_continuation"
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"
     EXTERNAL_CHANNEL_MESSAGE = "external_channel_message"

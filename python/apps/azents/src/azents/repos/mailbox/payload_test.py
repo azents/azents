@@ -4,9 +4,10 @@ import datetime
 from typing import cast
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from azents.core.enums import (
+    ActionExecutionStatus,
     ExternalChannelProvider,
     ExternalChannelResourceType,
     MailboxItemKind,
@@ -15,11 +16,13 @@ from azents.core.enums import (
 from azents.engine.events.types import ExternalChannelMessagePayload
 from azents.rdb.models.event import JSONValue
 from azents.repos.mailbox.data import (
+    AgentCreateGitWorktreeContinuationResult,
     ExternalChannelContinuationMailboxPayload,
     ExternalChannelMessageMailboxPayload,
     MailboxEnvelopePayload,
     MailboxItem,
     MailboxPresentationItem,
+    TurnActionContinuationMailboxPayload,
     TurnActionMailboxPayload,
     UserMessageMailboxPayload,
 )
@@ -124,6 +127,76 @@ def test_external_channel_continuation_payload_is_distinct_from_goal() -> None:
 
     assert item.payload is not None
     assert item.payload.type == "external_channel_continuation"
+
+
+def test_turn_action_continuation_decodes_closed_typed_payload() -> None:
+    """Persisted bridge continuation JSON decodes without raw business unions."""
+    raw = {
+        "type": "turn_action_continuation",
+        "items": [
+            {
+                "item_key": "turn_action_continuation:0",
+                "presentation_kind": "turn_action_continuation",
+            }
+        ],
+        "bridge_identity": "bridge-001",
+        "action_execution_id": "execution-001",
+        "originating_run_id": "run-001",
+        "predecessor_run_id": "run-002",
+        "terminal_status": "cancelled",
+        "reason_code": "ownership_handover",
+        "failure_summary": None,
+        "cancellation_summary": (
+            "Operation cancelled during Session ownership handover."
+        ),
+        "result": {
+            "type": "agent_create_git_worktree",
+            "source_project_path": "/workspace/agent/repo",
+            "generated_worktree_path": None,
+            "requested_starting_ref": "main",
+            "resolved_base_commit": None,
+            "branch_name": None,
+        },
+    }
+
+    payload = TypeAdapter(MailboxEnvelopePayload).validate_python(raw)
+
+    assert isinstance(payload, TurnActionContinuationMailboxPayload)
+    assert payload.terminal_status is ActionExecutionStatus.CANCELLED
+    assert payload.cancellation_summary == (
+        "Operation cancelled during Session ownership handover."
+    )
+    assert isinstance(payload.result, AgentCreateGitWorktreeContinuationResult)
+
+
+def test_turn_action_continuation_rejects_unbounded_terminal_summary() -> None:
+    """Terminal explanations remain bounded before entering model context."""
+    with pytest.raises(ValidationError):
+        TurnActionContinuationMailboxPayload(
+            type="turn_action_continuation",
+            items=[
+                MailboxPresentationItem(
+                    item_key="turn_action_continuation:0",
+                    presentation_kind="turn_action_continuation",
+                )
+            ],
+            bridge_identity="bridge-001",
+            action_execution_id="execution-001",
+            originating_run_id="run-001",
+            predecessor_run_id="run-002",
+            terminal_status=ActionExecutionStatus.FAILED,
+            reason_code=None,
+            failure_summary="x" * 1001,
+            cancellation_summary=None,
+            result=AgentCreateGitWorktreeContinuationResult(
+                type="agent_create_git_worktree",
+                source_project_path="/workspace/agent/repo",
+                generated_worktree_path=None,
+                requested_starting_ref=None,
+                resolved_base_commit=None,
+                branch_name=None,
+            ),
+        )
 
 
 @pytest.mark.parametrize(

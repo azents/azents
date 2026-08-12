@@ -326,6 +326,7 @@ class PollMessagesResult:
     user_messages: list[RunUserMessage]
     context_invalidated: bool
     complete_run: bool
+    suppress_parent_result: bool
 
 
 PollMessages: TypeAlias = Callable[[], Awaitable[PollMessagesResult]]

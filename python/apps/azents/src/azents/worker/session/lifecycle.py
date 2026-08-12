@@ -397,6 +397,24 @@ class SessionLifecycleService:
                 session_id=session_id,
             )
 
+    async def get_active_agent_run(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+    ) -> AgentRunState | None:
+        """Return the newest pending or running Run without claiming it."""
+        async with self.session_manager() as db_session:
+            await self._lock_owned_session(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
+            return await self.agent_run_repository.get_active_by_session_id(
+                db_session,
+                session_id=session_id,
+            )
+
     async def claim_recoverable_agent_run(
         self,
         session_id: str,
@@ -515,6 +533,45 @@ class SessionLifecycleService:
             )
             await db_session.commit()
             return cancelled
+
+    async def complete_bridge_predecessor_run(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+        run_id: str,
+    ) -> AgentRunStatus:
+        """Terminalize a bridge predecessor without delivering an interim result."""
+        async with self.session_manager() as db_session:
+            await self._lock_owned_session(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
+            run = await self.agent_run_repository.lock_by_id(db_session, run_id)
+            if run is None or run.session_id != session_id:
+                raise ValueError("AgentRun not found in session")
+            match run.status:
+                case AgentRunStatus.PENDING:
+                    terminal_status = AgentRunStatus.CANCELLED
+                case AgentRunStatus.RUNNING:
+                    terminal_status = AgentRunStatus.COMPLETED
+                case _:
+                    raise ValueError("Bridge predecessor AgentRun is not active")
+            terminal_at = datetime.datetime.now(datetime.UTC)
+            await self.agent_run_repository.mark_terminal(
+                db_session,
+                run_id,
+                terminal_status,
+                ended_at=terminal_at,
+            )
+            await self.agent_run_repository.mark_parent_result_suppressed(
+                db_session,
+                run_id=run_id,
+                finalized_at=terminal_at,
+            )
+            await db_session.commit()
+            return terminal_status
 
     async def activate_pending_agent_run(
         self,

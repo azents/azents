@@ -50,6 +50,7 @@ from azents.engine.run.contracts import ToolAdmissionBarrier
 from azents.engine.run.errors import (
     UserVisibleRuntimeError,
 )
+from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import (
@@ -73,6 +74,7 @@ class InputPollResult:
     events: list[Event]
     context_invalidated: bool
     complete_run: bool
+    suppress_parent_result: bool
 
 
 @dataclass(frozen=True)
@@ -251,6 +253,7 @@ class AgentRunExecutionRequest:
     model: str
     owner_generation: int
     tool_admission_barrier: ToolAdmissionBarrier
+    turn_action_bridge_boundary: TurnActionBridgeBoundary
     run_index: int = 1
     max_turns: int | None = None
 
@@ -363,6 +366,9 @@ class AgentRunExecution[
                                 session,
                                 request.run_id,
                                 AgentRunStatus.COMPLETED,
+                                suppress_parent_result=(
+                                    poll_result.suppress_parent_result
+                                ),
                             )
                         return AgentRunStatus.COMPLETED
                     if poll_result.context_invalidated:
@@ -701,6 +707,26 @@ class AgentRunExecution[
                             )
                         await finish_turn("cancelled")
                         return AgentRunStatus.INTERRUPTED
+                    bridge_observation = request.turn_action_bridge_boundary.consume()
+                    if bridge_observation is not None:
+                        if poll_input_events is None:
+                            raise RuntimeError(
+                                "TurnAction bridge admission requires input polling"
+                            )
+                        poll_result = await poll_input_events(request.session_id)
+                        if poll_result.complete_run:
+                            async with self.session_manager() as session:
+                                await self._mark_terminal(
+                                    session,
+                                    request.run_id,
+                                    AgentRunStatus.COMPLETED,
+                                    suppress_parent_result=True,
+                                )
+                            await finish_turn("completed")
+                            return AgentRunStatus.COMPLETED
+                        if poll_result.context_invalidated:
+                            await finish_turn("completed")
+                            return AgentRunStatus.RUNNING
                     if not needs_follow_up:
                         async with self.session_manager() as session:
                             run_marker = await self._append_run_marker(
@@ -1360,17 +1386,25 @@ class AgentRunExecution[
         *,
         terminal_result_event_id: str | None = None,
         terminal_result_message: str | None = None,
+        suppress_parent_result: bool = False,
     ) -> None:
         """Record run terminal state."""
+        terminal_at = datetime.datetime.now(datetime.UTC)
         await self.run_repo.mark_terminal(
             session,
             run_id,
             status,
-            ended_at=datetime.datetime.now(datetime.UTC),
+            ended_at=terminal_at,
             terminal_result_event_id=terminal_result_event_id,
             terminal_result_message=terminal_result_message,
         )
-        if self.terminal_finalization_coordinator is not None:
+        if suppress_parent_result:
+            await self.run_repo.mark_parent_result_suppressed(
+                session,
+                run_id=run_id,
+                finalized_at=terminal_at,
+            )
+        elif self.terminal_finalization_coordinator is not None:
             await self.terminal_finalization_coordinator.finalize_run_in_session(
                 session,
                 run_id=run_id,

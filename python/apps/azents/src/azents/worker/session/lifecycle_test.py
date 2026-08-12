@@ -28,16 +28,24 @@ from azents.worker.session.lifecycle import SessionLifecycleService
 class _Session:
     """Minimal async DB session test double."""
 
+    def __init__(self, order: list[str] | None = None) -> None:
+        self.order = order
+
     async def commit(self) -> None:
         """Accept transaction commit."""
+        if self.order is not None:
+            self.order.append("commit")
 
 
 class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
     """DB session context for tests."""
 
+    def __init__(self, order: list[str] | None = None) -> None:
+        self.session = _Session(order)
+
     async def __aenter__(self) -> AsyncSession:
         """Return test session."""
-        return cast(AsyncSession, _Session())
+        return cast(AsyncSession, self.session)
 
     async def __aexit__(self, *exc_info: object) -> None:
         """No resources to clean up."""
@@ -46,9 +54,12 @@ class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
 class _SessionManager:
     """Session manager for tests."""
 
+    def __init__(self, order: list[str] | None = None) -> None:
+        self.order = order
+
     def __call__(self) -> _SessionScope:
         """Return new session scope."""
-        return _SessionScope()
+        return _SessionScope(self.order)
 
 
 class _Broker:
@@ -143,13 +154,17 @@ class _AgentSessionRepository:
 class _TerminalFinalizationCoordinator:
     """Terminal coordinator test double."""
 
+    def __init__(self) -> None:
+        self.finalized_run_ids: list[str] = []
+
     async def finalize_run_in_session(
         self,
         session: AsyncSession,
         *,
         run_id: str,
     ) -> None:
-        del session, run_id
+        del session
+        self.finalized_run_ids.append(run_id)
 
     async def finalize_runs_in_session(
         self,
@@ -157,7 +172,8 @@ class _TerminalFinalizationCoordinator:
         *,
         run_ids: list[str],
     ) -> None:
-        del session, run_ids
+        del session
+        self.finalized_run_ids.extend(run_ids)
 
 
 class _MailboxRepository:
@@ -190,12 +206,16 @@ class _AgentRunRepository:
         *,
         activated_run: AgentRunState | None = None,
         active_lookup_error: Exception | None = None,
+        order: list[str] | None = None,
     ) -> None:
         self.running_run = running_run
         self.activated_run = activated_run
         self.active_lookup_error = active_lookup_error
+        self.order = order
         self.terminal_session_ids: list[str] = []
         self.terminal_run_ids: list[str] = []
+        self.terminal_statuses: list[AgentRunStatus] = []
+        self.suppressed_run_ids: list[str] = []
         self.activation_run_ids: list[str] = []
         self.phase_updates: list[tuple[str, AgentRunPhase]] = []
 
@@ -220,6 +240,54 @@ class _AgentRunRepository:
         del session
         if self.running_run is None or self.running_run.id != run_id:
             return None
+        return self.running_run
+
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> AgentRunState | None:
+        """Return the configured run under the bridge predecessor lock."""
+        del session
+        if self.order is not None:
+            self.order.append("lock_run")
+        if self.running_run is None or self.running_run.id != run_id:
+            return None
+        return self.running_run
+
+    async def mark_terminal(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        status: AgentRunStatus,
+        *,
+        ended_at: datetime,
+    ) -> AgentRunState:
+        """Record the bridge predecessor terminal transition."""
+        del session, ended_at
+        if self.running_run is None or self.running_run.id != run_id:
+            raise AssertionError("Bridge predecessor Run was not configured")
+        if self.order is not None:
+            self.order.append(f"mark_terminal:{status.value}")
+        self.terminal_run_ids.append(run_id)
+        self.terminal_statuses.append(status)
+        self.running_run = self.running_run.model_copy(update={"status": status})
+        return self.running_run
+
+    async def mark_parent_result_suppressed(
+        self,
+        session: AsyncSession,
+        *,
+        run_id: str,
+        finalized_at: datetime,
+    ) -> AgentRunState:
+        """Record parent-result suppression after terminal transition."""
+        del session, finalized_at
+        if self.running_run is None or self.running_run.id != run_id:
+            raise AssertionError("Bridge predecessor Run was not configured")
+        if self.order is not None:
+            self.order.append("suppress_parent_result")
+        self.suppressed_run_ids.append(run_id)
         return self.running_run
 
     async def mark_terminal_if_running(
@@ -495,6 +563,65 @@ async def test_terminal_update_rejects_cross_session_run() -> None:
         )
 
     assert agent_run_repository.terminal_run_ids == []
+
+
+@pytest.mark.parametrize(
+    ("run_status", "expected_terminal_status"),
+    [
+        (AgentRunStatus.PENDING, AgentRunStatus.CANCELLED),
+        (AgentRunStatus.RUNNING, AgentRunStatus.COMPLETED),
+    ],
+)
+@pytest.mark.asyncio
+async def test_complete_bridge_predecessor_suppresses_parent_result_atomically(
+    run_status: AgentRunStatus,
+    expected_terminal_status: AgentRunStatus,
+) -> None:
+    """Bridge recovery terminalizes and suppresses before one transaction commits."""
+    order: list[str] = []
+    run = _running_run().model_copy(update={"status": run_status})
+    agent_run_repository = _AgentRunRepository(run, order=order)
+    coordinator = _TerminalFinalizationCoordinator()
+    service = SessionLifecycleService(
+        broker=cast(SessionBroker, _Broker()),
+        session_manager=cast(
+            SessionManager[AsyncSession],
+            _SessionManager(order),
+        ),
+        agent_session_repository=cast(
+            AgentSessionRepository,
+            _AgentSessionRepository(),
+        ),
+        agent_run_repository=cast(
+            AgentRunRepository,
+            agent_run_repository,
+        ),
+        mailbox_item_repository=cast(
+            MailboxRepository,
+            _MailboxRepository(set()),
+        ),
+        terminal_finalization_coordinator=cast(
+            TerminalRunFinalizationCoordinator,
+            coordinator,
+        ),
+    )
+
+    terminal_status = await service.complete_bridge_predecessor_run(
+        "session-001",
+        owner_generation=0,
+        run_id=run.id,
+    )
+
+    assert terminal_status is expected_terminal_status
+    assert agent_run_repository.terminal_statuses == [expected_terminal_status]
+    assert agent_run_repository.suppressed_run_ids == [run.id]
+    assert coordinator.finalized_run_ids == []
+    assert order == [
+        "lock_run",
+        f"mark_terminal:{expected_terminal_status.value}",
+        "suppress_parent_result",
+        "commit",
+    ]
 
 
 @pytest.mark.asyncio

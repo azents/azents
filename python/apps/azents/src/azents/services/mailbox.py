@@ -30,6 +30,8 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
+    AgentCreateGitWorktreeAction,
+    AgentRemoveGitWorktreeAction,
     CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
     CreateSessionWorkingFolderAction,
@@ -72,11 +74,14 @@ from azents.repos.external_channel.data import ExternalChannelMailboxProjectionI
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import (
+    AgentCreateGitWorktreeContinuationResult,
+    AgentRemoveGitWorktreeContinuationResult,
     ExternalChannelMessageMailboxPayload,
     MailboxEnvelopePayload,
     MailboxItem,
     MailboxItemCreate,
     MailboxPresentationItem,
+    TurnActionContinuationMailboxPayload,
 )
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
@@ -193,6 +198,8 @@ class PromotedMailboxItems:
     claimed_count: int
     inserted_count: int
     deduped_count: int
+    complete_run: bool
+    suppress_parent_result: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -236,6 +243,8 @@ class MailboxPreparationOutcome:
     promoted: list[_PromotedMailboxItem]
     turn_effect: TurnEffect
     operation_action: OperationActionInput | None
+    complete_run: bool
+    suppress_parent_result: bool
 
 
 class MailboxProcessor(Protocol):
@@ -589,6 +598,8 @@ class MailboxService:
                     claimed_count=0,
                     inserted_count=0,
                     deduped_count=0,
+                    complete_run=False,
+                    suppress_parent_result=False,
                 )
 
             outcome = await self._promote_claimed_buffers(
@@ -604,7 +615,8 @@ class MailboxService:
             )
             promoted = outcome.promoted
             if (
-                prepared_inference_state is not None
+                promoted
+                and prepared_inference_state is not None
                 and outcome.turn_effect is not TurnEffect.FAILED
                 and _buffer_requires_inference(claimed[0])
             ):
@@ -734,6 +746,8 @@ class MailboxService:
             claimed_count=len(buffer_ids),
             inserted_count=len(event_inserted),
             deduped_count=len(deduped),
+            complete_run=outcome.complete_run,
+            suppress_parent_result=outcome.suppress_parent_result,
         )
 
     async def _acknowledge_promoted_agent_results(
@@ -973,6 +987,8 @@ class MailboxService:
                 promoted=[],
                 turn_effect=TurnEffect.NEUTRAL,
                 operation_action=None,
+                complete_run=False,
+                suppress_parent_result=False,
             )
         buffer = claimed[0]
         if (
@@ -983,14 +999,8 @@ class MailboxService:
                 promoted=[],
                 turn_effect=TurnEffect.NEUTRAL,
                 operation_action=None,
-            )
-        if (
-            _buffer_requires_inference(buffer)
-            and profile_resolution_failure is not None
-        ):
-            return _preparation_outcome(
-                [_system_error_promoted_buffer(buffer, profile_resolution_failure)],
-                TurnEffect.FAILED,
+                complete_run=False,
+                suppress_parent_result=False,
             )
         context = MailboxPreparationContext(
             session=session,
@@ -1000,6 +1010,22 @@ class MailboxService:
             prepared_inference_state=prepared_inference_state,
             prepared_files=prepared_files,
         )
+        if buffer.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
+            fenced = await _turn_action_continuation_predecessor_fence(
+                self,
+                context,
+                buffer,
+            )
+            if fenced is not None:
+                return fenced
+        if (
+            _buffer_requires_inference(buffer)
+            and profile_resolution_failure is not None
+        ):
+            return _preparation_outcome(
+                [_system_error_promoted_buffer(buffer, profile_resolution_failure)],
+                TurnEffect.FAILED,
+            )
         processor = self._processor_for(buffer)
         return await processor.process(context, buffer)
 
@@ -1012,6 +1038,8 @@ class MailboxService:
                 return _GoalContinuationMailboxProcessor(self)
             case MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
                 return _ExternalChannelContinuationMailboxProcessor(self)
+            case MailboxItemKind.TURN_ACTION_CONTINUATION:
+                return _TurnActionContinuationMailboxProcessor(self)
             case MailboxItemKind.AGENT_MESSAGE:
                 return _AgentMessageMailboxProcessor(self)
             case MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
@@ -1035,6 +1063,12 @@ class MailboxService:
                         | CreateSessionWorkingFolderAction()
                     ):
                         return _OperationActionMailboxProcessor(action)
+                    case (
+                        AgentCreateGitWorktreeAction() | AgentRemoveGitWorktreeAction()
+                    ):
+                        raise RuntimeError(
+                            "Agent worktree bridge action execution is not enabled"
+                        )
                     case _:
                         assert_never(action)  # ty: ignore[type-assertion-failure] — persisted action validation excludes CommandAction at this mailbox boundary, but TypeAdapter retains its broader union.
             case _:
@@ -1371,6 +1405,71 @@ class _ExternalChannelContinuationMailboxProcessor:
 
 
 @dataclasses.dataclass(frozen=True)
+class _TurnActionContinuationMailboxProcessor:
+    """Promote one bridge continuation only after its predecessor is terminal."""
+
+    service: MailboxService
+
+    async def process(
+        self,
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
+        del context
+        if not isinstance(buffer.payload, TurnActionContinuationMailboxPayload):
+            raise ValueError(
+                "TurnAction continuation MailboxItem payload is malformed."
+            )
+        reminder = SystemReminderPayload(
+            text=_turn_action_continuation_text(buffer.payload)
+        )
+        return _preparation_outcome(
+            [
+                _PromotedMailboxItem(
+                    buffer=buffer,
+                    user_message=None,
+                    event_kind=EventKind.SYSTEM_REMINDER,
+                    payload=_JSON_OBJECT_ADAPTER.validate_python(
+                        reminder.model_dump(mode="json")
+                    ),
+                    external_id=(
+                        f"turn_action_continuation:{buffer.payload.action_execution_id}"
+                    ),
+                )
+            ],
+            TurnEffect.ELIGIBLE,
+        )
+
+
+async def _turn_action_continuation_predecessor_fence(
+    service: MailboxService,
+    context: MailboxPreparationContext,
+    buffer: MailboxItem,
+) -> MailboxPreparationOutcome | None:
+    """Keep a bridge continuation durable until its predecessor is terminal."""
+    if not isinstance(buffer.payload, TurnActionContinuationMailboxPayload):
+        raise ValueError("TurnAction continuation MailboxItem payload is malformed.")
+    predecessor = await service.agent_run_repository.get_by_id(
+        context.session,
+        buffer.payload.predecessor_run_id,
+    )
+    if predecessor is None or predecessor.session_id != context.session_id:
+        raise ValueError("TurnAction continuation predecessor Run is invalid.")
+    if predecessor.status not in {
+        AgentRunStatus.PENDING,
+        AgentRunStatus.RUNNING,
+    }:
+        return None
+    return MailboxPreparationOutcome(
+        promoted=[],
+        turn_effect=TurnEffect.NEUTRAL,
+        operation_action=None,
+        complete_run=context.active_run_id == predecessor.id,
+        suppress_parent_result=context.active_run_id == predecessor.id,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
 class _AgentMessageMailboxProcessor:
     """Prepare one inter-agent mailbox message."""
 
@@ -1585,6 +1684,8 @@ class _OperationActionMailboxProcessor:
                 action=self.action,
                 execution=None,
             ),
+            complete_run=False,
+            suppress_parent_result=False,
         )
 
 
@@ -1597,6 +1698,8 @@ def _preparation_outcome(
         promoted=promoted,
         turn_effect=turn_effect,
         operation_action=None,
+        complete_run=False,
+        suppress_parent_result=False,
     )
 
 
@@ -1676,6 +1779,7 @@ def _buffer_requires_inference(buffer: MailboxItem) -> bool:
             MailboxItemKind.USER_MESSAGE
             | MailboxItemKind.GOAL_CONTINUATION
             | MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
+            | MailboxItemKind.TURN_ACTION_CONTINUATION
             | MailboxItemKind.AGENT_MESSAGE
             | MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE
         ):
@@ -1689,6 +1793,68 @@ def _buffer_requires_inference(buffer: MailboxItem) -> bool:
             return isinstance(action, GoalAction | SkillAction)
         case _:
             assert_never(buffer.kind)
+
+
+def _turn_action_continuation_text(
+    payload: TurnActionContinuationMailboxPayload,
+) -> str:
+    """Render bounded registered-bridge outcome text for model continuation."""
+    result = payload.result
+    terminal = payload.terminal_status.value
+    reason = f" Reason code: {payload.reason_code}." if payload.reason_code else ""
+    failure = (
+        f" Failure summary: {payload.failure_summary}."
+        if payload.failure_summary is not None
+        else ""
+    )
+    cancellation = (
+        f" Cancellation summary: {payload.cancellation_summary}."
+        if payload.cancellation_summary is not None
+        else ""
+    )
+    terminal_context = f"{reason}{failure}{cancellation}"
+    match result:
+        case AgentCreateGitWorktreeContinuationResult():
+            generated = (
+                f" Generated worktree path: {result.generated_worktree_path}."
+                if result.generated_worktree_path is not None
+                else ""
+            )
+            branch = (
+                f" Branch: {result.branch_name}."
+                if result.branch_name is not None
+                else ""
+            )
+            commit = (
+                f" Resolved base commit: {result.resolved_base_commit}."
+                if result.resolved_base_commit is not None
+                else ""
+            )
+            return (
+                "The requested Agent-managed Git worktree creation reached "
+                f"terminal status {terminal}. Source Project path: "
+                f"{result.source_project_path}.{generated}{branch}{commit}"
+                f"{terminal_context}"
+            )
+        case AgentRemoveGitWorktreeContinuationResult():
+            branch = (
+                f" Preserved branch: {result.preserved_branch_name}."
+                if result.preserved_branch_name is not None
+                else ""
+            )
+            retry = (
+                f" {result.retry_guidance}" if result.retry_guidance is not None else ""
+            )
+            return (
+                "The requested Agent-managed Git worktree removal reached "
+                f"terminal status {terminal}. Worktree path: "
+                f"{result.worktree_path}.{branch} Force used: "
+                f"{str(result.force).lower()}. Dirty content discarded: "
+                f"{str(result.dirty_content_discarded).lower()}."
+                f"{terminal_context}{retry}"
+            )
+        case _:
+            assert_never(result)
 
 
 def _requested_inference_profile(
