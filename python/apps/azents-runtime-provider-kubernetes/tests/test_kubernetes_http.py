@@ -24,6 +24,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     LabelSelector,
     LocalObjectReference,
     NetworkPolicyEgressRule,
+    NetworkPolicyIngressRule,
     NetworkPolicyPeer,
     NetworkPolicyPort,
     NetworkPolicyResource,
@@ -708,7 +709,24 @@ def _network_policy() -> NetworkPolicyResource:
                 }
             ),
             policy_types=("Ingress", "Egress"),
-            ingress=(),
+            ingress=(
+                NetworkPolicyIngressRule(
+                    peers=(
+                        NetworkPolicyPeer(
+                            namespace_selector=LabelSelector(
+                                match_labels={
+                                    "kubernetes.io/metadata.name": "azents-runtime"
+                                }
+                            ),
+                            pod_selector=LabelSelector(
+                                match_labels={"azents/runtime-id": "runtime-1"}
+                            ),
+                            ip_block=None,
+                        ),
+                    ),
+                    ports=(NetworkPolicyPort(protocol="TCP", port=8080),),
+                ),
+            ),
             egress=(
                 NetworkPolicyEgressRule(
                     peers=(
@@ -726,6 +744,36 @@ def _network_policy() -> NetworkPolicyResource:
             ),
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_network_policy_list_uses_exact_label_selector() -> None:
+    network_policy = _network_policy()
+    api = RecordingKubernetesHttpApi(
+        ({"items": [network_policy_manifest(network_policy)]},)
+    )
+
+    result = await api.list_network_policies(
+        {
+            "azents/managed-by": "azents-runtime-provider-kubernetes",
+            "azents/runtime-id": "runtime-1",
+        },
+        "azents-runtime",
+    )
+
+    assert result == (network_policy,)
+    assert len(api.requests) == 1
+    request = api.requests[0]
+    assert request.method == "GET"
+    assert request.path == (
+        "/apis/networking.k8s.io/v1/namespaces/azents-runtime/networkpolicies"
+    )
+    assert request.params == {
+        "labelSelector": (
+            "azents/managed-by=azents-runtime-provider-kubernetes,"
+            "azents/runtime-id=runtime-1"
+        )
+    }
 
 
 def _pod(resources: ContainerResources | None) -> PodResource:

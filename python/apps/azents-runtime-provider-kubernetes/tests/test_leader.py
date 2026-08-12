@@ -169,6 +169,14 @@ class FakeKubernetesApi(KubernetesApi):
     async def delete_network_policy(self, name: str, namespace: str) -> None:
         """Unused by leader tests."""
 
+    async def list_network_policies(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[NetworkPolicyResource]:
+        """Unused by leader tests."""
+        return ()
+
     async def get_lease(self, name: str, namespace: str) -> LeaseResource | None:
         """Return the fake Lease."""
         return self.lease

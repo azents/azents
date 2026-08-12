@@ -26,6 +26,7 @@ ANNOTATION_CONFIGURATION_DIGEST = "azents/runtime-configuration-digest"
 ANNOTATION_POLICY_DIGEST = "azents/proxy-policy-digest"
 ANNOTATION_CA_FINGERPRINT = "azents/runtime-ca-fingerprint"
 ANNOTATION_ARTIFACT_DIGEST = "azents/proxy-artifact-digest"
+ANNOTATION_NETWORK_MODE = "azents/runtime-network-mode"
 MANAGED_BY_VALUE = "azents-runtime-provider-kubernetes"
 
 _RUNTIME_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -120,6 +121,21 @@ def resource_name(runtime_id: str, role: ResourceRole) -> str:
     return name
 
 
+def proxy_policy_resource_name(runtime_id: str, policy_digest: str) -> str:
+    """Return one digest-revisioned proxy policy ConfigMap name."""
+    if _DIGEST_RE.fullmatch(policy_digest) is None:
+        raise InvalidOwnedResourceMetadata(
+            "proxy policy resource name requires a SHA-256 digest"
+        )
+    base = resource_name(runtime_id, ResourceRole.PROXY_POLICY)
+    suffix = f"-{policy_digest[:12]}"
+    candidate = f"{base[: _MAX_KUBERNETES_NAME_LENGTH - len(suffix)]}{suffix}"
+    candidate = candidate.rstrip("-.")
+    if _KUBERNETES_NAME_RE.fullmatch(candidate) is None:
+        raise InvalidRuntimeId(runtime_id)
+    return candidate
+
+
 def validate_runtime_id(runtime_id: str) -> str:
     """Validate the existing logical Runtime identifier contract."""
     if _RUNTIME_ID_RE.fullmatch(runtime_id) is None:
@@ -200,6 +216,29 @@ def validate_owned_metadata(
         raise InvalidOwnedResourceMetadata(
             f"owned resource label mismatch: {LABEL_DESIRED_GENERATION}"
         )
+
+
+def validate_proxy_policy_metadata(
+    metadata: ObjectMeta,
+    identity: OwnedResourceIdentity,
+    *,
+    desired_generation: int,
+    policy_digest: str,
+) -> None:
+    """Reject foreign or stale revisioned proxy policy metadata."""
+    if metadata.name != proxy_policy_resource_name(
+        identity.runtime_id,
+        policy_digest,
+    ):
+        raise InvalidOwnedResourceMetadata("proxy policy resource name mismatch")
+    expected = owned_labels(
+        identity,
+        ResourceRole.PROXY_POLICY,
+        desired_generation=desired_generation,
+    )
+    for key, value in expected.items():
+        if metadata.labels.get(key) != value:
+            raise InvalidOwnedResourceMetadata(f"owned resource label mismatch: {key}")
 
 
 def service_comparison_view(service: ServiceResource) -> ServiceResource:

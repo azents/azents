@@ -22,6 +22,7 @@ from azents_runtime_control.runtime_configuration import (
     canonical_runtime_configuration_json,
 )
 
+from azents_runtime_provider_kubernetes.interception_ca import InvalidRuntimeCa
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ConfigMapResource,
     ContainerResources,
@@ -36,14 +37,24 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     NetworkPolicyPeer,
     NetworkPolicyPort,
     NetworkPolicyResource,
+    ObjectMeta,
     PersistentVolumeClaimResource,
     PersistentVolumeClaimVolume,
     PodResource,
     PodStatus,
     PodWatchEvent,
     SecretResource,
+    ServicePort,
     ServiceResource,
+    ServiceSpec,
     Toleration,
+)
+from azents_runtime_provider_kubernetes.network_enforcement import (
+    InvalidMandatoryService,
+    MandatoryServiceReference,
+)
+from azents_runtime_provider_kubernetes.owned_resources import (
+    InvalidOwnedResourceMetadata,
 )
 from azents_runtime_provider_kubernetes.provider import (
     RUNNER_LIMIT_ENV_NAMES,
@@ -52,6 +63,8 @@ from azents_runtime_provider_kubernetes.provider import (
     InvalidWorkspacePath,
     KubernetesRuntimeProvider,
     KubernetesRuntimeProviderConfig,
+    NetworkRecreationRequired,
+    ProxyNotReady,
     UnsupportedRuntimeConfiguration,
 )
 
@@ -59,6 +72,7 @@ _RUNNER_IMAGE = f"repo/runner:phase5@sha256:{'a' * 64}"
 _OLD_RUNNER_IMAGE = f"repo/runner:old@sha256:{'b' * 64}"
 _NEW_RUNNER_IMAGE = f"repo/runner:new@sha256:{'c' * 64}"
 _ENGINE_IMAGE = f"repo/engine:phase5@sha256:{'e' * 64}"
+_PROXY_IMAGE = f"repo/proxy:phase4@sha256:{'f' * 64}"
 
 
 class FakeKubernetesApi(KubernetesApi):
@@ -76,9 +90,11 @@ class FakeKubernetesApi(KubernetesApi):
         self.deleted_pod_grace_periods: list[int | None] = []
         self.deleted_pvcs: list[str] = []
         self.deleted_network_policies: list[str] = []
+        self.operations: list[tuple[str, str]] = []
         self.watch_events: list[PodWatchEvent] = []
         self.fail_pod_deletion = False
         self.defer_pod_deletion = False
+        self._next_service_address = 20
 
     async def get_pod(self, name: str, namespace: str) -> PodResource | None:
         """Return a Pod by name."""
@@ -87,6 +103,7 @@ class FakeKubernetesApi(KubernetesApi):
     async def apply_pod(self, pod: PodResource) -> None:
         """Apply a Pod."""
         self.applied_pods.append(pod.metadata.name)
+        self.operations.append(("apply_pod", pod.metadata.name))
         self.pods[(pod.metadata.namespace, pod.metadata.name)] = pod
 
     async def delete_pod(
@@ -99,6 +116,7 @@ class FakeKubernetesApi(KubernetesApi):
         """Delete a Pod when present."""
         self.deleted_pods.append(name)
         self.deleted_pod_grace_periods.append(grace_period_seconds)
+        self.operations.append(("delete_pod", name))
         if self.fail_pod_deletion:
             raise RuntimeError("Pod deletion failed")
         if not self.defer_pod_deletion:
@@ -144,11 +162,13 @@ class FakeKubernetesApi(KubernetesApi):
 
     async def apply_pvc(self, pvc: PersistentVolumeClaimResource) -> None:
         """Apply a PVC."""
+        self.operations.append(("apply_pvc", pvc.metadata.name))
         self.pvcs[(pvc.metadata.namespace, pvc.metadata.name)] = pvc
 
     async def delete_pvc(self, name: str, namespace: str) -> None:
         """Delete a PVC when present."""
         self.deleted_pvcs.append(name)
+        self.operations.append(("delete_pvc", name))
         self.pvcs.pop((namespace, name), None)
 
     async def list_pvcs(
@@ -176,10 +196,27 @@ class FakeKubernetesApi(KubernetesApi):
 
     async def apply_service(self, service: ServiceResource) -> None:
         """Apply a Service."""
+        key = (service.metadata.namespace, service.metadata.name)
+        existing = self.services.get(key)
+        cluster_ip = service.spec.cluster_ip
+        if cluster_ip is None:
+            cluster_ip = (
+                existing.spec.cluster_ip
+                if existing is not None
+                else f"10.96.0.{self._next_service_address}"
+            )
+            if existing is None:
+                self._next_service_address += 1
+            service = dataclasses.replace(
+                service,
+                spec=dataclasses.replace(service.spec, cluster_ip=cluster_ip),
+            )
+        self.operations.append(("apply_service", service.metadata.name))
         self.services[(service.metadata.namespace, service.metadata.name)] = service
 
     async def delete_service(self, name: str, namespace: str) -> None:
         """Delete a Service when present."""
+        self.operations.append(("delete_service", name))
         self.services.pop((namespace, name), None)
 
     async def list_services(
@@ -208,12 +245,14 @@ class FakeKubernetesApi(KubernetesApi):
 
     async def apply_config_map(self, config_map: ConfigMapResource) -> None:
         """Apply a ConfigMap."""
+        self.operations.append(("apply_config_map", config_map.metadata.name))
         self.config_maps[(config_map.metadata.namespace, config_map.metadata.name)] = (
             config_map
         )
 
     async def delete_config_map(self, name: str, namespace: str) -> None:
         """Delete a ConfigMap when present."""
+        self.operations.append(("delete_config_map", name))
         self.config_maps.pop((namespace, name), None)
 
     async def list_config_maps(
@@ -242,10 +281,12 @@ class FakeKubernetesApi(KubernetesApi):
 
     async def apply_secret(self, secret: SecretResource) -> None:
         """Apply a Secret."""
+        self.operations.append(("apply_secret", secret.metadata.name))
         self.secrets[(secret.metadata.namespace, secret.metadata.name)] = secret
 
     async def delete_secret(self, name: str, namespace: str) -> None:
         """Delete a Secret when present."""
+        self.operations.append(("delete_secret", name))
         self.secrets.pop((namespace, name), None)
 
     async def list_secrets(
@@ -281,12 +322,30 @@ class FakeKubernetesApi(KubernetesApi):
             network_policy.metadata.namespace,
             network_policy.metadata.name,
         )
+        self.operations.append(("apply_network_policy", network_policy.metadata.name))
         self.network_policies[key] = network_policy
 
     async def delete_network_policy(self, name: str, namespace: str) -> None:
         """Delete a NetworkPolicy when present."""
         self.deleted_network_policies.append(name)
+        self.operations.append(("delete_network_policy", name))
         self.network_policies.pop((namespace, name), None)
+
+    async def list_network_policies(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[NetworkPolicyResource]:
+        """List NetworkPolicies matching labels."""
+        return tuple(
+            policy
+            for (policy_namespace, _), policy in self.network_policies.items()
+            if policy_namespace == namespace
+            and all(
+                policy.metadata.labels.get(key) == value
+                for key, value in labels.items()
+            )
+        )
 
     async def get_lease(self, name: str, namespace: str) -> LeaseResource | None:
         """Unused by provider tests."""
@@ -333,11 +392,134 @@ def _provider_with_runner_env(
                 "app.kubernetes.io/component": "runtime-control",
             },
             runtime_control_port=8030,
+            mandatory_services=(
+                MandatoryServiceReference(
+                    role="runtime_control",
+                    namespace="azents",
+                    name="runtime-control",
+                    endpoint_hostnames=("runtime-control",),
+                    ports=(8020,),
+                ),
+                MandatoryServiceReference(
+                    role="runtime_transfer",
+                    namespace="azents",
+                    name="runtime-transfer",
+                    endpoint_hostnames=("runtime-transfer",),
+                    ports=(8030,),
+                ),
+            ),
+            proxy_image=_PROXY_IMAGE,
+            proxy_addon_digest="a" * 64,
+            proxy_port=8080,
+            proxy_readiness_port=8081,
             network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
             network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
             network_hard_cap_extra_egress=network_hard_cap_extra_egress,
         ),
     )
+
+
+def _provider_config(
+    *,
+    provider_id: str = "provider-k8s",
+    workspace_mount_path: str = "/runtime/home",
+    engine_image: str = _ENGINE_IMAGE,
+    image_pull_secrets: tuple[LocalObjectReference, ...] = (),
+    pod_annotations: Mapping[str, str] | None = None,
+) -> KubernetesRuntimeProviderConfig:
+    return KubernetesRuntimeProviderConfig(
+        provider_id=provider_id,
+        namespace="azents-runtime",
+        workspace_mount_path=workspace_mount_path,
+        runner_env={},
+        engine_image=engine_image,
+        runtime_control_namespace="azents",
+        runtime_control_labels={
+            "app.kubernetes.io/component": "runtime-control",
+        },
+        runtime_control_port=8030,
+        mandatory_services=(
+            MandatoryServiceReference(
+                role="runtime_control",
+                namespace="azents",
+                name="runtime-control",
+                endpoint_hostnames=("runtime-control",),
+                ports=(8020,),
+            ),
+            MandatoryServiceReference(
+                role="runtime_transfer",
+                namespace="azents",
+                name="runtime-transfer",
+                endpoint_hostnames=("runtime-transfer",),
+                ports=(8030,),
+            ),
+        ),
+        proxy_image=_PROXY_IMAGE,
+        proxy_addon_digest="a" * 64,
+        proxy_port=8080,
+        proxy_readiness_port=8081,
+        image_pull_secrets=image_pull_secrets,
+        pod_annotations={} if pod_annotations is None else pod_annotations,
+    )
+
+
+def _install_mandatory_services(api: FakeKubernetesApi) -> None:
+    services = (
+        ServiceResource(
+            metadata=ObjectMeta(
+                name="runtime-control",
+                namespace="azents",
+                labels={},
+                annotations={},
+            ),
+            spec=ServiceSpec(
+                service_type="ClusterIP",
+                cluster_ip="10.96.0.10",
+                selector={"app.kubernetes.io/component": "runtime-control"},
+                ports=(
+                    ServicePort(
+                        name="control",
+                        protocol="TCP",
+                        port=8020,
+                        target_port=8020,
+                    ),
+                ),
+            ),
+        ),
+        ServiceResource(
+            metadata=ObjectMeta(
+                name="runtime-transfer",
+                namespace="azents",
+                labels={},
+                annotations={},
+            ),
+            spec=ServiceSpec(
+                service_type="ClusterIP",
+                cluster_ip="10.96.0.11",
+                selector={"app.kubernetes.io/component": "runtime-transfer"},
+                ports=(
+                    ServicePort(
+                        name="transfer",
+                        protocol="TCP",
+                        port=8030,
+                        target_port=8030,
+                    ),
+                ),
+            ),
+        ),
+    )
+    for service in services:
+        api.services[(service.metadata.namespace, service.metadata.name)] = service
+
+
+def _mark_proxy_ready(api: FakeKubernetesApi) -> PodResource:
+    key = ("azents-runtime", "azents-runtime-runtime-1-proxy")
+    pod = dataclasses.replace(
+        api.pods[key],
+        status=PodStatus(phase="Running", ready=True),
+    )
+    api.pods[key] = pod
+    return pod
 
 
 def test_provider_rejects_unmanaged_runner_environment() -> None:
@@ -840,12 +1022,12 @@ async def test_observe_running_pod_reports_running() -> None:
     assert report.observed_state is RuntimeProviderObservedState.RUNNING
     assert report.reason == "pod_running"
     assert report.reconciliation is not None
-    assert report.reconciliation.observations[0].kind == "network_policy"
+    assert report.reconciliation.observations[0].kind == "network_enforcement"
     assert (
         report.reconciliation.observations[0].status
         is RuntimeProviderReconciliationStatus.IN_SYNC
     )
-    assert report.reconciliation.observations[0].reason == "network_policy_in_sync"
+    assert report.reconciliation.observations[0].reason == "network_enforcement_in_sync"
 
 
 @pytest.mark.asyncio
@@ -883,7 +1065,7 @@ async def test_provider_reconnect_generation_label_does_not_report_policy_drift(
         report.reconciliation.observations[0].status
         is RuntimeProviderReconciliationStatus.IN_SYNC
     )
-    assert report.reconciliation.observations[0].reason == "network_policy_in_sync"
+    assert report.reconciliation.observations[0].reason == "network_enforcement_in_sync"
 
 
 @pytest.mark.asyncio
@@ -1006,14 +1188,14 @@ async def test_broadened_network_policy_reports_explicit_observe_drift() -> None
     assert command_report.observed_state is RuntimeProviderObservedState.RUNNING
     assert command_report.reason == "pod_running"
     assert command_report.reconciliation is not None
-    assert command_report.reconciliation.observations[0].kind == "network_policy"
+    assert command_report.reconciliation.observations[0].kind == "network_enforcement"
     assert (
         command_report.reconciliation.observations[0].status
         is RuntimeProviderReconciliationStatus.DRIFTED
     )
     assert (
         command_report.reconciliation.observations[0].reason
-        == "network_policy_mismatch"
+        == "network_enforcement_mismatch"
     )
     assert failover_reports[0].observed_state is RuntimeProviderObservedState.RUNNING
     assert failover_reports[0].reason == "pod_running"
@@ -1044,12 +1226,12 @@ async def test_missing_network_policy_reports_drift_without_lifecycle_change() -
     assert report.observed_state is RuntimeProviderObservedState.RUNNING
     assert report.reason == "pod_running"
     assert report.reconciliation is not None
-    assert report.reconciliation.observations[0].kind == "network_policy"
+    assert report.reconciliation.observations[0].kind == "network_enforcement"
     assert (
         report.reconciliation.observations[0].status
         is RuntimeProviderReconciliationStatus.DRIFTED
     )
-    assert report.reconciliation.observations[0].reason == "network_policy_missing"
+    assert report.reconciliation.observations[0].reason == "network_enforcement_missing"
 
 
 @pytest.mark.asyncio
@@ -1196,17 +1378,8 @@ async def test_start_applies_configured_pod_annotations() -> None:
     api = FakeKubernetesApi()
     provider = KubernetesRuntimeProvider(
         api,
-        KubernetesRuntimeProviderConfig(
+        _provider_config(
             provider_id="system-kubernetes",
-            namespace="azents-runtime",
-            workspace_mount_path="/runtime/home",
-            runner_env={},
-            engine_image=_ENGINE_IMAGE,
-            runtime_control_namespace="azents",
-            runtime_control_labels={
-                "app.kubernetes.io/component": "runtime-control",
-            },
-            runtime_control_port=8030,
             pod_annotations={"descheduler/no-evict": "true"},
         ),
     )
@@ -1255,17 +1428,8 @@ async def test_start_applies_configured_runtime_pod_image_pull_secrets() -> None
     api = FakeKubernetesApi()
     provider = KubernetesRuntimeProvider(
         api,
-        KubernetesRuntimeProviderConfig(
+        _provider_config(
             provider_id="system-kubernetes",
-            namespace="azents-runtime",
-            workspace_mount_path="/runtime/home",
-            runner_env={},
-            engine_image=_ENGINE_IMAGE,
-            runtime_control_namespace="azents",
-            runtime_control_labels={
-                "app.kubernetes.io/component": "runtime-control",
-            },
-            runtime_control_port=8030,
             image_pull_secrets=(LocalObjectReference(name="ecr-pull-secret"),),
         ),
     )
@@ -1290,32 +1454,14 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
     api = FakeKubernetesApi()
     old_provider = KubernetesRuntimeProvider(
         api,
-        KubernetesRuntimeProviderConfig(
+        _provider_config(
             provider_id="system-kubernetes",
-            namespace="azents-runtime",
-            workspace_mount_path="/runtime/home",
-            runner_env={},
-            engine_image=_ENGINE_IMAGE,
-            runtime_control_namespace="azents",
-            runtime_control_labels={
-                "app.kubernetes.io/component": "runtime-control",
-            },
-            runtime_control_port=8030,
         ),
     )
     new_provider = KubernetesRuntimeProvider(
         api,
-        KubernetesRuntimeProviderConfig(
+        _provider_config(
             provider_id="system-kubernetes",
-            namespace="azents-runtime",
-            workspace_mount_path="/runtime/home",
-            runner_env={},
-            engine_image=_ENGINE_IMAGE,
-            runtime_control_namespace="azents",
-            runtime_control_labels={
-                "app.kubernetes.io/component": "runtime-control",
-            },
-            runtime_control_port=8030,
             image_pull_secrets=(LocalObjectReference(name="ecr-pull-secret"),),
         ),
     )
@@ -1667,22 +1813,723 @@ async def test_watch_deleted_pod_reports_stopped() -> None:
     assert report.provider_runtime_id is None
 
 
+@pytest.mark.asyncio
+async def test_v3_direct_start_builds_complete_in_sync_enforcement() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            allowed_cidrs=["10.20.0.0/16"],
+        ),
+    )
+
+    result = await provider.start(command)
+
+    pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
+    policy = api.network_policies[
+        ("azents-runtime", "azents-runtime-runtime-1-execution")
+    ]
+    reconciliation = result.report.reconciliation
+    assert reconciliation is not None
+    observation = reconciliation.observations[0]
+    assert result.report.observed_state is RuntimeProviderObservedState.STARTING
+    assert observation.kind == "network_enforcement"
+    assert observation.status is RuntimeProviderReconciliationStatus.IN_SYNC
+    assert observation.reason == "network_enforcement_in_sync"
+    assert pod.metadata.labels["azents/resource-role"] == "runtime-pod"
+    assert pod.metadata.annotations["azents/runtime-network-mode"] == "direct"
+    assert pod.spec.dns_policy is None
+    assert pod.spec.dns_config is None
+    assert pod.spec.host_aliases == ()
+    assert policy.metadata.labels["azents/resource-role"] == "runtime-network-policy"
+    assert policy.spec.policy_types == ("Ingress", "Egress")
+
+
+@pytest.mark.asyncio
+async def test_v3_missing_mandatory_service_has_no_mutation() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+
+    with pytest.raises(InvalidMandatoryService, match="mandatory Service is missing"):
+        await provider.start(
+            _command(
+                RuntimeLifecycleCommandType.START,
+                runtime_configuration=_runtime_configuration(schema_version=3),
+            )
+        )
+
+    assert api.operations == []
+    assert api.pods == {}
+    assert api.pvcs == {}
+    assert api.network_policies == {}
+
+
+@pytest.mark.asyncio
+async def test_v3_invalid_mandatory_service_has_no_mutation() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    control_key = ("azents", "runtime-control")
+    control = api.services[control_key]
+    api.services[control_key] = dataclasses.replace(
+        control,
+        spec=dataclasses.replace(control.spec, cluster_ip="None"),
+    )
+    provider = _provider(api)
+
+    with pytest.raises(
+        InvalidMandatoryService,
+        match="ClusterIP is unavailable",
+    ):
+        await provider.start(
+            _command(
+                RuntimeLifecycleCommandType.START,
+                runtime_configuration=_runtime_configuration(schema_version=3),
+            )
+        )
+
+    assert api.operations == []
+    assert api.pods == {}
+    assert api.pvcs == {}
+    assert api.network_policies == {}
+
+
+@pytest.mark.asyncio
+async def test_v3_no_network_uses_strict_dns_hosts_and_platform_only_policy() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(
+                schema_version=3,
+                network_mode="no_network",
+            ),
+        )
+    )
+
+    pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
+    runner_env = {item.name: item.value for item in pod.spec.containers[0].env}
+    policy = api.network_policies[
+        ("azents-runtime", "azents-runtime-runtime-1-execution")
+    ]
+    assert pod.spec.dns_policy == "None"
+    assert pod.spec.dns_config is not None
+    assert {
+        hostname for alias in pod.spec.host_aliases for hostname in alias.hostnames
+    } == {"runtime-control", "runtime-transfer"}
+    assert len(policy.spec.egress) == 2
+    assert all(
+        all(port.port != 53 for port in rule.ports) for rule in policy.spec.egress
+    )
+    assert "HTTP_PROXY" not in runner_env
+    assert "HTTPS_PROXY" not in runner_env
+    assert "SSL_CERT_FILE" not in runner_env
+    assert api.secrets == {}
+
+
+@pytest.mark.asyncio
+async def test_v3_proxy_prepares_complete_proxy_before_runtime_creation() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+            allowed_cidrs=["10.20.0.0/16"],
+        ),
+    )
+
+    preparing = await provider.start(command)
+
+    runtime_key = ("azents-runtime", "azents-runtime-runtime-1")
+    proxy_key = ("azents-runtime", "azents-runtime-runtime-1-proxy")
+    service_key = ("azents-runtime", "azents-runtime-runtime-1-proxy")
+    assert preparing.report.observed_state is RuntimeProviderObservedState.STARTING
+    assert preparing.report.reason == "proxy_preparing"
+    assert runtime_key not in api.pods
+    assert ("azents-runtime", "azents-runtime-runtime-1-workspace") not in api.pvcs
+    assert proxy_key in api.pods
+    assert api.services[service_key].spec.cluster_ip == "10.96.0.20"
+    assert ("azents-runtime", "azents-runtime-runtime-1-ca") in api.secrets
+
+    _mark_proxy_ready(api)
+    started = await provider.start(command)
+
+    runtime = api.pods[runtime_key]
+    runner = runtime.spec.containers[0]
+    runner_env = {item.name: item.value for item in runner.env}
+    reconciliation = started.report.reconciliation
+    assert reconciliation is not None
+    observation = reconciliation.observations[0]
+    assert observation.status is RuntimeProviderReconciliationStatus.IN_SYNC
+    assert runtime.spec.dns_policy == "None"
+    assert runner_env["AZ_RUNTIME_RUNNER_HTTP_PROXY"] == (
+        "http://azents-runtime-runtime-1-proxy.azents-runtime.svc:8080"
+    )
+    assert "HTTP_PROXY" not in runner_env
+    assert "HTTPS_PROXY" not in runner_env
+    assert api.operations.index(("apply_pod", "azents-runtime-runtime-1-proxy")) < (
+        api.operations.index(("apply_pod", "azents-runtime-runtime-1"))
+    )
+
+
+@pytest.mark.asyncio
+async def test_v3_narrower_transition_applies_policy_before_replacement() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    direct = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(schema_version=3),
+    )
+    proxy = _command(
+        RuntimeLifecycleCommandType.START,
+        desired_generation=2,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+            desired_generation=2,
+            configuration_sequence=2,
+            digest="e" * 64,
+        ),
+    )
+    await provider.start(direct)
+    await provider.start(proxy)
+    _mark_proxy_ready(api)
+    api.operations.clear()
+
+    await provider.start(proxy)
+
+    assert api.operations.index(
+        ("apply_network_policy", "azents-runtime-runtime-1-execution")
+    ) < api.operations.index(("delete_pod", "azents-runtime-runtime-1"))
+    runtime = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
+    assert runtime.metadata.annotations["azents/runtime-network-mode"] == (
+        "proxy_required"
+    )
+
+
+@pytest.mark.asyncio
+async def test_v3_transition_to_broader_mode_deletes_runtime_before_policy() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    proxy = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(proxy)
+    _mark_proxy_ready(api)
+    await provider.start(proxy)
+    direct = _command(
+        RuntimeLifecycleCommandType.START,
+        desired_generation=2,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            desired_generation=2,
+            configuration_sequence=2,
+            digest="e" * 64,
+        ),
+    )
+    api.operations.clear()
+
+    await provider.start(direct)
+
+    assert api.operations.index(("delete_pod", "azents-runtime-runtime-1")) < (
+        api.operations.index(
+            ("apply_network_policy", "azents-runtime-runtime-1-execution")
+        )
+    )
+    runtime = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
+    assert runtime.metadata.annotations["azents/runtime-network-mode"] == "direct"
+    assert ("azents-runtime", "azents-runtime-runtime-1-proxy") not in api.pods
+
+
+@pytest.mark.asyncio
+async def test_v3_direct_configuration_update_preserves_runtime_and_pvc() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(schema_version=3),
+        )
+    )
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pvc_key = ("azents-runtime", "azents-runtime-runtime-1-workspace")
+    pod = api.pods[pod_key]
+    pvc = api.pvcs[pvc_key]
+
+    result = await provider.update_configuration(
+        _command(
+            RuntimeLifecycleCommandType.UPDATE_CONFIGURATION,
+            runtime_configuration=_runtime_configuration(
+                schema_version=3,
+                allowed_cidrs=["10.20.0.0/16"],
+                configuration_sequence=2,
+                digest="e" * 64,
+            ),
+        )
+    )
+
+    assert api.pods[pod_key] is pod
+    assert api.pvcs[pvc_key] is pvc
+    assert api.deleted_pods == []
+    assert result.report.reason.startswith("network_enforcement_updated:")
+    reconciliation = result.report.reconciliation
+    assert reconciliation is not None
+    assert (
+        reconciliation.observations[0].status
+        is RuntimeProviderReconciliationStatus.IN_SYNC
+    )
+
+
+@pytest.mark.asyncio
+async def test_v3_configuration_update_rejects_runtime_recreation_change() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(schema_version=3),
+        )
+    )
+
+    with pytest.raises(
+        NetworkRecreationRequired,
+        match="network_recreation_required",
+    ):
+        await provider.update_configuration(
+            _command(
+                RuntimeLifecycleCommandType.UPDATE_CONFIGURATION,
+                runtime_configuration=_runtime_configuration(
+                    schema_version=3,
+                    network_mode="no_network",
+                    configuration_sequence=2,
+                    digest="e" * 64,
+                ),
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_v3_proxy_update_waits_without_runtime_recreation() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    initial = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(initial)
+    _mark_proxy_ready(api)
+    await provider.start(initial)
+    runtime_key = ("azents-runtime", "azents-runtime-runtime-1")
+    runtime = api.pods[runtime_key]
+    updated = _command(
+        RuntimeLifecycleCommandType.UPDATE_CONFIGURATION,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+            allowed_cidrs=["10.20.0.0/16"],
+            allowed_domains=["api.example.com"],
+            configuration_sequence=2,
+            digest="e" * 64,
+        ),
+    )
+
+    with pytest.raises(ProxyNotReady, match="proxy_not_ready"):
+        await provider.update_configuration(updated)
+
+    assert api.pods[runtime_key] is runtime
+    assert "azents-runtime-runtime-1" not in api.deleted_pods
+    _mark_proxy_ready(api)
+    result = await provider.update_configuration(updated)
+    assert api.pods[runtime_key] is runtime
+    reconciliation = result.report.reconciliation
+    assert reconciliation is not None
+    assert (
+        reconciliation.observations[0].status
+        is RuntimeProviderReconciliationStatus.IN_SYNC
+    )
+
+
+@pytest.mark.asyncio
+async def test_v3_proxy_cleanup_preserves_ca_until_terminal_delete() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(command)
+    _mark_proxy_ready(api)
+    await provider.start(command)
+    ca_key = ("azents-runtime", "azents-runtime-runtime-1-ca")
+    pvc_key = ("azents-runtime", "azents-runtime-runtime-1-workspace")
+
+    await provider.stop(
+        dataclasses.replace(command, command_type=RuntimeLifecycleCommandType.STOP)
+    )
+
+    assert ca_key in api.secrets
+    assert pvc_key in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1-proxy") not in api.pods
+    assert ("azents-runtime", "azents-runtime-runtime-1-proxy") not in api.services
+
+    await provider.terminal_delete(
+        dataclasses.replace(
+            command,
+            command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
+        )
+    )
+    assert ca_key not in api.secrets
+    assert pvc_key not in api.pvcs
+
+
+@pytest.mark.asyncio
+async def test_v3_proxy_reset_recreates_pvc_and_preserves_ca() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(command)
+    _mark_proxy_ready(api)
+    await provider.start(command)
+    ca_key = ("azents-runtime", "azents-runtime-runtime-1-ca")
+    ca = api.secrets[ca_key]
+
+    result = await provider.reset(
+        dataclasses.replace(
+            command,
+            command_type=RuntimeLifecycleCommandType.RESET,
+            reset_final_desired_state=RuntimeDesiredState.STOPPED,
+        )
+    )
+
+    assert result.report.observed_state is RuntimeProviderObservedState.STOPPED
+    assert api.secrets[ca_key] is ca
+    assert api.deleted_pvcs == ["azents-runtime-runtime-1-workspace"]
+    assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
+    assert ("azents-runtime", "azents-runtime-runtime-1-proxy") not in api.pods
+
+
+@pytest.mark.asyncio
+async def test_v3_missing_applied_ca_fails_without_regeneration() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(command)
+    _mark_proxy_ready(api)
+    await provider.start(command)
+    pvc = api.pvcs[("azents-runtime", "azents-runtime-runtime-1-workspace")]
+    assert "azents/runtime-ca-fingerprint" in pvc.metadata.annotations
+    api.secrets.pop(("azents-runtime", "azents-runtime-runtime-1-ca"))
+    api.operations.clear()
+
+    with pytest.raises(
+        InvalidRuntimeCa,
+        match="missing for existing Runtime",
+    ):
+        await provider.start(command)
+
+    assert api.operations == []
+    assert ("azents-runtime", "azents-runtime-runtime-1-ca") not in api.secrets
+
+
+@pytest.mark.asyncio
+async def test_v3_missing_preparing_ca_fails_without_regeneration() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(command)
+    api.secrets.pop(("azents-runtime", "azents-runtime-runtime-1-ca"))
+    api.operations.clear()
+
+    with pytest.raises(
+        InvalidRuntimeCa,
+        match="missing for existing Runtime",
+    ):
+        await provider.start(command)
+
+    assert api.operations == []
+    assert ("azents-runtime", "azents-runtime-runtime-1-ca") not in api.secrets
+
+
+@pytest.mark.asyncio
+async def test_v3_proxy_pods_are_excluded_from_recovery_and_watch_reports() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(command)
+    proxy = api.pods[("azents-runtime", "azents-runtime-runtime-1-proxy")]
+    api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=proxy))
+
+    assert await provider.observe_known_runtimes() == ()
+    assert [report async for report in provider.watch_known_runtimes()] == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_and_watch_skip_incomplete_runtime_identity() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+    incomplete = dataclasses.replace(
+        pod,
+        metadata=dataclasses.replace(
+            pod.metadata,
+            labels={
+                key: value
+                for key, value in pod.metadata.labels.items()
+                if key != "azents/workspace-id"
+            },
+        ),
+    )
+    api.pods[pod_key] = incomplete
+    api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=incomplete))
+
+    reports = await provider.observe_known_runtimes()
+    assert len(reports) == 1
+    assert reports[0].observed_state is RuntimeProviderObservedState.STOPPED
+    assert reports[0].reason == "pvc_present_without_pod"
+    assert reports[0].diagnostic == {"source": "pvc"}
+    assert [report async for report in provider.watch_known_runtimes()] == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_and_watch_skip_noncanonical_runtime_pod_name() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    pod = api.pods.pop(("azents-runtime", "azents-runtime-runtime-1"))
+    renamed = dataclasses.replace(
+        pod,
+        metadata=dataclasses.replace(
+            pod.metadata,
+            name="forged-runtime-pod",
+        ),
+    )
+    api.pods[("azents-runtime", "forged-runtime-pod")] = renamed
+    api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=renamed))
+
+    reports = await provider.observe_known_runtimes()
+    assert len(reports) == 1
+    assert reports[0].observed_state is RuntimeProviderObservedState.STOPPED
+    assert reports[0].reason == "pvc_present_without_pod"
+    assert reports[0].diagnostic == {"source": "pvc"}
+    assert [report async for report in provider.watch_known_runtimes()] == []
+
+
+@pytest.mark.asyncio
+async def test_recovery_and_watch_require_configuration_managed_label() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+    unmanaged = dataclasses.replace(
+        pod,
+        metadata=dataclasses.replace(
+            pod.metadata,
+            labels={
+                key: value
+                for key, value in pod.metadata.labels.items()
+                if key != "azents/runtime-configuration-managed"
+            },
+        ),
+    )
+    api.pods[pod_key] = unmanaged
+    api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=unmanaged))
+
+    reports = await provider.observe_known_runtimes()
+    assert len(reports) == 1
+    assert reports[0].observed_state is RuntimeProviderObservedState.STOPPED
+    assert reports[0].reason == "pvc_present_without_pod"
+    assert reports[0].diagnostic == {"source": "pvc"}
+    assert [report async for report in provider.watch_known_runtimes()] == []
+
+
+@pytest.mark.asyncio
+async def test_v3_start_does_not_adopt_foreign_runtime_policy() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(schema_version=3),
+    )
+    await provider.start(command)
+    policy_key = ("azents-runtime", "azents-runtime-runtime-1-execution")
+    policy = api.network_policies[policy_key]
+    foreign = dataclasses.replace(
+        policy,
+        metadata=dataclasses.replace(
+            policy.metadata,
+            labels={
+                **policy.metadata.labels,
+                "azents/runtime-provider-id": "foreign-provider",
+            },
+        ),
+    )
+    api.network_policies[policy_key] = foreign
+    api.pods.clear()
+    api.pvcs.clear()
+    api.operations.clear()
+
+    with pytest.raises(
+        InvalidOwnedResourceMetadata,
+        match="owned resource metadata mismatch",
+    ):
+        await provider.start(command)
+
+    assert api.operations == []
+    assert api.network_policies[policy_key] is foreign
+    assert api.pods == {}
+    assert api.pvcs == {}
+
+
+@pytest.mark.asyncio
+async def test_v3_proxy_does_not_adopt_foreign_policy_config_map() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(command)
+    config_map_key = next(iter(api.config_maps))
+    config_map = api.config_maps[config_map_key]
+    foreign = dataclasses.replace(
+        config_map,
+        metadata=dataclasses.replace(
+            config_map.metadata,
+            labels={
+                **config_map.metadata.labels,
+                "azents/workspace-id": "foreign-workspace",
+            },
+        ),
+    )
+    api.config_maps[config_map_key] = foreign
+    api.operations.clear()
+
+    with pytest.raises(
+        InvalidOwnedResourceMetadata,
+        match="owned resource metadata mismatch",
+    ):
+        await provider.start(command)
+
+    assert api.operations == []
+    assert api.config_maps[config_map_key] is foreign
+    assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
+
+
+@pytest.mark.asyncio
+async def test_v3_terminal_delete_validates_all_ownership_before_mutation() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(command)
+    _mark_proxy_ready(api)
+    await provider.start(command)
+    service_key = ("azents-runtime", "azents-runtime-runtime-1-proxy")
+    service = api.services[service_key]
+    foreign = dataclasses.replace(
+        service,
+        metadata=dataclasses.replace(
+            service.metadata,
+            labels={
+                **service.metadata.labels,
+                "azents/agent-id": "foreign-agent",
+            },
+        ),
+    )
+    api.services[service_key] = foreign
+    api.operations.clear()
+
+    with pytest.raises(
+        InvalidOwnedResourceMetadata,
+        match="owned resource metadata mismatch",
+    ):
+        await provider.terminal_delete(
+            dataclasses.replace(
+                command,
+                command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
+            )
+        )
+
+    assert api.operations == []
+    assert ("azents-runtime", "azents-runtime-runtime-1") in api.pods
+    assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
+    assert api.services[service_key] is foreign
+
+
 def test_invalid_workspace_path_is_rejected() -> None:
     api = FakeKubernetesApi()
 
     with pytest.raises(InvalidWorkspacePath):
         KubernetesRuntimeProvider(
             api,
-            KubernetesRuntimeProviderConfig(
-                provider_id="provider-k8s",
-                namespace="azents-runtime",
-                runner_env={},
-                engine_image=_ENGINE_IMAGE,
-                runtime_control_namespace="azents",
-                runtime_control_labels={
-                    "app.kubernetes.io/component": "runtime-control",
-                },
-                runtime_control_port=8030,
+            _provider_config(
                 workspace_mount_path="relative/path",
             ),
         )
@@ -1928,17 +2775,8 @@ def test_provider_rejects_mutable_engine_image() -> None:
     with pytest.raises(UnsupportedRuntimeConfiguration, match="immutable sha256"):
         KubernetesRuntimeProvider(
             FakeKubernetesApi(),
-            KubernetesRuntimeProviderConfig(
-                provider_id="provider-k8s",
-                namespace="azents-runtime",
-                runner_env={},
+            _provider_config(
                 engine_image="repo/engine:latest",
-                workspace_mount_path="/runtime/home",
-                runtime_control_namespace="azents",
-                runtime_control_labels={
-                    "app.kubernetes.io/component": "runtime-control",
-                },
-                runtime_control_port=8030,
             ),
         )
 
@@ -2099,6 +2937,9 @@ def _runtime_configuration(
     persistent_storage_bytes: int | None = None,
     allowed_cidrs: list[str] | None = None,
     denied_cidrs: list[str] | None = None,
+    network_mode: str = "direct",
+    allowed_domains: list[str] | None = None,
+    denied_domains: list[str] | None = None,
     configuration_sequence: int = 1,
     digest: str = "d" * 64,
 ) -> RuntimeConfigurationEnvelope:
@@ -2190,6 +3031,31 @@ def _runtime_configuration(
     }
     if schema_version == 2:
         effective_profile["process_containment"] = removed_process_containment
+    if schema_version == 3:
+        del effective_profile["network_policy"]
+        if network_mode == "no_network":
+            effective_profile["network_access"] = {"mode": network_mode}
+        elif network_mode == "proxy_required":
+            allowed_domain_values: list[JsonValue] = []
+            allowed_domain_values.extend(allowed_domains or ["*.example.com"])
+            denied_domain_values: list[JsonValue] = []
+            denied_domain_values.extend(denied_domains or [])
+            effective_profile["network_access"] = {
+                "mode": network_mode,
+                "allowed_cidrs": allowed_cidr_values,
+                "denied_cidrs": denied_cidr_values,
+                "domain_policy": {
+                    "mode": "allowlist",
+                    "allowed_domains": allowed_domain_values,
+                    "denied_domains": denied_domain_values,
+                },
+            }
+        else:
+            effective_profile["network_access"] = {
+                "mode": network_mode,
+                "allowed_cidrs": allowed_cidr_values,
+                "denied_cidrs": denied_cidr_values,
+            }
     configuration: dict[str, JsonValue] = {
         "schema_version": 1,
         "provider": {
