@@ -198,6 +198,38 @@ class SessionGitWorktreeRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def worktree_path_exists(
+        self,
+        session: AsyncSession,
+        *,
+        worktree_path: str,
+        excluding_id: str,
+    ) -> bool:
+        """Return whether another allocation owns the exact worktree path."""
+        result = await session.execute(
+            sa.select(RDBSessionAgentContextGitWorktree.id).where(
+                RDBSessionAgentContextGitWorktree.id != excluding_id,
+                RDBSessionAgentContextGitWorktree.worktree_path == worktree_path,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def branch_name_exists(
+        self,
+        session: AsyncSession,
+        *,
+        branch_name: str,
+        excluding_id: str,
+    ) -> bool:
+        """Return whether another allocation owns the exact branch name."""
+        result = await session.execute(
+            sa.select(RDBSessionAgentContextGitWorktree.id).where(
+                RDBSessionAgentContextGitWorktree.id != excluding_id,
+                RDBSessionAgentContextGitWorktree.branch_name == branch_name,
+            )
+        )
+        return result.scalar_one_or_none() is not None
+
     async def update_target(
         self,
         session: AsyncSession,

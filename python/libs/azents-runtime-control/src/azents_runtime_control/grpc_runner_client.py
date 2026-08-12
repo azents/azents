@@ -897,6 +897,10 @@ def _copy_final_success(
         git_refs.refs.extend(_git_ref_entries(payload))
         git_refs.default_branch = _str_payload(payload, "default_branch")
         git_refs.head_commit = _str_payload(payload, "head_commit")
+        git_refs.repository_anchor_path = _str_payload(
+            payload,
+            "repository_anchor_path",
+        )
         return
     if "base_commit" in payload:
         worktree = message.git_create_worktree
@@ -1092,6 +1096,7 @@ def _final_success_payload(
             ],
             "default_branch": message.git_list_refs.default_branch,
             "head_commit": message.git_list_refs.head_commit,
+            "repository_anchor_path": (message.git_list_refs.repository_anchor_path),
         }
     if result_kind == "git_create_worktree":
         return {

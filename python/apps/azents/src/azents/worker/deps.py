@@ -34,6 +34,7 @@ from azents.engine.tools.claude_rules import (
     ToolkitClaudeRulesAppendixDedupeStateStore,
 )
 from azents.engine.tools.deps import get_vfs_projection_service
+from azents.engine.tools.dynamic_worktree import DynamicWorktreeToolkitProvider
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.import_file import ImportFileStagingConfiguration
 from azents.engine.tools.runtime_io import (
@@ -99,6 +100,7 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.external_channel.slack_events import SlackConversationClient
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
+from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingService,
 )
@@ -503,6 +505,14 @@ def get_subagent_toolkit_provider(
         mailbox_item_service=mailbox_item_service,
         agent_repository=agent_repository,
     )
+
+
+def get_dynamic_worktree_toolkit_provider(
+    service: Annotated[SessionGitWorktreeService, Depends(SessionGitWorktreeService)],
+    broker: Annotated[SessionBroker, Depends(get_worker_broker)],
+) -> DynamicWorktreeToolkitProvider:
+    """DynamicWorktreeToolkitProvider dependency for Worker."""
+    return DynamicWorktreeToolkitProvider(service=service, broker=broker)
 
 
 async def get_worker_redis(

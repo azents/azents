@@ -532,6 +532,7 @@ message GitListRefsFinalSuccess {
   repeated RuntimeGitRefEntry refs = 1;
   string default_branch = 2;
   string head_commit = 3;
+  string repository_anchor_path = 4;
 }
 
 message GitCreateWorktreeFinalSuccess {

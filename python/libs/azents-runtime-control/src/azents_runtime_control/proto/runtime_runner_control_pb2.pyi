@@ -3285,8 +3285,10 @@ class GitListRefsFinalSuccess(_message.Message):
     REFS_FIELD_NUMBER: _builtins.int
     DEFAULT_BRANCH_FIELD_NUMBER: _builtins.int
     HEAD_COMMIT_FIELD_NUMBER: _builtins.int
+    REPOSITORY_ANCHOR_PATH_FIELD_NUMBER: _builtins.int
     default_branch: _builtins.str
     head_commit: _builtins.str
+    repository_anchor_path: _builtins.str
     @_builtins.property
     def refs(
         self,
@@ -3297,6 +3299,7 @@ class GitListRefsFinalSuccess(_message.Message):
         refs: _abc.Iterable[Global___RuntimeGitRefEntry] | None = ...,
         default_branch: _builtins.str = ...,
         head_commit: _builtins.str = ...,
+        repository_anchor_path: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -3307,6 +3310,8 @@ class GitListRefsFinalSuccess(_message.Message):
         b"head_commit",
         "refs",
         b"refs",
+        "repository_anchor_path",
+        b"repository_anchor_path",
     ]
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...

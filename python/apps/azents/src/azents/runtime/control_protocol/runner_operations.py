@@ -333,6 +333,7 @@ class RuntimeGitRefsResult:
     refs: tuple[RuntimeGitRefEntry, ...]
     default_branch: str | None
     head_commit: str | None
+    repository_anchor_path: str
     final_cursor: str
 
 
@@ -1862,6 +1863,10 @@ class RuntimeRunnerOperationClient:
             refs=tuple(_git_ref_entries(final.event.payload)),
             default_branch=_optional_str_payload(final.event.payload, "default_branch"),
             head_commit=_optional_str_payload(final.event.payload, "head_commit"),
+            repository_anchor_path=_str_payload(
+                final.event.payload,
+                "repository_anchor_path",
+            ),
             final_cursor=final.cursor,
         )
 

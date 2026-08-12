@@ -63,6 +63,7 @@ from azents.engine.tools.claude_rules import (
     ClaudeRulesToolkit,
     ClaudeRulesToolkitProvider,
 )
+from azents.engine.tools.dynamic_worktree import DynamicWorktreeToolkitProvider
 from azents.engine.tools.external_channel import (
     ExternalChannelToolkit,
     ExternalChannelToolkitProvider,
@@ -1253,6 +1254,7 @@ async def resolve_agent_tools(
     external_channel_toolkit_provider: ExternalChannelToolkitProvider | None = None,
     skill_toolkit_provider: SkillToolkitProvider | None = None,
     subagent_toolkit_provider: ToolkitProvider[Any] | None = None,
+    dynamic_worktree_toolkit_provider: DynamicWorktreeToolkitProvider | None = None,
     memory_enabled: bool = True,
     runtime_capability_resolver: RuntimeCapabilityResolver,
 ) -> list[ToolkitBinding]:
@@ -1277,6 +1279,7 @@ async def resolve_agent_tools(
     :param goal_toolkit_provider: Goal toolkit provider (None disables goal)
     :param external_channel_toolkit_provider: External Channel root provider
     :param skill_toolkit_provider: Skill toolkit provider (None disables Skill)
+    :param dynamic_worktree_toolkit_provider: Dynamic Worktree provider
     :param runtime_capability_resolver: Agent Runtime capability resolver.
     :return: List of (Toolkit, slug) tuples
     """
@@ -1634,6 +1637,50 @@ async def resolve_agent_tools(
                 False,
                 None,
                 subagent_modes,
+            )
+        )
+
+    # Auto-bound Toolkit: Agent-managed dynamic Git worktrees
+    dynamic_worktree_modes = _ROOT_AND_SUBAGENT_EXECUTION_MODES
+    if dynamic_worktree_toolkit_provider is not None and _allows_execution_mode(
+        dynamic_worktree_modes,
+        execution_mode,
+    ):
+        dynamic_worktree_config = DynamicWorktreeToolkitProvider.validate_config({})
+        dynamic_worktree_context = ResolveContext(
+            toolkit_id="",
+            toolkit_name="dynamic_worktree",
+            credentials_json=None,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            session=None,
+            web_url=web_url,
+            oauth_secret_key=oauth_secret_key,
+            workspace_id=context.workspace_id,
+            workspace_handle=workspace_handle,
+        )
+        dynamic_worktree_resolved = await _resolve_toolkit_with_logging(
+            agent_id=agent_id,
+            context=context,
+            source="auto",
+            slug="dynamic_worktree",
+            provider=dynamic_worktree_toolkit_provider,
+            toolkit_name="dynamic_worktree",
+            resolve=dynamic_worktree_toolkit_provider.resolve(
+                dynamic_worktree_config,
+                dynamic_worktree_context,
+            ),
+        )
+        pending.append(
+            (
+                dynamic_worktree_toolkit_provider,
+                dynamic_worktree_resolved,
+                dynamic_worktree_config,
+                "dynamic_worktree",
+                None,
+                False,
+                None,
+                dynamic_worktree_modes,
             )
         )
 
