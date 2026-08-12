@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ActionExecutionStatus,
     AgentProjectCatalogStatus,
+    GitWorktreePathClaimOwnerKind,
     GitWorktreePathClaimState,
     LLMProvider,
     RuntimeRunnerState,
@@ -685,6 +686,157 @@ class TestSessionWorkspaceProjectService:
         assert claim.action_execution_id is None
         assert claim.state == GitWorktreePathClaimState.REMOVING
         assert claim.lease_until > datetime.datetime.now(datetime.UTC)
+
+    async def test_agent_removal_claim_transitions_and_terminalizes(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Persist the Agent claim lifecycle around destructive Runner ownership."""
+        workspace_id = await _create_workspace(rdb_session, "swp-agent-claim")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-agent-claim",
+        )
+        execution = await ActionExecutionRepository().create(
+            rdb_session,
+            ActionExecutionCreate(
+                id=None,
+                session_id=fixture.session_id,
+                mailbox_item_id="01900000000070008000000000000016",
+                sender_user_id=None,
+                action_type="agent_remove_git_worktree",
+                action={
+                    "type": "agent_remove_git_worktree",
+                    "bridge_identity": "bridge-agent-claim",
+                    "originating_run_id": "run-agent-claim",
+                    "client_tool_call_id": "call-agent-claim",
+                    "session_agent_context_id": "context-agent-claim",
+                    "originating_agent_session_id": fixture.session_id,
+                    "worktree_project_id": "project-agent-claim",
+                    "worktree_allocation_id": "allocation-agent-claim",
+                    "worktree_path": "/workspace/agent/worktree",
+                    "force": False,
+                },
+                status=ActionExecutionStatus.RUNNING,
+                owner_generation=0,
+            ),
+        )
+        repository = SessionWorkspaceProjectRepository()
+        path = "/workspace/agent/.azents/worktrees/agent/removal"
+
+        claimed = await repository.try_claim_agent_git_worktree(
+            rdb_session,
+            runtime_id=fixture.runtime_id,
+            action_execution_id=execution.id,
+            owner_generation=execution.owner_generation,
+            worktree_path=path,
+        )
+        assert claimed is True
+        claim = await rdb_session.scalar(
+            sa.select(RDBGitWorktreePathClaim).where(
+                RDBGitWorktreePathClaim.action_execution_id == execution.id
+            )
+        )
+        assert claim is not None
+        assert claim.owner_kind is GitWorktreePathClaimOwnerKind.AGENT_ACTION
+        assert claim.state is GitWorktreePathClaimState.CLAIMED
+
+        await repository.mark_agent_git_worktree_claim_removing(
+            rdb_session,
+            action_execution_id=execution.id,
+            worktree_path=path,
+        )
+        await rdb_session.refresh(claim)
+        assert claim.state is GitWorktreePathClaimState.REMOVING
+
+        await repository.release_agent_git_worktree_claim(
+            rdb_session,
+            action_execution_id=execution.id,
+            worktree_path=path,
+            state=GitWorktreePathClaimState.REMOVED,
+        )
+        await rdb_session.refresh(claim)
+        assert claim.state is GitWorktreePathClaimState.REMOVED
+        assert claim.lease_until <= datetime.datetime.now(datetime.UTC)
+
+    async def test_agent_removal_cancellation_releases_only_nonremoving_claims(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Cancellation retains only a claim that may still own Runner mutation."""
+        workspace_id = await _create_workspace(rdb_session, "swp-agent-cancel-claim")
+        fixture = await _create_runtime_fixture(
+            rdb_session,
+            workspace_id,
+            "swp-agent-cancel-claim",
+        )
+        action_repository = ActionExecutionRepository()
+        repository = SessionWorkspaceProjectRepository()
+        paths = (
+            "/workspace/agent/.azents/worktrees/agent/claimed",
+            "/workspace/agent/.azents/worktrees/agent/removing",
+        )
+        executions = []
+        for index, path in enumerate(paths, start=17):
+            execution = await action_repository.create(
+                rdb_session,
+                ActionExecutionCreate(
+                    id=None,
+                    session_id=fixture.session_id,
+                    mailbox_item_id=f"019000000000700080000000000000{index}",
+                    sender_user_id=None,
+                    action_type="agent_remove_git_worktree",
+                    action={
+                        "type": "agent_remove_git_worktree",
+                        "bridge_identity": f"bridge-agent-cancel-{index}",
+                        "originating_run_id": f"run-agent-cancel-{index}",
+                        "client_tool_call_id": f"call-agent-cancel-{index}",
+                        "session_agent_context_id": f"context-agent-cancel-{index}",
+                        "originating_agent_session_id": fixture.session_id,
+                        "worktree_project_id": f"project-agent-cancel-{index}",
+                        "worktree_allocation_id": f"allocation-agent-cancel-{index}",
+                        "worktree_path": path,
+                        "force": False,
+                    },
+                    status=ActionExecutionStatus.RUNNING,
+                    owner_generation=0,
+                ),
+            )
+            assert await repository.try_claim_agent_git_worktree(
+                rdb_session,
+                runtime_id=fixture.runtime_id,
+                action_execution_id=execution.id,
+                owner_generation=execution.owner_generation,
+                worktree_path=path,
+            )
+            executions.append(execution)
+
+        await repository.mark_agent_git_worktree_claim_removing(
+            rdb_session,
+            action_execution_id=executions[1].id,
+            worktree_path=paths[1],
+        )
+        for execution in executions:
+            await repository.release_nonremoving_agent_git_worktree_claims(
+                rdb_session,
+                action_execution_id=execution.id,
+            )
+
+        claims = list(
+            (
+                await rdb_session.scalars(
+                    sa.select(RDBGitWorktreePathClaim)
+                    .where(
+                        RDBGitWorktreePathClaim.owner_kind
+                        == GitWorktreePathClaimOwnerKind.AGENT_ACTION
+                    )
+                    .order_by(RDBGitWorktreePathClaim.worktree_path)
+                )
+            )
+        )
+        assert [claim.worktree_path for claim in claims] == [paths[1]]
+        assert claims[0].state is GitWorktreePathClaimState.REMOVING
 
     async def test_register_existing_folder_rejects_invalid_path_before_runtime_check(
         self, rdb_session: AsyncSession

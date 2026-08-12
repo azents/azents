@@ -38,6 +38,134 @@ from .data import (
 class SessionWorkspaceProjectRepository:
     """Session Workspace Project CRUD repository."""
 
+    async def try_claim_agent_git_worktree(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        action_execution_id: str,
+        owner_generation: int,
+        worktree_path: str,
+    ) -> bool:
+        """Reserve one exact managed path for an Agent removal action."""
+        await self.acquire_runtime_path_coordination_lock(
+            session,
+            runtime_id=runtime_id,
+        )
+        claim_paths = await self._list_blocking_cleanup_claim_paths(
+            session,
+            runtime_id=runtime_id,
+        )
+        if any(_paths_overlap(worktree_path, claim_path) for claim_path in claim_paths):
+            return False
+        await self.acquire_runtime_worktree_path_lock(
+            session,
+            runtime_id=runtime_id,
+            worktree_path=worktree_path,
+        )
+        existing = await session.execute(
+            sa.select(RDBGitWorktreePathClaim).where(
+                RDBGitWorktreePathClaim.agent_runtime_id == runtime_id,
+                RDBGitWorktreePathClaim.worktree_path == worktree_path,
+            )
+        )
+        claim = existing.scalar_one_or_none()
+        if claim is not None and await self._claim_blocks_path(session, claim=claim):
+            return False
+        now = datetime.now(UTC)
+        if claim is None:
+            claim = RDBGitWorktreePathClaim(
+                agent_runtime_id=runtime_id,
+                worktree_path=worktree_path,
+                owner_kind=GitWorktreePathClaimOwnerKind.AGENT_ACTION,
+                action_execution_id=action_execution_id,
+                root_session_id=None,
+                owner_generation=owner_generation,
+                discovery_fingerprint=None,
+                state=GitWorktreePathClaimState.CLAIMED,
+                reason_code=None,
+                summary=None,
+                lease_until=now + timedelta(minutes=6),
+            )
+            session.add(claim)
+        else:
+            claim.owner_kind = GitWorktreePathClaimOwnerKind.AGENT_ACTION
+            claim.action_execution_id = action_execution_id
+            claim.root_session_id = None
+            claim.owner_generation = owner_generation
+            claim.discovery_fingerprint = None
+            claim.state = GitWorktreePathClaimState.CLAIMED
+            claim.reason_code = None
+            claim.summary = None
+            claim.lease_until = now + timedelta(minutes=6)
+        await session.flush()
+        return True
+
+    async def mark_agent_git_worktree_claim_removing(
+        self,
+        session: AsyncSession,
+        *,
+        action_execution_id: str,
+        worktree_path: str,
+    ) -> None:
+        """Transition one Agent removal claim into Runner mutation state."""
+        await session.execute(
+            sa.update(RDBGitWorktreePathClaim)
+            .where(
+                RDBGitWorktreePathClaim.owner_kind
+                == GitWorktreePathClaimOwnerKind.AGENT_ACTION,
+                RDBGitWorktreePathClaim.action_execution_id == action_execution_id,
+                RDBGitWorktreePathClaim.worktree_path == worktree_path,
+                RDBGitWorktreePathClaim.state == GitWorktreePathClaimState.CLAIMED,
+            )
+            .values(
+                state=GitWorktreePathClaimState.REMOVING,
+                lease_until=datetime.now(UTC) + timedelta(minutes=6),
+            )
+        )
+        await session.flush()
+
+    async def release_agent_git_worktree_claim(
+        self,
+        session: AsyncSession,
+        *,
+        action_execution_id: str,
+        worktree_path: str,
+        state: GitWorktreePathClaimState,
+    ) -> None:
+        """Record one Agent removal claim as terminal and non-blocking."""
+        await session.execute(
+            sa.update(RDBGitWorktreePathClaim)
+            .where(
+                RDBGitWorktreePathClaim.owner_kind
+                == GitWorktreePathClaimOwnerKind.AGENT_ACTION,
+                RDBGitWorktreePathClaim.action_execution_id == action_execution_id,
+                RDBGitWorktreePathClaim.worktree_path == worktree_path,
+            )
+            .values(
+                state=state,
+                lease_until=datetime.now(UTC),
+            )
+        )
+        await session.flush()
+
+    async def release_nonremoving_agent_git_worktree_claims(
+        self,
+        session: AsyncSession,
+        *,
+        action_execution_id: str,
+    ) -> None:
+        """Release Agent claims that cannot own an in-flight Runner removal."""
+        await session.execute(
+            sa.delete(RDBGitWorktreePathClaim).where(
+                RDBGitWorktreePathClaim.owner_kind
+                == GitWorktreePathClaimOwnerKind.AGENT_ACTION,
+                RDBGitWorktreePathClaim.action_execution_id == action_execution_id,
+                RDBGitWorktreePathClaim.state != GitWorktreePathClaimState.REMOVING,
+            )
+        )
+        await session.flush()
+
     async def try_claim_orphan_git_worktree(
         self,
         session: AsyncSession,
@@ -414,6 +542,28 @@ class SessionWorkspaceProjectRepository:
                 RDBSessionAgentContextProject.session_agent_context_id == context_id,
                 RDBSessionAgentContextProject.path == path,
             )
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build_project(rdb, session_id=session_id)
+
+    async def lock_project_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        project_id: str,
+        context_id: str,
+        session_id: str,
+    ) -> SessionWorkspaceProject | None:
+        """Lock one exact Project in the admission-pinned Session context."""
+        result = await session.execute(
+            sa.select(RDBSessionAgentContextProject)
+            .where(
+                RDBSessionAgentContextProject.id == project_id,
+                RDBSessionAgentContextProject.session_agent_context_id == context_id,
+            )
+            .with_for_update()
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
