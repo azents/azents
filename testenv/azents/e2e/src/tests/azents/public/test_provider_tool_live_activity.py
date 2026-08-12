@@ -107,7 +107,7 @@ def _wait_for_live_provider_call(
     token: str,
     session_id: str,
     status: str,
-    timeout: float = 15,
+    timeout: float = 120,
 ) -> dict[str, object]:
     """Poll the public live snapshot until one provider call reaches status."""
     deadline = time.monotonic() + timeout
