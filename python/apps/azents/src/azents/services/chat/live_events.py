@@ -308,7 +308,12 @@ def mailbox_item_is_publicly_presentable(mailbox_item: MailboxItem) -> bool:
     return not (
         mailbox_item.kind is MailboxItemKind.ACTION_MESSAGE
         and mailbox_item.action is not None
-        and mailbox_item.action.get("type") == "create_session_working_folder"
+        and mailbox_item.action.get("type")
+        in {
+            "create_session_working_folder",
+            "agent_create_git_worktree",
+            "agent_remove_git_worktree",
+        }
     )
 
 
@@ -318,6 +323,8 @@ def mailbox_item_to_pending_projection(
     """Project a durable typed MailboxItem into a safe public envelope."""
     if mailbox_item.kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
         raise ValueError("TurnAction continuation is not publicly presentable")
+    if not mailbox_item_is_publicly_presentable(mailbox_item):
+        raise ValueError("Mailbox item is not publicly presentable")
     if mailbox_item.payload is None:
         raise ValueError("Mailbox item payload is required for pending projection")
     projected_items: list[PendingMailboxItem] = []
@@ -422,7 +429,7 @@ def mailbox_item_to_pending_projection(
 
 def mailbox_item_to_live_event(mailbox_item: MailboxItem) -> Event | None:
     """Convert MailboxItem to non-durable live event projection."""
-    if mailbox_item.kind == MailboxItemKind.TURN_ACTION_CONTINUATION:
+    if not mailbox_item_is_publicly_presentable(mailbox_item):
         return None
     if mailbox_item.kind == MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
         return None

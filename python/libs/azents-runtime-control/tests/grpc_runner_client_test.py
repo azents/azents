@@ -281,6 +281,72 @@ async def test_grpc_client_maps_file_glob_payload_and_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_grpc_client_preserves_git_repository_anchor() -> None:
+    """Git ref final results preserve repository authority through protobuf."""
+    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+
+    async def stream(
+        requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
+        *,
+        metadata: Sequence[tuple[str, str]] | None = None,
+    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+        del metadata
+        register = await anext(requests)
+        yield runtime_runner_control_pb2.RunnerControlMessage(
+            request_id=register.request_id,
+            register_accepted=runtime_runner_control_pb2.RunnerRegisterAccepted(
+                runtime_id=register.register.runtime_id,
+                runner_id=register.register.runner_id,
+                connection_id=register.connection_id,
+                generation=7,
+                heartbeat_interval_seconds=20,
+            ),
+        )
+        event = await anext(requests)
+        sent.append(event)
+
+    client = GrpcRunnerControlClient(stream, runner_auth_token="runner-token")
+    accepted = await client.register_runner(
+        _registration(),
+        connection_id="connection-1",
+        registered_at=_now(),
+    )
+    await client.append_runner_event(
+        RunnerOperationEvent(
+            request_id="req-refs",
+            runtime_id="runtime-1",
+            generation=accepted.generation,
+            event_type=RuntimeRunnerEventType.FINAL_SUCCESS,
+            payload={
+                "git_refs": [],
+                "default_branch": "main",
+                "head_commit": "abc123",
+                "repository_anchor_path": "/workspace/agent/repo",
+            },
+            created_at=_now(),
+            final=True,
+        )
+    )
+    for _ in range(10):
+        if sent:
+            break
+        await asyncio.sleep(0)
+
+    event = sent[0].operation_event
+    assert event.final_success.WhichOneof("result") == "git_list_refs"
+    assert (
+        event.final_success.git_list_refs.repository_anchor_path
+        == "/workspace/agent/repo"
+    )
+    decoded = runner_event_from_message(
+        event,
+        request_id="req-refs",
+    )
+    assert decoded.payload["repository_anchor_path"] == "/workspace/agent/repo"
+    await client.close()
+
+
+@pytest.mark.asyncio
 async def test_grpc_client_backpressures_operation_delivery() -> None:
     """The stream waits for scheduler admission before reading another operation."""
     first_received = asyncio.Event()

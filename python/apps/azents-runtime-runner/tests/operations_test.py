@@ -1683,11 +1683,40 @@ async def test_git_list_refs_returns_branches_tags_and_head(tmp_path: Path) -> N
     payload = client.events[-1].payload
     assert payload["default_branch"] == "main"
     assert isinstance(payload["head_commit"], str)
+    assert payload["repository_anchor_path"] == str(repo)
     raw_refs = payload.get("git_refs")
     assert isinstance(raw_refs, list)
     refs = {ref["ref"]: ref for ref in raw_refs if isinstance(ref, dict)}
     assert refs["refs/heads/main"]["default"] is True
     assert refs["refs/tags/v1"]["type"] == "tag"
+
+
+@pytest.mark.asyncio
+async def test_git_list_refs_resolves_linked_worktree_repository_anchor(
+    tmp_path: Path,
+) -> None:
+    """Linked checkout inspection returns the shared repository authority."""
+    repo = _init_git_repo(tmp_path / "repo")
+    linked = tmp_path / "linked"
+    _git(repo, "worktree", "add", "-b", "linked", str(linked), "main")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="list_git_refs",
+            payload={"source_project_path": str(linked)},
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    payload = client.events[-1].payload
+    assert payload["repository_anchor_path"] == str(repo)
+    assert isinstance(payload["head_commit"], str)
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
-from typing import ClassVar
+from typing import ClassVar, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -12,6 +12,7 @@ from azcommon.result import Failure, Success
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.broker.types import SessionBroker
 from azents.core.agent import BuiltinToolConfig, SelectableModelSettings
 from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
@@ -43,6 +44,10 @@ from azents.engine.tools.claude_rules import (
     ClaudeRulesAppendixDedupeState,
     ClaudeRulesToolkitProvider,
 )
+from azents.engine.tools.dynamic_worktree import (
+    DynamicWorktreeToolkit,
+    DynamicWorktreeToolkitProvider,
+)
 from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.session import SessionManager
@@ -51,6 +56,7 @@ from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.repos.toolkit.data import AgentToolkit, ToolkitConfig
 from azents.runtime.types import RuntimeDomainConfig
+from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_selectable_model_options,
@@ -394,6 +400,14 @@ def _make_subagent_provider() -> SubagentToolkitProvider:
         broker=AsyncMock(),
         mailbox_item_service=AsyncMock(),
         agent_repository=agent_repository,
+    )
+
+
+def _make_dynamic_worktree_provider() -> DynamicWorktreeToolkitProvider:
+    """Create DynamicWorktreeToolkitProvider for resolution tests."""
+    return DynamicWorktreeToolkitProvider(
+        service=cast(SessionGitWorktreeService, AsyncMock()),
+        broker=cast(SessionBroker, AsyncMock()),
     )
 
 
@@ -781,6 +795,43 @@ class TestResolveInvokeInput:
 
 class TestResolveAgentTools:
     """resolve_agent_tools auto-bound Toolkit tests."""
+
+    @pytest.mark.parametrize(
+        "execution_mode",
+        [ToolkitExecutionMode.ROOT, ToolkitExecutionMode.SUBAGENT],
+    )
+    async def test_auto_binds_dynamic_worktree_in_shared_context_modes(
+        self,
+        execution_mode: ToolkitExecutionMode,
+    ) -> None:
+        """Root and subagent Runs resolve the shared-context worktree Toolkit."""
+        session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
+        agent_toolkit_repository = AsyncMock()
+        agent_toolkit_repository.list_by_agent.return_value = []
+
+        bindings = await resolve_agent_tools(
+            "agent-1",
+            _make_toolkit_context(),
+            execution_mode=execution_mode,
+            toolkit_registry={},
+            agent_toolkit_repository=agent_toolkit_repository,
+            toolkit_repository=AsyncMock(),
+            session_manager=_session_manager_for(session),
+            web_url="https://example.test",
+            oauth_secret_key="secret",
+            mcp_proxy_url=None,
+            runtime_domain_config=RuntimeDomainConfig(
+                allowed_domains=(),
+                denied_domains=(),
+            ),
+            dynamic_worktree_toolkit_provider=_make_dynamic_worktree_provider(),
+            memory_enabled=False,
+            runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+        )
+
+        assert [binding.slug for binding in bindings] == ["dynamic_worktree"]
+        assert isinstance(bindings[0].toolkit, DynamicWorktreeToolkit)
 
     async def test_skips_registered_toolkit_with_invalid_persisted_config(
         self,

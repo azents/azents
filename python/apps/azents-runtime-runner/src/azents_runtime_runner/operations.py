@@ -1107,6 +1107,12 @@ class RunnerOperations:
             return
         default_branch = await self._default_branch(operation, source_path)
         head_commit = await self._head_commit(operation, source_path)
+        repository_anchor_path = await self._repository_anchor_path(
+            operation,
+            source_path,
+        )
+        if repository_anchor_path is None:
+            return
         refs: list[JsonValue] = []
         for line in refs_result.stdout.splitlines():
             parts = line.split("\t")
@@ -1128,6 +1134,7 @@ class RunnerOperations:
                 "git_refs": refs,
                 "default_branch": default_branch,
                 "head_commit": head_commit,
+                "repository_anchor_path": repository_anchor_path,
             },
         )
 
@@ -2282,6 +2289,39 @@ class RunnerOperations:
             )
             return None
         return result.stdout.strip()
+
+    async def _repository_anchor_path(
+        self,
+        operation: RunnerOperationEnvelope,
+        source_path: Path,
+    ) -> str | None:
+        """Resolve the shared repository anchor for a primary or linked worktree."""
+        result = await self._run_git_capture(
+            operation,
+            ("rev-parse", "--path-format=absolute", "--git-common-dir"),
+            cwd=source_path,
+        )
+        if result is None:
+            return None
+        if result.exit_code != 0:
+            await self._final_error(
+                operation,
+                "git_command_failed",
+                _git_command_error_message(result),
+            )
+            return None
+        common_dir = Path(result.stdout.strip())
+        anchor = common_dir.parent if common_dir.name == ".git" else common_dir
+        try:
+            authorized = _resolve_lexical_path(
+                str(anchor),
+                workspace=self._workspace,
+                write=False,
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "invalid_source_path", str(exc))
+            return None
+        return self._workspace.display_lexical_path(authorized)
 
     async def _git_branch_exists(
         self,

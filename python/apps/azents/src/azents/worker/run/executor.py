@@ -47,6 +47,7 @@ from azents.core.tools import (
 )
 from azents.engine.context.window import compute_auto_compaction_threshold_tokens
 from azents.engine.events.action_messages import (
+    AgentCreateGitWorktreeAction,
     CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
     CreateSessionWorkingFolderAction,
@@ -128,6 +129,10 @@ from azents.engine.tools.deps import (
     get_toolkit_registry,
     get_vfs_projection_service,
 )
+from azents.engine.tools.dynamic_worktree import (
+    DynamicWorktreeToolkit,
+    DynamicWorktreeToolkitProvider,
+)
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
@@ -189,6 +194,7 @@ from azents.worker.deps import (
     get_builtin_toolkit_provider,
     get_claude_rules_toolkit_provider,
     get_command_registry,
+    get_dynamic_worktree_toolkit_provider,
     get_exchange_file_service,
     get_skill_toolkit_provider,
     get_subagent_toolkit_provider,
@@ -323,6 +329,21 @@ def _refresh_runtime_peer_toolkits(toolkits: Sequence[ToolkitBinding]) -> None:
             )
 
 
+def _bind_dynamic_worktree_toolkits(
+    toolkits: Sequence[ToolkitBinding],
+    *,
+    run_id: str,
+    turn_action_bridge_boundary: TurnActionBridgeBoundary,
+) -> None:
+    """Bind the current private Run bridge to reconciled worktree Toolkits."""
+    for binding in toolkits:
+        if isinstance(binding.toolkit, DynamicWorktreeToolkit):
+            binding.toolkit.bind_run(
+                run_id=run_id,
+                turn_action_bridge_boundary=turn_action_bridge_boundary,
+            )
+
+
 @dataclasses.dataclass
 class RunExecutor:
     """Resolve a session wake-up and execute the engine run lifecycle."""
@@ -395,6 +416,10 @@ class RunExecutor:
     ]
     subagent_toolkit_provider: Annotated[
         SubagentToolkitProvider, Depends(get_subagent_toolkit_provider)
+    ]
+    dynamic_worktree_toolkit_provider: Annotated[
+        DynamicWorktreeToolkitProvider,
+        Depends(get_dynamic_worktree_toolkit_provider),
     ]
     broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)]
     failed_run_finalizer: Annotated[
@@ -627,6 +652,7 @@ class RunExecutor:
             external_channel_toolkit_provider=(self.external_channel_toolkit_provider),
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
+            dynamic_worktree_toolkit_provider=(self.dynamic_worktree_toolkit_provider),
             memory_enabled=agent.memory_enabled if agent is not None else True,
             runtime_capability_resolver=runtime_capability_resolver,
         )
@@ -1252,6 +1278,7 @@ class RunExecutor:
             external_channel_toolkit_provider=(self.external_channel_toolkit_provider),
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
+            dynamic_worktree_toolkit_provider=(self.dynamic_worktree_toolkit_provider),
             memory_enabled=agent_memory_enabled,
             runtime_capability_resolver=runtime_capability_resolver,
         )
@@ -1317,6 +1344,11 @@ class RunExecutor:
             )
             run_request = dataclasses.replace(run_request, toolkits=prepared_toolkits)
             _refresh_runtime_peer_toolkits(prepared_toolkits)
+        _bind_dynamic_worktree_toolkits(
+            run_request.toolkits,
+            run_id=run_id,
+            turn_action_bridge_boundary=turn_action_bridge_boundary,
+        )
 
         now = loop.time()
         logger.info(
@@ -2437,6 +2469,7 @@ class RunExecutor:
                 await self._process_operation_actions(
                     agent_id=agent_id,
                     session_id=session_id,
+                    active_run_id=active_run_id,
                     owner_generation=owner_generation,
                     tool_admission_barrier=tool_admission_barrier,
                     operation_action=promoted.operation_action,
@@ -2498,6 +2531,7 @@ class RunExecutor:
         *,
         agent_id: str,
         session_id: str,
+        active_run_id: str | None,
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
         operation_action: OperationActionInput | None,
@@ -2512,6 +2546,7 @@ class RunExecutor:
             result = await self._process_operation_action(
                 agent_id=agent_id,
                 session_id=session_id,
+                active_run_id=active_run_id,
                 execution=operation_action.execution,
                 action=operation_action.action,
                 owner_generation=owner_generation,
@@ -2549,6 +2584,7 @@ class RunExecutor:
                     result = await self._process_operation_action(
                         agent_id=agent_id,
                         session_id=session_id,
+                        active_run_id=active_run_id,
                         execution=execution,
                         action=action,
                         owner_generation=owner_generation,
@@ -2558,6 +2594,7 @@ class RunExecutor:
                     result = await self._process_operation_action(
                         agent_id=agent_id,
                         session_id=session_id,
+                        active_run_id=active_run_id,
                         execution=execution,
                         action=action,
                         owner_generation=owner_generation,
@@ -2567,6 +2604,17 @@ class RunExecutor:
                     result = await self._process_operation_action(
                         agent_id=agent_id,
                         session_id=session_id,
+                        active_run_id=active_run_id,
+                        execution=execution,
+                        action=action,
+                        owner_generation=owner_generation,
+                        tool_admission_barrier=tool_admission_barrier,
+                    )
+                case AgentCreateGitWorktreeAction():
+                    result = await self._process_operation_action(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        active_run_id=active_run_id,
                         execution=execution,
                         action=action,
                         owner_generation=owner_generation,
@@ -2588,11 +2636,13 @@ class RunExecutor:
         *,
         agent_id: str,
         session_id: str,
+        active_run_id: str | None,
         execution: ActionExecution,
         action: (
             CreateGitWorktreeAction
             | CleanupOrphanGitWorktreesAction
             | CreateSessionWorkingFolderAction
+            | AgentCreateGitWorktreeAction
         ),
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
@@ -2701,6 +2751,22 @@ class RunExecutor:
                     execution=execution,
                     action=action,
                     owner_generation=owner_generation,
+                    on_projection_updated=publish_projection,
+                    on_history_event_appended=publish_history_event,
+                )
+            case AgentCreateGitWorktreeAction():
+                if active_run_id is None:
+                    raise RuntimeError(
+                        "Agent worktree bridge requires an active processing Run"
+                    )
+                worktree_service = self.session_git_worktree_service
+                return await worktree_service.run_agent_create_git_worktree_action(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    execution=execution,
+                    action=action,
+                    owner_generation=owner_generation,
+                    predecessor_run_id=active_run_id,
                     on_projection_updated=publish_projection,
                     on_history_event_appended=publish_history_event,
                 )

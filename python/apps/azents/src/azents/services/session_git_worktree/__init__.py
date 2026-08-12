@@ -2,6 +2,7 @@
 
 import asyncio
 import dataclasses
+import hashlib
 import logging
 import re
 from collections.abc import Awaitable, Callable, Sequence
@@ -19,6 +20,7 @@ from azents.core.enums import (
     ActionExecutionEventKind,
     ActionExecutionStatus,
     AgentProjectCatalogStatus,
+    AgentRuntimeCapability,
     AgentSessionKind,
     AgentSessionStatus,
     EventKind,
@@ -70,7 +72,10 @@ from azents.repos.session_git_worktree.data import (
     SessionGitWorktreeCreate,
 )
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
+from azents.repos.session_workspace_project.data import (
+    SessionWorkspaceProject,
+    SessionWorkspaceProjectCreate,
+)
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeGitRefEntry,
@@ -271,6 +276,7 @@ class GitRefPreview:
     refs: tuple[RuntimeGitRefEntry, ...]
     default_branch: str | None
     head_commit: str | None
+    repository_anchor_path: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -349,6 +355,14 @@ class GitWorktreeActionExecutionResult:
     complete_run: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class AgentCreateGitWorktreeAdmission:
+    """Durable acceptance result for one Agent create bridge call."""
+
+    mailbox_item_id: str
+    bridge_identity: str
+
+
 @dataclasses.dataclass
 class SessionGitWorktreeService:
     """Orchestrate session Git worktree allocation and initialization."""
@@ -400,6 +414,175 @@ class SessionGitWorktreeService:
     skill_store: Annotated[SkillStateStore | None, Depends(get_skill_state_store)] = (
         None
     )
+
+    async def agent_create_git_worktree_available(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+    ) -> bool:
+        """Return whether the current Session may project the Agent create tool."""
+        if self.runner_operations is None or self.skill_store is None:
+            return False
+        try:
+            await self.session_working_folder_binding_service.require_bindable_context(
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+            await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                wait_timeout_seconds=0,
+                start_if_stopped=False,
+            )
+        except RuntimeStorageError, SessionWorkingFolderBindingError:
+            return False
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+        return (
+            agent_session is not None
+            and agent_session.agent_id == agent_id
+            and agent_session.status is AgentSessionStatus.ACTIVE
+        )
+
+    async def admit_agent_create_git_worktree(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        originating_run_id: str,
+        client_tool_call_id: str,
+        source_project_path: str,
+        starting_ref: str | None,
+        branch_name: str | None,
+    ) -> AgentCreateGitWorktreeAdmission:
+        """Pin current authority and durably enqueue one Agent create action."""
+        if self.runner_operations is None or self.skill_store is None:
+            raise ValueError("Agent-managed worktree creation is unavailable")
+        normalized_starting_ref = _normalized_optional_tool_argument(
+            starting_ref,
+            field_name="starting_ref",
+        )
+        normalized_branch_name = _normalized_optional_tool_argument(
+            branch_name,
+            field_name="branch_name",
+        )
+        try:
+            await self.session_working_folder_binding_service.require_bindable_context(
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                start_if_stopped=False,
+            )
+            binding_service = self.session_working_folder_binding_service
+            authority = await binding_service.resolve_authority_for_target(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime_target=runtime,
+            )
+            workspace_root = normalize_agent_workspace_root(
+                runtime.workspace_path
+            ).as_posix()
+            normalized_source_path = normalize_session_workspace_path(
+                source_project_path,
+                workspace_root=workspace_root,
+            )
+        except (RuntimeStorageError, SessionWorkingFolderBindingError) as error:
+            raise ValueError(str(error)) from None
+        except ValueError as error:
+            raise ValueError(str(error)) from None
+
+        bridge_identity = _worktree_bridge_identity(
+            session_id=session_id,
+            run_id=originating_run_id,
+            tool_name="create_git_worktree",
+            client_tool_call_id=client_tool_call_id,
+        )
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            session_agent = (
+                await self.agent_session_repository.get_session_agent_by_session_id(
+                    session,
+                    session_id,
+                )
+            )
+            project = (
+                await self.session_workspace_project_repository.get_project_by_path(
+                    session,
+                    session_id=session_id,
+                    path=normalized_source_path,
+                )
+            )
+            if (
+                agent_session is None
+                or agent_session.agent_id != agent_id
+                or agent_session.status is not AgentSessionStatus.ACTIVE
+                or session_agent is None
+                or session_agent.context_id != authority.context_id
+            ):
+                raise ValueError("The current Session context is unavailable.")
+            if (
+                project is None
+                or project.session_agent_context_id != authority.context_id
+            ):
+                raise ValueError(
+                    "source_project_path must identify a current Session Project."
+                )
+            action = AgentCreateGitWorktreeAction(
+                bridge_identity=bridge_identity,
+                originating_run_id=originating_run_id,
+                client_tool_call_id=client_tool_call_id,
+                session_agent_context_id=authority.context_id,
+                originating_agent_session_id=session_id,
+                source_project_id=project.id,
+                source_project_path=normalized_source_path,
+                starting_ref=normalized_starting_ref,
+                branch_name=normalized_branch_name,
+            )
+            existing = await self.mailbox_item_repository.get_by_idempotency_key(
+                session,
+                session_id=session_id,
+                kind=MailboxItemKind.ACTION_MESSAGE,
+                idempotency_key=bridge_identity,
+            )
+            admission = existing
+            if admission is None:
+                admission = await self.mailbox_item_repository.create_idempotent(
+                    session,
+                    MailboxItemCreate(
+                        session_id=session_id,
+                        kind=MailboxItemKind.ACTION_MESSAGE,
+                        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                        requested_model_target_label=None,
+                        requested_reasoning_effort=None,
+                        sender_user_id=None,
+                        order_group=None,
+                        order_sequence=0,
+                        content="",
+                        idempotency_key=bridge_identity,
+                        metadata={"source": "agent_tool"},
+                        action=action.model_dump(mode="json"),
+                        attachments=[],
+                        file_parts=[],
+                        payload=None,
+                    ),
+                    idempotency_key=bridge_identity,
+                )
+            if admission.presentation.action != action.model_dump(mode="json"):
+                raise ValueError(
+                    "The client tool call identity is already bound to another request."
+                )
+        return AgentCreateGitWorktreeAdmission(
+            mailbox_item_id=admission.id,
+            bridge_identity=bridge_identity,
+        )
 
     async def preview_git_refs(
         self,
@@ -469,6 +652,7 @@ class SessionGitWorktreeService:
                 refs=result.refs,
                 default_branch=result.default_branch,
                 head_commit=result.head_commit,
+                repository_anchor_path=result.repository_anchor_path,
             )
         )
 
@@ -478,7 +662,7 @@ class SessionGitWorktreeService:
         *,
         allocation: SessionGitWorktree,
         worktree_path: str,
-    ) -> object:
+    ) -> SessionWorkspaceProject:
         """Register the worktree Project and link it to the allocation."""
         project = await self.session_workspace_project_repository.create_project(
             session,
@@ -523,6 +707,41 @@ class SessionGitWorktreeService:
                     reason=_action_cancellation_reason(exc),
                     on_history_event_appended=on_history_event_appended,
                     predecessor_run_id=None,
+                )
+            )
+            raise
+
+    async def run_agent_create_git_worktree_action(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        execution: ActionExecution,
+        action: AgentCreateGitWorktreeAction,
+        owner_generation: int,
+        predecessor_run_id: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None = None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None = None,
+    ) -> GitWorktreeActionExecutionResult:
+        """Execute one admitted Agent create bridge through the shared lifecycle."""
+        try:
+            return await self._execute_agent_create_git_worktree_action(
+                agent_id=agent_id,
+                session_id=session_id,
+                execution=execution,
+                action=action,
+                owner_generation=owner_generation,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+        except asyncio.CancelledError as exc:
+            await asyncio.shield(
+                self.cancel_action_execution(
+                    execution=execution,
+                    reason=_action_cancellation_reason(exc),
+                    on_history_event_appended=on_history_event_appended,
+                    predecessor_run_id=predecessor_run_id,
                 )
             )
             raise
@@ -1616,6 +1835,377 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
 
+    async def _execute_agent_create_git_worktree_action(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        execution: ActionExecution,
+        action: AgentCreateGitWorktreeAction,
+        owner_generation: int,
+        predecessor_run_id: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+    ) -> GitWorktreeActionExecutionResult:
+        """Execute one pinned Agent create request and end its predecessor Run."""
+        if execution.session_id != session_id:
+            raise ValueError("ActionExecution belongs to another session")
+        if execution.owner_generation != owner_generation:
+            raise RuntimeError("ActionExecution belongs to another Session owner")
+        if execution.status is not ActionExecutionStatus.PENDING:
+            raise RuntimeError("Only newly admitted pending operations may execute")
+
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            session_agent = (
+                await self.agent_session_repository.get_session_agent_by_session_id(
+                    session,
+                    session_id,
+                )
+            )
+            source_project = (
+                await self.session_workspace_project_repository.get_project_by_id(
+                    session,
+                    action.source_project_id,
+                )
+            )
+        if (
+            agent_session is None
+            or agent_session.agent_id != agent_id
+            or agent_session.status is not AgentSessionStatus.ACTIVE
+            or agent is None
+            or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
+            or session_agent is None
+            or action.originating_agent_session_id != session_id
+            or session_agent.context_id != action.session_agent_context_id
+            or source_project is None
+            or source_project.session_agent_context_id
+            != action.session_agent_context_id
+            or source_project.path != action.source_project_path
+        ):
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=None,
+                reason_code="source_context_changed",
+                reason="The admitted source Project context is no longer available.",
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+
+        if self.skill_store is None:
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=None,
+                reason_code="skill_projection_unavailable",
+                reason="Skill projection storage is unavailable.",
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+
+        async with self.session_manager() as session:
+            execution = await self.action_execution_repository.mark_running(
+                session,
+                action_execution_id=execution.id,
+                started_at=datetime.now(UTC),
+            )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="resolve_source",
+            command_argv=None,
+            content="Resolving the admitted Git Project.",
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+
+        try:
+            binding_service = self.session_working_folder_binding_service
+            await binding_service.require_bindable_context(
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+            runtime = await self.runtime_target_resolver.resolve_operation_target(
+                agent_id,
+                start_if_stopped=False,
+            )
+            binding = await binding_service.resolve_authority_for_target(
+                agent_id=agent_id,
+                session_id=session_id,
+                runtime_target=runtime,
+            )
+            workspace_root = normalize_agent_workspace_root(
+                runtime.workspace_path
+            ).as_posix()
+            normalized_source_path = normalize_session_workspace_path(
+                action.source_project_path,
+                workspace_root=workspace_root,
+            )
+        except (
+            RuntimeStorageError,
+            SessionWorkingFolderBindingError,
+            ValueError,
+        ) as error:
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=None,
+                reason_code="runtime_authority_changed",
+                reason=str(error),
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+        if (
+            runtime.runtime_capability_version != agent.runtime_capability_version
+            or normalized_source_path != action.source_project_path
+        ):
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=None,
+                reason_code="runtime_authority_changed",
+                reason="Agent Runtime authority changed after admission.",
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+
+        runner_operations = self.runner_operations
+        if runner_operations is None:
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=None,
+                reason_code="runner_operations_unavailable",
+                reason="Runtime runner operations are unavailable.",
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+        try:
+            refs = await runner_operations.list_git_refs(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                owner_session_id=session_id,
+                source_project_path=normalized_source_path,
+                deadline_at=_git_operation_deadline(),
+                text_output_callback=None,
+            )
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ):
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=None,
+                reason_code="runtime_unavailable",
+                reason="Runtime runner is not ready.",
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+        except RuntimeRunnerOperationFailedError as error:
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=None,
+                reason_code=error.code or "source_not_git",
+                reason=str(error),
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+
+        starting_ref = action.starting_ref or refs.head_commit
+        if starting_ref is None:
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=None,
+                reason_code="head_unavailable",
+                reason="The selected Project has no current HEAD commit.",
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+
+        try:
+            async with self.session_manager() as session:
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    runtime_target=runtime,
+                )
+                current_project = (
+                    await self.session_workspace_project_repository.get_project_by_id(
+                        session,
+                        action.source_project_id,
+                    )
+                )
+                if (
+                    current_project is None
+                    or current_project.session_agent_context_id
+                    != action.session_agent_context_id
+                    or current_project.path != normalized_source_path
+                ):
+                    raise ValueError(
+                        "The admitted source Project changed before Git execution."
+                    )
+                allocation = await self._ensure_agent_worktree_allocation(
+                    session,
+                    execution=execution,
+                    session_id=session_id,
+                    session_handle=agent_session.handle,
+                    runtime_id=runtime.id,
+                    working_folder_path=binding.working_folder_path,
+                    source_project_path=refs.repository_anchor_path,
+                    starting_ref=starting_ref,
+                    requested_branch_name=action.branch_name,
+                )
+        except (SessionWorkingFolderBindingError, ValueError) as error:
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=None,
+                reason_code="source_context_changed",
+                reason=str(error),
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+
+        if allocation.status in {
+            SessionGitWorktreeStatus.FAILED,
+            SessionGitWorktreeStatus.CLEANUP_PENDING,
+            SessionGitWorktreeStatus.CLEANED,
+            SessionGitWorktreeStatus.CLEANUP_FAILED,
+        }:
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=allocation,
+                reason_code="allocation_unavailable",
+                reason=allocation.failure_summary or "Git worktree allocation failed.",
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+        if allocation.status is SessionGitWorktreeStatus.READY:
+            if allocation.base_commit is None:
+                raise RuntimeError("Ready worktree allocation has no base commit")
+            create_result = _CreateWorktreeSuccess(
+                worktree_path=allocation.worktree_path,
+                branch_name=allocation.branch_name,
+                base_commit=allocation.base_commit,
+            )
+        else:
+            create_result = await self._run_agent_create_worktree_step(
+                runtime=runtime,
+                execution=execution,
+                allocation=allocation,
+                generated_branch=action.branch_name is None,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            if create_result is None:
+                return _bridge_create_terminal_result()
+
+        generated_project = await self._register_agent_created_project(
+            agent_id=agent_id,
+            runtime=runtime,
+            execution=execution,
+            allocation=allocation,
+            worktree_path=create_result.worktree_path,
+            predecessor_run_id=predecessor_run_id,
+            on_projection_updated=on_projection_updated,
+            on_history_event_appended=on_history_event_appended,
+        )
+        if generated_project is None:
+            return _bridge_create_terminal_result()
+        if not await self._catalog_agent_created_project(
+            agent_id=agent_id,
+            runtime=runtime,
+            execution=execution,
+            allocation=allocation,
+            worktree_path=create_result.worktree_path,
+            predecessor_run_id=predecessor_run_id,
+            on_projection_updated=on_projection_updated,
+            on_history_event_appended=on_history_event_appended,
+        ):
+            return _bridge_create_terminal_result()
+        await self._run_action_refresh_project_status_step(
+            agent_id=agent_id,
+            execution=execution,
+            path=create_result.worktree_path,
+            on_projection_updated=on_projection_updated,
+        )
+        try:
+            await self._sync_skill_projection_for_project_change(
+                agent_id=agent_id,
+                session_id=session_id,
+                required=True,
+            )
+        except Exception as error:
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=allocation,
+                reason_code="skill_projection_failed",
+                reason=str(error) or type(error).__name__,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return _bridge_create_terminal_result()
+
+        execution = await self._update_action_result(
+            execution=execution,
+            result={
+                "source_project_path": normalized_source_path,
+                "source_project_id": action.source_project_id,
+                "generated_project_id": generated_project.id,
+                "worktree_path": create_result.worktree_path,
+                "requested_starting_ref": action.starting_ref,
+                "base_commit": create_result.base_commit,
+                "branch_name": create_result.branch_name,
+                "reason_code": None,
+            },
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.COMPLETED,
+            step_key=None,
+            command_argv=None,
+            content="Agent-managed Git worktree creation completed.",
+            exit_code=0,
+            on_projection_updated=on_projection_updated,
+        )
+        await self.commit_bridge_action_execution_terminal_handoff(
+            execution=execution,
+            status=ActionExecutionStatus.COMPLETED,
+            failure_summary=None,
+            cancellation_summary=None,
+            predecessor_run_id=predecessor_run_id,
+            allocation=allocation,
+            on_history_event_appended=on_history_event_appended,
+        )
+        return _bridge_create_terminal_result()
+
     async def _execute_git_worktree_action(
         self,
         *,
@@ -1884,6 +2474,308 @@ class SessionGitWorktreeService:
             complete_run=False,
         )
 
+    async def _ensure_agent_worktree_allocation(
+        self,
+        session: AsyncSession,
+        *,
+        execution: ActionExecution,
+        session_id: str,
+        session_handle: str,
+        runtime_id: str,
+        working_folder_path: str,
+        source_project_path: str,
+        starting_ref: str,
+        requested_branch_name: str | None,
+    ) -> SessionGitWorktree:
+        """Create or fetch one pinned Agent-requested worktree allocation."""
+        existing = (
+            await self.session_git_worktree_repository.get_by_action_execution_id(
+                session,
+                action_execution_id=execution.id,
+            )
+        )
+        if existing is not None:
+            if (
+                existing.session_id != session_id
+                or existing.source_project_path != source_project_path
+                or existing.starting_ref != starting_ref
+                or (
+                    requested_branch_name is not None
+                    and existing.branch_name != requested_branch_name
+                )
+            ):
+                raise ValueError(
+                    "The existing allocation does not match the admitted request."
+                )
+            return existing
+
+        worktree_parent_path = (
+            PurePosixPath(working_folder_path) / "worktrees"
+        ).as_posix()
+        for suffix in range(1, _MAX_COLLISION_ATTEMPTS + 1):
+            worktree_path, generated_branch_name = _target_names(
+                session_handle=session_handle,
+                worktree_parent_path=worktree_parent_path,
+                source_project_path=source_project_path,
+                path_suffix=suffix,
+                branch_suffix=suffix,
+            )
+            branch_name = requested_branch_name or generated_branch_name
+            project_repository = self.session_workspace_project_repository
+            await project_repository.acquire_runtime_path_coordination_lock(
+                session,
+                runtime_id=runtime_id,
+            )
+            await project_repository.acquire_runtime_worktree_path_lock(
+                session,
+                runtime_id=runtime_id,
+                worktree_path=worktree_path,
+            )
+            path_exists = (
+                await self.session_git_worktree_repository.worktree_path_exists(
+                    session,
+                    worktree_path=worktree_path,
+                    excluding_id="",
+                )
+            )
+            branch_exists = (
+                await self.session_git_worktree_repository.branch_name_exists(
+                    session,
+                    branch_name=branch_name,
+                    excluding_id="",
+                )
+            )
+            claim_exists = await project_repository.has_blocking_git_worktree_claim(
+                session,
+                runtime_id=runtime_id,
+                worktree_path=worktree_path,
+            )
+            if branch_exists and requested_branch_name is not None:
+                raise ValueError(
+                    f"Git branch already exists in a managed allocation: {branch_name}"
+                )
+            if path_exists or branch_exists or claim_exists:
+                continue
+            return await self.session_git_worktree_repository.create(
+                session,
+                SessionGitWorktreeCreate(
+                    id=uuid7().hex,
+                    session_id=session_id,
+                    action_execution_id=execution.id,
+                    session_workspace_project_id=None,
+                    source_project_path=source_project_path,
+                    starting_ref=starting_ref,
+                    worktree_path=worktree_path,
+                    branch_name=branch_name,
+                    branch_created_by=SessionGitWorktreeBranchCreatedBy.AZENTS,
+                    status=SessionGitWorktreeStatus.PENDING,
+                ),
+            )
+        raise ValueError("Could not allocate a unique Git worktree path and branch.")
+
+    async def _run_agent_create_worktree_step(
+        self,
+        *,
+        runtime: RuntimeOperationTarget,
+        execution: ActionExecution,
+        allocation: SessionGitWorktree,
+        generated_branch: bool,
+        predecessor_run_id: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+    ) -> _CreateWorktreeSuccess | None:
+        """Create an Agent-requested worktree with bounded generated collisions."""
+        runner_operations = self.runner_operations
+        if runner_operations is None:
+            raise RuntimeError("Runtime runner operations are unavailable")
+        current = allocation
+        path_suffix = 1
+        branch_suffix = 1
+        for _ in range(_MAX_COLLISION_ATTEMPTS):
+            current = await self._choose_agent_available_target(
+                current,
+                runtime_id=runtime.id,
+                path_suffix=path_suffix,
+                branch_suffix=branch_suffix,
+                generated_branch=generated_branch,
+            )
+            command_argv = [
+                "git",
+                "worktree",
+                "add",
+                "-b",
+                current.branch_name,
+                current.worktree_path,
+                current.starting_ref,
+            ]
+            await self._append_action_execution_event(
+                execution=execution,
+                kind=ActionExecutionEventKind.COMMAND_STARTED,
+                step_key="create_git_worktree",
+                command_argv=command_argv,
+                content="Starting Agent-managed Git worktree creation.",
+                exit_code=None,
+                on_projection_updated=on_projection_updated,
+            )
+            async with self.session_manager() as session:
+                current = await self.session_git_worktree_repository.mark_creating(
+                    session,
+                    worktree_id=current.id,
+                )
+            try:
+                result = await runner_operations.create_git_worktree(
+                    runtime_id=runtime.id,
+                    runner_generation=runtime.runner_generation,
+                    owner_session_id=current.session_id,
+                    source_project_path=current.source_project_path,
+                    worktree_path=current.worktree_path,
+                    branch_name=current.branch_name,
+                    starting_ref=current.starting_ref,
+                    deadline_at=_git_operation_deadline(),
+                    text_output_callback=self._action_text_callback(
+                        execution=execution,
+                        on_projection_updated=on_projection_updated,
+                    ),
+                )
+            except RuntimeRunnerOperationFailedError as error:
+                collision = error.code or _collision_kind(str(error))
+                if collision in {"branch", "branch_exists"} and generated_branch:
+                    branch_suffix += 1
+                    continue
+                if collision in {"path", "worktree_path_exists"}:
+                    path_suffix += 1
+                    continue
+                await self._fail_agent_create_git_worktree(
+                    execution=execution,
+                    allocation=current,
+                    reason_code=error.code or "runner_operation_failed",
+                    reason=str(error),
+                    predecessor_run_id=predecessor_run_id,
+                    on_projection_updated=on_projection_updated,
+                    on_history_event_appended=on_history_event_appended,
+                )
+                return None
+            except (
+                RuntimeRunnerOperationUnavailable,
+                RuntimeRunnerOperationGenerationError,
+            ):
+                await self._fail_agent_create_git_worktree(
+                    execution=execution,
+                    allocation=current,
+                    reason_code="runtime_unavailable",
+                    reason="Runtime runner is not ready.",
+                    predecessor_run_id=predecessor_run_id,
+                    on_projection_updated=on_projection_updated,
+                    on_history_event_appended=on_history_event_appended,
+                )
+                return None
+            await self._append_action_execution_event(
+                execution=execution,
+                kind=ActionExecutionEventKind.COMMAND_COMPLETED,
+                step_key="create_git_worktree",
+                command_argv=None,
+                content="Agent-managed Git worktree creation completed.",
+                exit_code=0,
+                on_projection_updated=on_projection_updated,
+            )
+            async with self.session_manager() as session:
+                await self.session_git_worktree_repository.mark_ready(
+                    session,
+                    worktree_id=current.id,
+                    base_commit=result.base_commit,
+                    worktree_path=result.worktree_path,
+                    branch_name=result.branch_name,
+                    ready_at=datetime.now(UTC),
+                )
+            return _CreateWorktreeSuccess(
+                worktree_path=result.worktree_path,
+                branch_name=result.branch_name,
+                base_commit=result.base_commit,
+            )
+        await self._fail_agent_create_git_worktree(
+            execution=execution,
+            allocation=current,
+            reason_code="collision_exhausted",
+            reason="Could not allocate a unique Git worktree path and branch.",
+            predecessor_run_id=predecessor_run_id,
+            on_projection_updated=on_projection_updated,
+            on_history_event_appended=on_history_event_appended,
+        )
+        return None
+
+    async def _choose_agent_available_target(
+        self,
+        allocation: SessionGitWorktree,
+        *,
+        runtime_id: str,
+        path_suffix: int,
+        branch_suffix: int,
+        generated_branch: bool,
+    ) -> SessionGitWorktree:
+        """Choose the next Agent target while preserving an explicit branch."""
+        session_handle = (
+            _branch_session_handle(allocation.branch_name)
+            if generated_branch
+            else "explicit"
+        )
+        worktree_parent_path = PurePosixPath(allocation.worktree_path).parent.as_posix()
+        for offset in range(_MAX_COLLISION_ATTEMPTS):
+            candidate_path_suffix = path_suffix + offset
+            candidate_branch_suffix = branch_suffix + offset
+            worktree_path, generated_branch_name = _target_names(
+                session_handle=session_handle,
+                worktree_parent_path=worktree_parent_path,
+                source_project_path=allocation.source_project_path,
+                path_suffix=candidate_path_suffix,
+                branch_suffix=candidate_branch_suffix,
+            )
+            branch_name = (
+                generated_branch_name if generated_branch else allocation.branch_name
+            )
+            async with self.session_manager() as session:
+                project_repository = self.session_workspace_project_repository
+                await project_repository.acquire_runtime_path_coordination_lock(
+                    session,
+                    runtime_id=runtime_id,
+                )
+                await project_repository.acquire_runtime_worktree_path_lock(
+                    session,
+                    runtime_id=runtime_id,
+                    worktree_path=worktree_path,
+                )
+                path_exists = (
+                    await self.session_git_worktree_repository.worktree_path_exists(
+                        session,
+                        worktree_path=worktree_path,
+                        excluding_id=allocation.id,
+                    )
+                )
+                branch_exists = (
+                    await self.session_git_worktree_repository.branch_name_exists(
+                        session,
+                        branch_name=branch_name,
+                        excluding_id=allocation.id,
+                    )
+                )
+                claim_exists = await project_repository.has_blocking_git_worktree_claim(
+                    session,
+                    runtime_id=runtime_id,
+                    worktree_path=worktree_path,
+                )
+                if branch_exists and not generated_branch:
+                    raise ValueError(
+                        f"Git branch already exists in a managed allocation: "
+                        f"{branch_name}"
+                    )
+                if not path_exists and not branch_exists and not claim_exists:
+                    return await self.session_git_worktree_repository.update_target(
+                        session,
+                        worktree_id=allocation.id,
+                        worktree_path=worktree_path,
+                        branch_name=branch_name,
+                    )
+        return allocation
+
     async def _ensure_action_worktree_allocation(
         self,
         session: AsyncSession,
@@ -2106,6 +2998,84 @@ class SessionGitWorktreeService:
             return False
         return True
 
+    async def _register_agent_created_project(
+        self,
+        *,
+        agent_id: str,
+        runtime: RuntimeOperationTarget,
+        execution: ActionExecution,
+        allocation: SessionGitWorktree,
+        worktree_path: str,
+        predecessor_run_id: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+    ) -> SessionWorkspaceProject | None:
+        """Register or recover the Project linked to an Agent allocation."""
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="register_project",
+            command_argv=None,
+            content="Registering the Agent-managed worktree Project.",
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+        try:
+            expected_authority = RuntimeOperationAuthority(
+                configuration_sequence=runtime.configuration_sequence,
+                configuration_digest=runtime.configuration_digest,
+                desired_generation=runtime.desired_generation,
+            )
+            current_runtime = (
+                await self.runtime_target_resolver.resolve_operation_target(
+                    agent_id,
+                    expected_authority=expected_authority,
+                    start_if_stopped=False,
+                )
+            )
+            async with self.session_manager() as session:
+                binding_service = self.session_working_folder_binding_service
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=agent_id,
+                    session_id=allocation.session_id,
+                    runtime_target=current_runtime,
+                )
+                repository = self.session_git_worktree_repository
+                current_allocation = await repository.get_by_action_execution_id(
+                    session,
+                    action_execution_id=execution.id,
+                )
+                if current_allocation is None:
+                    raise RuntimeError("Git worktree allocation is missing")
+                if current_allocation.session_workspace_project_id is not None:
+                    project_repository = self.session_workspace_project_repository
+                    project = await project_repository.get_project_by_id(
+                        session,
+                        current_allocation.session_workspace_project_id,
+                    )
+                    if project is None or project.path != worktree_path:
+                        raise RuntimeError(
+                            "Linked worktree Project does not match the allocation"
+                        )
+                    return project
+                return await self._create_and_link_workspace_project(
+                    session,
+                    allocation=current_allocation,
+                    worktree_path=worktree_path,
+                )
+        except Exception as error:
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=allocation,
+                reason_code="project_registration_failed",
+                reason=str(error) or type(error).__name__,
+                predecessor_run_id=predecessor_run_id,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return None
+
     async def _run_action_catalog_step(
         self,
         *,
@@ -2156,6 +3126,67 @@ class SessionGitWorktreeService:
                 execution=execution,
                 allocation=allocation,
                 reason=str(exc) or type(exc).__name__,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return False
+        return True
+
+    async def _catalog_agent_created_project(
+        self,
+        *,
+        agent_id: str,
+        runtime: RuntimeOperationTarget,
+        execution: ActionExecution,
+        allocation: SessionGitWorktree,
+        worktree_path: str,
+        predecessor_run_id: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+    ) -> bool:
+        """Upsert Project Catalog state before the bridge terminal handoff."""
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="upsert_catalog",
+            command_argv=None,
+            content="Updating the Agent Project Catalog.",
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+        try:
+            expected_authority = RuntimeOperationAuthority(
+                configuration_sequence=runtime.configuration_sequence,
+                configuration_digest=runtime.configuration_digest,
+                desired_generation=runtime.desired_generation,
+            )
+            current_runtime = (
+                await self.runtime_target_resolver.resolve_operation_target(
+                    agent_id,
+                    expected_authority=expected_authority,
+                    start_if_stopped=False,
+                )
+            )
+            async with self.session_manager() as session:
+                binding_service = self.session_working_folder_binding_service
+                await binding_service.resolve_bound_authority_in_transaction(
+                    session,
+                    agent_id=agent_id,
+                    session_id=allocation.session_id,
+                    runtime_target=current_runtime,
+                )
+                await self.agent_project_catalog_repository.upsert_entry(
+                    session,
+                    agent_id=agent_id,
+                    path=worktree_path,
+                )
+        except Exception as error:
+            await self._fail_agent_create_git_worktree(
+                execution=execution,
+                allocation=allocation,
+                reason_code="catalog_update_failed",
+                reason=str(error) or type(error).__name__,
+                predecessor_run_id=predecessor_run_id,
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
@@ -2519,6 +3550,10 @@ class SessionGitWorktreeService:
         if _is_agent_worktree_bridge_action(execution.action_type):
             if execution.action_type == "agent_create_git_worktree":
                 action = AgentCreateGitWorktreeAction.model_validate(execution.action)
+                await self._compensate_agent_created_project(
+                    execution=execution,
+                    allocation=allocation,
+                )
             else:
                 action = AgentRemoveGitWorktreeAction.model_validate(execution.action)
             resolved_predecessor_run_id = (
@@ -2610,14 +3645,146 @@ class SessionGitWorktreeService:
             on_history_event_appended=on_history_event_appended,
         )
 
+    async def _update_action_result(
+        self,
+        *,
+        execution: ActionExecution,
+        result: dict[str, JSONValue],
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+    ) -> ActionExecution:
+        """Persist and project one bounded worktree action result."""
+        async with self.session_manager() as session:
+            updated = await self.action_execution_repository.update_result(
+                session,
+                action_execution_id=execution.id,
+                result=result,
+            )
+        await self._publish_action_execution_projection(
+            execution=updated,
+            on_projection_updated=on_projection_updated,
+        )
+        return updated
+
+    async def _fail_agent_create_git_worktree(
+        self,
+        *,
+        execution: ActionExecution,
+        allocation: SessionGitWorktree | None,
+        reason_code: str,
+        reason: str,
+        predecessor_run_id: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+    ) -> None:
+        """Persist a bounded Agent create failure and enqueue its continuation."""
+        await self._compensate_agent_created_project(
+            execution=execution,
+            allocation=allocation,
+        )
+        execution = await self._update_action_result(
+            execution=execution,
+            result={
+                "reason_code": reason_code,
+                "worktree_path": (
+                    allocation.worktree_path if allocation is not None else None
+                ),
+                "base_commit": (
+                    allocation.base_commit if allocation is not None else None
+                ),
+                "branch_name": (
+                    allocation.branch_name if allocation is not None else None
+                ),
+            },
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.FAILED,
+            step_key=None,
+            command_argv=None,
+            content=reason,
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+        await self.commit_bridge_action_execution_terminal_handoff(
+            execution=execution,
+            status=ActionExecutionStatus.FAILED,
+            failure_summary=reason,
+            cancellation_summary=None,
+            predecessor_run_id=predecessor_run_id,
+            allocation=allocation,
+            on_history_event_appended=on_history_event_appended,
+        )
+
+    async def _compensate_agent_created_project(
+        self,
+        *,
+        execution: ActionExecution,
+        allocation: SessionGitWorktree | None,
+    ) -> None:
+        """Remove generated Project state when Agent creation does not complete."""
+        if allocation is None:
+            return
+        async with self.session_manager() as session:
+            current_allocation = (
+                await self.session_git_worktree_repository.get_by_action_execution_id(
+                    session,
+                    action_execution_id=execution.id,
+                )
+            )
+            if (
+                current_allocation is None
+                or current_allocation.session_workspace_project_id is None
+            ):
+                return
+            project = await self.session_workspace_project_repository.get_project_by_id(
+                session,
+                current_allocation.session_workspace_project_id,
+            )
+            if project is None:
+                return
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                execution.session_id,
+            )
+            if agent_session is None:
+                raise RuntimeError(
+                    "AgentSession is missing during Project compensation"
+                )
+            await self.agent_project_catalog_repository.delete_entry_by_path(
+                session,
+                agent_id=agent_session.agent_id,
+                path=project.path,
+            )
+            deleted = await self.session_workspace_project_repository.delete_project(
+                session,
+                project.id,
+                session_id=execution.session_id,
+            )
+            if not deleted:
+                raise RuntimeError("Generated worktree Project compensation failed")
+
+        if self.skill_store is None:
+            return
+        await self.skill_store.invalidate_project(
+            agent_session.agent_id,
+            execution.session_id,
+            project_id=project.id,
+            project_path=project.path,
+            session_run_state=agent_session.run_state,
+        )
+
     async def _sync_skill_projection_for_project_change(
         self,
         *,
         agent_id: str,
         session_id: str,
+        required: bool = False,
     ) -> None:
         """Refresh latest Skill projection after adding a Project source."""
         if self.skill_store is None or self.runner_operations is None:
+            if required:
+                raise RuntimeError("Skill projection dependencies are unavailable")
             return
         projection_service = SkillProjectionService(
             store=self.skill_store,
@@ -3255,9 +4422,45 @@ class _CreateWorktreeSuccess:
     base_commit: str
 
 
+def _bridge_create_terminal_result() -> GitWorktreeActionExecutionResult:
+    """Return the terminal fresh-Run outcome for an Agent create bridge."""
+    return GitWorktreeActionExecutionResult(
+        completed=True,
+        context_invalidated=False,
+        complete_run=True,
+    )
+
+
 def _git_operation_deadline() -> datetime:
     """Return a deadline for one Git runner operation."""
     return datetime.now(UTC) + timedelta(seconds=_GIT_OPERATION_TIMEOUT_SECONDS)
+
+
+def _normalized_optional_tool_argument(
+    value: str | None,
+    *,
+    field_name: str,
+) -> str | None:
+    """Normalize an optional tool string while rejecting explicit empty values."""
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field_name} must not be empty when provided.")
+    return normalized
+
+
+def _worktree_bridge_identity(
+    *,
+    session_id: str,
+    run_id: str,
+    tool_name: str,
+    client_tool_call_id: str,
+) -> str:
+    """Build one bounded stable bridge idempotency identity."""
+    canonical = "\0".join((session_id, run_id, tool_name, client_tool_call_id))
+    digest = hashlib.sha256(canonical.encode()).hexdigest()
+    return f"agent-worktree:{tool_name}:{digest}"
 
 
 def _target_names(

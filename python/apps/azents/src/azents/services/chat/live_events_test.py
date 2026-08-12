@@ -171,6 +171,44 @@ def test_turn_action_continuation_is_hidden_from_public_live_projections() -> No
         mailbox_item_to_pending_projection(mailbox_item)
 
 
+def test_agent_worktree_action_is_hidden_from_public_live_projections() -> None:
+    """Internal Agent worktree admission does not appear as pending chat input."""
+    mailbox_item = MailboxItem(
+        id="0723456789abcdef0123456789abcdef",
+        session_id="1123456789abcdef0123456789abcdef",
+        kind=MailboxItemKind.ACTION_MESSAGE,
+        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
+        sender_user_id=None,
+        order_group="0723456789abcdef0123456789abcdef",
+        order_sequence=0,
+        content="",
+        idempotency_key="agent-worktree:create:bridge-001",
+        metadata={"source": "agent_tool"},
+        action={
+            "type": "agent_create_git_worktree",
+            "bridge_identity": "bridge-001",
+            "originating_run_id": "run-001",
+            "client_tool_call_id": "call-001",
+            "session_agent_context_id": "context-001",
+            "originating_agent_session_id": ("1123456789abcdef0123456789abcdef"),
+            "source_project_id": "project-001",
+            "source_project_path": "/workspace/agent/repo",
+            "starting_ref": None,
+            "branch_name": None,
+        },
+        attachments=[],
+        file_parts=[],
+        created_at=datetime.datetime(2026, 8, 12, tzinfo=datetime.UTC),
+    )
+
+    assert mailbox_item_is_publicly_presentable(mailbox_item) is False
+    assert mailbox_item_to_live_event(mailbox_item) is None
+    with pytest.raises(ValueError, match="not publicly presentable"):
+        mailbox_item_to_pending_projection(mailbox_item)
+
+
 def test_agent_result_mailbox_item_live_event_restores_terminal_metadata() -> None:
     """Pending terminal result exposes the complete agent message payload."""
     event = mailbox_item_to_live_event(
