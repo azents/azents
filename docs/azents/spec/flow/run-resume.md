@@ -27,8 +27,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/cli/team_session_cutover.py
-last_verified_at: 2026-08-10
-spec_version: 26
+last_verified_at: 2026-08-12
+spec_version: 27
 ---
 
 # Run Resume
@@ -229,6 +229,20 @@ completes, the same active run rebuilds model/tool context before its next model
 cancelled action is terminal, is not retried or discarded, and FIFO processing may continue to later
 pending input.
 
+For `agent_create_git_worktree` and `agent_remove_git_worktree`, the same cancellation path uses the
+bridge terminalizer and therefore creates exactly one bounded continuation alongside the cancelled
+history snapshot; it still never replays Git. A normal bridge terminal transaction creates the
+history result, hidden `turn_action_continuation`, and live-row deletion atomically. The continuation
+records the Run that terminalized the action as `predecessor_run_id`.
+
+Recovery must not promote that continuation while the predecessor remains pending or running. If a
+crash occurs after terminal handoff but before predecessor completion, the current processing
+boundary returns the existing `complete_run` outcome and leaves the continuation queued. Once the
+predecessor is terminal, a later processing boundary atomically promotes the row to one deterministic
+system reminder and starts a fresh Run. Duplicate admission, terminalization, or promotion converges
+through mailbox, history-event, and continuation identities and cannot produce a second Git side
+effect or second model-visible reminder.
+
 ## Failed-run Retry Recovery
 
 When a running `agent_runs` row has non-null `retry_state`, that state is the durable retry resume
@@ -295,6 +309,8 @@ run to observe `check_stop()` as true.
 - Tool recovery and cancellation preserve the durable call dialect; cross-dialect result pairing is rejected before handler execution.
 - User stop intent is consumed by stop finalization and must not interrupt the next wake-up.
 - A leftover nonterminal operation is cancelled into one durable snapshot before new work; operation handlers are never resumed or replayed after ownership loss.
+- A bridge continuation remains pending until its predecessor Run is terminal and is promoted at most
+  once into a fresh Run.
 - SDK `RunState` compatibility is not preserved.
 - Recovery and replay never reconstruct an execution User. Canonical durable Session/work state is
   the only execution authority after a routing signal.
@@ -302,6 +318,9 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-08-12** (spec_version 27) — Added Agent-managed worktree bridge recovery: cancelled
+  no-replay terminal continuation, atomic history/continuation handoff, predecessor-Run fencing,
+  and idempotent fresh-Run promotion.
 - **2026-08-10** (spec_version 26) — Made Runtime identity optional during recovery, added
   capability/version and Session-binding revalidation for Runtime-dependent resume, and prevented
   removing-state takeover or retry from reviving fenced Agent work.

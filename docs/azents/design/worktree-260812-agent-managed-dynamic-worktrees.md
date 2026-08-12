@@ -2,6 +2,7 @@
 title: "Agent-Managed Dynamic Worktrees Design"
 created: 2026-08-12
 updated: 2026-08-12
+implemented: 2026-08-12
 tags: [backend, engine, worker, runtime, session, workspace, project, git, worktree]
 document_role: primary
 document_type: design

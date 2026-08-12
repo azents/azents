@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import shlex
 import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -12,6 +13,7 @@ from urllib.parse import urlencode
 
 import azentsadminclient
 import azentspublicclient
+import docker as docker_py
 import psycopg
 import pytest
 import requests
@@ -30,6 +32,9 @@ from azentspublicclient.models.agent_session_title_source import (
 )
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.automatic_session_projects_replace_request import (
+    AutomaticSessionProjectsReplaceRequest,
+)
 from azentspublicclient.models.connection_access_policy_request import (
     ConnectionAccessPolicyRequest,
 )
@@ -166,6 +171,77 @@ def _wait_for_runtime_runner_ready(
         workspace_handle=workspace_handle,
         agent_id=agent_id,
     )
+
+
+def _runtime_container(agent_id: str) -> Container:
+    """Return the one Runtime container for an Agent."""
+    client = docker_py.from_env()
+    containers = client.containers.list(
+        all=True,
+        filters={"label": f"azents/agent-id={agent_id}"},
+    )
+    if len(containers) != 1:
+        names = [container.name for container in containers]
+        client.close()
+        raise AssertionError(
+            f"expected one Runtime container for {agent_id}, found {names!r}"
+        )
+    return containers[0]
+
+
+def _runtime_exec(container: Container, command: str) -> str:
+    """Run one bounded command inside an Agent Runtime."""
+    result = container.exec_run(["sh", "-lc", command])
+    output = result.output.decode(errors="replace")
+    if result.exit_code != 0:
+        raise AssertionError(
+            f"Runtime command failed with exit {result.exit_code}: {command}\n{output}"
+        )
+    return output
+
+
+def _create_worktree_continuity_source(
+    container: Container,
+    *,
+    name: str,
+) -> str:
+    """Create a source whose target ref alone contains one filesystem Skill."""
+    source_path = f"/workspace/agent/{name}"
+    quoted = shlex.quote(source_path)
+    _runtime_exec(
+        container,
+        "\n".join(
+            [
+                "set -eu",
+                f"mkdir -p {quoted}",
+                f"cd {quoted}",
+                "git init -b main",
+                "git config user.email e2e@example.com",
+                "git config user.name 'Azents E2E'",
+                "printf 'external channel worktree e2e\\n' > README.md",
+                "git add README.md",
+                "git commit -m 'initial commit'",
+                "git switch -c worktree-e2e-target",
+                "mkdir -p .claude/skills/worktree-e2e",
+                (
+                    "cat > .claude/skills/worktree-e2e/SKILL.md <<'EOF'\n"
+                    "---\n"
+                    "name: worktree-e2e\n"
+                    "description: Verify target-only dynamic worktree Skill "
+                    "adoption.\n"
+                    "---\n\n"
+                    "# Dynamic Worktree E2E Skill\n\n"
+                    "This Skill is available only from the generated worktree "
+                    "ref.\n"
+                    "EOF"
+                ),
+                "git add .claude/skills/worktree-e2e/SKILL.md",
+                "git commit -m 'add target-only worktree skill'",
+                "git switch main",
+            ]
+        ),
+    )
+    return source_path
 
 
 def _create_workspace_agents(
@@ -972,6 +1048,172 @@ def _matching_progress_request_evidence(
         f"observed={observed!r}"
     )
     return evidence
+
+
+def _session_project_paths(
+    *,
+    public_server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+) -> list[str]:
+    """Return exact registered Project paths through the public API."""
+    response = requests.get(
+        f"{public_server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}/projects",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    if response.status_code == 403:
+        return []
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        return []
+    items = cast(dict[str, object], payload).get("items")
+    if not isinstance(items, list):
+        return []
+    return [
+        path
+        for raw_item in cast(list[object], items)
+        if isinstance(raw_item, dict)
+        and isinstance(
+            path := cast(dict[str, object], raw_item).get("path"),
+            str,
+        )
+    ]
+
+
+def _dynamic_worktree_request_evidence(
+    openai_proxy_url: str,
+) -> list[dict[str, object]]:
+    """Return sanitized dynamic-worktree model request evidence."""
+    response = requests.get(
+        f"{openai_proxy_url}/v1/_dynamic_worktree_requests",
+        timeout=5,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        return []
+    return [
+        cast(dict[str, object], item)
+        for item in cast(list[object], payload)
+        if isinstance(item, dict)
+    ]
+
+
+def _worktree_action_result(
+    *,
+    public_server_url: str,
+    token: str,
+    session_id: str,
+    call_id: str,
+    status: str,
+) -> dict[str, object] | None:
+    """Return one terminal Agent-managed worktree action projection."""
+    response = requests.get(
+        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        return None
+    items = cast(dict[str, object], payload).get("items")
+    if not isinstance(items, list):
+        return None
+    for raw_event in reversed(cast(list[object], items)):
+        if not isinstance(raw_event, dict):
+            continue
+        event = cast(dict[str, object], raw_event)
+        if event.get("kind") != "action_execution_result":
+            continue
+        raw_payload = event.get("payload")
+        if not isinstance(raw_payload, dict):
+            continue
+        raw_projection = cast(dict[str, object], raw_payload).get("action_execution")
+        if not isinstance(raw_projection, dict):
+            continue
+        raw_execution = cast(dict[str, object], raw_projection).get("execution")
+        if not isinstance(raw_execution, dict):
+            continue
+        execution = cast(dict[str, object], raw_execution)
+        raw_action = execution.get("action")
+        if not isinstance(raw_action, dict):
+            continue
+        action = cast(dict[str, object], raw_action)
+        if (
+            action.get("client_tool_call_id") == call_id
+            and execution.get("status") == status
+        ):
+            return cast(dict[str, object], raw_projection)
+    return None
+
+
+def _session_history(
+    *,
+    public_server_url: str,
+    token: str,
+    session_id: str,
+) -> list[dict[str, object]]:
+    """Return durable Session history in canonical order."""
+    response = requests.get(
+        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        return []
+    items = cast(dict[str, object], payload).get("items")
+    if not isinstance(items, list):
+        return []
+    return [
+        cast(dict[str, object], item)
+        for item in cast(list[object], items)
+        if isinstance(item, dict)
+    ]
+
+
+def _turn_run_ids(history: list[dict[str, object]]) -> list[str]:
+    """Return model-turn Run IDs in durable history order."""
+    run_ids: list[str] = []
+    for event in history:
+        if event.get("kind") != "turn_marker":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        run_id = cast(dict[str, object], payload).get("run_id")
+        if isinstance(run_id, str):
+            run_ids.append(run_id)
+    return run_ids
+
+
+def _tool_call_run_id(
+    history: list[dict[str, object]],
+    *,
+    call_id: str,
+) -> str | None:
+    """Return the Run ID of a tool call from its terminating turn marker."""
+    target_seen = False
+    for event in history:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        event_payload = cast(dict[str, object], payload)
+        if (
+            event.get("kind") == "client_tool_call"
+            and event_payload.get("call_id") == call_id
+        ):
+            target_seen = True
+            continue
+        if target_seen and event.get("kind") == "turn_marker":
+            run_id = event_payload.get("run_id")
+            return run_id if isinstance(run_id, str) else None
+    return None
 
 
 def _login_main_web(
@@ -3170,6 +3412,464 @@ def test_provider_native_channel_work_progress_journey(
     )
     assert _BOT_TOKEN not in str(outcome_state)
     assert _SIGNING_SECRET not in str(outcome_state)
+
+
+@pytest.mark.runtime_provider
+def test_agent_managed_worktree_preserves_slack_binding_and_publication(
+    request: pytest.FixtureRequest,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_engine_worker_container: Container,
+    azents_runtime_provider_docker_container: Container,
+    slack_provider_fake_url: str,
+    openai_proxy_url: str,
+) -> None:
+    """Keep one Slack Binding through worktree creation and fresh-Run finish."""
+    del azents_engine_worker_container, azents_runtime_provider_docker_container
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.delete(
+        f"{openai_proxy_url}/v1/_dynamic_worktree_requests",
+        timeout=5,
+    ).raise_for_status()
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        runtime_profile_provider_id=_RUNTIME_PROVIDER_ID,
+        shell_enabled=True,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    container = _runtime_container(agent_id)
+    source_path = _create_worktree_continuity_source(
+        container,
+        name=f"external-worktree-source-{unique()}",
+    )
+    agent_api = AgentV1Api(public_api_client)
+    current_policy = agent_api.agent_v1_get_automatic_session_projects(
+        agent_id=agent_id,
+        handle=handle,
+        _headers=headers,
+    )
+    replaced_policy = agent_api.agent_v1_replace_automatic_session_projects(
+        agent_id=agent_id,
+        handle=handle,
+        automatic_session_projects_replace_request=(
+            AutomaticSessionProjectsReplaceRequest(
+                expected_revision=current_policy.revision,
+                project_paths=[source_path],
+            )
+        ),
+        _headers=headers,
+    )
+    assert replaced_policy.project_paths == [source_path]
+
+    root_timestamp = f"{int(time.time()) - 60}.000350"
+    message_text = (
+        "<@B-E2E> Agent-managed worktree External Channel continuity E2E\n"
+        f"Source: {source_path}"
+    )
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "delivery_scenarios": {
+                "chat.postMessage": "delivered",
+                "chat.update": "delivered",
+            },
+            "history_pages": [
+                [
+                    {
+                        "user": "U-WORKTREE",
+                        "ts": root_timestamp,
+                        "text": message_text,
+                    }
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_slack_connection(
+        agent_id=agent_id,
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id=_APP_ID,
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=headers,
+    )
+    external_api.external_channel_v1_update_connection_access_policy(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        connection_access_policy_request=ConnectionAccessPolicyRequest(
+            open_access_enabled=False,
+        ),
+        _headers=headers,
+    )
+
+    def disconnect_connection() -> None:
+        external_api.external_channel_v1_disconnect_connection(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+
+    request.addfinalizer(disconnect_connection)
+    validated = external_api.external_channel_v1_validate_connection(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert validated.status is ExternalChannelConnectionStatus.ACTIVE
+
+    chat_api = ChatV1Api(public_api_client)
+    baseline_session_ids = {
+        session.id
+        for session in chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+    }
+    callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
+    event_body = json.dumps(
+        {
+            "type": "event_callback",
+            "event_id": f"Ev-{unique()}",
+            "event_time": int(time.time()),
+            "api_app_id": _APP_ID,
+            "team_id": _TEAM_ID,
+            "event": {
+                "type": "app_mention",
+                "channel": _CHANNEL_ID,
+                "channel_type": "channel",
+                "user": "U-WORKTREE",
+                "text": message_text,
+                "ts": root_timestamp,
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    response = requests.post(
+        callback_url,
+        data=event_body,
+        headers=_signed_headers(event_body),
+        timeout=5,
+    )
+    assert response.status_code == 200
+    approval_request_id = wait_until(
+        lambda: _approval_request_id(slack_provider_fake_url),
+        timeout=15,
+        interval=0.2,
+        message="Worktree continuity approval control was not delivered",
+    )
+    decided = external_api.external_channel_v1_decide_approval_request(
+        access_request_id=approval_request_id,
+        external_channel_decision_input=ExternalChannelDecisionInput(
+            decision="allow_agent",
+            summary="Agent-managed worktree continuity E2E approval",
+        ),
+        _headers=headers,
+    )
+    assert decided.agent_session_id is None
+    _assert_no_pending_slack_participation_lifecycle(
+        chat_api=chat_api,
+        external_api=external_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        baseline_session_ids=baseline_session_ids,
+    )
+    _open_slack_setup_modal(
+        callback_url=callback_url,
+        app_id=_APP_ID,
+        team_id=_TEAM_ID,
+        channel_id=_CHANNEL_ID,
+        user_id="U-WORKTREE",
+    )
+    setup_view = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _latest_setup_view(slack_provider_fake_url),
+            timeout=15,
+            interval=0.2,
+            message="Worktree continuity setup did not open a location modal",
+        ),
+    )
+    _submit_slack_setup_location(
+        callback_url=callback_url,
+        app_id=_APP_ID,
+        team_id=_TEAM_ID,
+        user_id="U-WORKTREE",
+        setup_view=setup_view,
+    )
+
+    def selected_session_and_binding() -> tuple[str, str] | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        for session in sessions.items:
+            if session.id in baseline_session_ids:
+                continue
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if len(projection.items) == 1:
+                return session.id, projection.items[0].id
+        return None
+
+    session_id, binding_id = cast(
+        tuple[str, str],
+        wait_until(
+            selected_session_and_binding,
+            timeout=20,
+            interval=0.2,
+            message="Worktree continuity Session and Binding were not created",
+        ),
+    )
+    wait_until(
+        lambda: (
+            paths
+            if (
+                paths := _session_project_paths(
+                    public_server_url=azents_public_server_url,
+                    token=token,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                )
+            )
+            == [source_path]
+            else None
+        ),
+        timeout=30,
+        interval=0.5,
+        message="External Channel Session did not bind its automatic Project",
+    )
+
+    create_projection = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _worktree_action_result(
+                public_server_url=azents_public_server_url,
+                token=token,
+                session_id=session_id,
+                call_id="call_dynamic_worktree_external_create",
+                status="completed",
+            ),
+            timeout=90,
+            interval=0.5,
+            message="External Channel worktree creation did not complete",
+        ),
+    )
+    create_execution = create_projection.get("execution")
+    assert isinstance(create_execution, dict)
+    create_result = cast(dict[str, object], create_execution).get("result")
+    assert isinstance(create_result, dict)
+    worktree_path = cast(dict[str, object], create_result).get("worktree_path")
+    assert isinstance(worktree_path, str)
+    assert cast(dict[str, object], create_result).get("branch_name") == (
+        "e2e/external-channel-continuity"
+    )
+    assert sorted(
+        _session_project_paths(
+            public_server_url=azents_public_server_url,
+            token=token,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
+    ) == sorted([source_path, worktree_path])
+    _runtime_exec(
+        container,
+        f"test -f {shlex.quote(worktree_path)}/.claude/skills/worktree-e2e/SKILL.md",
+    )
+
+    def completed_finish() -> list[dict[str, object]]:
+        evidence = _channel_action_tool_evidence(
+            azents_public_server_url,
+            token,
+            session_id,
+            call_ids=frozenset({"call_dynamic_worktree_external_finish"}),
+        )
+        assert any(
+            item.get("kind") == "client_tool_call"
+            and item.get("call_id") == "call_dynamic_worktree_external_finish"
+            for item in evidence
+        ), evidence
+        assert any(
+            item.get("kind") == "client_tool_result"
+            and item.get("call_id") == "call_dynamic_worktree_external_finish"
+            for item in evidence
+        ), evidence
+        return evidence
+
+    finish_evidence = wait_until(
+        completed_finish,
+        timeout=90,
+        interval=0.2,
+        message="Fresh-Run External Channel final publication did not complete",
+    )
+    finish_result = next(
+        item for item in finish_evidence if item.get("kind") == "client_tool_result"
+    )
+    assert finish_result.get("status") == "completed", finish_evidence
+    finish_output = finish_result.get("output")
+    assert isinstance(finish_output, str), finish_evidence
+    assert '"status": "delivered"' in finish_output
+
+    history = _session_history(
+        public_server_url=azents_public_server_url,
+        token=token,
+        session_id=session_id,
+    )
+    turn_run_ids = _turn_run_ids(history)
+    distinct_turn_run_ids = list(dict.fromkeys(turn_run_ids))
+    assert len(distinct_turn_run_ids) == 2, history
+    create_action = cast(dict[str, object], create_execution).get("action")
+    assert isinstance(create_action, dict)
+    originating_run_id = cast(dict[str, object], create_action).get(
+        "originating_run_id"
+    )
+    assert originating_run_id == distinct_turn_run_ids[0]
+    execution_id = cast(dict[str, object], create_execution).get("id")
+    assert isinstance(execution_id, str)
+    originating_turn_index = next(
+        index
+        for index, event in enumerate(history)
+        if event.get("kind") == "turn_marker"
+        and isinstance(event.get("payload"), dict)
+        and cast(dict[str, object], event["payload"]).get("run_id")
+        == originating_run_id
+    )
+    terminal_action_index = next(
+        index
+        for index, event in enumerate(history)
+        if event.get("external_id") == f"action_execution_result:{execution_id}"
+    )
+    continuation_run_id = _tool_call_run_id(
+        history,
+        call_id="call_dynamic_worktree_external_finish",
+    )
+    assert continuation_run_id == distinct_turn_run_ids[1]
+    assert continuation_run_id != originating_run_id
+    continuation_turn_index = next(
+        index
+        for index, event in enumerate(history)
+        if event.get("kind") == "turn_marker"
+        and isinstance(event.get("payload"), dict)
+        and cast(dict[str, object], event["payload"]).get("run_id")
+        == continuation_run_id
+    )
+    assert originating_turn_index < terminal_action_index < continuation_turn_index
+
+    binding_projection = external_api.external_channel_v1_list_session_channels(
+        agent_id=agent_id,
+        session_id=session_id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert len(binding_projection.items) == 1
+    assert binding_projection.items[0].id == binding_id
+    provider_deliveries = cast(
+        list[dict[str, object]],
+        _provider_state(slack_provider_fake_url)["deliveries"],
+    )
+    assert any(
+        delivery.get("operation") == "chat.postMessage"
+        and delivery.get("channel") == _CHANNEL_ID
+        and delivery.get("thread_ts") == root_timestamp
+        and delivery.get("outcome") == "delivered"
+        for delivery in provider_deliveries
+    ), provider_deliveries
+
+    request_evidence = _dynamic_worktree_request_evidence(openai_proxy_url)
+    continuity_evidence = [
+        item
+        for item in request_evidence
+        if item.get("operation") == "external_channel_create"
+    ]
+    assert continuity_evidence
+    assert {item.get("binding") for item in continuity_evidence} == {binding_id}
+    assert any(
+        item.get("stage") == "continuation"
+        and item.get("load_skill_available") is True
+        and item.get("target_skill_present") is True
+        for item in continuity_evidence
+    ), continuity_evidence
+    assert any(
+        item.get("stage") == "after_skill"
+        and item.get("channel_action_tool_available") is True
+        for item in continuity_evidence
+    ), continuity_evidence
+
+    cleanup_response = requests.post(
+        f"{azents_public_server_url}/chat/v1/sessions/{session_id}/inputs",
+        headers={**headers, "Content-Type": "application/json"},
+        json={
+            "agent_id": agent_id,
+            "client_request_id": f"external-worktree-cleanup-{unique()}",
+            "message": (
+                f"Agent-managed worktree E2E remove\nPath: {worktree_path}"
+                "\nForce: false"
+            ),
+            "inference_profile": {
+                "model_target_label": "default",
+                "reasoning_effort": None,
+            },
+        },
+        timeout=30,
+    )
+    cleanup_response.raise_for_status()
+    wait_until(
+        lambda: _worktree_action_result(
+            public_server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            call_id="call_dynamic_worktree_remove_dirty",
+            status="completed",
+        ),
+        timeout=90,
+        interval=0.5,
+        message="Clean External Channel worktree removal did not complete",
+    )
+    wait_until(
+        lambda: (
+            True
+            if _session_project_paths(
+                public_server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
+            == [source_path]
+            else None
+        ),
+        timeout=60,
+        interval=0.5,
+        message="External Channel worktree Project was not cleaned up",
+    )
+    _runtime_exec(container, f"test ! -e {shlex.quote(worktree_path)}")
+    _runtime_exec(
+        container,
+        f"cd {shlex.quote(source_path)} && "
+        'test -n "$(git branch --list '
+        "'e2e/external-channel-continuity')\"",
+    )
+    assert _BOT_TOKEN not in str(_provider_state(slack_provider_fake_url))
+    assert _SIGNING_SECRET not in str(_provider_state(slack_provider_fake_url))
 
 
 @pytest.mark.runtime_provider
