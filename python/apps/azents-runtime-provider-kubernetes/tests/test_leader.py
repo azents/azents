@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
+    ConfigMapResource,
     KubernetesApi,
     LeaseResource,
     LeaseSpec,
@@ -14,6 +15,8 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PersistentVolumeClaimResource,
     PodResource,
     PodWatchEvent,
+    SecretResource,
+    ServiceResource,
 )
 from azents_runtime_provider_kubernetes.leader import (
     KubernetesLeaderElector,
@@ -80,6 +83,72 @@ class FakeKubernetesApi(KubernetesApi):
         labels: Mapping[str, str],
         namespace: str,
     ) -> Sequence[PersistentVolumeClaimResource]:
+        """Unused by leader tests."""
+        return ()
+
+    async def get_service(
+        self,
+        name: str,
+        namespace: str,
+    ) -> ServiceResource | None:
+        """Unused by leader tests."""
+        return None
+
+    async def apply_service(self, service: ServiceResource) -> None:
+        """Unused by leader tests."""
+
+    async def delete_service(self, name: str, namespace: str) -> None:
+        """Unused by leader tests."""
+
+    async def list_services(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[ServiceResource]:
+        """Unused by leader tests."""
+        return ()
+
+    async def get_config_map(
+        self,
+        name: str,
+        namespace: str,
+    ) -> ConfigMapResource | None:
+        """Unused by leader tests."""
+        return None
+
+    async def apply_config_map(self, config_map: ConfigMapResource) -> None:
+        """Unused by leader tests."""
+
+    async def delete_config_map(self, name: str, namespace: str) -> None:
+        """Unused by leader tests."""
+
+    async def list_config_maps(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[ConfigMapResource]:
+        """Unused by leader tests."""
+        return ()
+
+    async def get_secret(
+        self,
+        name: str,
+        namespace: str,
+    ) -> SecretResource | None:
+        """Unused by leader tests."""
+        return None
+
+    async def apply_secret(self, secret: SecretResource) -> None:
+        """Unused by leader tests."""
+
+    async def delete_secret(self, name: str, namespace: str) -> None:
+        """Unused by leader tests."""
+
+    async def list_secrets(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[SecretResource]:
         """Unused by leader tests."""
         return ()
 

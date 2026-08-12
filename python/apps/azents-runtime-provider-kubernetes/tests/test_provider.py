@@ -23,6 +23,7 @@ from azents_runtime_control.runtime_configuration import (
 )
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
+    ConfigMapResource,
     ContainerResources,
     ContainerTerminationEvidence,
     EmptyDirVolume,
@@ -40,6 +41,8 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodResource,
     PodStatus,
     PodWatchEvent,
+    SecretResource,
+    ServiceResource,
     Toleration,
 )
 from azents_runtime_provider_kubernetes.provider import (
@@ -64,6 +67,9 @@ class FakeKubernetesApi(KubernetesApi):
     def __init__(self) -> None:
         self.pods: dict[tuple[str, str], PodResource] = {}
         self.pvcs: dict[tuple[str, str], PersistentVolumeClaimResource] = {}
+        self.services: dict[tuple[str, str], ServiceResource] = {}
+        self.config_maps: dict[tuple[str, str], ConfigMapResource] = {}
+        self.secrets: dict[tuple[str, str], SecretResource] = {}
         self.network_policies: dict[tuple[str, str], NetworkPolicyResource] = {}
         self.applied_pods: list[str] = []
         self.deleted_pods: list[str] = []
@@ -157,6 +163,104 @@ class FakeKubernetesApi(KubernetesApi):
             if pvc_namespace == namespace
             and all(
                 pvc.metadata.labels.get(key) == value for key, value in labels.items()
+            )
+        )
+
+    async def get_service(
+        self,
+        name: str,
+        namespace: str,
+    ) -> ServiceResource | None:
+        """Return a Service by name."""
+        return self.services.get((namespace, name))
+
+    async def apply_service(self, service: ServiceResource) -> None:
+        """Apply a Service."""
+        self.services[(service.metadata.namespace, service.metadata.name)] = service
+
+    async def delete_service(self, name: str, namespace: str) -> None:
+        """Delete a Service when present."""
+        self.services.pop((namespace, name), None)
+
+    async def list_services(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[ServiceResource]:
+        """List Services matching labels."""
+        return tuple(
+            service
+            for (service_namespace, _), service in self.services.items()
+            if service_namespace == namespace
+            and all(
+                service.metadata.labels.get(key) == value
+                for key, value in labels.items()
+            )
+        )
+
+    async def get_config_map(
+        self,
+        name: str,
+        namespace: str,
+    ) -> ConfigMapResource | None:
+        """Return a ConfigMap by name."""
+        return self.config_maps.get((namespace, name))
+
+    async def apply_config_map(self, config_map: ConfigMapResource) -> None:
+        """Apply a ConfigMap."""
+        self.config_maps[(config_map.metadata.namespace, config_map.metadata.name)] = (
+            config_map
+        )
+
+    async def delete_config_map(self, name: str, namespace: str) -> None:
+        """Delete a ConfigMap when present."""
+        self.config_maps.pop((namespace, name), None)
+
+    async def list_config_maps(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[ConfigMapResource]:
+        """List ConfigMaps matching labels."""
+        return tuple(
+            config_map
+            for (config_map_namespace, _), config_map in self.config_maps.items()
+            if config_map_namespace == namespace
+            and all(
+                config_map.metadata.labels.get(key) == value
+                for key, value in labels.items()
+            )
+        )
+
+    async def get_secret(
+        self,
+        name: str,
+        namespace: str,
+    ) -> SecretResource | None:
+        """Return a Secret by name."""
+        return self.secrets.get((namespace, name))
+
+    async def apply_secret(self, secret: SecretResource) -> None:
+        """Apply a Secret."""
+        self.secrets[(secret.metadata.namespace, secret.metadata.name)] = secret
+
+    async def delete_secret(self, name: str, namespace: str) -> None:
+        """Delete a Secret when present."""
+        self.secrets.pop((namespace, name), None)
+
+    async def list_secrets(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[SecretResource]:
+        """List Secrets matching labels."""
+        return tuple(
+            secret
+            for (secret_namespace, _), secret in self.secrets.items()
+            if secret_namespace == namespace
+            and all(
+                secret.metadata.labels.get(key) == value
+                for key, value in labels.items()
             )
         )
 

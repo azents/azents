@@ -47,6 +47,7 @@ jobs:
               - 'python/apps/azents/**'
               - 'python/apps/azents-runtime-provider-docker/**'
               - 'python/apps/azents-runtime-provider-kubernetes/**'
+              - 'python/apps/azents-runtime-proxy/**'
               - 'python/apps/azents-runtime-runner/**'
               - 'python/libs/az-common/**'
               - 'python/libs/azents-runtime-control/**'
@@ -58,6 +59,7 @@ jobs:
               - 'python/apps/azents/**'
               - 'python/apps/azents-runtime-provider-docker/**'
               - 'python/apps/azents-runtime-provider-kubernetes/**'
+              - 'python/apps/azents-runtime-proxy/**'
               - 'python/apps/azents-runtime-runner/**'
               - 'python/libs/az-common/**'
               - 'python/libs/azents-admin-client/**'
@@ -108,6 +110,7 @@ jobs:
               - 'python/apps/azents/**'
               - 'python/apps/azents-runtime-provider-docker/**'
               - 'python/apps/azents-runtime-provider-kubernetes/**'
+              - 'python/apps/azents-runtime-proxy/**'
               - 'python/apps/azents-runtime-runner/**'
               - 'python/libs/az-common/**'
               - 'python/libs/azents-runtime-control/**'
@@ -150,6 +153,7 @@ jobs:
           - project: python/libs/azents-runtime-control
           - project: python/apps/azents
           - project: python/apps/azents-runtime-runner
+          - project: python/apps/azents-runtime-proxy
           - project: python/apps/azents-runtime-provider-kubernetes
           - project: python/apps/azents-runtime-provider-docker
           - project: testenv/azents
@@ -744,6 +748,10 @@ jobs:
             dockerfile: python/apps/azents-runtime-runner/Dockerfile
             image: azents-runtime-runner:ci
             extra_context: ""
+          - name: azents-runtime-proxy
+            dockerfile: python/apps/azents-runtime-proxy/Dockerfile
+            image: azents-runtime-proxy:ci
+            extra_context: ""
           - name: azents-runtime-engine
             dockerfile: images/azents-runtime-engine/Dockerfile
             image: azents-runtime-engine:ci
@@ -783,6 +791,13 @@ jobs:
                  test -z "${DOCKER_BUILDKIT:-}" &&
                  test -z "${COMPOSE_DOCKER_CLI_BUILD:-}" &&
                  test ! -e /var/run/azents-engine/docker.sock'
+              ;;
+            azents-runtime-proxy)
+              docker run --rm --entrypoint sh "${{ matrix.image }}" -ec \
+                'test "$(id -u)" = 1000 &&
+                 test "$(id -g)" = 1000 &&
+                 /workspace/python/apps/azents-runtime-proxy/.venv/bin/mitmdump \
+                   --version | grep -F "Mitmproxy: 12.2.3"'
               ;;
             azents-runtime-engine)
               docker run --rm --entrypoint dockerd "${{ matrix.image }}" --version \

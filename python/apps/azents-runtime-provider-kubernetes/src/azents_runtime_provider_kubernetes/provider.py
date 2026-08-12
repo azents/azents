@@ -66,8 +66,11 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     Toleration,
     VolumeMount,
 )
+from azents_runtime_provider_kubernetes.owned_resources import (
+    ResourceRole,
+    resource_name,
+)
 
-_RUNTIME_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _IMMUTABLE_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[0-9a-f]{64}$")
 _QUANTITY_RE = re.compile(
     r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+))"
@@ -147,10 +150,6 @@ RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_CONTROL_OPERATIONS",
 )
 _LOGGER = logging.getLogger(__name__)
-
-
-class InvalidRuntimeId(ValueError):
-    """Runtime id cannot be mapped to Kubernetes resource names."""
 
 
 class InvalidWorkspacePath(ValueError):
@@ -785,6 +784,9 @@ class KubernetesRuntimeProvider:
                     )
                     for item in policy.scheduling.tolerations
                 ),
+                dns_policy=None,
+                dns_config=None,
+                host_aliases=(),
                 containers=self._containers(command, policy),
                 volumes=(
                     PersistentVolumeClaimVolume(
@@ -1664,9 +1666,9 @@ def _pod_volumes_equal(
     if len(actual) != len(expected):
         return False
     for actual_volume, expected_volume in zip(actual, expected, strict=True):
-        if isinstance(actual_volume, PersistentVolumeClaimVolume) or isinstance(
+        if not isinstance(actual_volume, EmptyDirVolume) or not isinstance(
             expected_volume,
-            PersistentVolumeClaimVolume,
+            EmptyDirVolume,
         ):
             if actual_volume != expected_volume:
                 return False
@@ -1744,21 +1746,15 @@ def _log_context(
 
 
 def _pod_name(runtime_id: str) -> str:
-    return f"azents-runtime-{_safe_runtime_id(runtime_id)}"
+    return resource_name(runtime_id, ResourceRole.RUNTIME_POD)
 
 
 def _pvc_name(runtime_id: str) -> str:
-    return f"azents-runtime-{_safe_runtime_id(runtime_id)}-workspace"
+    return resource_name(runtime_id, ResourceRole.WORKSPACE_PVC)
 
 
 def _network_policy_name(runtime_id: str) -> str:
-    return f"azents-runtime-{_safe_runtime_id(runtime_id)}-execution"
-
-
-def _safe_runtime_id(runtime_id: str) -> str:
-    if not _RUNTIME_ID_RE.fullmatch(runtime_id):
-        raise InvalidRuntimeId(runtime_id)
-    return runtime_id
+    return resource_name(runtime_id, ResourceRole.RUNTIME_NETWORK_POLICY)
 
 
 def _observed_state(pod: PodResource) -> tuple[RuntimeProviderObservedState, str]:

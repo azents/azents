@@ -1,5 +1,7 @@
 """In-cluster Kubernetes HTTP adapter for Runtime Provider resources."""
 
+import base64
+import binascii
 import dataclasses
 import json
 import logging
@@ -13,6 +15,8 @@ from typing import Any, Self, cast
 import aiohttp
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
+    ConfigMapResource,
+    ConfigMapVolume,
     ContainerResourceClaim,
     ContainerResources,
     ContainerSecurityContext,
@@ -21,7 +25,9 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     EmptyDirVolume,
     EnvVar,
     ExecAction,
+    HostAlias,
     IpBlock,
+    KeyToPath,
     KubernetesApi,
     KubernetesResourceQuantity,
     LabelSelector,
@@ -37,6 +43,8 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PersistentVolumeClaimResource,
     PersistentVolumeClaimSpec,
     PersistentVolumeClaimVolume,
+    PodDnsConfig,
+    PodDnsConfigOption,
     PodResource,
     PodSecurityContext,
     PodSpec,
@@ -44,6 +52,11 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodWatchEvent,
     Probe,
     SeccompProfile,
+    SecretResource,
+    SecretVolume,
+    ServicePort,
+    ServiceResource,
+    ServiceSpec,
     Toleration,
     VolumeMount,
 )
@@ -253,6 +266,128 @@ class KubernetesHttpApi(KubernetesApi):
             params={"labelSelector": _label_selector(labels)},
         )
         return tuple(_pvc_resource(item) for item in cast(JsonObject, data)["items"])
+
+    async def get_service(
+        self,
+        name: str,
+        namespace: str,
+    ) -> ServiceResource | None:
+        data = await self._request_json(
+            "GET",
+            f"/api/v1/namespaces/{namespace}/services/{name}",
+            allow_not_found=True,
+        )
+        return None if data is None else service_resource(data)
+
+    async def apply_service(self, service: ServiceResource) -> None:
+        namespace = service.metadata.namespace
+        name = service.metadata.name
+        await self._create_or_replace(
+            f"/api/v1/namespaces/{namespace}/services/{name}",
+            f"/api/v1/namespaces/{namespace}/services",
+            service_manifest(service),
+        )
+
+    async def delete_service(self, name: str, namespace: str) -> None:
+        await self._request_json(
+            "DELETE",
+            f"/api/v1/namespaces/{namespace}/services/{name}",
+            allow_not_found=True,
+        )
+
+    async def list_services(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[ServiceResource]:
+        data = await self._request_json(
+            "GET",
+            f"/api/v1/namespaces/{namespace}/services",
+            params={"labelSelector": _label_selector(labels)},
+        )
+        return tuple(service_resource(item) for item in cast(JsonObject, data)["items"])
+
+    async def get_config_map(
+        self,
+        name: str,
+        namespace: str,
+    ) -> ConfigMapResource | None:
+        data = await self._request_json(
+            "GET",
+            f"/api/v1/namespaces/{namespace}/configmaps/{name}",
+            allow_not_found=True,
+        )
+        return None if data is None else config_map_resource(data)
+
+    async def apply_config_map(self, config_map: ConfigMapResource) -> None:
+        namespace = config_map.metadata.namespace
+        name = config_map.metadata.name
+        await self._create_or_replace(
+            f"/api/v1/namespaces/{namespace}/configmaps/{name}",
+            f"/api/v1/namespaces/{namespace}/configmaps",
+            config_map_manifest(config_map),
+        )
+
+    async def delete_config_map(self, name: str, namespace: str) -> None:
+        await self._request_json(
+            "DELETE",
+            f"/api/v1/namespaces/{namespace}/configmaps/{name}",
+            allow_not_found=True,
+        )
+
+    async def list_config_maps(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[ConfigMapResource]:
+        data = await self._request_json(
+            "GET",
+            f"/api/v1/namespaces/{namespace}/configmaps",
+            params={"labelSelector": _label_selector(labels)},
+        )
+        return tuple(
+            config_map_resource(item) for item in cast(JsonObject, data)["items"]
+        )
+
+    async def get_secret(
+        self,
+        name: str,
+        namespace: str,
+    ) -> SecretResource | None:
+        data = await self._request_json(
+            "GET",
+            f"/api/v1/namespaces/{namespace}/secrets/{name}",
+            allow_not_found=True,
+        )
+        return None if data is None else secret_resource(data)
+
+    async def apply_secret(self, secret: SecretResource) -> None:
+        namespace = secret.metadata.namespace
+        name = secret.metadata.name
+        await self._create_or_replace(
+            f"/api/v1/namespaces/{namespace}/secrets/{name}",
+            f"/api/v1/namespaces/{namespace}/secrets",
+            secret_manifest(secret),
+        )
+
+    async def delete_secret(self, name: str, namespace: str) -> None:
+        await self._request_json(
+            "DELETE",
+            f"/api/v1/namespaces/{namespace}/secrets/{name}",
+            allow_not_found=True,
+        )
+
+    async def list_secrets(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[SecretResource]:
+        data = await self._request_json(
+            "GET",
+            f"/api/v1/namespaces/{namespace}/secrets",
+            params={"labelSelector": _label_selector(labels)},
+        )
+        return tuple(secret_resource(item) for item in cast(JsonObject, data)["items"])
 
     async def get_network_policy(
         self,
@@ -495,6 +630,15 @@ def pod_manifest(pod: PodResource) -> JsonObject:
             }
             for toleration in pod.spec.tolerations
         ]
+    if pod.spec.dns_policy is not None:
+        spec["dnsPolicy"] = pod.spec.dns_policy
+    if pod.spec.dns_config is not None:
+        spec["dnsConfig"] = _pod_dns_config_manifest(pod.spec.dns_config)
+    if pod.spec.host_aliases:
+        spec["hostAliases"] = [
+            {"ip": item.ip, "hostnames": list(item.hostnames)}
+            for item in pod.spec.host_aliases
+        ]
     return {
         "apiVersion": "v1",
         "kind": "Pod",
@@ -575,19 +719,59 @@ def _probe_manifest(probe: Probe) -> JsonObject:
 
 
 def _volume_manifest(
-    volume: PersistentVolumeClaimVolume | EmptyDirVolume,
+    volume: (
+        PersistentVolumeClaimVolume | EmptyDirVolume | ConfigMapVolume | SecretVolume
+    ),
 ) -> JsonObject:
     if isinstance(volume, PersistentVolumeClaimVolume):
         return {
             "name": volume.name,
             "persistentVolumeClaim": {"claimName": volume.claim_name},
         }
-    empty_dir: JsonObject = {}
-    if volume.medium is not None:
-        empty_dir["medium"] = volume.medium
-    if volume.size_limit is not None:
-        empty_dir["sizeLimit"] = volume.size_limit
-    return {"name": volume.name, "emptyDir": empty_dir}
+    if isinstance(volume, EmptyDirVolume):
+        empty_dir: JsonObject = {}
+        if volume.medium is not None:
+            empty_dir["medium"] = volume.medium
+        if volume.size_limit is not None:
+            empty_dir["sizeLimit"] = volume.size_limit
+        return {"name": volume.name, "emptyDir": empty_dir}
+    if isinstance(volume, ConfigMapVolume):
+        source: JsonObject = {
+            "name": volume.config_map_name,
+            "items": [_key_to_path_manifest(item) for item in volume.items],
+        }
+        if volume.default_mode is not None:
+            source["defaultMode"] = volume.default_mode
+        return {"name": volume.name, "configMap": source}
+    source = {
+        "secretName": volume.secret_name,
+        "items": [_key_to_path_manifest(item) for item in volume.items],
+    }
+    if volume.default_mode is not None:
+        source["defaultMode"] = volume.default_mode
+    return {"name": volume.name, "secret": source}
+
+
+def _key_to_path_manifest(item: KeyToPath) -> JsonObject:
+    manifest: JsonObject = {"key": item.key, "path": item.path}
+    if item.mode is not None:
+        manifest["mode"] = item.mode
+    return manifest
+
+
+def _pod_dns_config_manifest(config: PodDnsConfig) -> JsonObject:
+    return {
+        "nameservers": list(config.nameservers),
+        "searches": list(config.searches),
+        "options": [
+            {
+                key: value
+                for key, value in {"name": option.name, "value": option.value}.items()
+                if value is not None
+            }
+            for option in config.options
+        ],
+    }
 
 
 def _pvc_manifest(pvc: PersistentVolumeClaimResource) -> JsonObject:
@@ -603,6 +787,65 @@ def _pvc_manifest(pvc: PersistentVolumeClaimResource) -> JsonObject:
             },
         },
     }
+
+
+def service_manifest(service: ServiceResource) -> JsonObject:
+    """Serialize one Provider-owned Service."""
+    spec: JsonObject = {
+        "type": service.spec.service_type,
+        "selector": dict(service.spec.selector),
+        "ports": [
+            {
+                key: value
+                for key, value in {
+                    "name": port.name,
+                    "protocol": port.protocol,
+                    "port": port.port,
+                    "targetPort": port.target_port,
+                }.items()
+                if value is not None
+            }
+            for port in service.spec.ports
+        ],
+    }
+    if service.spec.cluster_ip is not None:
+        spec["clusterIP"] = service.spec.cluster_ip
+    return {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": _metadata(service.metadata),
+        "spec": spec,
+    }
+
+
+def config_map_manifest(config_map: ConfigMapResource) -> JsonObject:
+    """Serialize one Provider-owned ConfigMap."""
+    manifest: JsonObject = {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": _metadata(config_map.metadata),
+        "data": dict(config_map.data),
+    }
+    if config_map.immutable is not None:
+        manifest["immutable"] = config_map.immutable
+    return manifest
+
+
+def secret_manifest(secret: SecretResource) -> JsonObject:
+    """Serialize one Provider-owned Secret without converting values to text."""
+    manifest: JsonObject = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": _metadata(secret.metadata),
+        "type": secret.secret_type,
+        "data": {
+            key: base64.b64encode(value).decode("ascii")
+            for key, value in secret.data.items()
+        },
+    }
+    if secret.immutable is not None:
+        manifest["immutable"] = secret.immutable
+    return manifest
 
 
 def network_policy_manifest(network_policy: NetworkPolicyResource) -> JsonObject:
@@ -796,6 +1039,17 @@ def pod_resource(data: JsonObject) -> PodResource:
                 _toleration(cast(JsonObject, item))
                 for item in spec.get("tolerations", [])
             ),
+            dns_policy=cast(str | None, spec.get("dnsPolicy")),
+            dns_config=_pod_dns_config(cast(JsonObject | None, spec.get("dnsConfig"))),
+            host_aliases=tuple(
+                HostAlias(
+                    ip=str(item["ip"]),
+                    hostnames=tuple(
+                        str(hostname) for hostname in item.get("hostnames", [])
+                    ),
+                )
+                for item in spec.get("hostAliases", [])
+            ),
             containers=tuple(_container(item) for item in spec.get("containers", [])),
             volumes=tuple(_volume(item) for item in spec.get("volumes", [])),
         ),
@@ -834,7 +1088,9 @@ def _container(data: JsonObject) -> ContainerSpec:
     )
 
 
-def _volume(data: JsonObject) -> PersistentVolumeClaimVolume | EmptyDirVolume:
+def _volume(
+    data: JsonObject,
+) -> PersistentVolumeClaimVolume | EmptyDirVolume | ConfigMapVolume | SecretVolume:
     persistent_volume_claim = cast(
         JsonObject | None,
         data.get("persistentVolumeClaim"),
@@ -845,14 +1101,77 @@ def _volume(data: JsonObject) -> PersistentVolumeClaimVolume | EmptyDirVolume:
             claim_name=str(persistent_volume_claim["claimName"]),
         )
     empty_dir = cast(JsonObject | None, data.get("emptyDir"))
-    if empty_dir is None:
-        raise RuntimeError("unsupported Runtime Pod volume type")
-    return EmptyDirVolume(
-        name=str(data["name"]),
-        medium=cast(str | None, empty_dir.get("medium")),
-        size_limit=cast(
-            KubernetesResourceQuantity | None,
-            empty_dir.get("sizeLimit"),
+    if empty_dir is not None:
+        return EmptyDirVolume(
+            name=str(data["name"]),
+            medium=cast(str | None, empty_dir.get("medium")),
+            size_limit=cast(
+                KubernetesResourceQuantity | None,
+                empty_dir.get("sizeLimit"),
+            ),
+        )
+    config_map = cast(JsonObject | None, data.get("configMap"))
+    if config_map is not None:
+        return ConfigMapVolume(
+            name=str(data["name"]),
+            config_map_name=str(config_map["name"]),
+            items=_key_to_paths(config_map.get("items")),
+            default_mode=_optional_int(config_map.get("defaultMode"), "defaultMode"),
+        )
+    secret = cast(JsonObject | None, data.get("secret"))
+    if secret is not None:
+        return SecretVolume(
+            name=str(data["name"]),
+            secret_name=str(secret["secretName"]),
+            items=_key_to_paths(secret.get("items")),
+            default_mode=_optional_int(secret.get("defaultMode"), "defaultMode"),
+        )
+    raise RuntimeError("unsupported Runtime Pod volume type")
+
+
+def _key_to_paths(value: object) -> tuple[KeyToPath, ...]:
+    if not isinstance(value, list) or not value:
+        raise RuntimeError("selected ConfigMap and Secret volumes require items")
+    items: list[KeyToPath] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise RuntimeError("selected volume items must be objects")
+        key = item.get("key")
+        path = item.get("path")
+        if not isinstance(key, str) or not key:
+            raise RuntimeError("selected volume item key must be a non-empty string")
+        if not isinstance(path, str) or not path:
+            raise RuntimeError("selected volume item path must be a non-empty string")
+        items.append(
+            KeyToPath(
+                key=key,
+                path=path,
+                mode=_optional_int(item.get("mode"), "mode"),
+            )
+        )
+    return tuple(items)
+
+
+def _optional_int(value: object, field: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(f"Pod volume {field} must be an integer")
+    return value
+
+
+def _pod_dns_config(data: JsonObject | None) -> PodDnsConfig | None:
+    if data is None:
+        return None
+    return PodDnsConfig(
+        nameservers=tuple(str(item) for item in data.get("nameservers", [])),
+        searches=tuple(str(item) for item in data.get("searches", [])),
+        options=tuple(
+            PodDnsConfigOption(
+                name=str(item["name"]),
+                value=cast(str | None, item.get("value")),
+            )
+            for item in data.get("options", [])
         ),
     )
 
@@ -1008,6 +1327,85 @@ def _pvc_resource(data: JsonObject) -> PersistentVolumeClaimResource:
             storage_request=str(requests.get("storage") or ""),
         ),
     )
+
+
+def service_resource(data: JsonObject) -> ServiceResource:
+    """Parse one Provider-owned Service."""
+    spec = cast(JsonObject, data["spec"])
+    cluster_ip = spec.get("clusterIP")
+    if cluster_ip is not None and not isinstance(cluster_ip, str):
+        raise RuntimeError("Service clusterIP must be a string")
+    return ServiceResource(
+        metadata=_object_meta(data),
+        spec=ServiceSpec(
+            service_type=str(spec.get("type") or "ClusterIP"),
+            cluster_ip=cluster_ip,
+            selector={
+                str(key): str(value)
+                for key, value in cast(JsonObject, spec.get("selector") or {}).items()
+            },
+            ports=tuple(
+                ServicePort(
+                    name=cast(str | None, item.get("name")),
+                    protocol=str(item.get("protocol") or "TCP"),
+                    port=_required_int(item.get("port"), "Service port"),
+                    target_port=_service_target_port(item.get("targetPort")),
+                )
+                for item in spec.get("ports", [])
+            ),
+        ),
+    )
+
+
+def config_map_resource(data: JsonObject) -> ConfigMapResource:
+    """Parse one Provider-owned ConfigMap."""
+    return ConfigMapResource(
+        metadata=_object_meta(data),
+        data={
+            str(key): str(value)
+            for key, value in cast(JsonObject, data.get("data") or {}).items()
+        },
+        immutable=_optional_bool(data.get("immutable"), "ConfigMap immutable"),
+    )
+
+
+def secret_resource(data: JsonObject) -> SecretResource:
+    """Parse one Provider-owned Secret into opaque byte values."""
+    encoded = cast(JsonObject, data.get("data") or {})
+    decoded: dict[str, bytes] = {}
+    for key, value in encoded.items():
+        if not isinstance(value, str):
+            raise RuntimeError("Secret data values must be base64 strings")
+        try:
+            decoded[str(key)] = base64.b64decode(value, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise RuntimeError("Secret data contains invalid base64") from error
+    return SecretResource(
+        metadata=_object_meta(data),
+        data=decoded,
+        secret_type=str(data.get("type") or "Opaque"),
+        immutable=_optional_bool(data.get("immutable"), "Secret immutable"),
+    )
+
+
+def _required_int(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError(f"{field} must be an integer")
+    return value
+
+
+def _service_target_port(value: object) -> int | str:
+    if isinstance(value, bool) or not isinstance(value, int | str):
+        raise RuntimeError("Service targetPort must be an integer or named port")
+    return value
+
+
+def _optional_bool(value: object, field: str) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise RuntimeError(f"{field} must be a boolean")
+    return value
 
 
 def network_policy_resource(data: JsonObject) -> NetworkPolicyResource:

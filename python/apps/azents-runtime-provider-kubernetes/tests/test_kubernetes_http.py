@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
+    ConfigMapResource,
+    ConfigMapVolume,
     ContainerResourceClaim,
     ContainerResources,
     ContainerSecurityContext,
@@ -16,7 +18,9 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     EmptyDirVolume,
     EnvVar,
     ExecAction,
+    HostAlias,
     IpBlock,
+    KeyToPath,
     LabelSelector,
     LocalObjectReference,
     NetworkPolicyEgressRule,
@@ -25,21 +29,34 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     NetworkPolicyResource,
     NetworkPolicySpec,
     ObjectMeta,
+    PodDnsConfig,
+    PodDnsConfigOption,
     PodResource,
     PodSecurityContext,
     PodSpec,
     Probe,
     SeccompProfile,
+    SecretResource,
+    SecretVolume,
+    ServicePort,
+    ServiceResource,
+    ServiceSpec,
     VolumeMount,
 )
 from azents_runtime_provider_kubernetes.kubernetes_http import (
     POD_WATCH_TIMEOUT,
     KubernetesApiRequestError,
     KubernetesHttpApi,
+    config_map_manifest,
+    config_map_resource,
     network_policy_manifest,
     network_policy_resource,
     pod_manifest,
     pod_resource,
+    secret_manifest,
+    secret_resource,
+    service_manifest,
+    service_resource,
 )
 
 type JsonObject = dict[str, Any]
@@ -162,6 +179,9 @@ def test_pod_manifest_preserves_image_pull_secrets() -> None:
             security_context=pod.spec.security_context,
             node_selector=pod.spec.node_selector,
             tolerations=pod.spec.tolerations,
+            dns_policy=pod.spec.dns_policy,
+            dns_config=pod.spec.dns_config,
+            host_aliases=pod.spec.host_aliases,
             containers=pod.spec.containers,
             volumes=pod.spec.volumes,
         ),
@@ -311,6 +331,22 @@ def test_pod_policy_topology_round_trips() -> None:
             ),
             node_selector={},
             tolerations=(),
+            dns_policy="None",
+            dns_config=PodDnsConfig(
+                nameservers=("127.0.0.1",),
+                searches=(),
+                options=(
+                    PodDnsConfigOption(name="ndots", value="1"),
+                    PodDnsConfigOption(name="attempts", value="1"),
+                    PodDnsConfigOption(name="timeout", value="1"),
+                ),
+            ),
+            host_aliases=(
+                HostAlias(
+                    ip="10.96.0.10",
+                    hostnames=("runtime-control.azents.svc",),
+                ),
+            ),
             containers=(runner, engine),
             volumes=(
                 EmptyDirVolume(
@@ -322,6 +358,30 @@ def test_pod_policy_topology_round_trips() -> None:
                     name="container-engine-storage",
                     medium=None,
                     size_limit=8_589_934_592,
+                ),
+                ConfigMapVolume(
+                    name="proxy-policy",
+                    config_map_name="runtime-proxy-policy",
+                    items=(
+                        KeyToPath(
+                            key="policy.json",
+                            path="policy.json",
+                            mode=0o444,
+                        ),
+                    ),
+                    default_mode=0o444,
+                ),
+                SecretVolume(
+                    name="runtime-ca",
+                    secret_name="runtime-ca",
+                    items=(
+                        KeyToPath(
+                            key="ca.crt",
+                            path="ca.crt",
+                            mode=0o444,
+                        ),
+                    ),
+                    default_mode=0o444,
                 ),
             ),
         ),
@@ -335,6 +395,30 @@ def test_pod_policy_topology_round_trips() -> None:
     assert manifest["spec"]["volumes"][1] == {
         "name": "container-engine-storage",
         "emptyDir": {"sizeLimit": 8_589_934_592},
+    }
+    assert manifest["spec"]["dnsPolicy"] == "None"
+    assert manifest["spec"]["dnsConfig"] == {
+        "nameservers": ["127.0.0.1"],
+        "searches": [],
+        "options": [
+            {"name": "ndots", "value": "1"},
+            {"name": "attempts", "value": "1"},
+            {"name": "timeout", "value": "1"},
+        ],
+    }
+    assert manifest["spec"]["hostAliases"] == [
+        {
+            "ip": "10.96.0.10",
+            "hostnames": ["runtime-control.azents.svc"],
+        }
+    ]
+    assert manifest["spec"]["volumes"][3] == {
+        "name": "runtime-ca",
+        "secret": {
+            "secretName": "runtime-ca",
+            "items": [{"key": "ca.crt", "path": "ca.crt", "mode": 0o444}],
+            "defaultMode": 0o444,
+        },
     }
 
 
@@ -493,6 +577,121 @@ async def test_network_policy_replace_retries_one_conflict() -> None:
     assert second_replace["metadata"]["resourceVersion"] == "43"
 
 
+def test_core_resources_round_trip_without_secret_text_coercion() -> None:
+    metadata = ObjectMeta(
+        name="runtime-proxy",
+        namespace="azents-runtime",
+        labels={"azents/runtime-id": "runtime-1"},
+        annotations={"azents/policy-digest": "digest"},
+    )
+    service = ServiceResource(
+        metadata=metadata,
+        spec=ServiceSpec(
+            service_type="ClusterIP",
+            cluster_ip="10.96.0.20",
+            selector={"azents/resource-role": "proxy"},
+            ports=(
+                ServicePort(
+                    name="proxy",
+                    protocol="TCP",
+                    port=8080,
+                    target_port="proxy",
+                ),
+            ),
+        ),
+    )
+    config_map = ConfigMapResource(
+        metadata=metadata,
+        data={"policy.json": '{"schema_version":1}'},
+        immutable=True,
+    )
+    secret = SecretResource(
+        metadata=metadata,
+        data={"ca.crt": b"\x00public\n", "mitmproxy-ca.pem": b"private\n"},
+        secret_type="Opaque",
+        immutable=False,
+    )
+
+    assert service_resource(service_manifest(service)) == service
+    assert config_map_resource(config_map_manifest(config_map)) == config_map
+    assert secret_resource(secret_manifest(secret)) == secret
+    assert secret_manifest(secret)["data"] == {
+        "ca.crt": "AHB1YmxpYwo=",
+        "mitmproxy-ca.pem": "cHJpdmF0ZQo=",
+    }
+
+
+def test_secret_resource_rejects_invalid_base64() -> None:
+    manifest = secret_manifest(
+        SecretResource(
+            metadata=ObjectMeta(
+                name="runtime-ca",
+                namespace="azents-runtime",
+                labels={},
+                annotations={},
+            ),
+            data={"ca.crt": b"public"},
+            secret_type="Opaque",
+            immutable=None,
+        )
+    )
+    manifest["data"]["ca.crt"] = "***"
+
+    with pytest.raises(RuntimeError, match="invalid base64"):
+        secret_resource(manifest)
+
+
+@pytest.mark.asyncio
+async def test_core_resource_methods_use_exact_namespaced_paths() -> None:
+    metadata = ObjectMeta(
+        name="runtime-proxy",
+        namespace="azents-runtime",
+        labels={"azents/runtime-id": "runtime-1"},
+        annotations={},
+    )
+    service = ServiceResource(
+        metadata=metadata,
+        spec=ServiceSpec(
+            service_type="ClusterIP",
+            cluster_ip=None,
+            selector={"azents/resource-role": "proxy"},
+            ports=(
+                ServicePort(
+                    name="proxy",
+                    protocol="TCP",
+                    port=8080,
+                    target_port=8080,
+                ),
+            ),
+        ),
+    )
+    config_map = ConfigMapResource(
+        metadata=metadata,
+        data={"policy.json": "{}"},
+        immutable=None,
+    )
+    secret = SecretResource(
+        metadata=metadata,
+        data={"ca.crt": b"public"},
+        secret_type="Opaque",
+        immutable=None,
+    )
+    api = RecordingKubernetesHttpApi((None, {}, None, {}, None, {}))
+
+    await api.apply_service(service)
+    await api.apply_config_map(config_map)
+    await api.apply_secret(secret)
+
+    assert [(item.method, item.path) for item in api.requests] == [
+        ("GET", "/api/v1/namespaces/azents-runtime/services/runtime-proxy"),
+        ("POST", "/api/v1/namespaces/azents-runtime/services"),
+        ("GET", "/api/v1/namespaces/azents-runtime/configmaps/runtime-proxy"),
+        ("POST", "/api/v1/namespaces/azents-runtime/configmaps"),
+        ("GET", "/api/v1/namespaces/azents-runtime/secrets/runtime-proxy"),
+        ("POST", "/api/v1/namespaces/azents-runtime/secrets"),
+    ]
+
+
 def _network_policy() -> NetworkPolicyResource:
     return NetworkPolicyResource(
         metadata=ObjectMeta(
@@ -544,6 +743,9 @@ def _pod(resources: ContainerResources | None) -> PodResource:
             security_context=None,
             node_selector={},
             tolerations=(),
+            dns_policy=None,
+            dns_config=None,
+            host_aliases=(),
             containers=(
                 ContainerSpec(
                     name="runner",
