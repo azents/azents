@@ -419,6 +419,20 @@ class RuntimeRecreationReconciler:
         item: RuntimeRecreationOperationItem,
     ) -> tuple[bool, bool]:
         async with self.session_manager() as session:
+            operation = await self.profile_repository.get_recreation_operation(
+                session,
+                operation_id=item.operation_id,
+            )
+            target_version = (
+                await self.profile_repository.get_recreation_target_version(
+                    session,
+                    target_kind=operation.target_kind,
+                    target_id=operation.target_id,
+                    for_share=True,
+                )
+                if operation is not None
+                else None
+            )
             locked_item = await self.profile_repository.lock_recreation_item(
                 session,
                 item_id=item.id,
@@ -550,14 +564,6 @@ class RuntimeRecreationReconciler:
                     failure_code="runtime_capability_unavailable",
                     failure_message=("The Agent no longer permits Runtime recreation."),
                 )
-            target_version = (
-                await self.profile_repository.get_recreation_target_version(
-                    session,
-                    target_kind=operation.target_kind,
-                    target_id=operation.target_id,
-                    for_share=True,
-                )
-            )
             if target_version != operation.target_version:
                 return False, await self.profile_repository.finish_recreation_item(
                     session,

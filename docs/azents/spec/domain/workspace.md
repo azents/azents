@@ -97,8 +97,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-11
-spec_version: 64
+last_verified_at: 2026-08-12
+spec_version: 65
 ---
 
 # Workspace & Membership
@@ -323,6 +323,13 @@ sequence, digest, and generation evidence. PodSpec, PVC, and Docker changes rema
 Recreation snapshots target IDs and versions plus current configuration authority, uses bounded
 concurrency, reports progress and bounded failures, skips stale/superseded targets, and preserves
 Agent Workspace data. No Agent Apply action exists.
+
+System Administrators have a separate read-only Admin detail for one exact Workspace Runtime
+Profile. It resolves by Workspace handle and Profile ID, returns Workspace and Profile identity,
+policy, selected Provider and infrastructure Profile, lifecycle/version metadata, selected-Agent
+count, and running-Runtime count, and returns not found for a mismatched pair. This inspection path
+does not require Workspace membership and exposes no Workspace mutation; instance-wide System Admin
+authority and customer Workspace roles remain separate.
 
 ### Agent Workspace Projects
 
@@ -698,6 +705,7 @@ stateDiagram-v2
 | `workspaceuser_v1_transfer_workspace_ownership` | POST | `[ownership-transfer-workspace-match]`, `[owner-required]` |
 | `invitation_v1_list_workspace_invitations` (admin) | GET | — |
 | `invitation_v1_delete_invitation` | DELETE | — |
+| `runtime_provider_v1_get_workspace_profile_admin_detail` | GET `/runtime-provider/v1/workspaces/{handle}/runtime-profiles/{profile_id}` | System Admin read-only; Workspace membership not required |
 
 ## Glossary
 
@@ -716,6 +724,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-12 (spec_version=65)** — Added the System-Admin-only, membership-independent,
+  read-only Workspace Runtime Profile detail used to inspect infrastructure Profile deletion
+  blockers without granting customer Workspace mutation authority.
 - **2026-08-11 (spec_version=64)** — Added exact-version Owner-only Runtime Profile hard deletion,
   atomic Workspace default and Agent selection clearing with version advancement, no-fallback
   `profile_required` recovery, running/applied Runtime and Agent Workspace preservation, and

@@ -21,19 +21,19 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-11 | 24 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-12 | 25 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-11 | 91 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-06 | 10 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-11 | 64 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-12 | 65 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-11 | 154 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-11 | 59 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-11 | 24 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-12 | 60 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-12 | 25 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-03 | 33 |
@@ -307,6 +307,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Persist Requested and Resolved AgentRun Provenance Historical Requirements Reconstruction](requirements/provenance-260710-inference-provenance.md) | provenance-260710 | 2026-07-10 | - |
 | [Platform Runtime Provider Management Requirements](requirements/provider-260722-platform-runtime-provider-management.md) | provider-260722 | 2026-07-22 | - |
 | [Direct Provider Conversation Continuity Requirements](requirements/provider-260731-direct-conversation-continuity.md) | provider-260731 | 2026-07-31 | 2026-07-31 |
+| [Provider Infrastructure Profile Deletion Requirements](requirements/provider-260811-infrastructure-profile-deletion.md) | provider-260811 | 2026-08-11 | 2026-08-12 |
 | [Durable External Channel Conversation Provisioning Requirements](requirements/provisioning-260810-durable-external-channel-conversation.md) | provisioning-260810 | 2026-08-10 | 2026-08-10 |
 | [Use an Explicit Nested Inference Profile Request Historical Requirements Reconstruction](requirements/public-260710-public-inference-profile-request-contract.md) | public-260710 | 2026-07-10 | - |
 | [Pyright Configuration Review Historical Requirements Reconstruction](requirements/pyright-260310-pyright-config.md) | pyright-260310 | 2026-03-10 | 2026-03-10 |
@@ -694,6 +695,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Persist Requested and Resolved AgentRun Provenance](adr/provenance-260710-inference-provenance.md)
 - [Platform Runtime Provider Management](adr/provider-260722-platform-runtime-provider-management.md)
 - [Direct Provider Conversation Continuity](adr/provider-260731-direct-conversation-continuity.md)
+- [Provider Infrastructure Profile Deletion](adr/provider-260811-infrastructure-profile-deletion.md)
 - [Durable External Channel Conversation Provisioning Decisions](adr/provisioning-260810-durable-external-channel-conversation.md)
 - [Use an Explicit Nested Inference Profile Request](adr/public-260710-public-inference-profile-request-contract.md)
 - [Pyright Configuration Review Historical Decision Reconstruction](adr/pyright-260310-pyright-config.md)

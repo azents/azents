@@ -73,6 +73,25 @@ class TestWorkspaceRepository:
         # Then: None
         assert workspace is None
 
+    async def test_get_with_id_by_handle_returns_one_row_snapshot(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Workspace ID and projection come from the same handle lookup."""
+        repo = WorkspaceRepository()
+        create_result = await repo.create(
+            rdb_session,
+            WorkspaceCreate(name="Atomic handle", handle="atomic-handle"),
+        )
+        assert isinstance(create_result, Success)
+
+        snapshot = await repo.get_with_id_by_handle(rdb_session, "atomic-handle")
+
+        assert snapshot is not None
+        workspace_id, workspace = snapshot
+        assert workspace_id
+        assert workspace == create_result.value
+
     async def test_list_all(self, rdb_session: AsyncSession) -> None:
         """Fetch all Workspace list."""
         # Given: multiple Workspace create

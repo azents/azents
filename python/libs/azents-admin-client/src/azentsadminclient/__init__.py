@@ -40,6 +40,7 @@ __all__ = [
     "ApiKeyError",
     "ApiAttributeError",
     "ApiException",
+    "AdminWorkspaceRuntimeProfileDetailResponse",
     "ArchiveRetentionApplicationResponse",
     "ArchiveRetentionPreviewRequest",
     "ArchiveRetentionPreviewResponse",
@@ -84,6 +85,10 @@ __all__ = [
     "PlatformGitHubAppHealthResponse",
     "PlatformGitHubAppPatchRequest",
     "RuntimeInfrastructureProfileCreateRequest",
+    "RuntimeInfrastructureProfileDeleteRequest",
+    "RuntimeInfrastructureProfileDeleteResponse",
+    "RuntimeInfrastructureProfileDeletionImpactResponse",
+    "RuntimeInfrastructureProfileDeletionReferenceResponse",
     "RuntimeInfrastructureProfileListResponse",
     "RuntimeInfrastructureProfileReplaceRequest",
     "RuntimeInfrastructureProfileResponse",
@@ -157,6 +162,7 @@ __all__ = [
     "WorkspaceCreateRequest",
     "WorkspaceListResponse",
     "WorkspaceResponse",
+    "WorkspaceRuntimeProfilePolicyV1",
     "WorkspaceUpdateRequest",
     "WorkspaceUserCreateRequest",
     "WorkspaceUserListResponse",
@@ -192,6 +198,7 @@ from azentsadminclient.exceptions import ApiAttributeError as ApiAttributeError
 from azentsadminclient.exceptions import ApiException as ApiException
 
 # import models into sdk package
+from azentsadminclient.models.admin_workspace_runtime_profile_detail_response import AdminWorkspaceRuntimeProfileDetailResponse as AdminWorkspaceRuntimeProfileDetailResponse
 from azentsadminclient.models.archive_retention_application_response import ArchiveRetentionApplicationResponse as ArchiveRetentionApplicationResponse
 from azentsadminclient.models.archive_retention_preview_request import ArchiveRetentionPreviewRequest as ArchiveRetentionPreviewRequest
 from azentsadminclient.models.archive_retention_preview_response import ArchiveRetentionPreviewResponse as ArchiveRetentionPreviewResponse
@@ -236,6 +243,10 @@ from azentsadminclient.models.platform_git_hub_app_field_response import Platfor
 from azentsadminclient.models.platform_git_hub_app_health_response import PlatformGitHubAppHealthResponse as PlatformGitHubAppHealthResponse
 from azentsadminclient.models.platform_git_hub_app_patch_request import PlatformGitHubAppPatchRequest as PlatformGitHubAppPatchRequest
 from azentsadminclient.models.runtime_infrastructure_profile_create_request import RuntimeInfrastructureProfileCreateRequest as RuntimeInfrastructureProfileCreateRequest
+from azentsadminclient.models.runtime_infrastructure_profile_delete_request import RuntimeInfrastructureProfileDeleteRequest as RuntimeInfrastructureProfileDeleteRequest
+from azentsadminclient.models.runtime_infrastructure_profile_delete_response import RuntimeInfrastructureProfileDeleteResponse as RuntimeInfrastructureProfileDeleteResponse
+from azentsadminclient.models.runtime_infrastructure_profile_deletion_impact_response import RuntimeInfrastructureProfileDeletionImpactResponse as RuntimeInfrastructureProfileDeletionImpactResponse
+from azentsadminclient.models.runtime_infrastructure_profile_deletion_reference_response import RuntimeInfrastructureProfileDeletionReferenceResponse as RuntimeInfrastructureProfileDeletionReferenceResponse
 from azentsadminclient.models.runtime_infrastructure_profile_list_response import RuntimeInfrastructureProfileListResponse as RuntimeInfrastructureProfileListResponse
 from azentsadminclient.models.runtime_infrastructure_profile_replace_request import RuntimeInfrastructureProfileReplaceRequest as RuntimeInfrastructureProfileReplaceRequest
 from azentsadminclient.models.runtime_infrastructure_profile_response import RuntimeInfrastructureProfileResponse as RuntimeInfrastructureProfileResponse
@@ -309,6 +320,7 @@ from azentsadminclient.models.validation_error_loc_inner import ValidationErrorL
 from azentsadminclient.models.workspace_create_request import WorkspaceCreateRequest as WorkspaceCreateRequest
 from azentsadminclient.models.workspace_list_response import WorkspaceListResponse as WorkspaceListResponse
 from azentsadminclient.models.workspace_response import WorkspaceResponse as WorkspaceResponse
+from azentsadminclient.models.workspace_runtime_profile_policy_v1 import WorkspaceRuntimeProfilePolicyV1 as WorkspaceRuntimeProfilePolicyV1
 from azentsadminclient.models.workspace_update_request import WorkspaceUpdateRequest as WorkspaceUpdateRequest
 from azentsadminclient.models.workspace_user_create_request import WorkspaceUserCreateRequest as WorkspaceUserCreateRequest
 from azentsadminclient.models.workspace_user_list_response import WorkspaceUserListResponse as WorkspaceUserListResponse

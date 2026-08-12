@@ -550,12 +550,38 @@ async def test_recreation_skips_superseded_exact_dispatch() -> None:
 
 
 async def test_recreation_ignores_item_locked_by_peer_worker() -> None:
-    """A peer-held running item cannot be processed or redispatched."""
+    """A peer-held item cannot be processed after target authority is fenced."""
     reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item()
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
     profiles.list_recreation_items.return_value = [item]
     profiles.claim_recreation_items.return_value = []
+    profiles.lock_recreation_item.return_value = None
+    profiles.get_recreation_operation.return_value = _operation()
+
+    result = await reconciler.reconcile_once()
+
+    assert result.processed_items == 1
+    assert result.dispatched_items == 0
+    assert result.completed_items == 0
+    profiles.get_recreation_target_version.assert_awaited_once_with(
+        ANY,
+        target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
+        target_id="profile-1",
+        for_share=True,
+    )
+    runtimes.get_by_id.assert_not_awaited()
+
+
+async def test_recreation_does_not_dispatch_after_target_deletion() -> None:
+    """An absent target cannot authorize item processing or restart dispatch."""
+    reconciler, profiles, runtimes, _agents = _reconciler()
+    item = _item()
+    profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
+    profiles.list_recreation_items.return_value = [item]
+    profiles.claim_recreation_items.return_value = []
+    profiles.get_recreation_operation.return_value = _operation()
+    profiles.get_recreation_target_version.return_value = None
     profiles.lock_recreation_item.return_value = None
 
     result = await reconciler.reconcile_once()
@@ -563,8 +589,13 @@ async def test_recreation_ignores_item_locked_by_peer_worker() -> None:
     assert result.processed_items == 1
     assert result.dispatched_items == 0
     assert result.completed_items == 0
-    profiles.get_recreation_operation.assert_not_awaited()
-    runtimes.get_by_id.assert_not_awaited()
+    profiles.get_recreation_target_version.assert_awaited_once()
+    profiles.lock_recreation_item.assert_awaited_once_with(
+        ANY,
+        item_id="item-1",
+        expected_attempt=1,
+    )
+    runtimes.set_desired_state_if_configuration_current.assert_not_awaited()
 
 
 async def test_recreation_failure_becomes_terminal_at_maximum_attempts() -> None:

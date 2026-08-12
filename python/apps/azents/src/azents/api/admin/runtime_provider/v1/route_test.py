@@ -11,12 +11,14 @@ from pydantic import ValidationError
 from azents.api.admin import mount as mount_admin
 from azents.api.admin.runtime_provider.v1 import (
     create_provider_recreation,
+    delete_pod_profile,
     get_auth_binding,
     get_platform_recreation,
     mount,
     rotate_auth_binding,
 )
 from azents.api.admin.runtime_provider.v1.data import (
+    RuntimeInfrastructureProfileDeleteRequest,
     RuntimeProviderAuthenticationBindingResponse,
     RuntimeProviderAuthenticationBindingRotateRequest,
 )
@@ -33,10 +35,15 @@ from azents.core.runtime_profile import (
     RuntimeRecreationTargetKind,
 )
 from azents.repos.runtime_profile.data import (
+    RuntimeInfrastructureProfileDeletion,
     RuntimeRecreationOperation,
     RuntimeRecreationOperationItem,
 )
 from azents.repos.runtime_provider_binding.data import RuntimeProviderAuthBinding
+from azents.services.runtime_profile_admin.service import (
+    RuntimeProfileAdminService,
+    RuntimeProfileAdminUnavailable,
+)
 from azents.services.runtime_provider_binding_admin.service import (
     RuntimeProviderBindingAdminProjection,
     RuntimeProviderBindingAdminService,
@@ -154,6 +161,18 @@ def test_mounts_runtime_provider_inventory_and_authentication_routes() -> None:
     )
     assert (
         "/runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/"
+        "deletion-impact" in paths
+    )
+    assert (
+        "/runtime-provider/v1/providers/{provider_id}/container-profiles/"
+        "{profile_id}/deletion-impact" in paths
+    )
+    assert (
+        "/runtime-provider/v1/workspaces/{handle}/runtime-profiles/{profile_id}"
+        in paths
+    )
+    assert (
+        "/runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/"
         "recreation-operations" in paths
     )
     assert (
@@ -213,6 +232,97 @@ def test_admin_mount_protects_all_recreation_routes_with_system_admin() -> None:
             dependency.call is get_system_admin
             for dependency in route.dependant.dependencies
         )
+
+
+def test_admin_mount_protects_profile_delete_and_detail_routes() -> None:
+    """Profile deletion impact, mutation, and detail inherit System Admin auth."""
+    app = FastAPI()
+    mount_admin(as_route_mounter(app))
+    protected_routes = [
+        route
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        and (
+            route.path.endswith("/deletion-impact")
+            or (
+                route.path.endswith("/{profile_id}")
+                and "profiles" in route.path
+                and "DELETE" in route.methods
+            )
+            or "/workspaces/{handle}/runtime-profiles/{profile_id}" in route.path
+        )
+    ]
+
+    assert len(protected_routes) == 5
+    for route in protected_routes:
+        assert any(
+            dependency.call is get_system_admin
+            for dependency in route.dependant.dependencies
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_profile_forwards_exact_version_and_actor() -> None:
+    """Pod Profile deletion forwards exact identity, version, kind, and actor."""
+    service = create_autospec(RuntimeProfileAdminService, instance=True)
+    service.delete_profile = AsyncMock(
+        return_value=RuntimeInfrastructureProfileDeletion(
+            profile_id="profile-1",
+            superseded_recreation_operation_count=1,
+            skipped_recreation_item_count=2,
+        )
+    )
+
+    response = await delete_pod_profile(
+        system_admin=_system_admin(),
+        service=service,
+        request_body=RuntimeInfrastructureProfileDeleteRequest(
+            expected_version=4,
+        ),
+        provider_id="provider-1",
+        profile_id="profile-1",
+    )
+
+    assert response.profile_id == "profile-1"
+    assert response.superseded_recreation_operation_count == 1
+    assert response.skipped_recreation_item_count == 2
+    service.delete_profile.assert_awaited_once_with(
+        "provider-1",
+        "profile-1",
+        profile_kind="kubernetes_pod",
+        expected_version=4,
+        actor_user_id="admin-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_profile_maps_current_reference_conflict() -> None:
+    """Current references return a bounded conflict with the authoritative count."""
+    service = create_autospec(RuntimeProfileAdminService, instance=True)
+    service.delete_profile = AsyncMock(
+        side_effect=RuntimeProfileAdminUnavailable(
+            code="profile_referenced",
+            message="Runtime infrastructure Profile is referenced.",
+            blocking_reference_count=3,
+        )
+    )
+
+    with pytest.raises(HTTPException) as captured:
+        await delete_pod_profile(
+            system_admin=_system_admin(),
+            service=service,
+            request_body=RuntimeInfrastructureProfileDeleteRequest(
+                expected_version=4,
+            ),
+            provider_id="provider-1",
+            profile_id="profile-1",
+        )
+
+    assert captured.value.status_code == 409
+    assert captured.value.detail == {
+        "code": "profile_referenced",
+        "blocking_reference_count": 3,
+    }
 
 
 @pytest.mark.asyncio

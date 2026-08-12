@@ -5,8 +5,13 @@ import {
   runtimeProviderV1CreatePodProfile,
   runtimeProviderV1CreatePodProfileRecreation,
   runtimeProviderV1CreateProviderRecreation,
+  runtimeProviderV1DeleteContainerProfile,
+  runtimeProviderV1DeletePodProfile,
+  runtimeProviderV1GetContainerProfileDeletionImpact,
   runtimeProviderV1GetPlatformRecreation,
+  runtimeProviderV1GetPodProfileDeletionImpact,
   runtimeProviderV1GetRuntimeProvider,
+  runtimeProviderV1GetWorkspaceProfileAdminDetail,
   runtimeProviderV1ListAuthBindingAuditEvents,
   runtimeProviderV1ListAuthBindings,
   runtimeProviderV1ListContainerProfiles,
@@ -71,6 +76,97 @@ export const runtimeProviderRouter = router({
           input.profileKind === "kubernetes_pod"
             ? await runtimeProviderV1ListPodProfiles(request)
             : await runtimeProviderV1ListContainerProfiles(request);
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, { 404: "NOT_FOUND" });
+      }
+    }),
+
+  getInfrastructureProfileDeletionImpact: protectedProcedure
+    .input(
+      z.object({
+        providerId: z.string().min(1),
+        profileId: z.string().min(1),
+        profileKind: profileKindSchema,
+        offset: z.number().int().nonnegative().default(0),
+        limit: z.number().int().positive().max(100).default(50),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const request = {
+          client: ctx.adminApiClient,
+          path: {
+            provider_id: input.providerId,
+            profile_id: input.profileId,
+          },
+          query: { offset: input.offset, limit: input.limit },
+          throwOnError: true,
+        } as const;
+        const { data } =
+          input.profileKind === "kubernetes_pod"
+            ? await runtimeProviderV1GetPodProfileDeletionImpact(request)
+            : await runtimeProviderV1GetContainerProfileDeletionImpact(request);
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, {
+          404: "NOT_FOUND",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  deleteInfrastructureProfile: protectedProcedure
+    .input(
+      z.object({
+        providerId: z.string().min(1),
+        profileId: z.string().min(1),
+        profileKind: profileKindSchema,
+        expectedVersion: z.number().int().positive(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const request = {
+          client: ctx.adminApiClient,
+          path: {
+            provider_id: input.providerId,
+            profile_id: input.profileId,
+          },
+          body: { expected_version: input.expectedVersion },
+          throwOnError: true,
+        } as const;
+        const { data } =
+          input.profileKind === "kubernetes_pod"
+            ? await runtimeProviderV1DeletePodProfile(request)
+            : await runtimeProviderV1DeleteContainerProfile(request);
+        return data;
+      } catch (error) {
+        throw mapExpectedError(error, {
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+          422: "BAD_REQUEST",
+        });
+      }
+    }),
+
+  getWorkspaceProfileAdminDetail: protectedProcedure
+    .input(
+      z.object({
+        workspaceHandle: z.string().min(1),
+        profileId: z.string().min(1),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await runtimeProviderV1GetWorkspaceProfileAdminDetail({
+          client: ctx.adminApiClient,
+          path: {
+            handle: input.workspaceHandle,
+            profile_id: input.profileId,
+          },
+          throwOnError: true,
+        });
         return data;
       } catch (error) {
         throw mapExpectedError(error, { 404: "NOT_FOUND" });
