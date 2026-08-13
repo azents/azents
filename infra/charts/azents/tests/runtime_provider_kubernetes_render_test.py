@@ -46,6 +46,13 @@ def _helm_template(*values: str) -> str:
     return completed.stdout
 
 
+def _normalized_helm_error(error: subprocess.CalledProcessError) -> str:
+    """Normalize Helm field-path formatting across supported Helm versions."""
+    return "".join(
+        character for character in error.stderr.lower() if character.isalnum()
+    )
+
+
 def test_runtime_provider_kubernetes_default_off_render_contract() -> None:
     """Default values render an authoritative empty Provider source."""
     rendered = _helm_template()
@@ -444,7 +451,9 @@ def test_proxy_required_attestation_requires_immutable_artifacts() -> None:
             "runtimeProviderKubernetes.strictNetwork.attestations.proxyRequired=true",
         )
 
-    assert "strictnetwork.proxy" in raised.value.stderr.lower()
+    normalized_error = _normalized_helm_error(raised.value)
+    assert "strictnetworkproxyimagedigest" in normalized_error
+    assert "strictnetworkproxyaddondigest" in normalized_error
 
 
 @pytest.mark.parametrize(
