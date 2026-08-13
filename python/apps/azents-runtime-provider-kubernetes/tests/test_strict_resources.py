@@ -15,6 +15,7 @@ from azents_runtime_provider_kubernetes.interception_ca import (
     generate_runtime_ca,
 )
 from azents_runtime_provider_kubernetes.kubernetes_api import (
+    EmptyDirVolume,
     LocalObjectReference,
     SecretVolume,
 )
@@ -26,10 +27,13 @@ from azents_runtime_provider_kubernetes.owned_resources import (
 )
 from azents_runtime_provider_kubernetes.strict_resources import (
     RUNNER_PROXY_INPUT_ENV,
+    RUNTIME_TRUST_MOUNT_PATH,
+    RUNTIME_TRUST_VOLUME,
     ProxyResourceInputs,
     build_proxy_resources,
     runtime_ca_volume,
     runtime_proxy_environment,
+    runtime_trust_volume,
 )
 
 
@@ -66,7 +70,7 @@ def test_proxy_resources_preserve_stable_service_and_exact_evidence() -> None:
     )
     assert container.readiness_probe is not None
     assert tuple(container.readiness_probe.exec_action.command) == (
-        "python",
+        "/workspace/python/apps/azents-runtime-proxy/.venv/bin/python",
         "-m",
         "azents_runtime_proxy.main",
         "ready",
@@ -94,6 +98,16 @@ def test_runtime_proxy_environment_uses_provider_only_runner_input() -> None:
     assert runtime_proxy_environment(hostname, 8080) == {
         RUNNER_PROXY_INPUT_ENV: f"http://{hostname}:8080"
     }
+
+
+def test_runtime_trust_volume_is_bounded_memory_backed_workspace() -> None:
+    volume = runtime_trust_volume()
+
+    assert isinstance(volume, EmptyDirVolume)
+    assert volume.name == RUNTIME_TRUST_VOLUME
+    assert volume.medium == "Memory"
+    assert volume.size_limit == "16Mi"
+    assert RUNTIME_TRUST_MOUNT_PATH == "/var/run/azents-runtime"
 
 
 def _inputs() -> ProxyResourceInputs:

@@ -147,9 +147,10 @@ resources and RBAC, mandatory Services, workload Namespace/default-deny ownershi
 discoverable CNI identity, unexpected selecting NetworkPolicies, and proxy artifact
 immutability. Findings are structured warnings on the active Provider connection.
 They do not change capability advertisement, Runtime desired/applied state, or
-Provider readiness, and they are not evidence that packet enforcement works.
-Qualified packet-level validation in an enforcing-CNI environment remains required
-before treating a strict deployment as proven.
+Provider readiness. Deterministic Helm render and Provider tests validate the
+configuration, resource, RBAC, manifest, and warning contracts; the operator
+attestation remains responsible for asserting that the deployment supplies the
+required enforcing substrate.
 
 ## External Service And Credential Modes
 

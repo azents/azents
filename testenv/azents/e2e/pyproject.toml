@@ -18,6 +18,7 @@ dependencies = [
     "az-common",
     "azents-admin-client",
     "azents-public-client",
+    "azents-runtime-control",
     # type stubs
     "types-requests==2.33.0.20260327",
     "types-docker==7.1.0.20260109",
@@ -38,6 +39,7 @@ resolution = "lowest-direct"
 az-common = { path = "../../../python/libs/az-common", editable = true }
 azents-admin-client = { path = "../../../python/libs/azents-admin-client", editable = true }
 azents-public-client = { path = "../../../python/libs/azents-public-client", editable = true }
+azents-runtime-control = { path = "../../../python/libs/azents-runtime-control", editable = true }
 
 [tool.ruff]
 target-version = "py314"

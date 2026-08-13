@@ -1,7 +1,8 @@
 ---
 title: "Hierarchical Runtime Network Restriction Requirements"
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-13
+implemented: 2026-08-13
 tags: [runtime, network, security, provider, workspace]
 document_role: primary
 document_type: requirements

@@ -70,6 +70,8 @@ _PROXY_COMBINED_CA_PATH = "/var/run/secrets/azents/runtime-proxy/mitmproxy-ca.pe
 _PROXY_RUN_PATH = "/var/run/azents-proxy"
 RUNTIME_CA_VOLUME = "runtime-network-ca"
 RUNTIME_CA_MOUNT_PATH = "/var/run/secrets/azents/runtime-network"
+RUNTIME_TRUST_VOLUME = "runtime-trust"
+RUNTIME_TRUST_MOUNT_PATH = "/var/run/azents-runtime"
 RUNNER_PROXY_INPUT_ENV = "AZ_RUNTIME_RUNNER_HTTP_PROXY"
 
 
@@ -229,6 +231,15 @@ def runtime_ca_volume(secret_name: str) -> SecretVolume:
     )
 
 
+def runtime_trust_volume() -> EmptyDirVolume:
+    """Return the bounded writable Runner trust workspace."""
+    return EmptyDirVolume(
+        name=RUNTIME_TRUST_VOLUME,
+        medium="Memory",
+        size_limit="16Mi",
+    )
+
+
 def runtime_proxy_url(hostname: str, port: int) -> str:
     """Return the canonical child-process HTTP proxy URL."""
     if not _canonical_hostname(hostname) or not 1 <= port <= 65_535:
@@ -317,7 +328,10 @@ def _proxy_pod(
                     readiness_probe=Probe(
                         exec_action=ExecAction(
                             command=(
-                                "python",
+                                (
+                                    "/workspace/python/apps/"
+                                    "azents-runtime-proxy/.venv/bin/python"
+                                ),
                                 "-m",
                                 "azents_runtime_proxy.main",
                                 "ready",

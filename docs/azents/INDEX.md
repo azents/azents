@@ -21,19 +21,19 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-12 | 25 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-13 | 26 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-12 | 92 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-06 | 10 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-12 | 66 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-13 | 67 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-12 | 155 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-12 | 60 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-12 | 25 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-13 | 61 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-13 | 26 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-03 | 33 |
@@ -48,7 +48,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-12 | 27 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-11 | 27 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-13 | 28 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-01 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-01 | 6 |
 
@@ -263,7 +263,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Multi-Worktree Registration Historical Requirements Reconstruction](requirements/multi-260704-multi-worktree-registration.md) | multi-260704 | 2026-07-04 | 2026-07-04 |
 | [Agent-Centric Navigation Redesign Discussion Historical Requirements Reconstruction](requirements/nav-260420-nav.md) | nav-260420 | 2026-04-20 | 2026-04-21 |
 | [Agent-Focused Navigation Information Architecture Historical Requirements Reconstruction](requirements/navigation-260626-navigation-ia.md) | navigation-260626 | 2026-06-26 | - |
-| [Hierarchical Runtime Network Restriction Requirements](requirements/network-260812-hierarchical-runtime-network-restriction.md) | network-260812 | 2026-08-12 | - |
+| [Hierarchical Runtime Network Restriction Requirements](requirements/network-260812-hierarchical-runtime-network-restriction.md) | network-260812 | 2026-08-12 | 2026-08-13 |
 | [New Session Project Selection Historical Requirements Reconstruction](requirements/new-260629-new-selection.md) | new-260629 | 2026-06-29 | - |
 | [New Session Mixed Workspace Selection Historical Requirements Reconstruction](requirements/new-260705-new-mixed-selection.md) | new-260705 | 2026-07-05 | - |
 | [nointern-web System Historical Requirements Reconstruction](requirements/nointern-260216-nointern-web.md) | nointern-260216 | 2026-02-16 | 2026-02-16 |

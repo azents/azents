@@ -1,7 +1,8 @@
 ---
 title: "Hierarchical Runtime Network Restriction Design"
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-08-13
+implemented: 2026-08-13
 tags: [runtime, network, security, provider, workspace, kubernetes, frontend, testenv]
 document_role: primary
 document_type: design
@@ -636,28 +637,24 @@ checks must not be presented as data-plane proof.
 
 ### E2E primary verification matrix
 
-A focused Kubernetes strict-network journey uses a qualified disposable or dedicated
-test cluster with an enforcing NetworkPolicy CNI, the real Kubernetes Provider v3,
-Runtime Runner, proxy image, Runtime Control, and product APIs.
+The focused E2E journey is deterministic and control-plane-only. It creates product
+state through Admin/Public APIs and uses the real Runtime Control protocol with a
+bounded fake Kubernetes Provider participant. It does not start a Kubernetes cluster,
+create Kubernetes resources, execute packet probes, or claim data-plane enforcement.
 
 | Scenario | Positive evidence | Negative evidence |
 | --- | --- | --- |
-| Legacy direct | Existing CIDR-allowed HTTP/DNS behavior is retained | Inherited denied CIDR remains blocked |
-| v3 direct narrowing | Workspace CIDR subset is reachable | Expansion is rejected before desired configuration |
-| Proxy unrestricted | HTTP, HTTPS, and WebSocket succeed through proxy | Unset proxy env, direct IP, raw TCP, UDP, QUIC, DoH/DoT, and SSH fail |
-| Proxy allowlist | Exact and wildcard allowed hosts succeed | Apex mismatch, denied host, outside wildcard, redirect escape, SNI/Host mismatch, and denied CIDR fail |
-| HTTPS inspection | Standard Runtime trust succeeds | Certificate-pinned or custom-untrusted client fails without passthrough |
-| No external network | Runtime Control/transfer and ordinary Runner operations remain ready | Internet, private, DNS, proxy, cross-Runtime, TCP, and UDP attempts fail |
-| Tightening transition | New narrower configuration becomes applied | No observation window restores the old direct path |
-| Proxy policy replacement | Same Service/CA identity and new policy become ready | During replacement there is failure, never direct fallback or stale applied evidence |
-| Stop/restart/reset/delete | PVC and CA/Service preservation follow the lifecycle matrix | Terminal delete leaves no owned resource; unrelated resources remain |
-| Drift and recovery | Narrow drift is repaired through fenced update | Stale generation, broadened policy, CA mismatch, or hosts mismatch cannot report applied |
+| Legacy compatibility | Profile v1/v2 and Policy v1 remain readable with direct semantics | Strict fields are rejected from legacy contracts |
+| v3 direct narrowing | API-created Workspace policy resolves to the inherited CIDR subset | Expansion is rejected before desired configuration |
+| Proxy hierarchy | Unrestricted and allowlisted parent authority can be narrowed through Policy v2 | Denials cannot be removed and allowlists cannot be broadened |
+| No-network hierarchy | A stricter Workspace override resolves to `no_network` | A Workspace cannot restore proxy or direct authority |
+| Capability compatibility | An attested Kubernetes Provider accepts the supported strict contract | Docker or missing-capability Providers remain incompatible |
+| Desired/applied projection | Current aggregate `network_enforcement` and Runner evidence promote the exact desired state | Stale, drifted, incomplete, or wrong-generation evidence cannot promote applied state |
+| Tightening transition | Restrictive changes converge through the approved in-place or recreation classification | No API or protocol path reports a weaker fallback |
 
-Product state is created through Admin/Public APIs. Runtime probes execute through
-ordinary Runner operations rather than direct Kubernetes exec. Evidence records
-configuration sequence, desired generation, mode, bounded probe outcome, and owned
-resource-role counts; it excludes credentials, headers, bodies, CA PEM, and private
-keys.
+This E2E evidence proves API composition, compatibility, dispatch, fencing, and bounded
+status projection only. Kubernetes resource construction and lifecycle behavior are
+verified independently by Provider unit, manifest, protocol, and lifecycle tests.
 
 ### Deterministic coverage
 
@@ -685,34 +682,25 @@ Always-on tests cover:
 - OpenAPI/client regeneration, API projection tests, localized UI forms/status copy,
   and story/component tests.
 
-A deterministic E2E lane may use a bounded fake Kubernetes API to verify the complete
-Admin/Profile/desired/applied/UI journey without claiming packet enforcement. It
-must label its evidence as control-plane behavior only.
+A deterministic E2E lane may use a bounded fake Provider protocol participant to
+verify the Admin/Profile/desired/applied journey without claiming Kubernetes resource
+creation or packet enforcement. It must label its evidence as control-plane behavior
+only.
 
 ### Testenv prerequisites and CI policy
 
-Testenv adds a safe Kubernetes strict-network prerequisite contract with CNI kind,
-NetworkPolicy availability, workload namespace, mandatory Service readiness, proxy
-image availability, IPv4/IPv6 scope, and credential-presence metadata. It stores no
-tokens, kubeconfig content, CA private material, or endpoint credentials.
+Strict-network validation adds no Kubernetes prerequisite snapshot, live-cluster
+workflow, packet-probe lane, or qualification artifact. Always-on CI runs deterministic
+contract, Provider, proxy, Runner, Helm render, generated-client, and control-plane E2E
+coverage without Kubernetes credentials or resource creation.
 
-Always-on CI runs deterministic unit, contract, Helm render, generated-client, and
-control-plane E2E coverage without external credentials. The qualified packet-level
-Kubernetes lane runs through the existing live label, manual dispatch, and scheduled
-policy. For a maintainer-requested release/merge qualification, missing prerequisites
-fail. Optional nightly execution may report prerequisite-not-ready as a structured
-skip. Once a Provider advertises a strict capability in the qualified lane, inability
-to prove denial, inspection, lifecycle fencing, or storage preservation is a test
-failure, not a skip.
-
-Warning-only deployment validation is never accepted as enforcement evidence. Final
-delivery evidence requires at least one successful qualified live run for both
-enabled strict modes and the complete negative matrix supported by that cluster's IP
-families.
+Warning-only deployment validation and test results are never capability authority.
+Operator attestations remain the only capability-enablement input, while desired/applied
+Runtime evidence remains the product truth for one concrete Runtime.
 
 ## Design Authority
 
-- Design revision: `1`
+- Design revision: `2`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -725,12 +713,12 @@ families.
 | M7 | Keep Pod, PVC, policy, proxy, Service, ConfigMap, and Secret ownership in the Kubernetes Provider | `network-260812/REQ-8`, `REQ-9`, `REQ-10`; `network-260812/ADR-D6` | `decided` |
 | M8 | Advertise strict capabilities only through independent operator attestations and store validation warnings as connection-generation-scoped operational diagnostics | `network-260812/REQ-9`, `REQ-11`; `network-260812/ADR-D7` | `decided` |
 | M9 | Preserve existing desired/applied sequence, digest, generation, Provider, and Runner evidence as product truth | `network-260812/REQ-10`; current Runtime Provider and persistence Specs | `existing` |
-| M10 | Replace Kubernetes v2 `network_policy` observation with one protocol-v3 aggregate `network_enforcement` observation and retain Control-fenced repair | M3, M7, M9; current Runtime Provider Spec requires a coordinated protocol revision for a new kind | `derived` |
+| M10 | Add one protocol-v3 aggregate `network_enforcement` observation for v3 strict contracts, retain protocol-v2 `network_policy` for legacy direct contracts, and keep Control-fenced repair | M3, M7, M9; current Runtime Provider Spec requires a coordinated protocol revision for a new kind | `derived` |
 | M11 | Apply CIDR changes in place, replace proxy-only resources for policy/artifact changes, recreate Runtime for mode/trust/hosts changes, and narrow first | `network-260812/REQ-8`, `REQ-10`; `network-260812/ADR-D8` | `decided` |
 | M12 | Preserve Workspace PVC except at existing reset and terminal-delete boundaries | `network-260812/REQ-8`; current Agent Runtime Persistence Spec; `network-260812/ADR-D8` | `existing` |
 | M13 | Project effective mode, limitations, compatibility, warnings, and bounded failures through Admin/Public APIs and web surfaces | `network-260812/REQ-9`, `REQ-11`; `network-260812/ADR-D7` | `required` |
 | M14 | Emit redacted proxy diagnostics only through ordinary Pod logs | `network-260812/REQ-12`; `network-260812/ADR-D3`, `ADR-D6` | `decided` |
-| M15 | Require deterministic control-plane coverage plus qualified live negative packet-enforcement evidence without making tests capability authority | `network-260812/REQ-9`, `REQ-10`; `network-260812/ADR-D7` | `derived` |
+| M15 | Require deterministic API/control-plane E2E plus Kubernetes Provider/proxy unit, manifest, protocol, and lifecycle coverage without making tests capability authority | `network-260812/REQ-9`, `REQ-10`; `network-260812/ADR-D7` | `derived` |
 
 ## Removal and Replacement
 
@@ -738,17 +726,17 @@ families.
 | --- | --- | --- | --- | --- |
 | Kubernetes v1/v2 `network_policy` as the only new-configuration network shape | M1 | v3 `network_access`; legacy documents remain readable | Core contracts, resolver, APIs, generated clients, Provider parser | Schema and compatibility tests retain v1/v2 and require v3 for new strict contracts |
 | Workspace Policy v1 as the only editable policy | M1 | Policy v2 for hierarchy; v1 remains direct-only | Public API, web form, generated clients | API/OpenAPI and UI tests cover both versions |
-| Runtime DNS rule in strict modes | M6 | Strict DNS config plus mandatory `hostAliases` | Kubernetes Pod and Runtime NetworkPolicy builders | Manifest tests and live DNS-negative probes |
-| Direct customer CIDR egress in proxy/no-network modes | M3 | Proxy-only or Platform-only complete Runtime policy | Runtime NetworkPolicy builder and comparison | Manifest equality and live direct-IP/raw-socket denial |
-| Narrow `network_policy` reconciliation kind and Kubernetes Provider protocol v2 admission | M10 | Protocol v3 aggregate `network_enforcement` evidence | Runtime-control library/protobuf, Provider, Control admission/reconciler | v2 rejection, v3 contract tests, no active actionable old kind |
+| Runtime DNS rule in strict modes | M6 | Strict DNS config plus mandatory `hostAliases` | Kubernetes Pod and Runtime NetworkPolicy builders | Exact manifest and comparison tests |
+| Direct customer CIDR egress in proxy/no-network modes | M3 | Proxy-only or Platform-only complete Runtime policy | Runtime NetworkPolicy builder and comparison | Exact manifest equality and negative-rule assertions |
+| `network_policy` as the only Kubernetes reconciliation contract | M10 | Protocol v3 aggregate `network_enforcement` for v3 strict contracts; protocol v2 `network_policy` remains legacy direct-only | Runtime-control library/protobuf, Provider, Control admission/reconciler | v2 compatibility tests, v3 aggregate contract tests, and no v2 strict-contract fallback |
 | NetworkPolicy-only `UPDATE_CONFIGURATION` implementation | M11 | Mode-aware bounded enforcement-bundle update | Kubernetes Provider lifecycle | Impact and lifecycle tests prove proxy-only updates and recreation rejection |
 | Kubernetes API boundary limited to Pod/PVC/NetworkPolicy | M7 | Typed Service/ConfigMap/Secret/hosts/DNS support | Provider API models and HTTP adapter | Model/manifest/HTTP tests and exact method grep |
 | Provider RBAC limited to workload Pod/PVC/NetworkPolicy | M6, M7 | Narrow workload-resource permissions plus resource-name-scoped mandatory Platform Service reads | Helm RBAC | Render tests for exact namespaces, resource names, resources, and verbs |
-| Runner without interception trust bootstrap | M5 | Public-CA validation and inherited child-process bundle | Runner startup and Provider Pod inputs | Runner tests, mount-key checks, proxy HTTPS E2E |
+| Runner without interception trust bootstrap | M5 | Public-CA validation and inherited child-process bundle | Runner startup and Provider Pod inputs | Runner tests, mount-key checks, and proxy trust/authority unit tests |
 | CIDR-only Admin and Workspace Profile editors | M13 | Mode-aware CIDR/domain forms and explanations | Admin Web, Main Web, localization, stories | Component tests and Web Surface E2E |
 | Runtime status without effective network mode | M13 | Bounded desired/applied network projection | Public API and Workspace Runtime panel | API and UI tests; no Kubernetes/private material fields |
 | Provider connection projection without safe warning diagnostics | M8, M13 | Active-connection-generation diagnostic snapshot and disconnected-unavailable projection | Provider protocol, connection persistence, Admin API/UI | Migration, generation-fence, redaction, disconnect, and Admin projection tests |
-| Strict-mode packet-enforcement evidence absence | M15 | Qualified Kubernetes live E2E matrix | testenv prerequisite and CI live lane | Required qualification artifact before delivery |
+| Strict-mode validation limited to API composition | M15 | Provider/proxy manifest, protocol, lifecycle, and authority tests alongside control-plane E2E | Provider/proxy packages and deterministic E2E | Focused unit suites plus API-created desired/applied journey; no packet claim |
 | Existing MCP egress proxy | None | Retained independent server-side SSRF control | No change | Existing resource and tests remain |
 | Workspace PVC lifecycle | None | Retained existing reset/terminal-delete authority | No change except proxy-resource coordination | Persistence regression tests |
 
@@ -758,9 +746,9 @@ families.
   models stored in JSONB with scalar schema versions. Adding discriminated versions
   does not require PostgreSQL DDL. The resolver already composes Workspace
   restrictions and computes canonical desired documents.
-- **M4 — feasible with conformance risk.** A new dedicated proxy image/addon is
+- **M4 — feasible with compatibility risk.** A new dedicated proxy image/addon is
   repository-local work. mitmproxy addon API and WebSocket behavior require pinned
-  version conformance tests, but no architectural blocker was found.
+  protocol and forwarding tests, but no architectural blocker was found.
 - **M5 — feasible.** The Provider currently lacks a crypto dependency, while the
   repository already uses `cryptography`. Adding it to the isolated Provider package
   preserves the external Provider boundary. Kubernetes Secret item selection can
@@ -776,22 +764,22 @@ families.
   nullable connection-observation fields plus a bounded Provider v3 diagnostics
   message support current/last-known Admin projection without changing the
   capability contract or creating qualification authority.
-- **M9-M11 — feasible with a coordinated protocol cutover.** Runtime Control already
+- **M9-M11 — feasible with a coordinated strict-contract protocol addition.** Runtime Control already
   fences desired/applied promotion and one-shot repair by Runtime, Provider
-  generation, desired generation, sequence, and digest. The current protocol admits
-  only Kubernetes v2 and one `network_policy` kind, so Provider, shared library,
-  protobuf, Control admission, tests, and Specs must move atomically to v3.
+  generation, desired generation, sequence, and digest. The prior strict-contract
+  shape had only Kubernetes v2 and one `network_policy` kind. Provider, shared
+  library, protobuf, Control admission, tests, and Specs add the coordinated v3
+  aggregate contract while retaining v2 for legacy direct operation.
 - **M12 — feasible.** Current Provider lifecycle already separates PVC deletion from
   stop/restart/recreation. Proxy resources can follow their own retention matrix.
 - **M13-M14 — feasible.** Existing API and UI surfaces already carry Profile,
   compatibility, desired/applied, Provider, and connection projections. They require
   bounded fields, the M8 connection diagnostics expansion, and generated-client
   updates rather than a new network-policy source of truth.
-- **M15 — conditional but not blocked.** Deterministic control-plane coverage is
-  available in repository CI. Packet-level proof requires a qualified enforcing-CNI
-  cluster and proxy test destinations. The prerequisite and live-lane policy can
-  represent missing infrastructure honestly; final delivery still requires a
-  successful live evidence artifact.
+- **M15 — feasible.** Deterministic API/control-plane coverage runs in repository CI.
+  Kubernetes resource semantics, ownership, comparison, replacement, cleanup, trust,
+  authority, and selected-IP forwarding are covered by focused Provider/proxy unit,
+  manifest, protocol, and lifecycle tests without requiring a live cluster.
 
 No authority or implementation blocker remains. The main non-blocking risks are
 mitmproxy addon compatibility, NetworkPolicy behavior differences across CNIs,
@@ -799,13 +787,13 @@ Service-IP handling differences around kube-proxy/eBPF, IPv6 coverage, CA expiry
 operations before a rotation surface exists, and applications that ignore standard
 proxy or trust variables. The Design addresses these through pinned artifacts,
 operator attestation, warning-only diagnostics, fail-closed per-Runtime evidence,
-qualified live tests, and explicit compatibility copy rather than fallback.
+deterministic focused tests, and explicit compatibility copy rather than fallback.
 
 ## Design Approval
 
 - Mode: `Collaborative`
 - Decision owner: requester
 - Approved on: 2026-08-12
-- Approved Design revision: `1`
+- Approved Design revision: `2`
 - Approved authority IDs: `M1`, `M2`, `M3`, `M4`, `M5`, `M6`, `M7`, `M8`, `M9`, `M10`, `M11`, `M12`, `M13`, `M14`, `M15`
-- Approved scope: Hierarchical direct, proxy-required, and no-external-network authority; versioned Profile and Workspace policy contracts; Provider-owned Kubernetes proxy, CA, Service, ConfigMap, Secret, and NetworkPolicy resources; strict Runtime DNS removal and mandatory hosts mappings; operator-attested capabilities with warning-only diagnostics; desired/applied enforcement evidence; fail-closed replacement and recovery boundaries; Admin and Runtime projections; migration, rollout, rollback, and E2E/live verification obligations.
+- Approved scope: Hierarchical direct, proxy-required, and no-external-network authority; versioned Profile and Workspace policy contracts; Provider-owned Kubernetes proxy, CA, Service, ConfigMap, Secret, and NetworkPolicy resources; strict Runtime DNS removal and mandatory hosts mappings; operator-attested capabilities with warning-only diagnostics; desired/applied enforcement evidence; fail-closed replacement and recovery boundaries; Admin and Runtime projections; migration, rollout, rollback, deterministic API/control-plane E2E, and Kubernetes Provider/proxy unit, manifest, protocol, and lifecycle verification obligations.

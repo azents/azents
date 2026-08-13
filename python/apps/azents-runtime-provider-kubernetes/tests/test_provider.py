@@ -1747,6 +1747,7 @@ async def test_start_reuses_matching_pending_pod_after_api_defaulting() -> None:
         pod,
         spec=dataclasses.replace(
             pod.spec,
+            dns_policy="ClusterFirst",
             containers=(
                 dataclasses.replace(runner, env=tuple(reversed(runner.env))),
                 *pod.spec.containers[1:],
@@ -1760,6 +1761,36 @@ async def test_start_reuses_matching_pending_pod_after_api_defaulting() -> None:
 
     assert api.deleted_pods == []
     assert api.pods[pod_key] == pending
+
+
+@pytest.mark.asyncio
+async def test_v3_proxy_preparation_reuses_pod_after_api_defaulting() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(command)
+    proxy_key = ("azents-runtime", "azents-runtime-runtime-1-proxy")
+    proxy = api.pods[proxy_key]
+    api.pods[proxy_key] = dataclasses.replace(
+        proxy,
+        spec=dataclasses.replace(proxy.spec, dns_policy="ClusterFirst"),
+        status=PodStatus(phase="Running", ready=False),
+    )
+    api.operations.clear()
+
+    preparing = await provider.start(command)
+
+    assert preparing.report.reason == "proxy_preparing"
+    assert api.deleted_pods == []
+    assert ("delete_pod", proxy.metadata.name) not in api.operations
+    assert api.pods[proxy_key].status == PodStatus(phase="Running", ready=False)
 
 
 @pytest.mark.asyncio
@@ -2000,6 +2031,8 @@ async def test_v3_proxy_prepares_complete_proxy_before_runtime_creation() -> Non
     runtime = api.pods[runtime_key]
     runner = runtime.spec.containers[0]
     runner_env = {item.name: item.value for item in runner.env}
+    runner_mounts = {item.name: item for item in runner.volume_mounts}
+    runtime_volumes = {item.name: item for item in runtime.spec.volumes}
     reconciliation = started.report.reconciliation
     assert reconciliation is not None
     observation = reconciliation.observations[0]
@@ -2010,6 +2043,16 @@ async def test_v3_proxy_prepares_complete_proxy_before_runtime_creation() -> Non
     )
     assert "HTTP_PROXY" not in runner_env
     assert "HTTPS_PROXY" not in runner_env
+    assert runner_mounts["runtime-network-ca"].read_only is True
+    assert runner_mounts["runtime-network-ca"].mount_path == (
+        "/var/run/secrets/azents/runtime-network"
+    )
+    assert runner_mounts["runtime-trust"].read_only is False
+    assert runner_mounts["runtime-trust"].mount_path == "/var/run/azents-runtime"
+    trust_volume = runtime_volumes["runtime-trust"]
+    assert isinstance(trust_volume, EmptyDirVolume)
+    assert trust_volume.medium == "Memory"
+    assert trust_volume.size_limit == "16Mi"
     assert api.operations.index(("apply_pod", "azents-runtime-runtime-1-proxy")) < (
         api.operations.index(("apply_pod", "azents-runtime-runtime-1"))
     )

@@ -107,11 +107,14 @@ from azents_runtime_provider_kubernetes.owned_resources import (
 from azents_runtime_provider_kubernetes.strict_resources import (
     RUNTIME_CA_MOUNT_PATH,
     RUNTIME_CA_VOLUME,
+    RUNTIME_TRUST_MOUNT_PATH,
+    RUNTIME_TRUST_VOLUME,
     ProxyResourceInputs,
     ProxyResources,
     build_proxy_resources,
     runtime_ca_volume,
     runtime_proxy_environment,
+    runtime_trust_volume,
 )
 
 _IMMUTABLE_IMAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[0-9a-f]{64}$")
@@ -1231,9 +1234,15 @@ class KubernetesRuntimeProvider:
                         mount_path=RUNTIME_CA_MOUNT_PATH,
                         read_only=True,
                     ),
+                    VolumeMount(
+                        name=RUNTIME_TRUST_VOLUME,
+                        mount_path=RUNTIME_TRUST_MOUNT_PATH,
+                        read_only=False,
+                    ),
                 ),
             )
             volumes.append(runtime_ca_volume(proxy.ca_secret.metadata.name))
+            volumes.append(runtime_trust_volume())
             annotations[ANNOTATION_CA_FINGERPRINT] = ca.fingerprint
         return dataclasses.replace(
             base,
@@ -2646,7 +2655,10 @@ def _pod_semantically_equal(actual: PodResource, expected: PodResource) -> bool:
         or actual.spec.security_context != expected.spec.security_context
         or dict(actual.spec.node_selector) != dict(expected.spec.node_selector)
         or not set(expected.spec.tolerations).issubset(set(actual.spec.tolerations))
-        or actual.spec.dns_policy != expected.spec.dns_policy
+        or not _dns_policies_equal(
+            actual.spec.dns_policy,
+            expected.spec.dns_policy,
+        )
         or actual.spec.dns_config != expected.spec.dns_config
         or tuple(actual.spec.host_aliases) != tuple(expected.spec.host_aliases)
         or not _container_specs_equal(
@@ -2718,7 +2730,7 @@ def _pod_specs_equal_for_in_place(actual: PodSpec, expected: PodSpec) -> bool:
         == expected.automount_service_account_token
         and dict(actual.node_selector) == dict(expected.node_selector)
         and set(expected.tolerations).issubset(set(actual.tolerations))
-        and actual.dns_policy == expected.dns_policy
+        and _dns_policies_equal(actual.dns_policy, expected.dns_policy)
         and actual.dns_config == expected.dns_config
         and tuple(actual.host_aliases) == tuple(expected.host_aliases)
         and (
@@ -2729,6 +2741,12 @@ def _pod_specs_equal_for_in_place(actual: PodSpec, expected: PodSpec) -> bool:
             )
         )
     )
+
+
+def _dns_policies_equal(actual: str | None, expected: str | None) -> bool:
+    if expected is None:
+        return actual in {None, "ClusterFirst"}
+    return actual == expected
 
 
 def _network_enforcement_evidence(
