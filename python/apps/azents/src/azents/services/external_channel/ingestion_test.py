@@ -338,6 +338,7 @@ def _request(
         trigger_position="00000000000000000002",
         provider_user_id="participant",
         invocation=True,
+        expected_file_count=None,
     )
     return ExternalChannelIngestionRequest(
         locator=locator,

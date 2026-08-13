@@ -494,6 +494,7 @@ def _build_request(
         trigger_position=source.trigger_position,
         provider_user_id=provider_user_id,
         invocation=True,
+        expected_file_count=None,
     )
     return ExternalChannelIngestionRequest(
         locator=locator,

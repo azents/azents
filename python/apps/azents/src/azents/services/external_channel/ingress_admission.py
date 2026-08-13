@@ -258,6 +258,7 @@ class ExternalChannelIngressAdmissionService:
                     trigger_position=request.locator.trigger_position,
                     provider_user_id=provider_user_id,
                     invocation=request.locator.invocation,
+                    expected_file_count=request.locator.expected_file_count,
                     invocation_id=invocation_id,
                     initial_title_eligible=request.initial_title_eligible,
                 ),

@@ -1145,6 +1145,7 @@ def _locator(item: ExternalChannelIngressItem) -> ExternalChannelTriggerLocator:
         trigger_position=item.trigger_position,
         provider_user_id=item.provider_user_id,
         invocation=item.invocation,
+        expected_file_count=item.expected_file_count,
     )
 
 

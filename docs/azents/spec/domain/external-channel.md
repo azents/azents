@@ -64,8 +64,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-11
-spec_version: 58
+last_verified_at: 2026-08-13
+spec_version: 59
 ---
 
 # External Channel
@@ -154,7 +154,7 @@ contain multiple independent bindings.
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
 | Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. Configured parent/thread creation copies the active participation setting; legacy isolated-thread access replay without a setup claim copies the Agent default. Binding, real Session, initial Channel Work, and the first content-free ingress item commit together only after setup selection or for an already configured conversation. |
-| Ingress conversation owner and item | One active owner is unique for the effective target Resource and owns the lease, provider-conversation preparation state, nullable resulting Binding/Session, first-batch flag, and current processing-batch fence. Each active item retains a content-free physical source locator and position, immutable owner authority, queue order, attempt/original-age state, processing ownership, and the exact admitted trigger correlation. Its provider-native explicit-invocation flag remains separate response-mode and provider-control evidence; an ordinary message admitted by a connected `all_messages` Binding still owns an active trigger correlation. `location=channel` may fan several source threads into one parent owner, while `location=threads` keeps exact root/thread owners. A required Discord delivery thread is prepared before the owner records a new Binding and Session. The first ready claim is one item and later claims are at most ten. Successful, suppressed, terminal provisioning, and bounded-failure rows are deleted; no completed outcome, tombstone, generic job, or durable wake row exists. |
+| Ingress conversation owner and item | One active owner is unique for the effective target Resource and owns the lease, provider-conversation preparation state, nullable resulting Binding/Session, first-batch flag, and current processing-batch fence. Each active item retains a content-free physical source locator and position, immutable owner authority, queue order, attempt/original-age state, processing ownership, the exact admitted trigger correlation, and the bounded count of files observed in a live Slack or Discord callback. Its provider-native explicit-invocation flag remains separate response-mode and provider-control evidence; an ordinary message admitted by a connected `all_messages` Binding still owns an active trigger correlation. `location=channel` may fan several source threads into one parent owner, while `location=threads` keeps exact root/thread owners. A required Discord delivery thread is prepared before the owner records a new Binding and Session. The first ready claim is one item and later claims are at most ten. Successful, suppressed, terminal provisioning, and bounded-failure rows are deleted; no completed outcome, tombstone, generic job, or durable wake row exists. |
 | Mailbox item and Session events | Every canonical provider message uses one deterministic `external_channel_message` mailbox row with one `prompt_role = context | invocation`, provider-message idempotency identity, and explicit order group/sequence. Every active admitted item correlates its exact eligible human trigger row to `prompt_role=invocation`, including an ordinary connected `all_messages` trigger whose provider-native explicit-invocation flag is false; other retained history remains `context` unless it independently matches another active admitted trigger. PostgreSQL conversation-position compare-and-set is the duplicate-prevention and ordering authority. Pending mailbox state owns wake recovery. Only the exact eligible human invocation-role row created with the root Session may carry transient initial-title eligibility; promotion and mailbox deletion consume it. Promotion creates canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
 | Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, finish timestamp, and ordered current provider projection parts. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
@@ -196,7 +196,9 @@ contain multiple independent bindings.
   remain provenance or authorization identities and never become the execution User.
 - A resource is `active`, `unavailable`, or `deleted`. Provider history is read on
   demand by a leased Session drain after durable callback admission and has no durable
-  hydration lifecycle.
+  hydration lifecycle. When a live callback observed files but the provider-history
+  trigger snapshot exposes fewer bounded file entries, the item remains a temporary
+  history failure and follows the existing ingress retry and age limits.
 - A binding has no active/inactive lifecycle state. `disconnected_at IS NULL` means
   connected, and explicit disconnect sets the terminal timestamp and reason. Gateway
   health, lease ownership, reconnect state, and provider-ingress availability never
@@ -459,6 +461,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-13** (spec_version 59) — Retained the bounded live-callback file count in
+  content-free ingress items and treated a provider-history trigger snapshot with
+  fewer files as a temporary failure so Slack and Discord attachment races reuse the
+  existing queue retry policy.
 - **2026-08-11** (spec_version 58) — Distinguished provider-native explicit
   invocation evidence from canonical prompt role: every active admitted item's exact
   human trigger correlates to `prompt_role=invocation`, including connected

@@ -126,6 +126,7 @@ def _slack_request() -> ExternalChannelIngestionRequest:
         trigger_position="00000000000000000001",
         provider_user_id="participant-1",
         invocation=True,
+        expected_file_count=None,
     )
     return ExternalChannelIngestionRequest(
         locator=locator,

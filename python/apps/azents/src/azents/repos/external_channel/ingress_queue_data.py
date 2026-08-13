@@ -94,6 +94,7 @@ class ExternalChannelIngressItem(_Record):
     trigger_position: str
     provider_user_id: str | None
     invocation: bool
+    expected_file_count: int | None
     invocation_id: str
     initial_title_eligible: bool
     state: ExternalChannelIngressItemState
@@ -134,6 +135,7 @@ class ExternalChannelIngressItemCreate(_Record):
     trigger_position: str
     provider_user_id: str | None
     invocation: bool
+    expected_file_count: int | None
     invocation_id: str
     initial_title_eligible: bool
 

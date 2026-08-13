@@ -13,6 +13,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceType,
 )
+from azents.core.external_channel_file import external_channel_file_metadata_items
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -125,6 +126,11 @@ class ExternalChannelTransportIngestionService:
                 trigger_position=normalized.provider_position,
                 provider_user_id=normalized.provider_user_id,
                 invocation=normalized.invocation,
+                expected_file_count=len(
+                    external_channel_file_metadata_items(
+                        normalized.attachment_metadata or {}
+                    )
+                ),
             ),
             scope=ExternalChannelConversationScope(
                 connection_id=event.connection_id,
@@ -259,6 +265,11 @@ class ExternalChannelTransportIngestionService:
                 trigger_position=normalized.provider_position,
                 provider_user_id=normalized.provider_user_id,
                 invocation=normalized.invocation,
+                expected_file_count=len(
+                    external_channel_file_metadata_items(
+                        normalized.attachment_metadata or {}
+                    )
+                ),
             ),
             scope=ExternalChannelConversationScope(
                 connection_id=event.connection_id,
