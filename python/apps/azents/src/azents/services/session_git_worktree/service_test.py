@@ -331,6 +331,7 @@ class _RunnerOperations(RuntimeRunnerOperationClient):
         self.mkdir_calls: list[dict[str, object]] = []
         self.inspect_result: RuntimeGitInspectWorktreeResult | None = None
         self.remove_outcome: Literal["removed", "already_absent"] = "removed"
+        self.repository_anchor_path = "/workspace/agent/repo"
 
     async def list_git_refs(
         self,
@@ -364,7 +365,7 @@ class _RunnerOperations(RuntimeRunnerOperationClient):
             ),
             default_branch="main",
             head_commit="abc123",
-            repository_anchor_path="/workspace/agent/repo",
+            repository_anchor_path=self.repository_anchor_path,
             final_cursor="cursor-refs",
         )
 
@@ -1257,8 +1258,7 @@ async def _create_agent_managed_worktree(
             session,
             session_id=fixture.session_id,
         )
-        assert len(allocations) == 1
-        allocation = allocations[0]
+        allocation = allocations[-1]
         assert allocation.status is SessionGitWorktreeStatus.READY
         assert allocation.session_workspace_project_id is not None
         await MailboxRepository().delete_by_session_id(
@@ -2339,6 +2339,7 @@ class TestSessionGitWorktreeService:
         assert len(create_calls) == expected_create_attempts
         if branch_name is None:
             assert create_calls[0]["branch_name"] != create_calls[1]["branch_name"]
+            assert create_calls[0]["worktree_path"] == create_calls[1]["worktree_path"]
         else:
             assert create_calls[0]["branch_name"] == branch_name
         async with rdb_session_manager() as session:
@@ -2357,6 +2358,163 @@ class TestSessionGitWorktreeService:
         terminal_execution = terminal_payload.action_execution["execution"]
         assert is_string_object_dict(terminal_execution)
         assert terminal_execution["status"] == expected_status
+
+    async def test_agent_create_keeps_distinct_repository_leaves_unsuffixed(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A later worktree keeps its base leaf when only the branch collides."""
+        runner = _RunnerOperations()
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-distinct-leaves",
+            runner=runner,
+            source_project_path="/workspace/agent/linked-one",
+        )
+        runner.repository_anchor_path = "/workspace/agent/repo-one"
+        first, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-distinct-first",
+        )
+
+        second_source_path = "/workspace/agent/linked-two"
+        async with rdb_session_manager() as session:
+            await SessionWorkspaceProjectRepository().create_project(
+                session,
+                SessionWorkspaceProjectCreate(
+                    session_id=fixture.session_id,
+                    path=second_source_path,
+                ),
+            )
+        runner.repository_anchor_path = "/workspace/agent/repo-two"
+        second, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            dataclasses.replace(fixture, source_project_path=second_source_path),
+            client_tool_call_id="call-distinct-second",
+        )
+
+        assert first.worktree_path.endswith("/repo-one")
+        assert second.worktree_path.endswith("/repo-two")
+        assert second.branch_name.endswith("-2")
+
+    @pytest.mark.parametrize(
+        ("failure", "expected_path_suffix", "expected_branch_suffix"),
+        [
+            ("worktree_path_exists: path exists", "/repo-3", "-2"),
+            ("branch_exists: branch exists", "/repo-2", "-3"),
+        ],
+        ids=["runner-path-after-db-collision", "runner-branch-after-db-collision"],
+    )
+    async def test_agent_create_advances_past_db_and_runner_collisions(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+        failure: str,
+        expected_path_suffix: str,
+        expected_branch_suffix: str,
+    ) -> None:
+        """Runner collision retry advances beyond the DB-selected suffix."""
+        runner = _RunnerOperations()
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug=f"agent-double-collision-{expected_path_suffix[-1]}",
+            runner=runner,
+        )
+        await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-double-collision-first",
+        )
+        runner.failures.append(failure)
+
+        second, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-double-collision-second",
+        )
+
+        create_calls = [
+            call for call in runner.calls if call["operation"] == "create_git_worktree"
+        ]
+        assert len(create_calls) == 3
+        first_retry_path = create_calls[1]["worktree_path"]
+        first_retry_branch = create_calls[1]["branch_name"]
+        assert isinstance(first_retry_path, str)
+        assert isinstance(first_retry_branch, str)
+        assert first_retry_path.endswith("/repo-2")
+        assert first_retry_branch.endswith("-2")
+        assert second.worktree_path.endswith(expected_path_suffix)
+        assert second.branch_name.endswith(expected_branch_suffix)
+
+    async def test_agent_create_reuses_lowest_cleaned_path_suffix(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A removed checkout releases its directory suffix but preserves its branch."""
+        runner = _RunnerOperations()
+        fixture = await _create_agent_worktree_session(
+            rdb_session_manager,
+            slug="agent-path-gap",
+            runner=runner,
+        )
+        first, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-path-gap-first",
+        )
+        second, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-path-gap-second",
+        )
+        assert first.worktree_path.endswith("/repo")
+        assert second.worktree_path.endswith("/repo-2")
+
+        runner.inspect_result = RuntimeGitInspectWorktreeResult(
+            worktree_path=second.worktree_path,
+            registered=True,
+            registered_branch_name=second.branch_name,
+            target_kind="directory",
+            dirty=False,
+            final_cursor="cursor-inspect-path-gap",
+        )
+        action, execution = await _admit_and_promote_agent_remove(
+            rdb_session_manager,
+            fixture,
+            worktree_path=second.worktree_path,
+            client_tool_call_id="call-path-gap-remove",
+            force=False,
+        )
+        await fixture.service.run_agent_remove_git_worktree_action(
+            agent_id=fixture.agent_id,
+            session_id=fixture.session_id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+            predecessor_run_id="processing-remove-run-001",
+        )
+        async with rdb_session_manager() as session:
+            allocations = await SessionGitWorktreeRepository().list_by_session_id(
+                session,
+                session_id=fixture.session_id,
+            )
+            removed = next(
+                candidate for candidate in allocations if candidate.id == second.id
+            )
+            assert removed.status is SessionGitWorktreeStatus.CLEANED
+            await MailboxRepository().delete_by_session_id(
+                session,
+                fixture.session_id,
+            )
+
+        replacement, _ = await _create_agent_managed_worktree(
+            rdb_session_manager,
+            fixture,
+            client_tool_call_id="call-path-gap-replacement",
+        )
+
+        assert replacement.worktree_path == second.worktree_path
+        assert replacement.branch_name != second.branch_name
 
     @pytest.mark.parametrize(
         ("predecessor_run_id", "expected_predecessor_run_id"),
@@ -2950,6 +3108,101 @@ class TestSessionGitWorktreeService:
             }
         ]
 
+    async def test_setup_action_advances_runner_branch_after_db_path_collision(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Setup action preserves the DB-selected path while retrying its branch."""
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(
+                session,
+                "setup-double-collision",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            action = CreateGitWorktreeAction(
+                source_project_path="/workspace/agent/repo",
+                starting_ref="main",
+            )
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    sender_user_id=None,
+                    id=None,
+                    session_id=agent_session.id,
+                    mailbox_item_id="01900000000070008000000000000016",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                    owner_generation=1,
+                ),
+            )
+        runner = _RunnerOperations(failures=["branch_exists: branch exists"])
+        service = _service(rdb_session_manager, runner)
+        binding_service = service.session_working_folder_binding_service
+        await binding_service.require_bindable_context(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+        )
+        runtime = await service.runtime_target_resolver.resolve_operation_target(
+            agent_id
+        )
+        binding = await binding_service.resolve_authority_for_target(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            runtime_target=runtime,
+        )
+        async with rdb_session_manager() as session:
+            await SessionGitWorktreeRepository().create(
+                session,
+                SessionGitWorktreeCreate(
+                    id="01900000000070008000000000000017",
+                    session_id=agent_session.id,
+                    action_execution_id=None,
+                    session_workspace_project_id=None,
+                    source_project_path="/workspace/agent/repo",
+                    starting_ref="main",
+                    worktree_path=(f"{binding.working_folder_path}/worktrees/repo"),
+                    branch_name="feature/unrelated",
+                    branch_created_by=SessionGitWorktreeBranchCreatedBy.AZENTS,
+                    status=SessionGitWorktreeStatus.READY,
+                ),
+            )
+
+        result = await service.run_git_worktree_action(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+        )
+
+        assert result.completed is True
+        create_calls = [
+            call for call in runner.calls if call["operation"] == "create_git_worktree"
+        ]
+        assert len(create_calls) == 2
+        first_path = create_calls[0]["worktree_path"]
+        second_path = create_calls[1]["worktree_path"]
+        first_branch = create_calls[0]["branch_name"]
+        second_branch = create_calls[1]["branch_name"]
+        assert isinstance(first_path, str)
+        assert isinstance(second_path, str)
+        assert isinstance(first_branch, str)
+        assert isinstance(second_branch, str)
+        assert first_path.endswith("/repo-2")
+        assert second_path.endswith("/repo-2")
+        assert not first_branch.endswith("-2")
+        assert second_branch.endswith("-2")
+
     async def test_orphan_cleanup_logs_candidate_failure_and_terminal_summary(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -3463,10 +3716,15 @@ class TestSessionGitWorktreeService:
         )
         first_branch = runner.calls[0]["branch_name"]
         second_branch = runner.calls[1]["branch_name"]
+        first_path = runner.calls[0]["worktree_path"]
+        second_path = runner.calls[1]["worktree_path"]
         assert isinstance(first_branch, str)
         assert isinstance(second_branch, str)
+        assert isinstance(first_path, str)
+        assert isinstance(second_path, str)
         assert first_branch.startswith("azents/")
         assert second_branch.endswith("-2")
+        assert first_path == second_path
 
     async def test_path_collision_suffixes_final_worktree_path(
         self,
@@ -3509,10 +3767,15 @@ class TestSessionGitWorktreeService:
         )
         first_path = runner.calls[0]["worktree_path"]
         second_path = runner.calls[1]["worktree_path"]
+        first_branch = runner.calls[0]["branch_name"]
+        second_branch = runner.calls[1]["branch_name"]
         assert isinstance(first_path, str)
         assert isinstance(second_path, str)
+        assert isinstance(first_branch, str)
+        assert isinstance(second_branch, str)
         assert first_path.endswith("/repo")
         assert second_path.endswith("/repo-2")
+        assert first_branch == second_branch
 
     async def test_catalog_upsert_failure_blocks_initialization(
         self,

@@ -204,26 +204,6 @@ class SessionGitWorktreeRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
-    async def target_exists(
-        self,
-        session: AsyncSession,
-        *,
-        worktree_path: str,
-        branch_name: str,
-        excluding_id: str,
-    ) -> bool:
-        """Return whether another allocation already owns a target path or branch."""
-        result = await session.execute(
-            sa.select(RDBSessionAgentContextGitWorktree.id).where(
-                RDBSessionAgentContextGitWorktree.id != excluding_id,
-                sa.or_(
-                    RDBSessionAgentContextGitWorktree.worktree_path == worktree_path,
-                    RDBSessionAgentContextGitWorktree.branch_name == branch_name,
-                ),
-            )
-        )
-        return result.scalar_one_or_none() is not None
-
     async def worktree_path_exists(
         self,
         session: AsyncSession,
@@ -236,6 +216,8 @@ class SessionGitWorktreeRepository:
             sa.select(RDBSessionAgentContextGitWorktree.id).where(
                 RDBSessionAgentContextGitWorktree.id != excluding_id,
                 RDBSessionAgentContextGitWorktree.worktree_path == worktree_path,
+                RDBSessionAgentContextGitWorktree.status
+                != SessionGitWorktreeStatus.CLEANED,
             )
         )
         return result.scalar_one_or_none() is not None

@@ -3411,13 +3411,15 @@ class SessionGitWorktreeService:
         worktree_parent_path = (
             PurePosixPath(working_folder_path) / "worktrees"
         ).as_posix()
-        for suffix in range(1, _MAX_COLLISION_ATTEMPTS + 1):
+        path_suffix = 1
+        branch_suffix = 1
+        for _ in range(_MAX_COLLISION_ATTEMPTS):
             worktree_path, generated_branch_name = _target_names(
                 session_handle=session_handle,
                 worktree_parent_path=worktree_parent_path,
                 source_project_path=source_project_path,
-                path_suffix=suffix,
-                branch_suffix=suffix,
+                path_suffix=path_suffix,
+                branch_suffix=branch_suffix,
             )
             branch_name = requested_branch_name or generated_branch_name
             project_repository = self.session_workspace_project_repository
@@ -3453,23 +3455,26 @@ class SessionGitWorktreeService:
                 raise ValueError(
                     f"Git branch already exists in a managed allocation: {branch_name}"
                 )
-            if path_exists or branch_exists or claim_exists:
-                continue
-            return await self.session_git_worktree_repository.create(
-                session,
-                SessionGitWorktreeCreate(
-                    id=uuid7().hex,
-                    session_id=session_id,
-                    action_execution_id=execution.id,
-                    session_workspace_project_id=None,
-                    source_project_path=source_project_path,
-                    starting_ref=starting_ref,
-                    worktree_path=worktree_path,
-                    branch_name=branch_name,
-                    branch_created_by=SessionGitWorktreeBranchCreatedBy.AZENTS,
-                    status=SessionGitWorktreeStatus.PENDING,
-                ),
-            )
+            if not path_exists and not branch_exists and not claim_exists:
+                return await self.session_git_worktree_repository.create(
+                    session,
+                    SessionGitWorktreeCreate(
+                        id=uuid7().hex,
+                        session_id=session_id,
+                        action_execution_id=execution.id,
+                        session_workspace_project_id=None,
+                        source_project_path=source_project_path,
+                        starting_ref=starting_ref,
+                        worktree_path=worktree_path,
+                        branch_name=branch_name,
+                        branch_created_by=SessionGitWorktreeBranchCreatedBy.AZENTS,
+                        status=SessionGitWorktreeStatus.PENDING,
+                    ),
+                )
+            if path_exists or claim_exists:
+                path_suffix += 1
+            if branch_exists:
+                branch_suffix += 1
         raise ValueError("Could not allocate a unique Git worktree path and branch.")
 
     async def _run_agent_create_worktree_step(
@@ -3539,10 +3544,16 @@ class SessionGitWorktreeService:
             except RuntimeRunnerOperationFailedError as error:
                 collision = error.code or _collision_kind(str(error))
                 if collision in {"branch", "branch_exists"} and generated_branch:
-                    branch_suffix += 1
+                    branch_suffix = _generated_branch_suffix(current.branch_name) + 1
                     continue
                 if collision in {"path", "worktree_path_exists"}:
-                    path_suffix += 1
+                    path_suffix = (
+                        _worktree_path_suffix(
+                            current.worktree_path,
+                            source_project_path=current.source_project_path,
+                        )
+                        + 1
+                    )
                     continue
                 await self._fail_agent_create_git_worktree(
                     execution=execution,
@@ -3618,15 +3629,15 @@ class SessionGitWorktreeService:
             else "explicit"
         )
         worktree_parent_path = PurePosixPath(allocation.worktree_path).parent.as_posix()
-        for offset in range(_MAX_COLLISION_ATTEMPTS):
-            candidate_path_suffix = path_suffix + offset
-            candidate_branch_suffix = branch_suffix + offset
+        current_path_suffix = path_suffix
+        current_branch_suffix = branch_suffix
+        for _ in range(_MAX_COLLISION_ATTEMPTS):
             worktree_path, generated_branch_name = _target_names(
                 session_handle=session_handle,
                 worktree_parent_path=worktree_parent_path,
                 source_project_path=allocation.source_project_path,
-                path_suffix=candidate_path_suffix,
-                branch_suffix=candidate_branch_suffix,
+                path_suffix=current_path_suffix,
+                branch_suffix=current_branch_suffix,
             )
             branch_name = (
                 generated_branch_name if generated_branch else allocation.branch_name
@@ -3673,6 +3684,10 @@ class SessionGitWorktreeService:
                         worktree_path=worktree_path,
                         branch_name=branch_name,
                     )
+            if path_exists or claim_exists:
+                current_path_suffix += 1
+            if branch_exists:
+                current_branch_suffix += 1
         return allocation
 
     async def _ensure_action_worktree_allocation(
@@ -3784,10 +3799,16 @@ class SessionGitWorktreeService:
             except RuntimeRunnerOperationFailedError as exc:
                 collision = _collision_kind(str(exc))
                 if collision == "branch":
-                    branch_suffix += 1
+                    branch_suffix = _generated_branch_suffix(current.branch_name) + 1
                     continue
                 if collision == "path":
-                    path_suffix += 1
+                    path_suffix = (
+                        _worktree_path_suffix(
+                            current.worktree_path,
+                            source_project_path=current.source_project_path,
+                        )
+                        + 1
+                    )
                     continue
                 await self._mark_action_execution_failed(
                     execution=execution,
@@ -5365,26 +5386,36 @@ class SessionGitWorktreeService:
                     runtime_id=runtime_id,
                     worktree_path=worktree_path,
                 )
-                exists = await self.session_git_worktree_repository.target_exists(
-                    session,
-                    worktree_path=worktree_path,
-                    branch_name=branch_name,
-                    excluding_id=allocation.id,
+                path_exists = (
+                    await self.session_git_worktree_repository.worktree_path_exists(
+                        session,
+                        worktree_path=worktree_path,
+                        excluding_id=allocation.id,
+                    )
+                )
+                branch_exists = (
+                    await self.session_git_worktree_repository.branch_name_exists(
+                        session,
+                        branch_name=branch_name,
+                        excluding_id=allocation.id,
+                    )
                 )
                 claim_exists = await project_repository.has_blocking_git_worktree_claim(
                     session,
                     runtime_id=runtime_id,
                     worktree_path=worktree_path,
                 )
-                if not exists and not claim_exists:
+                if not path_exists and not branch_exists and not claim_exists:
                     return await self.session_git_worktree_repository.update_target(
                         session,
                         worktree_id=allocation.id,
                         worktree_path=worktree_path,
                         branch_name=branch_name,
                     )
-            current_path_suffix += 1
-            current_branch_suffix += 1
+            if path_exists or claim_exists:
+                current_path_suffix += 1
+            if branch_exists:
+                current_branch_suffix += 1
         return allocation
 
 
@@ -5539,6 +5570,38 @@ def _repo_leaf(source_project_path: str) -> str:
     name = PurePosixPath(source_project_path).name
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip(".-_")
     return sanitized or "repo"
+
+
+def _worktree_path_suffix(
+    worktree_path: str,
+    *,
+    source_project_path: str,
+) -> int:
+    """Recover the numeric suffix from one generated worktree path."""
+    path_leaf = PurePosixPath(worktree_path).name
+    repo_leaf = _repo_leaf(source_project_path)
+    if path_leaf == repo_leaf:
+        return 1
+    suffix = path_leaf.removeprefix(f"{repo_leaf}-")
+    if path_leaf == f"{repo_leaf}-{suffix}" and suffix.isdigit():
+        value = int(suffix)
+        if value >= 2:
+            return value
+    raise ValueError("Recorded worktree path is not Azents-generated")
+
+
+def _generated_branch_suffix(branch_name: str) -> int:
+    """Recover the numeric suffix from one generated worktree branch."""
+    session_handle = _branch_session_handle(branch_name)
+    branch_base = f"azents/{session_handle}"
+    if branch_name == branch_base:
+        return 1
+    suffix = branch_name.removeprefix(f"{branch_base}-")
+    if branch_name == f"{branch_base}-{suffix}" and suffix.isdigit():
+        value = int(suffix)
+        if value >= 2:
+            return value
+    raise ValueError("Recorded worktree branch is not Azents-generated")
 
 
 def _branch_session_handle(branch_name: str) -> str:
