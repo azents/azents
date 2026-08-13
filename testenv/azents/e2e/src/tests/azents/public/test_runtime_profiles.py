@@ -315,7 +315,11 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
     assert read_only_runtime.runtime_profile_id == explicit_profile_id
     assert read_only_runtime.runtime is None
     assert read_only_runtime.state is None
-    assert read_only_runtime.configuration is None
+    read_only_configuration = read_only_runtime.configuration
+    if read_only_configuration is not None:
+        assert read_only_configuration.status == "configured_not_created"
+        assert read_only_configuration.desired is not None
+        assert read_only_configuration.applied is None
     assert read_only_runtime.actions.add is False
     assert read_only_runtime.actions.start is True
 
