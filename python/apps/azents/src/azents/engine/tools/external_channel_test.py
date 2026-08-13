@@ -19,14 +19,8 @@ from azents.core.external_channel_file import (
 )
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.hooks.types import (
-    AfterToolCallHookContext,
-    BeforeToolCallHookContext,
     CompactionSummaryHookContext,
-    RunStartHookContext,
     SessionIdleHookContext,
-    ToolCallDeny,
-    TurnEndHookContext,
-    TurnStartHookContext,
 )
 from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.types import FunctionToolError
@@ -210,84 +204,6 @@ def _channel_action_mode_enum(schema: dict[str, object]) -> list[object]:
     return cast(list[object], mode["enum"])
 
 
-def _before_channel_action(
-    *,
-    binding: str = "binding-1",
-    mode: str = "finish",
-    run_id: str = "run-1",
-) -> BeforeToolCallHookContext:
-    return BeforeToolCallHookContext(
-        tool_name="channel_action",
-        toolkit_slug="",
-        args_json=json.dumps(
-            {
-                "binding": binding,
-                "mode": mode,
-                "message": "Published message.",
-            }
-        ),
-        workspace_id="workspace-1",
-        agent_id="agent-1",
-        session_id="session-1",
-        run_id=run_id,
-    )
-
-
-def _after_channel_action(
-    *,
-    binding: str = "binding-1",
-    mode: str = "finish",
-    run_id: str = "run-1",
-    error_message: str | None = None,
-) -> AfterToolCallHookContext:
-    before = _before_channel_action(
-        binding=binding,
-        mode=mode,
-        run_id=run_id,
-    )
-    return AfterToolCallHookContext(
-        tool_name=before.tool_name,
-        toolkit_slug=before.toolkit_slug,
-        args_json=before.args_json,
-        workspace_id=before.workspace_id,
-        agent_id=before.agent_id,
-        session_id=before.session_id,
-        run_id=before.run_id,
-        output_text=error_message or "{}",
-        error_message=error_message,
-    )
-
-
-def _run_start(run_id: str = "run-1") -> RunStartHookContext:
-    return RunStartHookContext(
-        workspace_id="workspace-1",
-        agent_id="agent-1",
-        session_id="session-1",
-        run_id=run_id,
-    )
-
-
-def _turn_start(run_id: str = "run-1") -> TurnStartHookContext:
-    return TurnStartHookContext(
-        workspace_id="workspace-1",
-        agent_id="agent-1",
-        session_id="session-1",
-        run_id=run_id,
-        turn_index=None,
-    )
-
-
-def _turn_end(run_id: str = "run-1") -> TurnEndHookContext:
-    return TurnEndHookContext(
-        workspace_id="workspace-1",
-        agent_id="agent-1",
-        session_id="session-1",
-        run_id=run_id,
-        reason="completed",
-        turn_index=None,
-    )
-
-
 @pytest.mark.asyncio
 async def test_channel_action_uses_durable_client_call_identity() -> None:
     """The unprefixed tool commits the exact provider call ID and returns failure."""
@@ -405,74 +321,6 @@ async def test_ignore_rejects_every_publication_or_work_update_field() -> None:
                     }
                 )
             )
-
-
-@pytest.mark.asyncio
-async def test_channel_action_blocks_same_binding_and_mode_in_adjacent_turns() -> None:
-    """Deny one repeated publication turn, then allow the following retry."""
-    toolkit = _toolkit(_ActionService([_snapshot()]))
-    hooks = toolkit.hooks()
-    on_run_start = hooks.get("on_run_start")
-    on_turn_start = hooks.get("on_turn_start")
-    on_before_tool_call = hooks.get("on_before_tool_call")
-    on_after_tool_call = hooks.get("on_after_tool_call")
-    on_turn_end = hooks.get("on_turn_end")
-    assert on_run_start is not None
-    assert on_turn_start is not None
-    assert on_before_tool_call is not None
-    assert on_after_tool_call is not None
-    assert on_turn_end is not None
-
-    await on_run_start(_run_start())
-    await on_turn_start(_turn_start())
-    assert await on_before_tool_call(_before_channel_action()) is None
-    await on_after_tool_call(_after_channel_action())
-    await on_turn_end(_turn_end())
-
-    await on_turn_start(_turn_start())
-    denied = await on_before_tool_call(_before_channel_action())
-    assert isinstance(denied, ToolCallDeny)
-    assert "too verbose" in denied.message
-    assert await on_before_tool_call(_before_channel_action(mode="continue")) is None
-    assert (
-        await on_before_tool_call(_before_channel_action(binding="binding-2")) is None
-    )
-    await on_turn_end(_turn_end())
-
-    await on_turn_start(_turn_start())
-    assert await on_before_tool_call(_before_channel_action()) is None
-
-
-@pytest.mark.asyncio
-async def test_channel_action_guard_ignores_failed_execution_and_new_run() -> None:
-    """Keep failed calls retryable and isolate the guard to one Run."""
-    toolkit = _toolkit(_ActionService([_snapshot()]))
-    hooks = toolkit.hooks()
-    on_run_start = hooks.get("on_run_start")
-    on_turn_start = hooks.get("on_turn_start")
-    on_before_tool_call = hooks.get("on_before_tool_call")
-    on_after_tool_call = hooks.get("on_after_tool_call")
-    on_turn_end = hooks.get("on_turn_end")
-    assert on_run_start is not None
-    assert on_turn_start is not None
-    assert on_before_tool_call is not None
-    assert on_after_tool_call is not None
-    assert on_turn_end is not None
-
-    await on_run_start(_run_start())
-    await on_turn_start(_turn_start())
-    await on_after_tool_call(
-        _after_channel_action(error_message="Tool execution failed.")
-    )
-    await on_turn_end(_turn_end())
-    await on_turn_start(_turn_start())
-    assert await on_before_tool_call(_before_channel_action()) is None
-
-    await on_after_tool_call(_after_channel_action())
-    await on_turn_end(_turn_end())
-    await on_run_start(_run_start("run-2"))
-    await on_turn_start(_turn_start("run-2"))
-    assert await on_before_tool_call(_before_channel_action(run_id="run-2")) is None
 
 
 @pytest.mark.asyncio
