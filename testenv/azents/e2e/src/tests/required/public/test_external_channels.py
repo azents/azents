@@ -123,6 +123,7 @@ _DISCORD_BOT_USER_ID = "300000000000000001"
 _DISCORD_CHANNEL_ID = "400000000000000001"
 _DISCORD_BOT_TOKEN = "discord-e2e-private"
 _RUNTIME_PROVIDER_ID = "system-docker"
+_SLACK_HTTP_ACK_DEADLINE_SECONDS = 3
 _DISCORD_COMMAND_CONTRACTS = {
     "message_action": ("Ask an Azents Agent", 3),
     "azents_settings": ("azents", 1),
@@ -1347,7 +1348,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         headers=_signed_headers(challenge_body),
         timeout=5,
     )
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < _SLACK_HTTP_ACK_DEADLINE_SECONDS
     assert challenge.json() == {"challenge": "deterministic-challenge"}
 
     event_body = json.dumps(
@@ -1376,7 +1377,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         timeout=5,
     )
     assert first.status_code == 200
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < _SLACK_HTTP_ACK_DEADLINE_SECONDS
     duplicate = requests.post(
         callback_url,
         data=event_body,
@@ -1644,7 +1645,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         timeout=5,
     )
     assert follow_up.status_code == 200
-    assert time.monotonic() - started < 2
+    assert time.monotonic() - started < _SLACK_HTTP_ACK_DEADLINE_SECONDS
     barrier_state = cast(
         dict[str, object],
         wait_until(
