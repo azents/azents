@@ -2365,7 +2365,9 @@
         "waitAgent": "サブエージェントを待機",
         "interruptAgent": "サブエージェントを中断",
         "listAgents": "サブエージェントを一覧表示",
-        "toolSearch": "ツールを検索"
+        "toolSearch": "ツールを検索",
+        "createGitWorktree": "Git worktreeの作成をリクエスト",
+        "removeGitWorktree": "Git worktreeの削除をリクエスト"
       },
       "field": {
         "source": "ソース",
@@ -2393,7 +2395,12 @@
         "timeout": "待機時間（秒）",
         "previousStatus": "以前の状態",
         "requestedLimit": "要求件数",
-        "activationLimit": "有効化上限"
+        "activationLimit": "有効化上限",
+        "startingRef": "開始ref",
+        "branch": "ブランチ",
+        "force": "強制削除",
+        "requestId": "リクエストID",
+        "worktreePath": "Worktreeパス"
       },
       "changeAction": {
         "add": "追加",
@@ -2421,7 +2428,8 @@
       "categoryOrganize": "整理",
       "categorySubagent": "サブエージェント",
       "categoryWait": "待機",
-      "categoryOther": "その他"
+      "categoryOther": "その他",
+      "categoryGit": "Git"
     },
     "authorization": {
       "authorizationRequired": "認証が必要",

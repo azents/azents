@@ -271,6 +271,9 @@ function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
     case "wait":
     case "wait_agent":
       return { key: "wait", label: "wait" };
+    case "create_git_worktree":
+    case "remove_git_worktree":
+      return { key: "git", label: "git" };
     default:
       return { key: "other", label: "other" };
   }

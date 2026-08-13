@@ -2365,7 +2365,9 @@
         "waitAgent": "Attente des sous-agents",
         "interruptAgent": "Sous-agent interrompu",
         "listAgents": "Sous-agents listés",
-        "toolSearch": "Outils recherchés"
+        "toolSearch": "Outils recherchés",
+        "createGitWorktree": "Création du worktree Git demandée",
+        "removeGitWorktree": "Suppression du worktree Git demandée"
       },
       "field": {
         "source": "Source",
@@ -2393,7 +2395,12 @@
         "timeout": "Délai (secondes)",
         "previousStatus": "État précédent",
         "requestedLimit": "Limite demandée",
-        "activationLimit": "Limite d’activation"
+        "activationLimit": "Limite d’activation",
+        "startingRef": "Référence de départ",
+        "branch": "Branche",
+        "force": "Suppression forcée",
+        "requestId": "ID de requête",
+        "worktreePath": "Chemin du worktree"
       },
       "changeAction": {
         "add": "Ajouté",
@@ -2421,7 +2428,8 @@
       "categoryOrganize": "Organiser",
       "categorySubagent": "Sous-agent",
       "categoryWait": "Attente",
-      "categoryOther": "Autre"
+      "categoryOther": "Autre",
+      "categoryGit": "Git"
     },
     "authorization": {
       "authorizationRequired": "Autorisation requise",

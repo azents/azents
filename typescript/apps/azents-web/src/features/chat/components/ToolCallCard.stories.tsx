@@ -228,6 +228,84 @@ export const KnownWriteUsesEditIcon = {
   },
 } satisfies Story;
 
+export const CreateGitWorktree = {
+  args: {
+    toolCall: {
+      id: "create-git-worktree-story",
+      callId: "create-git-worktree-story",
+      name: "create_git_worktree",
+      arguments: JSON.stringify({
+        source_project_path: "/workspace/agent/projects/azents",
+        starting_ref: "main",
+        branch_name: "feat/worktree-tools",
+      }),
+      result: JSON.stringify({
+        accepted: true,
+        message:
+          "The worktree request was accepted. The authoritative result will arrive through a fresh continuation Run.",
+        request_id: "request-create-1",
+      }),
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText("Requested Git worktree creation"),
+    ).toBeVisible();
+    await expect(canvas.getByText("feat/worktree-tools")).toBeVisible();
+    await expect(
+      canvasElement.querySelector(".tabler-icon-git-branch"),
+    ).not.toBeNull();
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Requested Git worktree creation/ }),
+    );
+    await expect(
+      canvas.getByText("/workspace/agent/projects/azents"),
+    ).toBeVisible();
+    await expect(canvas.getByText("request-create-1")).toBeVisible();
+  },
+} satisfies Story;
+
+export const RemoveGitWorktree = {
+  args: {
+    toolCall: {
+      id: "remove-git-worktree-story",
+      callId: "remove-git-worktree-story",
+      name: "remove_git_worktree",
+      arguments: JSON.stringify({
+        worktree_project_path:
+          "/workspace/agent/sessions/session-1/worktrees/azents",
+        force: false,
+      }),
+      result: JSON.stringify({
+        accepted: true,
+        message:
+          "The worktree removal request was accepted. The authoritative result will arrive through a fresh continuation Run.",
+        request_id: "request-remove-1",
+      }),
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText("Requested Git worktree removal"),
+    ).toBeVisible();
+    await expect(canvas.getByText("azents")).toBeVisible();
+    await expect(
+      canvasElement.querySelector(".tabler-icon-git-branch"),
+    ).not.toBeNull();
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Requested Git worktree removal/ }),
+    );
+    await expect(
+      canvas.getByText("/workspace/agent/sessions/session-1/worktrees/azents"),
+    ).toBeVisible();
+    await expect(canvas.getByText("false")).toBeVisible();
+  },
+} satisfies Story;
+
 export const Failed = {
   args: {
     toolCall: failedToolCall,

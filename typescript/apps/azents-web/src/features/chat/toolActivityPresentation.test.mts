@@ -244,6 +244,26 @@ void test("groups wait with Wait activity", () => {
   assert.deepEqual(activityEvent.category, { key: "wait", label: "wait" });
 });
 
+void test("groups managed worktree tools with Git activity", () => {
+  for (const toolName of ["create_git_worktree", "remove_git_worktree"]) {
+    const tool = clientToolMessage("tool-message", "call-1", toolName);
+    const items = projectChatPresentationItems(
+      [
+        event("call-1", "client_tool_call", {
+          call_id: "call-1",
+          name: toolName,
+          arguments: "{}",
+        }),
+      ],
+      [tool],
+    );
+
+    const activityEvent = activityAt(items, 0).events[0];
+    assert.ok(activityEvent);
+    assert.deepEqual(activityEvent.category, { key: "git", label: "git" });
+  }
+});
+
 void test("closes Activity at an action-execution message boundary", () => {
   const firstTool = clientToolMessage("tool-message-1", "call-1");
   const secondTool = clientToolMessage("tool-message-2", "call-2");
