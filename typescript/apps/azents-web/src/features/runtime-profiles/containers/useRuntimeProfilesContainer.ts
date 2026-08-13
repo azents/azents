@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { trpc } from "@/trpc/client";
+import { runtimeProfileMutationPolicy } from "../runtimeProfilePolicy";
 import type { RuntimeProfileFormValues } from "../schemas";
 import type {
   RuntimeProfileDeletionErrorKind,
@@ -38,13 +39,6 @@ export interface RuntimeProfilesContainerOutput {
   onCloseDelete: () => void;
   onConfirmDelete: (profile: WorkspaceRuntimeProfileResponse) => void;
   onDismissDeletionFeedback: () => void;
-}
-
-function parseCidrs(value: string): string[] {
-  return value
-    .split(/\r?\n|,/)
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
 }
 
 function errorCode(error: unknown): string | null {
@@ -249,12 +243,7 @@ export function useRuntimeProfilesContainer(
   }, []);
   const onSubmit = useCallback(
     (values: RuntimeProfileFormValues): void => {
-      const allowedCidrs = parseCidrs(values.allowedCidrs);
-      const deniedCidrs = parseCidrs(values.deniedCidrs);
-      const networkPolicy =
-        allowedCidrs.length === 0 && deniedCidrs.length === 0
-          ? null
-          : { allowedCidrs, deniedCidrs };
+      const policy = runtimeProfileMutationPolicy(values);
       setMutationState({ type: "SUBMITTING" });
       if (editorState.type === "EDIT") {
         replaceMutation.mutate({
@@ -265,7 +254,7 @@ export function useRuntimeProfilesContainer(
           displayName: values.displayName,
           description: values.description,
           lifecycle: values.lifecycle,
-          networkPolicy,
+          policy,
         });
         return;
       }
@@ -276,7 +265,7 @@ export function useRuntimeProfilesContainer(
           displayName: values.displayName,
           description: values.description,
           lifecycle: values.lifecycle,
-          networkPolicy,
+          policy,
         });
       }
     },

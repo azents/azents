@@ -63,6 +63,9 @@ from azentspublicclient.models.workspace_runtime_profile_create_request import (
 from azentspublicclient.models.workspace_runtime_profile_default_replace_request import (  # noqa: E501
     WorkspaceRuntimeProfileDefaultReplaceRequest,
 )
+from azentspublicclient.models.workspace_runtime_profile_policy import (
+    WorkspaceRuntimeProfilePolicy,
+)
 from azentspublicclient.models.workspace_runtime_profile_policy_v1 import (
     WorkspaceRuntimeProfilePolicyV1,
 )
@@ -585,9 +588,11 @@ def test_admin_deletes_unreferenced_infrastructure_profile_without_runtime_disru
                 infrastructure_profile_id=infrastructure.id,
                 display_name=f"Deletion Target {suffix}",
                 description="Current reference for infrastructure deletion E2E.",
-                policy=WorkspaceRuntimeProfilePolicyV1(
-                    schema_version=1,
-                    network_restriction=None,
+                policy=WorkspaceRuntimeProfilePolicy(
+                    WorkspaceRuntimeProfilePolicyV1(
+                        schema_version=1,
+                        network_restriction=None,
+                    )
                 ),
             )
         ),

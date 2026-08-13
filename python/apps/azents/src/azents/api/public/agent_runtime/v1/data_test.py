@@ -41,7 +41,45 @@ def _document() -> RuntimeConfigurationDocument:
         agent_selection_version=4,
         required_capabilities=("runtime.resources",),
         missing_capabilities=(),
-        resolved_configuration={"secret_provider_detail": "not-public"},
+        resolved_configuration={
+            "effective_profile": {
+                "profile_kind": "kubernetes_pod",
+                "contract_family": "kubernetes.pod-profile",
+                "schema_version": 3,
+                "runner_resources": {
+                    "cpu_request_millicores": None,
+                    "cpu_limit_millicores": None,
+                    "memory_request_bytes": None,
+                    "memory_limit_bytes": None,
+                },
+                "workspace_volume": {
+                    "storage_class_name": "standard",
+                    "storage_request_bytes": 1,
+                },
+                "network_access": {
+                    "mode": "proxy_required",
+                    "allowed_cidrs": ["10.0.0.0/8"],
+                    "denied_cidrs": ["10.1.0.0/16"],
+                    "domain_policy": {
+                        "mode": "allowlist",
+                        "allowed_domains": ["*.example.com"],
+                        "denied_domains": ["blocked.example.com"],
+                    },
+                },
+                "service_account_name": None,
+                "scheduling": {
+                    "node_selector": {},
+                    "tolerations": [],
+                },
+                "dind": None,
+            },
+            "secret_provider_detail": "not-public",
+            "network_enforcement": {
+                "runtime_network_policy_name": "private-policy-name",
+                "proxy_service_cluster_ip": "10.96.0.10",
+                "ca_private_key": "private-key",
+            },
+        },
     )
 
 
@@ -90,6 +128,14 @@ def test_configuration_status_exposes_only_bounded_current_state() -> None:
     assert payload["desired"]["status"] == "ready"
     assert payload["desired"]["target_generation"] == 5
     assert payload["desired"]["workspace_runtime_profile_id"] == "profile-1"
+    assert payload["desired"]["network"] == {
+        "mode": "proxy_required",
+        "domain_mode": "allowlist",
+        "protocol_summary": "http_https_websocket",
+        "https_inspection": True,
+        "enforcement_status": "applied",
+    }
+    assert payload["applied"]["network"] == payload["desired"]["network"]
     assert payload["applied"]["applied_at"] is not None
     keys = _all_keys(payload)
     assert keys.isdisjoint(
@@ -99,6 +145,10 @@ def test_configuration_status_exposes_only_bounded_current_state() -> None:
             "encrypted_secrets",
             "secret_metadata",
             "provider_config",
+            "network_enforcement",
+            "runtime_network_policy_name",
+            "proxy_service_cluster_ip",
+            "ca_private_key",
         }
     )
 
@@ -130,6 +180,7 @@ def test_unconfigured_state_omits_source_scalars_and_digest() -> None:
     assert desired["provider_id"] is None
     assert desired["required_capabilities"] is None
     assert desired["reason_code"] == "runtime_profile_required"
+    assert desired["network"] is None
 
 
 def test_raw_state_replaces_direct_configuration_pointers() -> None:

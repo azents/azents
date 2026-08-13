@@ -557,6 +557,10 @@ type RuntimeInfrastructureProfileSpec = Annotated[
         Tag("kubernetes_pod:2"),
     ]
     | Annotated[
+        KubernetesPodProfileSpecV3,
+        Tag("kubernetes_pod:3"),
+    ]
+    | Annotated[
         DockerContainerProfileSpecV1,
         Tag("docker_container:1"),
     ]
@@ -660,6 +664,17 @@ type WorkspaceRuntimeProfilePolicy = Annotated[
 ]
 
 
+class RuntimeNetworkProjection(_FrozenProfileModel):
+    """Safe server-authored Runtime network authority projection."""
+
+    mode: RuntimeNetworkMode
+    allowed_cidrs: tuple[str, ...]
+    denied_cidrs: tuple[str, ...]
+    domain_mode: RuntimeProxyDomainMode | None
+    allowed_domains: tuple[str, ...]
+    denied_domains: tuple[str, ...]
+
+
 type RuntimeProfileAllowedValues = Annotated[
     frozenset[Annotated[str, Field(min_length=1, max_length=253)]],
     Field(min_length=1),
@@ -734,7 +749,7 @@ def parse_runtime_infrastructure_profile_spec(
 def parse_runtime_infrastructure_profile_api_spec(
     document: object,
 ) -> RuntimeInfrastructureProfileSpec:
-    """Parse the current v1 API infrastructure Profile contract."""
+    """Parse one API-visible infrastructure Profile contract."""
     return _RUNTIME_INFRASTRUCTURE_PROFILE_API_ADAPTER.validate_python(document)
 
 
@@ -757,6 +772,68 @@ def compose_workspace_runtime_profile(
             return _compose_workspace_runtime_profile_v2(spec, workspace_policy)
         case _:
             assert_never(workspace_policy)
+
+
+def project_runtime_network(
+    spec: RuntimeInfrastructureProfileInternalSpec,
+) -> RuntimeNetworkProjection:
+    """Project one infrastructure or effective Profile into safe network authority."""
+    match spec:
+        case DockerContainerProfileSpecV1() | DockerContainerProfileSpecV2():
+            return RuntimeNetworkProjection(
+                mode=RuntimeNetworkMode.DIRECT,
+                allowed_cidrs=(),
+                denied_cidrs=(),
+                domain_mode=None,
+                allowed_domains=(),
+                denied_domains=(),
+            )
+        case KubernetesPodProfileSpecV1() | KubernetesPodProfileSpecV2():
+            return RuntimeNetworkProjection(
+                mode=RuntimeNetworkMode.DIRECT,
+                allowed_cidrs=spec.network_policy.allowed_cidrs,
+                denied_cidrs=spec.network_policy.denied_cidrs,
+                domain_mode=None,
+                allowed_domains=(),
+                denied_domains=(),
+            )
+        case KubernetesPodProfileSpecV3():
+            match spec.network_access:
+                case RuntimeDirectNetworkAccess():
+                    return RuntimeNetworkProjection(
+                        mode=RuntimeNetworkMode.DIRECT,
+                        allowed_cidrs=spec.network_access.allowed_cidrs,
+                        denied_cidrs=spec.network_access.denied_cidrs,
+                        domain_mode=None,
+                        allowed_domains=(),
+                        denied_domains=(),
+                    )
+                case RuntimeProxyRequiredNetworkAccess():
+                    return RuntimeNetworkProjection(
+                        mode=RuntimeNetworkMode.PROXY_REQUIRED,
+                        allowed_cidrs=spec.network_access.allowed_cidrs,
+                        denied_cidrs=spec.network_access.denied_cidrs,
+                        domain_mode=spec.network_access.domain_policy.mode,
+                        allowed_domains=(
+                            spec.network_access.domain_policy.allowed_domains
+                        ),
+                        denied_domains=(
+                            spec.network_access.domain_policy.denied_domains
+                        ),
+                    )
+                case RuntimeNoNetworkAccess():
+                    return RuntimeNetworkProjection(
+                        mode=RuntimeNetworkMode.NO_NETWORK,
+                        allowed_cidrs=(),
+                        denied_cidrs=(),
+                        domain_mode=None,
+                        allowed_domains=(),
+                        denied_domains=(),
+                    )
+                case _:
+                    assert_never(spec.network_access)
+        case _:
+            assert_never(spec)
 
 
 def classify_runtime_configuration_application(

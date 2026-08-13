@@ -4,6 +4,11 @@ import datetime
 from unittest.mock import AsyncMock, create_autospec
 
 import pytest
+from azents_runtime_control.provider import (
+    RuntimeProviderOperationalDiagnostics,
+    RuntimeProviderOperationalWarning,
+    RuntimeProviderOperationalWarningSeverity,
+)
 from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
@@ -14,6 +19,7 @@ from azents.api.admin.runtime_provider.v1 import (
     delete_pod_profile,
     get_auth_binding,
     get_platform_recreation,
+    get_provider_diagnostics,
     mount,
     rotate_auth_binding,
 )
@@ -43,6 +49,10 @@ from azents.repos.runtime_provider_binding.data import RuntimeProviderAuthBindin
 from azents.services.runtime_profile_admin.service import (
     RuntimeProfileAdminService,
     RuntimeProfileAdminUnavailable,
+)
+from azents.services.runtime_provider_admin.service import (
+    RuntimeProviderAdminService,
+    RuntimeProviderOperationalDiagnosticsProjection,
 )
 from azents.services.runtime_provider_binding_admin.service import (
     RuntimeProviderBindingAdminProjection,
@@ -146,6 +156,9 @@ def test_mounts_runtime_provider_inventory_and_authentication_routes() -> None:
 
     assert "/runtime-provider/v1/providers" in paths
     assert "/runtime-provider/v1/providers/{provider_id}" in paths
+    assert (
+        "/runtime-provider/v1/providers/{provider_id}/operational-diagnostics" in paths
+    )
     assert "/runtime-provider/v1/providers/{provider_id}/policy" in paths
     assert "/runtime-provider/v1/providers/{provider_id}/availability" in paths
     assert "/runtime-provider/v1/providers/{provider_id}/contracts" in paths
@@ -192,6 +205,65 @@ def test_mounts_runtime_provider_inventory_and_authentication_routes() -> None:
         "/runtime-provider/v1/authentication-bindings/{binding_id}/audit-events"
         in paths
     )
+
+
+@pytest.mark.asyncio
+async def test_operational_diagnostics_returns_active_snapshot_or_unavailable() -> None:
+    """Admin diagnostics expose only bounded active-generation warning evidence."""
+    checked_at = datetime.datetime(2026, 8, 12, tzinfo=datetime.UTC)
+    diagnostics = RuntimeProviderOperationalDiagnostics(
+        checked_at=checked_at,
+        warnings=(
+            RuntimeProviderOperationalWarning(
+                code="rbac_incomplete",
+                severity=RuntimeProviderOperationalWarningSeverity.WARNING,
+                metadata={
+                    "required_verb": "get",
+                    "resource_kind": "secrets",
+                },
+            ),
+        ),
+    )
+    service = create_autospec(RuntimeProviderAdminService, instance=True)
+    service.get_operational_diagnostics = AsyncMock(
+        return_value=RuntimeProviderOperationalDiagnosticsProjection(
+            generation=7,
+            protocol_version="agent-runtime-provider-kubernetes-v3",
+            diagnostics=diagnostics,
+        )
+    )
+
+    active = await get_provider_diagnostics(
+        service=service,
+        provider_id="provider-1",
+    )
+    service.get_operational_diagnostics.return_value = None
+    unavailable = await get_provider_diagnostics(
+        service=service,
+        provider_id="provider-1",
+    )
+
+    assert active.available
+    assert active.generation == 7
+    assert active.protocol_version == "agent-runtime-provider-kubernetes-v3"
+    assert active.checked_at == checked_at
+    assert [warning.model_dump(mode="json") for warning in active.warnings] == [
+        {
+            "code": "rbac_incomplete",
+            "severity": "warning",
+            "metadata": {
+                "required_verb": "get",
+                "resource_kind": "secrets",
+            },
+        }
+    ]
+    assert unavailable.model_dump(mode="json") == {
+        "available": False,
+        "generation": None,
+        "protocol_version": None,
+        "checked_at": None,
+        "warnings": [],
+    }
 
 
 def test_admin_mount_protects_binding_routes_with_system_admin() -> None:

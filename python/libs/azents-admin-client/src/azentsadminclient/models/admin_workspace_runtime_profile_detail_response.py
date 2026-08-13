@@ -19,10 +19,11 @@ import json
 
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
 from typing_extensions import Annotated
+from azentsadminclient.models.runtime_network_projection import RuntimeNetworkProjection
 from azentsadminclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle
-from azentsadminclient.models.workspace_runtime_profile_policy_v1 import WorkspaceRuntimeProfilePolicyV1
+from azentsadminclient.models.workspace_runtime_profile_policy import WorkspaceRuntimeProfilePolicy
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -37,7 +38,9 @@ class AdminWorkspaceRuntimeProfileDetailResponse(BaseModel):
     display_name: StrictStr
     description: StrictStr
     lifecycle: RuntimeProfileLifecycle
-    policy: WorkspaceRuntimeProfilePolicyV1
+    policy: WorkspaceRuntimeProfilePolicy
+    infrastructure_network: Optional[RuntimeNetworkProjection]
+    effective_network: Optional[RuntimeNetworkProjection]
     version: Annotated[int, Field(strict=True, ge=1)]
     digest: StrictStr
     provider_id: StrictStr
@@ -53,7 +56,7 @@ class AdminWorkspaceRuntimeProfileDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["workspace_id", "workspace_name", "workspace_handle", "profile_id", "display_name", "description", "lifecycle", "policy", "version", "digest", "provider_id", "provider_display_name", "provider_kind", "infrastructure_profile_id", "infrastructure_profile_display_name", "infrastructure_profile_kind", "infrastructure_profile_lifecycle", "infrastructure_profile_version", "selected_agent_count", "running_runtime_count", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["workspace_id", "workspace_name", "workspace_handle", "profile_id", "display_name", "description", "lifecycle", "policy", "infrastructure_network", "effective_network", "version", "digest", "provider_id", "provider_display_name", "provider_kind", "infrastructure_profile_id", "infrastructure_profile_display_name", "infrastructure_profile_kind", "infrastructure_profile_lifecycle", "infrastructure_profile_version", "selected_agent_count", "running_runtime_count", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -99,10 +102,26 @@ class AdminWorkspaceRuntimeProfileDetailResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of policy
         if self.policy:
             _dict['policy'] = self.policy.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of infrastructure_network
+        if self.infrastructure_network:
+            _dict['infrastructure_network'] = self.infrastructure_network.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of effective_network
+        if self.effective_network:
+            _dict['effective_network'] = self.effective_network.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
+
+        # set to None if infrastructure_network (nullable) is None
+        # and model_fields_set contains the field
+        if self.infrastructure_network is None and "infrastructure_network" in self.model_fields_set:
+            _dict['infrastructure_network'] = None
+
+        # set to None if effective_network (nullable) is None
+        # and model_fields_set contains the field
+        if self.effective_network is None and "effective_network" in self.model_fields_set:
+            _dict['effective_network'] = None
 
         return _dict
 
@@ -123,7 +142,9 @@ class AdminWorkspaceRuntimeProfileDetailResponse(BaseModel):
             "display_name": obj.get("display_name"),
             "description": obj.get("description"),
             "lifecycle": obj.get("lifecycle"),
-            "policy": WorkspaceRuntimeProfilePolicyV1.from_dict(obj["policy"]) if obj.get("policy") is not None else None,
+            "policy": WorkspaceRuntimeProfilePolicy.from_dict(obj["policy"]) if obj.get("policy") is not None else None,
+            "infrastructure_network": RuntimeNetworkProjection.from_dict(obj["infrastructure_network"]) if obj.get("infrastructure_network") is not None else None,
+            "effective_network": RuntimeNetworkProjection.from_dict(obj["effective_network"]) if obj.get("effective_network") is not None else None,
             "version": obj.get("version"),
             "digest": obj.get("digest"),
             "provider_id": obj.get("provider_id"),

@@ -664,9 +664,39 @@
       "infrastructureLabel": "Profil Pod ou conteneur du fournisseur",
       "infrastructureDescription": "Ce fournisseur et ce profil précis seront utilisés, sans solution de repli.",
       "lifecycleLabel": "Cycle de vie",
+      "networkColumn": "Réseau effectif",
+      "networkModeLabel": "Accès réseau",
+      "networkModeDescription": "Conservez ou réduisez l’autorité du Provider Profile sélectionné. Le serveur valide et calcule la politique effective.",
+      "infrastructureAuthority": "Autorité maximale du Provider Profile : {mode}",
+      "networkMode": {
+        "inherit": "Hériter du Provider Profile",
+        "direct": "Réseau direct",
+        "proxy_required": "Proxy HTTP inspecté obligatoire",
+        "no_network": "Aucun réseau externe"
+      },
+      "proxyLimitationsTitle": "Limites du proxy",
+      "proxyLimitationsDescription": "Le trafic HTTP, HTTPS et WebSocket externe doit utiliser le proxy géré. Les connexions HTTPS sont inspectées avec la configuration de confiance du Runtime. Les autres protocoles externes sont indisponibles.",
+      "noNetworkTitle": "Réseau externe désactivé",
+      "noNetworkDescription": "Le Runtime ne reçoit aucune autorité réseau client ou externe.",
       "allowedCidrsLabel": "CIDR autorisés",
       "deniedCidrsLabel": "CIDR refusés",
       "cidrsDescription": "Saisissez un CIDR par ligne. Les règles de l’espace de travail peuvent uniquement restreindre la politique du fournisseur.",
+      "deniedCidrsDescription": "Saisissez un CIDR par ligne. Les refus sont prioritaires.",
+      "proxyDomainModeLabel": "Autorité de domaine du proxy",
+      "proxyDomainMode": {
+        "unrestricted": "Tous les domaines sauf les refus explicites",
+        "allowlist": "Uniquement les domaines explicitement autorisés"
+      },
+      "allowedDomainsLabel": "Domaines autorisés",
+      "deniedDomainsLabel": "Domaines refusés",
+      "domainsDescription": "Saisissez un nom d’hôte exact ou un caractère générique de libellé initial par ligne, par exemple api.example.com ou *.example.com.",
+      "deniedDomainsDescription": "Saisissez un nom d’hôte exact ou un caractère générique de libellé initial par ligne. Les refus sont prioritaires.",
+      "networkUnavailable": "Réseau effectif indisponible",
+      "networkAllowedCidrs": "CIDR autorisés : {values}",
+      "networkDeniedCidrs": "CIDR refusés : {values}",
+      "networkDomainMode": "Autorité de domaine : {mode}",
+      "networkAllowedDomains": "Domaines autorisés : {values}",
+      "networkDeniedDomains": "Domaines refusés : {values}",
       "cancel": "Annuler",
       "save": "Enregistrer",
       "availabilityReasons": {
@@ -2156,6 +2186,28 @@
         "infrastructure": "Infrastructure",
         "generation": "Génération",
         "digest": "Empreinte"
+      },
+      "configurationNetworkTitle": "Réseau effectif",
+      "configurationNetworkMode": "Mode : {mode}",
+      "configurationNetworkProtocol": "Portée des protocoles externes : {protocol}",
+      "configurationNetworkDomains": "Autorité de domaine : {mode}",
+      "configurationNetworkHttpsInspected": "Le trafic HTTPS est inspecté avec la configuration de confiance du Runtime.",
+      "configurationNetworkHttpsNotInspected": "Le trafic HTTPS n’est pas inspecté par le proxy Runtime géré.",
+      "configurationNetworkRecreationRequired": "Recréez le Runtime pour appliquer cette configuration réseau.",
+      "configurationNetworkBlocked": "Cette configuration réseau est actuellement bloquée.",
+      "configurationNetworkModes": {
+        "direct": "Réseau direct",
+        "proxy_required": "Proxy HTTP inspecté obligatoire",
+        "no_network": "Aucun réseau externe"
+      },
+      "configurationNetworkProtocols": {
+        "direct_ip": "Connectivité IP directe",
+        "http_https_websocket": "HTTP, HTTPS et WebSocket via le proxy géré",
+        "platform_only": "Connectivité requise par la plateforme uniquement"
+      },
+      "configurationNetworkDomainModes": {
+        "unrestricted": "Tous les domaines sauf les refus explicites",
+        "allowlist": "Liste d’autorisation explicite"
       },
       "configurationStatus": {
         "profile_required": {

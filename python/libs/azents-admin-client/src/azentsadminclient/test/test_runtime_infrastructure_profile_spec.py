@@ -74,6 +74,7 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
                         memory_limit_bytes = 1.0, ), 
                     docker_storage_bytes = 1.0, 
                     shared_temporary_storage_bytes = 1.0, ),
+                network_access = None,
                 network_name = ''
             )
         else:
@@ -117,6 +118,7 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
                         memory_limit_bytes = 1.0, ), 
                     docker_storage_bytes = 1.0, 
                     shared_temporary_storage_bytes = 1.0, ),
+                network_access = None,
                 network_name = '',
         )
         """

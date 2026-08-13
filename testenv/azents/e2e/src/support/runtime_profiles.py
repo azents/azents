@@ -9,6 +9,9 @@ from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api
 from azentspublicclient.models.workspace_runtime_profile_create_request import (
     WorkspaceRuntimeProfileCreateRequest,
 )
+from azentspublicclient.models.workspace_runtime_profile_policy import (
+    WorkspaceRuntimeProfilePolicy,
+)
 from azentspublicclient.models.workspace_runtime_profile_policy_v1 import (
     WorkspaceRuntimeProfilePolicyV1,
 )
@@ -90,9 +93,11 @@ def create_workspace_runtime_profile(
             infrastructure_profile_id=candidates[0].id,
             display_name=f"E2E Runtime {suffix}",
             description="Exact Runtime Profile for a Runtime Provider E2E journey.",
-            policy=WorkspaceRuntimeProfilePolicyV1(
-                schema_version=1,
-                network_restriction=None,
+            policy=WorkspaceRuntimeProfilePolicy(
+                WorkspaceRuntimeProfilePolicyV1(
+                    schema_version=1,
+                    network_restriction=None,
+                )
             ),
         ),
         _headers=headers,

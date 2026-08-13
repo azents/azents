@@ -71,6 +71,7 @@ __all__ = [
     "KubernetesDinDModule",
     "KubernetesPodProfileSpecV1",
     "KubernetesPodProfileSpecV2",
+    "KubernetesPodProfileSpecV3",
     "KubernetesSchedulingModule",
     "KubernetesToleration",
     "KubernetesWorkspaceVolume",
@@ -84,6 +85,7 @@ __all__ = [
     "PlatformGitHubAppFieldResponse",
     "PlatformGitHubAppHealthResponse",
     "PlatformGitHubAppPatchRequest",
+    "RuntimeDirectNetworkAccess",
     "RuntimeInfrastructureProfileCreateRequest",
     "RuntimeInfrastructureProfileDeleteRequest",
     "RuntimeInfrastructureProfileDeleteResponse",
@@ -93,7 +95,11 @@ __all__ = [
     "RuntimeInfrastructureProfileReplaceRequest",
     "RuntimeInfrastructureProfileResponse",
     "RuntimeInfrastructureProfileSpec",
+    "RuntimeNetworkAccess",
+    "RuntimeNetworkMode",
     "RuntimeNetworkPolicyModule",
+    "RuntimeNetworkProjection",
+    "RuntimeNoNetworkAccess",
     "RuntimeProfileLifecycle",
     "RuntimeProviderAuthMethod",
     "RuntimeProviderAuthenticationBindingAuditEventResponse",
@@ -113,8 +119,15 @@ __all__ = [
     "RuntimeProviderContractResponse",
     "RuntimeProviderLifecycleState",
     "RuntimeProviderListResponse",
+    "RuntimeProviderOperationalDiagnosticsResponse",
+    "RuntimeProviderOperationalWarningResponse",
     "RuntimeProviderPolicyUpdateRequest",
     "RuntimeProviderResponse",
+    "RuntimeProxyDomainMode",
+    "RuntimeProxyDomainPolicy",
+    "RuntimeProxyDomainPolicyAllowlist",
+    "RuntimeProxyDomainPolicyUnrestricted",
+    "RuntimeProxyRequiredNetworkAccess",
     "RuntimeRecreationCreateRequest",
     "RuntimeRecreationItemResponse",
     "RuntimeRecreationItemStatus",
@@ -162,7 +175,14 @@ __all__ = [
     "WorkspaceCreateRequest",
     "WorkspaceListResponse",
     "WorkspaceResponse",
+    "WorkspaceRuntimeNetworkRestriction",
+    "WorkspaceRuntimeNetworkRestrictionDirect",
+    "WorkspaceRuntimeNetworkRestrictionInherit",
+    "WorkspaceRuntimeNetworkRestrictionNoNetwork",
+    "WorkspaceRuntimeNetworkRestrictionProxyRequired",
+    "WorkspaceRuntimeProfilePolicy",
     "WorkspaceRuntimeProfilePolicyV1",
+    "WorkspaceRuntimeProfilePolicyV2",
     "WorkspaceUpdateRequest",
     "WorkspaceUserCreateRequest",
     "WorkspaceUserListResponse",
@@ -229,6 +249,7 @@ from azentsadminclient.models.kubernetes_container_resources import KubernetesCo
 from azentsadminclient.models.kubernetes_din_d_module import KubernetesDinDModule as KubernetesDinDModule
 from azentsadminclient.models.kubernetes_pod_profile_spec_v1 import KubernetesPodProfileSpecV1 as KubernetesPodProfileSpecV1
 from azentsadminclient.models.kubernetes_pod_profile_spec_v2 import KubernetesPodProfileSpecV2 as KubernetesPodProfileSpecV2
+from azentsadminclient.models.kubernetes_pod_profile_spec_v3 import KubernetesPodProfileSpecV3 as KubernetesPodProfileSpecV3
 from azentsadminclient.models.kubernetes_scheduling_module import KubernetesSchedulingModule as KubernetesSchedulingModule
 from azentsadminclient.models.kubernetes_toleration import KubernetesToleration as KubernetesToleration
 from azentsadminclient.models.kubernetes_workspace_volume import KubernetesWorkspaceVolume as KubernetesWorkspaceVolume
@@ -242,6 +263,7 @@ from azentsadminclient.models.platform_git_hub_app_effective_status import Platf
 from azentsadminclient.models.platform_git_hub_app_field_response import PlatformGitHubAppFieldResponse as PlatformGitHubAppFieldResponse
 from azentsadminclient.models.platform_git_hub_app_health_response import PlatformGitHubAppHealthResponse as PlatformGitHubAppHealthResponse
 from azentsadminclient.models.platform_git_hub_app_patch_request import PlatformGitHubAppPatchRequest as PlatformGitHubAppPatchRequest
+from azentsadminclient.models.runtime_direct_network_access import RuntimeDirectNetworkAccess as RuntimeDirectNetworkAccess
 from azentsadminclient.models.runtime_infrastructure_profile_create_request import RuntimeInfrastructureProfileCreateRequest as RuntimeInfrastructureProfileCreateRequest
 from azentsadminclient.models.runtime_infrastructure_profile_delete_request import RuntimeInfrastructureProfileDeleteRequest as RuntimeInfrastructureProfileDeleteRequest
 from azentsadminclient.models.runtime_infrastructure_profile_delete_response import RuntimeInfrastructureProfileDeleteResponse as RuntimeInfrastructureProfileDeleteResponse
@@ -251,7 +273,11 @@ from azentsadminclient.models.runtime_infrastructure_profile_list_response impor
 from azentsadminclient.models.runtime_infrastructure_profile_replace_request import RuntimeInfrastructureProfileReplaceRequest as RuntimeInfrastructureProfileReplaceRequest
 from azentsadminclient.models.runtime_infrastructure_profile_response import RuntimeInfrastructureProfileResponse as RuntimeInfrastructureProfileResponse
 from azentsadminclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec as RuntimeInfrastructureProfileSpec
+from azentsadminclient.models.runtime_network_access import RuntimeNetworkAccess as RuntimeNetworkAccess
+from azentsadminclient.models.runtime_network_mode import RuntimeNetworkMode as RuntimeNetworkMode
 from azentsadminclient.models.runtime_network_policy_module import RuntimeNetworkPolicyModule as RuntimeNetworkPolicyModule
+from azentsadminclient.models.runtime_network_projection import RuntimeNetworkProjection as RuntimeNetworkProjection
+from azentsadminclient.models.runtime_no_network_access import RuntimeNoNetworkAccess as RuntimeNoNetworkAccess
 from azentsadminclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle as RuntimeProfileLifecycle
 from azentsadminclient.models.runtime_provider_auth_method import RuntimeProviderAuthMethod as RuntimeProviderAuthMethod
 from azentsadminclient.models.runtime_provider_authentication_binding_audit_event_response import RuntimeProviderAuthenticationBindingAuditEventResponse as RuntimeProviderAuthenticationBindingAuditEventResponse
@@ -271,8 +297,15 @@ from azentsadminclient.models.runtime_provider_contract_list_response import Run
 from azentsadminclient.models.runtime_provider_contract_response import RuntimeProviderContractResponse as RuntimeProviderContractResponse
 from azentsadminclient.models.runtime_provider_lifecycle_state import RuntimeProviderLifecycleState as RuntimeProviderLifecycleState
 from azentsadminclient.models.runtime_provider_list_response import RuntimeProviderListResponse as RuntimeProviderListResponse
+from azentsadminclient.models.runtime_provider_operational_diagnostics_response import RuntimeProviderOperationalDiagnosticsResponse as RuntimeProviderOperationalDiagnosticsResponse
+from azentsadminclient.models.runtime_provider_operational_warning_response import RuntimeProviderOperationalWarningResponse as RuntimeProviderOperationalWarningResponse
 from azentsadminclient.models.runtime_provider_policy_update_request import RuntimeProviderPolicyUpdateRequest as RuntimeProviderPolicyUpdateRequest
 from azentsadminclient.models.runtime_provider_response import RuntimeProviderResponse as RuntimeProviderResponse
+from azentsadminclient.models.runtime_proxy_domain_mode import RuntimeProxyDomainMode as RuntimeProxyDomainMode
+from azentsadminclient.models.runtime_proxy_domain_policy import RuntimeProxyDomainPolicy as RuntimeProxyDomainPolicy
+from azentsadminclient.models.runtime_proxy_domain_policy_allowlist import RuntimeProxyDomainPolicyAllowlist as RuntimeProxyDomainPolicyAllowlist
+from azentsadminclient.models.runtime_proxy_domain_policy_unrestricted import RuntimeProxyDomainPolicyUnrestricted as RuntimeProxyDomainPolicyUnrestricted
+from azentsadminclient.models.runtime_proxy_required_network_access import RuntimeProxyRequiredNetworkAccess as RuntimeProxyRequiredNetworkAccess
 from azentsadminclient.models.runtime_recreation_create_request import RuntimeRecreationCreateRequest as RuntimeRecreationCreateRequest
 from azentsadminclient.models.runtime_recreation_item_response import RuntimeRecreationItemResponse as RuntimeRecreationItemResponse
 from azentsadminclient.models.runtime_recreation_item_status import RuntimeRecreationItemStatus as RuntimeRecreationItemStatus
@@ -320,7 +353,14 @@ from azentsadminclient.models.validation_error_loc_inner import ValidationErrorL
 from azentsadminclient.models.workspace_create_request import WorkspaceCreateRequest as WorkspaceCreateRequest
 from azentsadminclient.models.workspace_list_response import WorkspaceListResponse as WorkspaceListResponse
 from azentsadminclient.models.workspace_response import WorkspaceResponse as WorkspaceResponse
+from azentsadminclient.models.workspace_runtime_network_restriction import WorkspaceRuntimeNetworkRestriction as WorkspaceRuntimeNetworkRestriction
+from azentsadminclient.models.workspace_runtime_network_restriction_direct import WorkspaceRuntimeNetworkRestrictionDirect as WorkspaceRuntimeNetworkRestrictionDirect
+from azentsadminclient.models.workspace_runtime_network_restriction_inherit import WorkspaceRuntimeNetworkRestrictionInherit as WorkspaceRuntimeNetworkRestrictionInherit
+from azentsadminclient.models.workspace_runtime_network_restriction_no_network import WorkspaceRuntimeNetworkRestrictionNoNetwork as WorkspaceRuntimeNetworkRestrictionNoNetwork
+from azentsadminclient.models.workspace_runtime_network_restriction_proxy_required import WorkspaceRuntimeNetworkRestrictionProxyRequired as WorkspaceRuntimeNetworkRestrictionProxyRequired
+from azentsadminclient.models.workspace_runtime_profile_policy import WorkspaceRuntimeProfilePolicy as WorkspaceRuntimeProfilePolicy
 from azentsadminclient.models.workspace_runtime_profile_policy_v1 import WorkspaceRuntimeProfilePolicyV1 as WorkspaceRuntimeProfilePolicyV1
+from azentsadminclient.models.workspace_runtime_profile_policy_v2 import WorkspaceRuntimeProfilePolicyV2 as WorkspaceRuntimeProfilePolicyV2
 from azentsadminclient.models.workspace_update_request import WorkspaceUpdateRequest as WorkspaceUpdateRequest
 from azentsadminclient.models.workspace_user_create_request import WorkspaceUserCreateRequest as WorkspaceUserCreateRequest
 from azentsadminclient.models.workspace_user_list_response import WorkspaceUserListResponse as WorkspaceUserListResponse

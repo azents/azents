@@ -1,7 +1,6 @@
 """Hierarchical Runtime network Profile contract tests."""
 
 import pytest
-from pydantic import ValidationError
 
 from azents.core.runtime_profile import (
     JsonValue,
@@ -33,6 +32,7 @@ from azents.core.runtime_profile import (
     evaluate_runtime_profile_compatibility,
     parse_runtime_infrastructure_profile_api_spec,
     parse_workspace_runtime_profile_policy,
+    project_runtime_network,
     required_runtime_profile_capabilities,
 )
 
@@ -151,18 +151,35 @@ def _resolved_configuration(
     }
 
 
-def test_v1_api_profile_parser_accepts_v2_and_rejects_v3() -> None:
-    """The current Admin and Public v1 APIs expose only Profile v1/v2."""
+def test_v1_api_profile_parser_accepts_legacy_and_v3_contracts() -> None:
+    """The stable API version exposes every rollout Profile contract version."""
     legacy = _legacy_direct_profile()
+    strict = _profile_v3(
+        _proxy_network(
+            RuntimeProxyDomainPolicyAllowlist(
+                mode=RuntimeProxyDomainMode.ALLOWLIST,
+                allowed_domains=("*.example.com",),
+                denied_domains=("blocked.example.com",),
+            )
+        )
+    )
 
     assert (
         parse_runtime_infrastructure_profile_api_spec(legacy.model_dump(mode="json"))
         == legacy
     )
-    with pytest.raises(ValidationError):
-        parse_runtime_infrastructure_profile_api_spec(
-            _profile_v3(_direct_network()).model_dump(mode="json")
-        )
+    assert (
+        parse_runtime_infrastructure_profile_api_spec(strict.model_dump(mode="json"))
+        == strict
+    )
+    assert project_runtime_network(strict).model_dump(mode="json") == {
+        "mode": "proxy_required",
+        "allowed_cidrs": ["10.0.0.0/8"],
+        "denied_cidrs": ["10.1.0.0/16"],
+        "domain_mode": "allowlist",
+        "allowed_domains": ["*.example.com"],
+        "denied_domains": ["blocked.example.com"],
+    }
 
 
 def test_policy_v2_parser_canonicalizes_cidrs_and_idna_domains() -> None:

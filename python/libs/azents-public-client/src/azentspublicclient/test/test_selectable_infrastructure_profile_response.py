@@ -43,6 +43,7 @@ class TestSelectableInfrastructureProfileResponse(unittest.TestCase):
                 display_name = '',
                 description = '',
                 spec = None,
+                infrastructure_network = { },
                 required_capabilities = [
                     ''
                     ],
@@ -60,6 +61,7 @@ class TestSelectableInfrastructureProfileResponse(unittest.TestCase):
                 display_name = '',
                 description = '',
                 spec = None,
+                infrastructure_network = { },
                 required_capabilities = [
                     ''
                     ],

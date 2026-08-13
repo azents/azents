@@ -2,13 +2,18 @@
 
 import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from azents.core.runtime_profile import (
     RuntimeInfrastructureProfileSpec,
+    RuntimeNetworkProjection,
     RuntimeProfileLifecycle,
-    WorkspaceRuntimeProfilePolicyV1,
+    WorkspaceRuntimeProfilePolicy,
+    compose_workspace_runtime_profile,
     parse_runtime_infrastructure_profile_api_spec,
+    parse_runtime_infrastructure_profile_spec,
+    parse_workspace_runtime_profile_policy,
+    project_runtime_network,
 )
 from azents.repos.runtime_profile.data import WorkspaceRuntimeProfileDeletion
 from azents.services.runtime_profile_workspace.service import (
@@ -29,6 +34,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
     display_name: str
     description: str
     spec: RuntimeInfrastructureProfileSpec
+    infrastructure_network: RuntimeNetworkProjection
     required_capabilities: list[str]
     version: int
     digest: str
@@ -52,6 +58,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
             display_name=profile.display_name,
             description=profile.description,
             spec=spec,
+            infrastructure_network=project_runtime_network(spec),
             required_capabilities=list(profile.required_capabilities),
             version=profile.version,
             digest=profile.digest,
@@ -74,7 +81,9 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
     display_name: str
     description: str
     lifecycle: RuntimeProfileLifecycle
-    policy: WorkspaceRuntimeProfilePolicyV1
+    policy: WorkspaceRuntimeProfilePolicy
+    infrastructure_network: RuntimeNetworkProjection | None
+    effective_network: RuntimeNetworkProjection | None
     version: int
     digest: str
     available: bool
@@ -95,6 +104,20 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
         """Convert one Workspace Profile availability projection."""
         profile = projection.profile
         compatibility = projection.compatibility
+        policy = parse_workspace_runtime_profile_policy(profile.policy)
+        infrastructure_network: RuntimeNetworkProjection | None = None
+        effective_network: RuntimeNetworkProjection | None = None
+        try:
+            infrastructure = parse_runtime_infrastructure_profile_spec(
+                projection.infrastructure_profile.spec
+            )
+            infrastructure_network = project_runtime_network(infrastructure)
+            effective = parse_runtime_infrastructure_profile_spec(
+                compose_workspace_runtime_profile(infrastructure, policy)
+            )
+            effective_network = project_runtime_network(effective)
+        except ValidationError, ValueError:
+            pass
         return cls(
             id=profile.id,
             provider_id=projection.provider.provider_id,
@@ -102,7 +125,9 @@ class WorkspaceRuntimeProfileResponse(BaseModel):
             display_name=profile.display_name,
             description=profile.description,
             lifecycle=profile.lifecycle,
-            policy=WorkspaceRuntimeProfilePolicyV1.model_validate(profile.policy),
+            policy=policy,
+            infrastructure_network=infrastructure_network,
+            effective_network=effective_network,
             version=profile.version,
             digest=profile.digest,
             available=projection.available,
@@ -130,7 +155,7 @@ class WorkspaceRuntimeProfileCreateRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     description: str = Field(max_length=4000)
     lifecycle: RuntimeProfileLifecycle = RuntimeProfileLifecycle.ACTIVE
-    policy: WorkspaceRuntimeProfilePolicyV1
+    policy: WorkspaceRuntimeProfilePolicy
 
 
 class WorkspaceRuntimeProfileReplaceRequest(BaseModel):
@@ -141,7 +166,7 @@ class WorkspaceRuntimeProfileReplaceRequest(BaseModel):
     display_name: str = Field(min_length=1, max_length=120)
     description: str = Field(max_length=4000)
     lifecycle: RuntimeProfileLifecycle
-    policy: WorkspaceRuntimeProfilePolicyV1
+    policy: WorkspaceRuntimeProfilePolicy
 
 
 class WorkspaceRuntimeProfileDeleteRequest(BaseModel):

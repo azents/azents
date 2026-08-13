@@ -7,12 +7,17 @@ import {
   Modal,
   Select,
   Stack,
+  Text,
   Textarea,
   TextInput,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo } from "react";
+import {
+  policySchemaVersionForInfrastructure,
+  proxyDomainModeForInfrastructure,
+} from "../runtimeProfilePolicy";
 import { runtimeProfileFormSchema } from "../schemas";
 import type { RuntimeProfileFormValues } from "../schemas";
 import type {
@@ -33,6 +38,70 @@ function cidrsToText(cidrs?: string[]): string {
   return cidrs?.join("\n") ?? "";
 }
 
+function networkModeForProfile(
+  editorState: RuntimeProfileEditorState,
+): RuntimeProfileFormValues["networkMode"] {
+  if (editorState.type !== "EDIT") {
+    return "inherit";
+  }
+  const policy = editorState.profile.policy;
+  if (policy.schema_version === 1) {
+    return policy.network_restriction === null ? "inherit" : "direct";
+  }
+  return policy.network_restriction.mode;
+}
+
+function networkFieldsForProfile(
+  editorState: RuntimeProfileEditorState,
+): Pick<
+  RuntimeProfileFormValues,
+  | "allowedCidrs"
+  | "deniedCidrs"
+  | "proxyDomainMode"
+  | "allowedDomains"
+  | "deniedDomains"
+> {
+  if (editorState.type !== "EDIT") {
+    return {
+      allowedCidrs: "",
+      deniedCidrs: "",
+      proxyDomainMode: "unrestricted",
+      allowedDomains: "",
+      deniedDomains: "",
+    };
+  }
+  const restriction = editorState.profile.policy.network_restriction;
+  if (
+    restriction === null ||
+    ("mode" in restriction &&
+      (restriction.mode === "inherit" || restriction.mode === "no_network"))
+  ) {
+    return {
+      allowedCidrs: "",
+      deniedCidrs: "",
+      proxyDomainMode: "unrestricted",
+      allowedDomains: "",
+      deniedDomains: "",
+    };
+  }
+  return {
+    allowedCidrs: cidrsToText(restriction.allowed_cidrs),
+    deniedCidrs: cidrsToText(restriction.denied_cidrs),
+    proxyDomainMode:
+      "domain_policy" in restriction
+        ? restriction.domain_policy.mode
+        : "unrestricted",
+    allowedDomains:
+      "domain_policy" in restriction
+        ? cidrsToText(restriction.domain_policy.allowed_domains)
+        : "",
+    deniedDomains:
+      "domain_policy" in restriction
+        ? cidrsToText(restriction.domain_policy.denied_domains)
+        : "",
+  };
+}
+
 export function RuntimeProfileFormModal({
   editorState,
   mutationState,
@@ -48,8 +117,13 @@ export function RuntimeProfileFormModal({
       description: "",
       infrastructureProfileId: "",
       lifecycle: "active",
+      policySchemaVersion: 2,
+      networkMode: "inherit",
       allowedCidrs: "",
       deniedCidrs: "",
+      proxyDomainMode: "unrestricted",
+      allowedDomains: "",
+      deniedDomains: "",
     },
     validate: (values) => {
       const result = runtimeProfileFormSchema.safeParse(values);
@@ -67,26 +141,48 @@ export function RuntimeProfileFormModal({
 
   useEffect(() => {
     if (editorState.type === "EDIT") {
-      const restriction = editorState.profile.policy.network_restriction;
+      const selectedInfrastructure = infrastructureProfiles.find(
+        (profile) =>
+          profile.id === editorState.profile.infrastructure_profile_id,
+      );
+      const infrastructureNetwork =
+        selectedInfrastructure?.infrastructure_network ??
+        editorState.profile.infrastructure_network;
+      const networkFields = networkFieldsForProfile(editorState);
       form.setValues({
         displayName: editorState.profile.display_name,
         description: editorState.profile.description,
         infrastructureProfileId: editorState.profile.infrastructure_profile_id,
         lifecycle: editorState.profile.lifecycle,
-        allowedCidrs: cidrsToText(restriction?.allowed_cidrs),
-        deniedCidrs: cidrsToText(restriction?.denied_cidrs),
+        policySchemaVersion: editorState.profile.policy.schema_version,
+        networkMode: networkModeForProfile(editorState),
+        ...networkFields,
+        proxyDomainMode:
+          infrastructureNetwork?.domain_mode === "allowlist"
+            ? "allowlist"
+            : networkFields.proxyDomainMode,
       });
       form.resetDirty();
       return;
     }
     if (editorState.type === "CREATE") {
+      const initialInfrastructure = infrastructureProfiles[0];
       form.setValues({
         displayName: "",
         description: "",
-        infrastructureProfileId: infrastructureProfiles[0]?.id ?? "",
+        infrastructureProfileId: initialInfrastructure?.id ?? "",
         lifecycle: "active",
+        policySchemaVersion: initialInfrastructure
+          ? policySchemaVersionForInfrastructure(initialInfrastructure)
+          : 2,
+        networkMode: "inherit",
         allowedCidrs: "",
         deniedCidrs: "",
+        proxyDomainMode: proxyDomainModeForInfrastructure(
+          initialInfrastructure?.infrastructure_network ?? null,
+        ),
+        allowedDomains: "",
+        deniedDomains: "",
       });
       form.resetDirty();
     }
@@ -114,6 +210,45 @@ export function RuntimeProfileFormModal({
     }
     return options;
   }, [editorState, infrastructureProfiles, t]);
+  const selectedInfrastructure = infrastructureProfiles.find(
+    (profile) => profile.id === form.values.infrastructureProfileId,
+  );
+  const infrastructureNetworkMode =
+    selectedInfrastructure?.infrastructure_network.mode ??
+    (editorState.type === "EDIT" &&
+    editorState.profile.infrastructure_profile_id ===
+      form.values.infrastructureProfileId
+      ? editorState.profile.infrastructure_network?.mode
+      : null) ??
+    null;
+  const infrastructureDomainMode =
+    selectedInfrastructure?.infrastructure_network.domain_mode ??
+    (editorState.type === "EDIT" &&
+    editorState.profile.infrastructure_profile_id ===
+      form.values.infrastructureProfileId
+      ? editorState.profile.infrastructure_network?.domain_mode
+      : null) ??
+    null;
+  const modeOptions = [
+    { value: "inherit", label: t("networkMode.inherit") },
+    ...(form.values.policySchemaVersion === 1 ||
+    infrastructureNetworkMode === "direct"
+      ? [{ value: "direct", label: t("networkMode.direct") }]
+      : []),
+    ...(form.values.policySchemaVersion === 2 &&
+    (infrastructureNetworkMode === "direct" ||
+      infrastructureNetworkMode === "proxy_required")
+      ? [
+          {
+            value: "proxy_required",
+            label: t("networkMode.proxy_required"),
+          },
+        ]
+      : []),
+    ...(form.values.policySchemaVersion === 2
+      ? [{ value: "no_network", label: t("networkMode.no_network") }]
+      : []),
+  ];
 
   return (
     <Modal
@@ -143,7 +278,27 @@ export function RuntimeProfileFormModal({
             searchable
             required
             key={form.key("infrastructureProfileId")}
-            {...form.getInputProps("infrastructureProfileId")}
+            value={form.values.infrastructureProfileId}
+            error={form.errors.infrastructureProfileId}
+            onChange={(value) => {
+              form.setFieldValue("infrastructureProfileId", value ?? "");
+              form.setFieldValue("networkMode", "inherit");
+              const infrastructure = infrastructureProfiles.find(
+                (profile) => profile.id === value,
+              );
+              if (infrastructure) {
+                form.setFieldValue(
+                  "policySchemaVersion",
+                  policySchemaVersionForInfrastructure(infrastructure),
+                );
+                form.setFieldValue(
+                  "proxyDomainMode",
+                  proxyDomainModeForInfrastructure(
+                    infrastructure.infrastructure_network,
+                  ),
+                );
+              }
+            }}
           />
           <Select
             label={t("lifecycleLabel")}
@@ -155,20 +310,91 @@ export function RuntimeProfileFormModal({
             key={form.key("lifecycle")}
             {...form.getInputProps("lifecycle")}
           />
-          <Textarea
-            label={t("allowedCidrsLabel")}
-            description={t("cidrsDescription")}
-            minRows={3}
-            key={form.key("allowedCidrs")}
-            {...form.getInputProps("allowedCidrs")}
+          <Select
+            label={t("networkModeLabel")}
+            description={t("networkModeDescription")}
+            data={modeOptions}
+            allowDeselect={false}
+            key={form.key("networkMode")}
+            {...form.getInputProps("networkMode")}
           />
-          <Textarea
-            label={t("deniedCidrsLabel")}
-            description={t("cidrsDescription")}
-            minRows={3}
-            key={form.key("deniedCidrs")}
-            {...form.getInputProps("deniedCidrs")}
-          />
+          {infrastructureNetworkMode !== null && (
+            <Text size="xs" c="dimmed">
+              {t("infrastructureAuthority", {
+                mode: t(`networkMode.${infrastructureNetworkMode}`),
+              })}
+            </Text>
+          )}
+          {form.values.networkMode === "proxy_required" && (
+            <Alert color="blue" title={t("proxyLimitationsTitle")}>
+              {t("proxyLimitationsDescription")}
+            </Alert>
+          )}
+          {form.values.networkMode === "no_network" && (
+            <Alert color="gray" title={t("noNetworkTitle")}>
+              {t("noNetworkDescription")}
+            </Alert>
+          )}
+          {(form.values.networkMode === "direct" ||
+            form.values.networkMode === "proxy_required") && (
+            <>
+              <Textarea
+                label={t("allowedCidrsLabel")}
+                description={t("cidrsDescription")}
+                minRows={3}
+                key={form.key("allowedCidrs")}
+                {...form.getInputProps("allowedCidrs")}
+              />
+              <Textarea
+                label={t("deniedCidrsLabel")}
+                description={t("deniedCidrsDescription")}
+                minRows={3}
+                key={form.key("deniedCidrs")}
+                {...form.getInputProps("deniedCidrs")}
+              />
+            </>
+          )}
+          {form.values.policySchemaVersion === 2 &&
+            form.values.networkMode === "proxy_required" && (
+              <>
+                <Select
+                  label={t("proxyDomainModeLabel")}
+                  data={[
+                    ...(infrastructureDomainMode === "allowlist"
+                      ? []
+                      : [
+                          {
+                            value: "unrestricted",
+                            label: t("proxyDomainMode.unrestricted"),
+                          },
+                        ]),
+                    {
+                      value: "allowlist",
+                      label: t("proxyDomainMode.allowlist"),
+                    },
+                  ]}
+                  allowDeselect={false}
+                  key={form.key("proxyDomainMode")}
+                  {...form.getInputProps("proxyDomainMode")}
+                />
+                {form.values.proxyDomainMode === "allowlist" && (
+                  <Textarea
+                    label={t("allowedDomainsLabel")}
+                    description={t("domainsDescription")}
+                    minRows={3}
+                    key={form.key("allowedDomains")}
+                    {...form.getInputProps("allowedDomains")}
+                  />
+                )}
+                <Textarea
+                  label={t("deniedDomainsLabel")}
+                  description={t("deniedDomainsDescription")}
+                  minRows={3}
+                  key={form.key("deniedDomains")}
+                  {...form.getInputProps("deniedDomains")}
+                />
+              </>
+            )}
           {mutationState.type === "IDLE" && mutationState.error !== null && (
             <Alert color="red">{mutationState.error}</Alert>
           )}

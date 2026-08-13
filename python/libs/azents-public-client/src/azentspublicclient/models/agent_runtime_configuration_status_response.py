@@ -17,9 +17,10 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.runtime_configuration_state_response import RuntimeConfigurationStateResponse
+from azentspublicclient.models.runtime_configuration_status import RuntimeConfigurationStatus
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -27,18 +28,11 @@ class AgentRuntimeConfigurationStatusResponse(BaseModel):
     """
     Desired and applied Runtime configuration status.
     """ # noqa: E501
-    status: StrictStr
+    status: RuntimeConfigurationStatus
     desired: Optional[RuntimeConfigurationStateResponse]
     applied: Optional[RuntimeConfigurationStateResponse]
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["status", "desired", "applied"]
-
-    @field_validator('status')
-    def status_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['profile_required', 'configuration_blocked', 'configured_not_created', 'waiting_for_recreation', 'applied']):
-            raise ValueError("must be one of enum values ('profile_required', 'configuration_blocked', 'configured_not_created', 'waiting_for_recreation', 'applied')")
-        return value
 
     model_config = ConfigDict(
         populate_by_name=True,

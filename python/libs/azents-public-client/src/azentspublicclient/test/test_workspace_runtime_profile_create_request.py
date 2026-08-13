@@ -39,14 +39,14 @@ class TestWorkspaceRuntimeProfileCreateRequest(unittest.TestCase):
                 display_name = '0',
                 description = '',
                 lifecycle = 'active',
-                policy = { }
+                policy = None
             )
         else:
             return WorkspaceRuntimeProfileCreateRequest(
                 infrastructure_profile_id = '',
                 display_name = '0',
                 description = '',
-                policy = { },
+                policy = None,
         )
         """
 

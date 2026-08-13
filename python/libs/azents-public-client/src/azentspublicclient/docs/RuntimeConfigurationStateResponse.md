@@ -25,6 +25,7 @@ Name | Type | Description | Notes
 **provider_acknowledged_at** | **datetime** |  | 
 **runner_observed_at** | **datetime** |  | 
 **applied_at** | **datetime** |  | 
+**network** | [**RuntimeConfigurationNetworkResponse**](RuntimeConfigurationNetworkResponse.md) |  | 
 
 ## Example
 

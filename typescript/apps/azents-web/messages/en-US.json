@@ -664,9 +664,39 @@
       "infrastructureLabel": "Provider Pod or Container Profile",
       "infrastructureDescription": "This exact Provider and Profile will be used. No fallback is applied.",
       "lifecycleLabel": "Lifecycle",
+      "networkColumn": "Effective network",
+      "networkModeLabel": "Network access",
+      "networkModeDescription": "Preserve or narrow the selected Provider Profile authority. The server validates and computes the effective policy.",
+      "infrastructureAuthority": "Provider Profile maximum: {mode}",
+      "networkMode": {
+        "inherit": "Inherit Provider Profile",
+        "direct": "Direct network",
+        "proxy_required": "Inspected HTTP proxy required",
+        "no_network": "No external network"
+      },
+      "proxyLimitationsTitle": "Proxy limitations",
+      "proxyLimitationsDescription": "External HTTP, HTTPS, and WebSocket traffic must use the managed proxy. HTTPS connections are inspected using Runtime trust configuration. Other external protocols are unavailable.",
+      "noNetworkTitle": "External network disabled",
+      "noNetworkDescription": "The Runtime receives no customer or external network authority.",
       "allowedCidrsLabel": "Allowed CIDRs",
       "deniedCidrsLabel": "Denied CIDRs",
       "cidrsDescription": "Enter one CIDR per line. Workspace rules can only narrow provider policy.",
+      "deniedCidrsDescription": "Enter one CIDR per line. Denials take precedence.",
+      "proxyDomainModeLabel": "Proxy domain authority",
+      "proxyDomainMode": {
+        "unrestricted": "All domains except explicit denials",
+        "allowlist": "Only explicitly allowed domains"
+      },
+      "allowedDomainsLabel": "Allowed domains",
+      "deniedDomainsLabel": "Denied domains",
+      "domainsDescription": "Enter one exact hostname or leading-label wildcard per line, such as api.example.com or *.example.com.",
+      "deniedDomainsDescription": "Enter one exact hostname or leading-label wildcard per line. Denials take precedence.",
+      "networkUnavailable": "Effective network unavailable",
+      "networkAllowedCidrs": "Allowed CIDRs: {values}",
+      "networkDeniedCidrs": "Denied CIDRs: {values}",
+      "networkDomainMode": "Domain authority: {mode}",
+      "networkAllowedDomains": "Allowed domains: {values}",
+      "networkDeniedDomains": "Denied domains: {values}",
       "cancel": "Cancel",
       "save": "Save",
       "availabilityReasons": {
@@ -2156,6 +2186,28 @@
         "infrastructure": "Infrastructure",
         "generation": "Generation",
         "digest": "Digest"
+      },
+      "configurationNetworkTitle": "Effective network",
+      "configurationNetworkMode": "Mode: {mode}",
+      "configurationNetworkProtocol": "External protocol scope: {protocol}",
+      "configurationNetworkDomains": "Domain authority: {mode}",
+      "configurationNetworkHttpsInspected": "HTTPS traffic is inspected using the Runtime trust configuration.",
+      "configurationNetworkHttpsNotInspected": "HTTPS traffic is not inspected by the managed Runtime proxy.",
+      "configurationNetworkRecreationRequired": "Recreate the Runtime to apply this network configuration.",
+      "configurationNetworkBlocked": "This network configuration is currently blocked.",
+      "configurationNetworkModes": {
+        "direct": "Direct network",
+        "proxy_required": "Inspected HTTP proxy required",
+        "no_network": "No external network"
+      },
+      "configurationNetworkProtocols": {
+        "direct_ip": "Direct IP connectivity",
+        "http_https_websocket": "HTTP, HTTPS, and WebSocket through the managed proxy",
+        "platform_only": "Platform-required connectivity only"
+      },
+      "configurationNetworkDomainModes": {
+        "unrestricted": "All domains except explicit denials",
+        "allowlist": "Explicit allowlist"
       },
       "configurationStatus": {
         "profile_required": {

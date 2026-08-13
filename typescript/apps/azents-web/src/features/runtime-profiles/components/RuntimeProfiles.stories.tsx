@@ -32,11 +32,70 @@ const infrastructureProfile: SelectableInfrastructureProfileResponse = {
     },
     network_name: "azents-runtimes",
   },
+  infrastructure_network: {
+    mode: "direct",
+    allowed_cidrs: ["0.0.0.0/0", "::/0"],
+    denied_cidrs: ["169.254.169.254/32"],
+    domain_mode: null,
+    allowed_domains: [],
+    denied_domains: [],
+  },
   required_capabilities: ["runtime.docker.container-profile.v1"],
   version: 3,
   digest: "sha256:infrastructure-profile-digest",
   capability_revision_id: "capability-revision-9",
 };
+
+const proxyAllowlistInfrastructureProfile: SelectableInfrastructureProfileResponse =
+  {
+    ...infrastructureProfile,
+    id: "infrastructure-profile-kubernetes-proxy",
+    provider_id: "runtime-provider-kubernetes",
+    provider_display_name: "Kubernetes production",
+    provider_kind: "kubernetes",
+    profile_kind: "kubernetes_pod",
+    display_name: "Restricted proxy",
+    spec: {
+      profile_kind: "kubernetes_pod",
+      contract_family: "kubernetes.pod-profile",
+      schema_version: 3,
+      runner_resources: {
+        cpu_request_millicores: 500,
+        cpu_limit_millicores: 2000,
+        memory_request_bytes: 1_073_741_824,
+        memory_limit_bytes: 4_294_967_296,
+      },
+      workspace_volume: {
+        storage_class_name: "runtime-workspaces",
+        storage_request_bytes: 10_737_418_240,
+      },
+      network_access: {
+        mode: "proxy_required",
+        allowed_cidrs: ["10.0.0.0/8"],
+        denied_cidrs: [],
+        domain_policy: {
+          mode: "allowlist",
+          allowed_domains: ["*.example.com"],
+          denied_domains: [],
+        },
+      },
+      service_account_name: null,
+      scheduling: {
+        node_selector: {},
+        tolerations: [],
+      },
+      dind: null,
+    },
+    infrastructure_network: {
+      mode: "proxy_required",
+      allowed_cidrs: ["10.0.0.0/8"],
+      denied_cidrs: [],
+      domain_mode: "allowlist",
+      allowed_domains: ["*.example.com"],
+      denied_domains: [],
+    },
+    required_capabilities: ["runtime.kubernetes.pod-profile.v3"],
+  };
 
 const availableProfile: WorkspaceRuntimeProfileResponse = {
   id: "workspace-runtime-profile-standard",
@@ -51,6 +110,15 @@ const availableProfile: WorkspaceRuntimeProfileResponse = {
       allowed_cidrs: ["10.0.0.0/8"],
       denied_cidrs: [],
     },
+  },
+  infrastructure_network: infrastructureProfile.infrastructure_network,
+  effective_network: {
+    mode: "direct",
+    allowed_cidrs: ["10.0.0.0/8"],
+    denied_cidrs: ["169.254.169.254/32"],
+    domain_mode: null,
+    allowed_domains: [],
+    denied_domains: [],
   },
   version: 7,
   digest: "sha256:workspace-runtime-profile-digest",
@@ -209,6 +277,89 @@ export const UnavailableDefaultPreserved = {
   },
 } satisfies Story;
 
+export const UnavailableProxyProfileEdit = {
+  args: {
+    state: {
+      type: "READY",
+      profiles: [
+        {
+          ...unavailableProfile,
+          policy: {
+            schema_version: 2,
+            network_restriction: {
+              mode: "proxy_required",
+              allowed_cidrs: ["10.0.0.0/8"],
+              denied_cidrs: [],
+              domain_policy: {
+                mode: "allowlist",
+                allowed_domains: ["*.example.com"],
+                denied_domains: ["blocked.example.com"],
+              },
+            },
+          },
+          infrastructure_network: {
+            mode: "proxy_required",
+            allowed_cidrs: ["10.0.0.0/8"],
+            denied_cidrs: [],
+            domain_mode: "unrestricted",
+            allowed_domains: [],
+            denied_domains: [],
+          },
+          effective_network: {
+            mode: "proxy_required",
+            allowed_cidrs: ["10.0.0.0/8"],
+            denied_cidrs: [],
+            domain_mode: "allowlist",
+            allowed_domains: ["*.example.com"],
+            denied_domains: ["blocked.example.com"],
+          },
+        },
+      ],
+      infrastructureProfiles: [],
+      defaultProfile: {
+        runtime_profile_id: null,
+        version: 6,
+        profile: null,
+      },
+    },
+    editorState: {
+      type: "EDIT",
+      profile: {
+        ...unavailableProfile,
+        policy: {
+          schema_version: 2,
+          network_restriction: {
+            mode: "proxy_required",
+            allowed_cidrs: ["10.0.0.0/8"],
+            denied_cidrs: [],
+            domain_policy: {
+              mode: "allowlist",
+              allowed_domains: ["*.example.com"],
+              denied_domains: ["blocked.example.com"],
+            },
+          },
+        },
+        infrastructure_network: {
+          mode: "proxy_required",
+          allowed_cidrs: ["10.0.0.0/8"],
+          denied_cidrs: [],
+          domain_mode: "unrestricted",
+          allowed_domains: [],
+          denied_domains: [],
+        },
+        effective_network: {
+          mode: "proxy_required",
+          allowed_cidrs: ["10.0.0.0/8"],
+          denied_cidrs: [],
+          domain_mode: "allowlist",
+          allowed_domains: ["*.example.com"],
+          denied_domains: ["blocked.example.com"],
+        },
+      },
+    },
+  },
+} satisfies Story;
+
 export const RecreationRunning = {
   args: {
     operationState: { type: "LOADED", operation: recreation },
@@ -218,6 +369,52 @@ export const RecreationRunning = {
 export const CreateModal = {
   args: {
     editorState: { type: "CREATE" },
+  },
+} satisfies Story;
+
+export const ProxyAllowlistCreateModal = {
+  args: {
+    state: {
+      type: "READY",
+      profiles: [],
+      infrastructureProfiles: [proxyAllowlistInfrastructureProfile],
+      defaultProfile: {
+        runtime_profile_id: null,
+        version: 1,
+        profile: null,
+      },
+    },
+    editorState: { type: "CREATE" },
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(
+      page.getByRole("textbox", {
+        name: "Network mode",
+      }),
+    );
+    await userEvent.click(
+      page.getByRole("option", {
+        name: "Managed proxy required",
+      }),
+    );
+    const domainAuthority = page.getByRole("textbox", {
+      name: "Proxy domain authority",
+    });
+    await expect(domainAuthority).toHaveValue(
+      "Only explicitly allowed domains",
+    );
+    await userEvent.click(domainAuthority);
+    await expect(
+      page.queryByRole("option", {
+        name: "All domains except explicit denials",
+      }),
+    ).not.toBeInTheDocument();
+    await expect(
+      page.getByRole("option", {
+        name: "Only explicitly allowed domains",
+      }),
+    ).toBeVisible();
   },
 } satisfies Story;
 

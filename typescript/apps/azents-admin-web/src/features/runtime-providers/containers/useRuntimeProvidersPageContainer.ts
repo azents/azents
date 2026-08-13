@@ -8,6 +8,7 @@ import type {
   RuntimeProviderAuthenticationBindingResponse,
   RuntimeProviderAuthenticationBindingRotateResponse,
   RuntimeProviderContractResponse,
+  RuntimeProviderOperationalDiagnosticsResponse,
   RuntimeProviderResponse,
 } from "@azents/admin-client";
 
@@ -17,6 +18,8 @@ export type RuntimeProviderAuthBindingItem =
 export type RuntimeProviderAuthAuditEvent =
   RuntimeProviderAuthenticationBindingAuditEventResponse;
 export type RuntimeProviderContractItem = RuntimeProviderContractResponse;
+export type RuntimeProviderDiagnosticsItem =
+  RuntimeProviderOperationalDiagnosticsResponse;
 
 export type RuntimeProviderListState =
   | { type: "LOADING" }
@@ -35,6 +38,12 @@ export type RuntimeProviderContractState =
   | { type: "ERROR"; message: string }
   | { type: "LOADED"; items: RuntimeProviderContractItem[] };
 
+export type RuntimeProviderDiagnosticsState =
+  | { type: "IDLE" }
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | { type: "LOADED"; diagnostics: RuntimeProviderDiagnosticsItem };
+
 export type RuntimeProviderAuthAuditState =
   | { type: "IDLE" }
   | { type: "LOADING" }
@@ -51,6 +60,7 @@ export interface RuntimeProvidersPageContentProps {
   selectedProvider: RuntimeProviderItem | null;
   detailOpen: boolean;
   contractState: RuntimeProviderContractState;
+  diagnosticsState: RuntimeProviderDiagnosticsState;
   authBindingState: RuntimeProviderAuthBindingState;
   authAuditState: RuntimeProviderAuthAuditState;
   authMutating: boolean;
@@ -101,6 +111,10 @@ export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentP
     { enabled: effectiveSelectedProviderId !== null },
   );
   const contractsQuery = trpc.runtimeProvider.listContracts.useQuery(
+    { providerId: effectiveSelectedProviderId ?? "" },
+    { enabled: effectiveSelectedProviderId !== null },
+  );
+  const diagnosticsQuery = trpc.runtimeProvider.getDiagnostics.useQuery(
     { providerId: effectiveSelectedProviderId ?? "" },
     { enabled: effectiveSelectedProviderId !== null },
   );
@@ -162,6 +176,16 @@ export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentP
         : contractsQuery.isError
           ? { type: "ERROR", message: contractsQuery.error.message }
           : { type: "LOADED", items: contractsQuery.data?.items ?? [] };
+  const diagnosticsState: RuntimeProviderDiagnosticsState =
+    effectiveSelectedProviderId === null
+      ? { type: "IDLE" }
+      : diagnosticsQuery.isLoading
+        ? { type: "LOADING" }
+        : diagnosticsQuery.isError
+          ? { type: "ERROR", message: diagnosticsQuery.error.message }
+          : diagnosticsQuery.data
+            ? { type: "LOADED", diagnostics: diagnosticsQuery.data }
+            : { type: "LOADING" };
   const authAuditState: RuntimeProviderAuthAuditState =
     auditBinding === null
       ? { type: "IDLE" }
@@ -259,6 +283,7 @@ export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentP
     selectedProvider,
     detailOpen: selectedProviderId !== null,
     contractState,
+    diagnosticsState,
     authBindingState,
     authAuditState,
     authMutating:

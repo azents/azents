@@ -57,7 +57,13 @@ class TestRuntimeConfigurationStateResponse(unittest.TestCase):
                 runner_reported_digest = '',
                 provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 runner_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
-                applied_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
+                applied_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                network = azentspublicclient.models.runtime_configuration_network_response.RuntimeConfigurationNetworkResponse(
+                    mode = 'direct', 
+                    domain_mode = '', 
+                    protocol_summary = 'direct_ip', 
+                    https_inspection = True, 
+                    enforcement_status = 'profile_required', )
             )
         else:
             return RuntimeConfigurationStateResponse(
@@ -84,6 +90,12 @@ class TestRuntimeConfigurationStateResponse(unittest.TestCase):
                 provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 runner_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 applied_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
+                network = azentspublicclient.models.runtime_configuration_network_response.RuntimeConfigurationNetworkResponse(
+                    mode = 'direct', 
+                    domain_mode = '', 
+                    protocol_summary = 'direct_ip', 
+                    https_inspection = True, 
+                    enforcement_status = 'profile_required', ),
         )
         """
 

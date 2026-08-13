@@ -15,9 +15,14 @@ from azents.core.enums import (
 )
 from azents.core.runtime_profile import (
     RuntimeInfrastructureProfileSpec,
+    RuntimeNetworkProjection,
     RuntimeProfileLifecycle,
-    WorkspaceRuntimeProfilePolicyV1,
+    WorkspaceRuntimeProfilePolicy,
+    compose_workspace_runtime_profile,
     parse_runtime_infrastructure_profile_api_spec,
+    parse_runtime_infrastructure_profile_spec,
+    parse_workspace_runtime_profile_policy,
+    project_runtime_network,
 )
 from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider_binding.data import (
@@ -30,6 +35,9 @@ from azents.services.runtime_profile_admin.service import (
     AdminWorkspaceRuntimeProfileDetailProjection,
     RuntimeInfrastructureProfileDeletionImpactProjection,
     RuntimeInfrastructureProfileProjection,
+)
+from azents.services.runtime_provider_admin.service import (
+    RuntimeProviderOperationalDiagnosticsProjection,
 )
 from azents.services.runtime_provider_binding_admin.service import (
     RuntimeProviderBindingAdminProjection,
@@ -84,6 +92,53 @@ class RuntimeProviderListResponse(BaseModel):
     """Provider inventory response."""
 
     items: list[RuntimeProviderResponse]
+
+
+class RuntimeProviderOperationalWarningResponse(BaseModel):
+    """One bounded warning-only Provider deployment diagnostic."""
+
+    code: str
+    severity: str
+    metadata: dict[str, str]
+
+
+class RuntimeProviderOperationalDiagnosticsResponse(BaseModel):
+    """Active-generation Provider diagnostics or explicit unavailability."""
+
+    available: bool
+    generation: int | None
+    protocol_version: str | None
+    checked_at: datetime.datetime | None
+    warnings: list[RuntimeProviderOperationalWarningResponse]
+
+    @classmethod
+    def convert_from(
+        cls,
+        projection: RuntimeProviderOperationalDiagnosticsProjection | None,
+    ) -> "RuntimeProviderOperationalDiagnosticsResponse":
+        """Convert only the current active connection diagnostic snapshot."""
+        if projection is None:
+            return cls(
+                available=False,
+                generation=None,
+                protocol_version=None,
+                checked_at=None,
+                warnings=[],
+            )
+        return cls(
+            available=True,
+            generation=projection.generation,
+            protocol_version=projection.protocol_version,
+            checked_at=projection.diagnostics.checked_at,
+            warnings=[
+                RuntimeProviderOperationalWarningResponse(
+                    code=warning.code,
+                    severity=warning.severity.value,
+                    metadata=dict(warning.metadata),
+                )
+                for warning in projection.diagnostics.warnings
+            ],
+        )
 
 
 class RuntimeProviderContractResponse(BaseModel):
@@ -277,7 +332,9 @@ class AdminWorkspaceRuntimeProfileDetailResponse(BaseModel):
     display_name: str
     description: str
     lifecycle: RuntimeProfileLifecycle
-    policy: WorkspaceRuntimeProfilePolicyV1
+    policy: WorkspaceRuntimeProfilePolicy
+    infrastructure_network: RuntimeNetworkProjection | None
+    effective_network: RuntimeNetworkProjection | None
     version: int = Field(ge=1)
     digest: str
     provider_id: str
@@ -302,6 +359,20 @@ class AdminWorkspaceRuntimeProfileDetailResponse(BaseModel):
         profile = projection.profile
         infrastructure = projection.infrastructure_profile
         provider = projection.provider
+        policy = parse_workspace_runtime_profile_policy(profile.policy)
+        infrastructure_network: RuntimeNetworkProjection | None = None
+        effective_network: RuntimeNetworkProjection | None = None
+        try:
+            infrastructure_spec = parse_runtime_infrastructure_profile_spec(
+                infrastructure.spec
+            )
+            infrastructure_network = project_runtime_network(infrastructure_spec)
+            effective_spec = parse_runtime_infrastructure_profile_spec(
+                compose_workspace_runtime_profile(infrastructure_spec, policy)
+            )
+            effective_network = project_runtime_network(effective_spec)
+        except ValidationError, ValueError:
+            pass
         return cls(
             workspace_id=projection.workspace_id,
             workspace_name=projection.workspace.name,
@@ -310,7 +381,9 @@ class AdminWorkspaceRuntimeProfileDetailResponse(BaseModel):
             display_name=profile.display_name,
             description=profile.description,
             lifecycle=profile.lifecycle,
-            policy=WorkspaceRuntimeProfilePolicyV1.model_validate(profile.policy),
+            policy=policy,
+            infrastructure_network=infrastructure_network,
+            effective_network=effective_network,
             version=profile.version,
             digest=profile.digest,
             provider_id=provider.provider_id,

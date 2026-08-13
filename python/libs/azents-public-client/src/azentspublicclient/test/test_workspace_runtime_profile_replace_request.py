@@ -40,7 +40,7 @@ class TestWorkspaceRuntimeProfileReplaceRequest(unittest.TestCase):
                 display_name = '0',
                 description = '',
                 lifecycle = 'active',
-                policy = { }
+                policy = None
             )
         else:
             return WorkspaceRuntimeProfileReplaceRequest(
@@ -49,7 +49,7 @@ class TestWorkspaceRuntimeProfileReplaceRequest(unittest.TestCase):
                 display_name = '0',
                 description = '',
                 lifecycle = 'active',
-                policy = { },
+                policy = None,
         )
         """
 
