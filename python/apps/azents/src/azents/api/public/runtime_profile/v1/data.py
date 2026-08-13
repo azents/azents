@@ -8,7 +8,7 @@ from azents.core.runtime_profile import (
     RuntimeInfrastructureProfileSpec,
     RuntimeProfileLifecycle,
     WorkspaceRuntimeProfilePolicyV1,
-    parse_runtime_infrastructure_profile_spec,
+    parse_runtime_infrastructure_profile_api_spec,
 )
 from azents.repos.runtime_profile.data import WorkspaceRuntimeProfileDeletion
 from azents.services.runtime_profile_workspace.service import (
@@ -42,7 +42,7 @@ class SelectableInfrastructureProfileResponse(BaseModel):
         """Convert one safe selectable Profile projection."""
         profile = projection.profile
         provider = projection.provider
-        spec = parse_runtime_infrastructure_profile_spec(profile.spec)
+        spec = parse_runtime_infrastructure_profile_api_spec(profile.spec)
         return cls(
             id=profile.id,
             provider_id=provider.provider_id,

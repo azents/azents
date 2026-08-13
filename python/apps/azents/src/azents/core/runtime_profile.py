@@ -4,6 +4,7 @@ import enum
 import hashlib
 import ipaddress
 import json
+import re
 from collections.abc import Mapping
 from typing import Annotated, Literal, assert_never
 
@@ -134,6 +135,21 @@ class RuntimeProfileStringConstraintPath(enum.StrEnum):
     DOCKER_NETWORK = "network_name"
 
 
+class RuntimeNetworkMode(enum.StrEnum):
+    """Ordered Runtime network authority."""
+
+    DIRECT = "direct"
+    PROXY_REQUIRED = "proxy_required"
+    NO_NETWORK = "no_network"
+
+
+class RuntimeProxyDomainMode(enum.StrEnum):
+    """Ordered proxy domain authority."""
+
+    UNRESTRICTED = "unrestricted"
+    ALLOWLIST = "allowlist"
+
+
 class _FrozenProfileModel(BaseModel):
     """Strict immutable base for Profile documents."""
 
@@ -247,6 +263,118 @@ class RuntimeNetworkPolicyModule(_FrozenProfileModel):
         return self
 
 
+class RuntimeDirectNetworkAccess(_FrozenProfileModel):
+    """Direct customer egress within one CIDR boundary."""
+
+    mode: Literal[RuntimeNetworkMode.DIRECT]
+    allowed_cidrs: tuple[str, ...]
+    denied_cidrs: tuple[str, ...]
+
+    @field_validator("allowed_cidrs", "denied_cidrs", mode="before")
+    @classmethod
+    def canonicalize_cidrs(cls, value: object) -> tuple[str, ...]:
+        """Reuse the legacy direct CIDR contract."""
+        return RuntimeNetworkPolicyModule.canonicalize_cidrs(value)
+
+    @model_validator(mode="after")
+    def validate_unique_cidrs(self) -> "RuntimeDirectNetworkAccess":
+        """Reject duplicate CIDRs after canonicalization."""
+        if len(set(self.allowed_cidrs)) != len(self.allowed_cidrs):
+            raise ValueError("Allowed CIDRs must be unique.")
+        if len(set(self.denied_cidrs)) != len(self.denied_cidrs):
+            raise ValueError("Denied CIDRs must be unique.")
+        return self
+
+
+class _RuntimeProxyDomainPolicyBase(_FrozenProfileModel):
+    """Canonical proxy destination domain policy."""
+
+    allowed_domains: tuple[str, ...]
+    denied_domains: tuple[str, ...]
+
+    @field_validator("allowed_domains", "denied_domains", mode="before")
+    @classmethod
+    def canonicalize_domains(cls, value: object) -> tuple[str, ...]:
+        """Canonicalize exact and leading-label wildcard domain patterns."""
+        if not isinstance(value, list | tuple):
+            raise ValueError("Domain patterns must be an array.")
+        patterns: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("Domain patterns must contain strings.")
+            patterns.append(_canonical_domain_pattern(item))
+        if len(set(patterns)) != len(patterns):
+            raise ValueError("Domain patterns must be unique.")
+        return tuple(sorted(patterns))
+
+
+class RuntimeProxyDomainPolicyUnrestricted(_RuntimeProxyDomainPolicyBase):
+    """Unrestricted hostname authority before final denials."""
+
+    mode: Literal[RuntimeProxyDomainMode.UNRESTRICTED]
+
+    @model_validator(mode="after")
+    def validate_unrestricted_policy(
+        self,
+    ) -> "RuntimeProxyDomainPolicyUnrestricted":
+        """Keep unrestricted authority explicit rather than list-derived."""
+        if self.allowed_domains:
+            raise ValueError(
+                "Unrestricted domain policy cannot declare allowed domains."
+            )
+        return self
+
+
+class RuntimeProxyDomainPolicyAllowlist(_RuntimeProxyDomainPolicyBase):
+    """Explicit allowlist hostname authority with final denials."""
+
+    mode: Literal[RuntimeProxyDomainMode.ALLOWLIST]
+
+
+type RuntimeProxyDomainPolicy = Annotated[
+    RuntimeProxyDomainPolicyUnrestricted | RuntimeProxyDomainPolicyAllowlist,
+    Field(discriminator="mode"),
+]
+
+
+class RuntimeProxyRequiredNetworkAccess(_FrozenProfileModel):
+    """Inspected HTTP proxy authority within CIDR and domain boundaries."""
+
+    mode: Literal[RuntimeNetworkMode.PROXY_REQUIRED]
+    allowed_cidrs: tuple[str, ...]
+    denied_cidrs: tuple[str, ...]
+    domain_policy: RuntimeProxyDomainPolicy
+
+    @field_validator("allowed_cidrs", "denied_cidrs", mode="before")
+    @classmethod
+    def canonicalize_cidrs(cls, value: object) -> tuple[str, ...]:
+        """Reuse the legacy direct CIDR contract."""
+        return RuntimeNetworkPolicyModule.canonicalize_cidrs(value)
+
+    @model_validator(mode="after")
+    def validate_unique_cidrs(self) -> "RuntimeProxyRequiredNetworkAccess":
+        """Reject duplicate CIDRs after canonicalization."""
+        if len(set(self.allowed_cidrs)) != len(self.allowed_cidrs):
+            raise ValueError("Allowed CIDRs must be unique.")
+        if len(set(self.denied_cidrs)) != len(self.denied_cidrs):
+            raise ValueError("Denied CIDRs must be unique.")
+        return self
+
+
+class RuntimeNoNetworkAccess(_FrozenProfileModel):
+    """No customer or external network authority."""
+
+    mode: Literal[RuntimeNetworkMode.NO_NETWORK]
+
+
+type RuntimeNetworkAccess = Annotated[
+    RuntimeDirectNetworkAccess
+    | RuntimeProxyRequiredNetworkAccess
+    | RuntimeNoNetworkAccess,
+    Field(discriminator="mode"),
+]
+
+
 class KubernetesToleration(_FrozenProfileModel):
     """Typed Kubernetes toleration supported by Pod Profile v1."""
 
@@ -309,6 +437,20 @@ class KubernetesPodProfileSpecV2(_DirectProfileSpecV2):
     dind: KubernetesDinDModule | None
 
 
+class KubernetesPodProfileSpecV3(_FrozenProfileModel):
+    """Kubernetes Pod Profile contract version 3."""
+
+    profile_kind: Literal[RuntimeInfrastructureProfileKind.KUBERNETES_POD]
+    contract_family: Literal["kubernetes.pod-profile"]
+    schema_version: Literal[3]
+    runner_resources: KubernetesContainerResources
+    workspace_volume: KubernetesWorkspaceVolume
+    network_access: RuntimeNetworkAccess
+    service_account_name: Annotated[str | None, Field(max_length=253)]
+    scheduling: KubernetesSchedulingModule
+    dind: KubernetesDinDModule | None
+
+
 class DockerContainerResources(_FrozenProfileModel):
     """Docker-native enforceable Runner resource choices."""
 
@@ -362,6 +504,8 @@ def _runtime_profile_discriminator(value: object) -> str | None:
             return "kubernetes_pod:1"
         case KubernetesPodProfileSpecV2():
             return "kubernetes_pod:2"
+        case KubernetesPodProfileSpecV3():
+            return "kubernetes_pod:3"
         case DockerContainerProfileSpecV1():
             return "docker_container:1"
         case DockerContainerProfileSpecV2():
@@ -376,6 +520,31 @@ def _runtime_profile_discriminator(value: object) -> str | None:
     if not isinstance(profile_kind, str) or not isinstance(schema_version, int):
         return None
     return f"{profile_kind}:{schema_version}"
+
+
+type RuntimeInfrastructureProfileInternalSpec = Annotated[
+    Annotated[
+        KubernetesPodProfileSpecV1,
+        Tag("kubernetes_pod:1"),
+    ]
+    | Annotated[
+        KubernetesPodProfileSpecV2,
+        Tag("kubernetes_pod:2"),
+    ]
+    | Annotated[
+        KubernetesPodProfileSpecV3,
+        Tag("kubernetes_pod:3"),
+    ]
+    | Annotated[
+        DockerContainerProfileSpecV1,
+        Tag("docker_container:1"),
+    ]
+    | Annotated[
+        DockerContainerProfileSpecV2,
+        Tag("docker_container:2"),
+    ],
+    Discriminator(_runtime_profile_discriminator),
+]
 
 
 type RuntimeInfrastructureProfileSpec = Annotated[
@@ -404,6 +573,91 @@ class WorkspaceRuntimeProfilePolicyV1(_FrozenProfileModel):
 
     schema_version: Literal[1]
     network_restriction: RuntimeNetworkPolicyModule | None
+
+
+class WorkspaceRuntimeNetworkRestrictionInherit(_FrozenProfileModel):
+    """Preserve the infrastructure Profile network authority."""
+
+    mode: Literal["inherit"]
+
+
+class WorkspaceRuntimeNetworkRestrictionDirect(_FrozenProfileModel):
+    """Retain direct mode while narrowing its CIDR authority."""
+
+    mode: Literal[RuntimeNetworkMode.DIRECT]
+    allowed_cidrs: tuple[str, ...]
+    denied_cidrs: tuple[str, ...]
+
+    @field_validator("allowed_cidrs", "denied_cidrs", mode="before")
+    @classmethod
+    def canonicalize_cidrs(cls, value: object) -> tuple[str, ...]:
+        """Reuse the legacy direct CIDR contract."""
+        return RuntimeNetworkPolicyModule.canonicalize_cidrs(value)
+
+    @model_validator(mode="after")
+    def validate_unique_cidrs(
+        self,
+    ) -> "WorkspaceRuntimeNetworkRestrictionDirect":
+        """Reject duplicate CIDRs after canonicalization."""
+        if len(set(self.allowed_cidrs)) != len(self.allowed_cidrs):
+            raise ValueError("Allowed CIDRs must be unique.")
+        if len(set(self.denied_cidrs)) != len(self.denied_cidrs):
+            raise ValueError("Denied CIDRs must be unique.")
+        return self
+
+
+class WorkspaceRuntimeNetworkRestrictionProxyRequired(_FrozenProfileModel):
+    """Select proxy-required mode and restrictive destination policy."""
+
+    mode: Literal[RuntimeNetworkMode.PROXY_REQUIRED]
+    allowed_cidrs: tuple[str, ...]
+    denied_cidrs: tuple[str, ...]
+    domain_policy: RuntimeProxyDomainPolicy
+
+    @field_validator("allowed_cidrs", "denied_cidrs", mode="before")
+    @classmethod
+    def canonicalize_cidrs(cls, value: object) -> tuple[str, ...]:
+        """Reuse the legacy direct CIDR contract."""
+        return RuntimeNetworkPolicyModule.canonicalize_cidrs(value)
+
+    @model_validator(mode="after")
+    def validate_unique_cidrs(
+        self,
+    ) -> "WorkspaceRuntimeNetworkRestrictionProxyRequired":
+        """Reject duplicate CIDRs after canonicalization."""
+        if len(set(self.allowed_cidrs)) != len(self.allowed_cidrs):
+            raise ValueError("Allowed CIDRs must be unique.")
+        if len(set(self.denied_cidrs)) != len(self.denied_cidrs):
+            raise ValueError("Denied CIDRs must be unique.")
+        return self
+
+
+class WorkspaceRuntimeNetworkRestrictionNoNetwork(_FrozenProfileModel):
+    """Select no customer or external network authority."""
+
+    mode: Literal[RuntimeNetworkMode.NO_NETWORK]
+
+
+type WorkspaceRuntimeNetworkRestriction = Annotated[
+    WorkspaceRuntimeNetworkRestrictionInherit
+    | WorkspaceRuntimeNetworkRestrictionDirect
+    | WorkspaceRuntimeNetworkRestrictionProxyRequired
+    | WorkspaceRuntimeNetworkRestrictionNoNetwork,
+    Field(discriminator="mode"),
+]
+
+
+class WorkspaceRuntimeProfilePolicyV2(_FrozenProfileModel):
+    """Workspace-owned hierarchical network restriction."""
+
+    schema_version: Literal[2]
+    network_restriction: WorkspaceRuntimeNetworkRestriction
+
+
+type WorkspaceRuntimeProfilePolicy = Annotated[
+    WorkspaceRuntimeProfilePolicyV1 | WorkspaceRuntimeProfilePolicyV2,
+    Field(discriminator="schema_version"),
+]
 
 
 type RuntimeProfileAllowedValues = Annotated[
@@ -461,65 +715,48 @@ class RuntimeProfileCompatibility(_FrozenProfileModel):
     incompatible_constraints: tuple[str, ...]
 
 
-_RUNTIME_INFRASTRUCTURE_PROFILE_ADAPTER = TypeAdapter(RuntimeInfrastructureProfileSpec)
+_RUNTIME_INFRASTRUCTURE_PROFILE_ADAPTER = TypeAdapter(
+    RuntimeInfrastructureProfileInternalSpec
+)
+_RUNTIME_INFRASTRUCTURE_PROFILE_API_ADAPTER = TypeAdapter(
+    RuntimeInfrastructureProfileSpec
+)
+_WORKSPACE_RUNTIME_PROFILE_POLICY_ADAPTER = TypeAdapter(WorkspaceRuntimeProfilePolicy)
 
 
 def parse_runtime_infrastructure_profile_spec(
     document: object,
-) -> RuntimeInfrastructureProfileSpec:
+) -> RuntimeInfrastructureProfileInternalSpec:
     """Parse one discriminated infrastructure Profile document."""
     return _RUNTIME_INFRASTRUCTURE_PROFILE_ADAPTER.validate_python(document)
 
 
+def parse_runtime_infrastructure_profile_api_spec(
+    document: object,
+) -> RuntimeInfrastructureProfileSpec:
+    """Parse the current v1 API infrastructure Profile contract."""
+    return _RUNTIME_INFRASTRUCTURE_PROFILE_API_ADAPTER.validate_python(document)
+
+
+def parse_workspace_runtime_profile_policy(
+    document: object,
+) -> WorkspaceRuntimeProfilePolicy:
+    """Parse one discriminated Workspace Runtime Profile policy."""
+    return _WORKSPACE_RUNTIME_PROFILE_POLICY_ADAPTER.validate_python(document)
+
+
 def compose_workspace_runtime_profile(
-    spec: RuntimeInfrastructureProfileSpec,
-    workspace_policy: WorkspaceRuntimeProfilePolicyV1,
+    spec: RuntimeInfrastructureProfileInternalSpec,
+    workspace_policy: WorkspaceRuntimeProfilePolicy,
 ) -> dict[str, JsonValue]:
     """Compose restrictive Workspace policy into one effective Profile."""
-    restriction = workspace_policy.network_restriction
-    if restriction is None:
-        return canonicalize_runtime_profile_document(spec)
-    match spec:
-        case DockerContainerProfileSpecV1() | DockerContainerProfileSpecV2():
-            raise ValueError("workspace_network_restriction_unsupported")
-        case KubernetesPodProfileSpecV1() | KubernetesPodProfileSpecV2():
-            pass
+    match workspace_policy:
+        case WorkspaceRuntimeProfilePolicyV1():
+            return _compose_workspace_runtime_profile_v1(spec, workspace_policy)
+        case WorkspaceRuntimeProfilePolicyV2():
+            return _compose_workspace_runtime_profile_v2(spec, workspace_policy)
         case _:
-            assert_never(spec)
-
-    base = spec.network_policy
-    if base.allowed_cidrs and restriction.allowed_cidrs:
-        base_networks = tuple(
-            ipaddress.ip_network(cidr, strict=False) for cidr in base.allowed_cidrs
-        )
-        for cidr in restriction.allowed_cidrs:
-            restricted = ipaddress.ip_network(cidr, strict=False)
-            if isinstance(restricted, ipaddress.IPv4Network):
-                within_boundary = any(
-                    isinstance(allowed, ipaddress.IPv4Network)
-                    and restricted.subnet_of(allowed)
-                    for allowed in base_networks
-                )
-            else:
-                within_boundary = any(
-                    isinstance(allowed, ipaddress.IPv6Network)
-                    and restricted.subnet_of(allowed)
-                    for allowed in base_networks
-                )
-            if not within_boundary:
-                raise ValueError("workspace_network_restriction_expands")
-        allowed_cidrs = restriction.allowed_cidrs
-    elif restriction.allowed_cidrs:
-        allowed_cidrs = restriction.allowed_cidrs
-    else:
-        allowed_cidrs = base.allowed_cidrs
-
-    effective_network = RuntimeNetworkPolicyModule(
-        allowed_cidrs=allowed_cidrs,
-        denied_cidrs=tuple(sorted({*base.denied_cidrs, *restriction.denied_cidrs})),
-    )
-    effective = spec.model_copy(update={"network_policy": effective_network})
-    return canonicalize_runtime_profile_document(effective)
+            assert_never(workspace_policy)
 
 
 def classify_runtime_configuration_application(
@@ -541,7 +778,13 @@ def classify_runtime_configuration_application(
 
     desired_provider = _configuration_section(desired_configuration, "provider")
     applied_provider = _configuration_section(applied_configuration, "provider")
-    if desired_provider != applied_provider:
+    if _without_keys(
+        desired_provider,
+        {"capability_revision_id", "capability_digest"},
+    ) != _without_keys(
+        applied_provider,
+        {"capability_revision_id", "capability_digest"},
+    ):
         return RuntimeConfigurationApplicationImpact.RECREATE
     if desired_provider.get("kind") != "kubernetes":
         return RuntimeConfigurationApplicationImpact.RECREATE
@@ -583,16 +826,46 @@ def classify_runtime_configuration_application(
         != RuntimeInfrastructureProfileKind.KUBERNETES_POD
     ):
         return RuntimeConfigurationApplicationImpact.RECREATE
-    if _without_keys(desired_profile, {"network_policy"}) != _without_keys(
+    desired_profile_version = desired_profile.get("schema_version")
+    applied_profile_version = applied_profile.get("schema_version")
+    if desired_profile_version != applied_profile_version:
+        return RuntimeConfigurationApplicationImpact.RECREATE
+    if desired_profile_version in {1, 2}:
+        if _without_keys(desired_profile, {"network_policy"}) != _without_keys(
+            applied_profile,
+            {"network_policy"},
+        ):
+            return RuntimeConfigurationApplicationImpact.RECREATE
+        return RuntimeConfigurationApplicationImpact.IN_PLACE
+    if desired_profile_version != 3:
+        return RuntimeConfigurationApplicationImpact.RECREATE
+    if _without_keys(desired_profile, {"network_access"}) != _without_keys(
         applied_profile,
-        {"network_policy"},
+        {"network_access"},
+    ):
+        return RuntimeConfigurationApplicationImpact.RECREATE
+    desired_network = _configuration_section(desired_profile, "network_access")
+    applied_network = _configuration_section(applied_profile, "network_access")
+    network_mode = desired_network.get("mode")
+    if network_mode != applied_network.get("mode"):
+        return RuntimeConfigurationApplicationImpact.RECREATE
+    if network_mode not in {
+        RuntimeNetworkMode.DIRECT,
+        RuntimeNetworkMode.PROXY_REQUIRED,
+        RuntimeNetworkMode.NO_NETWORK,
+    }:
+        return RuntimeConfigurationApplicationImpact.RECREATE
+    if not _network_enforcement_change_is_in_place(
+        desired_configuration=desired_configuration,
+        applied_configuration=applied_configuration,
+        network_mode=network_mode,
     ):
         return RuntimeConfigurationApplicationImpact.RECREATE
     return RuntimeConfigurationApplicationImpact.IN_PLACE
 
 
 def required_runtime_profile_capabilities(
-    spec: RuntimeInfrastructureProfileSpec,
+    spec: RuntimeInfrastructureProfileInternalSpec,
 ) -> frozenset[str]:
     """Derive exact Provider capabilities required by a typed Profile spec."""
     match spec:
@@ -603,6 +876,38 @@ def required_runtime_profile_capabilities(
                 "workspace.persistent-volume",
                 "runtime.network-policy",
             }
+            if spec.service_account_name is not None:
+                required.add("kubernetes.service-account")
+            if spec.scheduling.node_selector or spec.scheduling.tolerations:
+                required.add("kubernetes.scheduling")
+            if spec.dind is not None:
+                required.update({"docker.dind", "docker.storage.ephemeral"})
+            return frozenset(required)
+        case KubernetesPodProfileSpecV3():
+            required = {
+                "kubernetes.pod-profile",
+                "runtime.resources",
+                "workspace.persistent-volume",
+            }
+            match spec.network_access:
+                case RuntimeDirectNetworkAccess():
+                    required.add("runtime.network-policy")
+                case RuntimeProxyRequiredNetworkAccess():
+                    required.update(
+                        {
+                            "runtime.inspected-http-proxy",
+                            "runtime.network-enforcement",
+                        }
+                    )
+                case RuntimeNoNetworkAccess():
+                    required.update(
+                        {
+                            "runtime.external-network-denial",
+                            "runtime.network-enforcement",
+                        }
+                    )
+                case _:
+                    assert_never(spec.network_access)
             if spec.service_account_name is not None:
                 required.add("kubernetes.service-account")
             if spec.scheduling.node_selector or spec.scheduling.tolerations:
@@ -622,10 +927,22 @@ def required_runtime_profile_capabilities(
 
 
 def evaluate_runtime_profile_compatibility(
-    spec: RuntimeInfrastructureProfileSpec,
+    spec: RuntimeInfrastructureProfileInternalSpec,
     supported_contracts: list[RuntimeProviderProfileContractSupport],
+    *,
+    provider_protocol_version: str | None,
 ) -> RuntimeProfileCompatibility:
     """Evaluate exact family, schema, and typed capability compatibility."""
+    if (
+        isinstance(spec, KubernetesPodProfileSpecV3)
+        and provider_protocol_version != "agent-runtime-provider-kubernetes-v3"
+    ):
+        return RuntimeProfileCompatibility(
+            compatible=False,
+            reason_code="profile_protocol_version_unsupported",
+            missing_capabilities=(),
+            incompatible_constraints=(),
+        )
     support = next(
         (
             candidate
@@ -741,8 +1058,332 @@ def _constraint_paths_for_kind(
     )
 
 
+_DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def _canonical_domain_pattern(value: str) -> str:
+    """Return one canonical exact-host or leading-label wildcard pattern."""
+    raw = value.strip()
+    wildcard = raw.startswith("*.")
+    hostname = raw[2:] if wildcard else raw
+    if hostname.endswith("."):
+        hostname = hostname[:-1]
+    if not hostname or hostname.endswith(".") or "*" in hostname:
+        raise ValueError("Domain pattern must be an exact host or leading wildcard.")
+    if any(character in hostname for character in "/:@?#[]"):
+        raise ValueError("Domain pattern must not contain URL components.")
+    try:
+        canonical = hostname.lower().encode("idna").decode("ascii")
+    except UnicodeError as error:
+        raise ValueError("Domain pattern is not valid IDNA.") from error
+    if len(canonical) > 253:
+        raise ValueError("Domain pattern exceeds the hostname length limit.")
+    labels = canonical.split(".")
+    if any(not _DOMAIN_LABEL_RE.fullmatch(label) for label in labels):
+        raise ValueError("Domain pattern contains an invalid hostname label.")
+    try:
+        ipaddress.ip_address(canonical)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("Domain policy does not accept IP literals.")
+    return f"*.{canonical}" if wildcard else canonical
+
+
+def _compose_workspace_runtime_profile_v1(
+    spec: RuntimeInfrastructureProfileInternalSpec,
+    workspace_policy: WorkspaceRuntimeProfilePolicyV1,
+) -> dict[str, JsonValue]:
+    """Preserve the legacy direct-only composition contract."""
+    restriction = workspace_policy.network_restriction
+    match spec:
+        case DockerContainerProfileSpecV1() | DockerContainerProfileSpecV2():
+            if restriction is None:
+                return canonicalize_runtime_profile_document(spec)
+            raise ValueError("workspace_network_restriction_unsupported")
+        case KubernetesPodProfileSpecV1() | KubernetesPodProfileSpecV2():
+            if restriction is None:
+                return canonicalize_runtime_profile_document(spec)
+            effective_network = _compose_cidr_boundary(
+                base_allowed_cidrs=spec.network_policy.allowed_cidrs,
+                base_denied_cidrs=spec.network_policy.denied_cidrs,
+                restricted_allowed_cidrs=restriction.allowed_cidrs,
+                restricted_denied_cidrs=restriction.denied_cidrs,
+            )
+            effective = spec.model_copy(update={"network_policy": effective_network})
+            return canonicalize_runtime_profile_document(effective)
+        case KubernetesPodProfileSpecV3():
+            match spec.network_access:
+                case RuntimeDirectNetworkAccess():
+                    if restriction is None:
+                        return canonicalize_runtime_profile_document(spec)
+                    effective_network = _compose_cidr_boundary(
+                        base_allowed_cidrs=spec.network_access.allowed_cidrs,
+                        base_denied_cidrs=spec.network_access.denied_cidrs,
+                        restricted_allowed_cidrs=restriction.allowed_cidrs,
+                        restricted_denied_cidrs=restriction.denied_cidrs,
+                    )
+                    effective = spec.model_copy(
+                        update={
+                            "network_access": RuntimeDirectNetworkAccess(
+                                mode=RuntimeNetworkMode.DIRECT,
+                                allowed_cidrs=effective_network.allowed_cidrs,
+                                denied_cidrs=effective_network.denied_cidrs,
+                            )
+                        }
+                    )
+                    return canonicalize_runtime_profile_document(effective)
+                case RuntimeProxyRequiredNetworkAccess() | RuntimeNoNetworkAccess():
+                    raise ValueError("workspace_network_restriction_unsupported")
+                case _:
+                    assert_never(spec.network_access)
+        case _:
+            assert_never(spec)
+
+
+def _compose_workspace_runtime_profile_v2(
+    spec: RuntimeInfrastructureProfileInternalSpec,
+    workspace_policy: WorkspaceRuntimeProfilePolicyV2,
+) -> dict[str, JsonValue]:
+    """Compose explicit hierarchical network authority into Profile v3."""
+    match spec:
+        case DockerContainerProfileSpecV1() | DockerContainerProfileSpecV2():
+            raise ValueError("workspace_network_policy_unsupported")
+        case (
+            KubernetesPodProfileSpecV1()
+            | KubernetesPodProfileSpecV2()
+            | KubernetesPodProfileSpecV3()
+        ):
+            base = _kubernetes_profile_v3(spec)
+        case _:
+            assert_never(spec)
+
+    restriction = workspace_policy.network_restriction
+    match restriction:
+        case WorkspaceRuntimeNetworkRestrictionInherit():
+            effective_network = base.network_access
+        case WorkspaceRuntimeNetworkRestrictionDirect():
+            match base.network_access:
+                case RuntimeDirectNetworkAccess():
+                    effective_cidrs = _compose_cidr_boundary(
+                        base_allowed_cidrs=base.network_access.allowed_cidrs,
+                        base_denied_cidrs=base.network_access.denied_cidrs,
+                        restricted_allowed_cidrs=restriction.allowed_cidrs,
+                        restricted_denied_cidrs=restriction.denied_cidrs,
+                    )
+                    effective_network = RuntimeDirectNetworkAccess(
+                        mode=RuntimeNetworkMode.DIRECT,
+                        allowed_cidrs=effective_cidrs.allowed_cidrs,
+                        denied_cidrs=effective_cidrs.denied_cidrs,
+                    )
+                case RuntimeProxyRequiredNetworkAccess() | RuntimeNoNetworkAccess():
+                    raise ValueError("workspace_network_mode_expands")
+                case _:
+                    assert_never(base.network_access)
+        case WorkspaceRuntimeNetworkRestrictionProxyRequired():
+            match base.network_access:
+                case RuntimeDirectNetworkAccess():
+                    base_domain_policy: RuntimeProxyDomainPolicy = (
+                        RuntimeProxyDomainPolicyUnrestricted(
+                            mode=RuntimeProxyDomainMode.UNRESTRICTED,
+                            allowed_domains=(),
+                            denied_domains=(),
+                        )
+                    )
+                case RuntimeProxyRequiredNetworkAccess():
+                    base_domain_policy = base.network_access.domain_policy
+                case RuntimeNoNetworkAccess():
+                    raise ValueError("workspace_network_mode_expands")
+                case _:
+                    assert_never(base.network_access)
+            effective_cidrs = _compose_cidr_boundary(
+                base_allowed_cidrs=base.network_access.allowed_cidrs,
+                base_denied_cidrs=base.network_access.denied_cidrs,
+                restricted_allowed_cidrs=restriction.allowed_cidrs,
+                restricted_denied_cidrs=restriction.denied_cidrs,
+            )
+            effective_network = RuntimeProxyRequiredNetworkAccess(
+                mode=RuntimeNetworkMode.PROXY_REQUIRED,
+                allowed_cidrs=effective_cidrs.allowed_cidrs,
+                denied_cidrs=effective_cidrs.denied_cidrs,
+                domain_policy=_compose_domain_policy(
+                    base=base_domain_policy,
+                    restriction=restriction.domain_policy,
+                ),
+            )
+        case WorkspaceRuntimeNetworkRestrictionNoNetwork():
+            effective_network = RuntimeNoNetworkAccess(
+                mode=RuntimeNetworkMode.NO_NETWORK
+            )
+        case _:
+            assert_never(restriction)
+    effective = base.model_copy(update={"network_access": effective_network})
+    return canonicalize_runtime_profile_document(effective)
+
+
+def _kubernetes_profile_v3(
+    spec: (
+        KubernetesPodProfileSpecV1
+        | KubernetesPodProfileSpecV2
+        | KubernetesPodProfileSpecV3
+    ),
+) -> KubernetesPodProfileSpecV3:
+    """Return the canonical v3 view of one Kubernetes Profile."""
+    match spec:
+        case KubernetesPodProfileSpecV3():
+            return spec
+        case KubernetesPodProfileSpecV1() | KubernetesPodProfileSpecV2():
+            return KubernetesPodProfileSpecV3(
+                profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+                contract_family="kubernetes.pod-profile",
+                schema_version=3,
+                runner_resources=spec.runner_resources,
+                workspace_volume=spec.workspace_volume,
+                network_access=RuntimeDirectNetworkAccess(
+                    mode=RuntimeNetworkMode.DIRECT,
+                    allowed_cidrs=spec.network_policy.allowed_cidrs,
+                    denied_cidrs=spec.network_policy.denied_cidrs,
+                ),
+                service_account_name=spec.service_account_name,
+                scheduling=spec.scheduling,
+                dind=spec.dind,
+            )
+        case _:
+            assert_never(spec)
+
+
+def _compose_cidr_boundary(
+    *,
+    base_allowed_cidrs: tuple[str, ...],
+    base_denied_cidrs: tuple[str, ...],
+    restricted_allowed_cidrs: tuple[str, ...],
+    restricted_denied_cidrs: tuple[str, ...],
+) -> RuntimeNetworkPolicyModule:
+    """Compose a restrictive child CIDR policy within its parent boundary."""
+    if base_allowed_cidrs and restricted_allowed_cidrs:
+        base_networks = tuple(
+            ipaddress.ip_network(cidr, strict=False) for cidr in base_allowed_cidrs
+        )
+        for cidr in restricted_allowed_cidrs:
+            restricted = ipaddress.ip_network(cidr, strict=False)
+            if not any(
+                _subnet_of_same_family(restricted, allowed) for allowed in base_networks
+            ):
+                raise ValueError("workspace_network_restriction_expands")
+        allowed_cidrs = restricted_allowed_cidrs
+    elif restricted_allowed_cidrs:
+        allowed_cidrs = restricted_allowed_cidrs
+    else:
+        allowed_cidrs = base_allowed_cidrs
+    return RuntimeNetworkPolicyModule(
+        allowed_cidrs=allowed_cidrs,
+        denied_cidrs=tuple(sorted({*base_denied_cidrs, *restricted_denied_cidrs})),
+    )
+
+
+def _compose_domain_policy(
+    *,
+    base: RuntimeProxyDomainPolicy,
+    restriction: RuntimeProxyDomainPolicy,
+) -> RuntimeProxyDomainPolicy:
+    """Compose a restrictive child proxy domain policy."""
+    match base:
+        case RuntimeProxyDomainPolicyUnrestricted():
+            pass
+        case RuntimeProxyDomainPolicyAllowlist():
+            if not isinstance(restriction, RuntimeProxyDomainPolicyAllowlist):
+                raise ValueError("workspace_network_domain_expands")
+            for pattern in restriction.allowed_domains:
+                if not any(
+                    _domain_pattern_within(pattern, parent)
+                    for parent in base.allowed_domains
+                ):
+                    raise ValueError("workspace_network_domain_expands")
+        case _:
+            assert_never(base)
+    denied_domains = tuple(sorted({*base.denied_domains, *restriction.denied_domains}))
+    match restriction:
+        case RuntimeProxyDomainPolicyUnrestricted():
+            return RuntimeProxyDomainPolicyUnrestricted(
+                mode=RuntimeProxyDomainMode.UNRESTRICTED,
+                allowed_domains=(),
+                denied_domains=denied_domains,
+            )
+        case RuntimeProxyDomainPolicyAllowlist():
+            return RuntimeProxyDomainPolicyAllowlist(
+                mode=RuntimeProxyDomainMode.ALLOWLIST,
+                allowed_domains=restriction.allowed_domains,
+                denied_domains=denied_domains,
+            )
+        case _:
+            assert_never(restriction)
+
+
+def _domain_pattern_within(candidate: str, parent: str) -> bool:
+    """Return whether one canonical domain pattern is a structural subset."""
+    candidate_wildcard = candidate.startswith("*.")
+    parent_wildcard = parent.startswith("*.")
+    candidate_host = candidate[2:] if candidate_wildcard else candidate
+    parent_host = parent[2:] if parent_wildcard else parent
+    if not parent_wildcard:
+        return not candidate_wildcard and candidate_host == parent_host
+    if candidate_wildcard:
+        return candidate_host == parent_host or candidate_host.endswith(
+            f".{parent_host}"
+        )
+    return candidate_host != parent_host and candidate_host.endswith(f".{parent_host}")
+
+
+def _network_enforcement_change_is_in_place(
+    *,
+    desired_configuration: dict[str, JsonValue],
+    applied_configuration: dict[str, JsonValue],
+    network_mode: object,
+) -> bool:
+    """Classify server-known enforcement inputs outside the effective Profile."""
+    desired = _configuration_section(desired_configuration, "network_enforcement")
+    applied = _configuration_section(applied_configuration, "network_enforcement")
+    if desired == applied:
+        return True
+    if not desired or not applied:
+        return False
+    if (
+        desired.get("mode") != applied.get("mode")
+        or desired.get("mode") != network_mode
+    ):
+        return False
+    if network_mode == RuntimeNetworkMode.DIRECT:
+        in_place_keys = {"policy_digest"}
+    elif network_mode == RuntimeNetworkMode.PROXY_REQUIRED:
+        in_place_keys = {"policy_digest", "proxy_artifact_revision"}
+    else:
+        return False
+    return _without_keys(desired, in_place_keys) == _without_keys(
+        applied,
+        in_place_keys,
+    )
+
+
+def _subnet_of_same_family(
+    candidate: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    container: ipaddress.IPv4Network | ipaddress.IPv6Network,
+) -> bool:
+    """Return whether two same-family networks have a subset relationship."""
+    if isinstance(candidate, ipaddress.IPv4Network) and isinstance(
+        container,
+        ipaddress.IPv4Network,
+    ):
+        return candidate.subnet_of(container)
+    if isinstance(candidate, ipaddress.IPv6Network) and isinstance(
+        container,
+        ipaddress.IPv6Network,
+    ):
+        return candidate.subnet_of(container)
+    return False
+
+
 def _profile_value_at_path(
-    spec: RuntimeInfrastructureProfileSpec,
+    spec: RuntimeInfrastructureProfileInternalSpec,
     path: str,
 ) -> object:
     value: object = spec

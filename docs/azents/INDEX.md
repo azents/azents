@@ -263,6 +263,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Multi-Worktree Registration Historical Requirements Reconstruction](requirements/multi-260704-multi-worktree-registration.md) | multi-260704 | 2026-07-04 | 2026-07-04 |
 | [Agent-Centric Navigation Redesign Discussion Historical Requirements Reconstruction](requirements/nav-260420-nav.md) | nav-260420 | 2026-04-20 | 2026-04-21 |
 | [Agent-Focused Navigation Information Architecture Historical Requirements Reconstruction](requirements/navigation-260626-navigation-ia.md) | navigation-260626 | 2026-06-26 | - |
+| [Hierarchical Runtime Network Restriction Requirements](requirements/network-260812-hierarchical-runtime-network-restriction.md) | network-260812 | 2026-08-12 | - |
 | [New Session Project Selection Historical Requirements Reconstruction](requirements/new-260629-new-selection.md) | new-260629 | 2026-06-29 | - |
 | [New Session Mixed Workspace Selection Historical Requirements Reconstruction](requirements/new-260705-new-mixed-selection.md) | new-260705 | 2026-07-05 | - |
 | [nointern-web System Historical Requirements Reconstruction](requirements/nointern-260216-nointern-web.md) | nointern-260216 | 2026-02-16 | 2026-02-16 |
@@ -652,6 +653,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Multi-Worktree Registration Historical Decision Reconstruction](adr/multi-260704-multi-worktree-registration.md)
 - [Agent-Centric Navigation Redesign Discussion](adr/nav-260420-nav.md)
 - [Agent-Focused Navigation Information Architecture](adr/navigation-260626-navigation-ia.md)
+- [Hierarchical Runtime Network Restriction](adr/network-260812-hierarchical-runtime-network-restriction.md)
 - [New Session Project Selection](adr/new-260629-new-selection.md)
 - [New Session Mixed Workspace Selection](adr/new-260705-new-mixed-selection.md)
 - [nointern-web System Historical Decision Reconstruction](adr/nointern-260216-nointern-web.md)

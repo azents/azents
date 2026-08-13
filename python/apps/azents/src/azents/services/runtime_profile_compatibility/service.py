@@ -7,8 +7,8 @@ from pydantic import ValidationError
 
 from azents.core.enums import RuntimeProviderKind
 from azents.core.runtime_profile import (
+    RuntimeInfrastructureProfileInternalSpec,
     RuntimeInfrastructureProfileKind,
-    RuntimeInfrastructureProfileSpec,
     RuntimeProfileCompatibility,
     canonicalize_runtime_profile_document,
     digest_runtime_profile_document,
@@ -23,7 +23,7 @@ from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContr
 class PreparedRuntimeInfrastructureProfile:
     """Validated canonical values ready for Profile persistence."""
 
-    spec: RuntimeInfrastructureProfileSpec
+    spec: RuntimeInfrastructureProfileInternalSpec
     canonical_spec: dict[str, Any]
     required_capabilities: tuple[str, ...]
     digest: str
@@ -80,6 +80,7 @@ class RuntimeProfileCompatibilityService:
         compatibility = evaluate_runtime_profile_compatibility(
             spec,
             provider_contract.profile_contracts,
+            provider_protocol_version=provider_contract.protocol_version,
         )
         if not compatibility.compatible:
             raise RuntimeProfileCompatibilityUnavailable(

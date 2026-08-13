@@ -17,7 +17,7 @@ from azents.core.runtime_profile import (
     RuntimeInfrastructureProfileSpec,
     RuntimeProfileLifecycle,
     WorkspaceRuntimeProfilePolicyV1,
-    parse_runtime_infrastructure_profile_spec,
+    parse_runtime_infrastructure_profile_api_spec,
 )
 from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider_binding.data import (
@@ -151,7 +151,7 @@ class RuntimeInfrastructureProfileResponse(BaseModel):
         profile = projection.profile
         compatibility = projection.compatibility
         try:
-            spec = parse_runtime_infrastructure_profile_spec(profile.spec)
+            spec = parse_runtime_infrastructure_profile_api_spec(profile.spec)
         except ValidationError:
             spec = None
         return cls(

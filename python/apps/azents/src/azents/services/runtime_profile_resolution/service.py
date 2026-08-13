@@ -22,10 +22,11 @@ from azents.core.runtime_profile import (
     RuntimeConfigurationStateStatus,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
-    WorkspaceRuntimeProfilePolicyV1,
     compose_workspace_runtime_profile,
     evaluate_runtime_profile_compatibility,
     parse_runtime_infrastructure_profile_spec,
+    parse_workspace_runtime_profile_policy,
+    required_runtime_profile_capabilities,
 )
 from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContract
 from azents.rdb.deps import get_session_manager
@@ -59,6 +60,7 @@ class PreparedRuntimeProfileResolution:
 
     status: RuntimeConfigurationResolutionStatus
     reason_code: str | None
+    required_capabilities: tuple[str, ...]
     missing_capabilities: tuple[str, ...]
     capability_revision: RuntimeProviderContractRevision | None
     resolved_configuration: dict[str, Any] | None
@@ -427,59 +429,72 @@ class RuntimeProfileResolutionService:
         elif reason_code is None:
             reason_code = "provider_capability_unavailable"
 
+        required_capabilities = infrastructure.required_capabilities
         missing_capabilities: tuple[str, ...] = ()
         resolved_configuration = None
         try:
             spec = parse_runtime_infrastructure_profile_spec(infrastructure.spec)
-            workspace_policy = WorkspaceRuntimeProfilePolicyV1.model_validate(
-                profile.policy
-            )
+            workspace_policy = parse_workspace_runtime_profile_policy(profile.policy)
         except ValidationError:
             if reason_code is None:
                 reason_code = "profile_document_invalid"
         else:
-            if contract is not None:
-                compatibility = evaluate_runtime_profile_compatibility(
-                    spec,
-                    contract.profile_contracts,
-                )
-                missing_capabilities = compatibility.missing_capabilities
-                if not compatibility.compatible and reason_code is None:
-                    reason_code = compatibility.reason_code or "profile_incompatible"
             if reason_code is None:
                 try:
                     effective_spec = compose_workspace_runtime_profile(
                         spec,
                         workspace_policy,
                     )
+                    parsed_effective_spec = parse_runtime_infrastructure_profile_spec(
+                        effective_spec
+                    )
+                except ValidationError:
+                    reason_code = "profile_document_invalid"
                 except ValueError as error:
                     reason_code = str(error)
                 else:
-                    resolved_configuration = {
-                        "schema_version": 1,
-                        "provider": {
-                            "id": provider.id,
-                            "logical_id": provider.provider_id,
-                            "kind": provider.kind.value,
-                            "capability_revision_id": (
-                                capability_revision.id
-                                if capability_revision is not None
-                                else None
-                            ),
-                            "capability_digest": capability_digest,
-                        },
-                        "infrastructure_profile": {
-                            "id": infrastructure.id,
-                            "version": infrastructure.version,
-                            "digest": infrastructure.digest,
-                        },
-                        "workspace_runtime_profile": {
-                            "id": profile.id,
-                            "version": profile.version,
-                            "digest": profile.digest,
-                        },
-                        "effective_profile": effective_spec,
-                    }
+                    required_capabilities = tuple(
+                        sorted(
+                            required_runtime_profile_capabilities(parsed_effective_spec)
+                        )
+                    )
+                    if contract is not None:
+                        compatibility = evaluate_runtime_profile_compatibility(
+                            parsed_effective_spec,
+                            contract.profile_contracts,
+                            provider_protocol_version=contract.protocol_version,
+                        )
+                        missing_capabilities = compatibility.missing_capabilities
+                        if not compatibility.compatible:
+                            reason_code = (
+                                compatibility.reason_code or "profile_incompatible"
+                            )
+                    if reason_code is None:
+                        resolved_configuration = {
+                            "schema_version": 1,
+                            "provider": {
+                                "id": provider.id,
+                                "logical_id": provider.provider_id,
+                                "kind": provider.kind.value,
+                                "capability_revision_id": (
+                                    capability_revision.id
+                                    if capability_revision is not None
+                                    else None
+                                ),
+                                "capability_digest": capability_digest,
+                            },
+                            "infrastructure_profile": {
+                                "id": infrastructure.id,
+                                "version": infrastructure.version,
+                                "digest": infrastructure.digest,
+                            },
+                            "workspace_runtime_profile": {
+                                "id": profile.id,
+                                "version": profile.version,
+                                "digest": profile.digest,
+                            },
+                            "effective_profile": effective_spec,
+                        }
 
         status = (
             RuntimeConfigurationResolutionStatus.READY
@@ -509,6 +524,7 @@ class RuntimeProfileResolutionService:
         return PreparedRuntimeProfileResolution(
             status=status,
             reason_code=reason_code,
+            required_capabilities=required_capabilities,
             missing_capabilities=missing_capabilities,
             capability_revision=capability_revision,
             resolved_configuration=resolved_configuration,
@@ -547,7 +563,7 @@ def _build_configuration_state_write(
         agent_selection_version=int(
             resolution.source_trace.get("agent_selection_version", 1)
         ),
-        required_capabilities=infrastructure.required_capabilities,
+        required_capabilities=resolution.required_capabilities,
         missing_capabilities=resolution.missing_capabilities,
         resolved_configuration=resolution.resolved_configuration,
     )

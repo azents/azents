@@ -21,10 +21,11 @@ from azents.core.runtime_profile import (
     RuntimeProfileCompatibility,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
-    WorkspaceRuntimeProfilePolicyV1,
+    WorkspaceRuntimeProfilePolicy,
     compose_workspace_runtime_profile,
     evaluate_runtime_profile_compatibility,
     parse_runtime_infrastructure_profile_spec,
+    parse_workspace_runtime_profile_policy,
 )
 from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContract
 from azents.rdb.deps import get_session_manager
@@ -298,7 +299,7 @@ class RuntimeProfileWorkspaceService:
         display_name: str,
         description: str,
         lifecycle: RuntimeProfileLifecycle,
-        policy: WorkspaceRuntimeProfilePolicyV1,
+        policy: WorkspaceRuntimeProfilePolicy,
         actor_workspace_user_id: str,
     ) -> WorkspaceRuntimeProfileProjection:
         """Create one complete Workspace Runtime choice."""
@@ -311,10 +312,11 @@ class RuntimeProfileWorkspaceService:
                 infrastructure=infrastructure,
                 policy=policy,
             )
-            await self._require_selectable_infrastructure(
+            await self._require_selectable_workspace_profile(
                 session,
                 workspace_id=workspace_id,
                 infrastructure=infrastructure,
+                policy=policy,
             )
             try:
                 profile = (
@@ -360,7 +362,7 @@ class RuntimeProfileWorkspaceService:
         display_name: str,
         description: str,
         lifecycle: RuntimeProfileLifecycle,
-        policy: WorkspaceRuntimeProfilePolicyV1,
+        policy: WorkspaceRuntimeProfilePolicy,
         actor_workspace_user_id: str,
     ) -> WorkspaceRuntimeProfileProjection:
         """Replace one Workspace Profile with optimistic version fencing."""
@@ -385,10 +387,11 @@ class RuntimeProfileWorkspaceService:
                 policy=policy,
             )
             if lifecycle is RuntimeProfileLifecycle.ACTIVE:
-                await self._require_selectable_infrastructure(
+                await self._require_selectable_workspace_profile(
                     session,
                     workspace_id=workspace_id,
                     infrastructure=infrastructure,
+                    policy=policy,
                 )
             try:
                 profile = (
@@ -610,15 +613,14 @@ class RuntimeProfileWorkspaceService:
                 compatibility=unavailable,
                 capability_revision_id=provider.current_contract_revision_id,
             )
-        compatibility = await self._infrastructure_compatibility(
+        compatibility = await self._workspace_profile_compatibility(
             session,
             provider=provider,
             infrastructure=infrastructure,
+            policy_payload=profile.policy,
         )
         try:
-            workspace_policy = WorkspaceRuntimeProfilePolicyV1.model_validate(
-                profile.policy
-            )
+            workspace_policy = parse_workspace_runtime_profile_policy(profile.policy)
             spec = parse_runtime_infrastructure_profile_spec(infrastructure.spec)
             compose_workspace_runtime_profile(spec, workspace_policy)
         except ValidationError:
@@ -731,11 +733,47 @@ class RuntimeProfileWorkspaceService:
                 message="Runtime infrastructure Profile is incompatible.",
             )
 
+    async def _require_selectable_workspace_profile(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        infrastructure: RuntimeInfrastructureProfile,
+        policy: WorkspaceRuntimeProfilePolicy,
+    ) -> None:
+        """Require current Provider support for the effective Workspace Profile."""
+        await self._require_selectable_infrastructure(
+            session,
+            workspace_id=workspace_id,
+            infrastructure=infrastructure,
+        )
+        provider = await self.provider_repository.get_by_id(
+            session,
+            provider_id=infrastructure.provider_id,
+            for_update=False,
+        )
+        if provider is None:
+            raise RuntimeProfileWorkspaceUnavailable(
+                code="infrastructure_profile_unavailable",
+                message="Runtime infrastructure Profile is not selectable.",
+            )
+        compatibility = await self._workspace_profile_compatibility(
+            session,
+            provider=provider,
+            infrastructure=infrastructure,
+            policy_payload=policy.model_dump(mode="json"),
+        )
+        if not compatibility.compatible:
+            raise RuntimeProfileWorkspaceUnavailable(
+                code=compatibility.reason_code or "profile_incompatible",
+                message="Workspace Runtime Profile is incompatible.",
+            )
+
     @staticmethod
     def _require_valid_workspace_policy(
         *,
         infrastructure: RuntimeInfrastructureProfile,
-        policy: WorkspaceRuntimeProfilePolicyV1,
+        policy: WorkspaceRuntimeProfilePolicy,
     ) -> None:
         """Require policy composition to match Runtime resolution semantics."""
         spec = parse_runtime_infrastructure_profile_spec(infrastructure.spec)
@@ -804,6 +842,45 @@ class RuntimeProfileWorkspaceService:
         return evaluate_runtime_profile_compatibility(
             spec,
             contract.profile_contracts,
+            provider_protocol_version=contract.protocol_version,
+        )
+
+    async def _workspace_profile_compatibility(
+        self,
+        session: AsyncSession,
+        *,
+        provider: RuntimeProvider,
+        infrastructure: RuntimeInfrastructureProfile,
+        policy_payload: dict[str, object],
+    ) -> RuntimeProfileCompatibility:
+        """Evaluate the composed effective Profile against current capability."""
+        revision_id = provider.current_contract_revision_id
+        if revision_id is None:
+            return _unavailable_compatibility("provider_capability_unavailable")
+        revision = await self.policy_repository.get_contract_by_id(
+            session,
+            contract_revision_id=revision_id,
+            for_update=False,
+        )
+        if revision is None or revision.provider_id != provider.id:
+            return _unavailable_compatibility("provider_capability_unavailable")
+        try:
+            contract = RuntimeProviderCapabilityContract.model_validate(
+                revision.contract
+            )
+            spec = parse_runtime_infrastructure_profile_spec(infrastructure.spec)
+            policy = parse_workspace_runtime_profile_policy(policy_payload)
+            effective = parse_runtime_infrastructure_profile_spec(
+                compose_workspace_runtime_profile(spec, policy)
+            )
+        except ValidationError:
+            return _unavailable_compatibility("profile_document_invalid")
+        except ValueError as error:
+            return _unavailable_compatibility(str(error))
+        return evaluate_runtime_profile_compatibility(
+            effective,
+            contract.profile_contracts,
+            provider_protocol_version=contract.protocol_version,
         )
 
 
@@ -819,7 +896,7 @@ def _unavailable_compatibility(reason_code: str) -> RuntimeProfileCompatibility:
 def _workspace_profile_digest(
     *,
     infrastructure: RuntimeInfrastructureProfile,
-    policy: WorkspaceRuntimeProfilePolicyV1,
+    policy: WorkspaceRuntimeProfilePolicy,
 ) -> str:
     document = {
         "provider_id": infrastructure.provider_id,
