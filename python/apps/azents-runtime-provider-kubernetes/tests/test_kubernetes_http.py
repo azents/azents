@@ -22,6 +22,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     IpBlock,
     KeyToPath,
     LabelSelector,
+    LabelSelectorRequirement,
     LocalObjectReference,
     NetworkPolicyEgressRule,
     NetworkPolicyIngressRule,
@@ -693,6 +694,67 @@ async def test_core_resource_methods_use_exact_namespaced_paths() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_deployment_diagnostics_use_read_only_discovery_and_exact_access() -> (
+    None
+):
+    api = RecordingKubernetesHttpApi(
+        (
+            {"resources": [{"name": "pods"}, {"name": "pods/status"}]},
+            {"groups": [{"name": "cilium.io"}, {"name": "networking.k8s.io"}]},
+            {"status": {"allowed": True}},
+            {
+                "metadata": {
+                    "name": "azents-runtime",
+                    "labels": {
+                        "kubernetes.io/metadata.name": "azents-runtime",
+                    },
+                }
+            },
+        )
+    )
+
+    resources = await api.discover_api_resources("v1")
+    groups = await api.list_api_groups()
+    allowed = await api.check_resource_access(
+        namespace="azents-runtime",
+        api_group="",
+        resource="services",
+        verb="get",
+        resource_name="runtime-control",
+    )
+    namespace = await api.get_namespace("azents-runtime")
+
+    assert resources == frozenset({"pods"})
+    assert groups == frozenset({"cilium.io", "networking.k8s.io"})
+    assert allowed is True
+    assert namespace is not None
+    assert namespace.name == "azents-runtime"
+    assert [(item.method, item.path) for item in api.requests] == [
+        ("GET", "/api/v1"),
+        ("GET", "/apis"),
+        (
+            "POST",
+            "/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
+        ),
+        ("GET", "/api/v1/namespaces/azents-runtime"),
+    ]
+    access_review = api.requests[2].json
+    assert access_review == {
+        "apiVersion": "authorization.k8s.io/v1",
+        "kind": "SelfSubjectAccessReview",
+        "spec": {
+            "resourceAttributes": {
+                "group": "",
+                "resource": "services",
+                "verb": "get",
+                "namespace": "azents-runtime",
+                "name": "runtime-control",
+            }
+        },
+    }
+
+
 def _network_policy() -> NetworkPolicyResource:
     return NetworkPolicyResource(
         metadata=ObjectMeta(
@@ -706,7 +768,14 @@ def _network_policy() -> NetworkPolicyResource:
                 match_labels={
                     "azents/runtime-id": "runtime-1",
                     "azents/execution-policy-managed": "true",
-                }
+                },
+                match_expressions=(
+                    LabelSelectorRequirement(
+                        key="azents/managed-by",
+                        operator="In",
+                        values=("azents-runtime-provider-kubernetes",),
+                    ),
+                ),
             ),
             policy_types=("Ingress", "Egress"),
             ingress=(
@@ -716,10 +785,12 @@ def _network_policy() -> NetworkPolicyResource:
                             namespace_selector=LabelSelector(
                                 match_labels={
                                     "kubernetes.io/metadata.name": "azents-runtime"
-                                }
+                                },
+                                match_expressions=(),
                             ),
                             pod_selector=LabelSelector(
-                                match_labels={"azents/runtime-id": "runtime-1"}
+                                match_labels={"azents/runtime-id": "runtime-1"},
+                                match_expressions=(),
                             ),
                             ip_block=None,
                         ),

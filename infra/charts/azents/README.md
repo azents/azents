@@ -45,7 +45,7 @@ Chart consumers create Kubernetes Secrets with the keys below and reference thei
 
 The bootstrap Secret is optional. Without it, a zero-user installation generates a setup token and logs the plaintext once after persisting only its hash. With it, the configured token is never logged. The Platform GitHub App Secret is also optional; when configured, each referenced field permanently overrides the Admin-managed database fallback, including empty Secret values, and is intentionally not injected into `scheduler`. Omit `server.platformGitHubApp.existingSecret` to let all four fields come from Admin-managed System Settings. For mixed ownership, set the corresponding `server.platformGitHubApp.*Key` value to an empty string and restart `apiserver`, `adminserver`, and `worker`; the stored database fallback is never copied from the Secret.
 
-Runtime Control requires an operator-owned TLS Secret whenever the component or Kubernetes Provider is enabled. The certificate must authenticate the configured `server.runtimeControl.endpoint`; the default endpoint requires a DNS SAN for `runtime-control.<server namespace>.svc.cluster.local`. The Kubernetes Provider authenticates with a projected token for the exact `azents-runtime-control` audience. Runtime Control verifies that token with Kubernetes TokenReview. Its server ServiceAccount receives the cluster-scoped TokenReview `create` permission; the long-running Provider ServiceAccount receives no TokenReview or Secret-write permission.
+Runtime Control requires an operator-owned TLS Secret whenever the component or Kubernetes Provider is enabled. The certificate must authenticate the configured `server.runtimeControl.endpoint`; the default endpoint requires a DNS SAN for `runtime-control.<server namespace>.svc.cluster.local`. The Kubernetes Provider authenticates with a projected token for the exact `azents-runtime-control` audience. Runtime Control verifies that token with Kubernetes TokenReview. Its server ServiceAccount receives the cluster-scoped TokenReview `create` permission. The Provider receives no TokenReview permission and no cluster-wide or Platform-namespace Secret access; its Secret lifecycle permission is limited to Provider-owned Runtime CA resources in the dedicated workload namespace.
 
 ## External Service Policy
 
@@ -91,7 +91,7 @@ Container resource requirements follow the standard Helm chart pattern: defaults
 - Server ConfigMap: `AZ_RUNTIME_RUNNER_IMAGE`, `AZ_RUNTIME_RUNNER_CONTROL_ENDPOINT`, `AZ_RUNTIME_RUNNER_TRANSFER_ENDPOINT`
 - Provider authentication: `AZ_RUNTIME_PROVIDER_SERVICE_ACCOUNT_TOKEN_FILE` points to a projected ServiceAccount token with audience `azents-runtime-control`. The Provider watches the file and reconnects after rotation. It is separate from Runtime Runner authentication.
 - Provider Deployment: `AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE`, `AZ_RUNTIME_PROVIDER_WORKSPACE_PATH`, `AZ_RUNTIME_PROVIDER_STORAGE_CLASS`, `AZ_RUNTIME_PROVIDER_POD_IMAGE_PULL_SECRETS`
-- Provider RBAC: leader election Lease permissions are scoped to the provider namespace, while Runtime Pod/PVC/NetworkPolicy permissions are scoped to the workload namespace
+- Provider RBAC: leader election Lease permissions are scoped to the provider namespace. Runtime Pod, PVC, Service, ConfigMap, Secret, and NetworkPolicy lifecycle permissions are scoped to the workload namespace. Mandatory Platform Services use exact-name `get` Roles in their configured namespaces. Deployment diagnostics receive exact workload-Namespace `get` and `SelfSubjectAccessReview` `create`; they receive no TokenReview, broad Service discovery, or Platform Secret access.
 - Runtime Pod image pulls: by default, Runtime Pods inherit `global.imagePullSecrets`. Consumers may override with `runtimeProviderKubernetes.runtimePod.imagePullSecrets`. Referenced pull secrets must already exist in the workload namespace.
 - Runtime execution images: Runner and nested Docker Engine
   references must include immutable `sha256` digests. The Provider rejects
@@ -112,6 +112,44 @@ Container resource requirements follow the standard Helm chart pattern: defaults
   broad policy explicitly excludes these Pods because Kubernetes allow rules are
   additive. For legacy Pods, `deniedCidrs` narrows default public egress,
   `allowedCidrs` adds explicit CIDRs, and `extraEgress` adds service exceptions.
+
+### Strict Network Attestations
+
+`runtimeProviderKubernetes.strictNetwork.attestations.proxyRequired` and
+`runtimeProviderKubernetes.strictNetwork.attestations.noNetwork` are independent
+and default to `false`. Each boolean is an explicit operator attestation that
+authorizes the Provider to advertise the matching strict capability. Kubernetes
+discovery, diagnostics, and successful Runtime reconciliation never enable or
+disable these capabilities automatically.
+
+Before enabling either attestation, the operator must:
+
+- provide a dedicated workload namespace and prevent unrelated workloads from
+  sharing the Provider-managed network-policy boundary;
+- run a CNI that enforces Kubernetes NetworkPolicy for the Runtime and proxy Pods;
+- retain the chart-owned policy-managed default deny and prevent additive
+  NetworkPolicies from selecting Provider-managed Runtime or proxy Pods; and
+- keep each configured mandatory Platform Service as a stable, non-headless
+  ClusterIP Service whose exact endpoint hostname and port inputs match the
+  Provider configuration.
+
+`proxyRequired: true` additionally requires
+`runtimeProviderKubernetes.strictNetwork.proxy.image` with an immutable
+`sha256` digest and a lowercase SHA-256
+`runtimeProviderKubernetes.strictNetwork.proxy.addonDigest`. Profile and Workspace
+input cannot select either artifact. The chart maps both `runtime_control` and
+`runtime_transfer` roles to the chart-owned `runtime-control` Service by default;
+operators may configure explicit role-specific Service references when their
+deployment topology differs.
+
+The Provider performs best-effort startup and periodic checks for required API
+resources and RBAC, mandatory Services, workload Namespace/default-deny ownership,
+discoverable CNI identity, unexpected selecting NetworkPolicies, and proxy artifact
+immutability. Findings are structured warnings on the active Provider connection.
+They do not change capability advertisement, Runtime desired/applied state, or
+Provider readiness, and they are not evidence that packet enforcement works.
+Qualified packet-level validation in an enforcing-CNI environment remains required
+before treating a strict deployment as proven.
 
 ## External Service And Credential Modes
 

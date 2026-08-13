@@ -154,7 +154,8 @@ def test_proxy_required_runtime_is_platform_and_own_proxy_only() -> None:
             "azents/runtime-id": "runtime-1",
             "azents/resource-role": "proxy-pod",
             "azents/runtime-configuration-managed": "true",
-        }
+        },
+        match_expressions=(),
     )
 
 
@@ -193,7 +194,8 @@ def test_proxy_policies_select_matching_roles_and_destination_boundary() -> None
         ("203.0.113.0/24", ("203.0.113.128/25",)),
     }
     assert all(
-        peer.namespace_selector != LabelSelector(match_labels={"extra": "true"})
+        peer.namespace_selector
+        != LabelSelector(match_labels={"extra": "true"}, match_expressions=())
         for rule in result.egress_policy.spec.egress
         for peer in rule.peers
     )
@@ -307,7 +309,10 @@ def _extra_egress() -> NetworkPolicyEgressRule:
     return NetworkPolicyEgressRule(
         peers=(
             NetworkPolicyPeer(
-                namespace_selector=LabelSelector(match_labels={"extra": "true"}),
+                namespace_selector=LabelSelector(
+                    match_labels={"extra": "true"},
+                    match_expressions=(),
+                ),
                 pod_selector=None,
                 ip_block=None,
             ),

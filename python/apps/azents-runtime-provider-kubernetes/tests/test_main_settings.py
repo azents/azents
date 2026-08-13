@@ -82,6 +82,16 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_LEASE_NAMESPACE", "azents")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE", "azents-runtime")
     monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_DEFAULT_DENY_LABELS",
+        (
+            '{"app.kubernetes.io/component":"runtime-provider-kubernetes",'
+            '"app.kubernetes.io/instance":"azents",'
+            '"app.kubernetes.io/managed-by":"Helm",'
+            '"app.kubernetes.io/name":"azents",'
+            '"azents/network-policy-role":"runtime-execution-default-deny"}'
+        ),
+    )
+    monkeypatch.setenv(
         "AZ_RUNTIME_PROVIDER_LEASE_NAME",
         "azents-runtime-provider-kubernetes",
     )
@@ -106,6 +116,8 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
             '"ports":[8030]}]'
         ),
     )
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ATTEST_PROXY_REQUIRED", "false")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ATTEST_NO_NETWORK", "false")
     monkeypatch.setenv(
         "AZ_RUNTIME_PROVIDER_PROXY_IMAGE",
         f"proxy@sha256:{'f' * 64}",
@@ -113,6 +125,10 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PROXY_ADDON_DIGEST", "a" * 64)
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PROXY_PORT", "8080")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PROXY_READINESS_PORT", "8081")
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_DIAGNOSTIC_REFRESH_INTERVAL_SECONDS",
+        "300",
+    )
     monkeypatch.setenv(
         "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_ALLOWED_CIDRS",
         "[]",
@@ -149,6 +165,10 @@ def test_provider_settings_loads_provider_global_runtime_controls(
         "app.kubernetes.io/component": "runtime-control"
     }
     assert settings.runtime_control_port == 8030
+    assert (
+        settings.default_deny_labels["azents/network-policy-role"]
+        == "runtime-execution-default-deny"
+    )
     assert [reference.role for reference in settings.mandatory_services] == [
         "runtime_control",
         "runtime_transfer",
@@ -157,6 +177,9 @@ def test_provider_settings_loads_provider_global_runtime_controls(
     assert settings.proxy_addon_digest == "a" * 64
     assert settings.proxy_port == 8080
     assert settings.proxy_readiness_port == 8081
+    assert settings.attest_proxy_required is False
+    assert settings.attest_no_network is False
+    assert settings.diagnostic_refresh_interval_seconds == 300
     assert settings.network_hard_cap_allowed_cidrs == ()
     assert settings.network_hard_cap_denied_cidrs == ()
     assert settings.network_hard_cap_extra_egress == ()
@@ -357,10 +380,12 @@ def test_provider_settings_accepts_pod_image_pull_secrets(
     )
 
 
-def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
+def test_capability_contract_declares_kubernetes_pod_profile_support(
+    provider_env: Path,
+) -> None:
     """Registration advertises the exact current Pod Profile contract."""
     assert provider_main._PROTOCOL_VERSION == "agent-runtime-provider-kubernetes-v3"
-    contract = provider_main._capability_contract()
+    contract = provider_main._capability_contract(ProviderSettings())
     assert contract["implementation_version"] == "0.4.0"
     assert contract["optional_capabilities"] == []
     profile_contracts = contract["profile_contracts"]
@@ -392,3 +417,112 @@ def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
     assert "runtime.inspected-http-proxy" not in capabilities
     assert "runtime.external-network-denial" not in capabilities
     assert "runtime.network-enforcement" not in capabilities
+
+
+@pytest.mark.parametrize(
+    ("proxy_required", "no_network", "expected_strict_capabilities"),
+    [
+        (False, False, set()),
+        (
+            True,
+            False,
+            {
+                "runtime.inspected-http-proxy",
+                "runtime.network-enforcement",
+            },
+        ),
+        (
+            False,
+            True,
+            {
+                "runtime.external-network-denial",
+                "runtime.network-enforcement",
+            },
+        ),
+        (
+            True,
+            True,
+            {
+                "runtime.inspected-http-proxy",
+                "runtime.external-network-denial",
+                "runtime.network-enforcement",
+            },
+        ),
+    ],
+)
+def test_strict_capabilities_follow_only_independent_attestations(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+    proxy_required: bool,
+    no_network: bool,
+    expected_strict_capabilities: set[str],
+) -> None:
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_ATTEST_PROXY_REQUIRED",
+        str(proxy_required).lower(),
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_ATTEST_NO_NETWORK",
+        str(no_network).lower(),
+    )
+    settings = ProviderSettings()
+
+    profile_contracts = provider_main._capability_contract(settings)[
+        "profile_contracts"
+    ]
+    assert isinstance(profile_contracts, list)
+    capabilities = profile_contracts[0]["capabilities"]
+    assert isinstance(capabilities, list)
+    strict_capabilities = {
+        capability
+        for capability in capabilities
+        if capability
+        in {
+            "runtime.inspected-http-proxy",
+            "runtime.external-network-denial",
+            "runtime.network-enforcement",
+        }
+    }
+    assert strict_capabilities == expected_strict_capabilities
+
+
+def test_no_network_attestation_does_not_require_proxy_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ATTEST_NO_NETWORK", "true")
+    monkeypatch.delenv("AZ_RUNTIME_PROVIDER_PROXY_IMAGE")
+    monkeypatch.delenv("AZ_RUNTIME_PROVIDER_PROXY_ADDON_DIGEST")
+
+    settings = ProviderSettings()
+
+    assert settings.proxy_image is None
+    assert settings.proxy_addon_digest is None
+    profile_contracts = provider_main._capability_contract(settings)[
+        "profile_contracts"
+    ]
+    assert isinstance(profile_contracts, list)
+    capabilities = profile_contracts[0]["capabilities"]
+    assert isinstance(capabilities, list)
+    assert "runtime.external-network-denial" in capabilities
+    assert "runtime.inspected-http-proxy" not in capabilities
+
+
+def test_invalid_proxy_artifacts_do_not_suppress_attested_capability(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_env: Path,
+) -> None:
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ATTEST_PROXY_REQUIRED", "true")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PROXY_IMAGE", "mutable:latest")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PROXY_ADDON_DIGEST", "invalid")
+
+    settings = ProviderSettings()
+
+    profile_contracts = provider_main._capability_contract(settings)[
+        "profile_contracts"
+    ]
+    assert isinstance(profile_contracts, list)
+    capabilities = profile_contracts[0]["capabilities"]
+    assert isinstance(capabilities, list)
+    assert "runtime.inspected-http-proxy" in capabilities
+    assert "runtime.network-enforcement" in capabilities

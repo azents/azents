@@ -207,6 +207,34 @@ runtimeProviderKubernetes:
     tag: ""
     digest: ""
     pullPolicy: IfNotPresent
+  strictNetwork:
+    attestations:
+      proxyRequired: false
+      noNetwork: false
+    proxy:
+      image:
+        repository: ""
+        tag: ""
+        digest: ""
+        pullPolicy: IfNotPresent
+      addonDigest: ""
+      port: 8080
+      readinessPort: 8081
+    mandatoryServices:
+      runtimeControl:
+        namespace: ""
+        name: runtime-control
+        endpointHostnames: []
+        ports:
+          - 8030
+      runtimeTransfer:
+        namespace: ""
+        name: runtime-control
+        endpointHostnames: []
+        ports:
+          - 8030
+    diagnostics:
+      refreshIntervalSeconds: 300
   serviceAccount:
     create: true
     name: ""

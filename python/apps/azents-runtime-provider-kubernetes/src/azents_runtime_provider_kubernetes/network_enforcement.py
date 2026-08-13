@@ -309,7 +309,8 @@ def build_proxy_network_inputs(value: NetworkEnforcementInputs) -> ProxyNetworkI
         peers=(
             NetworkPolicyPeer(
                 namespace_selector=LabelSelector(
-                    match_labels={_NAMESPACE_LABEL: value.namespace}
+                    match_labels={_NAMESPACE_LABEL: value.namespace},
+                    match_expressions=(),
                 ),
                 pod_selector=LabelSelector(
                     match_labels={
@@ -317,7 +318,8 @@ def build_proxy_network_inputs(value: NetworkEnforcementInputs) -> ProxyNetworkI
                         LABEL_RUNTIME_ID: value.identity.runtime_id,
                         LABEL_RESOURCE_ROLE: ResourceRole.RUNTIME_POD.value,
                         LABEL_CONFIGURATION_MANAGED: "true",
-                    }
+                    },
+                    match_expressions=(),
                 ),
                 ip_block=None,
             ),
@@ -384,7 +386,8 @@ def _network_policy(
                         else ResourceRole.PROXY_POD.value
                     ),
                     LABEL_CONFIGURATION_MANAGED: "true",
-                }
+                },
+                match_expressions=(),
             ),
             policy_types=policy_types,
             ingress=ingress,
@@ -403,9 +406,13 @@ def _mandatory_service_rules(
                     namespace_selector=LabelSelector(
                         match_labels={
                             _NAMESPACE_LABEL: item.reference.namespace,
-                        }
+                        },
+                        match_expressions=(),
                     ),
-                    pod_selector=LabelSelector(match_labels=item.selector),
+                    pod_selector=LabelSelector(
+                        match_labels=item.selector,
+                        match_expressions=(),
+                    ),
                     ip_block=None,
                 ),
             ),
@@ -430,7 +437,8 @@ def _proxy_service_rule(value: NetworkEnforcementInputs) -> NetworkPolicyEgressR
         peers=(
             NetworkPolicyPeer(
                 namespace_selector=LabelSelector(
-                    match_labels={_NAMESPACE_LABEL: value.namespace}
+                    match_labels={_NAMESPACE_LABEL: value.namespace},
+                    match_expressions=(),
                 ),
                 pod_selector=LabelSelector(
                     match_labels={
@@ -438,7 +446,8 @@ def _proxy_service_rule(value: NetworkEnforcementInputs) -> NetworkPolicyEgressR
                         LABEL_RUNTIME_ID: value.identity.runtime_id,
                         LABEL_RESOURCE_ROLE: ResourceRole.PROXY_POD.value,
                         LABEL_CONFIGURATION_MANAGED: "true",
-                    }
+                    },
+                    match_expressions=(),
                 ),
                 ip_block=None,
             ),
@@ -452,9 +461,13 @@ def _dns_egress_rule() -> NetworkPolicyEgressRule:
         peers=(
             NetworkPolicyPeer(
                 namespace_selector=LabelSelector(
-                    match_labels={_NAMESPACE_LABEL: "kube-system"}
+                    match_labels={_NAMESPACE_LABEL: "kube-system"},
+                    match_expressions=(),
                 ),
-                pod_selector=LabelSelector(match_labels={"k8s-app": "kube-dns"}),
+                pod_selector=LabelSelector(
+                    match_labels={"k8s-app": "kube-dns"},
+                    match_expressions=(),
+                ),
                 ip_block=None,
             ),
         ),

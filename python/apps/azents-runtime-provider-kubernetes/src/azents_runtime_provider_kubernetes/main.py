@@ -25,6 +25,12 @@ from azents_runtime_control.provider import (
     ProviderRunLoop,
 )
 
+from azents_runtime_provider_kubernetes.deployment_diagnostics import (
+    DeploymentDiagnosticSettings,
+    OperationalDiagnosticsState,
+    collect_operational_diagnostics,
+    refresh_operational_diagnostics,
+)
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     IpBlock,
     LabelSelector,
@@ -110,6 +116,19 @@ async def _run_control_loop(
     prepared = await prepare_runtime_provider(settings, api)
     provider = prepared.lifecycle
     registration = prepared.registration
+    diagnostic_settings = DeploymentDiagnosticSettings(
+        provider_namespace=settings.namespace,
+        workload_namespace=settings.workload_namespace,
+        runtime_control_endpoint=settings.control_endpoint,
+        mandatory_services=settings.mandatory_services,
+        default_deny_labels=settings.default_deny_labels,
+        attest_proxy_required=settings.attest_proxy_required,
+        proxy_image=settings.proxy_image,
+        proxy_addon_digest=settings.proxy_addon_digest,
+    )
+    diagnostics = OperationalDiagnosticsState(
+        await collect_operational_diagnostics(api, diagnostic_settings)
+    )
     while not stop.is_set():
         _set_readiness(settings.readiness_file, ready=False)
         provider_credential = read_service_account_token(
@@ -134,7 +153,7 @@ async def _run_control_loop(
             registration=registration,
             connection_id=control_connection_id,
             consumer_id=f"{control_connection_id}:provider",
-            operational_diagnostics=lambda: None,
+            operational_diagnostics=diagnostics.snapshot,
         )
         try:
             await run_loop.start()
@@ -162,8 +181,18 @@ async def _run_control_loop(
                 ),
                 name="runtime-provider-credential-watch",
             )
+            diagnostics_task = asyncio.create_task(
+                refresh_operational_diagnostics(
+                    diagnostics,
+                    api,
+                    diagnostic_settings,
+                    interval_seconds=settings.diagnostic_refresh_interval_seconds,
+                    stop=stop,
+                ),
+                name="runtime-provider-deployment-diagnostics",
+            )
             done, pending = await asyncio.wait(
-                {watch_task, command_task, credential_task},
+                {watch_task, command_task, credential_task, diagnostics_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
             for task in pending:
@@ -409,6 +438,13 @@ class ProviderSettings:
         self.workload_namespace: str = _required_env(
             "AZ_RUNTIME_PROVIDER_WORKLOAD_NAMESPACE"
         )
+        self.default_deny_labels = _json_string_map_env(
+            "AZ_RUNTIME_PROVIDER_DEFAULT_DENY_LABELS"
+        )
+        if not self.default_deny_labels:
+            raise RuntimeError(
+                "AZ_RUNTIME_PROVIDER_DEFAULT_DENY_LABELS must not be empty"
+            )
         self.lease_name: str = _required_env("AZ_RUNTIME_PROVIDER_LEASE_NAME")
         self.workspace_path: str = _required_env("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH")
         self.runner_env: Mapping[str, str] = _selected_env(RUNNER_LIMIT_ENV_NAMES)
@@ -433,14 +469,28 @@ class ProviderSettings:
         self.mandatory_services = _json_mandatory_services_env(
             "AZ_RUNTIME_PROVIDER_MANDATORY_SERVICES"
         )
-        self.proxy_image = _required_env("AZ_RUNTIME_PROVIDER_PROXY_IMAGE")
-        self.proxy_addon_digest = _required_env(
+        self.attest_proxy_required = _required_bool_env(
+            "AZ_RUNTIME_PROVIDER_ATTEST_PROXY_REQUIRED"
+        )
+        self.attest_no_network = _required_bool_env(
+            "AZ_RUNTIME_PROVIDER_ATTEST_NO_NETWORK"
+        )
+        self.proxy_image = _optional_env("AZ_RUNTIME_PROVIDER_PROXY_IMAGE")
+        self.proxy_addon_digest = _optional_env(
             "AZ_RUNTIME_PROVIDER_PROXY_ADDON_DIGEST"
         )
         self.proxy_port = int(_required_env("AZ_RUNTIME_PROVIDER_PROXY_PORT"))
         self.proxy_readiness_port = int(
             _required_env("AZ_RUNTIME_PROVIDER_PROXY_READINESS_PORT")
         )
+        self.diagnostic_refresh_interval_seconds = float(
+            _required_env("AZ_RUNTIME_PROVIDER_DIAGNOSTIC_REFRESH_INTERVAL_SECONDS")
+        )
+        if not 30 <= self.diagnostic_refresh_interval_seconds <= 3600:
+            raise RuntimeError(
+                "AZ_RUNTIME_PROVIDER_DIAGNOSTIC_REFRESH_INTERVAL_SECONDS must be "
+                "between 30 and 3600"
+            )
         self.network_hard_cap_allowed_cidrs = _json_string_tuple_env(
             "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_ALLOWED_CIDRS"
         )
@@ -536,12 +586,12 @@ def _provider_registration(settings: ProviderSettings) -> ProviderRegistration:
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata={},
-        capability_contract=_capability_contract(),
+        capability_contract=_capability_contract(settings),
         operational_diagnostics=None,
     )
 
 
-def _capability_contract() -> dict[str, JsonValue]:
+def _capability_contract(settings: ProviderSettings) -> dict[str, JsonValue]:
     capabilities = [
         "kubernetes.pod-profile",
         "runtime.resources",
@@ -552,6 +602,17 @@ def _capability_contract() -> dict[str, JsonValue]:
         "docker.dind",
         "docker.storage.ephemeral",
     ]
+    if settings.attest_proxy_required:
+        capabilities.extend(
+            (
+                "runtime.inspected-http-proxy",
+                "runtime.network-enforcement",
+            )
+        )
+    if settings.attest_no_network:
+        capabilities.append("runtime.external-network-denial")
+        if "runtime.network-enforcement" not in capabilities:
+            capabilities.append("runtime.network-enforcement")
     return {
         "schema_version": 1,
         "implementation_key": "kubernetes",
@@ -596,6 +657,11 @@ def _required_env(name: str) -> str:
     if value is None or not value:
         raise RuntimeError(f"required environment variable is missing: {name}")
     return value
+
+
+def _optional_env(name: str) -> str | None:
+    value = os.environ.get(name)
+    return None if value is None or not value else value
 
 
 def _required_bool_env(name: str) -> bool:
@@ -790,7 +856,10 @@ def _network_policy_selector(value: object, env_name: str) -> LabelSelector | No
                 f"{env_name} selector labels must map strings to strings"
             )
         validated_match_labels[key] = item
-    return LabelSelector(match_labels=validated_match_labels)
+    return LabelSelector(
+        match_labels=validated_match_labels,
+        match_expressions=(),
+    )
 
 
 def _network_policy_port(value: object, env_name: str) -> NetworkPolicyPort:
