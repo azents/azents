@@ -25,7 +25,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-08-13
-spec_version: 28
+spec_version: 29
 ---
 
 # E2E Primary Test Strategy
@@ -124,10 +124,17 @@ E2E tests reproduce product behavior through user-facing UI, public/internal tes
 Always-on required CI does not depend on external credentials.
 
 - Python lint/type/unit and other deterministic checks.
-- Testenv unit runs `uv run pytest -vv ./src/unit_tests` for support behavior that
+- Testenv support tests run `uv run pytest -vv ./src/support_tests` for behavior that
   requires no server, network listener, container, product image, browser, Runtime
   Provider, or external prerequisite.
-- Deterministic E2E runs `uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src/tests` in `testenv/azents/e2e`.
+- E2E execution profiles are owned by directories, not individual pytest markers.
+  `src/tests/required/` owns all credential-free required product E2E and
+  `src/tests/web/` owns browser, TLS gateway, and Web image E2E. Each directory has
+  one `suite.toml`, and every test below that directory uses the same substrate.
+- One planner discovers enabled suite directories and creates a dynamic matrix.
+  It balances files only within a suite using the latest successful `main` timing
+  baseline, with a deterministic source-based fallback. Required uses three lanes;
+  Web uses one lane. Lanes are parallel partitions, not additional profiles.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
@@ -161,14 +168,11 @@ Always-on required CI does not depend on external credentials.
   leases, retry-tail movement, same-batch cursor views, final cursor CAS, atomic
   successful-subset mailbox admission, one post-batch wake, bounded failure logs,
   active diagnostics, producer recovery scans, and Redis-independent correctness.
-- Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run
-  selected `runtime_provider` journeys, including Tool Search Runtime Hooks, provider-native
-  External Channel progress, file transfer, and Optional Managed Runtime add/stop/remove/reconnect/
-  re-add. The Optional Managed Runtime journey proves stopped add without compute, lazy start,
-  Workspace preservation across temporary stop, irreversible removal pending through Provider
-  outage, exact acknowledgement after reconnect, higher-generation re-add, stale Session binding
-  rejection, and a newly created post-add Session binding to current Runner evidence. The lane loads
-  no host AppArmor profile and uses direct Runner execution for both Profile schema versions.
+- The required suite uses a locally bootstrapped and API-enrolled Docker Runtime
+  Provider as suite substrate. It retains the two Tool Search Runtime Hooks scenarios,
+  provider-native External Channel progress, Runtime Profile precedence/application/
+  recreation, and the existing deterministic product journeys. Runtime Provider
+  scenarios that were outside required CI are not retained.
 - Worktree-built Server, Runtime Runner, Docker Runtime Provider, Main Web, and
   Admin Web E2E images import image-specific BuildKit GitHub Actions cache scopes.
   Only `main` push jobs export cache, with one existing lane owning each scope;
@@ -188,16 +192,16 @@ Always-on required CI does not depend on external credentials.
 - Deterministic Optional Managed Runtime E2E creates a Runtime-free Agent through public APIs,
   executes and persists a model-only turn, verifies no logical or physical Runtime appears, and
   confirms Runtime-backed Workspace projection remains unavailable.
-- Web Surface E2E runs in a separate parallel lane with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src/tests`.
+- Web Surface E2E runs from `src/tests/web/` in its own suite lane.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
 - Optional Managed Runtime Web Surface E2E creates all product state through public/admin APIs,
   then uses the real Main Web and server projections to prove the Runtime-free new-Session guidance,
   Profile-backed Add Runtime confirmation, managed controls, aggregate-only destructive removal
   confirmation, and non-cancellable removal progress. The browser journey does not write directly
   to PostgreSQL or derive Runtime actions in test code.
-- The stable `ci-python-e2e` required gate aggregates Testenv unit plus the
-  deterministic, focused Runtime Provider, and Web Surface lane results for the
-  scopes selected by path filtering.
+- The stable `ci-python-e2e` required gate aggregates support tests, the planner,
+  all enabled suite lanes, and the timing aggregator for the scopes selected by path
+  filtering.
 - Each executed required E2E lane uploads bounded observability artifacts even when
   pytest fails. The artifact contains JUnit XML, the complete pytest output, the
   slow-test report, and Docker process/storage diagnostics. Failed browser calls also
@@ -211,15 +215,10 @@ Always-on required CI does not depend on external credentials.
 - Web Surface path filtering includes backend/E2E dependencies, both web Dockerfiles, and the TypeScript workspace.
 - testenv fixture/prerequisite unit, contract lint.
 
-Live/external verification runs only conditionally.
-
-- PR label `azents-live-e2e`.
-- manual workflow dispatch.
-- nightly schedule.
-
-Live workflow runs `live_external` E2E marker. If credential is missing in live verification requested by maintainer, treat as fail; in nightly optional verification, report prerequisite not-ready as skip summary and do not fail deterministic CI.
-
-Agent Runtime Provider E2E follows the same policy. The focused required lane creates its System Docker Provider declaration through the trusted bootstrap source, enrolls it through the Admin and Public HTTP APIs, and passes only the issued credential to the Provider process. In required live Runtime Provider runs, missing or stale external provider prerequisites are treated as failures. Optional or nightly runs can report prerequisite-not-ready as a skip summary.
+The maintained E2E suite does not contain external-credential or `live_external`
+tests. Required Runtime Provider coverage creates its System Docker Provider
+declaration through the trusted bootstrap source, enrolls it through the Admin and
+Public HTTP APIs, and passes only the issued credential to the Provider process.
 
 Runtime Execution Profile E2E creates policy state through Admin/Public APIs only. It verifies
 typed unknown-field rejection, qualified engine-policy acceptance, hierarchy reductions and
@@ -267,6 +266,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-13** — v29. Replaced marker-selected deterministic, focused Runtime
+  Provider, Web Surface, and unused live groupings with folder-owned `required` and
+  `web` suites, timing-balanced planner lanes, and one dynamic E2E runner matrix.
 - **2026-08-13** — v28. Added deterministic API-created hierarchical network-restriction
   control-plane coverage, explicitly separated from Kubernetes Provider/proxy unit, manifest,
   protocol, lifecycle, trust, and forwarding validation and from any packet-enforcement claim.

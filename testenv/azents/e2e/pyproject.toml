@@ -51,12 +51,7 @@ select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "T", "PGH003"]
 python-version = "3.14"
 
 [tool.pytest.ini_options]
-testpaths = ["src/unit_tests", "src/tests"]
+testpaths = ["src/support_tests", "src/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-markers = [
-    "live_external: requires external credentials or live third-party services",
-    "runtime_provider: requires an agent runtime provider connection",
-    "web_surface: exercises deployed web applications through a real browser and gateway",
-]

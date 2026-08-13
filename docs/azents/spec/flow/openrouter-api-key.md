@@ -21,9 +21,9 @@ code_paths:
   - python/apps/azents/src/azents/engine/model_stream.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
-  - testenv/azents/e2e/src/tests/azents/public/test_llm_provider_integration.py
-  - testenv/azents/e2e/src/tests/azents/public/test_model_selection.py
-last_verified_at: 2026-08-01
+  - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
+  - testenv/azents/e2e/src/tests/required/public/test_model_selection.py
+last_verified_at: 2026-08-13
 spec_version: 3
 ---
 

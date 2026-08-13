@@ -1,0 +1,9 @@
+[suite]
+name = "required"
+lanes = 3
+timeout_minutes = 45
+cache_write_repositories = [
+  "azents-server",
+  "azents-runtime-runner",
+  "azents-runtime-provider-docker",
+]

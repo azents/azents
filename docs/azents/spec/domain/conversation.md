@@ -111,7 +111,7 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-08-12
+last_verified_at: 2026-08-13
 spec_version: 147
 ---
 
@@ -1132,14 +1132,13 @@ Current verification:
 
 - `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/api/public/chat/v1/chat_api_test.py::TestRestMessageWriteContract::test_validate_rest_session_rejects_subagent_before_write src/azents/services/agent_session_input_test.py::TestAgentSessionInputService::test_create_buffered_agent_input_rejects_subagent_before_wake src/azents/services/chat/subagent_tree_test.py::TestSubagentTreeProjection::test_finalize_tree_propagates_interrupted_to_all_descendants src/azents/services/chat_write_test.py::TestChatWriteService::test_pending_command_rejects_subagent_session_before_write src/azents/services/session_git_worktree/service_test.py -q`
 - `cd python/apps/azents && uv run pytest src/azents/engine/tools/subagent_test.py src/azents/services/chat/subagent_tree_test.py src/azents/worker/run/executor_test.py -q`
-- `cd testenv/azents/e2e && uv run pytest ./src/tests/azents/public/test_subagents.py -q` in Docker-enabled deterministic E2E environments
+- `cd testenv/azents/e2e && uv run pytest ./src/tests/required/public/test_subagents.py -q` in Docker-enabled deterministic E2E environments
 
 - `cd python/apps/azents && uv run pytest src/azents/runtime -q`
 - `cd python/apps/azents && uv run pyright`
 - `cd testenv/azents && uv run pytest testenv/tests -q`
 - deterministic azents E2E CI for public chat/tool behavior
-- `cd testenv/azents/e2e && uv run pyright src/tests/azents/public/test_chat_input_buffer.py`
-- `cd testenv/azents/e2e && uv run pytest -vv src/tests/azents/public/test_session_git_worktree_lifecycle.py` in deterministic E2E CI
+- `cd testenv/azents/e2e && uv run pyright src/tests/required/public/test_chat_input_buffer.py`
 - REST chat write verification evidence is recorded in `docs/azents/design/rest-chat-write-boundary.md`; preemptive stop audit and E2E coverage evidence is recorded in `docs/azents/design/preemptive-user-stop-phase6-audit.md` and `docs/azents/design/preemptive-user-stop-phase7-verification.md`. Docker/testcontainers blocker #4468 and browser-runner blocker #4469 track scenarios that could not run in the current agent runtime.
 
 ## 11. External Channel Conversation Projection

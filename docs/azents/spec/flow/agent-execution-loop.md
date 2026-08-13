@@ -78,7 +78,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-12
+last_verified_at: 2026-08-13
 spec_version: 155
 ---
 
@@ -1103,14 +1103,12 @@ Primary checks:
 - `cd python/apps/azents && uv run pytest src/azents/runtime -q`
 - `cd python/apps/azents && uv run pytest src/azents/engine/events/execution_test.py src/azents/engine/events/filters_test.py src/azents/engine/events/engine_adapter_test.py`
 - `cd python/apps/azents && uv run pytest src/azents/engine/run/tool_budget_test.py src/azents/engine/tooling/tool_search_test.py src/azents/engine/events/tools_test.py src/azents/engine/events/engine_adapter_test.py src/azents/engine/events/litellm_responses_test.py src/azents/engine/events/openai_responses_test.py src/azents/engine/tools/mcp_base_test.py src/azents/engine/tooling/toolkit_state_test.py`
-- `cd testenv/azents/e2e && uv run pytest -q src/tests/azents/public/test_runtime_hooks.py -k tool_search`
-- `cd testenv/azents/e2e && uv run pytest -q src/tests/azents/public/test_runtime_exec_process_tools.py -k apply_patch`
+- `cd testenv/azents/e2e && uv run pytest -q src/tests/required/public/test_runtime_hooks.py -k tool_search`
 - `cd python/apps/azents && uv run pyright`
 - deterministic azents E2E CI for text/tool/UI projection behavior
-- deterministic action-based Git worktree lifecycle E2E coverage, including existing-session Register Project actions, durable buffer-keyed execution recovery, and terminal success/failure history
-- `cd testenv/azents/e2e && uv run pyright src/tests/azents/public/test_chat_input_buffer.py`
-- Failed-run retry recovery E2E: `cd testenv/azents/e2e && uv run pytest src/tests/azents/public/test_agent_execution_persistence.py -q -k failed_run`
-- Per-prompt target, effort, provenance, and resolution-failure E2E: `cd testenv/azents/e2e && uv run pytest src/tests/azents/public/test_per_prompt_inference_profile.py -q`
+- `cd testenv/azents/e2e && uv run pyright src/tests/required/public/test_chat_input_buffer.py`
+- Failed-run retry recovery E2E: `cd testenv/azents/e2e && uv run pytest src/tests/required/public/test_agent_execution_persistence.py -q -k failed_run`
+- Per-prompt target, effort, provenance, and resolution-failure E2E: `cd testenv/azents/e2e && uv run pytest src/tests/required/public/test_per_prompt_inference_profile.py -q`
 - REST chat write targeted verification: `cd python/apps/azents && uv run pytest -q src/azents/api/public/chat/v1/chat_api_test.py src/azents/repos/chat_write_request/repository_test.py src/azents/services/chat/input_buffer_test.py`
 - REST chat write and preemptive stop E2E/browser blocker tracking: GitHub issues #4468 and #4469
 - static scan for removed `openai-agents`, `azents.engine.sdk`, `azents.runtime.llm`, and

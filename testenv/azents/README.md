@@ -16,27 +16,22 @@ E2E translated testenv fixture/readiness/support translated translated translate
 
 ```bash
 cd testenv/azents/e2e
-uv run pytest ./src/tests/azents/public/test_health.py
+uv run pytest ./src/tests/required/public/test_health.py
 ```
 
-Required CI uses separate credential-free lanes for deterministic product behavior and deployed web surfaces.
+Required CI discovers folder-owned suites and balances files into lanes. Every test
+inside a suite folder uses that folder's execution profile.
 
 ```bash
 cd testenv/azents/e2e
-uv run pytest -vv ./src/unit_tests
-uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src/tests
-uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src/tests
+uv run pytest -vv ./src/support_tests
+uv run pytest -vv ./src/tests/required
+uv run pytest -vv ./src/tests/web
 ```
 
-Live/external verifytranslated deterministic CI translated translated translated. PR translated `azents-live-e2e` label translated
-translated maintainer translated `/azents-live-e2e` comment translated translated translated workflow translated runtranslated
-requesttranslated live check translated processtranslated credential missing translated failuretranslated.
-Nightly live workflow translated optional check translated prerequisite not-ready statetranslated skip summary translated translated.
-Live workflow translated `live_external` marker translated translated E2E testtranslated runtranslated. GitHub Actions translated `AZENTS_BEDROCK_AWS_ACCESS_KEY_ID`,
-`AZENTS_BEDROCK_AWS_SECRET_ACCESS_KEY`, `AZENTS_BEDROCK_AWS_REGION` secret translated translated
-`azents-bedrock` shared credentials profile translated materialize translated,
-`AZENTS_BROWSER_OAUTH_STORAGE_STATE` secret translated translated Browser/OAuth storage state translated materialize translated.
-Browser/OAuth prerequisite translated `AZENTS_PUBLIC_BASE_URL` secret translated `.env` translated materialize translated translated ready translated translated.
+`required/` owns credential-free product E2E with the Docker Runtime Provider.
+`web/` owns browser, TLS gateway, and Web image E2E. External-credential E2E is not
+part of the maintained suite.
 
 ## Bootstrap boundary
 
