@@ -9,7 +9,7 @@ tags: [runtime, network, security, provider, kubernetes, frontend, testenv]
 - Requirements: [`network-260812/REQ`](../requirements/network-260812-hierarchical-runtime-network-restriction.md)
 - Decisions: [`network-260812/ADR`](../adr/network-260812-hierarchical-runtime-network-restriction.md)
 - Approved Design: [`network-260812/DESIGN`](../design/network-260812-hierarchical-runtime-network-restriction.md)
-- Approved Design revision: `1`
+- Approved Design revision: `2`
 - Approved mechanism IDs: `M1` through `M15`
 - Design delta: `None`
 - Implementation owner: Primary agent (`/root`)
@@ -29,7 +29,7 @@ before stack-wide CI monitoring begins.
 | 4 | `feature/network-restriction-4-provider-lifecycle` | Phase 3 | `Runtime network restriction [4/8]: Enforce strict network lifecycle` | `M3`, `M7`, `M10`, `M11`, `M12` | Provider resource lifecycle, complete policies, aggregate reconciliation, recovery, narrow-first transitions, v2 actionable removal |
 | 5 | `feature/network-restriction-5-helm` | Phase 4 | `Runtime network restriction [5/8]: Package strict network enforcement` | `M3`, `M4`, `M6`, `M7`, `M8` | Default-disabled attestations, immutable artifacts, mandatory Service references, narrow RBAC, chart render coverage |
 | 6 | `feature/network-restriction-6-product` | Phase 5 | `Runtime network restriction [6/8]: Expose network policy controls` | `M1`, `M2`, `M8`, `M13` | Admin/Public API projections, OpenAPI and generated clients, Admin and Workspace profile/status web surfaces |
-| 7 | `feature/network-restriction-7-validation` | Phase 6 | `Runtime network restriction [7/8]: Validate and document enforcement` | `M15` plus full `M1`-`M15` validation | deterministic tests, Kubernetes qualification substrate, Living Specs, implementation dates, delivery evidence |
+| 7 | `feature/network-restriction-7-validation` | Phase 6 | `Runtime network restriction [7/8]: Validate and document enforcement` | `M15` plus full `M1`-`M15` validation | deterministic API/control-plane E2E, Kubernetes Provider/proxy tests, Living Specs, implementation dates, delivery evidence |
 | 8 | `feature/network-restriction-8-cleanup` | Phase 7 | `Runtime network restriction [8/8]: Remove implementation plans` | full approved delivery cleanup | remove temporary overall and phase plans after validation and Spec promotion |
 
 ## Fixed Interfaces and Integration Boundaries
@@ -62,14 +62,16 @@ before stack-wide CI monitoring begins.
   recreation. Authority is narrowed before replacement.
 - Workspace PVC deletion remains limited to existing reset and terminal-delete
   boundaries. Stop and ordinary replacement preserve it.
-- The qualified packet-enforcement lane is distinct from deterministic CI and requires
-  an enforcing-CNI environment. Warning diagnostics cannot substitute for its evidence.
+- API/control-plane E2E is distinct from Kubernetes Provider/proxy unit, manifest,
+  protocol, lifecycle, trust, and forwarding validation. Neither test layer becomes
+  capability authority or claims live packet enforcement.
 
 ## Phase Dependencies and Context Checkpoints
 
 ### Phase 1 — Contracts and composition
 
-Inputs: approved Design revision 1 and current Profile v1/v2 and Policy v1 behavior.
+Historical Phase 1 inputs: then-approved Design revision 1 and the pre-feature Profile v1/v2 and
+Policy v1 behavior. The current delivery and review authority is approved Design revision 2.
 
 Outputs:
 
@@ -139,7 +141,8 @@ Outputs:
 - persistent CA and stable Service retention plus existing PVC semantics;
 - narrow-first transitions and recreation-required outcomes;
 - aggregate `network_enforcement` evidence; and
-- removal of the actionable v2 `network_policy` reconciliation path.
+- removal of any v2 `network_policy` fallback for v3 strict contracts while retaining
+  the legacy direct v2 path.
 
 Checkpoint to Phase 5: the Provider can enforce and prove strict modes when configured,
 but chart attestations remain default-disabled until packaged.
@@ -183,22 +186,21 @@ no TypeScript-side policy composition.
 
 ### Phase 7 — Validation, Specs, and implementation record
 
-Inputs: stable complete implementation and fresh deterministic prerequisites.
+Inputs: stable complete implementation and the credential-free E2E fixture.
 
 Outputs:
 
 - deterministic contract, Provider, Runner, addon, Helm, generated-client, and
   control-plane E2E coverage;
-- safe strict-network prerequisite snapshot and qualified live-lane test definitions;
-- Kubernetes strict-network journey evidence that distinguishes deterministic
-  control-plane proof from packet enforcement;
+- explicit separation between API/control-plane evidence and Kubernetes
+  Provider/proxy unit, manifest, protocol, lifecycle, trust, and forwarding evidence;
 - full authority, removal, security, lifecycle, migration, rollout, and rollback audit;
 - updated Runtime Provider, Runtime Control, Workspace, persistence, and E2E Living
   Specs;
-- matching `implemented: 2026-08-12` dates on Requirements and Design only after
+- matching `implemented: 2026-08-13` dates on Requirements and Design only after
   required implementation validation succeeds; and
-- recorded validation commands, environments, failures, corrections, and remaining
-  external qualification prerequisites.
+- recorded validation commands, environments, failures, corrections, and explicit
+  non-packet evidence classification.
 
 Checkpoint to Phase 8: implementation and Specs are authoritative and verified; only
 temporary implementation plans remain.
@@ -239,17 +241,17 @@ implementation phase begins.
 | --- | --- | --- | --- |
 | v1/v2 `network_policy` as the only new Kubernetes contract shape | 1 | Profile v3 `network_access`; legacy parsers retained | parser/API tests require v3 for strict contracts while v1/v2 fixtures remain unchanged |
 | Policy v1 as the only editable Workspace policy | 1 and 6 | Policy v2 hierarchy; Policy v1 retained direct-only | server and generated/UI tests cover both versions |
-| narrow v2 actionable `network_policy` observation | 4 | protocol-v3 aggregate `network_enforcement` | static search and protocol/Control tests find no active actionable old kind |
+| `network_policy` as the only Kubernetes reconciliation contract | 4 | protocol-v3 aggregate `network_enforcement` for v3 strict contracts while protocol v2 remains legacy direct-only | protocol/Control tests separate v2 compatibility from v3 strict evidence and reject cross-version fallback |
 | Provider API limited to Pod/PVC/NetworkPolicy | 3 | typed Service/ConfigMap/Secret/hosts/DNS boundary | typed transport tests and exact method search |
 | Runner without interception trust bootstrap | 3 | validated public-CA appended trust bundle | Runner tests and mounted-key absence assertions |
-| Runtime DNS in strict modes | 4 | strict DNS configuration plus mandatory host aliases | manifest tests and qualified DNS-negative probes |
-| direct customer egress in proxy/no-network modes | 4 | proxy-only or Platform-only complete Runtime policy | policy equality and qualified direct-IP/raw-socket denial |
+| Runtime DNS in strict modes | 4 | strict DNS configuration plus mandatory host aliases | exact manifest and comparison tests |
+| direct customer egress in proxy/no-network modes | 4 | proxy-only or Platform-only complete Runtime policy | exact policy equality and negative-rule assertions |
 | NetworkPolicy-only in-place Provider update | 4 | mode-aware bounded enforcement-bundle update | lifecycle and recreation-required tests |
 | Provider workload RBAC limited to Pod/PVC/NetworkPolicy | 5 | narrow owned-resource CRUD plus named Service reads | Helm render assertions for resources, names, namespaces, and verbs |
 | CIDR-only Admin and Workspace editors | 6 | mode-aware CIDR/domain forms and explanations | stories, component tests, and Web Surface E2E |
 | Runtime status without effective network mode | 6 | bounded desired/applied network projection | API/UI tests and sensitive-field absence checks |
 | connection projection without warning diagnostics | 2 and 6 | generation-scoped snapshot and disconnected-unavailable projection | migration, generation-fence, redaction, disconnect, and Admin tests |
-| absence of strict packet-enforcement evidence | 7 | qualified Kubernetes live E2E matrix | qualification artifact or explicit external prerequisite record |
+| strict-mode validation limited to API composition | 7 | Provider/proxy unit, manifest, protocol, lifecycle, trust, and forwarding tests alongside control-plane E2E | focused deterministic suites and explicit non-packet labeling |
 | temporary implementation plans | 8 | implemented snapshot, Living Specs, code, and test evidence | final tree search finds no network-260812 plan |
 
 The existing MCP egress proxy and Workspace PVC lifecycle remain unchanged except for
@@ -273,9 +275,8 @@ coordination required by the approved strict Runtime resource lifecycle.
   TypeScript clients; generated files are never manually edited.
 - TypeScript: formatting, lint, typecheck, targeted unit/component/story tests, and
   affected app builds.
-- E2E: credential-free deterministic control-plane journey in required CI; qualified
-  packet-level Kubernetes strict-network matrix under existing live/manual/scheduled
-  policy.
+- E2E: credential-free deterministic Admin/Public API and Runtime Control journey in
+  required CI, explicitly limited to control-plane behavior.
 - Documentation: snapshot validator, generated index hook, `/spec-review`, authority
   and removal audit, frontmatter validation, and `git diff --check`.
 - Final stack: all planned PRs exist before required GitHub check monitoring. Failures
@@ -286,10 +287,8 @@ coordination required by the approved strict Runtime resource lifecycle.
 - Deterministic implementation and control-plane E2E require no live credential.
 - Migration integration requires PostgreSQL and the repository migration environment.
 - Provider and Runner image tests require the existing build/test substrate.
-- Packet-level proof requires a qualified enforcing-CNI cluster, mandatory Services,
-  immutable proxy image availability, and supported IP-family coverage.
-- Missing optional nightly live prerequisites may be reported as a structured skip.
-  Maintainer-requested qualification fails when prerequisites are missing.
+- Strict-network validation requires no Kubernetes cluster, Kubernetes credential,
+  packet-probe destination, or qualification artifact.
 - No live Kubernetes resource is applied, restarted, deleted, or otherwise mutated by
   this delivery task.
 - Any new material behavior, persistent authority, fallback, compatibility path,
@@ -300,7 +299,7 @@ coordination required by the approved strict Runtime resource lifecycle.
 
 The exact independent reviewer for every phase is
 `/root/network-260812-reviewer`. Review inputs are the confirmed Requirements, accepted
-ADR, approved Design revision 1 and authority IDs `M1`-`M15`, current Specs, the phase
+ADR, approved Design revision 2 and authority IDs `M1`-`M15`, current Specs, the phase
 execution plan, focused evidence, and the stable phase diff.
 
 Review priority is Requirements and Design authority, security and private-key

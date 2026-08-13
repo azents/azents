@@ -9,6 +9,7 @@ import pytest
 from mitmproxy import connection, http, tcp, tls, udp
 from mitmproxy.options import Options
 from mitmproxy.proxy.context import Context
+from mitmproxy.proxy.layers.http import GetHttpConnection, HttpStream
 from mitmproxy.proxy.server_hooks import ServerConnectionHookData
 
 from azents_runtime_proxy.addon import AzentsProxyAddon
@@ -53,13 +54,12 @@ def _flow(url: str, *, host_header: str | None = None) -> http.HTTPFlow:
     server = connection.Server(address=None)
     flow = http.HTTPFlow(client, server, live=True)
     flow.request = http.Request.make("GET", url)
-    if host_header is not None:
-        flow.request.headers["host"] = host_header
+    flow.request.headers["host"] = host_header or flow.request.host
     return flow
 
 
 @pytest.mark.asyncio
-async def test_request_authorization_pins_selected_ip_and_preserves_sni(
+async def test_request_authorization_pins_forwarding_host_and_preserves_authority(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     addon = AzentsProxyAddon(_policy(), readiness_port=0, resolver=_resolver)
@@ -71,6 +71,8 @@ async def test_request_authorization_pins_selected_ip_and_preserves_sni(
     await addon.requestheaders(flow)
 
     assert flow.response is None
+    assert flow.request.host == "203.0.113.10"
+    assert flow.request.host_header == "api.example.com"
     assert flow.server_conn.address == ("203.0.113.10", 443)
     assert flow.server_conn.sni == "api.example.com"
     assert flow.request.stream is True
@@ -80,6 +82,74 @@ async def test_request_authorization_pins_selected_ip_and_preserves_sni(
     assert "token" not in caplog.records[-1].message
     assert "Bearer" not in caplog.records[-1].message
     assert "private request body" not in caplog.records[-1].message
+
+
+@pytest.mark.asyncio
+async def test_http_forwarding_command_uses_selected_ip_with_original_host() -> None:
+    addon = AzentsProxyAddon(_policy(), readiness_port=0, resolver=_resolver)
+    flow = _flow("http://api.example.com/path")
+
+    await addon.requestheaders(flow)
+
+    stream = HttpStream(Context(flow.client_conn, Options()), stream_id=1)
+    stream.flow = flow
+    command = next(stream.make_server_connection())
+    assert isinstance(command, GetHttpConnection)
+    assert command.address == ("203.0.113.10", 80)
+    assert command.tls is False
+    assert flow.request.host_header == "api.example.com"
+
+
+@pytest.mark.asyncio
+async def test_https_connect_pins_selected_ip_and_preserves_authority_and_sni() -> None:
+    addon = AzentsProxyAddon(_policy(), readiness_port=0, resolver=_resolver)
+    flow = _flow("https://api.example.com/")
+    flow.request.method = "CONNECT"
+    flow.request.authority = "api.example.com:443"
+
+    await addon.http_connect(flow)
+
+    assert flow.response is None
+    assert flow.request.host == "203.0.113.10"
+    assert flow.request.authority == "api.example.com:443"
+    assert flow.request.host_header == "api.example.com"
+    assert flow.server_conn.address == ("203.0.113.10", 443)
+    assert flow.server_conn.sni == "api.example.com"
+
+
+@pytest.mark.asyncio
+async def test_https_tunneled_request_uses_verified_connect_authority() -> None:
+    addon = AzentsProxyAddon(_policy(), readiness_port=0, resolver=_resolver)
+    flow = _flow(
+        "https://203.0.113.10/path",
+        host_header="api.example.com",
+    )
+    flow.server_conn.address = ("203.0.113.10", 443)
+    flow.server_conn.sni = "api.example.com"
+
+    await addon.requestheaders(flow)
+
+    assert flow.response is None
+    assert flow.request.host == "203.0.113.10"
+    assert flow.request.host_header == "api.example.com"
+    assert flow.server_conn.address == ("203.0.113.10", 443)
+    assert flow.server_conn.sni == "api.example.com"
+
+
+@pytest.mark.asyncio
+async def test_https_tunneled_request_rejects_spoofed_authority() -> None:
+    addon = AzentsProxyAddon(_policy(), readiness_port=0, resolver=_resolver)
+    flow = _flow(
+        "https://203.0.113.10/path",
+        host_header="other.example.com",
+    )
+    flow.server_conn.address = ("203.0.113.10", 443)
+    flow.server_conn.sni = "api.example.com"
+
+    await addon.requestheaders(flow)
+
+    assert flow.response is not None
+    assert flow.response.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -125,12 +195,13 @@ async def test_redirect_is_rechecked_before_returning_to_runtime() -> None:
     assert flow.response.content == b""
 
 
-def test_server_connection_requires_allowed_ip_before_and_after_connect() -> None:
+def test_server_connection_requires_allowed_ip_and_preserves_hostname_sni() -> None:
     addon = AzentsProxyAddon(_policy(), readiness_port=0, resolver=_resolver)
     client = connection.Client(
         peername=("127.0.0.1", 40_000),
         sockname=("127.0.0.1", 8080),
     )
+    client.sni = "api.example.com"
     server = connection.Server(address=("api.example.com", 443))
     data = ServerConnectionHookData(server=server, client=client)
 
@@ -139,11 +210,31 @@ def test_server_connection_requires_allowed_ip_before_and_after_connect() -> Non
     assert server.error == "upstream address is not authorized"
     server.error = None
     server.address = ("203.0.113.10", 443)
+    server.sni = "203.0.113.10"
     addon.server_connect(data)
     assert server.error is None
+    assert server.sni == "api.example.com"
     server.peername = ("198.51.100.10", 443)
     addon.server_connected(data)
     assert server.error == "upstream peer address is not authorized"
+
+
+def test_server_connection_omits_sni_for_ip_authority() -> None:
+    addon = AzentsProxyAddon(_policy(), readiness_port=0, resolver=_resolver)
+    client = connection.Client(
+        peername=("127.0.0.1", 40_000),
+        sockname=("127.0.0.1", 8080),
+    )
+    server = connection.Server(
+        address=("203.0.113.10", 443),
+        sni="203.0.113.10",
+    )
+    data = ServerConnectionHookData(server=server, client=client)
+
+    addon.server_connect(data)
+
+    assert server.error is None
+    assert server.sni is None
 
 
 def test_raw_tcp_and_udp_flows_are_killed() -> None:

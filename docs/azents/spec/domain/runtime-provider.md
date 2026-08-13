@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
-last_verified_at: 2026-08-12
-spec_version: 25
+last_verified_at: 2026-08-13
+spec_version: 26
 ---
 
 # Runtime Provider
@@ -89,10 +89,13 @@ typed contract, canonicalizes it, and creates or reuses the Provider-local diges
 registering the connection. A changed valid advertisement immediately changes current compatibility.
 An invalid advertisement is rejected and cannot retain command authority through older history.
 
-Both Providers advertise Profile schema versions 1 and 2. Schema v2 no longer carries an
-Azents-owned process-containment module and does not require a containment capability. Historical
-stored schema-v2 documents with `process_containment: null` are normalized to the current direct
-contract; a non-null value is invalid and cannot silently execute through the direct path.
+Docker Providers advertise Container Profile schema versions 1 and 2. Kubernetes Providers
+advertise Pod Profile schema versions 1, 2, and 3. Kubernetes schema v3 adds the explicit
+`direct`, `proxy_required`, and `no_network` network-access contracts; schema v1 and v2 remain
+direct-only for stored compatibility. Schema v2 no longer carries an Azents-owned
+process-containment module. Historical stored schema-v2 documents with
+`process_containment: null` are normalized to the current direct contract; a non-null value is
+invalid and cannot silently execute through the direct path.
 Admin Profile write ingress rejects unknown removed fields instead of stripping them. Runner
 startup rejects `AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG`, and bundled Provider startup rejects every
 `AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_*` variable, including empty values, so version-skewed
@@ -172,15 +175,16 @@ Disconnection, an ambiguous outcome, or a stale Provider generation never proves
 
 Each Provider owns typed infrastructure Profiles for its native substrate:
 
-- Kubernetes Providers own Pod Profile schema v1 or v2 containing typed Runner resources,
-  scheduling, Workspace PVC, network preset, and optional DinD modules.
+- Kubernetes Providers own Pod Profile schema v1, v2, or v3 containing typed Runner resources,
+  scheduling, Workspace PVC, network authority, and optional DinD modules.
 - Docker Providers own Container Profile schema v1 or v2 containing typed resources and
   Docker-network placement.
 
-Profile v1 and Profile v2 both describe direct Runner execution. Profile v2 retains its versioned
-contract shape for stored compatibility but has no process-containment field. Workspace, Agent,
-Session, and user surfaces select the complete infrastructure Profile without exposing an
-Azents-owned process-isolation toggle.
+Kubernetes Profile v1 and v2 both describe direct Runner execution. Kubernetes Profile v3 adds a
+complete `network_access` authority with `direct`, `proxy_required`, or `no_network` mode,
+Provider CIDR boundaries, and proxy domain authority. Workspace, Agent, Session, and user surfaces
+select the complete infrastructure Profile without exposing an Azents-owned process-isolation
+toggle.
 
 Infrastructure Profile writes are Provider-kind-specific, expected-version-fenced, and validated
 against the Provider's current capability contract. Missing or removed capability makes dependent
@@ -216,9 +220,12 @@ Workspace mutation authority. The Admin deletion review links blocking reference
 surface while retaining the Provider-page deletion context.
 
 A Workspace Runtime Profile is the complete customer choice. It selects one infrastructure Profile
-and may add only the Workspace policy supported by that contract. Kubernetes network policy is
-restrictive-only and composes with Provider and infrastructure hard boundaries. Required DNS and
-Runtime Control communication remains Platform protected. Docker rejects Workspace network policy.
+and may add only the Workspace policy supported by that contract. Workspace Policy v1 remains a
+direct-only CIDR restriction. Policy v2 composes the hierarchy `direct` → `proxy_required` →
+`no_network`, intersects inherited CIDR authority, and narrows proxy domain authority without
+restoring a parent denial. Required Runtime Control and transfer communication remains Platform
+protected. Strict Runtimes have no DNS egress and receive only observed mandatory Service
+host mappings. Docker rejects Workspace network policy.
 
 The complete resolved configuration travels through the canonical Runtime configuration envelope.
 The Provider reports exact configuration evidence for the current desired generation. Applied state
@@ -226,35 +233,39 @@ is promoted only after the Provider acknowledgement and a matching ordinary Runn
 There is no policy snapshot, separate Apply action, dedicated Runner configuration-update
 operation, or legacy parser fallback.
 
-NetworkPolicy-only Kubernetes changes may be adopted in place. PodSpec, PVC, and Docker changes
-require explicit durable recreation. Provider-, infrastructure-Profile-, and Workspace-Profile-
-scoped recreation operations snapshot exact target IDs and versions, use bounded concurrency and
-retries, skip stale or superseded targets, and preserve Workspace storage. PVC expansion may apply
-to the current claim; shrink waits for an explicit destructive reset or terminal delete.
+CIDR-only enforcement changes may be adopted in place. Proxy policy or proxy artifact changes
+replace only the affected proxy-owned resources while retaining the logical Runtime CA and stable
+Service identity. Mode, Runtime trust, mandatory-host mapping, PodSpec, PVC, and Docker changes
+require explicit durable recreation. Every transition narrows old authority before enabling the
+replacement. Provider-, infrastructure-Profile-, and Workspace-Profile-scoped recreation
+operations snapshot exact target IDs and versions, use bounded concurrency and retries, skip stale
+or superseded targets, and preserve Workspace storage. PVC expansion may apply to the current
+claim; shrink waits for an explicit destructive reset or terminal delete.
 
-Kubernetes Provider v2 reports Pod lifecycle directly and does not use process-local command or
-NetworkPolicy verification history as lifecycle authority. A current `OBSERVE` completion may include
-one structured `network_policy` observation; watch, failover, lifecycle-only, and non-`OBSERVE`
-completion reports may omit it. The Provider owns only factual backend observation and the
-non-destructive configuration application. Runtime Control's report sink validates identity,
-generation, lifecycle, and configuration evidence and persists only those ordinary facts; it never
-persists drift, a repair claim, or retry state. The gRPC bridge retains command-type correlation only
-for the live stream. A valid current `OBSERVE` completion with `network_policy:drifted` is handed
-once to the Lifecycle Reconciler, which re-fences the Runtime, Provider generation, and
-equal desired/applied configuration sequence while holding that Runtime row through exact
-configuration lookup and `UPDATE_CONFIGURATION` append, never `START`. Pending lifecycle dispatch
-and terminal deletion block the handoff. Control logs the transient handoff and successful dispatch
-with Runtime/Provider identity, Provider and desired generations, configuration sequence,
-NetworkPolicy kind, and reason, but does not persist those fields as repair state. Lost completion,
-stream/control restart, and dispatch failure discard the handoff; a later periodic `OBSERVE` is the
-only retry mechanism. Policy comparison excludes the historical Provider-generation transport
-label but keeps desired-generation, configuration identity, selectors, and rules exact.
+Kubernetes Provider v3 reports Pod lifecycle directly and does not use process-local command or
+resource verification history as lifecycle authority. A current command completion may include one
+structured aggregate `network_enforcement` observation covering every resource required by the
+effective mode. Watch, failover, lifecycle-only, and non-`OBSERVE` completion reports may omit it.
+The Provider owns factual backend observation and bounded non-destructive configuration
+application. Runtime Control's report sink validates identity, generation, lifecycle, and
+configuration evidence and persists only ordinary lifecycle/configuration facts; it never persists
+drift, a repair claim, or retry state. The gRPC bridge retains command-type correlation only for the
+live stream. A valid current `OBSERVE` completion with `network_enforcement:drifted` is handed once
+to the Lifecycle Reconciler, which re-fences the Runtime, Provider generation, and equal
+desired/applied configuration sequence while holding that Runtime row through exact configuration
+lookup and `UPDATE_CONFIGURATION` append, never `START`. Missing or drifted enforcement cannot
+record Provider configuration acknowledgement or clear configuration-provider failure. Exactly one
+current `in_sync` aggregate may acknowledge enforcement. Pending lifecycle dispatch and terminal
+deletion block the handoff. Lost completion, stream/control restart, and dispatch failure discard
+the handoff; a later periodic `OBSERVE` is the only retry mechanism.
 
-The current Kubernetes protocol accepts only `network_policy` reconciliation evidence. A report
-containing any other kind is rejected as a whole, and adding a kind requires a coordinated new
-Provider protocol and development snapshot. Kubernetes v1 cannot register with current Runtime
-Control; only `agent-runtime-provider-kubernetes-v2` obtains connection and command authority.
-Docker Provider protocol behavior is unchanged.
+Current Runtime Control accepts Kubernetes protocol v2 for retained legacy direct contracts and
+protocol v3 for current strict contracts. Protocol v2 uses the legacy `network_policy`
+reconciliation contract, cannot send operational diagnostics, and retains legacy acknowledgement
+semantics. Protocol v3 requires operational diagnostics and uses exactly one aggregate
+`network_enforcement` observation for strict enforcement acknowledgement and repair. Kubernetes
+protocol v1 cannot register. Docker Provider protocol behavior is unchanged and rejects Kubernetes
+reconciliation or diagnostic payloads.
 
 Admin/Public surfaces expose typed schema versions and values, current compatibility, impact,
 desired/applied status, and bounded recreation progress. These surfaces do not expose Provider
@@ -303,6 +314,11 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **26 (2026-08-13):** Added Kubernetes Profile v3 and Workspace Policy v2 hierarchical network
+  authority, strict `proxy_required` and `no_network` enforcement bundles, Provider protocol v3
+  aggregate `network_enforcement`, operator-attested capability diagnostics, mode-aware lifecycle
+  impact, bounded API/UI projection, deterministic control-plane E2E, and focused
+  Provider/proxy manifest, protocol, lifecycle, trust, and forwarding validation.
 - **25 (2026-08-12):** Added System-Admin exact-version infrastructure Profile hard deletion,
   fresh blocking-reference and applied-only impact projection, target-scoped recreation
   terminalization, Runtime/Workspace preservation, and membership-independent Admin Workspace

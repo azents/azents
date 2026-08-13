@@ -97,8 +97,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-12
-spec_version: 66
+last_verified_at: 2026-08-13
+spec_version: 67
 ---
 
 # Workspace & Membership
@@ -271,11 +271,13 @@ Workspace-owned policy that the selected infrastructure contract permits. The in
 Profile must belong to that exact Provider and match its Provider kind, and the Workspace Runtime
 Profile cannot be read or mutated through another Workspace.
 
-The current Workspace policy surface is restrictive-only network policy for Kubernetes Profiles.
-It may preserve or narrow the Provider/infrastructure boundary and required Platform communication,
-but cannot expand either. Docker Profiles reject Workspace network policy rather than claiming
-false parity. Missing optional fields mean no Workspace-added restriction; they do not inherit
-hidden Provider or global customer policy.
+The current Workspace policy surface is restrictive-only network authority for Kubernetes
+Profiles. Policy v1 remains direct-only CIDR narrowing. Policy v2 may preserve or reduce the
+Provider mode through `direct` → `proxy_required` → `no_network`, intersect inherited CIDRs, reduce
+an unrestricted proxy policy to an allowlist, narrow an inherited allowlist, and add final domain
+denials. It cannot restore direct access, expand CIDRs or domains, remove inherited denials, or
+restore a denied protocol. Docker Profiles use Policy v1 with no Workspace network restriction and
+reject strict policy rather than claiming false parity.
 
 Profile create, complete replacement, default selection, and scoped recreation require
 `RUNTIME_PROFILES_WRITE`; reads require `RUNTIME_PROFILES_READ`. Owners and Managers retain these
@@ -286,11 +288,13 @@ it, its Agent selections, or its Runtime references. Availability is computed fr
 Provider lifecycle/connection/current capability, infrastructure Profile compatibility, and
 Workspace Profile state. No arbitrary substitute is selected.
 
-Infrastructure and Workspace Runtime Profile responses expose the Profile schema without a derived
-process-containment projection. Admin create/edit preserves Profile v1 and direct Profile v2.
-Historical schema-v2 documents with `process_containment: null` remain readable, while non-null
-removed values are rejected rather than translated to direct execution. Workspace and Agent
-surfaces can select the complete Profile but cannot edit deployment-owned security arguments.
+Infrastructure and Workspace Runtime Profile responses expose typed Profile and Policy schemas
+without a derived process-containment projection. Admin Kubernetes create/edit supports Profile v3
+network modes, CIDR/domain policy, and independent strict-capability attestations; Docker remains
+Profile v1/v2 direct-only. Workspace create/edit selects Policy v1 for Docker and Policy v2 for
+Kubernetes, constrains available options by the selected parent authority, and explains effective
+protocol/trust limitations. Historical schema-v2 documents with `process_containment: null` remain
+readable, while non-null removed values are rejected rather than translated to direct execution.
 
 Each Workspace also stores a nullable default Runtime Profile and an optimistic default version.
 The default is picker assistance only; omitting Runtime selection on Agent creation produces a
@@ -317,12 +321,15 @@ lifecycle authority permits them. Selecting and applying a replacement is the on
 and preserves Workspace storage.
 
 Parent Profile changes enqueue authoritative current desired-configuration-state reconciliation
-for affected Agents. NetworkPolicy-only Kubernetes changes may be adopted in place after exact
-sequence, digest, and generation evidence. PodSpec, PVC, and Docker changes remain
+for affected Agents. Kubernetes CIDR-only and proxy-owned policy/artifact changes may be adopted in
+place after exact sequence, digest, generation, aggregate Provider enforcement, and ordinary Runner
+evidence. Mode, Runtime trust, mandatory-host mapping, PodSpec, PVC, and Docker changes remain
 `waiting_for_recreation` until an authorized actor creates a durable scoped recreation operation.
 Recreation snapshots target IDs and versions plus current configuration authority, uses bounded
 concurrency, reports progress and bounded failures, skips stale/superseded targets, and preserves
-Agent Workspace data. No Agent Apply action exists.
+Agent Workspace data. Desired/applied Runtime status projects the effective network mode and
+bounded limitations without exposing Kubernetes resources, CA material, or credentials. No Agent
+Apply action exists.
 
 System Administrators have a separate read-only Admin detail for one exact Workspace Runtime
 Profile. It resolves by Workspace handle and Profile ID, returns Workspace and Profile identity,
@@ -741,6 +748,10 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-13 (spec_version=67)** — Added Kubernetes Profile v3 and Workspace Policy v2
+  hierarchical network editing, parent-authority-constrained forms, effective strict-mode status,
+  bounded warnings, and mode-aware recreation/in-place convergence while retaining Docker
+  direct-only behavior.
 - **2026-08-12 (spec_version=66)** — Added on-demand Agent creation from exact current-context Git
   Projects and branch-preserving managed removal with dirty refusal, explicit force, shared path
   claims, Project/Catalog/Skill cleanup, and archive-safe branch retention.

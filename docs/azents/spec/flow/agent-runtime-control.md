@@ -36,8 +36,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-12
-spec_version: 60
+last_verified_at: 2026-08-13
+spec_version: 61
 ---
 
 # Agent Runtime Control
@@ -201,11 +201,12 @@ command history, verification caches, and NetworkPolicy state do not rewrite an 
 Pod to `starting`. Watch, initial-resync, and failover reports may omit reconciliation evidence and
 remain valid current-protocol lifecycle observations.
 
-After an explicit lifecycle or configuration command, Kubernetes Provider v2 may attach one
-structured `network_policy` reconciliation observation. `in_sync` confirms the exact expected
-NetworkPolicy; `drifted` reports bounded mismatch evidence without changing the lifecycle state.
-A complete report containing another reconciliation kind is rejected before it becomes actionable;
-kinds are never ignored or partially consumed.
+After an explicit lifecycle or configuration command, Kubernetes Provider v3 may attach one
+structured aggregate `network_enforcement` reconciliation observation. `in_sync` confirms every
+mode-required resource and readiness fence; `drifted` reports bounded mismatch evidence without
+changing the lifecycle state. Missing or drifted evidence cannot acknowledge the desired
+configuration. A complete report containing another reconciliation kind is rejected before it
+becomes actionable; kinds are never ignored or partially consumed.
 
 Authority is explicitly separated. The **Provider** owns factual lifecycle/resource observation and
 configuration application, and cannot retain command history as lifecycle authority. The **Runtime
@@ -214,29 +215,26 @@ evidence and persists only ordinary lifecycle/configuration facts; it must not i
 dispatch a repair, or retain repair state. The **gRPC bridge** owns only stream-local
 `request_id → command_type` correlation. The **Lifecycle Reconciler** owns desired-state convergence
 and dispatch: only a successful correlated `OBSERVE` completion may hand it current
-`network_policy:drifted` evidence, which it re-fences before a non-destructive
+`network_enforcement:drifted` evidence, which it re-fences before a non-destructive
 `UPDATE_CONFIGURATION` dispatch. The Reconciler does not reinterpret Provider lifecycle facts and
 does not persist a drift candidate, claim, retry time, or completion history.
 
-The Kubernetes Provider owns each Runtime-specific NetworkPolicy as one complete resource. Creation
-uses POST, while reconciliation of an existing policy uses resourceVersion-fenced PUT replacement
-so labels, annotations, selectors, and rules removed from the desired representation do not survive
-as merge-patch residue. A replacement conflict re-reads the latest resource and retries once without
-deleting the policy. Pods retain explicit delete-and-recreate lifecycle semantics because their
-mutable surface is limited by Kubernetes immutability, PVCs retain data-preserving merge updates,
-and the leader Lease retains concurrency-sensitive merge updates.
-
-NetworkPolicy drift compares the complete managed policy semantics while excluding only the
-historical `azents/provider-generation` transport label. A Provider reconnect therefore does not
-create drift by itself; desired-generation, configuration annotations, selectors, and rules remain
-exact comparison inputs.
+The Kubernetes Provider owns each Runtime-specific enforcement bundle. Direct mode owns the
+Runtime Pod, PVC, and complete Runtime NetworkPolicy. Proxy-required mode additionally owns one
+dedicated proxy Pod, stable Service, canonical policy ConfigMap, logical-Runtime CA Secret, proxy
+ingress/egress NetworkPolicies, public Runtime trust mount, and exact mandatory Service host
+mappings. No-network mode owns a Platform-only Runtime NetworkPolicy and no proxy resources.
+Creation uses typed Kubernetes API operations, while reconciliation of existing complete resources
+uses resourceVersion-fenced replacement where exact semantics are required. Pods retain explicit
+delete-and-recreate lifecycle semantics, PVCs retain data-preserving updates, and the leader Lease
+retains concurrency-sensitive merge updates.
 
 Control periodically dispatches idempotent Provider `start` commands for running Runtimes and
 read-only Provider `observe` commands where current lifecycle state needs re-observation. Periodic
 `start` revalidates the desired Runner image and Provider-managed workload configuration, reuses an
 equivalent workload, and replaces only a drifted workload while preserving Agent Workspace storage.
-NetworkPolicy repair is not a periodic durable candidate: only one valid, current, live-stream
-`OBSERVE` completion reporting `network_policy:drifted` may immediately dispatch
+Network enforcement repair is not a periodic durable candidate: only one valid, current,
+live-stream `OBSERVE` completion reporting `network_enforcement:drifted` may immediately dispatch
 `UPDATE_CONFIGURATION`, never `START`. The handoff is discarded after use. A missing completion,
 Provider reconnect, Control restart, stale generation/configuration fence, unsupported evidence, or
 dispatch failure creates no replay or hot loop; the next periodic `OBSERVE` is the only retry.
@@ -254,7 +252,7 @@ The live Provider connection registry, rather than a cached per-Runtime connecti
 Runtime Profile reconciliation classifies one action for each candidate. A ready desired slot may
 dispatch lifecycle work, wait for Provider acknowledgement, offer exact sequence/digest/generation
 evidence to the Runner through the ordinary heartbeat acknowledgement, wait for a matching Runner
-state report, adopt a NetworkPolicy-only change in place, wait for explicit recreation, or do
+state report, adopt an enforcement-bundle change in place, wait for explicit recreation, or do
 nothing. Independent loops must not select competing lifecycle and configuration actions for the
 same observation.
 
@@ -294,11 +292,15 @@ Every Provider stream declares exactly one authentication method in gRPC metadat
 
 The normalized Provider authentication result contains the durable binding ID, Provider ID, method, normalized subject, method-safe audit metadata, and evidence expiry. Control records that result on the durable Provider connection. An issued-token connection records its credential ID; a Kubernetes ServiceAccount connection has no synthetic credential or enrollment grant. A binding must be active and belong to the authenticated Provider. Registration `provider_id`, credential identifiers, scope, and generation cannot select or discover a Provider; a mismatched registration is rejected with `PERMISSION_DENIED`.
 
-Authenticated Kubernetes Provider registration requires protocol
-`agent-runtime-provider-kubernetes-v2`. Runtime Control rejects v1 and every other Kubernetes
-protocol value with `FAILED_PRECONDITION` before proposing a capability contract or registering
-connection and command authority. There is no mixed-version serving mode, legacy report parser,
-fallback, or rollback path. Docker Provider protocol admission is unchanged.
+Authenticated Kubernetes Provider registration accepts protocol
+`agent-runtime-provider-kubernetes-v2` for retained legacy direct operation and
+`agent-runtime-provider-kubernetes-v3` for current strict contracts. Protocol v2 cannot send
+operational diagnostics and uses the legacy `network_policy` reconciliation contract. Protocol v3
+requires diagnostics and uses aggregate `network_enforcement` evidence. Runtime Control rejects v1
+and every other Kubernetes protocol value with `FAILED_PRECONDITION` before proposing a capability
+contract or registering connection and command authority. A connection cannot mix versioned report
+contracts or use v2 as fallback for a v3 strict contract. Docker Provider protocol admission is
+unchanged.
 
 For `kubernetes_service_account`, Runtime Control submits the presented projected token to Kubernetes TokenReview with the exact `azents-runtime-control` audience. It accepts only an authenticated review with that audience and an exact `system:serviceaccount:<namespace>:<name>` subject matching one active durable binding. Evidence expiry is derived only after that successful review. The Kubernetes Provider watches the projected token file and reconnects after rotation. Runtime Control, not the Provider ServiceAccount, has the narrow `create` permission on `authentication.k8s.io/tokenreviews`.
 
@@ -335,9 +337,11 @@ infrastructure Profile, Workspace Runtime Profile, resolved typed configuration,
 image, and generation-scoped Runner credential. Providers reject another Provider's envelope,
 unsupported Profile kinds, invalid typed values, and generation mismatch before backend mutation.
 
-The envelope accepts the retained Kubernetes Pod/Docker Container Profile v1 contracts and their
-Profile v2 equivalents. Both versions use direct Runner execution. Historical schema-v2 payloads
-with `process_containment: null` are normalized before exact-field validation. Any non-null removed
+The envelope accepts retained Kubernetes Pod Profile v1/v2, Kubernetes Pod Profile v3, and Docker
+Container Profile v1/v2 contracts. Kubernetes v1/v2 and Docker remain direct-only. Kubernetes v3
+contains the resolved `direct`, `proxy_required`, or `no_network` authority, including effective
+CIDR/domain policy and mandatory Service identities. Historical schema-v2 payloads with
+`process_containment: null` are normalized before exact-field validation. Any non-null removed
 field remains invalid, so an active containment request fails before Provider mutation instead of
 falling back to direct execution.
 
@@ -357,12 +361,12 @@ overwrites the previous applied slot. There is no separate Runner configuration-
 protocol.
 
 Provider reports backend observed state and configuration evidence without Agent Workspace metadata.
-Kubernetes Provider v2 command reports may additionally carry exactly one structured
-`network_policy` reconciliation observation. Watch, failover, and lifecycle-only reports may omit
-that field. Absence means the report supplies no actionable reconciliation evidence; it does not
-clear current evidence or invoke a compatibility fallback. Current-generation Runner registration
-and state reports carry the effective absolute Agent Workspace path; Control validates and stores
-that value in `agent_runtimes.workspace_path`.
+Kubernetes Provider v3 command reports may additionally carry exactly one structured aggregate
+`network_enforcement` reconciliation observation. Watch, failover, and lifecycle-only reports may
+omit that field. Absence means the report supplies no actionable reconciliation evidence and cannot
+acknowledge strict enforcement; it does not invoke a compatibility fallback. Current-generation
+Runner registration and state reports carry the effective absolute Agent Workspace path; Control
+validates and stores that value in `agent_runtimes.workspace_path`.
 
 Kubernetes Runtime Pod reuse compares Provider-managed configuration while allowing additive fields injected by Kubernetes admission and defaulting. In particular, configured tolerations must remain present, but built-in `NoExecute` tolerations added by Kubernetes do not make an otherwise reusable Pod stale or trigger replacement during repeated start reconciliation.
 
@@ -546,10 +550,11 @@ the caller's bounded operation timeout. Dispatch and operation qualification sti
 Provider and Runner authority. Supersession, current-generation failure, timeout, cancellation, or
 authority drift fails closed rather than retargeting the operation to another Runtime incarnation.
 
-Desired/applied mismatch never authorizes implicit recreation. Kubernetes NetworkPolicy-only changes
-may adopt in place through exact Provider and Runner evidence. PodSpec, PVC, and Docker changes
-remain waiting for an explicit recreation operation. Recreation snapshots the exact target version
-plus configuration sequence, digest, and desired generation, dispatches one fenced next generation,
+Desired/applied mismatch never authorizes implicit recreation. Kubernetes CIDR-only or proxy-owned
+policy/artifact changes may adopt in place through exact aggregate Provider and ordinary Runner
+evidence. Mode, Runtime trust, mandatory-host mapping, PodSpec, PVC, and Docker changes remain
+waiting for an explicit recreation operation. Recreation snapshots the exact target version plus
+configuration sequence, digest, and desired generation, dispatches one fenced next generation,
 skips stale or superseded items, and completes only after that exact replacement state becomes
 applied. Stopped Runtimes skip immediate recreation and adopt the current Profile on their next
 start.
@@ -592,9 +597,10 @@ Required deterministic coverage:
 - repository/service tests for desired/observed/runner state summary/actions
 - Coordination Store contract tests for in-memory and Redis implementations
 - provider/runner gRPC registration, generation fencing, request/reply/body stream tests
-- Kubernetes v1 registration rejection before contract/connection authority and Kubernetes v2
-  registration acceptance
-- strict `network_policy`-only reconciliation report decoding and sink rejection
+- Kubernetes protocol v1 registration rejection, retained protocol-v2 legacy admission without
+  diagnostics, and protocol-v3 strict admission with required diagnostics
+- strict aggregate `network_enforcement` report decoding, incomplete/drifted acknowledgement
+  rejection, exact `in_sync` promotion, and Docker rejection
 - stream-local `OBSERVE` completion correlation, current row-lock repair fencing, structured
   handoff/dispatch logs, stale generation/sequence rejection, and
   lifecycle/configuration/repair/periodic precedence
@@ -620,6 +626,10 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-13** (spec_version 61) — Added hierarchical Runtime network configuration,
+  Kubernetes Provider protocol v3 aggregate enforcement evidence, strict-mode resources and
+  trust/hosts boundaries, mode-aware in-place versus recreation impact, bounded diagnostics, and
+  deterministic control-plane E2E plus focused Provider/proxy validation.
 - **2026-08-12** (spec_version 60) — Added target-first recreation locking and atomic
   infrastructure Profile deletion terminalization so deleted authority cannot dispatch later
   Runtime restarts while already-dispatched work remains generation-fenced.

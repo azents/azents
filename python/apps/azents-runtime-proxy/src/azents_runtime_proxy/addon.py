@@ -85,13 +85,25 @@ class AzentsProxyAddon:
             data.context.client.error = str(error)
             data.context.client.state = connection.ConnectionState.CLOSED
 
+    async def http_connect(self, flow: http.HTTPFlow) -> None:
+        """Authorize and pin a CONNECT tunnel before its TLS handshake."""
+        await self._authorize_and_pin(flow)
+
     async def requestheaders(self, flow: http.HTTPFlow) -> None:
         """Authorize authority before resolution and pin an allowed selected IP."""
+        await self._authorize_and_pin(flow)
+
+    async def _authorize_and_pin(self, flow: http.HTTPFlow) -> None:
         try:
-            host = self._request_host(flow.request)
+            host = self._request_host(flow)
             port = flow.request.port
             addresses = await self._addresses(host, port)
             selected = self.policy.authorize_addresses(addresses)[0]
+            authority = flow.request.authority
+            host_header = flow.request.host_header
+            flow.request.host = selected
+            flow.request.authority = authority
+            flow.request.host_header = host_header
             flow.server_conn.address = (selected, port)
             flow.server_conn.sni = None if _is_ip_address(host) else host
             flow.request.stream = True
@@ -136,6 +148,16 @@ class AzentsProxyAddon:
             self.policy.authorize_address(address[0])
         except InvalidProxyPolicy, ValueError:
             data.server.error = "upstream address is not authorized"
+            return
+        if data.server.sni is not None and _is_ip_address(data.server.sni):
+            try:
+                data.server.sni = (
+                    canonical_host(data.client.sni)
+                    if data.client.sni is not None
+                    else None
+                )
+            except InvalidProxyPolicy:
+                data.server.error = "upstream SNI is not authorized"
 
     def server_connected(self, data: server_hooks.ServerConnectionHookData) -> None:
         """Verify the selected peer address after connection establishment."""
@@ -161,8 +183,17 @@ class AzentsProxyAddon:
             return (host,)
         return await self.resolver(host, port)
 
-    def _request_host(self, request: http.Request) -> str:
-        host = self.policy.authorize_host(request.host)
+    def _request_host(self, flow: http.HTTPFlow) -> str:
+        request = flow.request
+        if _is_ip_address(request.host) and flow.server_conn.sni is not None:
+            pinned_address = flow.server_conn.address
+            if pinned_address is None or request.host != pinned_address[0]:
+                raise InvalidProxyPolicy(
+                    "request destination does not match pinned upstream"
+                )
+            host = self.policy.authorize_host(flow.server_conn.sni)
+        else:
+            host = self.policy.authorize_host(request.host)
         authority = request.host_header or request.authority
         if authority:
             authority_host = urlsplit(f"//{authority}").hostname

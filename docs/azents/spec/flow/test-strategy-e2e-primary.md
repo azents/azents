@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-11
-spec_version: 27
+last_verified_at: 2026-08-13
+spec_version: 28
 ---
 
 # E2E Primary Test Strategy
@@ -98,7 +98,11 @@ cd testenv/azents
 uv run testenv prerequisite prepare --profile live --json
 ```
 
-Current priority contracts are Bedrock AWS shared credentials and Browser/OAuth storage state. Snapshot includes `generated_at`, `mode`, `max_age_seconds`, `contract_hash`, `worktree_fingerprint`, `env_fingerprint`, `status`, `checks`, and `guidance`. CLI output and snapshot record only safe metadata such as present/missing, profile, region, and source path; they do not include secret values.
+Current priority contracts are Bedrock AWS shared credentials and Browser/OAuth storage state.
+Snapshot includes `generated_at`, `mode`, `max_age_seconds`, `contract_hash`,
+`worktree_fingerprint`, `env_fingerprint`, `status`, `checks`, and `guidance`. CLI output and
+snapshots record only safe metadata such as present/missing, profile, region, and source path; they
+do not include secret values.
 
 Agent Runtime live prerequisite is declared with Runtime provider/control contract. Contract snapshot is stored around checks/guidance, and live helper separately calculates safe metadata such as provider mode, provider id, Kubernetes/Docker availability, Helm availability, and Runtime namespace. Provider credential, runtime-control auth token, and token map literal are not included in snapshot/API/E2E evidence.
 
@@ -225,15 +229,28 @@ still fails closed unless that Runtime's Provider has the required typed accepte
 Surface journey first uses an actual server projection and may use server-shaped response fixtures
 only for bounded presentation branches.
 
-Qualified Kubernetes execution-policy coverage is live evidence. Its prerequisite contract must
-distinguish unadvertised capability from advertised-but-unenforced privileged engine, CNI,
-and storage capability. Unadvertised capability may skip that live scenario; an
-advertised capability whose admission, isolation, network, or storage enforcement cannot be proven
-must fail. Missing Docker/testcontainers or qualified-cluster prerequisites are unavailable
-evidence, never a local live-PASS substitute.
+For features whose approved Design explicitly requires qualified Kubernetes execution-policy
+coverage, that coverage is live evidence. Its prerequisite contract must distinguish unadvertised
+capability from advertised-but-unenforced privileged engine, CNI, and storage capability.
+Unadvertised capability may skip that live scenario; an advertised capability whose required
+admission, isolation, network, or storage enforcement cannot be proven must fail. Missing
+Docker/testcontainers or qualified-cluster prerequisites are unavailable evidence, never a local
+live-PASS substitute. This general policy does not add a live-cluster or packet-qualification gate
+to hierarchical Runtime network restriction, whose approved verification boundary is the
+deterministic and focused coverage below.
 
 Runtime Provider CI still validates direct workload hardening, Workspace persistence, Runtime
 configuration compatibility, and fail-closed rejection of removed active containment payloads.
+
+Hierarchical Runtime network-restriction E2E is deterministic and API-centered. It creates
+infrastructure and Workspace Profile state through Admin/Public APIs, exercises the real Runtime
+Control protocol with a bounded fake Kubernetes Provider participant, and verifies positive
+capability compatibility, supported `proxy_required` and `no_network` composition, exact
+desired/applied evidence matching, and bounded projection. It does not start a Kubernetes cluster,
+create Kubernetes resources, execute packet probes, or claim packet enforcement. Expansion
+rejection and other hierarchy-negative cases remain backend contract/service coverage. Kubernetes
+resource and proxy behavior is covered separately by focused Provider/proxy unit, manifest,
+protocol, lifecycle, trust, and forwarding tests.
 
 ## Feature and Ship Workflow Requirements
 
@@ -250,6 +267,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-13** — v28. Added deterministic API-created hierarchical network-restriction
+  control-plane coverage, explicitly separated from Kubernetes Provider/proxy unit, manifest,
+  protocol, lifecycle, trust, and forwarding validation and from any packet-enforcement claim.
 - **2026-08-10** — v26. Added Optional Managed Runtime deterministic, focused Docker Provider, and
   Web Surface E2E policy, including Runtime-free model execution and UI guidance, explicit add,
   lazy start, Provider-outage removal, privacy-safe progress, exact reconnect acknowledgement,

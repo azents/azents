@@ -49,6 +49,10 @@ from support.runtime_provider_auth import (
 )
 from support.runtime_provider_mode import docker_infrastructure_profile_spec
 from support.server_readiness import wait_for_server_ready
+from support.strict_network_control_plane import (
+    StrictNetworkControlPlaneFixture,
+    load_control_plane_evidence,
+)
 from support.system_bootstrap import SystemBootstrapEvidence
 
 _AIMOCK_FIXTURE_DIR = REPOSITORY_ROOT / "testenv/azents/e2e/src/support/aimock_fixtures"
@@ -72,8 +76,9 @@ _DISCORD_PROVIDER_FAKE = (
 _DISCORD_PROVIDER_INTERNAL_API_URL = "http://discord-fake:8085/api/v10"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
 _RUNTIME_PROVIDER_ID = "system-docker"
+_STRICT_NETWORK_PROVIDER_ID = "system-kubernetes-e2e"
 _RUNTIME_WORKSPACE_PATH = "/workspace/agent"
-_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY = "e2e/system-docker"
+_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY = "e2e/runtime-providers"
 _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_CONTAINER_PATH = (
     "/var/run/azents/runtime-provider-bootstrap/providers.yaml"
 )
@@ -154,7 +159,7 @@ def system_bootstrap_setup_token() -> str:
 def runtime_provider_bootstrap_source_path(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> Path:
-    """Return one trusted bootstrap declaration for the E2E Docker Provider."""
+    """Return trusted declarations for deterministic E2E Runtime Providers."""
     source_path = (
         tmp_path_factory.mktemp("runtime-provider-bootstrap") / "providers.yaml"
     )
@@ -162,7 +167,7 @@ def runtime_provider_bootstrap_source_path(
         f"""apiVersion: azents.io/v1
 source:
   key: {_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY}
-  revision: e2e-system-docker-v1
+  revision: e2e-runtime-providers-v2
   digest: {"e" * 64}
 providers:
   - declarationKey: system-docker
@@ -173,6 +178,20 @@ providers:
       enabled: true
       availabilityMode: platform_wide
       setAsPlatformDefaultWhenUnset: true
+  - declarationKey: system-kubernetes-e2e
+    providerId: {_STRICT_NETWORK_PROVIDER_ID}
+    kind: kubernetes
+    authentication:
+      method: kubernetes_service_account
+      subject: system:serviceaccount:azents-e2e:strict-network-control-plane
+      namespace: azents-e2e
+      serviceAccountName: strict-network-control-plane
+      audience: azents-runtime-control
+    initial:
+      displayName: Kubernetes Control Plane E2E
+      enabled: true
+      availabilityMode: platform_wide
+      setAsPlatformDefaultWhenUnset: false
 """,
         encoding="utf-8",
     )
@@ -867,6 +886,27 @@ def _wait_for_tcp_ready(
         time.sleep(1)
 
 
+def _wait_for_runtime_control_ready(container: DockerContainer) -> None:
+    """Wait until Runtime Control confirms that its gRPC server has started."""
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        wrapped = container.get_wrapped_container()
+        wrapped.reload()
+        if wrapped.status == "exited":
+            pytest.fail(
+                "azents-runtime-control exited before gRPC startup\n\n"
+                f"logs:\n{_read_container_logs(container)}"
+            )
+        logs = _read_container_logs(container)
+        if "Runtime Control gRPC server started" in logs:
+            return
+        time.sleep(0.5)
+    pytest.fail(
+        "azents-runtime-control did not confirm gRPC startup\n\n"
+        f"logs:\n{_read_container_logs(container)}"
+    )
+
+
 def _read_container_logs(container: DockerContainer) -> str:
     """Read complete server logs for E2E diagnostics."""
     return read_container_logs(container)
@@ -1331,9 +1371,13 @@ def azents_runtime_control_container(
     )
 
     with container:
-        _wait_for_tcp_ready(container, 8030, "azents-runtime-control")
-        yield container
-        _log_server_output(container, "azents-runtime-control")
+        _wait_for_runtime_control_ready(container)
+        _register_server_log_capture("azents-runtime-control", container)
+        try:
+            yield container
+        finally:
+            _unregister_server_log_capture("azents-runtime-control")
+            _log_server_output(container, "azents-runtime-control")
 
 
 @pytest.fixture(scope="session")
@@ -1528,6 +1572,210 @@ def _create_e2e_docker_infrastructure_profile(
     if payload.get("compatible") is not True:
         pytest.fail(
             "E2E Docker infrastructure Profile is not compatible: "
+            f"{payload.get('compatibility_reason_code')!r}"
+        )
+
+
+@pytest.fixture(scope="session")
+def strict_network_control_plane(
+    tmp_path_factory: pytest.TempPathFactory,
+    container_network: Network,
+    azents_runtime_control_container: DockerContainer,
+    azents_public_server_url: str,
+    azents_admin_server_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
+) -> Generator[StrictNetworkControlPlaneFixture, None, None]:
+    """Run a bounded Kubernetes control-plane simulator without packet claims."""
+    provider_resource_id = _provider_resource_id(
+        admin_server_url=azents_admin_server_url,
+        access_token=system_bootstrap_evidence.access_token,
+        provider_id=_STRICT_NETWORK_PROVIDER_ID,
+    )
+    expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=30)
+    try:
+        credential = issue_runtime_provider_credential(
+            admin_server_url=azents_admin_server_url,
+            public_server_url=azents_public_server_url,
+            admin_access_token=system_bootstrap_evidence.access_token,
+            provider_id=_STRICT_NETWORK_PROVIDER_ID,
+            subject=f"e2e:{provider_resource_id}",
+            expires_at=expires_at,
+        )
+    except RuntimeProviderAuthenticationError as error:
+        pytest.fail(str(error))
+
+    runtime_control = azents_runtime_control_container.get_wrapped_container()
+    runtime_control.reload()
+    host = runtime_control.attrs["NetworkSettings"]["Networks"][container_network.name][
+        "IPAddress"
+    ]
+    if not isinstance(host, str) or not host:
+        pytest.fail("Runtime Control has no address on the E2E container network")
+    state_dir = tmp_path_factory.mktemp("strict-network-control-plane")
+    evidence_path = state_dir / "evidence.jsonl"
+    log_path = state_dir / "simulator.log"
+    command = [
+        sys.executable,
+        str(
+            REPOSITORY_ROOT
+            / "testenv/azents/e2e/src/support/strict_network_control_plane.py"
+        ),
+        "--endpoint",
+        f"{host}:8030",
+        "--provider-id",
+        _STRICT_NETWORK_PROVIDER_ID,
+        "--network-name",
+        container_network.name,
+        "--evidence-path",
+        str(evidence_path),
+    ]
+    environment = {
+        **os.environ,
+        "AZ_RUNTIME_PROVIDER_CREDENTIAL": credential,
+    }
+    with log_path.open("w", encoding="utf-8") as output:
+        process = subprocess.Popen(
+            command,
+            env=environment,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        try:
+            _wait_for_control_plane_provider_registered(
+                process=process,
+                evidence_path=evidence_path,
+                log_path=log_path,
+            )
+            _wait_for_runtime_provider_contract(
+                admin_server_url=azents_admin_server_url,
+                access_token=system_bootstrap_evidence.access_token,
+                provider_id=_STRICT_NETWORK_PROVIDER_ID,
+            )
+            _create_e2e_strict_network_infrastructure_profile(
+                admin_server_url=azents_admin_server_url,
+                access_token=system_bootstrap_evidence.access_token,
+                provider_id=_STRICT_NETWORK_PROVIDER_ID,
+            )
+            yield StrictNetworkControlPlaneFixture(
+                provider_id=_STRICT_NETWORK_PROVIDER_ID,
+                evidence_path=evidence_path,
+            )
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=10)
+
+
+def _provider_resource_id(
+    *,
+    admin_server_url: str,
+    access_token: str,
+    provider_id: str,
+) -> str:
+    """Wait for one bootstrapped durable Provider resource ID."""
+    deadline = time.monotonic() + 60
+    last_error = ""
+    while time.monotonic() < deadline:
+        response = requests.get(
+            f"{admin_server_url}/runtime-provider/v1/providers",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        if response.status_code != 200:
+            last_error = (
+                f"Runtime Provider inventory returned HTTP {response.status_code}"
+            )
+            time.sleep(0.5)
+            continue
+        payload = _JSON_OBJECT_ADAPTER.validate_python(response.json())
+        items = _JSON_OBJECT_LIST_ADAPTER.validate_python(payload.get("items"))
+        matches = [item for item in items if item.get("provider_id") == provider_id]
+        if len(matches) == 1 and isinstance(matches[0].get("id"), str):
+            return cast(str, matches[0]["id"])
+        last_error = f"inventory contained {len(matches)} matching Providers"
+        time.sleep(0.5)
+    pytest.fail(
+        f"Runtime Provider bootstrap did not create {provider_id}: {last_error}"
+    )
+
+
+def _wait_for_control_plane_provider_registered(
+    *,
+    process: subprocess.Popen[str],
+    evidence_path: Path,
+    log_path: Path,
+) -> None:
+    """Wait for the secret-free Provider registration evidence."""
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        return_code = process.poll()
+        if return_code is not None:
+            pytest.fail(
+                "strict-network control-plane simulator exited with "
+                f"{return_code}: {log_path.read_text(encoding='utf-8')[-4000:]}"
+            )
+        evidence = load_control_plane_evidence(evidence_path)
+        if any(item.event == "provider_registered" for item in evidence):
+            return
+        time.sleep(0.5)
+    pytest.fail("strict-network control-plane simulator did not register")
+
+
+def _create_e2e_strict_network_infrastructure_profile(
+    *,
+    admin_server_url: str,
+    access_token: str,
+    provider_id: str,
+) -> None:
+    """Create one v3 boundary Profile for deterministic strict-mode journeys."""
+    response = requests.post(
+        f"{admin_server_url}/runtime-provider/v1/providers/{provider_id}/pod-profiles",
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={
+            "display_name": "E2E Strict Kubernetes Boundary",
+            "description": (
+                "Control-plane-only Kubernetes v3 Profile for deterministic E2E."
+            ),
+            "lifecycle": "active",
+            "spec": {
+                "profile_kind": "kubernetes_pod",
+                "contract_family": "kubernetes.pod-profile",
+                "schema_version": 3,
+                "runner_resources": {
+                    "cpu_request_millicores": None,
+                    "cpu_limit_millicores": None,
+                    "memory_request_bytes": None,
+                    "memory_limit_bytes": None,
+                },
+                "workspace_volume": {
+                    "storage_class_name": "control-plane-only",
+                    "storage_request_bytes": 1,
+                },
+                "network_access": {
+                    "mode": "direct",
+                    "allowed_cidrs": ["0.0.0.0/0"],
+                    "denied_cidrs": [],
+                },
+                "service_account_name": None,
+                "scheduling": {"node_selector": {}, "tolerations": []},
+                "dind": None,
+            },
+        },
+        timeout=10,
+    )
+    if response.status_code != 201:
+        pytest.fail(
+            "failed to create strict-network infrastructure Profile: "
+            f"HTTP {response.status_code}: {response.text}"
+        )
+    payload = _JSON_OBJECT_ADAPTER.validate_python(response.json())
+    if payload.get("compatible") is not True:
+        pytest.fail(
+            "strict-network infrastructure Profile is not compatible: "
             f"{payload.get('compatibility_reason_code')!r}"
         )
 
