@@ -61,8 +61,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-11
-spec_version: 38
+last_verified_at: 2026-08-13
+spec_version: 39
 ---
 
 # External Channel Provider Ingress
@@ -281,8 +281,10 @@ durable queue content.
    freezes a connected Binding and active Session; a provisioning owner has neither.
    Items retain their physical source Resource and position separately from the target,
    plus provider/routing identity, trigger correlation, queue order, attempt state, and
-   processing fences. PostgreSQL is the correctness authority; Redis and in-memory
-   conversation locks are not used for ordering, cursor correctness, or recovery.
+   processing fences. Live Slack and Discord callbacks also retain only the bounded
+   count of projected file entries, not their bytes or provider URLs. PostgreSQL is the
+   correctness authority; Redis and in-memory conversation locks are not used for
+   ordering, cursor correctness, or recovery.
 3. After commit, the producer submits an owner-scoped execution key to the bounded
    Local Job Runtime. API and External Channel Gateway producers also scan due owners
    at startup and periodically, honoring owner preparation backoff and submitting rows
@@ -307,7 +309,10 @@ durable queue content.
    conversation cursor. Otherwise the provider policy reads an exclusive-start,
    inclusive-trigger exact/history range, retaining the current bounded visible
    context and one leading omission marker. A same-batch tentative cursor prevents
-   avoidable duplicate reads without reordering admitted callbacks.
+   avoidable duplicate reads without reordering admitted callbacks. If the canonical
+   trigger snapshot exposes fewer bounded files than the live callback observed, the
+   read is a temporary history failure and the existing item retry/backoff policy
+   reprocesses it.
 8. The final transaction re-locks the owner, claimed items, connection
    authority, and affected conversation positions. It validates the initial cursor
    snapshot, correlates every returned provider message with every active admitted
@@ -469,6 +474,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-13** (spec_version 39) — Persisted the bounded file count observed by live
+  Slack and Discord callbacks and classified a shorter provider-history trigger
+  snapshot as temporary so attachment propagation races use the existing ingress
+  retry/backoff path.
 - **2026-08-11** (spec_version 38) — Required every active admitted trigger identity,
   not only provider-native explicit mentions, to correlate its exact human provider
   message to `prompt_role=invocation`; connected `all_messages` triggers now remain

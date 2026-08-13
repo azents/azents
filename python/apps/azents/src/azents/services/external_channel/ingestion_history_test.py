@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, call
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -18,6 +19,7 @@ from azents.core.enums import (
 from azents.core.external_channel_reference import provider_reference_mappings_size
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryRange,
+    ExternalChannelHistoryTemporaryFailure,
     ExternalChannelOperationDeadline,
 )
 from azents.services.external_channel.data import (
@@ -102,12 +104,18 @@ def _discord_message() -> DiscordNormalizedMessage:
     )
 
 
+def _file_metadata(provider: ExternalChannelProvider) -> dict[str, object]:
+    """Build the minimal file projection needed for count validation."""
+    return {"files": [{"provider": provider.value}]}
+
+
 async def test_slack_history_uses_native_trigger_and_returns_canonical_messages() -> (
     None
 ):
     message = dataclasses.replace(
         _slack_message(),
         normalized_body="Slack history body for <@UREVIEWER> in <#CRELATED>",
+        attachment_metadata=_file_metadata(ExternalChannelProvider.SLACK),
         normalized_size=49,
     )
     slack_client = SimpleNamespace(
@@ -174,6 +182,7 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
         trigger_position=message.provider_position,
         provider_user_id="participant-1",
         invocation=True,
+        expected_file_count=1,
     )
 
     history = await reader.read_range(
@@ -305,6 +314,7 @@ async def test_slack_history_resolves_visible_bot_author_display_name() -> None:
         trigger_position=message.provider_position,
         provider_user_id="participant-1",
         invocation=False,
+        expected_file_count=None,
     )
 
     history = await reader.read_range(
@@ -389,6 +399,7 @@ async def test_slack_history_skips_optional_enrichment_inside_required_reserve()
         trigger_position=message.provider_position,
         provider_user_id="participant-1",
         invocation=True,
+        expected_file_count=None,
     )
 
     history = await reader.read_range(
@@ -405,7 +416,10 @@ async def test_slack_history_skips_optional_enrichment_inside_required_reserve()
 
 
 async def test_discord_history_preserves_reference_mappings() -> None:
-    message = _discord_message()
+    message = dataclasses.replace(
+        _discord_message(),
+        attachment_metadata=_file_metadata(ExternalChannelProvider.DISCORD),
+    )
     discord_client = SimpleNamespace(
         read_range=AsyncMock(
             return_value=ExternalChannelHistoryRange(
@@ -460,6 +474,7 @@ async def test_discord_history_preserves_reference_mappings() -> None:
         trigger_position=message.provider_position,
         provider_user_id="participant-1",
         invocation=False,
+        expected_file_count=1,
     )
 
     history = await reader.read_range(
@@ -477,3 +492,154 @@ async def test_discord_history_preserves_reference_mappings() -> None:
         "users": {"participant-1": "Participant"}
     }
     assert history.trigger.original_url == "https://discord.com/channels/100/300/2"
+
+
+async def test_slack_history_retries_when_callback_file_is_not_visible() -> None:
+    """A Slack history snapshot missing a callback-observed file is temporary."""
+    message = _slack_message()
+    slack_client = SimpleNamespace(
+        read_range=AsyncMock(
+            return_value=ExternalChannelHistoryRange(
+                messages=(message,),
+                trigger=message,
+                context_omitted=False,
+                range_start_position=None,
+                trigger_position=message.provider_position,
+                provider_request_count=1,
+                scanned_message_count=1,
+                elapsed_seconds=0,
+            )
+        ),
+        get_permalink=AsyncMock(return_value=None),
+        fetch_user_display_name=AsyncMock(return_value=None),
+        fetch_channel_display_name=AsyncMock(return_value=None),
+    )
+    reader = ExternalChannelProviderHistoryReader(
+        session_manager=cast(Any, _SessionManager()),
+        repository=cast(
+            Any,
+            SimpleNamespace(
+                get_connection_configuration=AsyncMock(
+                    return_value=SimpleNamespace(
+                        provider=ExternalChannelProvider.SLACK,
+                        provider_tenant_id="tenant-1",
+                        provider_bot_user_id="connected-bot",
+                        provider_app_id="connected-app",
+                        encrypted_credentials="ciphertext",
+                    )
+                )
+            ),
+        ),
+        credentials_codec=cast(
+            Any,
+            SimpleNamespace(
+                decrypt=lambda ciphertext: SlackConnectionCredentials(
+                    bot_token="secret-bot-token",
+                    signing_secret="secret-signing-key",
+                    app_token=None,
+                )
+            ),
+        ),
+        slack_client=cast(Any, slack_client),
+        discord_client=cast(Any, SimpleNamespace()),
+    )
+    locator = ExternalChannelTriggerLocator(
+        connection_id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
+        provider_event_type="app_mention",
+        provider_tenant_id="tenant-1",
+        provider_channel_id="channel-1",
+        provider_parent_channel_id=None,
+        provider_thread_key="1.000000",
+        delivery_thread_key="1.000000",
+        provider_resource_key=message.provider_resource_key,
+        trigger_provider_message_key=message.provider_message_key,
+        trigger_provider_message_id="2.000000",
+        trigger_position=message.provider_position,
+        provider_user_id="participant-1",
+        invocation=True,
+        expected_file_count=1,
+    )
+
+    with pytest.raises(
+        ExternalChannelHistoryTemporaryFailure,
+        match="has not exposed all trigger files yet",
+    ):
+        await reader.read_range(
+            locator=locator,
+            exclusive_start_position=None,
+            deadline=_deadline(),
+        )
+
+
+async def test_discord_history_retries_when_callback_file_is_not_visible() -> None:
+    """A Discord history snapshot missing a callback-observed file is temporary."""
+    message = _discord_message()
+    discord_client = SimpleNamespace(
+        read_range=AsyncMock(
+            return_value=ExternalChannelHistoryRange(
+                messages=(message,),
+                trigger=message,
+                context_omitted=False,
+                range_start_position=None,
+                trigger_position=message.provider_position,
+                provider_request_count=1,
+                scanned_message_count=1,
+                elapsed_seconds=0,
+            )
+        )
+    )
+    reader = ExternalChannelProviderHistoryReader(
+        session_manager=cast(Any, _SessionManager()),
+        repository=cast(
+            Any,
+            SimpleNamespace(
+                get_connection_configuration=AsyncMock(
+                    return_value=SimpleNamespace(
+                        provider=ExternalChannelProvider.DISCORD,
+                        provider_tenant_id="100",
+                        provider_bot_user_id="connected-bot",
+                        provider_app_id="connected-app",
+                        encrypted_credentials="ciphertext",
+                    )
+                )
+            ),
+        ),
+        credentials_codec=cast(
+            Any,
+            SimpleNamespace(
+                decrypt=lambda ciphertext: DiscordConnectionCredentials(
+                    bot_token="secret-bot-token"
+                )
+            ),
+        ),
+        slack_client=cast(Any, SimpleNamespace()),
+        discord_client=cast(Any, discord_client),
+    )
+    locator = ExternalChannelTriggerLocator(
+        connection_id="connection-1",
+        provider=ExternalChannelProvider.DISCORD,
+        provider_event_type="discord_message_create",
+        provider_tenant_id="100",
+        provider_channel_id="300",
+        provider_parent_channel_id="200",
+        provider_thread_key="300",
+        delivery_thread_key="300",
+        provider_resource_key="discord:100:300",
+        trigger_provider_message_key=message.provider_message_key,
+        trigger_provider_message_id="2",
+        trigger_position=message.provider_position,
+        provider_user_id="participant-1",
+        invocation=False,
+        expected_file_count=1,
+    )
+
+    with pytest.raises(
+        ExternalChannelHistoryTemporaryFailure,
+        match="has not exposed all trigger files yet",
+    ):
+        await reader.read_range(
+            locator=locator,
+            exclusive_start_position=None,
+            deadline=_deadline(),
+        )

@@ -200,6 +200,7 @@ def _slack_event(
     event_type: str = "app_mention",
     text: str = "private inbound content",
     authorizations: list[dict[str, object]] | None = None,
+    files: list[dict[str, object]] | None = None,
 ) -> ExternalChannelTrigger:
     event: dict[str, object] = {
         "type": event_type,
@@ -210,6 +211,8 @@ def _slack_event(
     }
     if thread_ts is not None:
         event["thread_ts"] = thread_ts
+    if files is not None:
+        event["files"] = files
     envelope: dict[str, object] = {"event": event}
     if authorizations is not None:
         envelope["authorizations"] = authorizations
@@ -234,6 +237,7 @@ def _discord_event(
     thread_id: str | None,
     parent_channel_id: str | None,
     invocation: bool,
+    files: list[dict[str, object]] | None = None,
 ) -> ExternalChannelTrigger:
     message: dict[str, object] = {
         "id": "100",
@@ -249,6 +253,8 @@ def _discord_event(
             "id": thread_id,
             "parent_id": parent_channel_id,
         }
+    if files is not None:
+        message["attachments"] = {"files": files}
     return ExternalChannelTrigger(
         connection_id="connection-1",
         provider_event_id="event-1",
@@ -293,6 +299,31 @@ async def test_slack_parent_invocation_projects_content_free_parent_request() ->
     assert request.locator.delivery_thread_key == "100.000001"
     assert request.locator.provider_resource_key == ("slack:T100:C100:100.000001")
     assert "private inbound content" not in repr(request)
+
+
+@pytest.mark.asyncio
+async def test_slack_callback_projects_expected_file_count() -> None:
+    """The durable locator retains the bounded callback-observed file count."""
+    service, ingestion = _service()
+
+    await service.ingest_slack_event(
+        event=_slack_event(
+            files=[
+                {
+                    "id": "F100",
+                    "name": "report.pdf",
+                    "mimetype": "application/pdf",
+                    "size": 123,
+                    "mode": "hosted",
+                }
+            ]
+        ),
+        connected_bot_user_id="UAUTH",
+        authority=_authority(ExternalChannelIngressProfile.SLACK_HTTP),
+        deadline=external_channel_transport_deadline(_NOW),
+    )
+
+    assert ingestion.requests[0].locator.expected_file_count == 1
 
 
 @pytest.mark.asyncio
@@ -377,6 +408,26 @@ async def test_discord_parent_invocation_defers_thread_provisioning_to_ingestion
     assert request.locator.provider_resource_key == "discord:300:100"
     assert request.locator.delivery_thread_key == "100"
     assert request.locator.provider_parent_channel_id == "200"
+
+
+@pytest.mark.asyncio
+async def test_discord_callback_projects_expected_file_count() -> None:
+    """The durable locator retains the bounded callback-observed file count."""
+    service, ingestion = _service()
+
+    await service.ingest_discord_event(
+        event=_discord_event(
+            channel_id="200",
+            thread_id=None,
+            parent_channel_id=None,
+            invocation=True,
+            files=[{"provider_file_id": "F100"}],
+        ),
+        authority=_authority(ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP),
+        deadline=external_channel_transport_deadline(_NOW),
+    )
+
+    assert ingestion.requests[0].locator.expected_file_count == 1
 
 
 @pytest.mark.asyncio

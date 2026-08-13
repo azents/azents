@@ -245,6 +245,11 @@ class RDBExternalChannelIngressItem(RDBModel):
         "attempt_count >= 0 AND attempt_count <= 5",
         name="ck_external_channel_ingress_items_attempt_count",
     )
+    CK_EXPECTED_FILE_COUNT = sa.CheckConstraint(
+        "expected_file_count IS NULL OR "
+        "(expected_file_count >= 0 AND expected_file_count <= 20)",
+        name="ck_external_channel_ingress_items_expected_file_count",
+    )
     CK_ACTIVE_STATE = sa.CheckConstraint(
         "("
         "state = 'pending' AND next_attempt_at IS NULL "
@@ -345,6 +350,10 @@ class RDBExternalChannelIngressItem(RDBModel):
     trigger_position: Mapped[str] = mapped_column(sa.Text, nullable=False)
     provider_user_id: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     invocation: Mapped[bool] = mapped_column(sa.Boolean, nullable=False)
+    expected_file_count: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+    )
     invocation_id: Mapped[str] = mapped_column(sa.String(255), nullable=False)
     initial_title_eligible: Mapped[bool] = mapped_column(
         sa.Boolean,
@@ -403,6 +412,7 @@ class RDBExternalChannelIngressItem(RDBModel):
         IX_POSITION,
         CK_SCOPE_KEY,
         CK_ATTEMPT_COUNT,
+        CK_EXPECTED_FILE_COUNT,
         CK_ACTIVE_STATE,
         CK_AUTHORITY,
     )

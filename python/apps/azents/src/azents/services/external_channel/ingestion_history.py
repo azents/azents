@@ -11,6 +11,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelProvider
+from azents.core.external_channel_file import external_channel_file_metadata_items
 from azents.core.external_channel_reference import provider_reference_mappings_size
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -21,6 +22,7 @@ from azents.services.external_channel.connection import (
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryRange,
+    ExternalChannelHistoryTemporaryFailure,
     ExternalChannelOperationDeadline,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
@@ -215,6 +217,10 @@ class ExternalChannelProviderHistoryReader:
                 _canonical_discord(message) for message in history.messages
             )
             trigger = _canonical_discord(history.trigger)
+        _validate_trigger_file_count(
+            locator=locator,
+            trigger=trigger,
+        )
         return ExternalChannelHistoryRange(
             messages=messages,
             trigger=trigger,
@@ -224,6 +230,24 @@ class ExternalChannelProviderHistoryReader:
             provider_request_count=history.provider_request_count,
             scanned_message_count=history.scanned_message_count,
             elapsed_seconds=history.elapsed_seconds,
+        )
+
+
+def _validate_trigger_file_count(
+    *,
+    locator: ExternalChannelTriggerLocator,
+    trigger: ExternalChannelCanonicalHistoryMessage,
+) -> None:
+    """Retry when provider history has not exposed callback-observed files yet."""
+    expected_file_count = locator.expected_file_count
+    if expected_file_count is None:
+        return
+    observed_file_count = len(
+        external_channel_file_metadata_items(trigger.attachment_metadata or {})
+    )
+    if observed_file_count < expected_file_count:
+        raise ExternalChannelHistoryTemporaryFailure(
+            "External Channel history has not exposed all trigger files yet."
         )
 
 

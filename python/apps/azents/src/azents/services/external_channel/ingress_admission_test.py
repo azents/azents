@@ -121,6 +121,7 @@ def _request(*, invocation: bool = True) -> ExternalChannelIngestionRequest:
                 trigger_position="0001",
                 provider_user_id="user-1",
                 invocation=invocation,
+                expected_file_count=None,
             ),
             scope=SimpleNamespace(
                 kind=ExternalChannelConversationScopeKind.THREAD,

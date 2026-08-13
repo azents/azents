@@ -115,6 +115,7 @@ def build_setup_continuation_request(
             trigger_position=source.trigger_position,
             provider_user_id=principal.provider_user_id,
             invocation=True,
+            expected_file_count=None,
         ),
         scope=ExternalChannelConversationScope(
             connection_id=configuration.id,

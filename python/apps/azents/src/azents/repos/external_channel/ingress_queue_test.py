@@ -132,6 +132,7 @@ def _item(index: int) -> SimpleNamespace:
         trigger_position=position,
         provider_user_id="user-1",
         invocation=True,
+        expected_file_count=None,
         invocation_id=f"invocation-{index}",
         initial_title_eligible=False,
         state=ExternalChannelIngressItemState.PENDING,
@@ -614,6 +615,7 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
         index: int,
         *,
         invocation: bool = True,
+        expected_file_count: int | None = None,
     ) -> ExternalChannelIngressItemCreate:
         return ExternalChannelIngressItemCreate(
             deduplication_key=f"{index:064d}",
@@ -641,6 +643,7 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
             trigger_position=f"{index:020d}",
             provider_user_id="U1",
             invocation=invocation,
+            expected_file_count=expected_file_count,
             invocation_id=f"invocation-{index}",
             initial_title_eligible=False,
         )
@@ -649,7 +652,7 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
     first = await repository.admit(
         rdb_session,
         owner_create=owner_create,
-        item_create=item_create(1),
+        item_create=item_create(1, expected_file_count=1),
     )
     second = await repository.admit(
         rdb_session,
@@ -661,6 +664,8 @@ async def test_postgres_pre_session_callbacks_share_one_owner(
     assert first.owner.ready is False
     assert first.created is True
     assert second.created is True
+    assert first.item.expected_file_count == 1
+    assert second.item.expected_file_count is None
     assert (
         await rdb_session.scalar(
             sa.select(sa.func.count()).select_from(RDBExternalChannelIngressOwner)

@@ -19,6 +19,7 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
 )
+from azents.core.external_channel_file import MAX_EXTERNAL_CHANNEL_FILES
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationLock,
     ExternalChannelConversationLockError,
@@ -100,6 +101,7 @@ class ExternalChannelTriggerLocator:
     trigger_position: str
     provider_user_id: str | None
     invocation: bool
+    expected_file_count: int | None
 
     def __post_init__(self) -> None:
         """Reject incomplete locators before provider or persistence use."""
@@ -123,6 +125,10 @@ class ExternalChannelTriggerLocator:
         }
         if self.provider_event_type not in expected_event_types[self.provider]:
             raise ValueError("External Channel provider event type is invalid.")
+        if self.expected_file_count is not None and not (
+            0 <= self.expected_file_count <= MAX_EXTERNAL_CHANNEL_FILES
+        ):
+            raise ValueError("External Channel expected file count is invalid.")
 
     @property
     def digest(self) -> str:
