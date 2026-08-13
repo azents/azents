@@ -97,7 +97,13 @@ type ProcessLauncher = Callable[[ExecutionSpec], Awaitable[ExecutionProcess]]
 class DirectExecutionBackend:
     """Direct Runner process execution."""
 
-    def __init__(self, *, launcher: ProcessLauncher | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        inherited_environment: Mapping[str, str] | None = None,
+        launcher: ProcessLauncher | None = None,
+    ) -> None:
+        self._inherited_environment = dict(inherited_environment or {})
         self._launcher = launcher or _launch_subprocess
 
     def agent_environment(
@@ -109,6 +115,7 @@ class DirectExecutionBackend:
         del workspace_path
         environment = dict(os.environ)
         environment.update(operation_environment)
+        environment.update(self._inherited_environment)
         return environment
 
     async def start(self, spec: ExecutionSpec) -> ExecutionProcess:

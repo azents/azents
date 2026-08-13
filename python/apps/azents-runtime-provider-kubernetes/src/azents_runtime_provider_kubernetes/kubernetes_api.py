@@ -77,7 +77,38 @@ class EmptyDirVolume:
     size_limit: KubernetesResourceQuantity | None
 
 
-type PodVolume = PersistentVolumeClaimVolume | EmptyDirVolume
+@dataclasses.dataclass(frozen=True)
+class KeyToPath:
+    """One selected ConfigMap or Secret key exposed in a Pod volume."""
+
+    key: str
+    path: str
+    mode: int | None
+
+
+@dataclasses.dataclass(frozen=True)
+class ConfigMapVolume:
+    """Pod volume backed by selected ConfigMap keys."""
+
+    name: str
+    config_map_name: str
+    items: Sequence[KeyToPath]
+    default_mode: int | None
+
+
+@dataclasses.dataclass(frozen=True)
+class SecretVolume:
+    """Pod volume backed by selected Secret keys."""
+
+    name: str
+    secret_name: str
+    items: Sequence[KeyToPath]
+    default_mode: int | None
+
+
+type PodVolume = (
+    PersistentVolumeClaimVolume | EmptyDirVolume | ConfigMapVolume | SecretVolume
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -144,6 +175,31 @@ class Toleration:
 
 
 @dataclasses.dataclass(frozen=True)
+class HostAlias:
+    """Exact static hostname mappings injected into one Pod."""
+
+    ip: str
+    hostnames: Sequence[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class PodDnsConfigOption:
+    """One Pod resolver option."""
+
+    name: str
+    value: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class PodDnsConfig:
+    """Explicit Pod resolver configuration."""
+
+    nameservers: Sequence[str]
+    searches: Sequence[str]
+    options: Sequence[PodDnsConfigOption]
+
+
+@dataclasses.dataclass(frozen=True)
 class ContainerSpec:
     """Provider-owned Runtime container spec."""
 
@@ -169,6 +225,9 @@ class PodSpec:
     security_context: PodSecurityContext | None
     node_selector: Mapping[str, str]
     tolerations: Sequence[Toleration]
+    dns_policy: str | None
+    dns_config: PodDnsConfig | None
+    host_aliases: Sequence[HostAlias]
     containers: Sequence[ContainerSpec]
     volumes: Sequence[PodVolume]
 
@@ -226,6 +285,53 @@ class PersistentVolumeClaimResource:
 
     metadata: ObjectMeta
     spec: PersistentVolumeClaimSpec
+
+
+@dataclasses.dataclass(frozen=True)
+class ServicePort:
+    """Kubernetes Service port mapping."""
+
+    name: str | None
+    protocol: str
+    port: int
+    target_port: int | str
+
+
+@dataclasses.dataclass(frozen=True)
+class ServiceSpec:
+    """Stable ClusterIP Service spec."""
+
+    service_type: str
+    cluster_ip: str | None
+    selector: Mapping[str, str]
+    ports: Sequence[ServicePort]
+
+
+@dataclasses.dataclass(frozen=True)
+class ServiceResource:
+    """Provider-owned Kubernetes Service."""
+
+    metadata: ObjectMeta
+    spec: ServiceSpec
+
+
+@dataclasses.dataclass(frozen=True)
+class ConfigMapResource:
+    """Provider-owned Kubernetes ConfigMap."""
+
+    metadata: ObjectMeta
+    data: Mapping[str, str]
+    immutable: bool | None
+
+
+@dataclasses.dataclass(frozen=True)
+class SecretResource:
+    """Provider-owned Kubernetes Secret with opaque byte values."""
+
+    metadata: ObjectMeta
+    data: Mapping[str, bytes]
+    secret_type: str
+    immutable: bool | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -363,6 +469,78 @@ class KubernetesApi(Protocol):
         namespace: str,
     ) -> Sequence[PersistentVolumeClaimResource]:
         """List PVCs matching labels."""
+        ...
+
+    async def get_service(
+        self,
+        name: str,
+        namespace: str,
+    ) -> ServiceResource | None:
+        """Return a Service by name."""
+        ...
+
+    async def apply_service(self, service: ServiceResource) -> None:
+        """Create or replace a Service."""
+        ...
+
+    async def delete_service(self, name: str, namespace: str) -> None:
+        """Delete a Service when present."""
+        ...
+
+    async def list_services(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[ServiceResource]:
+        """List Services matching labels."""
+        ...
+
+    async def get_config_map(
+        self,
+        name: str,
+        namespace: str,
+    ) -> ConfigMapResource | None:
+        """Return a ConfigMap by name."""
+        ...
+
+    async def apply_config_map(self, config_map: ConfigMapResource) -> None:
+        """Create or replace a ConfigMap."""
+        ...
+
+    async def delete_config_map(self, name: str, namespace: str) -> None:
+        """Delete a ConfigMap when present."""
+        ...
+
+    async def list_config_maps(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[ConfigMapResource]:
+        """List ConfigMaps matching labels."""
+        ...
+
+    async def get_secret(
+        self,
+        name: str,
+        namespace: str,
+    ) -> SecretResource | None:
+        """Return a Secret by name."""
+        ...
+
+    async def apply_secret(self, secret: SecretResource) -> None:
+        """Create or replace a Secret."""
+        ...
+
+    async def delete_secret(self, name: str, namespace: str) -> None:
+        """Delete a Secret when present."""
+        ...
+
+    async def list_secrets(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[SecretResource]:
+        """List Secrets matching labels."""
         ...
 
     async def get_network_policy(
