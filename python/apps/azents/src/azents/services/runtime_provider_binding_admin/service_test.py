@@ -178,6 +178,7 @@ class TestRuntimeProviderBindingAdminService:
             generation=1,
             reported_provider_type="docker",
             reported_protocol_version="test-v1",
+            operational_diagnostics=None,
             connected_at=connected_at,
         )
         assert (await service.get_binding(binding.binding.id)).connected

@@ -131,6 +131,7 @@ async def _run_control_loop(
             registration=registration,
             connection_id=control_connection_id,
             consumer_id=f"{control_connection_id}:provider",
+            operational_diagnostics=lambda: None,
         )
         try:
             await run_loop.start()
@@ -517,6 +518,7 @@ def _provider_registration(settings: ProviderSettings) -> ProviderRegistration:
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata={},
         capability_contract=_capability_contract(),
+        operational_diagnostics=None,
     )
 
 

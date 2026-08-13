@@ -22,6 +22,9 @@ from azents_runtime_control.provider import (
     RuntimeLifecycleResult,
     RuntimeProviderLifecycle,
     RuntimeProviderObservedState,
+    RuntimeProviderOperationalDiagnostics,
+    RuntimeProviderOperationalWarning,
+    RuntimeProviderOperationalWarningSeverity,
     RuntimeProviderReconciliationEvidence,
     RuntimeProviderReconciliationObservation,
     RuntimeProviderReconciliationStatus,
@@ -67,8 +70,10 @@ class FakeControlClient(ProviderControlClient):
         provider_id: str,
         generation: int,
         heartbeat_at: datetime,
+        operational_diagnostics: object,
     ) -> bool:
         """Record a heartbeat."""
+        del operational_diagnostics
         self.heartbeats.append((provider_id, generation))
         return self.heartbeat_ok
 
@@ -324,9 +329,11 @@ def _loop(
             config_schema_version="v1",
             metadata={"region": "test"},
             capability_contract={"schema_version": 1},
+            operational_diagnostics=None,
         ),
         connection_id="connection-1",
         consumer_id="consumer-1",
+        operational_diagnostics=lambda: None,
         clock=lambda: datetime(2026, 5, 25, tzinfo=UTC),
         monotonic=lambda: 100.0,
     )
@@ -419,6 +426,64 @@ def test_reconciliation_evidence_rejects_empty_or_duplicate_kinds() -> None:
     )
     with pytest.raises(ValueError, match="kinds must be unique"):
         RuntimeProviderReconciliationEvidence(observations=(observation, observation))
+
+
+def test_operational_diagnostics_rejects_unsafe_shape() -> None:
+    """Operational diagnostics remain warning-only, bounded, and unambiguous."""
+    with pytest.raises(ValueError, match="codes must be unique"):
+        warning = RuntimeProviderOperationalWarning(
+            code="cni_support_unconfirmed",
+            severity=RuntimeProviderOperationalWarningSeverity.WARNING,
+            metadata={},
+        )
+        RuntimeProviderOperationalDiagnostics(
+            checked_at=datetime(2026, 5, 25, tzinfo=UTC),
+            warnings=(warning, warning),
+        )
+
+    with pytest.raises(ValueError, match="metadata has too many entries"):
+        RuntimeProviderOperationalWarning(
+            code="rbac_incomplete",
+            severity=RuntimeProviderOperationalWarningSeverity.WARNING,
+            metadata={str(index): "value" for index in range(17)},
+        )
+
+    with pytest.raises(ValueError, match="unsupported keys"):
+        RuntimeProviderOperationalWarning(
+            code="rbac_incomplete",
+            severity=RuntimeProviderOperationalWarningSeverity.WARNING,
+            metadata={"private_key": "-----BEGIN PRIVATE KEY-----"},
+        )
+
+    with pytest.raises(ValueError, match="value is unsupported"):
+        RuntimeProviderOperationalWarning(
+            code="cni_support_unconfirmed",
+            severity=RuntimeProviderOperationalWarningSeverity.WARNING,
+            metadata={"reason": "certificate:-----BEGIN CERTIFICATE-----"},
+        )
+
+    for unsafe_value in (
+        "bearertoken123",
+        "customersecret",
+        "runtimepodname",
+        "runtimeproviderpod",
+    ):
+        with pytest.raises(ValueError, match="value is unsupported"):
+            RuntimeProviderOperationalWarning(
+                code="mandatory_service_unavailable",
+                severity=RuntimeProviderOperationalWarningSeverity.WARNING,
+                metadata={
+                    "reason": "service_missing",
+                    "service_role": unsafe_value,
+                },
+            )
+
+    with pytest.raises(ValueError, match="unknown.*cannot include metadata"):
+        RuntimeProviderOperationalWarning(
+            code="future_warning",
+            severity=RuntimeProviderOperationalWarningSeverity.WARNING,
+            metadata={"reason": "unknown"},
+        )
 
 
 def _runtime_configuration() -> RuntimeConfigurationEnvelope:

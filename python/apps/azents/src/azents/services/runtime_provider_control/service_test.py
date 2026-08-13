@@ -257,6 +257,7 @@ class TestRuntimeProviderEnrollmentService:
             generation=1,
             reported_provider_type="kubernetes",
             reported_protocol_version="test-v1",
+            operational_diagnostics=None,
             connected_at=now,
         )
 
@@ -269,6 +270,7 @@ class TestRuntimeProviderEnrollmentService:
             generation=2,
             reported_provider_type="kubernetes",
             reported_protocol_version="test-v1",
+            operational_diagnostics=None,
             connected_at=now + datetime.timedelta(seconds=1),
         )
 

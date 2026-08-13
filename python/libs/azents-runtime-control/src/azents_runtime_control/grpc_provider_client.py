@@ -30,6 +30,9 @@ from azents_runtime_control.provider import (
     RuntimeLifecycleCommand,
     RuntimeLifecycleCommandType,
     RuntimeProviderObservedState,
+    RuntimeProviderOperationalDiagnostics,
+    RuntimeProviderOperationalWarning,
+    RuntimeProviderOperationalWarningSeverity,
     RuntimeProviderReconciliationEvidence,
     RuntimeProviderReconciliationObservation,
     RuntimeProviderReconciliationStatus,
@@ -161,20 +164,26 @@ class GrpcProviderControlClient(ProviderControlClient):
         provider_id: str,
         generation: int,
         heartbeat_at: datetime,
+        operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
     ) -> bool:
         """Send a heartbeat and wait for the matching ack."""
         self._heartbeat_sequence += 1
         request_id = f"heartbeat:{self._heartbeat_sequence}"
         future = asyncio.get_running_loop().create_future()
         self._pending_heartbeat_acks[request_id] = future
+        heartbeat = runtime_provider_control_pb2.ProviderHeartbeat(
+            monotonic_sequence=self._heartbeat_sequence,
+        )
+        if operational_diagnostics is not None:
+            heartbeat.operational_diagnostics.CopyFrom(
+                _operational_diagnostics_message(operational_diagnostics)
+            )
         await self._send(
             runtime_provider_control_pb2.ProviderMessage(
                 connection_id=self._require_connection_id(),
                 request_id=request_id,
                 generation=generation,
-                heartbeat=runtime_provider_control_pb2.ProviderHeartbeat(
-                    monotonic_sequence=self._heartbeat_sequence,
-                ),
+                heartbeat=heartbeat,
             )
         )
         try:
@@ -353,20 +362,25 @@ def _register_message(
     connection_id: str,
     request_id: str,
 ) -> runtime_provider_control_pb2.ProviderMessage:
+    register = runtime_provider_control_pb2.ProviderRegister(
+        provider_id=registration.provider_id,
+        provider_type=registration.provider_type,
+        scope=registration.scope,
+        workspace_id=registration.workspace_id or "",
+        protocol_version=registration.protocol_version,
+        capabilities=list(registration.capabilities),
+        config_schema_version=registration.config_schema_version,
+        metadata=_struct(registration.metadata),
+        capability_contract=_struct(registration.capability_contract),
+    )
+    if registration.operational_diagnostics is not None:
+        register.operational_diagnostics.CopyFrom(
+            _operational_diagnostics_message(registration.operational_diagnostics)
+        )
     return runtime_provider_control_pb2.ProviderMessage(
         connection_id=connection_id,
         request_id=request_id,
-        register=runtime_provider_control_pb2.ProviderRegister(
-            provider_id=registration.provider_id,
-            provider_type=registration.provider_type,
-            scope=registration.scope,
-            workspace_id=registration.workspace_id or "",
-            protocol_version=registration.protocol_version,
-            capabilities=list(registration.capabilities),
-            config_schema_version=registration.config_schema_version,
-            metadata=_struct(registration.metadata),
-            capability_contract=_struct(registration.capability_contract),
-        ),
+        register=register,
     )
 
 
@@ -595,6 +609,41 @@ def _reconciliation_evidence_message(
     )
 
 
+def operational_diagnostics_from_message(
+    message: runtime_provider_control_pb2.ProviderOperationalDiagnostics,
+) -> RuntimeProviderOperationalDiagnostics:
+    """Decode one bounded warning-only Provider diagnostics snapshot."""
+    if not message.HasField("checked_at"):
+        raise ValueError("operational diagnostics checked_at is required")
+    return RuntimeProviderOperationalDiagnostics(
+        checked_at=_datetime(message.checked_at),
+        warnings=tuple(
+            RuntimeProviderOperationalWarning(
+                code=warning.code,
+                severity=RuntimeProviderOperationalWarningSeverity(warning.severity),
+                metadata=dict(warning.metadata),
+            )
+            for warning in message.warnings
+        ),
+    )
+
+
+def _operational_diagnostics_message(
+    diagnostics: RuntimeProviderOperationalDiagnostics,
+) -> runtime_provider_control_pb2.ProviderOperationalDiagnostics:
+    return runtime_provider_control_pb2.ProviderOperationalDiagnostics(
+        checked_at=_timestamp(diagnostics.checked_at),
+        warnings=[
+            runtime_provider_control_pb2.ProviderOperationalWarning(
+                code=warning.code,
+                severity=warning.severity.value,
+                metadata=dict(warning.metadata),
+            )
+            for warning in diagnostics.warnings
+        ],
+    )
+
+
 def _struct(metadata: Mapping[str, JsonValue]) -> struct_pb2.Struct:
     struct = struct_pb2.Struct()
     struct.update(metadata)
@@ -628,5 +677,6 @@ __all__ = [
     "ProviderControlStream",
     "RuntimeProviderControlStreamClosed",
     "json_value_from_struct",
+    "operational_diagnostics_from_message",
     "provider_report_from_message",
 ]

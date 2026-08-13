@@ -7,6 +7,7 @@ from typing import Protocol
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
 )
+from azents_runtime_control.provider import RuntimeProviderOperationalDiagnostics
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEnvelope,
     RuntimeConfigurationEvidence,
@@ -47,6 +48,7 @@ class RuntimeProviderRegistration:
     config_schema_version: str
     metadata: dict[str, JsonValue]
     capability_contract: dict[str, JsonValue]
+    operational_diagnostics: RuntimeProviderOperationalDiagnostics | None
     auth_credential_id: str | None
     connection_id: str
     owner_replica_id: str

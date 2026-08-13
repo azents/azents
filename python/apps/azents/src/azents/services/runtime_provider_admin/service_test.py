@@ -1,8 +1,16 @@
 """Runtime Provider administrative-policy reconciliation tests."""
 
 import datetime
+from datetime import UTC
+from typing import cast
+from unittest.mock import AsyncMock, Mock
 
 from azcommon.datetime import tznow
+from azents_runtime_control.provider import (
+    RuntimeProviderOperationalDiagnostics,
+    RuntimeProviderOperationalWarning,
+    RuntimeProviderOperationalWarningSeverity,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -17,8 +25,15 @@ from azents.rdb.session import SessionManager
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_control.data import RuntimeProviderConnection
+from azents.repos.runtime_provider_control.repository import (
+    RuntimeProviderControlRepository,
+)
 
-from .service import RuntimeProviderAdminService
+from .service import (
+    RuntimeProviderAdminService,
+    RuntimeProviderOperationalDiagnosticsProjection,
+)
 
 
 async def test_provider_policy_and_workspace_availability_enqueue_versions(
@@ -49,6 +64,7 @@ async def test_provider_policy_and_workspace_availability_enqueue_versions(
         session_manager=rdb_session_manager,
         repository=provider_repository,
         profile_repository=profile_repository,
+        control_repository=RuntimeProviderControlRepository(),
     )
 
     policy_updated = await service.update_policy(
@@ -96,3 +112,60 @@ async def test_provider_policy_and_workspace_availability_enqueue_versions(
         assert second.source_type is RuntimeReconcileSourceKind.PROVIDER
         assert second.source_id == provider.id
         assert second.source_version == "2"
+
+
+async def test_provider_operational_diagnostics_returns_only_current_projection(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Admin diagnostics expose no connection credential or binding authority."""
+    provider_repository = Mock(spec=RuntimeProviderRepository)
+    cast(
+        AsyncMock,
+        provider_repository.get_by_provider_id,
+    ).return_value = Mock(id="provider-row-1")
+    control_repository = Mock(spec=RuntimeProviderControlRepository)
+    diagnostics = RuntimeProviderOperationalDiagnostics(
+        checked_at=datetime.datetime(2026, 8, 12, tzinfo=UTC),
+        warnings=(
+            RuntimeProviderOperationalWarning(
+                code="rbac_incomplete",
+                severity=RuntimeProviderOperationalWarningSeverity.WARNING,
+                metadata={
+                    "required_verb": "get",
+                    "resource_kind": "secrets",
+                },
+            ),
+        ),
+    )
+    cast(
+        AsyncMock,
+        control_repository.get_current_connection,
+    ).return_value = Mock(
+        spec=RuntimeProviderConnection,
+        generation=7,
+        reported_protocol_version="agent-runtime-provider-kubernetes-v3",
+        operational_diagnostics=diagnostics,
+    )
+    service = RuntimeProviderAdminService(
+        session_manager=rdb_session_manager,
+        repository=cast(RuntimeProviderRepository, provider_repository),
+        profile_repository=RuntimeProfileRepository(),
+        control_repository=cast(
+            RuntimeProviderControlRepository,
+            control_repository,
+        ),
+    )
+
+    projection = await service.get_operational_diagnostics("system-kubernetes")
+    cast(
+        AsyncMock,
+        control_repository.get_current_connection,
+    ).return_value = None
+    unavailable = await service.get_operational_diagnostics("system-kubernetes")
+
+    assert projection == RuntimeProviderOperationalDiagnosticsProjection(
+        generation=7,
+        protocol_version="agent-runtime-provider-kubernetes-v3",
+        diagnostics=diagnostics,
+    )
+    assert unavailable is None

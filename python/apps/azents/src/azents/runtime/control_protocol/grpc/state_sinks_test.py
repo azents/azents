@@ -258,7 +258,8 @@ async def test_provider_running_report_clears_start_timeout_failure(
                 command.desired_generation
             ),
             reconciliation=None,
-        )
+        ),
+        configuration_acknowledgement_allowed=True,
     )
 
     async with rdb_session_manager() as session:
@@ -314,13 +315,73 @@ async def test_provider_starting_report_does_not_acknowledge_configuration(
             terminal_delete_acknowledged=False,
             runtime_configuration=_runtime_configuration_evidence(3),
             reconciliation=None,
-        )
+        ),
+        configuration_acknowledgement_allowed=True,
     )
 
     cast(
         AsyncMock,
         profile_repository.record_provider_configuration_evidence,
     ).assert_not_awaited()
+
+
+async def test_provider_running_report_without_enforcement_ack_skips_configuration(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Lifecycle-only or drifted v3 reports cannot acknowledge configuration."""
+    runtime_repository = Mock(spec=AgentRuntimeRepository)
+    runtime = Mock(
+        id="runtime-1",
+        runtime_provider_resource_id="provider-1",
+        desired_generation=3,
+        failure_code=None,
+    )
+    cast(AsyncMock, runtime_repository.get_by_id).return_value = runtime
+    cast(
+        AsyncMock,
+        runtime_repository.provider_report_matches_binding,
+    ).return_value = True
+    cast(
+        AsyncMock,
+        runtime_repository.record_provider_observed_state,
+    ).return_value = runtime
+    cast(
+        AsyncMock,
+        runtime_repository.record_provider_connection_state,
+    ).return_value = runtime
+    profile_repository = _profile_repository()
+    sink = RuntimeProviderReportRepositorySink(
+        cast(AgentRuntimeRepository, runtime_repository),
+        profile_repository,
+        rdb_session_manager,
+    )
+
+    await sink.record_provider_report(
+        RuntimeProviderReport(
+            runtime_id="runtime-1",
+            provider_id="system-kubernetes",
+            provider_generation=1,
+            observed_state=SharedProviderState.RUNNING,
+            observed_desired_generation=3,
+            provider_runtime_id="pod-runtime",
+            reason="network_enforcement_mismatch",
+            diagnostic={},
+            reported_at=datetime(2026, 8, 12, tzinfo=UTC),
+            terminal_delete_acknowledged=False,
+            runtime_configuration=_runtime_configuration_evidence(3),
+            reconciliation=None,
+        ),
+        configuration_acknowledgement_allowed=False,
+    )
+
+    cast(
+        AsyncMock,
+        profile_repository.record_provider_configuration_evidence,
+    ).assert_not_awaited()
+    cast(
+        AsyncMock,
+        runtime_repository.record_provider_observed_state,
+    ).assert_awaited_once()
 
 
 async def test_provider_report_ignores_finalized_runtime(
@@ -349,7 +410,8 @@ async def test_provider_report_ignores_finalized_runtime(
             terminal_delete_acknowledged=False,
             runtime_configuration=_runtime_configuration_evidence(),
             reconciliation=None,
-        )
+        ),
+        configuration_acknowledgement_allowed=True,
     )
 
     transport_match = cast(
@@ -392,7 +454,8 @@ async def test_provider_report_rejects_bound_runtime_provider_mismatch(
                 terminal_delete_acknowledged=False,
                 runtime_configuration=_runtime_configuration_evidence(),
                 reconciliation=None,
-            )
+            ),
+            configuration_acknowledgement_allowed=True,
         )
 
 
@@ -425,7 +488,8 @@ async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(
             terminal_delete_acknowledged=True,
             runtime_configuration=_runtime_configuration_evidence(),
             reconciliation=None,
-        )
+        ),
+        configuration_acknowledgement_allowed=True,
     )
 
     async with rdb_session_manager() as session:

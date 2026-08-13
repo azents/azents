@@ -4,6 +4,7 @@ import dataclasses
 from typing import Annotated
 
 from azcommon.datetime import tznow
+from azents_runtime_control.provider import RuntimeProviderOperationalDiagnostics
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +18,9 @@ from azents.rdb.session import SessionManager
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_control.repository import (
+    RuntimeProviderControlRepository,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -30,6 +34,15 @@ class RuntimeProviderAdminUnavailable(Exception):
         Exception.__init__(self, self.message)
 
 
+@dataclasses.dataclass(frozen=True)
+class RuntimeProviderOperationalDiagnosticsProjection:
+    """Safe current Provider diagnostics for internal Admin projection."""
+
+    generation: int
+    protocol_version: str
+    diagnostics: RuntimeProviderOperationalDiagnostics
+
+
 @dataclasses.dataclass
 class RuntimeProviderAdminService:
     """Manage Provider inventory and mutable administrative policy."""
@@ -40,6 +53,10 @@ class RuntimeProviderAdminService:
     repository: Annotated[RuntimeProviderRepository, Depends(RuntimeProviderRepository)]
     profile_repository: Annotated[
         RuntimeProfileRepository, Depends(RuntimeProfileRepository)
+    ]
+    control_repository: Annotated[
+        RuntimeProviderControlRepository,
+        Depends(RuntimeProviderControlRepository),
     ]
 
     async def list_providers(self) -> list[RuntimeProvider]:
@@ -65,6 +82,35 @@ class RuntimeProviderAdminService:
                 message="Runtime Provider was not found.",
             )
         return provider
+
+    async def get_operational_diagnostics(
+        self,
+        provider_id: str,
+    ) -> RuntimeProviderOperationalDiagnosticsProjection | None:
+        """Return diagnostics only from the active authenticated generation."""
+        async with self.session_manager() as session:
+            provider = await self.repository.get_by_provider_id(
+                session,
+                provider_logical_id=provider_id,
+                for_update=False,
+            )
+            if provider is None:
+                raise RuntimeProviderAdminUnavailable(
+                    code="provider_not_found",
+                    message="Runtime Provider was not found.",
+                )
+            connection = await self.control_repository.get_current_connection(
+                session,
+                provider_id=provider.id,
+                now=tznow(),
+            )
+        if connection is None or connection.operational_diagnostics is None:
+            return None
+        return RuntimeProviderOperationalDiagnosticsProjection(
+            generation=connection.generation,
+            protocol_version=connection.reported_protocol_version,
+            diagnostics=connection.operational_diagnostics,
+        )
 
     async def update_policy(
         self,

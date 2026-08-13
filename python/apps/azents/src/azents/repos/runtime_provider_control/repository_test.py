@@ -2,7 +2,13 @@
 
 import datetime
 
+import sqlalchemy as sa
 from azcommon.datetime import tznow
+from azents_runtime_control.provider import (
+    RuntimeProviderOperationalDiagnostics,
+    RuntimeProviderOperationalWarning,
+    RuntimeProviderOperationalWarningSeverity,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -15,6 +21,7 @@ from azents.core.enums import (
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
+from azents.rdb.models.runtime_provider_control import RDBRuntimeProviderConnection
 from azents.repos.runtime_provider.data import (
     RuntimeProviderBootstrapSourceCreate,
     RuntimeProviderCreate,
@@ -139,6 +146,166 @@ class TestRuntimeProviderControlRepository:
         assert consumed.consumed_credential_id == credential.id
         assert consumed.consumed_at == now
 
+    async def test_connection_diagnostics_replace_only_on_active_generation(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A reconnect never inherits or permits updates to an older snapshot."""
+        repository = RuntimeProviderControlRepository()
+        provider_id, source_id, binding_id = await _provider_source_and_binding(
+            rdb_session
+        )
+        auth_subject = f"admin:{provider_id}"
+        now = tznow()
+        grant = await repository.create_enrollment_grant(
+            rdb_session,
+            create=RuntimeProviderEnrollmentGrantCreate(
+                provider_id=provider_id,
+                binding_id=binding_id,
+                verifier="diagnostics-grant-verifier",
+                expires_at=now + datetime.timedelta(minutes=5),
+                issued_by_user_id=None,
+                issued_by_source_id=source_id,
+            ),
+        )
+        credential = await repository.create_credential_and_consume_grant(
+            rdb_session,
+            grant_id=grant.id,
+            credential=RuntimeProviderCredentialCreate(
+                provider_id=provider_id,
+                binding_id=binding_id,
+                verifier="diagnostics-credential-verifier",
+                expires_at=None,
+                issued_grant_id=grant.id,
+            ),
+            consumed_at=now,
+        )
+        assert credential is not None
+        initial = _diagnostics(
+            checked_at=now,
+            code="cni_support_unconfirmed",
+        )
+        first = await repository.create_connection(
+            rdb_session,
+            create=RuntimeProviderConnectionCreate(
+                provider_id=provider_id,
+                binding_id=binding_id,
+                credential_id=credential.id,
+                auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+                auth_subject=auth_subject,
+                evidence_expires_at=None,
+                connection_id="provider-diagnostics-connection-1",
+                generation=1,
+                reported_provider_type="kubernetes",
+                reported_protocol_version="agent-runtime-provider-kubernetes-v3",
+                operational_diagnostics=initial,
+                connected_at=now,
+            ),
+        )
+        replacement = _diagnostics(
+            checked_at=now + datetime.timedelta(minutes=1),
+            code="unexpected_network_policy",
+        )
+
+        assert await repository.heartbeat_connection(
+            rdb_session,
+            provider_id=provider_id,
+            binding_id=binding_id,
+            credential_id=credential.id,
+            generation=first.generation,
+            heartbeat_at=now + datetime.timedelta(minutes=1),
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            auth_subject=auth_subject,
+            operational_diagnostics=replacement,
+        )
+        first_row = (
+            await rdb_session.execute(
+                sa.select(RDBRuntimeProviderConnection).where(
+                    RDBRuntimeProviderConnection.id == first.id
+                )
+            )
+        ).scalar_one()
+        await rdb_session.refresh(first_row)
+        assert first_row.diagnostics_checked_at == replacement.checked_at
+        assert first_row.operational_diagnostics is not None
+        warnings = first_row.operational_diagnostics["warnings"]
+        assert isinstance(warnings, list)
+        warning = warnings[0]
+        assert isinstance(warning, dict)
+        code = next(
+            value
+            for key, value in warning.items()
+            if isinstance(key, str) and key == "code"
+        )
+        assert isinstance(code, str)
+        assert code == "unexpected_network_policy"
+
+        second = await repository.create_connection(
+            rdb_session,
+            create=RuntimeProviderConnectionCreate(
+                provider_id=provider_id,
+                binding_id=binding_id,
+                credential_id=credential.id,
+                auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+                auth_subject=auth_subject,
+                evidence_expires_at=None,
+                connection_id="provider-diagnostics-connection-2",
+                generation=2,
+                reported_provider_type="kubernetes",
+                reported_protocol_version="agent-runtime-provider-kubernetes-v3",
+                operational_diagnostics=None,
+                connected_at=now + datetime.timedelta(minutes=2),
+            ),
+        )
+
+        assert second.operational_diagnostics is None
+        assert not await repository.heartbeat_connection(
+            rdb_session,
+            provider_id=provider_id,
+            binding_id=binding_id,
+            credential_id=credential.id,
+            generation=first.generation,
+            heartbeat_at=now + datetime.timedelta(minutes=3),
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            auth_subject=auth_subject,
+            operational_diagnostics=initial,
+        )
+        second_row = (
+            await rdb_session.execute(
+                sa.select(RDBRuntimeProviderConnection).where(
+                    RDBRuntimeProviderConnection.id == second.id
+                )
+            )
+        ).scalar_one()
+        assert second_row.operational_diagnostics is None
+        assert second_row.diagnostics_checked_at is None
+        current = await repository.get_current_connection(
+            rdb_session,
+            provider_id=provider_id,
+            now=now + datetime.timedelta(minutes=3),
+        )
+        assert current is not None
+        assert current.generation == second.generation
+        assert current.operational_diagnostics is None
+        assert await repository.disconnect_connection(
+            rdb_session,
+            provider_id=provider_id,
+            binding_id=binding_id,
+            credential_id=credential.id,
+            generation=second.generation,
+            disconnected_at=now + datetime.timedelta(minutes=4),
+            auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
+            auth_subject=auth_subject,
+        )
+        assert (
+            await repository.get_current_connection(
+                rdb_session,
+                provider_id=provider_id,
+                now=now + datetime.timedelta(minutes=4),
+            )
+            is None
+        )
+
     async def test_revoked_credential_cannot_heartbeat_connection(
         self,
         rdb_session: AsyncSession,
@@ -187,6 +354,7 @@ class TestRuntimeProviderControlRepository:
                 generation=1,
                 reported_provider_type="docker",
                 reported_protocol_version="test-v1",
+                operational_diagnostics=None,
                 connected_at=now,
             ),
         )
@@ -200,6 +368,7 @@ class TestRuntimeProviderControlRepository:
             heartbeat_at=now + datetime.timedelta(seconds=1),
             auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
             auth_subject=auth_subject,
+            operational_diagnostics=None,
         )
         assert await repository.connection_active(
             rdb_session,
@@ -226,6 +395,7 @@ class TestRuntimeProviderControlRepository:
             heartbeat_at=now + datetime.timedelta(seconds=3),
             auth_method=RuntimeProviderAuthMethod.AZENTS_ISSUED_TOKEN,
             auth_subject=auth_subject,
+            operational_diagnostics=None,
         )
         assert not await repository.connection_active(
             rdb_session,
@@ -286,6 +456,7 @@ class TestRuntimeProviderControlRepository:
                 generation=1,
                 reported_provider_type="kubernetes",
                 reported_protocol_version="test-v1",
+                operational_diagnostics=None,
                 connected_at=now,
             ),
         )
@@ -299,6 +470,7 @@ class TestRuntimeProviderControlRepository:
             heartbeat_at=now + datetime.timedelta(seconds=1),
             auth_method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
             auth_subject=subject,
+            operational_diagnostics=None,
         )
         assert await repository.connection_active(
             rdb_session,
@@ -342,6 +514,7 @@ class TestRuntimeProviderControlRepository:
             heartbeat_at=now + datetime.timedelta(seconds=5),
             auth_method=RuntimeProviderAuthMethod.KUBERNETES_SERVICE_ACCOUNT,
             auth_subject=subject,
+            operational_diagnostics=None,
         )
         assert not await repository.connection_active(
             rdb_session,
@@ -358,3 +531,24 @@ class TestRuntimeProviderControlRepository:
             provider_id=provider_id,
             now=now + datetime.timedelta(seconds=5),
         )
+
+
+def _diagnostics(
+    *,
+    checked_at: datetime.datetime,
+    code: str,
+) -> RuntimeProviderOperationalDiagnostics:
+    return RuntimeProviderOperationalDiagnostics(
+        checked_at=checked_at,
+        warnings=(
+            RuntimeProviderOperationalWarning(
+                code=code,
+                severity=RuntimeProviderOperationalWarningSeverity.WARNING,
+                metadata=(
+                    {"policy_count": "1"}
+                    if code == "unexpected_network_policy"
+                    else {"reason": "api_discovery_unavailable"}
+                ),
+            ),
+        ),
+    )

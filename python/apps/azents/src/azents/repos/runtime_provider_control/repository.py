@@ -3,6 +3,11 @@
 import datetime
 
 import sqlalchemy as sa
+from azents_runtime_control.provider import (
+    RuntimeProviderOperationalDiagnostics,
+    RuntimeProviderOperationalWarning,
+    RuntimeProviderOperationalWarningSeverity,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -405,6 +410,14 @@ class RuntimeProviderControlRepository:
             status=RuntimeProviderConnectionStatus.CONNECTED,
             reported_provider_type=create.reported_provider_type,
             reported_protocol_version=create.reported_protocol_version,
+            operational_diagnostics=_diagnostics_payload(
+                create.operational_diagnostics
+            ),
+            diagnostics_checked_at=(
+                create.operational_diagnostics.checked_at
+                if create.operational_diagnostics is not None
+                else None
+            ),
             connected_at=create.connected_at,
             last_heartbeat_at=create.connected_at,
         )
@@ -423,8 +436,15 @@ class RuntimeProviderControlRepository:
         heartbeat_at: datetime.datetime,
         auth_method: RuntimeProviderAuthMethod,
         auth_subject: str,
+        operational_diagnostics: RuntimeProviderOperationalDiagnostics | None,
     ) -> bool:
         """Refresh one current authenticated connection heartbeat."""
+        values: dict[str, object] = {"last_heartbeat_at": heartbeat_at}
+        if operational_diagnostics is not None:
+            values.update(
+                operational_diagnostics=_diagnostics_payload(operational_diagnostics),
+                diagnostics_checked_at=operational_diagnostics.checked_at,
+            )
         result = await session.execute(
             sa.update(RDBRuntimeProviderConnection)
             .where(
@@ -458,7 +478,7 @@ class RuntimeProviderControlRepository:
                     ),
                 ),
             )
-            .values(last_heartbeat_at=heartbeat_at)
+            .values(**values)
             .returning(RDBRuntimeProviderConnection.id)
         )
         return result.scalar_one_or_none() is not None
@@ -585,6 +605,45 @@ class RuntimeProviderControlRepository:
         result = await session.execute(statement)
         return result.scalar_one_or_none() is not None
 
+    async def get_current_connection(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        now: datetime.datetime,
+    ) -> RuntimeProviderConnection | None:
+        """Return the active authenticated connection generation, if available."""
+        result = await session.execute(
+            sa.select(RDBRuntimeProviderConnection).where(
+                RDBRuntimeProviderConnection.provider_id == provider_id,
+                RDBRuntimeProviderConnection.status
+                == RuntimeProviderConnectionStatus.CONNECTED,
+                _active_connection_binding(),
+                _active_connection_provider(),
+                sa.or_(
+                    RDBRuntimeProviderConnection.evidence_expires_at.is_(None),
+                    RDBRuntimeProviderConnection.evidence_expires_at > now,
+                ),
+                sa.or_(
+                    RDBRuntimeProviderConnection.credential_id.is_(None),
+                    sa.exists(
+                        sa.select(RDBRuntimeProviderCredential.id).where(
+                            RDBRuntimeProviderCredential.id
+                            == RDBRuntimeProviderConnection.credential_id,
+                            RDBRuntimeProviderCredential.state
+                            == RuntimeProviderCredentialState.ACTIVE,
+                            sa.or_(
+                                RDBRuntimeProviderCredential.expires_at.is_(None),
+                                RDBRuntimeProviderCredential.expires_at > now,
+                            ),
+                        )
+                    ),
+                ),
+            )
+        )
+        connection = result.scalar_one_or_none()
+        return self._build_connection(connection) if connection is not None else None
+
     @staticmethod
     def _build_grant(
         rdb: RDBRuntimeProviderEnrollmentGrant,
@@ -640,8 +699,72 @@ class RuntimeProviderControlRepository:
             status=rdb.status,
             reported_provider_type=rdb.reported_provider_type,
             reported_protocol_version=rdb.reported_protocol_version,
+            operational_diagnostics=_diagnostics_from_rdb(rdb),
             connected_at=rdb.connected_at,
             last_heartbeat_at=rdb.last_heartbeat_at,
             disconnected_at=rdb.disconnected_at,
             created_at=rdb.created_at,
         )
+
+
+def _diagnostics_payload(
+    diagnostics: RuntimeProviderOperationalDiagnostics | None,
+) -> dict[str, object] | None:
+    if diagnostics is None:
+        return None
+    return {
+        "schema_version": 1,
+        "warnings": [
+            {
+                "code": warning.code,
+                "severity": warning.severity.value,
+                "metadata": dict(warning.metadata),
+            }
+            for warning in diagnostics.warnings
+        ],
+    }
+
+
+def _diagnostics_from_rdb(
+    rdb: RDBRuntimeProviderConnection,
+) -> RuntimeProviderOperationalDiagnostics | None:
+    payload = rdb.operational_diagnostics
+    checked_at = rdb.diagnostics_checked_at
+    if payload is None or checked_at is None:
+        return None
+    warnings = payload.get("warnings")
+    if payload.get("schema_version") != 1 or not isinstance(warnings, list):
+        raise ValueError("persisted Provider operational diagnostics are invalid")
+    parsed: list[RuntimeProviderOperationalWarning] = []
+    for warning in warnings:
+        if not isinstance(warning, dict):
+            raise ValueError("persisted Provider operational warning is invalid")
+        code = warning.get("code")
+        severity = warning.get("severity")
+        metadata = warning.get("metadata")
+        if (
+            not isinstance(code, str)
+            or not isinstance(severity, str)
+            or not isinstance(metadata, dict)
+            or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in metadata.items()
+            )
+        ):
+            raise ValueError("persisted Provider operational warning is invalid")
+        parsed_metadata = {
+            key: value
+            for key, value in metadata.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+        parsed.append(
+            RuntimeProviderOperationalWarning(
+                code=code,
+                severity=RuntimeProviderOperationalWarningSeverity(severity),
+                metadata=parsed_metadata,
+            )
+        )
+    return RuntimeProviderOperationalDiagnostics(
+        checked_at=checked_at,
+        warnings=tuple(parsed),
+    )
