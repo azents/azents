@@ -57,7 +57,7 @@ code_paths:
   - python/apps/azents/src/cli/externalchannelgateway.py
   - testenv/azents/e2e/src/support/slack_provider_fake.py
   - testenv/azents/e2e/src/support/discord_provider_fake.py
-  - testenv/azents/e2e/src/tests/azents/public/test_external_channels.py
+  - testenv/azents/e2e/src/tests/required/public/test_external_channels.py
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
