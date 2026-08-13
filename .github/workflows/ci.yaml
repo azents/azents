@@ -350,6 +350,8 @@ jobs:
             --lane "Deterministic E2E" \
             --job-result "${{ job.status }}" \
             --junit "$report_dir/junit.xml" \
+            --timings "$report_dir/pytest-timings.jsonl" \
+            --image-build-timings "$report_dir/image-build-timings.jsonl" \
             --output "$report_dir/summary.md"
       - name: Upload deterministic E2E observability
         if: always()
@@ -416,6 +418,8 @@ jobs:
             --lane "Focused Runtime Provider E2E" \
             --job-result "${{ job.status }}" \
             --junit "$report_dir/junit.xml" \
+            --timings "$report_dir/pytest-timings.jsonl" \
+            --image-build-timings "$report_dir/image-build-timings.jsonl" \
             --output "$report_dir/summary.md"
       - name: Upload runtime-provider E2E observability
         if: always()
@@ -479,6 +483,8 @@ jobs:
             --lane "Web Surface E2E" \
             --job-result "${{ job.status }}" \
             --junit "$report_dir/junit.xml" \
+            --timings "$report_dir/pytest-timings.jsonl" \
+            --image-build-timings "$report_dir/image-build-timings.jsonl" \
             --output "$report_dir/summary.md"
       - name: Upload Web Surface E2E observability
         if: always()

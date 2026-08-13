@@ -2,10 +2,13 @@
 
 import argparse
 import html
+import json
 import xml.etree.ElementTree as element_tree
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, TypedDict, cast
 
 
 @dataclass(frozen=True)
@@ -28,6 +31,38 @@ class JUnitSummary:
     skipped: int
     duration_seconds: float
     cases: tuple[TestCaseResult, ...]
+
+
+class _TestPhaseRecord(TypedDict):
+    record_type: Literal["test_phase"]
+    node_id: str
+    phase: str
+    duration_seconds: float
+    outcome: str
+
+
+class _FixtureRecord(TypedDict):
+    record_type: Literal["fixture"]
+    fixture: str
+    scope: str
+    node_id: str
+    phase: str
+    duration_seconds: float
+    outcome: str
+
+
+TimingRecord = _TestPhaseRecord | _FixtureRecord
+
+
+class ImageBuildTiming(TypedDict):
+    """One safe Docker image build timing record."""
+
+    image: str
+    duration_seconds: float
+    completed: bool
+    cache_backend: str
+    cache_scope: str | None
+    cache_export_enabled: bool
 
 
 def parse_junit(path: Path) -> JUnitSummary:
@@ -54,6 +89,8 @@ def render_summary(
     lane: str,
     job_result: str,
     junit_path: Path,
+    timings_path: Path | None = None,
+    image_build_timings_path: Path | None = None,
 ) -> str:
     """Render one lane summary without including failure messages or logs."""
     lines = [
@@ -69,6 +106,11 @@ def render_summary(
                 "diagnostics for setup or infrastructure failures.",
                 "",
             ]
+        )
+        _append_optional_timing_summaries(
+            lines=lines,
+            timings_path=timings_path,
+            image_build_timings_path=image_build_timings_path,
         )
         return "\n".join(lines)
 
@@ -127,7 +169,146 @@ def render_summary(
             )
         lines.extend(["", "</details>", ""])
 
+    _append_optional_timing_summaries(
+        lines=lines,
+        timings_path=timings_path,
+        image_build_timings_path=image_build_timings_path,
+    )
+
     return "\n".join(lines)
+
+
+def _append_optional_timing_summaries(
+    *,
+    lines: list[str],
+    timings_path: Path | None,
+    image_build_timings_path: Path | None,
+) -> None:
+    if timings_path is not None and timings_path.is_file():
+        lines.extend(_render_timing_summary(parse_timings(timings_path)))
+    if image_build_timings_path is not None and image_build_timings_path.is_file():
+        lines.extend(
+            _render_image_build_summary(
+                parse_image_build_timings(image_build_timings_path)
+            )
+        )
+
+
+def parse_timings(path: Path) -> tuple[TimingRecord, ...]:
+    """Parse safe timing records produced by the E2E pytest hooks."""
+    records: list[TimingRecord] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        payload = json.loads(line)
+        if payload["record_type"] == "test_phase":
+            records.append(cast(_TestPhaseRecord, payload))
+        elif payload["record_type"] == "fixture":
+            records.append(cast(_FixtureRecord, payload))
+        else:
+            raise ValueError(f"unsupported timing record: {payload['record_type']}")
+    return tuple(records)
+
+
+def parse_image_build_timings(path: Path) -> tuple[ImageBuildTiming, ...]:
+    """Parse safe image build timings produced by E2E fixtures."""
+    return tuple(
+        cast(ImageBuildTiming, json.loads(line))
+        for line in path.read_text(encoding="utf-8").splitlines()
+    )
+
+
+def _render_timing_summary(records: tuple[TimingRecord, ...]) -> list[str]:
+    test_phases = [
+        record for record in records if record["record_type"] == "test_phase"
+    ]
+    fixtures = [record for record in records if record["record_type"] == "fixture"]
+    lines = [
+        "<details>",
+        "<summary>Detailed timing</summary>",
+        "",
+        "| Test phase | Total | Count |",
+        "| --- | ---: | ---: |",
+    ]
+    phase_durations: dict[str, list[float]] = defaultdict(list)
+    for record in test_phases:
+        phase_durations[record["phase"]].append(record["duration_seconds"])
+    for phase in ("setup", "call", "teardown"):
+        durations = phase_durations[phase]
+        lines.append(f"| `{phase}` | {sum(durations):.2f}s | {len(durations)} |")
+
+    fixture_durations: dict[tuple[str, str], list[float]] = defaultdict(list)
+    for record in fixtures:
+        fixture_durations[(record["scope"], record["phase"])].append(
+            record["duration_seconds"]
+        )
+    lines.extend(
+        [
+            "",
+            "| Fixture scope | Phase | Total | Count |",
+            "| --- | --- | ---: | ---: |",
+        ]
+    )
+    for scope in ("session", "package", "module", "class", "function"):
+        for phase in ("setup", "teardown"):
+            durations = fixture_durations[(scope, phase)]
+            if durations:
+                lines.append(
+                    f"| `{scope}` | `{phase}` | "
+                    f"{sum(durations):.2f}s | {len(durations)} |"
+                )
+
+    lines.extend(
+        [
+            "",
+            "| Slow fixture phase | Scope | Duration | Requested by |",
+            "| --- | --- | ---: | --- |",
+        ]
+    )
+    slow_fixtures = sorted(
+        fixtures,
+        key=lambda record: record["duration_seconds"],
+        reverse=True,
+    )[:15]
+    for record in slow_fixtures:
+        label = f"{record['fixture']} ({record['phase']})"
+        requested_by = record["node_id"] or "<session>"
+        lines.append(
+            f"| {_inline_code(label)} | `{_escape_text(record['scope'])}` | "
+            f"{record['duration_seconds']:.2f}s | "
+            f"{_inline_code(requested_by)} |"
+        )
+    lines.extend(["", "</details>", ""])
+    return lines
+
+
+def _render_image_build_summary(records: tuple[ImageBuildTiming, ...]) -> list[str]:
+    lines = [
+        "<details>",
+        "<summary>Image build timing</summary>",
+        "",
+        "| Image | Duration | Cache | Completed |",
+        "| --- | ---: | --- | --- |",
+    ]
+    for record in sorted(
+        records,
+        key=lambda item: item["duration_seconds"],
+        reverse=True,
+    ):
+        lines.append(
+            f"| {_inline_code(record['image'])} | "
+            f"{record['duration_seconds']:.2f}s | "
+            f"`{_escape_text(record['cache_backend'])}` | "
+            f"`{str(record['completed']).lower()}` |"
+        )
+    total_duration = sum(record["duration_seconds"] for record in records)
+    lines.extend(
+        [
+            f"| **Total** | **{total_duration:.2f}s** |  |  |",
+            "",
+            "</details>",
+            "",
+        ]
+    )
+    return lines
 
 
 def _parse_test_case(element: element_tree.Element) -> TestCaseResult:
@@ -173,6 +354,8 @@ def _build_parser() -> argparse.ArgumentParser:
     summarize.add_argument("--lane", required=True)
     summarize.add_argument("--job-result", required=True)
     summarize.add_argument("--junit", type=Path, required=True)
+    summarize.add_argument("--timings", type=Path)
+    summarize.add_argument("--image-build-timings", type=Path)
     summarize.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -190,6 +373,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             lane=args.lane,
             job_result=args.job_result,
             junit_path=args.junit,
+            timings_path=args.timings,
+            image_build_timings_path=args.image_build_timings,
         ),
         encoding="utf-8",
     )
