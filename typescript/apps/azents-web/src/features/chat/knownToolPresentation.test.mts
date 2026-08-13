@@ -792,6 +792,98 @@ void test("renders an azents VFS import as a managed temporary file", () => {
   });
 });
 
+void test("specializes an accepted managed Git worktree creation request", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "create_git_worktree",
+      arguments: JSON.stringify({
+        source_project_path: "/workspace/agent/projects/azents",
+        starting_ref: "main",
+        branch_name: "feat/worktree-tools",
+      }),
+      result: JSON.stringify({
+        accepted: true,
+        message:
+          "The worktree request was accepted. The authoritative result will arrive through a fresh continuation Run.",
+        request_id: "request-create-1",
+      }),
+    }),
+  );
+
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "createGitWorktree",
+      subject: "feat/worktree-tools",
+      qualifier: null,
+      detail: {
+        type: "semantic",
+        fields: [
+          { label: "source", value: "/workspace/agent/projects/azents" },
+          { label: "startingRef", value: "main" },
+          { label: "branch", value: "feat/worktree-tools" },
+          { label: "requestId", value: "request-create-1" },
+        ],
+        sections: [
+          {
+            label: "result",
+            content:
+              "The worktree request was accepted. The authoritative result will arrive through a fresh continuation Run.",
+          },
+        ],
+        items: [],
+      },
+    },
+  });
+});
+
+void test("specializes an accepted managed Git worktree removal request", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "remove_git_worktree",
+      arguments: JSON.stringify({
+        worktree_project_path:
+          "/workspace/agent/sessions/session-1/worktrees/azents",
+        force: false,
+      }),
+      result: JSON.stringify({
+        accepted: true,
+        message:
+          "The worktree removal request was accepted. The authoritative result will arrive through a fresh continuation Run.",
+        request_id: "request-remove-1",
+      }),
+    }),
+  );
+
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "removeGitWorktree",
+      subject: "azents",
+      qualifier: null,
+      detail: {
+        type: "semantic",
+        fields: [
+          {
+            label: "worktreePath",
+            value: "/workspace/agent/sessions/session-1/worktrees/azents",
+          },
+          { label: "force", value: "false" },
+          { label: "requestId", value: "request-remove-1" },
+        ],
+        sections: [
+          {
+            label: "result",
+            content:
+              "The worktree removal request was accepted. The authoritative result will arrive through a fresh continuation Run.",
+          },
+        ],
+        items: [],
+      },
+    },
+  });
+});
+
 void test("keeps sensitive builtin payloads out of collapsed summaries", () => {
   const cases = [
     {

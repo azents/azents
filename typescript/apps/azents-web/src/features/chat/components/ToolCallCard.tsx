@@ -19,6 +19,7 @@ import {
   IconDownload,
   IconFileExport,
   IconFileText,
+  IconGitBranch,
   IconPencil,
   IconPhoto,
   IconRobot,
@@ -150,6 +151,9 @@ function presentationIcon(presentation: KnownToolPresentation): ReactElement {
     case "interruptAgent":
     case "listAgents":
       return <IconRobot size={activityRowIconSize} />;
+    case "createGitWorktree":
+    case "removeGitWorktree":
+      return <IconGitBranch size={activityRowIconSize} />;
   }
 }
 
@@ -225,6 +229,10 @@ function actionLabel(
       return t("action.interruptAgent");
     case "listAgents":
       return t("action.listAgents");
+    case "createGitWorktree":
+      return t("action.createGitWorktree");
+    case "removeGitWorktree":
+      return t("action.removeGitWorktree");
     case "toolSearch":
       return t("action.toolSearch");
   }
@@ -269,6 +277,8 @@ function presentationQualifier(
     case "waitAgent":
     case "interruptAgent":
     case "listAgents":
+    case "createGitWorktree":
+    case "removeGitWorktree":
     case "toolSearch":
       return presentation.qualifier;
   }
@@ -331,6 +341,16 @@ function detailLabel(
       return t("field.requestedLimit");
     case "activationLimit":
       return t("field.activationLimit");
+    case "startingRef":
+      return t("field.startingRef");
+    case "branch":
+      return t("field.branch");
+    case "force":
+      return t("field.force");
+    case "requestId":
+      return t("field.requestId");
+    case "worktreePath":
+      return t("field.worktreePath");
   }
 }
 

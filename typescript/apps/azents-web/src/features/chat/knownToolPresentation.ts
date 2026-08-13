@@ -41,6 +41,8 @@ export type KnownToolAction =
   | "waitAgent"
   | "interruptAgent"
   | "listAgents"
+  | "createGitWorktree"
+  | "removeGitWorktree"
   | "toolSearch";
 
 export type KnownToolDetailLabel =
@@ -69,7 +71,12 @@ export type KnownToolDetailLabel =
   | "timeout"
   | "previousStatus"
   | "requestedLimit"
-  | "activationLimit";
+  | "activationLimit"
+  | "startingRef"
+  | "branch"
+  | "force"
+  | "requestId"
+  | "worktreePath";
 
 export interface OutputDetail {
   language: string | null;
@@ -280,9 +287,23 @@ const runtimeWaitResultSchema = z.object({
   reason: z.string().optional(),
 });
 const interruptAgentInputSchema = z.object({ agent_name: z.string().min(1) });
+const createGitWorktreeInputSchema = z.object({
+  source_project_path: z.string().min(1),
+  starting_ref: z.string().min(1).nullable().optional(),
+  branch_name: z.string().min(1).nullable().optional(),
+});
+const removeGitWorktreeInputSchema = z.object({
+  worktree_project_path: z.string().min(1),
+  force: z.boolean().optional(),
+});
 const toolSearchInputSchema = z.object({
   query: z.string().min(1),
   limit: z.number().int().min(1).max(10).optional(),
+});
+const managedGitWorktreeRequestResultSchema = z.object({
+  accepted: z.literal(true),
+  message: z.string().min(1),
+  request_id: z.string().min(1),
 });
 const patchChangeSchema = z.object({
   action: z.union([z.literal("add"), z.literal("update"), z.literal("delete")]),
@@ -1184,6 +1205,101 @@ export function knownToolPresentation(
                   content: agent.last_task_message,
                 })),
               }),
+        );
+      }
+      case "create_git_worktree": {
+        const input = createGitWorktreeInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, managedGitWorktreeRequestResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "createGitWorktree",
+          input.data.branch_name ?? displayPath(input.data.source_project_path),
+          null,
+          semanticDetail({
+            fields: [
+              {
+                label: "source",
+                value: detailPath(input.data.source_project_path),
+              },
+              ...(input.data.starting_ref
+                ? [
+                    {
+                      label: "startingRef" as const,
+                      value: input.data.starting_ref,
+                    },
+                  ]
+                : []),
+              ...(input.data.branch_name
+                ? [
+                    {
+                      label: "branch" as const,
+                      value: input.data.branch_name,
+                    },
+                  ]
+                : []),
+              ...(result === null
+                ? []
+                : [
+                    {
+                      label: "requestId" as const,
+                      value: result.request_id,
+                    },
+                  ]),
+            ],
+            sections:
+              result === null
+                ? []
+                : [{ label: "result", content: result.message }],
+          }),
+        );
+      }
+      case "remove_git_worktree": {
+        const input = removeGitWorktreeInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, managedGitWorktreeRequestResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "removeGitWorktree",
+          displayPath(input.data.worktree_project_path),
+          null,
+          semanticDetail({
+            fields: [
+              {
+                label: "worktreePath",
+                value: detailPath(input.data.worktree_project_path),
+              },
+              { label: "force", value: String(input.data.force ?? false) },
+              ...(result === null
+                ? []
+                : [
+                    {
+                      label: "requestId" as const,
+                      value: result.request_id,
+                    },
+                  ]),
+            ],
+            sections:
+              result === null
+                ? []
+                : [{ label: "result", content: result.message }],
+          }),
         );
       }
       case "tool_search": {
