@@ -97,6 +97,23 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     )
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT", "8030")
     monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_MANDATORY_SERVICES",
+        (
+            '[{"role":"runtime_control","namespace":"azents",'
+            '"name":"runtime-control","endpoint_hostnames":["runtime-control"],'
+            '"ports":[8020]},{"role":"runtime_transfer","namespace":"azents",'
+            '"name":"runtime-transfer","endpoint_hostnames":["runtime-transfer"],'
+            '"ports":[8030]}]'
+        ),
+    )
+    monkeypatch.setenv(
+        "AZ_RUNTIME_PROVIDER_PROXY_IMAGE",
+        f"proxy@sha256:{'f' * 64}",
+    )
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PROXY_ADDON_DIGEST", "a" * 64)
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PROXY_PORT", "8080")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PROXY_READINESS_PORT", "8081")
+    monkeypatch.setenv(
         "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_ALLOWED_CIDRS",
         "[]",
     )
@@ -132,6 +149,14 @@ def test_provider_settings_loads_provider_global_runtime_controls(
         "app.kubernetes.io/component": "runtime-control"
     }
     assert settings.runtime_control_port == 8030
+    assert [reference.role for reference in settings.mandatory_services] == [
+        "runtime_control",
+        "runtime_transfer",
+    ]
+    assert settings.proxy_image == f"proxy@sha256:{'f' * 64}"
+    assert settings.proxy_addon_digest == "a" * 64
+    assert settings.proxy_port == 8080
+    assert settings.proxy_readiness_port == 8081
     assert settings.network_hard_cap_allowed_cidrs == ()
     assert settings.network_hard_cap_denied_cidrs == ()
     assert settings.network_hard_cap_extra_egress == ()
@@ -334,10 +359,10 @@ def test_provider_settings_accepts_pod_image_pull_secrets(
 
 def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
     """Registration advertises the exact current Pod Profile contract."""
-    assert provider_main._PROTOCOL_VERSION == "agent-runtime-provider-kubernetes-v2"
+    assert provider_main._PROTOCOL_VERSION == "agent-runtime-provider-kubernetes-v3"
     contract = provider_main._capability_contract()
-    assert contract["implementation_version"] == "0.3.0"
-    assert contract["optional_capabilities"] == ["network_policy_reconciliation"]
+    assert contract["implementation_version"] == "0.4.0"
+    assert contract["optional_capabilities"] == []
     profile_contracts = contract["profile_contracts"]
 
     assert isinstance(profile_contracts, list)
@@ -345,13 +370,12 @@ def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
         {
             "profile_kind": "kubernetes_pod",
             "contract_family": "kubernetes.pod-profile",
-            "schema_versions": [1, 2],
+            "schema_versions": [1, 2, 3],
             "capabilities": [
                 "kubernetes.pod-profile",
                 "runtime.resources",
                 "workspace.persistent-volume",
                 "runtime.network-policy",
-                "runtime.network-policy-reconciliation",
                 "kubernetes.service-account",
                 "kubernetes.scheduling",
                 "docker.dind",
@@ -363,3 +387,8 @@ def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
             },
         }
     ]
+    capabilities = profile_contracts[0]["capabilities"]
+    assert isinstance(capabilities, list)
+    assert "runtime.inspected-http-proxy" not in capabilities
+    assert "runtime.external-network-denial" not in capabilities
+    assert "runtime.network-enforcement" not in capabilities

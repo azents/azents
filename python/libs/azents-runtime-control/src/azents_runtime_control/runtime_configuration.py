@@ -1,6 +1,7 @@
 """Runtime configuration command and evidence contracts."""
 
 import dataclasses
+import enum
 import hashlib
 import ipaddress
 import json
@@ -74,6 +75,63 @@ class RuntimeNetworkPolicy:
     denied_cidrs: tuple[str, ...]
 
 
+class RuntimeNetworkMode(enum.StrEnum):
+    """Effective Runtime network enforcement mode."""
+
+    DIRECT = "direct"
+    PROXY_REQUIRED = "proxy_required"
+    NO_NETWORK = "no_network"
+
+
+class RuntimeProxyDomainMode(enum.StrEnum):
+    """Effective inspected-proxy domain authority."""
+
+    UNRESTRICTED = "unrestricted"
+    ALLOWLIST = "allowlist"
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeDirectNetworkAccess:
+    """Direct customer egress within one CIDR boundary."""
+
+    mode: RuntimeNetworkMode
+    allowed_cidrs: tuple[str, ...]
+    denied_cidrs: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeProxyDomainPolicy:
+    """Canonical inspected-proxy domain policy."""
+
+    mode: RuntimeProxyDomainMode
+    allowed_domains: tuple[str, ...]
+    denied_domains: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeProxyRequiredNetworkAccess:
+    """Inspected HTTP proxy authority within CIDR and domain boundaries."""
+
+    mode: RuntimeNetworkMode
+    allowed_cidrs: tuple[str, ...]
+    denied_cidrs: tuple[str, ...]
+    domain_policy: RuntimeProxyDomainPolicy
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeNoNetworkAccess:
+    """No customer or external network authority."""
+
+    mode: RuntimeNetworkMode
+
+
+RuntimeNetworkAccess: TypeAlias = (
+    RuntimeDirectNetworkAccess
+    | RuntimeProxyRequiredNetworkAccess
+    | RuntimeNoNetworkAccess
+)
+
+
 @dataclasses.dataclass(frozen=True)
 class KubernetesContainerResources:
     """Explicit Kubernetes resources for one known Runtime component."""
@@ -145,6 +203,18 @@ class KubernetesPodProfileV2:
 
 
 @dataclasses.dataclass(frozen=True)
+class KubernetesPodProfileV3:
+    """Resolved Kubernetes Pod Profile contract version 3."""
+
+    runner_resources: KubernetesContainerResources
+    workspace_volume: KubernetesWorkspaceVolume
+    network_access: RuntimeNetworkAccess
+    service_account_name: str | None
+    scheduling: KubernetesScheduling
+    dind: KubernetesDinD | None
+
+
+@dataclasses.dataclass(frozen=True)
 class DockerContainerResources:
     """Docker-native enforceable Runner resource choices."""
 
@@ -173,6 +243,7 @@ class DockerContainerProfileV2:
 RuntimeResolvedProfile: TypeAlias = (
     KubernetesPodProfileV1
     | KubernetesPodProfileV2
+    | KubernetesPodProfileV3
     | DockerContainerProfileV1
     | DockerContainerProfileV2
 )
@@ -288,7 +359,11 @@ def parse_runtime_configuration_envelope(
         _required_mapping(document, "effective_profile")
     )
     match effective_profile:
-        case KubernetesPodProfileV1() | KubernetesPodProfileV2():
+        case (
+            KubernetesPodProfileV1()
+            | KubernetesPodProfileV2()
+            | KubernetesPodProfileV3()
+        ):
             if provider.kind != "kubernetes":
                 raise ValueError(
                     "Kubernetes Pod Profile requires a Kubernetes Provider."
@@ -412,12 +487,14 @@ def _effective_profile(value: Mapping[str, JsonValue]) -> RuntimeResolvedProfile
 
 def _kubernetes_profile(
     value: Mapping[str, JsonValue],
-) -> KubernetesPodProfileV1 | KubernetesPodProfileV2:
+) -> KubernetesPodProfileV1 | KubernetesPodProfileV2 | KubernetesPodProfileV3:
     schema_version = _required_int(value, "schema_version")
     if schema_version == 1:
         return _kubernetes_profile_v1(value)
     if schema_version == 2:
         return _kubernetes_profile_v2(value)
+    if schema_version == 3:
+        return _kubernetes_profile_v3(value)
     raise ValueError("Kubernetes Pod Profile schema version is unsupported.")
 
 
@@ -496,6 +573,47 @@ def _kubernetes_profile_v2(
             _required_mapping(value, "workspace_volume")
         ),
         network_policy=_network_policy(_required_mapping(value, "network_policy")),
+        service_account_name=_optional_string(value, "service_account_name"),
+        scheduling=_scheduling(_required_mapping(value, "scheduling")),
+        dind=None
+        if dind_value is None
+        else _dind(_mapping_value(dind_value, "Kubernetes DinD")),
+    )
+
+
+def _kubernetes_profile_v3(
+    value: Mapping[str, JsonValue],
+) -> KubernetesPodProfileV3:
+    _require_exact_fields(
+        value,
+        {
+            "profile_kind",
+            "contract_family",
+            "schema_version",
+            "runner_resources",
+            "workspace_volume",
+            "network_access",
+            "service_account_name",
+            "scheduling",
+            "dind",
+        },
+        "Kubernetes Pod Profile",
+    )
+    if _required_string(value, "profile_kind") != "kubernetes_pod":
+        raise ValueError("Kubernetes Pod Profile kind is invalid.")
+    if _required_string(value, "contract_family") != "kubernetes.pod-profile":
+        raise ValueError("Kubernetes Pod Profile contract family is unsupported.")
+    if _required_int(value, "schema_version") != 3:
+        raise ValueError("Kubernetes Pod Profile schema version is unsupported.")
+    dind_value = value.get("dind")
+    return KubernetesPodProfileV3(
+        runner_resources=_kubernetes_resources(
+            _required_mapping(value, "runner_resources")
+        ),
+        workspace_volume=_workspace_volume(
+            _required_mapping(value, "workspace_volume")
+        ),
+        network_access=_network_access(_required_mapping(value, "network_access")),
         service_account_name=_optional_string(value, "service_account_name"),
         scheduling=_scheduling(_required_mapping(value, "scheduling")),
         dind=None
@@ -688,6 +806,70 @@ def _network_policy(value: Mapping[str, JsonValue]) -> RuntimeNetworkPolicy:
     )
 
 
+def _network_access(value: Mapping[str, JsonValue]) -> RuntimeNetworkAccess:
+    mode_value = _required_string(value, "mode")
+    try:
+        mode = RuntimeNetworkMode(mode_value)
+    except ValueError as error:
+        raise ValueError("Runtime network access mode is unsupported.") from error
+    match mode:
+        case RuntimeNetworkMode.DIRECT:
+            _require_exact_fields(
+                value,
+                {"mode", "allowed_cidrs", "denied_cidrs"},
+                "Direct network access",
+            )
+            return RuntimeDirectNetworkAccess(
+                mode=mode,
+                allowed_cidrs=_cidrs(value, "allowed_cidrs"),
+                denied_cidrs=_cidrs(value, "denied_cidrs"),
+            )
+        case RuntimeNetworkMode.PROXY_REQUIRED:
+            _require_exact_fields(
+                value,
+                {"mode", "allowed_cidrs", "denied_cidrs", "domain_policy"},
+                "Proxy-required network access",
+            )
+            return RuntimeProxyRequiredNetworkAccess(
+                mode=mode,
+                allowed_cidrs=_cidrs(value, "allowed_cidrs"),
+                denied_cidrs=_cidrs(value, "denied_cidrs"),
+                domain_policy=_proxy_domain_policy(
+                    _required_mapping(value, "domain_policy")
+                ),
+            )
+        case RuntimeNetworkMode.NO_NETWORK:
+            _require_exact_fields(value, {"mode"}, "No-network access")
+            return RuntimeNoNetworkAccess(mode=mode)
+        case _:
+            assert_never(mode)
+
+
+def _proxy_domain_policy(
+    value: Mapping[str, JsonValue],
+) -> RuntimeProxyDomainPolicy:
+    _require_exact_fields(
+        value,
+        {"mode", "allowed_domains", "denied_domains"},
+        "Proxy domain policy",
+    )
+    mode_value = _required_string(value, "mode")
+    try:
+        mode = RuntimeProxyDomainMode(mode_value)
+    except ValueError as error:
+        raise ValueError("Runtime proxy domain mode is unsupported.") from error
+    allowed_domains = _domains(value, "allowed_domains")
+    if mode is RuntimeProxyDomainMode.UNRESTRICTED and allowed_domains:
+        raise ValueError(
+            "Unrestricted proxy domain policy cannot declare allowed domains."
+        )
+    return RuntimeProxyDomainPolicy(
+        mode=mode,
+        allowed_domains=allowed_domains,
+        denied_domains=_domains(value, "denied_domains"),
+    )
+
+
 def _scheduling(value: Mapping[str, JsonValue]) -> KubernetesScheduling:
     _require_exact_fields(
         value, {"node_selector", "tolerations"}, "Kubernetes scheduling"
@@ -770,6 +952,46 @@ def _cidrs(value: Mapping[str, JsonValue], field: str) -> tuple[str, ...]:
     if cidrs != canonical or len(set(canonical)) != len(canonical):
         raise ValueError("Runtime configuration network CIDRs are not canonical.")
     return canonical
+
+
+def _domains(value: Mapping[str, JsonValue], field: str) -> tuple[str, ...]:
+    raw = value.get(field)
+    if not isinstance(raw, list) or any(not isinstance(item, str) for item in raw):
+        raise ValueError(
+            "Runtime configuration network domains must be an array of strings."
+        )
+    domains = tuple(item for item in raw if isinstance(item, str))
+    if (
+        any(
+            not item
+            or item != item.lower()
+            or item.endswith(".")
+            or not _canonical_domain_pattern(item)
+            for item in domains
+        )
+        or domains != tuple(sorted(domains))
+        or len(set(domains)) != len(domains)
+    ):
+        raise ValueError("Runtime configuration network domains are not canonical.")
+    return domains
+
+
+def _canonical_domain_pattern(value: str) -> bool:
+    candidate = value[2:] if value.startswith("*.") else value
+    if not candidate or len(candidate) > 253:
+        return False
+    labels = candidate.split(".")
+    return all(
+        label
+        and len(label) <= 63
+        and label[0].isalnum()
+        and label[-1].isalnum()
+        and all(
+            character.isascii() and (character.isalnum() or character == "-")
+            for character in label
+        )
+        for label in labels
+    )
 
 
 def _required_mapping(

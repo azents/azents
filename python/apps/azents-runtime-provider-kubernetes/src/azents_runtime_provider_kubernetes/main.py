@@ -38,14 +38,17 @@ from azents_runtime_provider_kubernetes.leader import (
     KubernetesLeaderElector,
     LeaderElectionConfig,
 )
+from azents_runtime_provider_kubernetes.network_enforcement import (
+    MandatoryServiceReference,
+)
 from azents_runtime_provider_kubernetes.provider import (
     RUNNER_LIMIT_ENV_NAMES,
     KubernetesRuntimeProvider,
     KubernetesRuntimeProviderConfig,
 )
 
-_PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v2"
-_CONFIG_SCHEMA_VERSION = "agent-runtime-provider-kubernetes-v1"
+_PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v3"
+_CONFIG_SCHEMA_VERSION = "agent-runtime-provider-kubernetes-v3"
 _DEFAULT_COMMAND_BLOCK_MS = 5_000
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
 _CREDENTIAL_POLL_INTERVAL_SECONDS = 1.0
@@ -427,6 +430,17 @@ class ProviderSettings:
             raise RuntimeError(
                 "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_PORT must be between 1 and 65535"
             )
+        self.mandatory_services = _json_mandatory_services_env(
+            "AZ_RUNTIME_PROVIDER_MANDATORY_SERVICES"
+        )
+        self.proxy_image = _required_env("AZ_RUNTIME_PROVIDER_PROXY_IMAGE")
+        self.proxy_addon_digest = _required_env(
+            "AZ_RUNTIME_PROVIDER_PROXY_ADDON_DIGEST"
+        )
+        self.proxy_port = int(_required_env("AZ_RUNTIME_PROVIDER_PROXY_PORT"))
+        self.proxy_readiness_port = int(
+            _required_env("AZ_RUNTIME_PROVIDER_PROXY_READINESS_PORT")
+        )
         self.network_hard_cap_allowed_cidrs = _json_string_tuple_env(
             "AZ_RUNTIME_PROVIDER_NETWORK_HARD_CAP_ALLOWED_CIDRS"
         )
@@ -488,6 +502,11 @@ async def prepare_runtime_provider(
                 runtime_control_namespace=settings.runtime_control_namespace,
                 runtime_control_labels=settings.runtime_control_labels,
                 runtime_control_port=settings.runtime_control_port,
+                mandatory_services=settings.mandatory_services,
+                proxy_image=settings.proxy_image,
+                proxy_addon_digest=settings.proxy_addon_digest,
+                proxy_port=settings.proxy_port,
+                proxy_readiness_port=settings.proxy_readiness_port,
                 network_hard_cap_allowed_cidrs=(
                     settings.network_hard_cap_allowed_cidrs
                 ),
@@ -513,7 +532,7 @@ def _provider_registration(settings: ProviderSettings) -> ProviderRegistration:
             "lifecycle",
             "observe",
             "pvc_persistence",
-            "network_policy_reconciliation",
+            "network_enforcement_reconciliation",
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata={},
@@ -528,7 +547,6 @@ def _capability_contract() -> dict[str, JsonValue]:
         "runtime.resources",
         "workspace.persistent-volume",
         "runtime.network-policy",
-        "runtime.network-policy-reconciliation",
         "kubernetes.service-account",
         "kubernetes.scheduling",
         "docker.dind",
@@ -537,7 +555,7 @@ def _capability_contract() -> dict[str, JsonValue]:
     return {
         "schema_version": 1,
         "implementation_key": "kubernetes",
-        "implementation_version": "0.3.0",
+        "implementation_version": "0.4.0",
         "protocol_version": _PROTOCOL_VERSION,
         "core_lifecycle_operations": [
             "start",
@@ -547,7 +565,7 @@ def _capability_contract() -> dict[str, JsonValue]:
             "observe",
             "terminal_delete",
         ],
-        "optional_capabilities": ["network_policy_reconciliation"],
+        "optional_capabilities": [],
         "persistence": {
             "kind": "persistent",
             "reset_destroys_workspace": True,
@@ -558,7 +576,7 @@ def _capability_contract() -> dict[str, JsonValue]:
             {
                 "profile_kind": "kubernetes_pod",
                 "contract_family": "kubernetes.pod-profile",
-                "schema_versions": [1, 2],
+                "schema_versions": [1, 2, 3],
                 "capabilities": capabilities,
                 "constraints": {
                     "maximums": {},
@@ -646,6 +664,54 @@ def _json_string_tuple_env(name: str) -> tuple[str, ...]:
     ):
         raise RuntimeError(f"{name} must be a JSON array of non-empty strings")
     return tuple(parsed)
+
+
+def _json_mandatory_services_env(
+    name: str,
+) -> tuple[MandatoryServiceReference, ...]:
+    parsed = json.loads(_required_env(name))
+    if not isinstance(parsed, list):
+        raise RuntimeError(f"{name} must be a JSON array")
+    references: list[MandatoryServiceReference] = []
+    for item in parsed:
+        if not isinstance(item, dict) or set(item) != {
+            "role",
+            "namespace",
+            "name",
+            "endpoint_hostnames",
+            "ports",
+        }:
+            raise RuntimeError(f"{name} entries have an invalid object shape")
+        role = item["role"]
+        namespace = item["namespace"]
+        service_name = item["name"]
+        hostnames = item["endpoint_hostnames"]
+        ports = item["ports"]
+        if (
+            not isinstance(role, str)
+            or not isinstance(namespace, str)
+            or not isinstance(service_name, str)
+            or not isinstance(hostnames, list)
+            or not all(isinstance(hostname, str) for hostname in hostnames)
+            or not isinstance(ports, list)
+            or not all(
+                not isinstance(port, bool) and isinstance(port, int) for port in ports
+            )
+        ):
+            raise RuntimeError(f"{name} entries contain invalid field values")
+        try:
+            references.append(
+                MandatoryServiceReference(
+                    role=role,
+                    namespace=namespace,
+                    name=service_name,
+                    endpoint_hostnames=tuple(hostnames),
+                    ports=tuple(ports),
+                )
+            )
+        except ValueError as error:
+            raise RuntimeError(f"{name} entry is invalid") from error
+    return tuple(references)
 
 
 def _json_network_policy_egress_env(

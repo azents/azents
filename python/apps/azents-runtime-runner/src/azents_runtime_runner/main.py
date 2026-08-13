@@ -34,6 +34,7 @@ from azents_runtime_control.transfer import (
 )
 
 from azents_runtime_runner.execution import DirectExecutionBackend
+from azents_runtime_runner.network import prepare_runner_network_environment
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.transfer import RunnerTransferManager
 from azents_runtime_runner.trust import prepare_runner_trust_environment
@@ -143,8 +144,12 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
         os.environ.get("AZ_RUNTIME_RUNNER_CONNECTION_ID") or uuid.uuid4().hex
     )
     limit_config = runner_limit_config_from_env()
+    inherited_environment = {
+        **prepare_runner_network_environment(),
+        **prepare_runner_trust_environment(),
+    }
     execution_backend = DirectExecutionBackend(
-        inherited_environment=prepare_runner_trust_environment()
+        inherited_environment=inherited_environment
     )
     workspace = Workspace(workspace_path)
     registration = RunnerRegistration(

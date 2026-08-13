@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from azents_runtime_runner.execution import DirectExecutionBackend
+from azents_runtime_runner.network import prepare_runner_network_environment
 from azents_runtime_runner.trust import prepare_trust_bundle
 
 _TRUST_ENVIRONMENT_NAMES = (
@@ -129,3 +130,54 @@ def test_direct_execution_backend_without_trust_inputs_adds_no_trust_variables(
     )
 
     assert all(name not in environment for name in _TRUST_ENVIRONMENT_NAMES)
+
+
+def test_runner_network_environment_projects_proxy_only_to_child_processes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proxy_url = "http://runtime-proxy.azents-runtime.svc:8080"
+    monkeypatch.setenv("AZ_RUNTIME_RUNNER_HTTP_PROXY", proxy_url)
+
+    inherited = prepare_runner_network_environment()
+    environment = DirectExecutionBackend(
+        inherited_environment=inherited
+    ).agent_environment(
+        workspace_path="/workspace",
+        operation_environment={"HTTP_PROXY": "http://bypass.invalid:3128"},
+    )
+
+    assert inherited == {
+        "HTTP_PROXY": proxy_url,
+        "HTTPS_PROXY": proxy_url,
+        "http_proxy": proxy_url,
+        "https_proxy": proxy_url,
+    }
+    assert all(environment[name] == proxy_url for name in inherited)
+
+
+def test_runner_network_environment_is_absent_without_provider_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AZ_RUNTIME_RUNNER_HTTP_PROXY", raising=False)
+
+    assert prepare_runner_network_environment() == {}
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "https://runtime-proxy:8080",
+        "http://user:password@runtime-proxy:8080",
+        "http://runtime-proxy",
+        "http://runtime-proxy:8080/path",
+        "http://runtime-proxy:8080/",
+    ),
+)
+def test_runner_network_environment_rejects_noncanonical_input(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+) -> None:
+    monkeypatch.setenv("AZ_RUNTIME_RUNNER_HTTP_PROXY", value)
+
+    with pytest.raises(RuntimeError):
+        prepare_runner_network_environment()

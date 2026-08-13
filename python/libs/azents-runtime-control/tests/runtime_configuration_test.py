@@ -10,8 +10,12 @@ from azents_runtime_control.runtime_configuration import (
     JsonValue,
     KubernetesPodProfileV1,
     KubernetesPodProfileV2,
+    KubernetesPodProfileV3,
     RuntimeConfigurationEnvelope,
     RuntimeConfigurationEvidence,
+    RuntimeNetworkMode,
+    RuntimeProxyDomainMode,
+    RuntimeProxyRequiredNetworkAccess,
     canonical_runtime_configuration_json,
     parse_configuration_sequence,
     parse_runtime_configuration_envelope,
@@ -77,6 +81,82 @@ def test_kubernetes_pod_profile_v2_parses_without_removed_field() -> None:
 
     profile = parsed.effective_profile
     assert isinstance(profile, KubernetesPodProfileV2)
+
+
+def test_kubernetes_pod_profile_v3_parses_proxy_required_network_access() -> None:
+    document = _document("kubernetes")
+    document["effective_profile"] = _kubernetes_profile_v3()
+
+    parsed = parse_runtime_configuration_envelope(
+        _envelope(document),
+        desired_generation=3,
+        expected_provider_kind="kubernetes",
+    )
+
+    profile = parsed.effective_profile
+    assert isinstance(profile, KubernetesPodProfileV3)
+    assert isinstance(profile.network_access, RuntimeProxyRequiredNetworkAccess)
+    assert profile.network_access.mode is RuntimeNetworkMode.PROXY_REQUIRED
+    assert profile.network_access.domain_policy.mode is RuntimeProxyDomainMode.ALLOWLIST
+    assert profile.network_access.domain_policy.allowed_domains == (
+        "*.example.com",
+        "api.example.com",
+    )
+
+
+@pytest.mark.parametrize(
+    ("network_access", "message"),
+    (
+        (
+            {
+                "mode": "no_network",
+                "allowed_cidrs": [],
+            },
+            "document shape",
+        ),
+        (
+            {
+                "mode": "proxy_required",
+                "allowed_cidrs": [],
+                "denied_cidrs": [],
+                "domain_policy": {
+                    "mode": "unrestricted",
+                    "allowed_domains": ["example.com"],
+                    "denied_domains": [],
+                },
+            },
+            "cannot declare allowed domains",
+        ),
+        (
+            {
+                "mode": "proxy_required",
+                "allowed_cidrs": [],
+                "denied_cidrs": [],
+                "domain_policy": {
+                    "mode": "allowlist",
+                    "allowed_domains": ["Example.com"],
+                    "denied_domains": [],
+                },
+            },
+            "not canonical",
+        ),
+    ),
+)
+def test_kubernetes_pod_profile_v3_rejects_invalid_mode_specific_shape(
+    network_access: dict[str, JsonValue],
+    message: str,
+) -> None:
+    document = _document("kubernetes")
+    profile = _kubernetes_profile_v3()
+    profile["network_access"] = network_access
+    document["effective_profile"] = profile
+
+    with pytest.raises(ValueError, match=message):
+        parse_runtime_configuration_envelope(
+            _envelope(document),
+            desired_generation=3,
+            expected_provider_kind="kubernetes",
+        )
 
 
 def test_profile_v2_rejects_enabled_removed_containment() -> None:
@@ -379,4 +459,24 @@ def _kubernetes_profile_v2(*, include_null: bool) -> dict[str, JsonValue]:
     profile["dind"] = None
     if include_null:
         profile["process_containment"] = None
+    return profile
+
+
+def _kubernetes_profile_v3() -> dict[str, JsonValue]:
+    profile = {
+        **_kubernetes_profile(),
+        "schema_version": 3,
+        "network_access": {
+            "mode": "proxy_required",
+            "allowed_cidrs": ["10.0.0.0/8"],
+            "denied_cidrs": ["10.10.0.0/16"],
+            "domain_policy": {
+                "mode": "allowlist",
+                "allowed_domains": ["*.example.com", "api.example.com"],
+                "denied_domains": ["blocked.example.com"],
+            },
+        },
+    }
+    del profile["network_policy"]
+    profile["dind"] = None
     return profile

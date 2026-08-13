@@ -375,12 +375,20 @@ class NetworkPolicyEgressRule:
 
 
 @dataclasses.dataclass(frozen=True)
+class NetworkPolicyIngressRule:
+    """One additive NetworkPolicy ingress rule."""
+
+    peers: Sequence[NetworkPolicyPeer]
+    ports: Sequence[NetworkPolicyPort]
+
+
+@dataclasses.dataclass(frozen=True)
 class NetworkPolicySpec:
     """Runtime-specific NetworkPolicy spec."""
 
     pod_selector: LabelSelector
     policy_types: Sequence[str]
-    ingress: Sequence[object]
+    ingress: Sequence[NetworkPolicyIngressRule]
     egress: Sequence[NetworkPolicyEgressRule]
 
 
@@ -560,6 +568,14 @@ class KubernetesApi(Protocol):
 
     async def delete_network_policy(self, name: str, namespace: str) -> None:
         """Delete a NetworkPolicy when present."""
+        ...
+
+    async def list_network_policies(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[NetworkPolicyResource]:
+        """List NetworkPolicies matching labels."""
         ...
 
     async def get_lease(self, name: str, namespace: str) -> LeaseResource | None:

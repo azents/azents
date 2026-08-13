@@ -26,9 +26,11 @@ from azents_runtime_provider_kubernetes.owned_resources import (
     config_map_comparison_view,
     owned_annotations,
     owned_labels,
+    proxy_policy_resource_name,
     resource_name,
     secret_comparison_view,
     validate_owned_metadata,
+    validate_proxy_policy_metadata,
 )
 
 
@@ -48,6 +50,51 @@ def test_resource_names_are_deterministic_for_every_owned_role() -> None:
             "azents-runtime-runtime-1-proxy-egress"
         ),
     }
+
+
+def test_proxy_policy_resource_name_is_digest_revisioned_and_bounded() -> None:
+    digest = "a" * 64
+
+    assert proxy_policy_resource_name("runtime-1", digest) == (
+        "azents-runtime-runtime-1-proxy-policy-aaaaaaaaaaaa"
+    )
+    assert len(proxy_policy_resource_name("a" * 210, digest)) <= 253
+    with pytest.raises(InvalidOwnedResourceMetadata, match="SHA-256"):
+        proxy_policy_resource_name("runtime-1", "invalid")
+
+
+def test_proxy_policy_metadata_requires_exact_digest_revision() -> None:
+    identity = OwnedResourceIdentity(
+        provider_id="provider-k8s",
+        runtime_id="runtime-1",
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+    )
+    digest = "a" * 64
+    metadata = ObjectMeta(
+        name=proxy_policy_resource_name(identity.runtime_id, digest),
+        namespace="azents-runtime",
+        labels=owned_labels(
+            identity,
+            ResourceRole.PROXY_POLICY,
+            desired_generation=7,
+        ),
+        annotations={},
+    )
+
+    validate_proxy_policy_metadata(
+        metadata,
+        identity,
+        desired_generation=7,
+        policy_digest=digest,
+    )
+    with pytest.raises(InvalidOwnedResourceMetadata, match="name mismatch"):
+        validate_proxy_policy_metadata(
+            metadata,
+            identity,
+            desired_generation=7,
+            policy_digest="b" * 64,
+        )
 
 
 @pytest.mark.parametrize(

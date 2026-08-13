@@ -35,6 +35,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     LeaseSpec,
     LocalObjectReference,
     NetworkPolicyEgressRule,
+    NetworkPolicyIngressRule,
     NetworkPolicyPeer,
     NetworkPolicyPort,
     NetworkPolicyResource,
@@ -427,6 +428,20 @@ class KubernetesHttpApi(KubernetesApi):
                 f"/networkpolicies/{name}"
             ),
             allow_not_found=True,
+        )
+
+    async def list_network_policies(
+        self,
+        labels: Mapping[str, str],
+        namespace: str,
+    ) -> Sequence[NetworkPolicyResource]:
+        data = await self._request_json(
+            "GET",
+            f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies",
+            params={"labelSelector": _label_selector(labels)},
+        )
+        return tuple(
+            network_policy_resource(item) for item in cast(JsonObject, data)["items"]
         )
 
     async def get_lease(self, name: str, namespace: str) -> LeaseResource | None:
@@ -857,7 +872,10 @@ def network_policy_manifest(network_policy: NetworkPolicyResource) -> JsonObject
         "spec": {
             "podSelector": _label_selector_manifest(network_policy.spec.pod_selector),
             "policyTypes": list(network_policy.spec.policy_types),
-            "ingress": list(network_policy.spec.ingress),
+            "ingress": [
+                _network_policy_ingress_manifest(rule)
+                for rule in network_policy.spec.ingress
+            ],
             "egress": [
                 _network_policy_egress_manifest(rule)
                 for rule in network_policy.spec.egress
@@ -871,6 +889,19 @@ def _network_policy_egress_manifest(
 ) -> JsonObject:
     value: JsonObject = {
         "to": [_network_policy_peer_manifest(peer) for peer in rule.peers],
+    }
+    if rule.ports:
+        value["ports"] = [
+            {"protocol": port.protocol, "port": port.port} for port in rule.ports
+        ]
+    return value
+
+
+def _network_policy_ingress_manifest(
+    rule: NetworkPolicyIngressRule,
+) -> JsonObject:
+    value: JsonObject = {
+        "from": [_network_policy_peer_manifest(peer) for peer in rule.peers],
     }
     if rule.ports:
         value["ports"] = [
@@ -1418,7 +1449,10 @@ def network_policy_resource(data: JsonObject) -> NetworkPolicyResource:
                 cast(JsonObject, spec.get("podSelector") or {})
             ),
             policy_types=tuple(str(item) for item in spec.get("policyTypes", [])),
-            ingress=tuple(spec.get("ingress", [])),
+            ingress=tuple(
+                _network_policy_ingress_rule(cast(JsonObject, item))
+                for item in spec.get("ingress", [])
+            ),
             egress=tuple(
                 _network_policy_egress_rule(cast(JsonObject, item))
                 for item in spec.get("egress", [])
@@ -1431,6 +1465,22 @@ def _network_policy_egress_rule(data: JsonObject) -> NetworkPolicyEgressRule:
     return NetworkPolicyEgressRule(
         peers=tuple(
             _network_policy_peer(cast(JsonObject, item)) for item in data.get("to", [])
+        ),
+        ports=tuple(
+            NetworkPolicyPort(
+                protocol=str(item.get("protocol") or "TCP"),
+                port=_network_policy_port_value(item["port"]),
+            )
+            for item in data.get("ports", [])
+        ),
+    )
+
+
+def _network_policy_ingress_rule(data: JsonObject) -> NetworkPolicyIngressRule:
+    return NetworkPolicyIngressRule(
+        peers=tuple(
+            _network_policy_peer(cast(JsonObject, item))
+            for item in data.get("from", [])
         ),
         ports=tuple(
             NetworkPolicyPort(
