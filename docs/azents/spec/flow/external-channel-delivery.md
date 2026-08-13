@@ -35,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-11
-spec_version: 42
+last_verified_at: 2026-08-13
+spec_version: 43
 ---
 
 # External Channel Delivery and Channel Work
@@ -73,9 +73,9 @@ model input boundary exposes three atomic modes:
   binding and executes those effects without a final reply. No reply, progress
   create/update, file, or unrelated provider request occurs.
 
-Within one Run, `channel_action` rejects the same `(binding, mode)` when it
-completed in the immediately preceding model turn. Rejected and failed calls do
-not count, and the guard uses only process-local Toolkit state.
+`channel_action` may use the same binding and mode in consecutive model turns.
+Publication frequency is determined by the Agent's work and communication needs
+rather than a process-local repetition guard.
 
 Either mode may attach up to 20 file sources to its conversational reply. Each source
 must use one of two formats: an absolute POSIX Runtime file path beginning with `/`, or
