@@ -1,7 +1,5 @@
 """Archived-session lifecycle and purge E2E tests."""
 
-from typing import Any, cast
-
 import azentsadminclient
 import azentspublicclient
 import requests
@@ -10,7 +8,6 @@ from azentsadminclient.models.file_lifecycle_settings_update_request import (
     FileLifecycleSettingsUpdateRequest,
 )
 from azentspublicclient.api.chat_v1_api import ChatV1Api
-from testcontainers.core.container import DockerContainer
 
 from support.utils import create_chat_session_with_agent
 
@@ -55,35 +52,22 @@ def _set_retention(system_api: SystemV1Api, retention_days: int | None) -> None:
 
 
 def _run_scheduler_task(
-    container: DockerContainer,
+    server_url: str,
     *,
     task_key: str,
 ) -> None:
-    """Trigger and execute one scheduler pass inside the deployed server image."""
-    script = f"""
-import asyncio
-from azents.app import run_with_container
-from azents.core.config import Config
-from azents.scheduler.service import SchedulerService
-
-async def main():
-    config = Config.from_env()
-    async with run_with_container(config) as dependency_container:
-        scheduler = await dependency_container.solve(SchedulerService)
-        state = await scheduler.trigger({task_key!r})
-        if state is None:
-            raise RuntimeError('unknown scheduler task')
-        await scheduler.run_once()
-
-asyncio.run(main())
-"""
-    result = container.get_wrapped_container().exec_run(["python", "-c", script])
-    exit_code = cast(Any, result).exit_code
-    if exit_code != 0:
-        output = cast(Any, result).output.decode(errors="replace")
+    """Trigger and execute one scheduler pass in the deployed Admin process."""
+    response = requests.post(
+        f"{server_url}/scheduler/v1/run",
+        json={"task_key": task_key},
+        timeout=30,
+    )
+    if not response.ok:
         raise AssertionError(
-            f"scheduler task {task_key} failed with exit {exit_code}:\n{output}"
+            f"scheduler task {task_key} failed with {response.status_code}: "
+            f"{response.text}"
         )
+    assert response.json() == {"task_key": task_key}
 
 
 def test_archive_list_restore_and_hard_delete_absence(
@@ -163,7 +147,7 @@ def test_zero_day_archive_waits_for_scheduler_purge(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
-    azents_admin_server_container: DockerContainer,
+    azents_admin_server_url: str,
 ) -> None:
     """Zero-day archive remains visible until the purge scheduler owns deletion."""
     system_api = SystemV1Api(admin_api_client)
@@ -199,7 +183,7 @@ def test_zero_day_archive_waits_for_scheduler_purge(
         assert archived_item.purge_after is not None
 
         _run_scheduler_task(
-            azents_admin_server_container,
+            azents_admin_server_url,
             task_key="archived_session_purge",
         )
 
