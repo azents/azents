@@ -184,6 +184,15 @@ class TestProviderToolLiveActivity:
                 session_id=session_id,
             )
 
+            running_action = _wait_for_action(
+                websocket,
+                _provider_upsert_with_status("running"),
+            )
+            running_event = json_object_payload(
+                running_action.get("event"),
+                label="running provider-tool event",
+            )
+
             restored_event = _wait_for_live_provider_call(
                 server_url=azents_public_server_url,
                 token=token,
@@ -200,15 +209,6 @@ class TestProviderToolLiveActivity:
             assert isinstance(live_event_id, str) and live_event_id
             assert restored_event.get("adapter") == "azents-live"
             assert restored_event.get("external_id") == call_id
-
-            running_action = _wait_for_action(
-                websocket,
-                _provider_upsert_with_status("running"),
-            )
-            running_event = json_object_payload(
-                running_action.get("event"),
-                label="running provider-tool event",
-            )
             assert running_event.get("id") == live_event_id
 
             completed_action = _wait_for_action(
