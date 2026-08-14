@@ -62,7 +62,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-14
-spec_version: 40
+spec_version: 41
 ---
 
 # External Channel Provider Ingress
@@ -275,9 +275,9 @@ durable queue content.
    `location=threads`. Discord parent messages use the parent channel, while messages
    inside an existing Discord Thread always use that Thread as an independent target.
    An ordinary non-invocation stops before queue insertion when no connected Binding
-   exists or its response mode is `mention_only`, except that an unbound Discord Thread
-   inherits the configured parent response mode and may proceed when it is
-   `all_messages`. An eligible
+   exists or its response mode is `mention_only`. Parent-channel participation and
+   `all_messages` authority never admit ordinary traffic from an unbound Discord
+   Thread. An eligible
    top-level invocation with no setting creates or replaces setup state and returns
    before queue insertion.
 2. Configured traffic locks or creates one active conversation owner unique to the
@@ -364,11 +364,12 @@ indeterminate provider create before repeating the idempotent transaction; an ex
 Binding keeps its prior snapshot and bypasses provider preparation.
 
 The shared response predicate admits explicit invocations in either mode and ordinary
-messages on an existing connected `all_messages` Binding. Parent-channel and Slack
-Binding creation remains mention-gated. An existing unbound Discord Thread instead
-inherits its parent participation response mode, so `all_messages` may admit the first
-eligible ordinary message into a new independent Thread Binding while `mention_only`
-still requires an explicit invocation. Ignored ordinary messages leave the
+messages on an existing connected `all_messages` Binding. Every Binding creation
+remains mention-gated. A Discord Thread has participation state independent from its
+parent channel, so a parent Binding or response-mode setting cannot admit an ordinary
+message from an unbound Thread. After an explicit Thread invocation creates its exact
+Binding, that Binding's response mode controls continuation only inside the Thread.
+Ignored ordinary messages leave the
 conversation position unchanged, so a later eligible mention can include them through
 the existing bounded provider-history range. Already committed
 mailbox input, wake, Channel Work, or AgentRun state is never cancelled or
@@ -479,6 +480,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-14** (spec_version 41) — Made Discord Thread participation independent
+  from its parent channel: unbound Thread traffic is mention-gated, while an existing
+  Thread Binding retains its own `all_messages` continuation.
 - **2026-08-14** (spec_version 40) — Stopped Discord Thread traffic from fanning
   into a `location=channel` parent conversation and allowed an unbound Thread to
   inherit configured `all_messages` authority for its independent Binding.

@@ -188,10 +188,7 @@ def test_response_mode_requires_invocation_until_binding_exists(
     """Only a connected all-messages Binding admits ordinary continuation."""
     assert (
         _response_mode_triggered(
-            request=_request(
-                invocation=invocation,
-                provider=ExternalChannelProvider.SLACK,
-            ),
+            invocation=invocation,
             binding=binding,
             response_mode=response_mode,
         )
@@ -199,26 +196,32 @@ def test_response_mode_requires_invocation_until_binding_exists(
     )
 
 
-def test_unbound_discord_thread_inherits_all_messages() -> None:
-    """An ordinary Discord Thread message may create its independent Binding."""
-    assert _response_mode_triggered(
-        request=_request(invocation=False),
-        binding=None,
-        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
-    )
-
-
 @pytest.mark.parametrize(
-    "location",
+    ("provider", "location"),
     [
-        ExternalChannelConversationLocation.CHANNEL,
-        ExternalChannelConversationLocation.THREADS,
+        (
+            ExternalChannelProvider.SLACK,
+            ExternalChannelConversationLocation.CHANNEL,
+        ),
+        (
+            ExternalChannelProvider.SLACK,
+            ExternalChannelConversationLocation.THREADS,
+        ),
+        (
+            ExternalChannelProvider.DISCORD,
+            ExternalChannelConversationLocation.CHANNEL,
+        ),
+        (
+            ExternalChannelProvider.DISCORD,
+            ExternalChannelConversationLocation.THREADS,
+        ),
     ],
 )
 async def test_unbound_all_messages_non_invocation_stops_before_queue(
+    provider: ExternalChannelProvider,
     location: ExternalChannelConversationLocation,
 ) -> None:
-    """Configured defaults cannot create a Binding from an ordinary message."""
+    """Parent configuration cannot join an unbound conversation automatically."""
     commit = AsyncMock()
     session = cast(AsyncSession, SimpleNamespace(commit=commit))
     repository = MagicMock()
@@ -274,7 +277,7 @@ async def test_unbound_all_messages_non_invocation_stops_before_queue(
             provider_event_id="event-1",
             request=_request(
                 invocation=False,
-                provider=ExternalChannelProvider.SLACK,
+                provider=provider,
             ),
         )
 

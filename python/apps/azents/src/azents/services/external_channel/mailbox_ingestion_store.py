@@ -328,16 +328,9 @@ class ExternalChannelMailboxIngestionStore:
                 connection=connection,
                 source_resource=source_resource,
             )
-            unbound_response_mode = await self._prepare_unbound_response_mode(
-                session,
-                request=request,
-                connection=connection,
-                binding=binding,
-            )
             ignored_reason = _response_mode_ignored_reason(
                 request=request,
                 binding=binding,
-                unbound_response_mode=unbound_response_mode,
             )
             if ignored_reason is not None:
                 await session.commit()
@@ -502,13 +495,6 @@ class ExternalChannelMailboxIngestionStore:
             ignored_reason = _response_mode_ignored_reason(
                 request=request,
                 binding=conversation.binding,
-                unbound_response_mode=(
-                    conversation.setting.response_mode
-                    if conversation.binding is None
-                    and _is_discord_thread(request)
-                    and conversation.setting is not None
-                    else None
-                ),
             )
             if ignored_reason is not None:
                 return await self._commit_ignored(session, ignored_reason)
@@ -933,33 +919,6 @@ class ExternalChannelMailboxIngestionStore:
             session,
             resource_id=parent_resource.id,
         )
-
-    async def _prepare_unbound_response_mode(
-        self,
-        session: AsyncSession,
-        *,
-        request: ExternalChannelIngestionRequest,
-        connection: ExternalChannelConnection,
-        binding: ExternalChannelBinding | None,
-    ) -> ExternalChannelResponseMode | None:
-        """Resolve the inherited response mode for a new Discord Thread."""
-        if binding is not None or not _is_discord_thread(request):
-            return None
-        route = await self._resolve_route(
-            session,
-            request=request,
-            connection=connection,
-        )
-        if route is None:
-            return None
-        setting = await self.repository.lock_active_participation_setting(
-            session,
-            connection_id=connection.id,
-            provider_parent_channel_id=_provider_parent_channel_id(request),
-        )
-        if setting is None or setting.route_id != route.id:
-            return None
-        return setting.response_mode
 
     async def _selected_setup_priority_request(
         self,
@@ -2270,7 +2229,6 @@ def _response_mode_ignored_reason(
     *,
     request: ExternalChannelIngestionRequest,
     binding: ExternalChannelBinding | None,
-    unbound_response_mode: ExternalChannelResponseMode | None = None,
 ) -> ExternalChannelIngestionReason | None:
     """Return why a current provider message cannot trigger shared ingestion."""
     if (
@@ -2279,20 +2237,10 @@ def _response_mode_ignored_reason(
     ):
         return None
     if binding is None:
-        if unbound_response_mode is ExternalChannelResponseMode.ALL_MESSAGES:
-            return None
         return ExternalChannelIngestionReason.NOT_AN_INVOCATION
     if binding.response_mode is ExternalChannelResponseMode.MENTION_ONLY:
         return ExternalChannelIngestionReason.RESPONSE_MODE_NOT_TRIGGERED
     return None
-
-
-def _is_discord_thread(request: ExternalChannelIngestionRequest) -> bool:
-    """Return whether one request addresses an existing Discord Thread."""
-    return (
-        request.locator.provider is ExternalChannelProvider.DISCORD
-        and request.scope.kind is ExternalChannelConversationScopeKind.THREAD
-    )
 
 
 def _approval_url(web_url: str, access_request_id: str) -> str | None:
