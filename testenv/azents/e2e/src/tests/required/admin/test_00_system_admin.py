@@ -113,6 +113,7 @@ def test_live_role_grant_revoke_and_final_admin_invariants(
             == []
         )
 
+        missing_email = f"missing-{unique()}@example.com"
         cli_result = azents_admin_server_container.get_wrapped_container().exec_run(
             [
                 "python",
@@ -120,28 +121,20 @@ def test_live_role_grant_revoke_and_final_admin_invariants(
                 "grant",
                 "--email",
                 ordinary_email,
+                "--email",
+                missing_email,
             ]
         )
-        if cast(Any, cli_result).exit_code != 0:
-            raise AssertionError("system-admin CLI grant failed")
+        cli_exit_code = cast(Any, cli_result).exit_code
+        cli_output = cast(Any, cli_result).output.decode(errors="replace")
+        assert cli_exit_code != 0
+        assert "System administrator grant completed." in cli_output
+        assert "No existing User matches the exact email." in cli_output
         assert (
             ordinary_system_api.system_v1_get_system_admin_me().user_id
             == ordinary_user_id
         )
         system_api.system_v1_revoke_system_admin(ordinary_user_id)
-
-        missing_cli_result = (
-            azents_admin_server_container.get_wrapped_container().exec_run(
-                [
-                    "python",
-                    "src/cli/system_admin.py",
-                    "grant",
-                    "--email",
-                    f"missing-{unique()}@example.com",
-                ]
-            )
-        )
-        assert cast(Any, missing_cli_result).exit_code != 0
 
     system_api = SystemV1Api(admin_api_client)
     initial_admin_id = system_api.system_v1_get_system_admin_me().user_id

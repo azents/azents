@@ -23,12 +23,15 @@ def main() -> None:
 
 @app.command("grant")
 def grant_system_admin(
-    email: Annotated[
-        str,
-        typer.Option("--email", help="Exact email of an existing Azents User"),
+    emails: Annotated[
+        list[str],
+        typer.Option(
+            "--email",
+            help="Exact email of an existing Azents User; repeat for multiple Users",
+        ),
     ],
 ) -> None:
-    """Grant system administrator authority to an existing User by exact email."""
+    """Grant system administrator authority to existing Users by exact email."""
 
     async def main() -> None:
         config = Config.from_env()
@@ -39,20 +42,21 @@ def grant_system_admin(
         )
         async with run_with_container(config) as container:
             service = await container.solve(SystemUserRoleService)
-            result = await service.grant_by_email(
-                email,
-                SystemUserRole.SYSTEM_ADMIN,
-                source="operator_cli",
-            )
-        match result:
-            case Success(assignment):
-                typer.echo(f"user_id: {assignment.user_id}")
-                typer.echo(f"role: {assignment.role.value}")
-                typer.echo("System administrator grant completed.")
-            case Failure(SystemUserNotFound()):
-                raise typer.BadParameter(
-                    "No existing User matches the exact email."
-                ) from None
+            for email in emails:
+                result = await service.grant_by_email(
+                    email,
+                    SystemUserRole.SYSTEM_ADMIN,
+                    source="operator_cli",
+                )
+                match result:
+                    case Success(assignment):
+                        typer.echo(f"user_id: {assignment.user_id}")
+                        typer.echo(f"role: {assignment.role.value}")
+                        typer.echo("System administrator grant completed.")
+                    case Failure(SystemUserNotFound()):
+                        raise typer.BadParameter(
+                            "No existing User matches the exact email."
+                        ) from None
 
     asyncio.run(main())
 

@@ -63,6 +63,28 @@ class _RoleService:
         return self.result
 
 
+class _SequentialRoleService(_RoleService):
+    """Role service stub returning one configured result per call."""
+
+    def __init__(
+        self,
+        results: list[Result[SystemUserRoleAssignment, SystemUserNotFound]],
+    ) -> None:
+        super().__init__(results[0])
+        self.results = iter(results)
+
+    async def grant_by_email(
+        self,
+        email: str,
+        role: SystemUserRole,
+        *,
+        source: str,
+    ) -> Result[SystemUserRoleAssignment, SystemUserNotFound]:
+        """Record the adapter input and return the next configured result."""
+        self.calls.append((email, role, source))
+        return next(self.results)
+
+
 def _configure_cli(monkeypatch: pytest.MonkeyPatch, service: _RoleService) -> None:
     """Replace runtime infrastructure with deterministic test doubles."""
     monkeypatch.setattr(system_admin.Config, "from_env", _load_config)
@@ -131,3 +153,58 @@ class TestSystemAdminCLI:
 
         assert result.exit_code == 2
         assert "No existing User matches the exact email." in result.stderr
+
+    def test_grant_reuses_bootstrap_for_repeated_emails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Repeated email options share one container and preserve failure output."""
+        assignment = SystemUserRoleAssignment(
+            user_id="user-id",
+            role=SystemUserRole.SYSTEM_ADMIN,
+            granted_by_user_id=None,
+            granted_at=datetime.datetime.now(datetime.timezone.utc),
+        )
+        service = _SequentialRoleService(
+            [
+                Success(assignment),
+                Failure(SystemUserNotFound(user_id="missing@example.com")),
+            ]
+        )
+        bootstrap_count = 0
+        monkeypatch.setattr(system_admin.Config, "from_env", _load_config)
+        monkeypatch.setattr(
+            system_admin,
+            "configure_logging_for_runtime",
+            lambda **_kwargs: None,
+        )
+
+        @asynccontextmanager
+        async def run_with_container(
+            _config: _Config,
+        ) -> AsyncGenerator[_Container, None]:
+            nonlocal bootstrap_count
+            bootstrap_count += 1
+            yield _Container(service)
+
+        monkeypatch.setattr(system_admin, "run_with_container", run_with_container)
+
+        result = CliRunner().invoke(
+            system_admin.app,
+            [
+                "grant",
+                "--email",
+                "admin@example.com",
+                "--email",
+                "missing@example.com",
+            ],
+        )
+
+        assert result.exit_code == 2
+        assert "System administrator grant completed." in result.stdout
+        assert "No existing User matches the exact email." in result.stderr
+        assert bootstrap_count == 1
+        assert [call[0] for call in service.calls] == [
+            "admin@example.com",
+            "missing@example.com",
+        ]
