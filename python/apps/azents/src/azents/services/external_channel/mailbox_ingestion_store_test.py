@@ -183,6 +183,28 @@ def test_response_mode_requires_invocation_without_connected_binding() -> None:
     )
 
 
+def test_response_mode_accepts_unbound_discord_thread_for_all_messages() -> None:
+    """A configured all-messages mode may start an independent Discord Thread."""
+    request = _slack_request()
+    ordinary_discord_thread = dataclasses.replace(
+        request,
+        locator=dataclasses.replace(
+            request.locator,
+            provider=ExternalChannelProvider.DISCORD,
+            provider_event_type="discord_message_create",
+            invocation=False,
+        ),
+    )
+    assert (
+        _response_mode_ignored_reason(
+            request=ordinary_discord_thread,
+            binding=None,
+            unbound_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        )
+        is None
+    )
+
+
 def test_response_mode_ignores_ordinary_message_for_mention_only() -> None:
     """Mention-only bindings retain ordinary provider messages as later context."""
     request = _slack_request()

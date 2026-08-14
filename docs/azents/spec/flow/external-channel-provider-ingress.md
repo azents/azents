@@ -61,8 +61,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-13
-spec_version: 39
+last_verified_at: 2026-08-14
+spec_version: 40
 ---
 
 # External Channel Provider Ingress
@@ -270,10 +270,14 @@ durable queue content.
 
 1. A short transaction revalidates the current connection, route, participation,
    access, Resource, and any existing Binding/Session filters. It creates or locks the
-   physical source Resource and resolves the effective target Resource: the parent
-   channel for `location=channel`, or the exact root/thread conversation for
-   `location=threads`. An ordinary non-invocation stops before queue insertion when no
-   connected Binding exists or its response mode is `mention_only`. An eligible
+   physical source Resource and resolves the effective target Resource. Slack uses the
+   parent channel for `location=channel` and the exact root/thread conversation for
+   `location=threads`. Discord parent messages use the parent channel, while messages
+   inside an existing Discord Thread always use that Thread as an independent target.
+   An ordinary non-invocation stops before queue insertion when no connected Binding
+   exists or its response mode is `mention_only`, except that an unbound Discord Thread
+   inherits the configured parent response mode and may proceed when it is
+   `all_messages`. An eligible
    top-level invocation with no setting creates or replaces setup state and returns
    before queue insertion.
 2. Configured traffic locks or creates one active conversation owner unique to the
@@ -359,13 +363,14 @@ the prepared delivery thread, and only then creates Session state. Retry reconci
 indeterminate provider create before repeating the idempotent transaction; an existing
 Binding keeps its prior snapshot and bypasses provider preparation.
 
-The shared response predicate is provider-neutral: explicit invocations proceed in
-either mode; an ordinary message proceeds only for an existing connected
-`all_messages` binding. An unbound or disconnected conversation always requires a new
-explicit invocation, including when its configured location default is
-`all_messages`; therefore Binding creation is always mention-gated. Ignored ordinary
-messages leave the conversation position unchanged, so a later eligible mention can
-include them through the existing bounded provider-history range. Already committed
+The shared response predicate admits explicit invocations in either mode and ordinary
+messages on an existing connected `all_messages` Binding. Parent-channel and Slack
+Binding creation remains mention-gated. An existing unbound Discord Thread instead
+inherits its parent participation response mode, so `all_messages` may admit the first
+eligible ordinary message into a new independent Thread Binding while `mention_only`
+still requires an explicit invocation. Ignored ordinary messages leave the
+conversation position unchanged, so a later eligible mention can include them through
+the existing bounded provider-history range. Already committed
 mailbox input, wake, Channel Work, or AgentRun state is never cancelled or
 reclassified by a later mode change. The explicit-invocation flag remains the
 response-mode and settings-control signal; it does not demote an ordinary message that
@@ -474,6 +479,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-14** (spec_version 40) — Stopped Discord Thread traffic from fanning
+  into a `location=channel` parent conversation and allowed an unbound Thread to
+  inherit configured `all_messages` authority for its independent Binding.
 - **2026-08-13** (spec_version 39) — Persisted the bounded file count observed by live
   Slack and Discord callbacks and classified a shorter provider-history trigger
   snapshot as temporary so attachment propagation races use the existing ingress

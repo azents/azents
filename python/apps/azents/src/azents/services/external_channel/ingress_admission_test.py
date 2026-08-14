@@ -102,14 +102,22 @@ def _resource(
     )
 
 
-def _request(*, invocation: bool = True) -> ExternalChannelIngestionRequest:
+def _request(
+    *,
+    invocation: bool = True,
+    provider: ExternalChannelProvider = ExternalChannelProvider.DISCORD,
+) -> ExternalChannelIngestionRequest:
     return cast(
         ExternalChannelIngestionRequest,
         SimpleNamespace(
             locator=ExternalChannelTriggerLocator(
                 connection_id="connection-1",
-                provider=ExternalChannelProvider.DISCORD,
-                provider_event_type="discord_message_create",
+                provider=provider,
+                provider_event_type=(
+                    "discord_message_create"
+                    if provider is ExternalChannelProvider.DISCORD
+                    else "message"
+                ),
                 provider_tenant_id="guild-1",
                 provider_channel_id="thread-1",
                 provider_parent_channel_id="parent-1",
@@ -180,11 +188,23 @@ def test_response_mode_requires_invocation_until_binding_exists(
     """Only a connected all-messages Binding admits ordinary continuation."""
     assert (
         _response_mode_triggered(
-            invocation=invocation,
+            request=_request(
+                invocation=invocation,
+                provider=ExternalChannelProvider.SLACK,
+            ),
             binding=binding,
             response_mode=response_mode,
         )
         is expected
+    )
+
+
+def test_unbound_discord_thread_inherits_all_messages() -> None:
+    """An ordinary Discord Thread message may create its independent Binding."""
+    assert _response_mode_triggered(
+        request=_request(invocation=False),
+        binding=None,
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
     )
 
 
@@ -252,7 +272,10 @@ async def test_unbound_all_messages_non_invocation_stops_before_queue(
     ):
         outcome = await service.admit_current_trigger(
             provider_event_id="event-1",
-            request=_request(invocation=False),
+            request=_request(
+                invocation=False,
+                provider=ExternalChannelProvider.SLACK,
+            ),
         )
 
     assert outcome is not None
@@ -263,10 +286,9 @@ async def test_unbound_all_messages_non_invocation_stops_before_queue(
     queue_repository.admit.assert_not_awaited()
 
 
-async def test_channel_location_fans_source_thread_into_parent_owner() -> None:
-    """A source-thread callback targets the configured parent conversation."""
+async def test_discord_channel_location_keeps_thread_as_owner_target() -> None:
+    """Discord Threads remain independent from the configured parent conversation."""
     source = _resource("source-1", ExternalChannelResourceType.THREAD)
-    parent = _resource("parent-resource-1", ExternalChannelResourceType.PARENT_CHANNEL)
     repository = MagicMock()
     repository.lock_connected_binding_by_resource = AsyncMock(return_value=None)
     repository.lock_routable_single_route = AsyncMock(return_value=_route())
@@ -279,7 +301,7 @@ async def test_channel_location_fans_source_thread_into_parent_owner() -> None:
             settings_generation=1,
         )
     )
-    repository.lock_resource_by_provider_key = AsyncMock(return_value=parent)
+    repository.lock_resource_by_provider_key = AsyncMock()
     repository.create_resource_idempotent = AsyncMock()
     service = _service(repository)
     session = cast(AsyncSession, object())
@@ -293,16 +315,11 @@ async def test_channel_location_fans_source_thread_into_parent_owner() -> None:
     )
 
     assert target is not None
-    assert target.resource.id == "parent-resource-1"
+    assert target.resource is source
     assert target.setting is not None
     assert target.binding is None
     assert target.response_mode is ExternalChannelResponseMode.ALL_MESSAGES
-    repository.lock_resource_by_provider_key.assert_awaited_once_with(
-        session,
-        connection_id="connection-1",
-        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
-        provider_resource_key="parent-1",
-    )
+    repository.lock_resource_by_provider_key.assert_not_awaited()
     repository.create_resource_idempotent.assert_not_awaited()
 
 
