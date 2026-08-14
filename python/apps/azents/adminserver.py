@@ -6,8 +6,10 @@ Run with uvicorn:
 
 from azcommon.logging import configure_logging_for_runtime
 
+from azents.api import testenv
 from azents.app import create_admin_api_app
 from azents.core.config import Config
+from azents.utils.fastapi.route import as_route_mounter
 
 config = Config.from_env()
 
@@ -18,3 +20,5 @@ configure_logging_for_runtime(
     sentry_dsn=config.sentry_dsn,
 )
 app = create_admin_api_app(config)
+if config.testenv_api_enabled:
+    testenv.mount(as_route_mounter(app))

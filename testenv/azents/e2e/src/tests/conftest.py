@@ -1153,6 +1153,7 @@ def azents_admin_server_container(
             "AZ_TESTENV_GITHUB_PLATFORM_VALIDATION_BASE_URL",
             _GITHUB_VALIDATION_INTERNAL_URL,
         )
+        .with_env("AZ_TESTENV_API_ENABLED", "true")
         .with_env(
             "AZ_RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY",
             _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY,
