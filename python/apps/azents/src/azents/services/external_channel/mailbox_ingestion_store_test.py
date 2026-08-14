@@ -183,8 +183,8 @@ def test_response_mode_requires_invocation_without_connected_binding() -> None:
     )
 
 
-def test_response_mode_accepts_unbound_discord_thread_for_all_messages() -> None:
-    """A configured all-messages mode may start an independent Discord Thread."""
+def test_response_mode_requires_invocation_for_unbound_discord_thread() -> None:
+    """A parent all-messages setting does not join an unbound Discord Thread."""
     request = _slack_request()
     ordinary_discord_thread = dataclasses.replace(
         request,
@@ -199,9 +199,8 @@ def test_response_mode_accepts_unbound_discord_thread_for_all_messages() -> None
         _response_mode_ignored_reason(
             request=ordinary_discord_thread,
             binding=None,
-            unbound_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
         )
-        is None
+        is ExternalChannelIngestionReason.NOT_AN_INVOCATION
     )
 
 

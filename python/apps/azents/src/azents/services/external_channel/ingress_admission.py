@@ -121,7 +121,7 @@ class ExternalChannelIngressAdmissionService:
             if target is None:
                 return None
             if not _response_mode_triggered(
-                request=request,
+                invocation=request.locator.invocation,
                 binding=target.binding,
                 response_mode=target.response_mode,
             ):
@@ -513,14 +513,14 @@ def _provider_parent_channel_id(request: ExternalChannelIngestionRequest) -> str
 
 def _response_mode_triggered(
     *,
-    request: ExternalChannelIngestionRequest,
+    invocation: bool,
     binding: ExternalChannelBinding | None,
     response_mode: ExternalChannelResponseMode,
 ) -> bool:
-    """Apply connected continuation and Discord thread creation policy."""
-    return request.locator.invocation or (
-        response_mode is ExternalChannelResponseMode.ALL_MESSAGES
-        and (binding is not None or _is_discord_thread(request))
+    """Require explicit invocation until this conversation owns a Binding."""
+    return invocation or (
+        binding is not None
+        and response_mode is ExternalChannelResponseMode.ALL_MESSAGES
     )
 
 
