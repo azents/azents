@@ -12,6 +12,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     ExternalChannelAppMode,
     ExternalChannelConversationLocation,
+    ExternalChannelConversationScopeKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
@@ -120,7 +121,7 @@ class ExternalChannelIngressAdmissionService:
             if target is None:
                 return None
             if not _response_mode_triggered(
-                invocation=request.locator.invocation,
+                request=request,
                 binding=target.binding,
                 response_mode=target.response_mode,
             ):
@@ -333,7 +334,10 @@ class ExternalChannelIngressAdmissionService:
         if setting is None or setting.route_id != route.id:
             return None
         resource = source_resource
-        if setting.location is ExternalChannelConversationLocation.CHANNEL:
+        if (
+            setting.location is ExternalChannelConversationLocation.CHANNEL
+            and not _is_discord_thread(request)
+        ):
             resource = await self.repository.lock_resource_by_provider_key(
                 session,
                 connection_id=connection.id,
@@ -509,14 +513,22 @@ def _provider_parent_channel_id(request: ExternalChannelIngestionRequest) -> str
 
 def _response_mode_triggered(
     *,
-    invocation: bool,
+    request: ExternalChannelIngestionRequest,
     binding: ExternalChannelBinding | None,
     response_mode: ExternalChannelResponseMode,
 ) -> bool:
-    """Require explicit invocation until a Binding owns all-message continuation."""
-    return invocation or (
-        binding is not None
-        and response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+    """Apply connected continuation and Discord thread creation policy."""
+    return request.locator.invocation or (
+        response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+        and (binding is not None or _is_discord_thread(request))
+    )
+
+
+def _is_discord_thread(request: ExternalChannelIngestionRequest) -> bool:
+    """Return whether one request addresses an existing Discord Thread."""
+    return (
+        request.locator.provider is ExternalChannelProvider.DISCORD
+        and request.scope.kind is ExternalChannelConversationScopeKind.THREAD
     )
 
 
