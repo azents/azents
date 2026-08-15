@@ -8,11 +8,18 @@ code_paths:
   - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/src/azents/scheduler/executor.py
   - python/apps/azents/src/azents/scheduler/service.py
+  - python/apps/azents/src/azents/job_runtime/deps.py
+  - python/apps/azents/src/azents/job_runtime/local.py
+  - python/apps/azents/src/azents/job_runtime/registry.py
+  - python/apps/azents/src/azents/job_runtime/types.py
   - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/chat/__init__.py
   - python/apps/azents/src/azents/services/agent_decommission.py
+  - python/apps/azents/src/azents/services/agent_runtime_removal/**
+  - python/apps/azents/src/azents/services/owner_lifecycle.py
+  - python/apps/azents/src/azents/services/llm_catalog/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/scheduled_task_state/__init__.py
   - python/apps/azents/src/azents/repos/scheduled_task_state/data.py
@@ -22,12 +29,10 @@ code_paths:
   - python/apps/azents/src/cli/devserver.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/c7b64368f3a1_add_scheduled_task_states.py
   - python/apps/azents/bin/scheduler.sh
-  - infra/argocd/azents-server/base/scheduler-deployment.yaml
-  - infra/argocd/azents-server/base/scheduler-pdb.yaml
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-07-26
-spec_version: 11
+last_verified_at: 2026-08-15
+spec_version: 12
 ---
 
 # Periodic Execution Flow Spec
@@ -38,7 +43,8 @@ Azents periodic execution is the system-owned scheduler flow for lightweight mai
 
 Production runs periodic execution through a dedicated scheduler role. The production entrypoint is `bin/scheduler.sh`, which applies the RDB revision from `db-schemas/rdb/revision` when needed and then starts `src/cli/scheduler.py run`.
 
-Production manifests define a separate scheduler Deployment and PodDisruptionBudget for ArgoCD and Helm chart consumers. The scheduler uses the server image and server environment sources, but it is not the AgentWorker.
+The Helm chart defines a separate scheduler Deployment and PodDisruptionBudget. The scheduler uses
+the server image and server environment sources, but it is not the AgentWorker.
 
 Devserver runs Public API, Admin API, AgentWorker, and Scheduler in one local process. This is local packaging only; it does not collapse the production scheduler role into AgentWorker.
 
@@ -60,16 +66,27 @@ The database does not store task definitions or schedule overrides. It stores cu
 
 Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection`,
 `archived_session_retention_recalculation`, `archived_session_purge`, `session_auto_archive`,
-`agent_decommission`, and `file_lifecycle_cleanup`. `scheduler_heartbeat` is a no-op heartbeat that
-returns a small execution summary and has no external network dependency.
+`agent_decommission`, `agent_runtime_removal`, `owner_lifecycle`, and
+`file_lifecycle_cleanup`. `scheduler_heartbeat` is a no-op heartbeat that returns a small execution
+summary and has no external network dependency.
 
 ## Execution backend
 
-Scheduler execution is abstracted by `TaskExecutor`.
+After claiming a due state row, `SchedulerService` submits one `JobRequest` to the shared
+application `JobRuntime` with handler key `scheduler.task`. The request carries the task key,
+attempt start time, lease owner, manual-trigger flag, an execution key scoped to that database claim,
+and an absolute deadline derived from the task timeout. The Scheduler waits for the structured Runtime
+outcome before recording success or failure.
 
-The v1 executor is `LocalTaskExecutor`, which calls the registered handler in the scheduler process with an asyncio timeout based on the task definition timeout.
+The current backend is the AppContext-owned `LocalJobRuntime`. It executes registered handlers with
+bounded process-local concurrency, enforces the absolute deadline and cancellation grace, and creates
+one task-local DI container for each execution. The `scheduler.task` adapter resolves the current
+code-registered definition, reconstructs `TaskContext`, and invokes its async handler. The same Job
+Runtime also hosts External Channel ingress through a separate registered handler; Scheduler claims
+do not use ingress coalescing or rerun behavior.
 
-Scheduler task handlers do not import Temporal APIs. A future durable execution backend would be added behind the `TaskExecutor` boundary.
+`job_runtime_backend=temporal` is a recognized configuration value but fails application composition
+because that backend is not implemented. Scheduler task handlers do not import Temporal APIs.
 
 ## Persistent state
 
@@ -99,7 +116,7 @@ Each loop iteration:
 1. Reads registered task definitions from code.
 2. Skips definitions that are not enabled by default.
 3. Tries to claim due work for each enabled task.
-4. Executes only tasks whose row lease claim succeeds.
+4. Submits only successfully claimed tasks to the shared Job Runtime and waits for their outcomes.
 5. Records success or failure and releases the lease.
 6. Sleeps until the next poll interval or shutdown signal.
 
@@ -289,6 +306,9 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-08-15** — v12. Replaced the removed `TaskExecutor` description with the shared
+  Job Runtime execution path, completed the registered task inventory, and added current Job Runtime
+  and lifecycle-service authority paths. Removed obsolete ArgoCD manifest references.
 - **2026-07-24** — v10. Clarified that lifecycle cleanup treats typed file provenance and nullable
   unresolved ModelFile Run lineage as metadata, never as User or execution authority.
 - **2026-07-26** — v11. Added the bounded five-minute `session_auto_archive` task and its

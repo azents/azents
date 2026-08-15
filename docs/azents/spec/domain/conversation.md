@@ -12,12 +12,10 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/run/types.py
-  - python/apps/azents/src/azents/engine/events/**
-  - python/apps/azents/src/azents-runtime-runner/**
+  - python/apps/azents-runtime-runner/**
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents/src/azents/worker/worker.py
-  - python/apps/azents/src/azents/worker/scheduler.py
   - python/apps/azents/src/azents/worker/live/**
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/broker/redis.py
@@ -33,11 +31,9 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
   - python/apps/azents/src/azents/rdb/models/chat_write_request.py
-  - python/apps/azents/src/azents/rdb/models/scheduled_task.py
   - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
   - python/apps/azents/src/azents/rdb/models/exchange_file.py
   - python/apps/azents/src/azents/repos/agent_session/**
-  - python/apps/azents/src/azents/repos/agent_run/**
   - python/apps/azents/src/azents/repos/agent_execution/**
   - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/repos/message/**
@@ -45,7 +41,6 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/chat_write_request/**
-  - python/apps/azents/src/azents/repos/scheduled_task/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/exchange_file/**
   - python/apps/azents/src/azents/repos/session_workspace_project/**
@@ -66,8 +61,6 @@ code_paths:
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/file_storage.py
   - python/apps/azents/src/azents/api/public/chat/**
-  - python/apps/azents/src/azents/api/internal/agent_home/v1/projects.py
-  - python/apps/azents/src/azents/api/internal/agent_home/v1/terminate.py
   - typescript/apps/azents-web/src/app/(app)/api/chat/exchange-files/**
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/features/agents/**
@@ -85,7 +78,6 @@ api_routes:
   - /chat/v1/sessions/{session_id}/inputs
   - /chat/v1/sessions/{session_id}/mailbox-items/{mailbox_item_id}
   - /chat/v1/sessions/{session_id}/edit-message
-  - /chat/v1/sessions/{session_id}/commands
   - /chat/v1/agents/{agent_id}/team-primary-session
   - /chat/v1/agents/{agent_id}/sessions
   - /chat/v1/agents/{agent_id}/sessions/messages
@@ -109,16 +101,14 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-  - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
-  - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-08-13
-spec_version: 147
+last_verified_at: 2026-08-15
+spec_version: 148
 ---
 
 # Conversation & Events
 
 The `conversation` domain owns `AgentSession`, event transcript events, durable
-`agent_runs`, mailbox items, exchange files, and scheduled task dispatch.
+`agent_runs`, mailbox items, and exchange files.
 
 Production agent execution now uses the event runtime. OpenAI Agents SDK `RunState` and legacy
 raw `runtime/llm.py` are not production conversation state.
@@ -150,7 +140,6 @@ erDiagram
     AgentSession ||--o{ SessionGitWorktree : "owned worktrees"
     AgentSession ||--o{ ActionExecution : "operation TurnAction executions"
     AgentRuntime ||--o{ ExchangeFile : "owns sandbox artifacts"
-    ScheduledTask }o--|| Agent : "targets"
 ```
 
 `AgentSession` is the conversation boundary. Direct session write routes target the requested session.
@@ -951,7 +940,7 @@ error message when diagram rendering fails.
 Chat route and collaboration inputs are prepared before model-call boundaries. The supported
 Mailbox kinds are `user_message`, `goal_continuation`, `turn_action_continuation`,
 `external_channel_continuation`, `action_message`, `agent_message`, and
-`external_channel_invocation`. Every mailbox envelope carries explicit scheduling intent and an
+`external_channel_message`. Every mailbox envelope carries explicit scheduling intent and an
 immutable typed payload whose ordered items use stable `(mailbox_item_id, item_key)` identity.
 Broker wake-ups are payload-free signals and never carry model input.
 
@@ -966,9 +955,9 @@ producers own wake-up and run-state transitions. User, Goal, action, spawn, and 
 `wake_session`; ordinary `send_message` and terminal `agent_result` inputs use `queue_only` and do not
 mark or wake the target session. Queue-only rows remain in FIFO order and are promoted with a later
 wake-producing input, but they do not count as follow-up work and do not prevent a session with no
-active Run from becoming idle. An External Channel invocation is ordinary FIFO input after its
-acceptance transaction commits the conversation-position advance, mailbox item, and Session running
-transition. Preparation handles exactly one FIFO head per transaction. The worker
+active Run from becoming idle. An External Channel message is ordinary FIFO input after its
+ingress finalization transaction commits the conversation-position advance, mailbox rows, and Session
+running transition. Preparation handles exactly one FIFO head per transaction. The worker
 first reads the head's identity and inference requirement, resolves the profile and attachment metadata outside any database session when needed, then locks the Session and
 the same FIFO head. Attachment resolution is metadata-only during promotion: it never downloads the
 Exchange file or creates a replacement ModelFile, and model rich input comes only from FileParts
@@ -985,7 +974,7 @@ Canonical outcomes are:
 | `goal_continuation`       | Durable `goal_continuation` event.                                                                                     |
 | `external_channel_continuation` | Durable `external_channel_continuation` event.                                                                    |
 | `agent_message`           | Durable `agent_message` event.                                                                                         |
-| `external_channel_invocation` | Contiguous source-attributed `external_channel_message` events.                                                   |
+| `external_channel_message` | One source-attributed `external_channel_message` event.                                                           |
 | `turn_action_continuation` | Invisible deterministic `system_reminder` after its predecessor Run is terminal; the turn becomes inference-eligible. |
 | Goal `action_message`     | Goal side effect plus canonical goal/user events; no `action_message` event.                                           |
 | Skill `action_message`    | `skill_loaded` plus optional `user_message`; no `action_message` event.                                                |
@@ -1005,15 +994,16 @@ denied all return 404. The response includes the root `product_mode` (`team` or 
 subagent rows) so clients can resolve Team/My navigation scope from an authorized detail response.
 Child subagent sessions are directly readable through this route and through history/live routes, but
 they are read-only for human chat writes.
-`POST /chat/v1/sessions/{session_id}/inputs` appends a user message input to an existing root
-session and rejects `session_kind = subagent` before creating a chat write request, mailbox item, live
+`POST /chat/v1/sessions/{session_id}/inputs` accepts one composer input for an existing root
+Session. An input without an action appends a user message, a command action creates an idle-only
+pending command, and other typed actions enter the turn-action flow. The route rejects
+`session_kind = subagent` before creating a chat write request, mailbox item, pending command, live
 projection, or broker wake-up.
 `POST /chat/v1/sessions/{session_id}/edit-message`,
-`POST /chat/v1/sessions/{session_id}/commands`, and
-`POST /chat/v1/sessions/{session_id}/retry-failed-run` are idle-only control boundaries. Message,
-edit, command, and failed-run retry write paths reject `session_kind = subagent` before write side
-effects; new subagent instructions must enter through parent-agent collaboration tools as
-`agent_message` input. All REST write
+`POST /chat/v1/sessions/{session_id}/retry-failed-run`, and command actions submitted through the
+input route are idle-only control boundaries. Message, edit, command, and failed-run retry write paths
+reject `session_kind = subagent` before write side effects; new subagent instructions must enter
+through parent-agent collaboration tools as `agent_message` input. All REST write
 requests require `client_request_id`; accepted writes are recorded in `chat_write_requests` so
 retries with the same key return the same accepted target instead of creating duplicate side effects.
 REST write idempotency is scoped to `(session_id, requester_user_id, client_request_id)`. The same
@@ -1143,14 +1133,15 @@ Current verification:
 
 ## 11. External Channel Conversation Projection
 
-An authorized External Channel invocation enters a Session through one deterministic
-mailbox envelope containing its immutable ordered provider-history projection. The
-acceptance transaction atomically advances the conversation position, commits the
-mailbox item, and makes the Session runnable. Promotion appends contiguous
-`external_channel_message` events. Provider-control delivery has no promotion gate.
+An authorized External Channel ingress batch admits each canonical provider message as
+one independent `external_channel_message` mailbox row. Rows from one processing
+batch share one order group and use contiguous sequence values in queue and provider-history
+order. The ingress finalization transaction atomically advances the conversation position,
+commits the mailbox rows, and makes the Session runnable. Promotion consumes each FIFO row
+into one `external_channel_message` event. Provider-control delivery has no promotion gate.
 
 Each event retains provider, resource/binding, canonical message and revision,
-sender, author type, provider timestamp, authorization state, lifecycle, and
+sender, author type, provider timestamp, `prompt_role = context | invocation`, lifecycle, and
 nullable validated original URL. Revisions may additionally retain bounded
 provider ID-to-display-name mappings; model lowering preserves raw IDs and
 renders the batch mapping table after the source messages. It is distinct from `user_message`: the
@@ -1160,12 +1151,15 @@ state without duplicate timeline rows.
 
 Edits and deletes do not rewrite a revision already projected into Session
 history. A later authorized release may append a source-attributed correction.
-Canonical provider messages remain outside AgentSession purge; batch membership
-and other Session-owned projection state follow the External Channel lifecycle
-participant.
+Provider history remains outside Conversation persistence; the source-attributed
+Event snapshots and other Session-owned projection state follow the AgentSession
+lifecycle.
 
 ## 12. Changelog
 
+- **2026-08-15** — v148. Removed stale user-facing Scheduled Task ownership, obsolete source/API
+  paths, and the obsolete standalone command route. Aligned External Channel mailbox terminology and
+  projection behavior with independent canonical message rows and `prompt_role`.
 - **2026-08-12** — v147. Added Agent-managed worktree bridge actions, atomic terminal
   history/continuation handoff, predecessor-Run fencing, and fresh-Run system-reminder promotion.
 - **2026-08-10** — v146. Made AgentRuntime optional for conversation execution, added nullable
