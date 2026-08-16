@@ -63,7 +63,7 @@ from azents.engine.events.engine_events import (
     RunStopped,
     SubagentTreeChanged,
 )
-from azents.engine.events.types import Event
+from azents.engine.events.types import Event, ExternalChannelMessagePayload
 from azents.engine.hooks.dispatcher import (
     RuntimeHookDispatcher,
     RuntimeHookProviderRef,
@@ -2974,7 +2974,16 @@ def has_actionable_tail(events: Sequence[Event]) -> bool:
         if latest_run_marker_index is not None
         else events
     )
-    return any(event.kind not in _NON_ACTIONABLE_TAIL_EVENT_KINDS for event in tail)
+    return any(_is_actionable_tail_event(event) for event in tail)
+
+
+def _is_actionable_tail_event(event: Event) -> bool:
+    """Return whether one uncovered event requires a new model turn."""
+    if event.kind in _NON_ACTIONABLE_TAIL_EVENT_KINDS:
+        return False
+    if isinstance(event.payload, ExternalChannelMessagePayload):
+        return event.payload.prompt_role == "invocation"
+    return True
 
 
 def _profile_resolution_failure(error: object) -> ProfileResolutionFailure:

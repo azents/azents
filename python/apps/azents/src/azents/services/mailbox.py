@@ -1569,15 +1569,10 @@ class ExternalChannelMessageMailboxProcessor:
         buffer: MailboxItem,
     ) -> MailboxPreparationOutcome:
         del context
-        if not isinstance(buffer.payload, ExternalChannelMessageMailboxPayload):
-            raise ValueError("External Channel MailboxItem payload is malformed.")
-        embedded = buffer.payload.items[0]
-        raw_payload = embedded.metadata.get("external_channel_message")
-        if not isinstance(raw_payload, dict):
-            raise ValueError("External Channel mailbox message is malformed.")
-        payload = ExternalChannelMessagePayload.model_validate(raw_payload)
+        decoded = _decode_external_channel_message(buffer)
+        payload = decoded.payload
         promoted: list[_PromotedMailboxItem] = []
-        if buffer.payload.context_omitted:
+        if decoded.mailbox_payload.context_omitted:
             reminder = SystemReminderPayload(
                 text=_EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER
             )
@@ -1602,15 +1597,20 @@ class ExternalChannelMessageMailboxProcessor:
                     payload.model_dump(mode="json")
                 ),
                 external_id=payload.projection_root_id,
-                item_key=embedded.item_key,
+                item_key=decoded.embedded.item_key,
                 initial_title_eligible=(
-                    buffer.payload.initial_title_eligible
+                    decoded.mailbox_payload.initial_title_eligible
                     and payload.prompt_role == "invocation"
                     and payload.author_type is ExternalChannelPrincipalAuthorType.HUMAN
                 ),
             )
         )
-        return _preparation_outcome(promoted, TurnEffect.ELIGIBLE)
+        turn_effect = (
+            TurnEffect.ELIGIBLE
+            if payload.prompt_role == "invocation"
+            else TurnEffect.NEUTRAL
+        )
+        return _preparation_outcome(promoted, turn_effect)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1781,9 +1781,13 @@ def _buffer_requires_inference(buffer: MailboxItem) -> bool:
             | MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
             | MailboxItemKind.TURN_ACTION_CONTINUATION
             | MailboxItemKind.AGENT_MESSAGE
-            | MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE
         ):
             return True
+        case MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE:
+            return (
+                _decode_external_channel_message(buffer).payload.prompt_role
+                == "invocation"
+            )
         case MailboxItemKind.ACTION_MESSAGE:
             if buffer.presentation.action is None:
                 raise ValueError("Action message input buffer requires action payload")
@@ -1793,6 +1797,32 @@ def _buffer_requires_inference(buffer: MailboxItem) -> bool:
             return isinstance(action, GoalAction | SkillAction)
         case _:
             assert_never(buffer.kind)
+
+
+@dataclasses.dataclass(frozen=True)
+class _DecodedExternalChannelMailboxMessage:
+    """Typed External Channel mailbox boundary."""
+
+    mailbox_payload: ExternalChannelMessageMailboxPayload
+    payload: ExternalChannelMessagePayload
+    embedded: MailboxPresentationItem
+
+
+def _decode_external_channel_message(
+    buffer: MailboxItem,
+) -> _DecodedExternalChannelMailboxMessage:
+    """Decode one typed External Channel message from its mailbox boundary."""
+    if not isinstance(buffer.payload, ExternalChannelMessageMailboxPayload):
+        raise ValueError("External Channel MailboxItem payload is malformed.")
+    embedded = buffer.payload.items[0]
+    raw_payload = embedded.metadata.get("external_channel_message")
+    if not isinstance(raw_payload, dict):
+        raise ValueError("External Channel mailbox message is malformed.")
+    return _DecodedExternalChannelMailboxMessage(
+        mailbox_payload=buffer.payload,
+        payload=ExternalChannelMessagePayload.model_validate(raw_payload),
+        embedded=embedded,
+    )
 
 
 def _turn_action_continuation_text(

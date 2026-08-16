@@ -8,7 +8,7 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 from azcommon.result import Failure, Success
@@ -25,6 +25,9 @@ from azents.core.enums import (
     AgentRuntimeCapability,
     AgentSessionKind,
     EventKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
 )
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
@@ -55,6 +58,7 @@ from azents.engine.events.types import (
     ActiveToolCall,
     AssistantMessagePayload,
     Event,
+    ExternalChannelMessagePayload,
     NativeArtifact,
     RunMarkerPayload,
     SystemErrorPayload,
@@ -4285,6 +4289,53 @@ def test_actionable_tail_detects_goal_update_after_run_marker() -> None:
     )
 
     assert has_actionable_tail([run_marker, goal_update])
+
+
+@pytest.mark.parametrize(
+    ("prompt_role", "expected"),
+    [
+        ("context", False),
+        ("invocation", True),
+    ],
+)
+def test_actionable_tail_uses_external_channel_prompt_role(
+    prompt_role: Literal["context", "invocation"],
+    expected: bool,
+) -> None:
+    """Only the correlated External Channel invocation starts a model turn."""
+    message = Event(
+        id="1123456789abcdef0123456789abcdea",
+        session_id="session-1",
+        kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        payload=ExternalChannelMessagePayload(
+            provider=ExternalChannelProvider.DISCORD,
+            provider_tenant_id="tenant-1",
+            resource_id="resource-1",
+            resource_label="channel-1",
+            resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+            binding_id="binding-1",
+            invocation_batch_id="batch-1",
+            external_message_id="message-1",
+            projection_root_id="external-channel:binding-1:message-1",
+            provider_message_key="discord:tenant-1:message-1",
+            provider_position="1",
+            principal_id="principal-1",
+            provider_user_id="user-1",
+            sender_display_name="User",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            prompt_role=prompt_role,
+            body="hello",
+            attachment_metadata={},
+            provider_created_at=run_executor_module.tznow(),
+            provider_updated_at=None,
+            original_url=None,
+            truncated_context_message_count=0,
+            truncated_context_size=0,
+        ),
+        created_at=run_executor_module.tznow(),
+    )
+
+    assert has_actionable_tail([message]) is expected
 
 
 @pytest.mark.asyncio
