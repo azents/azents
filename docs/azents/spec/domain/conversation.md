@@ -101,8 +101,8 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-last_verified_at: 2026-08-15
-spec_version: 148
+last_verified_at: 2026-08-16
+spec_version: 149
 ---
 
 # Conversation & Events
@@ -965,7 +965,9 @@ Exchange file or creates a replacement ModelFile, and model rich input comes onl
 stored on the mailbox item at its creation boundary. If the identity changed while external preparation
 ran, the worker discards the stale result and starts again. Successful preparation atomically updates
 the complete Session inference snapshot, applies Goal/Skill state changes, appends canonical events,
-associates input events with the active run, and deletes the source mailbox item.
+associates input events with the active run, and deletes the source mailbox item. After one row
+commits, the same leased runner reads the next FIFO head without rebuilding canonical execution
+authority. Concurrent appends are consumed by a later loop iteration or wake-up.
 
 Canonical outcomes are:
 
