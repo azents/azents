@@ -10,18 +10,10 @@ from azents.core.enums import AgentRuntimeCapability, AgentSessionKind
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
-from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
-from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
-from azents.services.agent_runtime.service import AgentRuntimeService
-from azents.services.runtime_storage_error import RuntimeStorageError
-from azents.services.session_workspace_project import (
-    normalize_agent_workspace_root,
-    normalize_session_workspace_project_paths,
-)
 
 from .data import (
     AgentDefaultRootWorkspaceIntent,
@@ -52,17 +44,9 @@ class RootAgentSessionCreationService:
         AgentAutomaticProjectRepository,
         Depends(AgentAutomaticProjectRepository),
     ]
-    agent_runtime_repository: Annotated[
-        AgentRuntimeRepository,
-        Depends(AgentRuntimeRepository),
-    ]
     session_workspace_project_repository: Annotated[
         SessionWorkspaceProjectRepository,
         Depends(SessionWorkspaceProjectRepository),
-    ]
-    runtime_target_resolver: Annotated[
-        RuntimeOperationTargetResolver,
-        Depends(AgentRuntimeService),
     ]
 
     async def create_root_session(
@@ -72,7 +56,7 @@ class RootAgentSessionCreationService:
         create: AgentSessionCreate,
         workspace_intent: RootWorkspaceIntent,
     ) -> RootAgentSessionCreationResult:
-        """Create one non-racing root Session and its Project snapshot."""
+        """Create one non-racing root Session without Runtime I/O."""
         if create.session_kind is not AgentSessionKind.ROOT:
             raise ValueError("Root AgentSession creation requires a root Session")
         if create.primary_kind is not None:
@@ -110,10 +94,29 @@ class RootAgentSessionCreationService:
         workspace_id: str,
         agent_id: str,
     ) -> RootAgentSessionCreationResult:
-        """Ensure team primary and snapshot policy only for its insert winner."""
+        """Ensure team primary without waiting for Runtime state."""
         agent = await self.agent_repository.lock_by_id(session, agent_id)
         if agent is None:
             raise ValueError("Agent is unavailable")
+        self._require_runtime_capability(
+            agent.runtime_capability,
+            runtime_dependent=False,
+        )
+        existing = await self.agent_session_repository.get_team_primary_by_agent_id(
+            session,
+            agent_id,
+        )
+        if existing is not None:
+            projects = await self.session_workspace_project_repository.list_projects(
+                session,
+                session_id=existing.id,
+            )
+            return RootAgentSessionCreationResult(
+                agent_session=existing,
+                created=False,
+                initial_project_paths=tuple(project.path for project in projects),
+                policy_revision=None,
+            )
         policy = await self._require_automatic_project_policy(
             session,
             agent_id=agent_id,
@@ -122,14 +125,6 @@ class RootAgentSessionCreationService:
             agent.runtime_capability,
             runtime_dependent=bool(policy.project_paths),
         )
-        project_paths = policy.project_paths
-        if project_paths:
-            project_paths = tuple(
-                normalize_session_workspace_project_paths(
-                    list(project_paths),
-                    workspace_root=await self._workspace_root(session, agent_id),
-                )
-            )
         ensured = await self.agent_session_repository.ensure_team_primary_for_agent(
             session,
             workspace_id=workspace_id,
@@ -150,12 +145,12 @@ class RootAgentSessionCreationService:
         await self._create_projects(
             session,
             session_id=ensured.session.id,
-            project_paths=project_paths,
+            project_paths=policy.project_paths,
         )
         return RootAgentSessionCreationResult(
             agent_session=ensured.session,
             created=True,
-            initial_project_paths=project_paths,
+            initial_project_paths=policy.project_paths,
             policy_revision=policy.revision,
         )
 
@@ -167,7 +162,7 @@ class RootAgentSessionCreationService:
         capability: AgentRuntimeCapability,
         workspace_intent: RootWorkspaceIntent,
     ) -> _ResolvedRootWorkspace:
-        """Resolve explicit or Agent-default Project paths before row creation."""
+        """Resolve a prevalidated Project snapshot without Runtime I/O."""
         match workspace_intent:
             case ExplicitRootWorkspaceIntent(existing_project_paths=paths):
                 if not paths:
@@ -180,15 +175,7 @@ class RootAgentSessionCreationService:
                     runtime_dependent=True,
                 )
                 return _ResolvedRootWorkspace(
-                    project_paths=tuple(
-                        normalize_session_workspace_project_paths(
-                            paths,
-                            workspace_root=await self._workspace_root(
-                                session,
-                                agent_id,
-                            ),
-                        )
-                    ),
+                    project_paths=tuple(paths),
                     policy_revision=None,
                 )
             case AgentDefaultRootWorkspaceIntent():
@@ -206,15 +193,7 @@ class RootAgentSessionCreationService:
                     runtime_dependent=True,
                 )
                 return _ResolvedRootWorkspace(
-                    project_paths=tuple(
-                        normalize_session_workspace_project_paths(
-                            list(policy.project_paths),
-                            workspace_root=await self._workspace_root(
-                                session,
-                                agent_id,
-                            ),
-                        )
-                    ),
+                    project_paths=policy.project_paths,
                     policy_revision=policy.revision,
                 )
             case _:
@@ -234,21 +213,6 @@ class RootAgentSessionCreationService:
         if policy is None:
             raise RuntimeError("Agent automatic Project policy is missing")
         return policy
-
-    async def _workspace_root(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-    ) -> str:
-        """Return the exact current Runner-reported Agent Workspace root."""
-        del session
-        try:
-            runtime = await self.runtime_target_resolver.resolve_operation_target(
-                agent_id
-            )
-        except RuntimeStorageError as exc:
-            raise ValueError(str(exc)) from exc
-        return normalize_agent_workspace_root(runtime.workspace_path).as_posix()
 
     @staticmethod
     def _require_runtime_capability(
