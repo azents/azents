@@ -9,8 +9,8 @@ tags: [scheduled-task, scheduler, engine, external-channel, api, frontend, teste
 - Requirements: [`scheduled-260816/REQ`](../requirements/scheduled-260816-agent-scheduled-tasks.md)
 - Decisions: [`scheduled-260816/ADR`](../adr/scheduled-260816-agent-scheduled-tasks.md)
 - Approved Design: [`scheduled-260816/DESIGN`](../design/scheduled-260816-agent-scheduled-tasks.md)
-- Approved Design revision: `2`
-- Approved mechanism IDs: `M1` through `M14`
+- Approved Design revision: `3`
+- Approved mechanism IDs: `M1` through `M15`
 - Design delta: `None`
 - Implementation owner: Primary agent (`/root`)
 - Independent reviewer: `scheduled-stack-reviewer` (`/root/scheduled-stack-reviewer`)
@@ -26,15 +26,15 @@ monitoring begins.
 
 | Phase | Branch | Base | PR title | Approved mechanisms | Primary boundary |
 | --- | --- | --- | --- | --- | --- |
-| Docs | `feature/scheduled-tasks-0-docs` | `origin/main` | `Scheduled Tasks: Approve design and delivery plan` | approved `M1`–`M14` authority | Requirements, ADR, approved Design revision 2, implementation plan, and Phase 1 execution plan |
+| Docs | `feature/scheduled-tasks-0-docs` | `origin/main` | `Scheduled Tasks: Approve design and delivery plan` | approved `M1`–`M15` authority | Requirements, ADR, approved Design revision 3, implementation plan, and Phase 1 execution plan |
 | 1 | `feature/scheduled-tasks-1-foundation` | Docs | `Scheduled Tasks [1/8]: Add the domain foundation` | `M1`, `M3`, `M4`, `M13`, `M14` | generated schema migration, Task persistence, AgentRun binding field, closed Mailbox/Event readers and projections |
 | 2 | `feature/scheduled-tasks-2-dispatch` | Phase 1 | `Scheduled Tasks [2/8]: Add dispatch and start admission` | `M1`, `M2`, `M3`, `M4`, `M13` | schedule validation, Task service, bounded Scheduler dispatcher, cycle admission, FIFO trigger, pending-to-started Run binding |
-| 3 | `feature/scheduled-tasks-3-toolkit` | Phase 2 | `Scheduled Tasks [3/8]: Add ScheduledToolkit execution` | `M3`, `M5`, `M9`, `M10`, `M13` | root-only auto-bound Toolkit, managed Skill VFS source, idle continuation, terminal result transaction, run-terminal tool behavior |
+| 3 | `feature/scheduled-tasks-3-toolkit` | Phase 2 | `Scheduled Tasks [3/8]: Add ScheduledToolkit execution` | `M3`, `M5`, `M9`, `M10`, `M13`, `M15` | root-only auto-bound Toolkit, managed Skill VFS source, idle and compaction continuity, terminal result transaction, run-terminal tool behavior |
 | 4 | `feature/scheduled-tasks-4-channel` | Phase 3 | `Scheduled Tasks [4/8]: Add channel presentation and progress` | `M6`, `M8`, `M12` | exact Binding revalidation, registration controls, Scheduled-owned Tracker, interim progress, terminal publication and exact-thread parent surfacing |
 | 5 | `feature/scheduled-tasks-5-lifecycle` | Phase 4 | `Scheduled Tasks [5/8]: Integrate Session and Binding lifecycle` | `M4`, `M7`, `M12` | Task and pre-start cleanup, started-cycle preservation, Scheduled-aware archive admission, Binding terminalization, purge ordering |
 | 6 | `feature/scheduled-tasks-6-api` | Phase 5 | `Scheduled Tasks [6/8]: Add the Public API and clients` | `M11`, `M12`, `M13` | versioned CRUD/current-cycle API, service authorization, OpenAPI, generated Python and TypeScript clients |
 | 7 | `feature/scheduled-tasks-7-web` | Phase 6 | `Scheduled Tasks [7/8]: Add the management interface` | `M11`, `M12` | dedicated Agent route, list/create/edit/delete/progress UI, Session and opaque Binding selection, navigation, stories and localization |
-| 8 | `feature/scheduled-tasks-8-validation` | Phase 7 | `Scheduled Tasks [8/8]: Validate and document the feature` | full `M1`–`M14` validation | deterministic testenv/E2E, failure and recovery matrix, removal evidence, Living Spec promotion, implementation dates, plan cleanup |
+| 8 | `feature/scheduled-tasks-8-validation` | Phase 7 | `Scheduled Tasks [8/8]: Validate and document the feature` | full `M1`–`M15` validation | deterministic testenv/E2E, failure and recovery matrix, removal evidence, Living Spec promotion, implementation dates, plan cleanup |
 
 ## Fixed Interfaces and Integration Boundaries
 
@@ -99,7 +99,7 @@ monitoring begins.
 
 ### Phase 1 — Domain foundation
 
-Inputs: approved revision 2, current PostgreSQL model conventions, closed
+Inputs: approved revision 3, current PostgreSQL model conventions, closed
 Mailbox/Event registries, and the current AgentRun schema.
 
 Outputs:
@@ -141,6 +141,8 @@ Outputs:
 - immutable managed Skill VFS projection under
   `azents://skills/scheduled/scheduled-task/SKILL.md`;
 - cycle-specific dynamic guidance and deterministic idle continuation;
+- sanitized active-cycle compaction-summary enrichment through the existing ordered
+  hook pipeline;
 - run-bound terminal tool, dedicated result Event, idempotent terminal transaction,
   one-time deletion, recurring pending/future advancement, and no-extra-turn Run
   completion; and
@@ -282,7 +284,9 @@ implementation owners edit the same file concurrently. The reviewer never edits.
   filters, transcript/history/live projections, and exhaustive-match type checks.
 - Scheduler and execution: lease reclaim, DST, missed/coalesced occurrences, one active
   plus one pending, wake loss, FIFO ordering, deletion race, Run recovery, idle
-  continuation, terminal idempotency, and no-extra-turn completion.
+  continuation, multiple-cycle compaction continuity during unrelated Runs,
+  deterministic due-time tie ordering, stale-section replacement, lifecycle
+  independence, sanitization, terminal idempotency, and no-extra-turn completion.
 - External Channel: opaque Binding authorization, registration controls, Scheduled
   Tracker coexistence, progress fences, Slack broadcast, Discord forward, multipart
   order, provider failure/ambiguity, cleanup, and no replay.
@@ -324,7 +328,7 @@ implementation owners edit the same file concurrently. The reviewer never edits.
 
 The exact independent reviewer for every phase is
 `/root/scheduled-stack-reviewer`. Review inputs are the confirmed Requirements,
-accepted ADR-D1 through D7, approved Design revision 2 and M1–M14, current Living
+accepted ADR-D1 through D7, approved Design revision 3 and M1–M15, current Living
 Specs, the phase execution plan, focused evidence, and the stable phase diff.
 
 Review priority is Requirements and Design authority, security/privacy, migration

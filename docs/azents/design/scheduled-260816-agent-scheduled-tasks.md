@@ -14,7 +14,7 @@ snapshot_id: scheduled-260816
 - Document reference: `scheduled-260816/DESIGN`
 - Requirements: [Agent Scheduled Tasks Requirements](../requirements/scheduled-260816-agent-scheduled-tasks.md) (`scheduled-260816/REQ`)
 - ADR: [Agent Scheduled Tasks](../adr/scheduled-260816-agent-scheduled-tasks.md) (`scheduled-260816/ADR`)
-- Design revision: `2`
+- Design revision: `3`
 - Mode: Collaborative
 - Decision owner: requester
 
@@ -32,12 +32,12 @@ wake. The AgentWorker starts the occurrence through the normal Session FIFO and 
 the resulting AgentRun to exactly one internal work-cycle identity.
 
 The automatically connected `ScheduledToolkit` owns Agent management tools, current
-cycle guidance, the terminal result tool, idle continuation, work-cycle Toolkit
-State, and the release-bundled Scheduled Task Skill. A terminal result is committed
-to the Session before any provider effect. Channel registration, progress, terminal
-publication, exact-thread parent surfacing, and Tracker cleanup reuse the current
-External Channel authorization and provider primitives without sharing canonical
-Channel Work state.
+cycle guidance, the terminal result tool, idle continuation, compaction continuity,
+work-cycle Toolkit State, and the release-bundled Scheduled Task Skill. A terminal
+result is committed to the Session before any provider effect. Channel registration,
+progress, terminal publication, exact-thread parent surfacing, and Tracker cleanup
+reuse the current External Channel authorization and provider primitives without
+sharing canonical Channel Work state.
 
 ## Current Behavior and Gaps
 
@@ -54,6 +54,7 @@ The current Session execution path already provides:
 - Session owner-generation fencing and recoverable AgentRuns;
 - typed Mailbox and Event unions with exhaustive lowering;
 - Session-scoped Toolkit State with schema versions and optimistic concurrency;
+- ordered Toolkit compaction-summary enrichment before continuity history is appended;
 - idle-hook continuation through fresh AgentRuns;
 - Session archive orchestration and execution-control fencing; and
 - immutable run-scoped managed Skill VFS projections.
@@ -98,6 +99,7 @@ behavior or authority.
 | `scheduled-260816/REQ-15` | Session lifecycle participant and Binding-terminalization integration | D3, D4, D6 |
 | `scheduled-260816/REQ-16` | Management projection, current-cycle projection, canonical Session navigation | D1, D3, D5, D6 |
 | `scheduled-260816/REQ-17` | Toolkit-owned VFS Skill package and provider-neutral creation workflow | D7 |
+| `scheduled-260816/REQ-18` | ScheduledToolkit compaction-summary projection from started cycle state | D3, D7 |
 
 ## Architecture and Ownership
 
@@ -452,6 +454,33 @@ The idle hook queries started nonterminal cycles in the current Session. It retu
 `scheduled_task_continuation` Mailbox item with an internal cycle ID and the same
 model-facing runtime message. This also restores continuation after unrelated FIFO
 human work ran between Scheduled Task Runs.
+
+### Compaction continuity
+
+The ScheduledToolkit participates in the existing ordered
+`on_compaction_summary` hook pipeline. The hook performs a non-locking Session-scoped
+query for Scheduled cycle Toolkit State and selects every current `started` cycle in
+deterministic `scheduled_for`, cycle-ID order. The cycle ID is used only for stable
+ordering and is never rendered.
+
+Only present `started` cycles are active compaction work. An `admitted` cycle is
+omitted because its first AgentRun has not crossed the start boundary. State removed
+before the non-locking query snapshot by terminalization or pre-start deletion is
+also omitted. The hook never creates, mutates, reactivates, or terminalizes Task or
+cycle state.
+
+The hook replaces any prior Scheduled work snapshot in the evolving summary and
+renders one bounded provider-neutral entry per active cycle containing:
+
+- title and objective;
+- complete canonical schedule and current `scheduled_for`;
+- current progress title and ordered tasks when present; and
+- continuation and terminal-action guidance.
+
+The renderer excludes Task, cycle, Session, Binding, provider identity, lease,
+credential, internal scheduler state, and prior terminal-result data. The enriched
+text becomes part of the canonical Compaction Summary Event and later model context;
+there is no separate Scheduled compaction ledger or persistence authority.
 
 ## Managed Scheduled Task Skill
 
@@ -861,7 +890,13 @@ they never wait for wall-clock cron boundaries. They verify:
 14. Slack thread parts use broadcast and Discord Thread parts are forwarded in order;
 15. UI CRUD, dedicated Session create/select, progress display, and Session
     navigation; and
-16. no terminal history, pause, resume, rerun, or cancel-current-cycle UI appears.
+16. no terminal history, pause, resume, rerun, or cancel-current-cycle UI appears;
+    and
+17. repeated compaction with multiple started cycles and unrelated current Runs
+    preserves sanitized current-work snapshots in deterministic tie order, replaces
+    stale Scheduled sections, and omits admitted or terminalized state as of the
+    read snapshot, including after Task deletion, Session archive, or Binding
+    disconnect.
 
 ### Testenv and fixtures
 
@@ -898,8 +933,8 @@ CI evidence includes:
 
 Backend unit and integration tests additionally cover cron/DST calculation, SQL
 constraints and leases, exhaustive unions and all model lowerers, Toolkit State
-optimistic conflicts, terminal idempotency, provider projection fences, and lifecycle
-registry ownership.
+optimistic conflicts, compaction-summary ordering and sanitization, terminal
+idempotency, provider projection fences, and lifecycle registry ownership.
 
 ## Alternatives, Assumptions, and Non-Blocking Risks
 
@@ -936,6 +971,7 @@ Non-blocking implementation risks:
 | AgentRun recovery binding | Feasible | AgentRun is already durable and worker recovery resumes running Runs |
 | Toolkit State cycles | Feasible | Session-bound namespaced state and optimistic handles already exist |
 | Idle continuation | Feasible | Runtime hooks already emit multiple typed continuation inputs |
+| Compaction continuity | Feasible | Existing ordered `on_compaction_summary` hooks enrich both manual and automatic compaction before the canonical Compaction Summary Event is persisted |
 | Terminal Session Event | Feasible | Event transcript supports deterministic append and complete lowerer projection |
 | Auto-bound ScheduledToolkit | Feasible | Goal, Todo, External Channel, and other auto-bound providers establish the pattern |
 | Toolkit-owned managed Skill | Feasible | Provider release VFS roots exist; eligibility requires a bounded auto-source extension |
@@ -950,12 +986,13 @@ Non-blocking implementation risks:
 | Deterministic verification | Feasible | Testenv Scheduler controls, E2E substrate, fake provider patterns, and lifecycle fixtures exist |
 
 No confirmed Requirement or accepted ADR is blocked. The auto-bound VFS source,
-Run-start cycle binding, Scheduled-specific progress routing, and Discord forwarding
-operation are required bounded extensions, not new authorities.
+Run-start cycle binding, Scheduled-specific progress routing, compaction-summary
+projection, and Discord forwarding operation are required bounded extensions, not
+new authorities.
 
 ## Design Authority
 
-- Design revision: `2`
+- Design revision: `3`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -973,6 +1010,7 @@ operation are required bounded extensions, not new authorities.
 | M12 | Exact Binding handles remain opaque and all Agent, Web, and provider mutations revalidate current Session/Binding authority | `scheduled-260816/REQ-1`, `REQ-2`, `REQ-5`, `REQ-9`, `REQ-10`, `REQ-15`, `REQ-17`; current External Channel authorization contract | `required` |
 | M13 | New typed trigger, continuation, and result variants extend every closed Mailbox/Event/lowerer/public projection boundary | `scheduled-260816/REQ-6`, `REQ-8`; `scheduled-260816/ADR-D2`, D5; current exhaustive engine-union constraint | `derived` |
 | M14 | Migration adds only new schema and no historical Task backfill, compatibility mode, or second scheduler | `scheduled-260816/REQ-13`, `REQ-14`; `scheduled-260816/ADR-D1`; historical removal evidence | `derived` |
+| M15 | ScheduledToolkit enriches canonical compaction summaries from current started cycle state without adding another persistence authority | `scheduled-260816/REQ-18`; `scheduled-260816/ADR-D3`, D7; current compaction-summary hook and Event contracts | `derived` |
 
 ## Removal and Replacement
 
@@ -992,6 +1030,6 @@ operation are required bounded extensions, not new authorities.
 - Mode: `Collaborative`
 - Decision owner: `requester`
 - Approved on: `2026-08-16`
-- Approved Design revision: `2`
-- Approved authority IDs: `M1`–`M14`
-- Approved scope: All material mechanisms in revision 2, including PostgreSQL scheduling authority, FIFO Session admission, Scheduled-owned cycle state and provider projections, canonical Session terminal results before one-attempt provider effects, exact Binding preservation, lifecycle removal of Tasks and pre-start work without interruption of started cycles, Public API and Web management, release-bundled Agent guidance, new typed protocol variants, and additive migration without legacy compatibility.
+- Approved Design revision: `3`
+- Approved authority IDs: `M1`–`M15`
+- Approved scope: All material mechanisms in revision 3, including PostgreSQL scheduling authority, FIFO Session admission, Scheduled-owned cycle state and provider projections, canonical Session terminal results before one-attempt provider effects, exact Binding preservation, lifecycle removal of Tasks and pre-start work without interruption of started cycles, Public API and Web management, release-bundled Agent guidance, sanitized compaction continuity for started work, new typed protocol variants, and additive migration without legacy compatibility.

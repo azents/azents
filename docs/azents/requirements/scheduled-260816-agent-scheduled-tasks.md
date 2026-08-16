@@ -367,6 +367,32 @@ The Agent must use built-in Scheduled Task guidance to translate user requests i
 - Explanation-only requests do not create a Task.
 - The Skill uses provider-neutral External Channel, channel handle, and conversation-scope concepts; provider-specific presentation remains owned by the existing External Channel implementation.
 
+### REQ-18. Compaction continuity for active work
+
+Active Scheduled Task work must remain explicit in compacted Session context so the
+Agent can continue the same work cycle without losing its objective or terminal
+responsibility.
+
+**Acceptance criteria**
+
+- When Session context is compacted while one or more started nonterminal work cycles
+  exist, the resulting compaction summary includes every current Scheduled Task work
+  cycle.
+- The compacted work snapshot includes the title, objective, complete canonical
+  schedule, current cycle's `scheduled_for` instant, and current provider-neutral
+  progress when present.
+- The compacted work snapshot reminds the Agent that the work cycle remains active
+  until it submits a finished or failed result through the terminal action.
+- An admitted occurrence whose first Agent run has not started is not included as
+  active work.
+- A terminalized work cycle is not included.
+- Every started work cycle remains eligible for compaction continuity after its Task
+  definition is deleted or its owning Session or Binding lifecycle changes.
+- The compacted snapshot exposes no Task, work-cycle, Session, Binding, provider
+  identity, lease, credential, internal scheduler state, or prior terminal result.
+- Compaction reads current work without creating, changing, reactivating, or
+  terminalizing a work cycle.
+
 ## Fixed Constraints
 
 - Current Living Specs and current source code describe existing behavior only; historical Scheduled Task documents do not define this snapshot's product intent.
@@ -386,4 +412,7 @@ The Agent must use built-in Scheduled Task guidance to translate user requests i
 
 ## Confirmation
 
-Confirmed by the requester on 2026-08-16 before ADR and Design work began.
+REQ-1 through REQ-17 were confirmed by the requester on 2026-08-16 before ADR and
+Design work began. REQ-18 was confirmed by the requester on 2026-08-16 through an
+explicit implementation-scope addition while the unimplemented design was being
+shipped.
