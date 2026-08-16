@@ -255,6 +255,12 @@ Class | Method | HTTP request | Description
 *RuntimeProfileV1Api* | [**runtime_profile_v1_replace_workspace_runtime_profile_default**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_replace_workspace_runtime_profile_default) | **PUT** /runtime-profile/v1/workspaces/{handle}/default | Replace Workspace Runtime Profile Default
 *RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_exchange_credential**](azentspublicclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_exchange_credential) | **POST** /runtime-provider-enrollment/v1/credentials/exchange | Exchange Credential
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_workspace_runtime_providers**](azentspublicclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_workspace_runtime_providers) | **GET** /runtime-provider/v1/workspaces/{handle}/providers | List Workspace Runtime Providers
+*ScheduledTaskV1Api* | [**scheduled_task_v1_create_scheduled_task**](azentspublicclient/docs/ScheduledTaskV1Api.md#scheduled_task_v1_create_scheduled_task) | **POST** /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks | Create Scheduled Task
+*ScheduledTaskV1Api* | [**scheduled_task_v1_delete_scheduled_task**](azentspublicclient/docs/ScheduledTaskV1Api.md#scheduled_task_v1_delete_scheduled_task) | **DELETE** /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id} | Delete Scheduled Task
+*ScheduledTaskV1Api* | [**scheduled_task_v1_get_scheduled_task**](azentspublicclient/docs/ScheduledTaskV1Api.md#scheduled_task_v1_get_scheduled_task) | **GET** /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id} | Get Scheduled Task
+*ScheduledTaskV1Api* | [**scheduled_task_v1_get_scheduled_task_cycle**](azentspublicclient/docs/ScheduledTaskV1Api.md#scheduled_task_v1_get_scheduled_task_cycle) | **GET** /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle | Get Scheduled Task Cycle
+*ScheduledTaskV1Api* | [**scheduled_task_v1_list_scheduled_tasks**](azentspublicclient/docs/ScheduledTaskV1Api.md#scheduled_task_v1_list_scheduled_tasks) | **GET** /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks | List Scheduled Tasks
+*ScheduledTaskV1Api* | [**scheduled_task_v1_replace_scheduled_task**](azentspublicclient/docs/ScheduledTaskV1Api.md#scheduled_task_v1_replace_scheduled_task) | **PUT** /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id} | Replace Scheduled Task
 *SecurityV1Api* | [**security_v1_elevate_with_email**](azentspublicclient/docs/SecurityV1Api.md#security_v1_elevate_with_email) | **POST** /security/v1/elevate/email | Elevate With Email
 *SecurityV1Api* | [**security_v1_elevate_with_password**](azentspublicclient/docs/SecurityV1Api.md#security_v1_elevate_with_password) | **POST** /security/v1/elevate/password | Elevate With Password
 *SecurityV1Api* | [**security_v1_get_auth_methods**](azentspublicclient/docs/SecurityV1Api.md#security_v1_get_auth_methods) | **GET** /security/v1/auth-methods | Get Auth Methods
@@ -315,6 +321,7 @@ Class | Method | HTTP request | Description
  - [AgentAdminAddRequest](azentspublicclient/docs/AgentAdminAddRequest.md)
  - [AgentAdminListResponse](azentspublicclient/docs/AgentAdminListResponse.md)
  - [AgentAdminResponse](azentspublicclient/docs/AgentAdminResponse.md)
+ - [AgentCreateGitWorktreeAction](azentspublicclient/docs/AgentCreateGitWorktreeAction.md)
  - [AgentCreateRequest](azentspublicclient/docs/AgentCreateRequest.md)
  - [AgentDecommissionResponse](azentspublicclient/docs/AgentDecommissionResponse.md)
  - [AgentListResponse](azentspublicclient/docs/AgentListResponse.md)
@@ -322,6 +329,7 @@ Class | Method | HTTP request | Description
  - [AgentModelSelectionInput](azentspublicclient/docs/AgentModelSelectionInput.md)
  - [AgentProjectPresetListResponse](azentspublicclient/docs/AgentProjectPresetListResponse.md)
  - [AgentProjectPresetResponse](azentspublicclient/docs/AgentProjectPresetResponse.md)
+ - [AgentRemoveGitWorktreeAction](azentspublicclient/docs/AgentRemoveGitWorktreeAction.md)
  - [AgentResponse](azentspublicclient/docs/AgentResponse.md)
  - [AgentRunPhase](azentspublicclient/docs/AgentRunPhase.md)
  - [AgentRunStatus](azentspublicclient/docs/AgentRunStatus.md)
@@ -591,6 +599,7 @@ Class | Method | HTTP request | Description
  - [PendingMailboxExternalChannelPresentation](azentspublicclient/docs/PendingMailboxExternalChannelPresentation.md)
  - [PendingMailboxGoalContinuationPresentation](azentspublicclient/docs/PendingMailboxGoalContinuationPresentation.md)
  - [PendingMailboxItem](azentspublicclient/docs/PendingMailboxItem.md)
+ - [PendingMailboxScheduledTaskPresentation](azentspublicclient/docs/PendingMailboxScheduledTaskPresentation.md)
  - [PendingMailboxUserMessagePresentation](azentspublicclient/docs/PendingMailboxUserMessagePresentation.md)
  - [PlatformGitHubAppAuthorizationReason](azentspublicclient/docs/PlatformGitHubAppAuthorizationReason.md)
  - [PrepareSessionWorkingFolderRequest](azentspublicclient/docs/PrepareSessionWorkingFolderRequest.md)
@@ -656,6 +665,15 @@ Class | Method | HTTP request | Description
  - [RuntimeRunnerState](azentspublicclient/docs/RuntimeRunnerState.md)
  - [RuntimeSummary](azentspublicclient/docs/RuntimeSummary.md)
  - [RuntimeTerminalDeleteAcknowledgementKind](azentspublicclient/docs/RuntimeTerminalDeleteAcknowledgementKind.md)
+ - [ScheduledTaskCreateRequest](azentspublicclient/docs/ScheduledTaskCreateRequest.md)
+ - [ScheduledTaskCurrentCycleEnvelope](azentspublicclient/docs/ScheduledTaskCurrentCycleEnvelope.md)
+ - [ScheduledTaskCurrentCycleResponse](azentspublicclient/docs/ScheduledTaskCurrentCycleResponse.md)
+ - [ScheduledTaskListResponse](azentspublicclient/docs/ScheduledTaskListResponse.md)
+ - [ScheduledTaskReplaceRequest](azentspublicclient/docs/ScheduledTaskReplaceRequest.md)
+ - [ScheduledTaskResponse](azentspublicclient/docs/ScheduledTaskResponse.md)
+ - [ScheduledTaskScheduleType](azentspublicclient/docs/ScheduledTaskScheduleType.md)
+ - [ScheduledTaskSessionResponse](azentspublicclient/docs/ScheduledTaskSessionResponse.md)
+ - [ScheduledTaskTargetResponse](azentspublicclient/docs/ScheduledTaskTargetResponse.md)
  - [Secrets](azentspublicclient/docs/Secrets.md)
  - [Secrets1](azentspublicclient/docs/Secrets1.md)
  - [SelectableInfrastructureProfileListResponse](azentspublicclient/docs/SelectableInfrastructureProfileListResponse.md)

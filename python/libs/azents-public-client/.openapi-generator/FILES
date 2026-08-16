@@ -14,6 +14,7 @@ azentspublicclient/api/llm_provider_integration_v1_api.py
 azentspublicclient/api/runtime_profile_v1_api.py
 azentspublicclient/api/runtime_provider_enrollment_v1_api.py
 azentspublicclient/api/runtime_provider_v1_api.py
+azentspublicclient/api/scheduled_task_v1_api.py
 azentspublicclient/api/security_v1_api.py
 azentspublicclient/api/toolkit_o_auth_v1_api.py
 azentspublicclient/api/toolkit_v1_api.py
@@ -36,6 +37,7 @@ azentspublicclient/docs/AddAgentRuntimeRequest.md
 azentspublicclient/docs/AgentAdminAddRequest.md
 azentspublicclient/docs/AgentAdminListResponse.md
 azentspublicclient/docs/AgentAdminResponse.md
+azentspublicclient/docs/AgentCreateGitWorktreeAction.md
 azentspublicclient/docs/AgentCreateRequest.md
 azentspublicclient/docs/AgentDecommissionResponse.md
 azentspublicclient/docs/AgentListResponse.md
@@ -43,6 +45,7 @@ azentspublicclient/docs/AgentModelSelection.md
 azentspublicclient/docs/AgentModelSelectionInput.md
 azentspublicclient/docs/AgentProjectPresetListResponse.md
 azentspublicclient/docs/AgentProjectPresetResponse.md
+azentspublicclient/docs/AgentRemoveGitWorktreeAction.md
 azentspublicclient/docs/AgentResponse.md
 azentspublicclient/docs/AgentRunPhase.md
 azentspublicclient/docs/AgentRunStatus.md
@@ -323,6 +326,7 @@ azentspublicclient/docs/PendingMailboxExternalChannelContinuationPresentation.md
 azentspublicclient/docs/PendingMailboxExternalChannelPresentation.md
 azentspublicclient/docs/PendingMailboxGoalContinuationPresentation.md
 azentspublicclient/docs/PendingMailboxItem.md
+azentspublicclient/docs/PendingMailboxScheduledTaskPresentation.md
 azentspublicclient/docs/PendingMailboxUserMessagePresentation.md
 azentspublicclient/docs/PlatformGitHubAppAuthorizationReason.md
 azentspublicclient/docs/PrepareSessionWorkingFolderRequest.md
@@ -391,6 +395,16 @@ azentspublicclient/docs/RuntimeRecreationTargetKind.md
 azentspublicclient/docs/RuntimeRunnerState.md
 azentspublicclient/docs/RuntimeSummary.md
 azentspublicclient/docs/RuntimeTerminalDeleteAcknowledgementKind.md
+azentspublicclient/docs/ScheduledTaskCreateRequest.md
+azentspublicclient/docs/ScheduledTaskCurrentCycleEnvelope.md
+azentspublicclient/docs/ScheduledTaskCurrentCycleResponse.md
+azentspublicclient/docs/ScheduledTaskListResponse.md
+azentspublicclient/docs/ScheduledTaskReplaceRequest.md
+azentspublicclient/docs/ScheduledTaskResponse.md
+azentspublicclient/docs/ScheduledTaskScheduleType.md
+azentspublicclient/docs/ScheduledTaskSessionResponse.md
+azentspublicclient/docs/ScheduledTaskTargetResponse.md
+azentspublicclient/docs/ScheduledTaskV1Api.md
 azentspublicclient/docs/Secrets.md
 azentspublicclient/docs/Secrets1.md
 azentspublicclient/docs/SecurityV1Api.md
@@ -502,6 +516,7 @@ azentspublicclient/models/add_agent_runtime_request.py
 azentspublicclient/models/agent_admin_add_request.py
 azentspublicclient/models/agent_admin_list_response.py
 azentspublicclient/models/agent_admin_response.py
+azentspublicclient/models/agent_create_git_worktree_action.py
 azentspublicclient/models/agent_create_request.py
 azentspublicclient/models/agent_decommission_response.py
 azentspublicclient/models/agent_list_response.py
@@ -509,6 +524,7 @@ azentspublicclient/models/agent_model_selection.py
 azentspublicclient/models/agent_model_selection_input.py
 azentspublicclient/models/agent_project_preset_list_response.py
 azentspublicclient/models/agent_project_preset_response.py
+azentspublicclient/models/agent_remove_git_worktree_action.py
 azentspublicclient/models/agent_response.py
 azentspublicclient/models/agent_run_phase.py
 azentspublicclient/models/agent_run_status.py
@@ -778,6 +794,7 @@ azentspublicclient/models/pending_mailbox_external_channel_continuation_presenta
 azentspublicclient/models/pending_mailbox_external_channel_presentation.py
 azentspublicclient/models/pending_mailbox_goal_continuation_presentation.py
 azentspublicclient/models/pending_mailbox_item.py
+azentspublicclient/models/pending_mailbox_scheduled_task_presentation.py
 azentspublicclient/models/pending_mailbox_user_message_presentation.py
 azentspublicclient/models/platform_git_hub_app_authorization_reason.py
 azentspublicclient/models/prepare_session_working_folder_request.py
@@ -843,6 +860,15 @@ azentspublicclient/models/runtime_recreation_target_kind.py
 azentspublicclient/models/runtime_runner_state.py
 azentspublicclient/models/runtime_summary.py
 azentspublicclient/models/runtime_terminal_delete_acknowledgement_kind.py
+azentspublicclient/models/scheduled_task_create_request.py
+azentspublicclient/models/scheduled_task_current_cycle_envelope.py
+azentspublicclient/models/scheduled_task_current_cycle_response.py
+azentspublicclient/models/scheduled_task_list_response.py
+azentspublicclient/models/scheduled_task_replace_request.py
+azentspublicclient/models/scheduled_task_response.py
+azentspublicclient/models/scheduled_task_schedule_type.py
+azentspublicclient/models/scheduled_task_session_response.py
+azentspublicclient/models/scheduled_task_target_response.py
 azentspublicclient/models/secrets.py
 azentspublicclient/models/secrets1.py
 azentspublicclient/models/selectable_infrastructure_profile_list_response.py
@@ -946,6 +972,7 @@ azentspublicclient/test/test_add_agent_runtime_request.py
 azentspublicclient/test/test_agent_admin_add_request.py
 azentspublicclient/test/test_agent_admin_list_response.py
 azentspublicclient/test/test_agent_admin_response.py
+azentspublicclient/test/test_agent_create_git_worktree_action.py
 azentspublicclient/test/test_agent_create_request.py
 azentspublicclient/test/test_agent_decommission_response.py
 azentspublicclient/test/test_agent_list_response.py
@@ -953,6 +980,7 @@ azentspublicclient/test/test_agent_model_selection.py
 azentspublicclient/test/test_agent_model_selection_input.py
 azentspublicclient/test/test_agent_project_preset_list_response.py
 azentspublicclient/test/test_agent_project_preset_response.py
+azentspublicclient/test/test_agent_remove_git_worktree_action.py
 azentspublicclient/test/test_agent_response.py
 azentspublicclient/test/test_agent_run_phase.py
 azentspublicclient/test/test_agent_run_status.py
@@ -1233,6 +1261,7 @@ azentspublicclient/test/test_pending_mailbox_external_channel_continuation_prese
 azentspublicclient/test/test_pending_mailbox_external_channel_presentation.py
 azentspublicclient/test/test_pending_mailbox_goal_continuation_presentation.py
 azentspublicclient/test/test_pending_mailbox_item.py
+azentspublicclient/test/test_pending_mailbox_scheduled_task_presentation.py
 azentspublicclient/test/test_pending_mailbox_user_message_presentation.py
 azentspublicclient/test/test_platform_git_hub_app_authorization_reason.py
 azentspublicclient/test/test_prepare_session_working_folder_request.py
@@ -1301,6 +1330,16 @@ azentspublicclient/test/test_runtime_recreation_target_kind.py
 azentspublicclient/test/test_runtime_runner_state.py
 azentspublicclient/test/test_runtime_summary.py
 azentspublicclient/test/test_runtime_terminal_delete_acknowledgement_kind.py
+azentspublicclient/test/test_scheduled_task_create_request.py
+azentspublicclient/test/test_scheduled_task_current_cycle_envelope.py
+azentspublicclient/test/test_scheduled_task_current_cycle_response.py
+azentspublicclient/test/test_scheduled_task_list_response.py
+azentspublicclient/test/test_scheduled_task_replace_request.py
+azentspublicclient/test/test_scheduled_task_response.py
+azentspublicclient/test/test_scheduled_task_schedule_type.py
+azentspublicclient/test/test_scheduled_task_session_response.py
+azentspublicclient/test/test_scheduled_task_target_response.py
+azentspublicclient/test/test_scheduled_task_v1_api.py
 azentspublicclient/test/test_secrets.py
 azentspublicclient/test/test_secrets1.py
 azentspublicclient/test/test_security_v1_api.py

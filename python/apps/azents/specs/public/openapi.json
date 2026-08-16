@@ -10727,6 +10727,409 @@
         }
       }
     },
+    "/scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks": {
+      "get": {
+        "tags": [
+          "Scheduled Task v1"
+        ],
+        "summary": "List Scheduled Tasks",
+        "description": "List every Task in one selected or all authorized Agent Sessions.",
+        "operationId": "scheduled_task_v1_list_scheduled_tasks",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 32,
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledTaskListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Scheduled Task v1"
+        ],
+        "summary": "Create Scheduled Task",
+        "description": "Create a Task for one existing authorized Session.",
+        "operationId": "scheduled_task_v1_create_scheduled_task",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduledTaskCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledTaskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}": {
+      "get": {
+        "tags": [
+          "Scheduled Task v1"
+        ],
+        "summary": "Get Scheduled Task",
+        "description": "Get one exact authorized Scheduled Task.",
+        "operationId": "scheduled_task_v1_get_scheduled_task",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledTaskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Scheduled Task v1"
+        ],
+        "summary": "Replace Scheduled Task",
+        "description": "Replace editable fields that govern future work.",
+        "operationId": "scheduled_task_v1_replace_scheduled_task",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduledTaskReplaceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledTaskResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Scheduled Task v1"
+        ],
+        "summary": "Delete Scheduled Task",
+        "description": "Permanently delete one exact authorized Scheduled Task.",
+        "operationId": "scheduled_task_v1_delete_scheduled_task",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle": {
+      "get": {
+        "tags": [
+          "Scheduled Task v1"
+        ],
+        "summary": "Get Scheduled Task Cycle",
+        "description": "Read the sanitized current-cycle projection.",
+        "operationId": "scheduled_task_v1_get_scheduled_task_cycle",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledTaskCurrentCycleEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/security/v1/auth-methods": {
       "get": {
         "tags": [
@@ -26210,6 +26613,435 @@
         "title": "RuntimeTerminalDeleteAcknowledgementKind",
         "description": "Authority that proved one terminal Runtime deletion."
       },
+      "ScheduledTaskCreateRequest": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 32,
+            "title": "Session Id"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "objective": {
+            "type": "string",
+            "maxLength": 3000,
+            "minLength": 1,
+            "title": "Objective"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "cron": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "channel_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "title",
+          "objective",
+          "at",
+          "cron",
+          "timezone",
+          "channel_id"
+        ],
+        "title": "ScheduledTaskCreateRequest",
+        "description": "Create one Task for an existing authorized Session."
+      },
+      "ScheduledTaskCurrentCycleEnvelope": {
+        "properties": {
+          "current_cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduledTaskCurrentCycleResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_cycle"
+        ],
+        "title": "ScheduledTaskCurrentCycleEnvelope",
+        "description": "Nullable current cycle for one Task."
+      },
+      "ScheduledTaskCurrentCycleResponse": {
+        "properties": {
+          "phase": {
+            "type": "string",
+            "enum": [
+              "admitted",
+              "started"
+            ],
+            "title": "Phase"
+          },
+          "scheduled_for": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scheduled For"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "progress_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Title"
+          },
+          "ordered_tasks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ordered Tasks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "phase",
+          "scheduled_for",
+          "started_at",
+          "progress_title",
+          "ordered_tasks"
+        ],
+        "title": "ScheduledTaskCurrentCycleResponse",
+        "description": "Sanitized current occurrence projection."
+      },
+      "ScheduledTaskListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduledTaskResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ScheduledTaskListResponse",
+        "description": "Ordered authorized Scheduled Task list."
+      },
+      "ScheduledTaskReplaceRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "objective": {
+            "type": "string",
+            "maxLength": 3000,
+            "minLength": 1,
+            "title": "Objective"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          },
+          "cron": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "channel_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "objective",
+          "at",
+          "cron",
+          "timezone",
+          "channel_id"
+        ],
+        "title": "ScheduledTaskReplaceRequest",
+        "description": "Replace editable fields that govern future work."
+      },
+      "ScheduledTaskResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "objective": {
+            "type": "string",
+            "title": "Objective"
+          },
+          "schedule_type": {
+            "$ref": "#/components/schemas/ScheduledTaskScheduleType"
+          },
+          "scheduled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled At"
+          },
+          "cron_expression": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cron Expression"
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "next_eligible_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Next Eligible At"
+          },
+          "execution_state": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "admitted",
+              "running",
+              "running_with_pending"
+            ],
+            "title": "Execution State"
+          },
+          "session": {
+            "$ref": "#/components/schemas/ScheduledTaskSessionResponse"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduledTaskTargetResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "objective",
+          "schedule_type",
+          "scheduled_at",
+          "cron_expression",
+          "timezone",
+          "next_eligible_at",
+          "execution_state",
+          "session",
+          "target",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ScheduledTaskResponse",
+        "description": "Sanitized Scheduled Task management projection."
+      },
+      "ScheduledTaskScheduleType": {
+        "type": "string",
+        "enum": [
+          "once",
+          "cron"
+        ],
+        "title": "ScheduledTaskScheduleType",
+        "description": "User Scheduled Task schedule type."
+      },
+      "ScheduledTaskSessionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "handle": {
+            "type": "string",
+            "title": "Handle"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "handle",
+          "title"
+        ],
+        "title": "ScheduledTaskSessionResponse",
+        "description": "Canonical Session navigation identity."
+      },
+      "ScheduledTaskTargetResponse": {
+        "properties": {
+          "channel_id": {
+            "type": "string",
+            "title": "Channel Id"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ExternalChannelProvider"
+          },
+          "location": {
+            "$ref": "#/components/schemas/ExternalChannelConversationLocation"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel_id",
+          "provider",
+          "location",
+          "label"
+        ],
+        "title": "ScheduledTaskTargetResponse",
+        "description": "Opaque External Channel target presentation."
+      },
       "SelectableInfrastructureProfileListResponse": {
         "properties": {
           "items": {
@@ -29674,6 +30506,10 @@
     {
       "name": "Runtime Provider Enrollment v1",
       "description": "\nRuntime Provider Enrollment API (Public)\n\nOperator-facing one-time enrollment grant exchange for known Providers.\n"
+    },
+    {
+      "name": "Scheduled Task v1",
+      "description": "\nScheduled Task API (Public)\n\nManage future Scheduled Task definitions and read sanitized current\noccurrence progress for authorized Agent Sessions.\n"
     },
     {
       "name": "Security v1",

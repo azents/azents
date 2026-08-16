@@ -32,6 +32,7 @@ __all__ = [
     "RuntimeProfileV1Api",
     "RuntimeProviderEnrollmentV1Api",
     "RuntimeProviderV1Api",
+    "ScheduledTaskV1Api",
     "SecurityV1Api",
     "ToolkitOAuthV1Api",
     "ToolkitV1Api",
@@ -60,6 +61,7 @@ __all__ = [
     "AgentAdminAddRequest",
     "AgentAdminListResponse",
     "AgentAdminResponse",
+    "AgentCreateGitWorktreeAction",
     "AgentCreateRequest",
     "AgentDecommissionResponse",
     "AgentListResponse",
@@ -67,6 +69,7 @@ __all__ = [
     "AgentModelSelectionInput",
     "AgentProjectPresetListResponse",
     "AgentProjectPresetResponse",
+    "AgentRemoveGitWorktreeAction",
     "AgentResponse",
     "AgentRunPhase",
     "AgentRunStatus",
@@ -336,6 +339,7 @@ __all__ = [
     "PendingMailboxExternalChannelPresentation",
     "PendingMailboxGoalContinuationPresentation",
     "PendingMailboxItem",
+    "PendingMailboxScheduledTaskPresentation",
     "PendingMailboxUserMessagePresentation",
     "PlatformGitHubAppAuthorizationReason",
     "PrepareSessionWorkingFolderRequest",
@@ -401,6 +405,15 @@ __all__ = [
     "RuntimeRunnerState",
     "RuntimeSummary",
     "RuntimeTerminalDeleteAcknowledgementKind",
+    "ScheduledTaskCreateRequest",
+    "ScheduledTaskCurrentCycleEnvelope",
+    "ScheduledTaskCurrentCycleResponse",
+    "ScheduledTaskListResponse",
+    "ScheduledTaskReplaceRequest",
+    "ScheduledTaskResponse",
+    "ScheduledTaskScheduleType",
+    "ScheduledTaskSessionResponse",
+    "ScheduledTaskTargetResponse",
     "Secrets",
     "Secrets1",
     "SelectableInfrastructureProfileListResponse",
@@ -508,6 +521,7 @@ from azentspublicclient.api.llm_provider_integration_v1_api import LLMProviderIn
 from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api as RuntimeProfileV1Api
 from azentspublicclient.api.runtime_provider_enrollment_v1_api import RuntimeProviderEnrollmentV1Api as RuntimeProviderEnrollmentV1Api
 from azentspublicclient.api.runtime_provider_v1_api import RuntimeProviderV1Api as RuntimeProviderV1Api
+from azentspublicclient.api.scheduled_task_v1_api import ScheduledTaskV1Api as ScheduledTaskV1Api
 from azentspublicclient.api.security_v1_api import SecurityV1Api as SecurityV1Api
 from azentspublicclient.api.toolkit_o_auth_v1_api import ToolkitOAuthV1Api as ToolkitOAuthV1Api
 from azentspublicclient.api.toolkit_v1_api import ToolkitV1Api as ToolkitV1Api
@@ -540,6 +554,7 @@ from azentspublicclient.models.add_agent_runtime_request import AddAgentRuntimeR
 from azentspublicclient.models.agent_admin_add_request import AgentAdminAddRequest as AgentAdminAddRequest
 from azentspublicclient.models.agent_admin_list_response import AgentAdminListResponse as AgentAdminListResponse
 from azentspublicclient.models.agent_admin_response import AgentAdminResponse as AgentAdminResponse
+from azentspublicclient.models.agent_create_git_worktree_action import AgentCreateGitWorktreeAction as AgentCreateGitWorktreeAction
 from azentspublicclient.models.agent_create_request import AgentCreateRequest as AgentCreateRequest
 from azentspublicclient.models.agent_decommission_response import AgentDecommissionResponse as AgentDecommissionResponse
 from azentspublicclient.models.agent_list_response import AgentListResponse as AgentListResponse
@@ -547,6 +562,7 @@ from azentspublicclient.models.agent_model_selection import AgentModelSelection 
 from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput as AgentModelSelectionInput
 from azentspublicclient.models.agent_project_preset_list_response import AgentProjectPresetListResponse as AgentProjectPresetListResponse
 from azentspublicclient.models.agent_project_preset_response import AgentProjectPresetResponse as AgentProjectPresetResponse
+from azentspublicclient.models.agent_remove_git_worktree_action import AgentRemoveGitWorktreeAction as AgentRemoveGitWorktreeAction
 from azentspublicclient.models.agent_response import AgentResponse as AgentResponse
 from azentspublicclient.models.agent_run_phase import AgentRunPhase as AgentRunPhase
 from azentspublicclient.models.agent_run_status import AgentRunStatus as AgentRunStatus
@@ -816,6 +832,7 @@ from azentspublicclient.models.pending_mailbox_external_channel_continuation_pre
 from azentspublicclient.models.pending_mailbox_external_channel_presentation import PendingMailboxExternalChannelPresentation as PendingMailboxExternalChannelPresentation
 from azentspublicclient.models.pending_mailbox_goal_continuation_presentation import PendingMailboxGoalContinuationPresentation as PendingMailboxGoalContinuationPresentation
 from azentspublicclient.models.pending_mailbox_item import PendingMailboxItem as PendingMailboxItem
+from azentspublicclient.models.pending_mailbox_scheduled_task_presentation import PendingMailboxScheduledTaskPresentation as PendingMailboxScheduledTaskPresentation
 from azentspublicclient.models.pending_mailbox_user_message_presentation import PendingMailboxUserMessagePresentation as PendingMailboxUserMessagePresentation
 from azentspublicclient.models.platform_git_hub_app_authorization_reason import PlatformGitHubAppAuthorizationReason as PlatformGitHubAppAuthorizationReason
 from azentspublicclient.models.prepare_session_working_folder_request import PrepareSessionWorkingFolderRequest as PrepareSessionWorkingFolderRequest
@@ -881,6 +898,15 @@ from azentspublicclient.models.runtime_recreation_target_kind import RuntimeRecr
 from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState as RuntimeRunnerState
 from azentspublicclient.models.runtime_summary import RuntimeSummary as RuntimeSummary
 from azentspublicclient.models.runtime_terminal_delete_acknowledgement_kind import RuntimeTerminalDeleteAcknowledgementKind as RuntimeTerminalDeleteAcknowledgementKind
+from azentspublicclient.models.scheduled_task_create_request import ScheduledTaskCreateRequest as ScheduledTaskCreateRequest
+from azentspublicclient.models.scheduled_task_current_cycle_envelope import ScheduledTaskCurrentCycleEnvelope as ScheduledTaskCurrentCycleEnvelope
+from azentspublicclient.models.scheduled_task_current_cycle_response import ScheduledTaskCurrentCycleResponse as ScheduledTaskCurrentCycleResponse
+from azentspublicclient.models.scheduled_task_list_response import ScheduledTaskListResponse as ScheduledTaskListResponse
+from azentspublicclient.models.scheduled_task_replace_request import ScheduledTaskReplaceRequest as ScheduledTaskReplaceRequest
+from azentspublicclient.models.scheduled_task_response import ScheduledTaskResponse as ScheduledTaskResponse
+from azentspublicclient.models.scheduled_task_schedule_type import ScheduledTaskScheduleType as ScheduledTaskScheduleType
+from azentspublicclient.models.scheduled_task_session_response import ScheduledTaskSessionResponse as ScheduledTaskSessionResponse
+from azentspublicclient.models.scheduled_task_target_response import ScheduledTaskTargetResponse as ScheduledTaskTargetResponse
 from azentspublicclient.models.secrets import Secrets as Secrets
 from azentspublicclient.models.secrets1 import Secrets1 as Secrets1
 from azentspublicclient.models.selectable_infrastructure_profile_list_response import SelectableInfrastructureProfileListResponse as SelectableInfrastructureProfileListResponse

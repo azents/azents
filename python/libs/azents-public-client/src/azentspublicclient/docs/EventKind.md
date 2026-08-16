@@ -10,6 +10,12 @@ Event transcript event kind.
 
 * `EXTERNAL_CHANNEL_CONTINUATION` (value: `'external_channel_continuation'`)
 
+* `SCHEDULED_TASK_TRIGGER` (value: `'scheduled_task_trigger'`)
+
+* `SCHEDULED_TASK_CONTINUATION` (value: `'scheduled_task_continuation'`)
+
+* `SCHEDULED_TASK_RESULT` (value: `'scheduled_task_result'`)
+
 * `GOAL_UPDATED` (value: `'goal_updated'`)
 
 * `ACTION_MESSAGE` (value: `'action_message'`)

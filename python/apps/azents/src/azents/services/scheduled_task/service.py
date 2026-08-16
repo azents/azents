@@ -339,6 +339,26 @@ class ScheduledTaskService:
             return None
         return target
 
+    async def lock_management_mutation_target(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        expected_binding_id: str | None,
+    ) -> ScheduledTaskMutationTarget | None:
+        """Lock one management target after its Binding authority locks."""
+        candidate = await self.repository.get_by_id(session, task_id)
+        if candidate is None or candidate.binding_id != expected_binding_id:
+            return None
+        target = await self._lock_mutation_target(
+            session,
+            session_id=candidate.session_id,
+            task_id=task_id,
+        )
+        if target is None or target.task != candidate:
+            return None
+        return target
+
     async def replace_locked_provider_target(
         self,
         session: AsyncSession,

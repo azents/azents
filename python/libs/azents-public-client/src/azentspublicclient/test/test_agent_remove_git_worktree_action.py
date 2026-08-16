@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.action import Action
+from azentspublicclient.models.agent_remove_git_worktree_action import AgentRemoveGitWorktreeAction
 
-class TestAction(unittest.TestCase):
-    """Action unit test stubs"""
+class TestAgentRemoveGitWorktreeAction(unittest.TestCase):
+    """AgentRemoveGitWorktreeAction unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,46 +25,34 @@ class TestAction(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> Action:
-        """Test Action
+    def make_instance(self, include_optional) -> AgentRemoveGitWorktreeAction:
+        """Test AgentRemoveGitWorktreeAction
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `Action`
+        # uncomment below to create an instance of `AgentRemoveGitWorktreeAction`
         """
-        model = Action()
+        model = AgentRemoveGitWorktreeAction()
         if include_optional:
-            return Action(
-                type = 'command',
-                name = '0',
-                skill_path = '0',
-                source_project_path = '0',
-                starting_ref = '',
+            return AgentRemoveGitWorktreeAction(
+                type = 'agent_remove_git_worktree',
                 bridge_identity = '0',
                 originating_run_id = '0',
                 client_tool_call_id = '0',
                 session_agent_context_id = '0',
                 originating_agent_session_id = '0',
-                source_project_id = '0',
-                branch_name = '',
                 worktree_project_id = '0',
                 worktree_allocation_id = '0',
                 worktree_path = '0',
                 force = True
             )
         else:
-            return Action(
-                name = '0',
-                skill_path = '0',
-                source_project_path = '0',
-                starting_ref = '',
+            return AgentRemoveGitWorktreeAction(
                 bridge_identity = '0',
                 originating_run_id = '0',
                 client_tool_call_id = '0',
                 session_agent_context_id = '0',
                 originating_agent_session_id = '0',
-                source_project_id = '0',
-                branch_name = '',
                 worktree_project_id = '0',
                 worktree_allocation_id = '0',
                 worktree_path = '0',
@@ -72,8 +60,8 @@ class TestAction(unittest.TestCase):
         )
         """
 
-    def testAction(self):
-        """Test Action"""
+    def testAgentRemoveGitWorktreeAction(self):
+        """Test AgentRemoveGitWorktreeAction"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 
