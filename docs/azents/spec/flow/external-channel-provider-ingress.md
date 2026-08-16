@@ -61,8 +61,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-14
-spec_version: 41
+last_verified_at: 2026-08-16
+spec_version: 42
 ---
 
 # External Channel Provider Ingress
@@ -273,7 +273,12 @@ durable queue content.
    physical source Resource and resolves the effective target Resource. Slack uses the
    parent channel for `location=channel` and the exact root/thread conversation for
    `location=threads`. Discord parent messages use the parent channel, while messages
-   inside an existing Discord Thread always use that Thread as an independent target.
+   inside an existing Discord Thread use that Thread as an independent target.
+   When Discord re-emits the exact starter message after Azents provisions a delivery
+   Thread for a parent-channel root, exact retained source-channel, root-message, and
+   delivery-channel labels normalize that replay back to the original parent-channel
+   root scope while preserving the delivery Thread identity. Provider-native Thread
+   starters remain independent Thread targets.
    An ordinary non-invocation stops before queue insertion when no connected Binding
    exists or its response mode is `mention_only`. Parent-channel participation and
    `all_messages` authority never admit ordinary traffic from an unbound Discord
@@ -480,6 +485,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-16** (spec_version 42) — Normalized the exact Discord starter replay from
+  an Azents-provisioned delivery Thread back to its parent-channel root history scope
+  while preserving provider-native Thread starter scope.
 - **2026-08-14** (spec_version 41) — Made Discord Thread participation independent
   from its parent channel: unbound Thread traffic is mention-gated, while an existing
   Thread Binding retains its own `all_messages` continuation.
