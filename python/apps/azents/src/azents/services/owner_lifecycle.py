@@ -37,8 +37,10 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.owner_lifecycle.data import OwnerLifecycleJob
+from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleCleanup
 from azents.repos.user import UserRepository
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
+from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
 )
@@ -287,6 +289,29 @@ class OwnerLifecycleExternalChannelLifecycleProtocol(Protocol):
         ...
 
 
+class OwnerLifecycleScheduledTaskLifecycleProtocol(Protocol):
+    """Scheduled Task lifecycle operations consumed during archive."""
+
+    async def archive_allows_active_runs(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+        running_session_ids: Sequence[str],
+    ) -> bool:
+        """Return whether every active execution is a preserved Scheduled cycle."""
+        ...
+
+    async def archive_participant(
+        self,
+        session: AsyncSession,
+        definition: SessionLifecycleParticipantDefinition,
+        context: SessionLifecycleTransitionContext,
+    ) -> ScheduledTaskLifecycleCleanup | None:
+        """Apply Scheduled Task archive participant work."""
+        ...
+
+
 class OwnerLifecycleBrokerProtocol(Protocol):
     """Broker used to deliver stop signals after durable stop requests."""
 
@@ -430,6 +455,10 @@ class OwnerLifecycleService:
     external_channel_lifecycle_service: Annotated[
         OwnerLifecycleExternalChannelLifecycleProtocol,
         Depends(ExternalChannelLifecycleService),
+    ]
+    scheduled_task_lifecycle_service: Annotated[
+        OwnerLifecycleScheduledTaskLifecycleProtocol,
+        Depends(ScheduledTaskLifecycleService),
     ]
     broker: Annotated[OwnerLifecycleBrokerProtocol, Depends(get_broker)]
 
@@ -668,6 +697,7 @@ class OwnerLifecycleService:
         """Stop and archive one User root tree through the shared lifecycle registry."""
         stop_session_ids: list[str] = []
         active = False
+        archived = False
         archive_cleanup_plans = ()
         async with self.session_manager() as session:
             tree = await self.agent_session_repository.lock_root_tree_sessions(
@@ -713,22 +743,36 @@ class OwnerLifecycleService:
                 # Transitional states; let the next pass observe progress.
                 return True
             session_ids = [item.id for item in tree]
-            for session_id in session_ids:
-                await self.agent_session_repository.request_stop(
-                    session,
-                    session_id=session_id,
-                    stop_request_id=uuid7().hex,
-                    stop_requester_user_id=None,
-                )
             active = any(
                 item.run_state is AgentSessionRunState.RUNNING for item in tree
             ) or await self.agent_run_repository.has_active_for_session_ids(
                 session,
                 session_ids=session_ids,
             )
-            stop_session_ids = session_ids
+            scheduled_lifecycle = self.scheduled_task_lifecycle_service
+            preserve_scheduled = (
+                active
+                and await scheduled_lifecycle.archive_allows_active_runs(
+                    session,
+                    session_ids=session_ids,
+                    running_session_ids=[
+                        item.id
+                        for item in tree
+                        if item.run_state is AgentSessionRunState.RUNNING
+                    ],
+                )
+            )
+            if not preserve_scheduled:
+                for session_id in session_ids:
+                    await self.agent_session_repository.request_stop(
+                        session,
+                        session_id=session_id,
+                        stop_request_id=uuid7().hex,
+                        stop_requester_user_id=None,
+                    )
+                stop_session_ids = session_ids
 
-            if not active:
+            if not active or preserve_scheduled:
                 settings = await self.retention_repository.lock_settings(session)
                 archived_at = datetime.datetime.now(datetime.UTC)
                 if immediate_purge:
@@ -761,14 +805,28 @@ class OwnerLifecycleService:
                 ) -> None:
                     """Apply lifecycle-owned state before archiving the root tree."""
                     nonlocal archive_cleanup_plans
-                    lifecycle = self.external_channel_lifecycle_service
-                    result = await lifecycle.archive_participant(
-                        session,
-                        definition,
-                        context,
+                    scheduled_result = (
+                        await self.scheduled_task_lifecycle_service.archive_participant(
+                            session,
+                            definition,
+                            context,
+                        )
                     )
-                    if result is not None:
-                        archive_cleanup_plans = getattr(result, "cleanup_plans", ())
+                    if scheduled_result is not None:
+                        archive_cleanup_plans += scheduled_result.cleanup_plans
+                    external_result = await (
+                        self.external_channel_lifecycle_service.archive_participant(
+                            session,
+                            definition,
+                            context,
+                        )
+                    )
+                    if external_result is not None:
+                        archive_cleanup_plans += getattr(
+                            external_result,
+                            "cleanup_plans",
+                            (),
+                        )
 
                 await self.lifecycle_orchestrator.archive(
                     context=SessionLifecycleTransitionContext(
@@ -797,14 +855,15 @@ class OwnerLifecycleService:
                 if not owned:
                     raise RuntimeError("Owner lifecycle lease was lost")
                 await session.commit()
+                archived = True
 
-        if not active:
+        if archived:
             await self.external_channel_lifecycle_service.consume_archive_cleanup(
                 archive_cleanup_plans
             )
         for session_id in stop_session_ids:
             await self.broker.send_message(SessionStopSignal(session_id=session_id))
-        return not active
+        return archived
 
     async def _detach_retained_user_references(
         self,

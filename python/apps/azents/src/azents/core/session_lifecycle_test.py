@@ -198,7 +198,7 @@ def test_external_channel_participant_declares_session_owned_foundation_state() 
     participant = get_session_lifecycle_registry().get("session.external-channel")
 
     assert participant.policy_version == 1
-    assert participant.dependencies == ("session.execution",)
+    assert participant.dependencies == ("session.scheduled-task",)
     assert participant.archive_policy is SessionLifecycleTransitionPolicy.TERMINATE
     assert participant.restore_policy is SessionLifecycleTransitionPolicy.PRESERVE
     assert participant.purge_policy is SessionLifecyclePurgePolicy.REQUIRED
@@ -219,6 +219,29 @@ def test_external_channel_participant_declares_session_owned_foundation_state() 
             SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
         ),
     }
+
+
+def test_scheduled_task_participant_precedes_external_channel() -> None:
+    """Scheduled Task authority is removed before Binding lifecycle verification."""
+    registry = get_session_lifecycle_registry()
+    participant = registry.get("session.scheduled-task")
+
+    assert participant.policy_version == 1
+    assert participant.dependencies == ("session.execution",)
+    assert participant.archive_policy is SessionLifecycleTransitionPolicy.TERMINATE
+    assert participant.restore_policy is SessionLifecycleTransitionPolicy.PRESERVE
+    assert participant.purge_policy is SessionLifecyclePurgePolicy.REQUIRED
+    assert {
+        (resource.name, resource.classification)
+        for resource in participant.owned_resources
+    } == {
+        (
+            "scheduled_tasks",
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+        )
+    }
+    keys = [definition.key for definition in registry.participants]
+    assert keys.index("session.scheduled-task") < keys.index("session.external-channel")
 
 
 def test_git_worktree_participant_is_database_only_compatibility_tombstone() -> None:

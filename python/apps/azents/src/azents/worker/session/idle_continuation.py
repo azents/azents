@@ -8,7 +8,11 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
-from azents.core.enums import MailboxItemKind, MailboxSchedulingMode
+from azents.core.enums import (
+    AgentSessionStatus,
+    MailboxItemKind,
+    MailboxSchedulingMode,
+)
 from azents.engine.hooks.dispatcher import (
     RuntimeHookDispatcher,
     RuntimeHookProviderRef,
@@ -31,6 +35,7 @@ from azents.repos.mailbox.data import (
     MailboxPresentationItem,
     ScheduledTaskContinuationMailboxPayload,
 )
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.services.chat.live_events import mailbox_item_to_live_event
 from azents.services.mailbox import MailboxEnqueue, MailboxService
 from azents.worker.deps import get_worker_broker
@@ -39,6 +44,14 @@ from azents.worker.session.execution_snapshot import (
     CanonicalExecutionOwnerGenerationStaleError,
     CanonicalExecutionSnapshot,
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class _IdleBoundaryEligibility:
+    """True-idle admission plus the archived Scheduled exception identity."""
+
+    eligible: bool
+    archived_cycle_id: str | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,6 +71,10 @@ class IdleContinuationService:
         MailboxRepository,
         Depends(MailboxRepository),
     ]
+    scheduled_task_cycle_repository: Annotated[
+        ScheduledTaskCycleRepository,
+        Depends(ScheduledTaskCycleRepository),
+    ]
     event_publisher: Annotated[WorkerEventPublisher, Depends(WorkerEventPublisher)]
     broker: Annotated[SessionBroker, Depends(get_worker_broker)]
     session_manager: Annotated[
@@ -73,12 +90,12 @@ class IdleContinuationService:
         run_id: str,
     ) -> bool:
         """Commit the idle outcome for one durable completed Run boundary."""
-        eligible = await self._eligible_idle_boundary(
+        eligibility = await self._eligible_idle_boundary(
             snapshot.session_id,
             run_id,
             owner_generation=snapshot.owner_generation,
         )
-        if not eligible:
+        if not eligibility.eligible:
             return False
         providers = [
             RuntimeHookProviderRef(slug=binding.slug, toolkit=binding.toolkit)
@@ -94,20 +111,34 @@ class IdleContinuationService:
                 reason="completed",
             ),
         )
-        continuation_inputs = [
-            self._continuation_input(snapshot.session_id, run_id, continuation)
-            for continuation in result.continuations
-        ]
         async with self.session_manager() as session:
-            if (
-                await self._eligible_idle_boundary_in_session(
-                    session,
+            eligibility = await self._eligible_idle_boundary_in_session(
+                session,
+                snapshot.session_id,
+                run_id,
+                owner_generation=snapshot.owner_generation,
+            )
+            if not eligibility.eligible:
+                return False
+            continuations = result.continuations
+            if eligibility.archived_cycle_id is not None:
+                continuations = [
+                    continuation
+                    for continuation in continuations
+                    if isinstance(
+                        continuation,
+                        ScheduledTaskSessionContinuationInput,
+                    )
+                    and continuation.cycle_id == eligibility.archived_cycle_id
+                ]
+            continuation_inputs = [
+                self._continuation_input(
                     snapshot.session_id,
                     run_id,
-                    owner_generation=snapshot.owner_generation,
+                    continuation,
                 )
-            ) is False:
-                return False
+                for continuation in continuations
+            ]
             enqueue_results = await self.mailbox_item_service.enqueue_many(
                 session,
                 continuation_inputs,
@@ -118,6 +149,9 @@ class IdleContinuationService:
                     session_id=snapshot.session_id,
                     run_id=run_id,
                     continue_running=bool(continuation_inputs),
+                    allow_archived_scheduled_continuation=(
+                        eligibility.archived_cycle_id is not None
+                    ),
                 )
             )
             if not consumed:
@@ -143,7 +177,7 @@ class IdleContinuationService:
         run_id: str,
         *,
         owner_generation: int,
-    ) -> bool:
+    ) -> _IdleBoundaryEligibility:
         """Return whether a boundary can enter idle hook evaluation."""
         async with self.session_manager() as session:
             return await self._eligible_idle_boundary_in_session(
@@ -160,7 +194,7 @@ class IdleContinuationService:
         run_id: str,
         *,
         owner_generation: int,
-    ) -> bool:
+    ) -> _IdleBoundaryEligibility:
         """Recheck the true-idle fence before committing hook output."""
         locked = await self.agent_session_repository.lock_by_id(
             session,
@@ -172,10 +206,27 @@ class IdleContinuationService:
             raise CanonicalExecutionOwnerGenerationStaleError(
                 "Session owner generation is stale during idle continuation"
             )
+        archived_cycle_id: str | None = None
+        if locked.status is not AgentSessionStatus.ACTIVE:
+            if locked.status is not AgentSessionStatus.ARCHIVED:
+                return _IdleBoundaryEligibility(False, None)
+            run = await self.agent_run_repository.get_by_id(session, run_id)
+            cycle_id = None if run is None else run.scheduled_task_cycle_id
+            if cycle_id is None:
+                return _IdleBoundaryEligibility(False, None)
+            cycle = await self.scheduled_task_cycle_repository.get_started(
+                session,
+                agent_id=locked.agent_id,
+                session_id=session_id,
+                cycle_id=cycle_id,
+            )
+            if cycle is None or cycle.state.current_run_id != run_id:
+                return _IdleBoundaryEligibility(False, None)
+            archived_cycle_id = cycle_id
         if locked.pending_idle_continuation_run_id != run_id:
-            return False
+            return _IdleBoundaryEligibility(False, None)
         if locked.pending_command_id is not None:
-            return False
+            return _IdleBoundaryEligibility(False, None)
         mailbox_item_repository = self.mailbox_item_repository
         pending_wake_input = (
             await mailbox_item_repository.has_by_session_id_and_scheduling_mode(
@@ -185,14 +236,14 @@ class IdleContinuationService:
             )
         )
         if pending_wake_input:
-            return False
+            return _IdleBoundaryEligibility(False, None)
         active_run = await self.agent_run_repository.get_active_by_session_id(
             session,
             session_id=session_id,
         )
         if active_run is not None:
-            return False
-        return True
+            return _IdleBoundaryEligibility(False, None)
+        return _IdleBoundaryEligibility(True, archived_cycle_id)
 
     def _continuation_input(
         self,

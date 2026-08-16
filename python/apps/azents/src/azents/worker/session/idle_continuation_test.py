@@ -2,6 +2,7 @@
 
 import dataclasses
 import datetime
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from azents.broker.types import BrokerMessage, SessionBroker, SessionWakeUp
 from azents.core.enums import (
     AgentSessionKind,
+    AgentSessionStatus,
     EventKind,
     MailboxItemKind,
     MailboxSchedulingMode,
@@ -109,6 +111,8 @@ class _LockedSession:
     pending_idle_continuation_run_id: str | None
     pending_command_id: str | None
     workspace_id: str
+    agent_id: str
+    status: AgentSessionStatus
     owner_generation: int
 
 
@@ -120,9 +124,11 @@ class _AgentSessionRepository:
         *,
         workspace_id: str = "workspace-001",
         owner_generation: int = 1,
+        status: AgentSessionStatus = AgentSessionStatus.ACTIVE,
     ) -> None:
         self.boundary_run_id: str | None = "run-001"
         self.workspace_id = workspace_id
+        self.status = status
         self.owner_generation = owner_generation
         self.consumed: list[tuple[str, str, bool]] = []
 
@@ -137,6 +143,8 @@ class _AgentSessionRepository:
             pending_idle_continuation_run_id=self.boundary_run_id,
             pending_command_id=None,
             workspace_id=self.workspace_id,
+            agent_id="agent-001",
+            status=self.status,
             owner_generation=self.owner_generation,
         )
 
@@ -147,9 +155,13 @@ class _AgentSessionRepository:
         session_id: str,
         run_id: str,
         continue_running: bool,
+        allow_archived_scheduled_continuation: bool,
     ) -> bool:
         """Consume the matching durable boundary."""
         del session
+        assert allow_archived_scheduled_continuation is (
+            self.status is AgentSessionStatus.ARCHIVED
+        )
         if self.boundary_run_id != run_id:
             return False
         self.boundary_run_id = None
@@ -169,6 +181,35 @@ class _AgentRunRepository:
         """Report no active Run."""
         del session, session_id
         return None
+
+    async def get_by_id(
+        self,
+        session: object,
+        run_id: str,
+    ) -> SimpleNamespace:
+        """Return one Scheduled-bound completed Run."""
+        del session
+        return SimpleNamespace(
+            id=run_id,
+            scheduled_task_cycle_id="c" * 32,
+        )
+
+
+class _CycleRepository:
+    """Started-cycle lookup used by archived idle admission."""
+
+    async def get_started(
+        self,
+        session: object,
+        *,
+        agent_id: str,
+        session_id: str,
+        cycle_id: str,
+    ) -> SimpleNamespace:
+        """Return the exact started cycle."""
+        del session, agent_id, session_id
+        assert cycle_id == "c" * 32
+        return SimpleNamespace(state=SimpleNamespace(current_run_id="run-001"))
 
 
 class _MailboxRepository:
@@ -286,6 +327,7 @@ def _service(
             Any,
             mailbox_item_repository or _MailboxRepository(pending=False),
         ),
+        scheduled_task_cycle_repository=cast(Any, _CycleRepository()),
         event_publisher=cast(WorkerEventPublisher, event_publisher),
         broker=cast(SessionBroker, broker),
         session_manager=cast(Any, _SessionManager()),
@@ -496,6 +538,54 @@ async def test_consume_stores_typed_scheduled_task_continuation() -> None:
     assert enqueue.payload.items[0].content == "Continue the Scheduled Task."
     event = event_publisher.dispatched[0][1]
     assert event.kind is EventKind.SCHEDULED_TASK_CONTINUATION
+    assert broker.sent_messages == [SessionWakeUp(session_id=snapshot.session_id)]
+
+
+@pytest.mark.asyncio
+async def test_archived_session_keeps_only_matching_scheduled_continuation() -> None:
+    """Archived Sessions reject unrelated idle continuations without reopening."""
+    mailbox_item_service = _MailboxService()
+    event_publisher = _EventPublisher()
+    broker = _Broker()
+    repository = _AgentSessionRepository(status=AgentSessionStatus.ARCHIVED)
+    toolkit = _IdleToolkit(
+        [
+            GoalSessionContinuationInput(
+                content="unrelated",
+                metadata={"source": "goal"},
+            ),
+            ScheduledTaskSessionContinuationInput(
+                cycle_id="d" * 32,
+                title="Wrong cycle",
+                content="unrelated",
+                metadata={"source": "scheduled_task"},
+            ),
+            ScheduledTaskSessionContinuationInput(
+                cycle_id="c" * 32,
+                title="Daily report",
+                content="Continue the preserved cycle.",
+                metadata={"source": "scheduled_task"},
+            ),
+        ]
+    )
+
+    result = await _service(
+        mailbox_item_service=mailbox_item_service,
+        event_publisher=event_publisher,
+        broker=broker,
+        agent_session_repository=repository,
+    ).consume(
+        snapshot := _snapshot(),
+        toolkits=[ToolkitBinding(toolkit, "scheduled", False)],
+        run_id="run-001",
+    )
+
+    assert result is True
+    [enqueue] = mailbox_item_service.enqueued_batches[0]
+    assert enqueue.kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION
+    assert isinstance(enqueue.payload, ScheduledTaskContinuationMailboxPayload)
+    assert enqueue.payload.cycle_id == "c" * 32
+    assert repository.consumed == [("session-001", "run-001", True)]
     assert broker.sent_messages == [SessionWakeUp(session_id=snapshot.session_id)]
 
 

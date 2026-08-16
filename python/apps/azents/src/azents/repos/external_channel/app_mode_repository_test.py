@@ -33,6 +33,9 @@ from azents.core.enums import (
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     LLMProvider,
+    MailboxItemKind,
+    MailboxSchedulingMode,
+    ScheduledTaskScheduleType,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -48,8 +51,18 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelSetupClaim,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.data import MailboxItemCreate
+from azents.repos.scheduled_task.data import ScheduledTaskCreate
+from azents.repos.scheduled_task.repository import ScheduledTaskRepository
+from azents.repos.scheduled_task_cycle import (
+    ScheduledTaskCycleRepository,
+    ScheduledTaskCycleSnapshot,
+)
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -1556,6 +1569,67 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
     )
     rdb_session.add(binding)
     await rdb_session.flush()
+    cycle_id = "c" * 32
+    task = await ScheduledTaskRepository().create(
+        rdb_session,
+        ScheduledTaskCreate(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            session_id=agent_session.id,
+            title="Daily report",
+            objective="Prepare the daily report.",
+            schedule_type=ScheduledTaskScheduleType.ONCE,
+            next_eligible_at=_at(10),
+            binding_id=binding.id,
+            scheduled_at=_at(10),
+            cron_expression=None,
+            timezone=None,
+        ),
+    )
+    task_row = await rdb_session.get(RDBScheduledTask, task.id)
+    assert task_row is not None
+    task_row.active_cycle_id = cycle_id
+    task_row.active_scheduled_for = _at(10)
+    cycle_repository = ScheduledTaskCycleRepository(ToolkitStateRepository())
+    await cycle_repository.create_admitted(
+        rdb_session,
+        ScheduledTaskCycleSnapshot(
+            cycle_id=cycle_id,
+            task_id=task.id,
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            session_id=agent_session.id,
+            binding_id=binding.id,
+            title=task.title,
+            objective=task.objective,
+            schedule_type=task.schedule_type,
+            scheduled_at=task.scheduled_at,
+            cron_expression=task.cron_expression,
+            timezone=task.timezone,
+            scheduled_for=_at(10),
+        ),
+    )
+    trigger = await MailboxRepository().create_idempotent(
+        rdb_session,
+        MailboxItemCreate(
+            session_id=agent_session.id,
+            kind=MailboxItemKind.SCHEDULED_TASK_TRIGGER,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            sender_user_id=None,
+            order_group=None,
+            order_sequence=0,
+            content="Run Daily report.",
+            idempotency_key=f"scheduled-task-trigger:{cycle_id}",
+            metadata={"cycle_id": cycle_id, "title": task.title},
+            action=None,
+            attachments=[],
+            file_parts=[],
+            payload=None,
+        ),
+        idempotency_key=f"scheduled-task-trigger:{cycle_id}",
+    )
 
     first = await management.disconnect_binding(
         rdb_session,
@@ -1579,6 +1653,17 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
     assert first is not None
     assert retry == ()
     assert binding.disconnect_reason == "manager_disconnected"
+    assert await rdb_session.get(RDBScheduledTask, task.id) is None
+    assert (
+        await cycle_repository.get(
+            rdb_session,
+            agent_id=agent.id,
+            session_id=agent_session.id,
+            cycle_id=cycle_id,
+        )
+        is None
+    )
+    assert await MailboxRepository().get_by_id(rdb_session, trigger.id) is None
     assert len(first) == 1
     assert first[0].target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
     assert first[0].target.request_payload == {

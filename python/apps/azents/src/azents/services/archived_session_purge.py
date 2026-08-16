@@ -16,6 +16,7 @@ from azents.broker.types import SessionBroker, SessionStopSignal
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
+    AgentSessionRunState,
     AgentSessionStatus,
     ArchivedSessionPurgeParticipantPhase,
     ArtifactStatus,
@@ -43,6 +44,7 @@ from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
 )
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
+from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_lifecycle.orchestrator import (
     SessionLifecycleOrchestrator,
     SessionLifecyclePurgeParticipantFailure,
@@ -136,6 +138,10 @@ class ArchivedSessionPurgeService:
     external_channel_lifecycle_service: Annotated[
         ExternalChannelLifecycleService,
         Depends(ExternalChannelLifecycleService),
+    ]
+    scheduled_task_lifecycle_service: Annotated[
+        ScheduledTaskLifecycleService,
+        Depends(ScheduledTaskLifecycleService),
     ]
 
     async def purge_once(
@@ -347,20 +353,35 @@ class ArchivedSessionPurgeService:
             )
             if fenced_count != len(session_ids):
                 raise RuntimeError("Purge root tree ownership fence is incomplete")
-            for session_id in session_ids:
-                await self.agent_session_repository.request_stop(
-                    session,
-                    session_id=session_id,
-                    stop_request_id=uuid7().hex,
-                    stop_requester_user_id=None,
-                )
             active = await self.agent_run_repository.has_active_for_session_ids(
                 session,
                 session_ids=session_ids,
             )
+            scheduled_lifecycle = self.scheduled_task_lifecycle_service
+            preserve_scheduled = (
+                active
+                and await scheduled_lifecycle.archive_allows_active_runs(
+                    session,
+                    session_ids=session_ids,
+                    running_session_ids=[
+                        item.id
+                        for item in sessions
+                        if item.run_state is AgentSessionRunState.RUNNING
+                    ],
+                )
+            )
+            if not preserve_scheduled:
+                for session_id in session_ids:
+                    await self.agent_session_repository.request_stop(
+                        session,
+                        session_id=session_id,
+                        stop_request_id=uuid7().hex,
+                        stop_requester_user_id=None,
+                    )
 
-        for session_id in session_ids:
-            await self.broker.send_message(SessionStopSignal(session_id=session_id))
+        if not preserve_scheduled:
+            for session_id in session_ids:
+                await self.broker.send_message(SessionStopSignal(session_id=session_id))
         if active:
             await self._retry(
                 job_id=job.id,
@@ -464,6 +485,19 @@ class ArchivedSessionPurgeService:
             participant: SessionLifecycleParticipantDefinition,
         ) -> dict[str, object] | None:
             match participant.key:
+                case "session.scheduled-task":
+                    async with self.session_manager() as session:
+                        lifecycle = self.scheduled_task_lifecycle_service
+                        summary = await lifecycle.cleanup_purge_participant(
+                            session,
+                            participant,
+                            context,
+                        )
+                    return (
+                        self.scheduled_task_lifecycle_service.summary_dict(summary)
+                        if summary is not None
+                        else None
+                    )
                 case "session.external-channel":
                     async with self.session_manager() as session:
                         lifecycle_service = self.external_channel_lifecycle_service
@@ -528,6 +562,19 @@ class ArchivedSessionPurgeService:
             participant: SessionLifecycleParticipantDefinition,
         ) -> dict[str, object] | None:
             match participant.key:
+                case "session.scheduled-task":
+                    async with self.session_manager() as session:
+                        lifecycle = self.scheduled_task_lifecycle_service
+                        summary = await lifecycle.verify_purge_participant(
+                            session,
+                            participant,
+                            context,
+                        )
+                    return (
+                        self.scheduled_task_lifecycle_service.summary_dict(summary)
+                        if summary is not None
+                        else None
+                    )
                 case "session.external-channel":
                     async with self.session_manager() as session:
                         lifecycle_service = self.external_channel_lifecycle_service
@@ -650,6 +697,26 @@ class ArchivedSessionPurgeService:
                     job_id=job.id,
                 )
             )
+            scheduled_task_execution = next(
+                (
+                    execution
+                    for execution in participant_executions
+                    if execution.participant_key == "session.scheduled-task"
+                ),
+                None,
+            )
+            if scheduled_task_execution is not None:
+                scheduled_task_participant = (
+                    self.lifecycle_orchestrator.registry.require_policy_version(
+                        key=scheduled_task_execution.participant_key,
+                        policy_version=scheduled_task_execution.policy_version,
+                    )
+                )
+                await self.scheduled_task_lifecycle_service.finalize_purge_participant(
+                    session,
+                    scheduled_task_participant,
+                    context,
+                )
             external_channel_execution = next(
                 (
                     execution
@@ -714,6 +781,20 @@ class ArchivedSessionPurgeService:
         context: SessionLifecyclePurgeContext,
     ) -> dict[str, object] | None:
         """Record that a fenced participant is ready for cleanup."""
+        if participant.key == "session.scheduled-task":
+            async with self.session_manager() as session:
+                summary = await (
+                    self.scheduled_task_lifecycle_service.prepare_purge_participant(
+                        session,
+                        participant,
+                        context,
+                    )
+                )
+            return (
+                self.scheduled_task_lifecycle_service.summary_dict(summary)
+                if summary is not None
+                else None
+            )
         if participant.key != "session.external-channel":
             return None
         async with self.session_manager() as session:

@@ -1,18 +1,35 @@
 """Scheduled Task External Channel control locator and rendering tests."""
 
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
 from azents.core.enums import ExternalChannelResourceType, ScheduledTaskScheduleType
 from azents.core.external_channel_projection import is_external_channel_projection
+from azents.rdb.session import SessionManager
+from azents.repos.external_channel.data import ExternalChannelInteraction
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import ScheduledTask
+from azents.repos.scheduled_task.repository import ScheduledTaskRepository
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.services.scheduled_task.control import (
+    ScheduledTaskControlLocator,
+    ScheduledTaskProviderControlService,
     _provider_context_matches_binding,
     build_scheduled_task_control_locator,
     parse_scheduled_task_control_locator,
     render_scheduled_task_discord_registration,
     render_scheduled_task_slack_registration,
+)
+from azents.services.scheduled_task.service import (
+    ScheduledTaskMutationTarget,
+    ScheduledTaskService,
 )
 
 _NOW = datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC)
@@ -43,6 +60,148 @@ def _task() -> ScheduledTask:
         created_at=_NOW,
         updated_at=_NOW,
     )
+
+
+class _ControlSession:
+    """Record the provider control transaction commit."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    async def commit(self) -> None:
+        """Record a committed provider mutation."""
+        self.calls.append("commit")
+
+
+class _ControlSessionManager:
+    """Yield one deterministic provider control transaction."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    @asynccontextmanager
+    async def __call__(self) -> AsyncIterator[AsyncSession]:
+        yield cast(AsyncSession, _ControlSession(self.calls))
+
+
+class _ControlTaskRepository:
+    """Return the pre-lock candidate without acquiring Task locks."""
+
+    def __init__(self, task: ScheduledTask, calls: list[str]) -> None:
+        self.task = task
+        self.calls = calls
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        task_id: str,
+    ) -> ScheduledTask | None:
+        del session
+        self.calls.append("candidate")
+        return self.task if task_id == self.task.id else None
+
+
+class _ControlTaskService:
+    """Record the Scheduled mutation lock after Binding authorization."""
+
+    def __init__(self, task: ScheduledTask, calls: list[str]) -> None:
+        self.task = task
+        self.calls = calls
+
+    async def lock_provider_mutation_target(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        expected_binding_id: str,
+    ) -> ScheduledTaskMutationTarget | None:
+        del session
+        assert task_id == self.task.id
+        assert expected_binding_id == self.task.binding_id
+        self.calls.append("scheduled-lock")
+        return ScheduledTaskMutationTarget(
+            task=self.task,
+            cycle=None,
+            trigger_id=None,
+        )
+
+    async def delete_locked_provider_target(
+        self,
+        session: AsyncSession,
+        *,
+        target: ScheduledTaskMutationTarget,
+        expected_binding_id: str,
+    ) -> bool:
+        del session
+        assert target.task == self.task
+        assert expected_binding_id == self.task.binding_id
+        self.calls.append("delete")
+        return True
+
+
+@pytest.mark.asyncio
+async def test_provider_mutation_authorizes_binding_before_scheduled_locks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider mutation follows Binding then Mailbox/cycle/Task lock order."""
+    calls: list[str] = []
+    task = _task()
+    task_repository = _ControlTaskRepository(task, calls)
+    task_service = _ControlTaskService(task, calls)
+    service = ScheduledTaskProviderControlService(
+        session_manager=cast(
+            SessionManager[AsyncSession],
+            _ControlSessionManager(calls),
+        ),
+        external_repository=cast(ExternalChannelRepository, object()),
+        task_repository=cast(ScheduledTaskRepository, task_repository),
+        cycle_repository=cast(ScheduledTaskCycleRepository, object()),
+        mailbox_repository=cast(MailboxRepository, object()),
+        config=cast(Config, object()),
+    )
+
+    async def authorize(
+        control_service: ScheduledTaskProviderControlService,
+        session: AsyncSession,
+        **kwargs: object,
+    ) -> ExternalChannelInteraction:
+        del control_service, session, kwargs
+        calls.append("binding-authorization")
+        return cast(ExternalChannelInteraction, object())
+
+    monkeypatch.setattr(
+        ScheduledTaskProviderControlService,
+        "_task_service",
+        lambda control_service: cast(ScheduledTaskService, task_service),
+    )
+    monkeypatch.setattr(
+        ScheduledTaskProviderControlService,
+        "_authorize",
+        authorize,
+    )
+
+    result = await service.mutate(
+        interaction_id="interaction-1",
+        locator=ScheduledTaskControlLocator(
+            action="delete",
+            task_id=task.id,
+            binding_id=_BINDING_ID,
+        ),
+        provider_parent_channel_id="channel-1",
+        provider_thread_resource_key=None,
+        origin_interaction_id=None,
+        edit=None,
+        now=_NOW,
+    )
+
+    assert result.action == "delete"
+    assert calls == [
+        "candidate",
+        "binding-authorization",
+        "scheduled-lock",
+        "delete",
+        "commit",
+    ]
 
 
 def test_signed_locator_round_trips_exact_action_task_and_binding() -> None:

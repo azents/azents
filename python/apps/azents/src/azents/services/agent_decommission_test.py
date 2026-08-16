@@ -178,8 +178,14 @@ class _RootSession:
 class _RootSessionRepositoryDouble:
     """Record root-tree lifecycle calls in their transaction order."""
 
-    def __init__(self, events: list[str]) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        run_state: AgentSessionRunState = AgentSessionRunState.IDLE,
+    ) -> None:
         self.events = events
+        self.run_state = run_state
 
     async def list_root_trees_by_agent_id(
         self,
@@ -203,7 +209,7 @@ class _RootSessionRepositoryDouble:
             _RootSession(
                 id=root_session_id,
                 status=AgentSessionStatus.ACTIVE,
-                run_state=AgentSessionRunState.IDLE,
+                run_state=self.run_state,
             )
         ]
 
@@ -246,6 +252,9 @@ class _RootSessionRepositoryDouble:
 class _AgentRunRepositoryDouble:
     """Report an idle root tree."""
 
+    def __init__(self, *, active: bool = False) -> None:
+        self.active = active
+
     async def has_active_for_session_ids(
         self,
         session: AsyncSession,
@@ -254,7 +263,7 @@ class _AgentRunRepositoryDouble:
     ) -> bool:
         """Return no residual active runs."""
         del session, session_ids
-        return False
+        return self.active
 
 
 @dataclass(frozen=True)
@@ -362,6 +371,34 @@ class _ExternalChannelLifecycleDouble:
         return 0
 
 
+class _ScheduledTaskLifecycleDouble:
+    """Ignore non-Scheduled participants in the archive-focused test."""
+
+    def __init__(self, *, allows_active_runs: bool = False) -> None:
+        self.allows_active_runs = allows_active_runs
+
+    async def archive_allows_active_runs(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+        running_session_ids: Sequence[str],
+    ) -> bool:
+        """Return configured Scheduled archive eligibility."""
+        del session, session_ids, running_session_ids
+        return self.allows_active_runs
+
+    async def archive_participant(
+        self,
+        session: AsyncSession,
+        definition: SessionLifecycleParticipantDefinition,
+        context: SessionLifecycleTransitionContext,
+    ) -> None:
+        """Return no Scheduled result for the External Channel participant."""
+        del session, definition, context
+        return None
+
+
 class _DecommissionStatusRepositoryDouble:
     """Always retain the scheduler-owned job lease."""
 
@@ -446,6 +483,7 @@ async def test_retire_tree_terminates_external_channel_before_archive() -> None:
     service.retention_repository = _RetentionRepositoryDouble()
     service.lifecycle_orchestrator = _LifecycleOrchestratorDouble(participant)
     service.external_channel_lifecycle_service = external_channel_lifecycle
+    service.scheduled_task_lifecycle_service = _ScheduledTaskLifecycleDouble()
     service.decommission_repository = _DecommissionStatusRepositoryDouble()
     service.broker = _BrokerDouble()
 
@@ -468,6 +506,51 @@ async def test_retire_tree_terminates_external_channel_before_archive() -> None:
     assert definition is participant
     assert context.root_session_id == "root-session-1"
     assert context.subtree_session_ids == ("root-session-1",)
+
+
+@pytest.mark.asyncio
+async def test_retire_tree_preserves_started_scheduled_run_without_stop() -> None:
+    """Agent decommission archives a valid started Scheduled Run without stopping it."""
+    events: list[str] = []
+    participant = SessionLifecycleParticipantDefinition(
+        key="session.external-channel",
+        policy_version=1,
+        dependencies=(),
+        owned_resources=(),
+        archive_policy=SessionLifecycleTransitionPolicy.TERMINATE,
+        restore_policy=SessionLifecycleTransitionPolicy.PRESERVE,
+        purge_policy=SessionLifecyclePurgePolicy.REQUIRED,
+    )
+    external_channel_lifecycle = _ExternalChannelLifecycleDouble(events)
+    broker = _BrokerDouble()
+    service = object.__new__(AgentDecommissionService)
+    service.session_manager = _transaction_manager
+    service.agent_session_repository = _RootSessionRepositoryDouble(
+        events,
+        run_state=AgentSessionRunState.RUNNING,
+    )
+    service.agent_run_repository = _AgentRunRepositoryDouble(active=True)
+    service.retention_repository = _RetentionRepositoryDouble()
+    service.lifecycle_orchestrator = _LifecycleOrchestratorDouble(participant)
+    service.external_channel_lifecycle_service = external_channel_lifecycle
+    service.scheduled_task_lifecycle_service = _ScheduledTaskLifecycleDouble(
+        allows_active_runs=True
+    )
+    service.decommission_repository = _DecommissionStatusRepositoryDouble()
+    service.broker = broker
+
+    retired = await service._retire_root_tree(
+        job=_job(job_id="decommission-scheduled"),
+        lease_owner="scheduler-1",
+        root_session_id="root-session-1",
+    )
+
+    assert retired is True
+    assert events == [
+        "external-channel-archive",
+        "archive-tree",
+    ]
+    assert broker.session_ids == []
 
 
 @dataclass(frozen=True)

@@ -10,6 +10,7 @@ from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentRunStatus,
     AgentSessionPrimaryKind,
     AgentSessionRunState,
     AgentSessionStatus,
@@ -17,6 +18,7 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
     RuntimeRunnerState,
+    ScheduledTaskScheduleType,
     SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
@@ -26,8 +28,10 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
+from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
@@ -46,8 +50,13 @@ from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepo
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.message import MessageRepository
+from azents.repos.scheduled_task.data import ScheduledTaskCreate
+from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
-from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.scheduled_task_cycle import (
+    ScheduledTaskCycleRepository,
+    ScheduledTaskCycleSnapshot,
+)
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.toolkit_state import ToolkitStateRepository
@@ -81,6 +90,7 @@ from azents.services.model_file import ModelFileService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
+from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
@@ -214,6 +224,79 @@ async def _bind_session_working_folder(
             ),
         )
         assert bound is not None
+
+
+async def _start_scheduled_cycle(
+    session_manager: SessionManager[AsyncSession],
+    *,
+    workspace_id: str,
+    agent_id: str,
+    session_id: str,
+) -> tuple[str, str, str]:
+    """Create one started Scheduled cycle and active Run for archive tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    cycle_id = "c" * 32
+    async with session_manager() as session:
+        await MailboxRepository().delete_by_session_id(session, session_id)
+        task = await ScheduledTaskRepository().create(
+            session,
+            ScheduledTaskCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                session_id=session_id,
+                title="Daily report",
+                objective="Prepare the daily report.",
+                schedule_type=ScheduledTaskScheduleType.ONCE,
+                next_eligible_at=now,
+                binding_id=None,
+                scheduled_at=now,
+                cron_expression=None,
+                timezone=None,
+            ),
+        )
+        task_row = await session.get(RDBScheduledTask, task.id)
+        agent_session = await session.get(RDBAgentSession, session_id)
+        assert task_row is not None
+        assert agent_session is not None
+        task_row.active_cycle_id = cycle_id
+        task_row.active_scheduled_for = now
+        cycle_repository = ScheduledTaskCycleRepository(ToolkitStateRepository())
+        cycle = await cycle_repository.create_admitted(
+            session,
+            ScheduledTaskCycleSnapshot(
+                cycle_id=cycle_id,
+                task_id=task.id,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                session_id=session_id,
+                binding_id=None,
+                title=task.title,
+                objective=task.objective,
+                schedule_type=task.schedule_type,
+                scheduled_at=task.scheduled_at,
+                cron_expression=task.cron_expression,
+                timezone=task.timezone,
+                scheduled_for=now,
+            ),
+        )
+        run = RDBAgentRun(
+            session_id=session_id,
+            scheduled_task_cycle_id=cycle_id,
+            run_index=1,
+            parent_agent_run_id=None,
+            status=AgentRunStatus.RUNNING,
+        )
+        session.add(run)
+        await session.flush()
+        await cycle_repository.start(
+            session,
+            record=cycle,
+            run_id=run.id,
+            started_at=now,
+        )
+        agent_session.run_state = AgentSessionRunState.RUNNING
+        await session.commit()
+        return task.id, cycle_id, run.id
 
 
 class _RuntimeTargetResolver(RuntimeOperationTargetResolver):
@@ -366,6 +449,9 @@ def _service(
         external_channel_lifecycle_service=ExternalChannelLifecycleService(
             repository=ExternalChannelLifecycleRepository(),
             action_service=cast(ExternalChannelActionService, _ChannelActionService()),
+        ),
+        scheduled_task_lifecycle_service=ScheduledTaskLifecycleService(
+            ScheduledTaskLifecycleRepository()
         ),
         session_manager=rdb_session_manager,
         runtime_target_resolver=(runtime_target_resolver or _RuntimeTargetResolver()),
@@ -1914,6 +2000,80 @@ class TestChatSessionTeamSessions:
 
         assert isinstance(archive_result, Failure)
         assert isinstance(archive_result.error, RunningSessionArchiveBlocked)
+
+    async def test_archive_preserves_started_scheduled_run_without_stop(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A valid started Scheduled cycle may outlive Session archive."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "team-session-scheduled-archive",
+        )
+        user_id = await _create_user(
+            rdb_session,
+            "team-session-scheduled-archive@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-scheduled-archive-agent",
+        )
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+        create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+        assert isinstance(create_result, Success)
+        task_id, cycle_id, run_id = await _start_scheduled_cycle(
+            rdb_session_manager,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+        )
+
+        archive_result = await _service(rdb_session_manager).archive_agent_session(
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+            user_id=user_id,
+        )
+
+        assert isinstance(archive_result, Success)
+        async with rdb_session_manager() as verify_session:
+            archived = await verify_session.get(
+                RDBAgentSession,
+                create_result.value.id,
+            )
+            assert archived is not None
+            assert archived.status is AgentSessionStatus.ARCHIVED
+            assert archived.stop_request_id is None
+            assert await verify_session.get(RDBScheduledTask, task_id) is None
+            run = await verify_session.get(RDBAgentRun, run_id)
+            assert run is not None
+            assert run.status is AgentRunStatus.RUNNING
+            cycle = await ScheduledTaskCycleRepository(
+                ToolkitStateRepository()
+            ).get_started(
+                verify_session,
+                agent_id=agent_id,
+                session_id=create_result.value.id,
+                cycle_id=cycle_id,
+            )
+            assert cycle is not None
+            assert cycle.state.current_run_id == run_id
 
     async def test_auto_archive_uses_current_agent_ttl(
         self,

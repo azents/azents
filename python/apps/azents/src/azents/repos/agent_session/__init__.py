@@ -1831,8 +1831,12 @@ class AgentSessionRepository:
         session_id: str,
         run_id: str,
         continue_running: bool,
+        allow_archived_scheduled_continuation: bool,
     ) -> bool:
         """Atomically consume one matching idle continuation boundary."""
+        allowed_statuses = [AgentSessionStatus.ACTIVE]
+        if allow_archived_scheduled_continuation:
+            allowed_statuses.append(AgentSessionStatus.ARCHIVED)
         values: dict[str, object] = {
             "pending_idle_continuation_run_id": None,
             "run_state": (
@@ -1853,7 +1857,7 @@ class AgentSessionRepository:
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.status.in_(allowed_statuses),
                 RDBAgentSession.pending_idle_continuation_run_id == run_id,
             )
             .values(**values)

@@ -58,9 +58,24 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                 purge_policy=SessionLifecyclePurgePolicy.REQUIRED,
             ),
             SessionLifecycleParticipantDefinition(
-                key="session.external-channel",
+                key="session.scheduled-task",
                 policy_version=1,
                 dependencies=("session.execution",),
+                owned_resources=(
+                    _database_resource(
+                        "scheduled_tasks",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_scheduled_task",
+                    ),
+                ),
+                archive_policy=SessionLifecycleTransitionPolicy.TERMINATE,
+                restore_policy=SessionLifecycleTransitionPolicy.PRESERVE,
+                purge_policy=SessionLifecyclePurgePolicy.REQUIRED,
+            ),
+            SessionLifecycleParticipantDefinition(
+                key="session.external-channel",
+                policy_version=1,
+                dependencies=("session.scheduled-task",),
                 owned_resources=(
                     _database_resource(
                         "external_channel_bindings",

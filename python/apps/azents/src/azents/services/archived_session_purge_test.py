@@ -47,6 +47,7 @@ from azents.repos.session_lifecycle_finalizer import (
 )
 from azents.services.archived_session_purge import ArchivedSessionPurgeService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
+from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
     get_session_lifecycle_registry,
@@ -715,6 +716,74 @@ class _ExternalChannelLifecycleService:
         return SimpleNamespace(model_dump=lambda: {"phase": phase})
 
 
+class _ScheduledTaskLifecycleService:
+    """Scheduled Task lifecycle double for purge participant dispatch."""
+
+    def __init__(self, *, allows_active_runs: bool = False) -> None:
+        self.allows_active_runs = allows_active_runs
+        self.calls: list[str] = []
+
+    async def archive_allows_active_runs(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+        running_session_ids: Sequence[str],
+    ) -> bool:
+        """Keep existing ordinary active-run stop behavior in baseline tests."""
+        del session, session_ids, running_session_ids
+        return self.allows_active_runs
+
+    async def prepare_purge_participant(
+        self,
+        session: AsyncSession,
+        participant: object,
+        context: object,
+    ) -> SimpleNamespace:
+        """Return one prepared summary."""
+        del session, participant, context
+        self.calls.append("prepared")
+        return SimpleNamespace(phase="prepared")
+
+    async def cleanup_purge_participant(
+        self,
+        session: AsyncSession,
+        participant: object,
+        context: object,
+    ) -> SimpleNamespace:
+        """Return one cleanup summary."""
+        del session, participant, context
+        self.calls.append("cleanup")
+        return SimpleNamespace(phase="cleanup")
+
+    async def verify_purge_participant(
+        self,
+        session: AsyncSession,
+        participant: object,
+        context: object,
+    ) -> SimpleNamespace:
+        """Return one verification summary."""
+        del session, participant, context
+        self.calls.append("verified")
+        return SimpleNamespace(phase="verified")
+
+    async def finalize_purge_participant(
+        self,
+        session: AsyncSession,
+        participant: object,
+        context: object,
+    ) -> SimpleNamespace:
+        """Return one final verification summary."""
+        del session, participant, context
+        self.calls.append("finalized")
+        return SimpleNamespace(phase="finalized")
+
+    @staticmethod
+    def summary_dict(summary: SimpleNamespace) -> dict[str, object]:
+        """Project a durable summary."""
+        return {"phase": summary.phase}
+
+
 def _job(now: datetime.datetime) -> ArchivedSessionPurgeJob:
     return ArchivedSessionPurgeJob(
         id="job-1",
@@ -857,6 +926,7 @@ def _build_service(
     s3_fail_key: str | None = None,
     worktree_failure_count: int = 0,
     external_lifecycle_fail_phase: str | None = None,
+    scheduled_allows_active_runs: bool = False,
 ) -> tuple[
     ArchivedSessionPurgeService,
     _RetentionRepository,
@@ -930,6 +1000,12 @@ def _build_service(
         external_channel_lifecycle_service=cast(
             ExternalChannelLifecycleService,
             external_channel_lifecycle_service,
+        ),
+        scheduled_task_lifecycle_service=cast(
+            ScheduledTaskLifecycleService,
+            _ScheduledTaskLifecycleService(
+                allows_active_runs=scheduled_allows_active_runs
+            ),
         ),
     )
     return (
@@ -1261,6 +1337,39 @@ async def test_active_run_schedules_retry_before_external_cleanup() -> None:
     assert worktree_service.calls == 0
     assert broker.purged_session_ids == []
     assert s3_service.deleted_keys == []
+
+
+async def test_started_scheduled_run_retries_without_stop_or_signal() -> None:
+    """Purge waits for a preserved Scheduled cycle without interrupting its Run."""
+    events: list[str] = []
+    (
+        service,
+        retention_repository,
+        agent_session_repository,
+        _,
+        worktree_service,
+        broker,
+        s3_service,
+    ) = _build_service(
+        events=events,
+        active_checks=[True],
+        scheduled_allows_active_runs=True,
+    )
+
+    summary = await service.purge_once(
+        lease_owner="worker-1",
+        deadline=_deadline(),
+    )
+
+    assert summary.completed_count == 0
+    assert summary.retry_scheduled_count == 1
+    assert retention_repository.retry is not None
+    assert retention_repository.retry["error_kind"] == "ActiveAgentRun"
+    assert agent_session_repository.deleted is False
+    assert worktree_service.calls == 0
+    assert broker.purged_session_ids == []
+    assert s3_service.deleted_keys == []
+    assert not any(event.startswith(("stop:", "signal:")) for event in events)
 
 
 async def test_object_delete_failure_preserves_tree_for_retry() -> None:

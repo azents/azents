@@ -327,12 +327,8 @@ class ScheduledTaskProviderControlService:
             raise ScheduledTaskProviderControlError("Scheduled Task delete is invalid.")
         async with self.session_manager() as session:
             service = self._task_service()
-            target = await service.lock_provider_mutation_target(
-                session,
-                task_id=locator.task_id,
-                expected_binding_id=locator.binding_id,
-            )
-            if target is None:
+            candidate = await self.task_repository.get_by_id(session, locator.task_id)
+            if candidate is None or candidate.binding_id != locator.binding_id:
                 raise ScheduledTaskProviderControlError(
                     "Scheduled Task control is unavailable."
                 )
@@ -340,12 +336,21 @@ class ScheduledTaskProviderControlService:
                 session,
                 interaction_id=interaction_id,
                 locator=locator,
-                task=target.task,
+                task=candidate,
                 provider_parent_channel_id=provider_parent_channel_id,
                 provider_thread_resource_key=provider_thread_resource_key,
                 origin_interaction_id=origin_interaction_id,
             )
             del interaction
+            target = await service.lock_provider_mutation_target(
+                session,
+                task_id=locator.task_id,
+                expected_binding_id=locator.binding_id,
+            )
+            if target is None or target.task != candidate:
+                raise ScheduledTaskProviderControlError(
+                    "Scheduled Task control is unavailable."
+                )
             if locator.action == "delete":
                 deleted = await service.delete_locked_provider_target(
                     session,
