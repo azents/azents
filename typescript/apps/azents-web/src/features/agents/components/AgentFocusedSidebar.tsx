@@ -32,6 +32,7 @@ import {
 import {
   IconAlertCircle,
   IconBrightnessAuto,
+  IconCalendarClock,
   IconCheck,
   IconChevronLeft,
   IconChevronRight,
@@ -233,6 +234,7 @@ export function AgentFocusedSidebar({
   const workspacePath = `/w/${handle}`;
   const basePath = `${workspacePath}/agents/${agent.id}`;
   const sessionsDirectoryHref = `${basePath}/sessions`;
+  const scheduledTasksHref = `${basePath}/scheduled-tasks`;
   const settingsHref = `${basePath}/settings`;
   const isAgentDirectoryActive = pathname === sessionsDirectoryHref;
   const { mode, preference, setColorMode } = useColorMode();
@@ -305,6 +307,7 @@ export function AgentFocusedSidebar({
   const renameBusy =
     editingSession !== null && renamingSessionId === editingSession.id;
   const isSessionsDirectoryActive = pathname === sessionsDirectoryHref;
+  const isScheduledTasksActive = pathname === scheduledTasksHref;
 
   const renderSession = (session: AgentSessionResponse): React.ReactElement => {
     const href = `${basePath}/sessions/${session.id}`;
@@ -633,6 +636,20 @@ export function AgentFocusedSidebar({
             </Badge>
           </Group>
         </Stack>
+
+        <Divider />
+
+        <Box px="xs" py="xs">
+          <NavLink
+            component={Link}
+            href={scheduledTasksHref}
+            active={isScheduledTasksActive}
+            label={t("tabs.scheduledTasks")}
+            leftSection={<IconCalendarClock size={rem(18)} />}
+            px="sm"
+            onClick={onNavigate}
+          />
+        </Box>
 
         <Divider />
 
