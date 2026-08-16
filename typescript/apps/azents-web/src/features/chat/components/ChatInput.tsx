@@ -68,6 +68,10 @@ import type {
 const DRAFT_STORAGE_KEY_PREFIX = "azents.chat.inputDraft";
 const LAST_SELECTED_PROFILE_STORAGE_KEY_PREFIX =
   "azents.chat.lastSelectedInferenceProfile";
+// iOS 27 beta may offer contact AutoFill for ordinary textareas. A recognized
+// non-contact token steers AutoFill away from that classifier without disabling
+// the textarea's separate writing-suggestion traits.
+const CHAT_COMPOSER_AUTOCOMPLETE = "new-password";
 
 function getScopedStorageKey(
   prefix: string,
@@ -2019,6 +2023,7 @@ export const ChatInput = memo(function ChatInput({
             <Textarea
               ref={textareaRef}
               name="message"
+              autoComplete={CHAT_COMPOSER_AUTOCOMPLETE}
               inputMode="text"
               autoCorrect="on"
               autoCapitalize="sentences"

@@ -269,6 +269,14 @@ const baseArgs = {
 
 export const Ready = {
   args: baseArgs,
+  play: async ({ canvasElement }) => {
+    const input = within(canvasElement).getByRole("textbox");
+    await expect(input).toHaveAttribute("autocomplete", "new-password");
+    await expect(input).toHaveAttribute("inputmode", "text");
+    await expect(input).toHaveAttribute("autocorrect", "on");
+    await expect(input).toHaveAttribute("autocapitalize", "sentences");
+    await expect(input).toHaveAttribute("spellcheck", "true");
+  },
 } satisfies Story;
 
 export const WithPendingFiles = {
