@@ -50,10 +50,12 @@ class _Repository:
         provider_resource: ExternalChannelResource | None = None,
         delivery_resource: ExternalChannelResource | None = None,
         configuration_generation: int = 2,
+        expected_delivery_channel_id: str = "201",
     ) -> None:
         self.provider_resource = provider_resource
         self.delivery_resource = delivery_resource
         self.configuration_generation = configuration_generation
+        self.expected_delivery_channel_id = expected_delivery_channel_id
 
     async def get_owned_discord_gateway_configuration(
         self,
@@ -98,7 +100,7 @@ class _Repository:
         delivery_channel_id: str,
     ) -> ExternalChannelResource | None:
         assert (connection_id, guild_id) == ("connection-1", "300")
-        assert delivery_channel_id.isdigit()
+        assert delivery_channel_id == self.expected_delivery_channel_id
         return self.delivery_resource
 
 
@@ -542,7 +544,9 @@ async def test_discord_provisioned_thread_starter_reuses_root_scope() -> None:
 @pytest.mark.asyncio
 async def test_discord_provider_native_thread_starter_keeps_thread_scope() -> None:
     """A provider-native Thread starter is not mistaken for a provisioned replay."""
-    service, ingestion = _service()
+    service, ingestion = _service(
+        repository=_Repository(expected_delivery_channel_id="100")
+    )
 
     await service.ingest_discord_event(
         event=_discord_event(
