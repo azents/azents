@@ -126,6 +126,7 @@ from azents.engine.tools.builtin import BuiltinToolkitProvider, RuntimeToolkit
 from azents.engine.tools.claude_rules import ClaudeRulesToolkitProvider
 from azents.engine.tools.deps import (
     get_goal_toolkit_provider,
+    get_scheduled_toolkit_provider,
     get_todo_toolkit_provider,
     get_toolkit_registry,
     get_vfs_projection_service,
@@ -136,6 +137,7 @@ from azents.engine.tools.dynamic_worktree import (
 )
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
+from azents.engine.tools.scheduled import ScheduledToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
@@ -409,6 +411,9 @@ class RunExecutor:
     goal_toolkit_provider: Annotated[
         GoalToolkitProvider, Depends(get_goal_toolkit_provider)
     ]
+    scheduled_toolkit_provider: Annotated[
+        ScheduledToolkitProvider, Depends(get_scheduled_toolkit_provider)
+    ]
     external_channel_toolkit_provider: Annotated[
         ExternalChannelToolkitProvider,
         Depends(get_worker_external_channel_toolkit_provider),
@@ -651,6 +656,7 @@ class RunExecutor:
             claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
             todo_toolkit_provider=self.todo_toolkit_provider,
             goal_toolkit_provider=self.goal_toolkit_provider,
+            scheduled_toolkit_provider=self.scheduled_toolkit_provider,
             external_channel_toolkit_provider=(self.external_channel_toolkit_provider),
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,
@@ -911,6 +917,11 @@ class RunExecutor:
             agent_id=snapshot.agent_id,
             session_id=snapshot.session_id,
             workspace_id=snapshot.workspace_id,
+            execution_mode=(
+                ToolkitExecutionMode.SUBAGENT
+                if snapshot.execution_mode is AgentSessionKind.SUBAGENT
+                else ToolkitExecutionMode.ROOT
+            ),
         )
         if command is None:
             if scheduled_admission is not None:
@@ -1310,6 +1321,7 @@ class RunExecutor:
             claude_rules_toolkit_provider=self.claude_rules_toolkit_provider,
             todo_toolkit_provider=self.todo_toolkit_provider,
             goal_toolkit_provider=self.goal_toolkit_provider,
+            scheduled_toolkit_provider=self.scheduled_toolkit_provider,
             external_channel_toolkit_provider=(self.external_channel_toolkit_provider),
             skill_toolkit_provider=self.skill_toolkit_provider,
             subagent_toolkit_provider=self.subagent_toolkit_provider,

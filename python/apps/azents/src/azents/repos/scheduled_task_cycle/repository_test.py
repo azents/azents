@@ -1,14 +1,21 @@
 """Scheduled Task cycle repository tests."""
 
 import datetime
-from typing import cast
+from typing import Literal, cast
 
 import pytest
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ScheduledTaskScheduleType
+from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleSnapshot
+from azents.repos.scheduled_task_cycle.data import (
+    ScheduledTaskCycleRecord,
+    ScheduledTaskCycleSnapshot,
+    ScheduledTaskCycleState,
+)
 from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpsert
 
@@ -98,6 +105,101 @@ def _repository() -> tuple[ScheduledTaskCycleRepository, _ToolkitStateRepository
     return (
         ScheduledTaskCycleRepository(toolkit_state_repository=state_repository),
         state_repository,
+    )
+
+
+def _cycle_state(
+    *,
+    cycle_id: str,
+    phase: Literal["admitted", "started"],
+    scheduled_for: datetime.datetime,
+) -> ScheduledTaskCycleState:
+    """Build one cycle state for direct SQL repository tests."""
+    return ScheduledTaskCycleState(
+        cycle_id=cycle_id,
+        task_id="t" * 32,
+        phase=phase,
+        workspace_id="w" * 32,
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        binding_id=None,
+        title="Daily report",
+        objective="Prepare the current report.",
+        schedule_type=ScheduledTaskScheduleType.CRON,
+        scheduled_at=None,
+        cron_expression="0 9 * * *",
+        timezone="America/New_York",
+        scheduled_for=scheduled_for,
+        current_run_id="r" * 32 if phase == "started" else None,
+        started_at=_now() if phase == "started" else None,
+        progress_title=None,
+    )
+
+
+def _rdb_state(
+    *,
+    state: ScheduledTaskCycleState,
+    state_name: str | None = None,
+    toolkit_state_id: str = "k" * 32,
+    version: int = 2,
+) -> RDBToolkitState:
+    """Build one ORM state row without database defaults."""
+    row = RDBToolkitState(
+        agent_id=state.agent_id,
+        session_id=state.session_id,
+        toolkit_namespace="scheduled",
+        state_name=state_name or f"cycle:{state.cycle_id}",
+        state_json=state.model_dump(mode="json"),
+        schema_version=1,
+        version=version,
+    )
+    row.id = toolkit_state_id
+    row.created_at = _now()
+    row.updated_at = _now()
+    return row
+
+
+class _Result:
+    """SQLAlchemy result double for list and returning-delete operations."""
+
+    def __init__(
+        self,
+        *,
+        rows: list[RDBToolkitState] | None = None,
+        scalar: str | None = None,
+    ) -> None:
+        self.rows = rows or []
+        self.scalar = scalar
+
+    def scalars(self) -> list[RDBToolkitState]:
+        """Return configured ORM rows."""
+        return self.rows
+
+    def scalar_one_or_none(self) -> str | None:
+        """Return configured deletion identity."""
+        return self.scalar
+
+
+class _QuerySession:
+    """Capture one direct SQL statement."""
+
+    def __init__(self, result: _Result) -> None:
+        self.result = result
+        self.query: object | None = None
+
+    async def execute(self, query: object) -> _Result:
+        """Capture and return the configured SQL result."""
+        self.query = query
+        return self.result
+
+
+def _sql(statement: object) -> str:
+    """Compile one captured SQL statement with literal fixture values."""
+    return str(
+        cast(sa.ClauseElement, statement).compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
     )
 
 
@@ -240,3 +342,126 @@ async def test_get_started_filters_admitted_state() -> None:
 
     assert started is not None
     assert started.state.current_run_id == "r" * 32
+
+
+async def test_list_started_filters_and_orders_current_cycle_rows() -> None:
+    """Compaction and idle reads omit admitted/non-cycle state deterministically."""
+    started_later = _rdb_state(
+        state=_cycle_state(
+            cycle_id="b" * 32,
+            phase="started",
+            scheduled_for=_now() + datetime.timedelta(minutes=1),
+        ),
+        toolkit_state_id="1" * 32,
+    )
+    started_first_b = _rdb_state(
+        state=_cycle_state(
+            cycle_id="d" * 32,
+            phase="started",
+            scheduled_for=_now(),
+        ),
+        toolkit_state_id="2" * 32,
+    )
+    started_first_a = _rdb_state(
+        state=_cycle_state(
+            cycle_id="c" * 32,
+            phase="started",
+            scheduled_for=_now(),
+        ),
+        toolkit_state_id="3" * 32,
+    )
+    admitted = _rdb_state(
+        state=_cycle_state(
+            cycle_id="a" * 32,
+            phase="admitted",
+            scheduled_for=_now() - datetime.timedelta(minutes=1),
+        ),
+        toolkit_state_id="4" * 32,
+    )
+    unrelated = _rdb_state(
+        state=_cycle_state(
+            cycle_id="e" * 32,
+            phase="started",
+            scheduled_for=_now() - datetime.timedelta(minutes=2),
+        ),
+        state_name="projection",
+        toolkit_state_id="5" * 32,
+    )
+    session = _QuerySession(
+        _Result(
+            rows=[
+                started_later,
+                started_first_b,
+                admitted,
+                unrelated,
+                started_first_a,
+            ]
+        )
+    )
+    repository = ScheduledTaskCycleRepository(
+        toolkit_state_repository=ToolkitStateRepository()
+    )
+
+    records = await repository.list_started(
+        cast(AsyncSession, session),
+        agent_id="a" * 32,
+        session_id="s" * 32,
+    )
+
+    assert [record.state.cycle_id for record in records] == [
+        "c" * 32,
+        "d" * 32,
+        "b" * 32,
+    ]
+    statement = _sql(session.query)
+    assert "toolkit_states.agent_id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'" in statement
+    assert "toolkit_states.session_id = 'ssssssssssssssssssssssssssssssss'" in statement
+    assert "toolkit_states.toolkit_namespace = 'scheduled'" in statement
+
+
+async def test_delete_started_uses_exact_row_version_fence() -> None:
+    """Terminal deletion cannot remove a concurrently changed cycle row."""
+    record = ScheduledTaskCycleRecord(
+        state=_cycle_state(
+            cycle_id="c" * 32,
+            phase="started",
+            scheduled_for=_now(),
+        ),
+        version=7,
+        toolkit_state_id="k" * 32,
+    )
+    session = _QuerySession(_Result(scalar=record.toolkit_state_id))
+    repository = ScheduledTaskCycleRepository(
+        toolkit_state_repository=ToolkitStateRepository()
+    )
+
+    assert await repository.delete_started(
+        cast(AsyncSession, session),
+        record=record,
+    )
+
+    statement = _sql(session.query)
+    assert "toolkit_states.id = 'kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk'" in statement
+    assert "toolkit_states.version = 7" in statement
+
+
+async def test_delete_started_rejects_admitted_cycle() -> None:
+    """Terminalization never deletes work that has not crossed the start boundary."""
+    record = ScheduledTaskCycleRecord(
+        state=_cycle_state(
+            cycle_id="c" * 32,
+            phase="admitted",
+            scheduled_for=_now(),
+        ),
+        version=1,
+        toolkit_state_id="k" * 32,
+    )
+    repository = ScheduledTaskCycleRepository(
+        toolkit_state_repository=ToolkitStateRepository()
+    )
+
+    with pytest.raises(ValueError, match="not started"):
+        await repository.delete_started(
+            cast(AsyncSession, object()),
+            record=record,
+        )

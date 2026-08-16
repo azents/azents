@@ -72,6 +72,7 @@ from azents.engine.tools.goal import GoalToolkit, GoalToolkitProvider
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
+from azents.engine.tools.scheduled import ScheduledToolkitProvider
 from azents.engine.tools.skill import SkillToolkit, SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkit, TodoToolkitProvider
 from azents.rdb.session import SessionManager
@@ -1251,6 +1252,7 @@ async def resolve_agent_tools(
     claude_rules_toolkit_provider: ClaudeRulesToolkitProvider | None = None,
     todo_toolkit_provider: TodoToolkitProvider | None = None,
     goal_toolkit_provider: GoalToolkitProvider | None = None,
+    scheduled_toolkit_provider: ScheduledToolkitProvider | None = None,
     external_channel_toolkit_provider: ExternalChannelToolkitProvider | None = None,
     skill_toolkit_provider: SkillToolkitProvider | None = None,
     subagent_toolkit_provider: ToolkitProvider[Any] | None = None,
@@ -1277,6 +1279,7 @@ async def resolve_agent_tools(
     :param claude_rules_toolkit_provider: Claude rules provider (None disables it)
     :param todo_toolkit_provider: Todo toolkit provider (None disables todo)
     :param goal_toolkit_provider: Goal toolkit provider (None disables goal)
+    :param scheduled_toolkit_provider: Scheduled root provider
     :param external_channel_toolkit_provider: External Channel root provider
     :param skill_toolkit_provider: Skill toolkit provider (None disables Skill)
     :param dynamic_worktree_toolkit_provider: Dynamic Worktree provider
@@ -1728,6 +1731,50 @@ async def resolve_agent_tools(
                 False,
                 None,
                 goal_modes,
+            )
+        )
+
+    # Auto-bound Toolkit: root-owned Scheduled Task management and execution
+    scheduled_modes = _ROOT_EXECUTION_MODES
+    if scheduled_toolkit_provider is not None and _allows_execution_mode(
+        scheduled_modes,
+        execution_mode,
+    ):
+        scheduled_config = ScheduledToolkitProvider.validate_config({})
+        scheduled_context = ResolveContext(
+            toolkit_id="",
+            toolkit_name="scheduled",
+            credentials_json=None,
+            agent_id=context.agent_id,
+            session_id=context.session_id,
+            session=None,
+            web_url=web_url,
+            oauth_secret_key=oauth_secret_key,
+            workspace_id=context.workspace_id,
+            workspace_handle=workspace_handle,
+        )
+        scheduled_resolved = await _resolve_toolkit_with_logging(
+            agent_id=agent_id,
+            context=context,
+            source="auto",
+            slug="scheduled",
+            provider=scheduled_toolkit_provider,
+            toolkit_name="scheduled",
+            resolve=scheduled_toolkit_provider.resolve(
+                scheduled_config,
+                scheduled_context,
+            ),
+        )
+        pending.append(
+            (
+                scheduled_toolkit_provider,
+                scheduled_resolved,
+                scheduled_config,
+                "scheduled",
+                None,
+                False,
+                None,
+                scheduled_modes,
             )
         )
 

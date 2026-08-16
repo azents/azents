@@ -26,7 +26,7 @@ monitoring begins.
 
 | Phase | Branch | Base | PR title | Approved mechanisms | Primary boundary |
 | --- | --- | --- | --- | --- | --- |
-| Docs | `feature/scheduled-tasks-0-docs` | `origin/main` | `Scheduled Tasks: Approve design and delivery plan` | approved `M1`–`M15` authority | Requirements, ADR, approved Design revision 3, implementation plan, and Phase 1 execution plan |
+| Docs | `feature/scheduled-tasks-0-docs` | `origin/main` | `Scheduled Tasks [0/8]: Approve design and delivery plan` | approved `M1`–`M15` authority | Requirements, ADR, approved Design revision 3, implementation plan, and Phase 1 execution plan |
 | 1 | `feature/scheduled-tasks-1-foundation` | Docs | `Scheduled Tasks [1/8]: Add the domain foundation` | `M1`, `M3`, `M4`, `M13`, `M14` | generated schema migration, Task persistence, AgentRun binding field, closed Mailbox/Event readers and projections |
 | 2 | `feature/scheduled-tasks-2-dispatch` | Phase 1 | `Scheduled Tasks [2/8]: Add dispatch and start admission` | `M1`, `M2`, `M3`, `M4`, `M13` | schedule validation, Task service, bounded Scheduler dispatcher, cycle admission, FIFO trigger, pending-to-started Run binding |
 | 3 | `feature/scheduled-tasks-3-toolkit` | Phase 2 | `Scheduled Tasks [3/8]: Add ScheduledToolkit execution` | `M3`, `M5`, `M9`, `M10`, `M13`, `M15` | root-only auto-bound Toolkit, managed Skill VFS source, idle and compaction continuity, terminal result transaction, run-terminal tool behavior |

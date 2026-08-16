@@ -148,6 +148,7 @@ class _RunRepo:
     def __init__(self) -> None:
         self.phases: list[AgentRunPhase] = []
         self.terminal: AgentRunStatus | None = None
+        self.scheduled_task_cycle_id: str | None = None
         self.active_tool_calls: list[ActiveToolCall] = []
         self.active_tool_call_snapshots: list[list[ActiveToolCall]] = []
         self.model_call_started_at: datetime.datetime | None = None
@@ -166,7 +167,7 @@ class _RunRepo:
         return AgentRunState(
             id=run_id if len(run_id) == 32 else "1" * 32,
             session_id="session-1",
-            scheduled_task_cycle_id=None,
+            scheduled_task_cycle_id=self.scheduled_task_cycle_id,
             run_index=1,
             phase=self.phases[-1] if self.phases else AgentRunPhase.IDLE,
             status=self.terminal or AgentRunStatus.RUNNING,
@@ -178,6 +179,8 @@ class _RunRepo:
             created_at=datetime.datetime.now(datetime.UTC),
             started_at=datetime.datetime.now(datetime.UTC),
             model_call_started_at=self.model_call_started_at,
+            terminal_result_event_id=self.terminal_result_event_id,
+            terminal_result_message=self.terminal_result_message,
             updated_at=datetime.datetime.now(datetime.UTC),
         )
 
@@ -871,6 +874,28 @@ class _ToolExecutor:
         self.cancelled_calls.append(call)
 
 
+class _TerminalToolExecutor(_ToolExecutor):
+    """Commit terminal Run recovery fields before returning the tool result."""
+
+    def __init__(self, run_repo: _RunRepo) -> None:
+        super().__init__()
+        self.run_repo = run_repo
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Return one terminal result after simulating canonical result commit."""
+        self.executed_calls.append(call)
+        self.run_repo.terminal_result_event_id = "e" * 32
+        self.run_repo.terminal_result_message = "Scheduled work completed."
+        return ClientToolResultPayload(
+            call_id=call.call_id,
+            name=call.name,
+            status="completed",
+            output=[OutputTextPart(text="Scheduled work completed.")],
+            terminal_run=True,
+            wire_dialect="json_function",
+        )
+
+
 class _BridgeToolExecutor(_ToolExecutor):
     """Mark every completed test call as a registered bridge admission."""
 
@@ -1000,6 +1025,7 @@ def _model_call_preparer(
     *,
     lowerer: _Lowerer | _RecordingLowerer | None = None,
     tool_executor: _ToolExecutor
+    | _TerminalToolExecutor
     | _FailingToolExecutor
     | _SettlingToolExecutor
     | _CancellingToolExecutor
@@ -1959,6 +1985,138 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
     assert [event.external_id for event in tool_events] == [
         "tool-call:run-1:call-1",
         "tool-result:run-1:call-1",
+    ]
+
+
+async def test_terminal_tool_completes_run_without_another_model_turn() -> None:
+    """A durable terminal tool result ends the Run after its result is finalized."""
+    run_repo = _RunRepo()
+    run_repo.scheduled_task_cycle_id = "c" * 32
+    transcript_repo = _TranscriptRepo()
+    lowerer = _RecordingLowerer()
+    normalizer = _OutputSequenceNormalizer(
+        [
+            NormalizedAdapterOutput(
+                needs_follow_up=True,
+                events=[
+                    _tool_call_event(
+                        name="submit_scheduled_task_result",
+                    )
+                ],
+                usage=_usage(),
+            )
+        ]
+    )
+    tool_executor = _TerminalToolExecutor(run_repo)
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=normalizer,
+        model_call_preparer=_model_call_preparer(
+            lowerer=lowerer,
+            tool_executor=tool_executor,
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        )
+    )
+
+    assert status is AgentRunStatus.COMPLETED
+    assert normalizer.call_count == 1
+    assert len(lowerer.transcripts) == 1
+    assert [call.name for call in tool_executor.executed_calls] == [
+        "submit_scheduled_task_result"
+    ]
+    assert run_repo.terminal is AgentRunStatus.COMPLETED
+    assert run_repo.terminal_result_event_id == "e" * 32
+    assert run_repo.terminal_result_message == "Scheduled work completed."
+    assert (
+        sum(
+            event.kind is EventKind.CLIENT_TOOL_RESULT
+            for event in transcript_repo.events
+        )
+        == 1
+    )
+    assert (
+        sum(event.kind is EventKind.RUN_MARKER for event in transcript_repo.events) == 1
+    )
+
+
+async def test_terminal_tool_recovery_finalizes_result_before_model_dispatch() -> None:
+    """Recovery repairs the missing Tool result and completes without model replay."""
+    run_repo = _RunRepo()
+    run_repo.scheduled_task_cycle_id = "c" * 32
+    run_repo.terminal_result_event_id = "e" * 32
+    run_repo.terminal_result_message = "Scheduled work completed."
+    run_repo.active_tool_calls = [
+        ActiveToolCall(
+            call_id="call-1",
+            name="submit_scheduled_task_result",
+            arguments='{"status":"finished","result":"done"}',
+            started_at=datetime.datetime.now(datetime.UTC),
+            owner_generation=1,
+            wire_dialect="json_function",
+        )
+    ]
+    transcript_repo = _TranscriptRepo()
+    transcript_repo.events.append(_tool_call_event(name="submit_scheduled_task_result"))
+    lowerer = _RecordingLowerer()
+    normalizer = _OutputSequenceNormalizer([])
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=normalizer,
+        model_call_preparer=_model_call_preparer(lowerer=lowerer),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            turn_action_bridge_boundary=TurnActionBridgeBoundary(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+        )
+    )
+
+    assert status is AgentRunStatus.COMPLETED
+    assert normalizer.call_count == 0
+    assert lowerer.transcripts == []
+    assert run_repo.active_tool_calls == []
+    results = [
+        event
+        for event in transcript_repo.events
+        if event.kind is EventKind.CLIENT_TOOL_RESULT
+    ]
+    assert len(results) == 1
+    payload = results[0].payload
+    assert isinstance(payload, ClientToolResultPayload)
+    assert payload.status == "completed"
+    assert payload.output == [
+        OutputTextPart(text="The Scheduled Task result was already committed.")
     ]
 
 

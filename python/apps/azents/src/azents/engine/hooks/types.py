@@ -276,8 +276,18 @@ class ExternalChannelSessionContinuationInput(SessionContinuationInputBase):
     kind: Literal["external_channel"] = "external_channel"
 
 
+class ScheduledTaskSessionContinuationInput(SessionContinuationInputBase):
+    """Scheduled Task continuation requested by its idle hook."""
+
+    kind: Literal["scheduled_task"] = "scheduled_task"
+    cycle_id: str = Field(min_length=32, max_length=32)
+    title: str = Field(min_length=1)
+
+
 SessionContinuationInput = Annotated[
-    GoalSessionContinuationInput | ExternalChannelSessionContinuationInput,
+    GoalSessionContinuationInput
+    | ExternalChannelSessionContinuationInput
+    | ScheduledTaskSessionContinuationInput,
     Field(discriminator="kind"),
 ]
 
