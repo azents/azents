@@ -62,6 +62,7 @@ from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 EXTERNAL_CHANNEL_TOOLKIT_SLUG = "external_channel"
@@ -258,6 +259,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         self,
         *,
         service: ExternalChannelActionService,
+        scheduled_channel_service: ScheduledTaskChannelService,
         file_transfer_service: ExternalChannelFileTransferService,
         agent_id: str,
         session_id: str,
@@ -265,6 +267,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
     ) -> None:
         """Create one Session-bound toolkit."""
         self.service = service
+        self.scheduled_channel_service = scheduled_channel_service
         self.file_transfer_service = file_transfer_service
         self.agent_id = agent_id
         self.session_id = session_id
@@ -399,34 +402,52 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         ),
                         authority=self.resource_authority,
                     )
-                result = await self.service.execute(
+                file_storage = (
+                    None if runtime_context is None else runtime_context.file_storage
+                )
+                provider_delivery_service = (
+                    None
+                    if runtime_context is None
+                    else runtime_context.provider_delivery_service
+                )
+                resolve_runtime_target = (
+                    None
+                    if runtime_context is None
+                    else runtime_context.resolve_runtime_target
+                )
+                scheduled = await self.scheduled_channel_service.execute_progress(
                     session_id=self.session_id,
                     agent_id=self.agent_id,
                     run_id=self.run_id,
-                    client_tool_call_id=execution.call_id,
                     binding_id=value.binding,
                     mode=ExternalChannelActionMode(value.mode),
                     message=value.message,
                     title=None if value.mode == "finish" else value.title,
                     tasks=tasks,
                     files=manifests,
-                    file_storage=(
-                        None
-                        if runtime_context is None
-                        else runtime_context.file_storage
-                    ),
+                    file_storage=file_storage,
                     authority=self.resource_authority,
-                    provider_delivery_service=(
-                        None
-                        if runtime_context is None
-                        else runtime_context.provider_delivery_service
-                    ),
-                    resolve_runtime_target=(
-                        None
-                        if runtime_context is None
-                        else runtime_context.resolve_runtime_target
-                    ),
+                    provider_delivery_service=provider_delivery_service,
+                    resolve_runtime_target=resolve_runtime_target,
                 )
+                result = scheduled.result
+                if result is None:
+                    result = await self.service.execute(
+                        session_id=self.session_id,
+                        agent_id=self.agent_id,
+                        run_id=self.run_id,
+                        client_tool_call_id=execution.call_id,
+                        binding_id=value.binding,
+                        mode=ExternalChannelActionMode(value.mode),
+                        message=value.message,
+                        title=None if value.mode == "finish" else value.title,
+                        tasks=tasks,
+                        files=manifests,
+                        file_storage=file_storage,
+                        authority=self.resource_authority,
+                        provider_delivery_service=provider_delivery_service,
+                        resolve_runtime_target=resolve_runtime_target,
+                    )
             except ValueError as error:
                 raise FunctionToolError(str(error)) from None
             return json.dumps(
@@ -501,10 +522,12 @@ class ExternalChannelToolkitProvider(ToolkitProvider[ExternalChannelToolkitConfi
         self,
         *,
         service: ExternalChannelActionService,
+        scheduled_channel_service: ScheduledTaskChannelService,
         file_transfer_service: ExternalChannelFileTransferService,
     ) -> None:
         """Create the provider."""
         self.service = service
+        self.scheduled_channel_service = scheduled_channel_service
         self.file_transfer_service = file_transfer_service
 
     async def resolve(
@@ -516,6 +539,7 @@ class ExternalChannelToolkitProvider(ToolkitProvider[ExternalChannelToolkitConfi
         del config
         return ExternalChannelToolkit(
             service=self.service,
+            scheduled_channel_service=self.scheduled_channel_service,
             file_transfer_service=self.file_transfer_service,
             agent_id=context.agent_id,
             session_id=context.session_id,

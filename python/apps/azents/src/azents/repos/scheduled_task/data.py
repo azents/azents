@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from azents.core.enums import ScheduledTaskScheduleType
 
+MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH = 3_000
+
 
 @dataclass(frozen=True)
 class ScheduledTask:

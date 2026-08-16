@@ -130,6 +130,7 @@ def _make_scheduled_provider() -> ScheduledToolkitProvider:
         session_manager=cast(Any, object()),
         service=cast(Any, object()),
         terminal_service=cast(Any, object()),
+        channel_service=cast(Any, object()),
         cycle_repository=cast(Any, object()),
         run_repository=cast(Any, object()),
     )

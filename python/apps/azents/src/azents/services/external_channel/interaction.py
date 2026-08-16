@@ -29,6 +29,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.scheduled_task.data import ScheduledTask
 from azents.services.external_channel.channel_action import get_slack_delivery_client
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
@@ -64,12 +65,21 @@ from azents.services.external_channel.slack_events import (
     SlackInteractionView,
 )
 from azents.services.external_channel.slack_http import (
+    SLACK_SCHEDULED_TASK_EDIT_VIEW_CALLBACK_ID,
     SLACK_SELECTOR_VIEW_CALLBACK_ID,
     SLACK_SETTINGS_VIEW_CALLBACK_ID,
     SLACK_SETUP_VIEW_CALLBACK_ID,
 )
 from azents.services.external_channel.slack_settings import (
     parse_slack_settings_locator,
+)
+from azents.services.scheduled_task.control import (
+    ScheduledTaskEditInput,
+    ScheduledTaskProviderControlError,
+    ScheduledTaskProviderControlService,
+    build_scheduled_task_slack_edit_metadata,
+    parse_scheduled_task_control_locator,
+    parse_scheduled_task_slack_edit_metadata,
 )
 
 _SELECTOR_TITLE = "Select an Agent"
@@ -94,6 +104,9 @@ class ExternalChannelInteractionHandoff:
         "selector_submission",
         "settings_open",
         "settings_submission",
+        "scheduled_task_edit_open",
+        "scheduled_task_edit_submission",
+        "scheduled_task_delete",
         "unsupported",
     ]
     provider_parent_channel_id: str | None = field(repr=False)
@@ -109,6 +122,11 @@ class ExternalChannelInteractionHandoff:
     selector_search: str | None = field(default=None, repr=False)
     selector_view_id: str | None = field(default=None, repr=False)
     selector_view_hash: str | None = field(default=None, repr=False)
+    scheduled_task_locator: str | None = field(default=None, repr=False)
+    scheduled_task_edit: ScheduledTaskEditInput | None = field(
+        default=None,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -179,6 +197,10 @@ class ExternalChannelInteractionProcessor:
         ExternalChannelParticipationService,
         Depends(ExternalChannelParticipationService),
     ]
+    scheduled_task_control: Annotated[
+        ScheduledTaskProviderControlService,
+        Depends(ScheduledTaskProviderControlService),
+    ]
     config: Annotated[Config, Depends(get_config)]
 
     async def process(self, handoff: ExternalChannelInteractionHandoff) -> None:
@@ -189,6 +211,13 @@ class ExternalChannelInteractionProcessor:
             return
         if handoff.handler == "settings_submission":
             await self._process_settings_submission(handoff, now=now)
+            return
+        if handoff.handler in {
+            "scheduled_task_edit_open",
+            "scheduled_task_edit_submission",
+            "scheduled_task_delete",
+        }:
+            await self._process_scheduled_task_control(handoff, now=now)
             return
         if handoff.handler == "unsupported":
             raise ValueError("Slack interaction has no supported callback handler.")
@@ -648,6 +677,99 @@ class ExternalChannelInteractionProcessor:
             }
         ):
             raise ValueError("Slack settings submission scope is unavailable.")
+
+    async def _process_scheduled_task_control(
+        self,
+        handoff: ExternalChannelInteractionHandoff,
+        *,
+        now: datetime.datetime,
+    ) -> None:
+        """Render or apply one reauthorized Scheduled Task registration control."""
+        if handoff.scheduled_task_locator is None:
+            raise ValueError("Slack Scheduled Task control is unavailable.")
+        edit_metadata = (
+            parse_scheduled_task_slack_edit_metadata(
+                metadata=handoff.scheduled_task_locator,
+                secret=self.config.auth.jwt.secret_key,
+            )
+            if handoff.handler == "scheduled_task_edit_submission"
+            else None
+        )
+        locator = parse_scheduled_task_control_locator(
+            locator=(
+                edit_metadata.locator
+                if edit_metadata is not None
+                else handoff.scheduled_task_locator
+            ),
+            secret=self.config.auth.jwt.secret_key,
+        )
+        interaction, configuration = await self._load_processing_interaction(handoff)
+        try:
+            if handoff.handler == "scheduled_task_edit_open":
+                if locator.action != "edit":
+                    raise ScheduledTaskProviderControlError(
+                        "Scheduled Task control is unavailable."
+                    )
+                task = await self.scheduled_task_control.load_for_edit(
+                    interaction_id=interaction.id,
+                    locator=locator,
+                    provider_parent_channel_id=handoff.provider_parent_channel_id,
+                    provider_thread_resource_key=_scheduled_task_slack_resource_key(
+                        tenant_id=configuration.provider_tenant_id,
+                        channel_id=handoff.provider_parent_channel_id,
+                        thread_key=handoff.provider_thread_key,
+                    ),
+                )
+                view = _scheduled_task_edit_view(
+                    task,
+                    build_scheduled_task_slack_edit_metadata(
+                        secret=self.config.auth.jwt.secret_key,
+                        locator=handoff.scheduled_task_locator,
+                        origin_interaction_id=interaction.id,
+                    ),
+                )
+            else:
+                expected_edit = handoff.handler == "scheduled_task_edit_submission"
+                if expected_edit != (locator.action == "edit"):
+                    raise ScheduledTaskProviderControlError(
+                        "Scheduled Task control is unavailable."
+                    )
+                result = await self.scheduled_task_control.mutate(
+                    interaction_id=interaction.id,
+                    locator=locator,
+                    provider_parent_channel_id=handoff.provider_parent_channel_id,
+                    provider_thread_resource_key=_scheduled_task_slack_resource_key(
+                        tenant_id=configuration.provider_tenant_id,
+                        channel_id=handoff.provider_parent_channel_id,
+                        thread_key=handoff.provider_thread_key,
+                    ),
+                    origin_interaction_id=(
+                        None
+                        if edit_metadata is None
+                        else edit_metadata.origin_interaction_id
+                    ),
+                    edit=handoff.scheduled_task_edit,
+                    now=now,
+                )
+                view = _scheduled_task_notice_view(
+                    "Scheduled Task saved."
+                    if result.action == "edit"
+                    else "Scheduled Task deleted."
+                )
+        except (ScheduledTaskProviderControlError, ValueError) as error:
+            view = _scheduled_task_notice_view(str(error))
+        if handoff.trigger_id is None:
+            return
+        result = await self.slack_client.open_interaction_view(
+            bot_token=self._slack_credentials(configuration).bot_token,
+            trigger_id=handoff.trigger_id,
+            view=view,
+        )
+        if result.status == "opened":
+            return
+        if result.status == "expired":
+            raise SlackInteractionTriggerExpired
+        raise RuntimeError("Slack Scheduled Task control could not be processed.")
 
     async def _load_processing_interaction(
         self,
@@ -1159,6 +1281,109 @@ def _settings_notice_view(message: str) -> SlackInteractionView:
     )
 
 
+def _scheduled_task_edit_view(
+    task: ScheduledTask,
+    locator: str,
+) -> SlackInteractionView:
+    """Render one provider-native edit modal from the current Task snapshot."""
+    at = (
+        ""
+        if task.scheduled_at is None
+        else task.scheduled_at.astimezone(datetime.UTC)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    return SlackInteractionView(
+        callback_id=SLACK_SCHEDULED_TASK_EDIT_VIEW_CALLBACK_ID,
+        title="Edit Scheduled Task",
+        private_metadata=locator,
+        blocks=[
+            _scheduled_task_text_input(
+                block_id="azents_scheduled_task_title",
+                label="Title",
+                initial_value=task.title,
+                multiline=False,
+                optional=False,
+            ),
+            _scheduled_task_text_input(
+                block_id="azents_scheduled_task_objective",
+                label="Objective",
+                initial_value=task.objective,
+                multiline=True,
+                optional=False,
+            ),
+            _scheduled_task_text_input(
+                block_id="azents_scheduled_task_at",
+                label="Run once at (RFC3339 UTC)",
+                initial_value=at,
+                multiline=False,
+                optional=True,
+            ),
+            _scheduled_task_text_input(
+                block_id="azents_scheduled_task_cron",
+                label="Cron expression",
+                initial_value=task.cron_expression or "",
+                multiline=False,
+                optional=True,
+            ),
+            _scheduled_task_text_input(
+                block_id="azents_scheduled_task_timezone",
+                label="Cron timezone",
+                initial_value=task.timezone or "",
+                multiline=False,
+                optional=True,
+            ),
+        ],
+        submit_title="Save",
+        close_title="Cancel",
+    )
+
+
+def _scheduled_task_text_input(
+    *,
+    block_id: str,
+    label: str,
+    initial_value: str,
+    multiline: bool,
+    optional: bool,
+) -> dict[str, object]:
+    return {
+        "type": "input",
+        "block_id": block_id,
+        "label": {"type": "plain_text", "text": label},
+        "optional": optional,
+        "element": {
+            "type": "plain_text_input",
+            "action_id": block_id,
+            "initial_value": initial_value,
+            "multiline": multiline,
+        },
+    }
+
+
+def _scheduled_task_notice_view(message: str) -> SlackInteractionView:
+    """Render one provider-native Scheduled Task acknowledgement."""
+    normalized = " ".join(message.split())[:500]
+    return SlackInteractionView(
+        callback_id=SLACK_SCHEDULED_TASK_EDIT_VIEW_CALLBACK_ID,
+        title="Scheduled Task",
+        private_metadata="completed",
+        blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": _slack_literal(
+                        normalized or "Scheduled Task control is unavailable."
+                    ),
+                },
+            }
+        ],
+        submit_title=None,
+        close_title="Close",
+    )
+
+
 def _settings_select_block(
     *,
     block_id: str,
@@ -1218,6 +1443,22 @@ def _slack_thread_resource_key(
     if tenant_id is None:
         raise ValueError("Slack interaction tenant is unavailable.")
     return f"slack:{tenant_id}:{channel_id}:{thread_key}"
+
+
+def _scheduled_task_slack_resource_key(
+    *,
+    tenant_id: str | None,
+    channel_id: str | None,
+    thread_key: str | None,
+) -> str | None:
+    """Return a control resource key only when the callback proves its thread."""
+    if channel_id is None or thread_key is None:
+        return None
+    return _slack_thread_resource_key(
+        tenant_id=tenant_id,
+        channel_id=channel_id,
+        thread_key=thread_key,
+    )
 
 
 def build_selector_metadata(

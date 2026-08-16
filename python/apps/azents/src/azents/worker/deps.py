@@ -33,7 +33,10 @@ from azents.engine.tools.claude_rules import (
     ClaudeRulesToolkitProvider,
     ToolkitClaudeRulesAppendixDedupeStateStore,
 )
-from azents.engine.tools.deps import get_vfs_projection_service
+from azents.engine.tools.deps import (
+    get_scheduled_task_channel_service,
+    get_vfs_projection_service,
+)
 from azents.engine.tools.dynamic_worktree import DynamicWorktreeToolkitProvider
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.import_file import ImportFileStagingConfiguration
@@ -100,6 +103,7 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.external_channel.slack_events import SlackConversationClient
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
+from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingService,
@@ -325,11 +329,16 @@ def get_worker_external_channel_toolkit_provider(
         ExternalChannelFileTransferService,
         Depends(get_worker_external_channel_file_transfer_service),
     ],
+    scheduled_channel_service: Annotated[
+        ScheduledTaskChannelService,
+        Depends(get_scheduled_task_channel_service),
+    ],
 ) -> ExternalChannelToolkitProvider:
     """Provide External Channel tools with Worker transfer staging when available."""
     return ExternalChannelToolkitProvider(
         service=service,
         file_transfer_service=file_transfer_service,
+        scheduled_channel_service=scheduled_channel_service,
     )
 
 

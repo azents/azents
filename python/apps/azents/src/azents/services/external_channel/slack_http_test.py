@@ -39,9 +39,16 @@ from azents.services.external_channel.slack_http import (
     project_slack_shortcut_source_event,
     verify_slack_signature,
 )
+from azents.services.scheduled_task.control import (
+    ScheduledTaskEditInput,
+    build_scheduled_task_control_locator,
+    build_scheduled_task_slack_edit_metadata,
+)
 
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
 _SECRET = "signing-secret"
+_CONTROL_TASK_ID = "01828d10-b4c3-7a12-94d6-8f43c4e195ce"
+_CONTROL_BINDING_ID = "01828d10-b4c3-7a12-94d6-8f43c4e195cf"
 
 
 def _encoded_sdk_params(
@@ -125,6 +132,94 @@ class _MockSlackWebClient(AsyncWebClient):
 
 def _validation_client(http_client: httpx.AsyncClient) -> SlackWebAPIClient:
     return SlackWebAPIClient(_MockSlackWebClient(http_client))
+
+
+def test_scheduled_task_controls_project_only_bounded_locator_and_modal_input() -> None:
+    """Scheduled Task control payloads remain request-local after admission."""
+    edit_locator = build_scheduled_task_control_locator(
+        secret=_SECRET,
+        action="edit",
+        task_id=_CONTROL_TASK_ID,
+        binding_id=_CONTROL_BINDING_ID,
+    )
+    opened = parse_slack_interaction_payload(
+        payload={
+            "type": "block_actions",
+            "api_app_id": "app-1",
+            "team": {"id": "tenant-1"},
+            "user": {"id": "user-1"},
+            "channel": {"id": "channel-1"},
+            "message": {"thread_ts": "1.000000"},
+            "trigger_id": "trigger-1",
+            "actions": [
+                {
+                    "action_id": "azents_scheduled_task_edit",
+                    "value": edit_locator,
+                }
+            ],
+        },
+        provider_interaction_key="interaction-1",
+        received_at=_NOW,
+    )
+
+    assert opened.handler == "scheduled_task_edit_open"
+    assert opened.scheduled_task_locator == edit_locator
+    assert opened.scheduled_task_edit is None
+
+    edit_metadata = build_scheduled_task_slack_edit_metadata(
+        secret=_SECRET,
+        locator=edit_locator,
+        origin_interaction_id="01828d10-b4c3-7a12-94d6-8f43c4e195d0",
+    )
+    assert len(edit_metadata) > 100
+    submitted = parse_slack_interaction_payload(
+        payload={
+            "type": "view_submission",
+            "api_app_id": "app-1",
+            "team": {"id": "tenant-1"},
+            "user": {"id": "user-1"},
+            "trigger_id": "trigger-2",
+            "view": {
+                "callback_id": "azents_scheduled_task_edit",
+                "private_metadata": edit_metadata,
+                "state": {
+                    "values": {
+                        "azents_scheduled_task_title": {
+                            "azents_scheduled_task_title": {"value": "Updated"}
+                        },
+                        "azents_scheduled_task_objective": {
+                            "azents_scheduled_task_objective": {
+                                "value": "Updated objective"
+                            }
+                        },
+                        "azents_scheduled_task_at": {
+                            "azents_scheduled_task_at": {"value": ""}
+                        },
+                        "azents_scheduled_task_cron": {
+                            "azents_scheduled_task_cron": {"value": "0 9 * * *"}
+                        },
+                        "azents_scheduled_task_timezone": {
+                            "azents_scheduled_task_timezone": {
+                                "value": "America/Los_Angeles"
+                            }
+                        },
+                    }
+                },
+            },
+        },
+        provider_interaction_key="interaction-2",
+        received_at=_NOW,
+    )
+
+    assert submitted.handler == "scheduled_task_edit_submission"
+    assert submitted.scheduled_task_locator == edit_metadata
+    assert submitted.scheduled_task_edit == ScheduledTaskEditInput(
+        title="Updated",
+        objective="Updated objective",
+        at=None,
+        cron="0 9 * * *",
+        timezone="America/Los_Angeles",
+    )
 
 
 def test_testenv_endpoint_overrides_are_explicit(

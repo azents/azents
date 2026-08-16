@@ -12,8 +12,25 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import AgentRunPatch, EventCreate
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.scheduled_task_cycle.data import ScheduledTrackerProjectionPart
 
 ScheduledTaskTerminalStatus = Literal["finished", "failed"]
+
+
+@dataclasses.dataclass(frozen=True)
+class ScheduledTaskTerminalEffectSnapshot:
+    """Process-local provider publication authority captured before cycle deletion."""
+
+    cycle_id: str
+    task_id: str
+    workspace_id: str
+    agent_id: str
+    session_id: str
+    binding_id: str
+    status: ScheduledTaskTerminalStatus
+    result: str
+    tracker_desired_revision: int
+    tracker_projection_parts: tuple[ScheduledTrackerProjectionPart, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -22,6 +39,7 @@ class ScheduledTaskTerminalOutcome:
 
     event: Event
     created: bool
+    effect_snapshot: ScheduledTaskTerminalEffectSnapshot | None
 
 
 class ScheduledTaskTerminalService:
@@ -90,7 +108,11 @@ class ScheduledTaskTerminalService:
                             terminal_result_message=payload.result,
                         ),
                     )
-                return ScheduledTaskTerminalOutcome(event=existing, created=False)
+                return ScheduledTaskTerminalOutcome(
+                    event=existing,
+                    created=False,
+                    effect_snapshot=None,
+                )
 
             cycle = await self.cycle_repository.lock(
                 session,
@@ -115,6 +137,24 @@ class ScheduledTaskTerminalService:
                 scheduled_for=cycle.state.scheduled_for,
                 status=status,
                 result=normalized_result,
+            )
+            effect_snapshot = (
+                None
+                if cycle.state.binding_id is None
+                else ScheduledTaskTerminalEffectSnapshot(
+                    cycle_id=cycle.state.cycle_id,
+                    task_id=cycle.state.task_id,
+                    workspace_id=cycle.state.workspace_id,
+                    agent_id=cycle.state.agent_id,
+                    session_id=cycle.state.session_id,
+                    binding_id=cycle.state.binding_id,
+                    status=status,
+                    result=normalized_result,
+                    tracker_desired_revision=cycle.state.tracker_desired_revision,
+                    tracker_projection_parts=tuple(
+                        cycle.state.tracker_current_projection_parts
+                    ),
+                )
             )
             event = await self.event_repository.append(
                 session,
@@ -164,7 +204,11 @@ class ScheduledTaskTerminalService:
                     terminal_result_message=normalized_result,
                 ),
             )
-            return ScheduledTaskTerminalOutcome(event=event, created=True)
+            return ScheduledTaskTerminalOutcome(
+                event=event,
+                created=True,
+                effect_snapshot=effect_snapshot,
+            )
 
 
 def _result_external_id(cycle_id: str) -> str:

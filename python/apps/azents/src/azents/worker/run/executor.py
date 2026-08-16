@@ -912,6 +912,16 @@ class RunExecutor:
                 )
 
         run_id = agent_run.id
+        if (
+            scheduled_admission is not None
+            and agent_run.scheduled_task_cycle_id is not None
+        ):
+            channel_service = self.scheduled_toolkit_provider.channel_service
+            await channel_service.create_initial_tracker(
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
+                cycle_id=agent_run.scheduled_task_cycle_id,
+            )
         await self.vfs_projection_service.ensure_run_projection(
             run_id=run_id,
             agent_id=snapshot.agent_id,

@@ -259,6 +259,8 @@ class SlackSocketManagerService:
                         settings_metadata=callback.settings_metadata,
                         settings_location=callback.settings_location,
                         settings_response_mode=callback.settings_response_mode,
+                        scheduled_task_locator=callback.scheduled_task_locator,
+                        scheduled_task_edit=callback.scheduled_task_edit,
                         trigger_id=callback.trigger_id,
                         selector_interaction_id=callback.selector_interaction_id,
                         selector_metadata=callback.selector_metadata,

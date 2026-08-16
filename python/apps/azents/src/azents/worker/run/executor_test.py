@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from azcommon.result import Failure, Success
@@ -1353,7 +1354,14 @@ def _executor(
         claude_rules_toolkit_provider=cast(ClaudeRulesToolkitProvider, object()),
         todo_toolkit_provider=cast(TodoToolkitProvider, object()),
         goal_toolkit_provider=cast(GoalToolkitProvider, object()),
-        scheduled_toolkit_provider=cast(ScheduledToolkitProvider, object()),
+        scheduled_toolkit_provider=cast(
+            ScheduledToolkitProvider,
+            SimpleNamespace(
+                channel_service=SimpleNamespace(
+                    create_initial_tracker=AsyncMock(return_value=None)
+                )
+            ),
+        ),
         external_channel_toolkit_provider=cast(
             ExternalChannelToolkitProvider,
             object(),

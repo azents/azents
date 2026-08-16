@@ -18,6 +18,7 @@ from azents.services.external_channel.discord_delivery import (
 )
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKMessage,
+    DiscordSDKPermissionDenied,
     DiscordSDKSession,
     DiscordSDKThread,
     DiscordSDKUnavailable,
@@ -32,7 +33,11 @@ class _SDKSession:
     message: DiscordSDKMessage = field(
         default_factory=lambda: DiscordSDKMessage("555", "333", "111")
     )
+    forwarded_message: DiscordSDKMessage = field(
+        default_factory=lambda: DiscordSDKMessage("556", "222", "111")
+    )
     create_thread_error: Exception | None = None
+    forward_message_error: Exception | None = None
     calls: list[tuple[str, object]] = field(default_factory=list)
 
     async def fetch_root_thread(self, **values: object) -> DiscordSDKThread | None:
@@ -67,6 +72,12 @@ class _SDKSession:
     async def create_message(self, **values: object) -> DiscordSDKMessage:
         self.calls.append(("create_message", values))
         return self.message
+
+    async def forward_message(self, **values: object) -> DiscordSDKMessage:
+        self.calls.append(("forward_message", values))
+        if self.forward_message_error is not None:
+            raise self.forward_message_error
+        return self.forwarded_message
 
     async def update_message(self, **values: object) -> DiscordSDKMessage:
         self.calls.append(("update_message", values))
@@ -141,6 +152,117 @@ async def test_create_message_forwards_nonce_and_rich_projection_to_sdk() -> Non
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_message_can_forward_the_exact_created_message() -> None:
+    """The opt-in flow creates first and forwards the typed SDK result second."""
+    session = _SDKSession()
+    client, _ = _client(session)
+    operation_key = ProviderOperationKey.from_seed("terminal-part-1")
+
+    result = await client.create_message(
+        bot_token="discord-secret",
+        guild_id="111",
+        channel_id="333",
+        content="Terminal result",
+        operation_key=operation_key,
+        forward_to_parent=True,
+        parent_channel_id="222",
+    )
+
+    assert result == DiscordDeliveryResult(
+        "delivered",
+        "discord:111:555",
+        None,
+        None,
+    )
+    assert session.calls == [
+        (
+            "create_message",
+            {
+                "guild_id": "111",
+                "channel_id": "333",
+                "content": "Terminal result",
+                "nonce": operation_key.value,
+                "components": None,
+                "embeds": None,
+            },
+        ),
+        (
+            "forward_message",
+            {
+                "message": session.message,
+                "destination_channel_id": "222",
+            },
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_forward_failure_preserves_created_thread_message_identity() -> None:
+    """Parent surfacing failure retains the successful Thread message key."""
+    session = _SDKSession(
+        forward_message_error=DiscordSDKUnavailable(),
+    )
+    client, _ = _client(session)
+
+    result = await client.create_message(
+        bot_token="discord-secret",
+        guild_id="111",
+        channel_id="333",
+        content="Terminal result",
+        operation_key=ProviderOperationKey.from_seed("terminal-part-2"),
+        forward_to_parent=True,
+        parent_channel_id="222",
+    )
+
+    assert result.status == "unknown"
+    assert result.provider_message_key == "discord:111:555"
+    assert result.error_kind == "provider_ambiguous"
+
+
+@pytest.mark.asyncio
+async def test_forward_permission_failure_keeps_classification_and_identity() -> None:
+    """A native forward denial remains failed without hiding the Thread message."""
+    session = _SDKSession(
+        forward_message_error=DiscordSDKPermissionDenied(),
+    )
+    client, _ = _client(session)
+
+    result = await client.create_message(
+        bot_token="discord-secret",
+        guild_id="111",
+        channel_id="333",
+        content="Terminal result",
+        operation_key=ProviderOperationKey.from_seed("terminal-part-permission"),
+        forward_to_parent=True,
+        parent_channel_id="222",
+    )
+
+    assert result.status == "failed"
+    assert result.provider_message_key == "discord:111:555"
+    assert result.error_kind == "permission_denied"
+
+
+@pytest.mark.asyncio
+async def test_forward_requires_an_explicit_parent_before_create() -> None:
+    """An incomplete forwarding payload cannot create the Thread message."""
+    session = _SDKSession()
+    client, _ = _client(session)
+
+    result = await client.create_message(
+        bot_token="discord-secret",
+        guild_id="111",
+        channel_id="333",
+        content="Terminal result",
+        operation_key=ProviderOperationKey.from_seed("terminal-part-3"),
+        forward_to_parent=True,
+    )
+
+    assert result.status == "failed"
+    assert result.error_kind == "provider_rejected"
+    assert session.calls == []
 
 
 @pytest.mark.asyncio

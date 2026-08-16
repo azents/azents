@@ -33,11 +33,13 @@ from azents.repos.external_channel.data import (
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
 )
+from azents.repos.scheduled_task.data import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
 from azents.services.external_channel.data import (
     ExternalChannelCapabilitySnapshot,
     ExternalChannelProviderIdentity,
 )
 from azents.services.external_channel.slack_blocks import projected_slack_blocks
+from azents.services.scheduled_task.control import ScheduledTaskEditInput
 
 MAX_SLACK_HTTP_BODY_BYTES = 256 * 1024
 MAX_SLACK_URL_VERIFICATION_CHALLENGE_BYTES = 4 * 1024
@@ -53,6 +55,8 @@ SLACK_SETTINGS_OPEN_ACTION_ID = "azents_conversation_settings_open"
 SLACK_SETTINGS_VIEW_CALLBACK_ID = "azents_conversation_settings"
 SLACK_SETUP_VIEW_CALLBACK_ID = "azents_conversation_setup"
 SLACK_SELECTOR_VIEW_CALLBACK_ID = "azents_agent_selector"
+SLACK_SCHEDULED_TASK_EDIT_VIEW_CALLBACK_ID = "azents_scheduled_task_edit"
+_MAX_SLACK_SCHEDULED_TASK_EDIT_METADATA_LENGTH = 512
 SLACK_REQUIRED_BOT_SCOPES = (
     "app_mentions:read",
     "channels:history",
@@ -147,6 +151,9 @@ class SlackInteractionCallback:
         "selector_submission",
         "settings_open",
         "settings_submission",
+        "scheduled_task_edit_open",
+        "scheduled_task_edit_submission",
+        "scheduled_task_delete",
         "unsupported",
     ]
     callback_id: str | None
@@ -176,6 +183,11 @@ class SlackInteractionCallback:
         default=None,
         repr=False,
     )
+    scheduled_task_locator: str | None = field(default=None, repr=False)
+    scheduled_task_edit: ScheduledTaskEditInput | None = field(
+        default=None,
+        repr=False,
+    )
 
     def requires_selector_processing(self) -> bool:
         """Return whether this callback belongs to the supported selector flow."""
@@ -196,6 +208,12 @@ class SlackInteractionCallback:
     ) -> bool:
         """Return whether the authenticated callback has one supported processor."""
         if self.requires_settings_processing():
+            return True
+        if self.handler in {
+            "scheduled_task_edit_open",
+            "scheduled_task_edit_submission",
+            "scheduled_task_delete",
+        }:
             return True
         return (
             app_mode is ExternalChannelAppMode.MULTI
@@ -449,6 +467,16 @@ def parse_slack_interaction_payload(
         payload,
         handler=handler,
     )
+    scheduled_task_locator = _interaction_scheduled_task_locator(
+        payload,
+        interaction_type=interaction_type,
+        handler=handler,
+    )
+    scheduled_task_edit = _interaction_scheduled_task_edit(
+        payload,
+        interaction_type=interaction_type,
+        handler=handler,
+    )
     return SlackInteractionCallback(
         app_id=app_id,
         tenant_id=tenant_id,
@@ -480,6 +508,8 @@ def parse_slack_interaction_payload(
         settings_metadata=settings_metadata,
         settings_location=settings_location,
         settings_response_mode=settings_response_mode,
+        scheduled_task_locator=scheduled_task_locator,
+        scheduled_task_edit=scheduled_task_edit,
         resource_correlation_key=_interaction_resource_correlation_key(payload),
         projection={
             "interaction_type": interaction_type.value,
@@ -941,6 +971,9 @@ def _interaction_handler(
     "selector_submission",
     "settings_open",
     "settings_submission",
+    "scheduled_task_edit_open",
+    "scheduled_task_edit_submission",
+    "scheduled_task_delete",
     "unsupported",
 ]:
     """Select one explicit provider processor from fixed callback identifiers."""
@@ -970,6 +1003,10 @@ def _interaction_handler(
                 return "selector_navigation"
             if action_id == SLACK_SETTINGS_OPEN_ACTION_ID:
                 return "settings_open"
+            if action_id == "azents_scheduled_task_edit":
+                return "scheduled_task_edit_open"
+            if action_id == "azents_scheduled_task_delete":
+                return "scheduled_task_delete"
             return "unsupported"
         case ExternalChannelInteractionType.OPTIONS:
             return "unsupported"
@@ -981,6 +1018,8 @@ def _interaction_handler(
                 SLACK_SETUP_VIEW_CALLBACK_ID,
             }:
                 return "settings_submission"
+            if callback_id == SLACK_SCHEDULED_TASK_EDIT_VIEW_CALLBACK_ID:
+                return "scheduled_task_edit_submission"
             return "unsupported"
         case _ as unreachable:
             assert_never(unreachable)
@@ -1199,6 +1238,121 @@ def _interaction_settings_metadata(
     if value is None or len(value) > 3_000:
         raise SlackHTTPInvalidPayload("Slack settings metadata is invalid.")
     return value
+
+
+def _interaction_scheduled_task_locator(
+    payload: dict[str, object],
+    *,
+    interaction_type: ExternalChannelInteractionType,
+    handler: str,
+) -> str | None:
+    """Keep one bounded signed Scheduled Task control scope request-local."""
+    if handler in {"scheduled_task_edit_open", "scheduled_task_delete"}:
+        value = _interaction_action_value(payload)
+    elif (
+        handler == "scheduled_task_edit_submission"
+        and interaction_type is ExternalChannelInteractionType.VIEW_SUBMISSION
+    ):
+        view = payload.get("view")
+        value = (
+            _optional_string(view, "private_metadata")
+            if is_external_channel_projection(view)
+            else None
+        )
+    else:
+        return None
+    maximum = (
+        _MAX_SLACK_SCHEDULED_TASK_EDIT_METADATA_LENGTH
+        if handler == "scheduled_task_edit_submission"
+        else 100
+    )
+    if value is None or len(value) > maximum:
+        raise SlackHTTPInvalidPayload("Slack Scheduled Task control is invalid.")
+    return value
+
+
+def _interaction_scheduled_task_edit(
+    payload: dict[str, object],
+    *,
+    interaction_type: ExternalChannelInteractionType,
+    handler: str,
+) -> ScheduledTaskEditInput | None:
+    """Read bounded Scheduled Task modal fields only for an edit submission."""
+    if (
+        handler != "scheduled_task_edit_submission"
+        or interaction_type is not ExternalChannelInteractionType.VIEW_SUBMISSION
+    ):
+        return None
+    title = _interaction_modal_text_value(
+        payload,
+        block_id="azents_scheduled_task_title",
+        action_id="azents_scheduled_task_title",
+        required=True,
+        limit=120,
+    )
+    objective = _interaction_modal_text_value(
+        payload,
+        block_id="azents_scheduled_task_objective",
+        action_id="azents_scheduled_task_objective",
+        required=True,
+        limit=MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
+    )
+    at = _interaction_modal_text_value(
+        payload,
+        block_id="azents_scheduled_task_at",
+        action_id="azents_scheduled_task_at",
+        required=False,
+        limit=128,
+    )
+    cron = _interaction_modal_text_value(
+        payload,
+        block_id="azents_scheduled_task_cron",
+        action_id="azents_scheduled_task_cron",
+        required=False,
+        limit=256,
+    )
+    timezone = _interaction_modal_text_value(
+        payload,
+        block_id="azents_scheduled_task_timezone",
+        action_id="azents_scheduled_task_timezone",
+        required=False,
+        limit=128,
+    )
+    assert title is not None and objective is not None
+    return ScheduledTaskEditInput(
+        title=title,
+        objective=objective,
+        at=at,
+        cron=cron,
+        timezone=timezone,
+    )
+
+
+def _interaction_modal_text_value(
+    payload: dict[str, object],
+    *,
+    block_id: str,
+    action_id: str,
+    required: bool,
+    limit: int,
+) -> str | None:
+    """Read one bounded plain-text input from the exact expected modal field."""
+    view = payload.get("view")
+    state = view.get("state") if is_external_channel_projection(view) else None
+    values = state.get("values") if is_external_channel_projection(state) else None
+    block = values.get(block_id) if is_external_channel_projection(values) else None
+    action = block.get(action_id) if is_external_channel_projection(block) else None
+    value = action.get("value") if is_external_channel_projection(action) else None
+    if value is None:
+        if required:
+            raise SlackHTTPInvalidPayload("Slack Scheduled Task edit is incomplete.")
+        return None
+    if not isinstance(value, str) or len(value) > limit:
+        raise SlackHTTPInvalidPayload("Slack Scheduled Task edit is invalid.")
+    normalized = value.strip()
+    if required and not normalized:
+        raise SlackHTTPInvalidPayload("Slack Scheduled Task edit is incomplete.")
+    return normalized or None
 
 
 def _interaction_settings_location(

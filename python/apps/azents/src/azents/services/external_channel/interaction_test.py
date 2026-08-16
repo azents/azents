@@ -74,6 +74,7 @@ from azents.services.external_channel.slack_events import (
     SlackInteractionView,
     SlackInteractionViewResult,
 )
+from azents.services.scheduled_task.control import ScheduledTaskProviderControlService
 from azents.testing.external_channel import make_provider_effect_plan
 
 _VALID_EXPIRY = datetime.datetime.max.replace(tzinfo=datetime.UTC)
@@ -310,6 +311,10 @@ def _processor(
         participation_service=cast(
             ExternalChannelParticipationService,
             participation or SimpleNamespace(),
+        ),
+        scheduled_task_control=cast(
+            ScheduledTaskProviderControlService,
+            SimpleNamespace(),
         ),
         config=cast(
             Config,

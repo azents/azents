@@ -543,6 +543,93 @@ async def test_discord_tracker_delivery_includes_session_navigation(
 
 
 @pytest.mark.asyncio
+async def test_slack_terminal_thread_reply_enables_broadcast() -> None:
+    """The Scheduled terminal flag reaches the exact-thread SDK call."""
+    post_message = AsyncMock(
+        return_value=SlackControlMessageResult(
+            status="delivered",
+            provider_message_key="slack:C1:123.456",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "conversation_scope": "thread",
+            "thread_ts": "111.222",
+            "reply_broadcast": True,
+        }
+    )
+    target.request_payload.pop("blocks")
+    target.request_payload.pop("embeds")
+
+    result = await ExternalChannelActionService._deliver_slack(
+        _service(slack_client=SimpleNamespace(post_message=post_message)),
+        target,
+        operation_key=ProviderOperationKey.from_seed("slack-terminal"),
+        bot_token="slack-secret",
+        file_storage=None,
+        agent_id=None,
+        session_id=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+
+    assert result.status == "delivered"
+    post_call = post_message.await_args
+    assert post_call is not None
+    assert post_call.kwargs["reply_broadcast"] is True
+
+
+@pytest.mark.asyncio
+async def test_discord_terminal_thread_reply_forwards_to_exact_parent() -> None:
+    """The Scheduled terminal flag reaches native exact-message forwarding."""
+    create_message = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "conversation_scope": "thread",
+            "channel_id": "444",
+            "parent_channel_id": "222",
+            "forward_to_parent": True,
+        }
+    )
+    target.request_payload.pop("blocks")
+    target.request_payload.pop("embeds")
+
+    result = await ExternalChannelActionService._deliver_discord(
+        _service(discord_client=_DiscordClientDelegate(create_message=create_message)),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-terminal"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    assert result.status == "delivered"
+    create_call = create_message.await_args
+    assert create_call is not None
+    assert create_call.kwargs["forward_to_parent"] is True
+    assert create_call.kwargs["parent_channel_id"] == "222"
+
+
+@pytest.mark.asyncio
 async def test_discord_parent_file_delivery_does_not_open_sdk_session() -> None:
     """The multipart direct gap does not add an unnecessary Discord login."""
     create_file_message = AsyncMock(

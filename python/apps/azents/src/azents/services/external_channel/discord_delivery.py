@@ -18,6 +18,7 @@ from azents.services.external_channel.discord_sdk import (
     DiscordSDKCredentialsInvalid,
     DiscordSDKError,
     DiscordSDKMessage,
+    DiscordSDKMessageForwardingSession,
     DiscordSDKPermissionDenied,
     DiscordSDKRateLimited,
     DiscordSDKRequestRejected,
@@ -326,8 +327,13 @@ class DiscordDeliveryClient:
         operation_key: ProviderOperationKey,
         components: list[dict[str, object]] | None = None,
         embeds: list[dict[str, object]] | None = None,
+        forward_to_parent: bool = False,
+        parent_channel_id: str | None = None,
     ) -> DiscordDeliveryResult:
-        """Create one text message with the SDK nonce boundary."""
+        """Create once and optionally forward the exact Message to its parent."""
+        if forward_to_parent and parent_channel_id is None:
+            return _rejected_result()
+        created_result: DiscordDeliveryResult | None = None
         try:
             async with self._open_sdk(bot_token=bot_token) as sdk:
                 message = await sdk.create_message(
@@ -338,11 +344,48 @@ class DiscordDeliveryClient:
                     components=components,
                     embeds=embeds,
                 )
+                created_result = _sdk_message_result(
+                    message,
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                )
+                if created_result.status != "delivered" or not forward_to_parent:
+                    return created_result
+                assert parent_channel_id is not None
+                if not isinstance(sdk, DiscordSDKMessageForwardingSession):
+                    return _forwarding_result(
+                        created_result,
+                        _unknown_result(
+                            error_kind="provider_ambiguous",
+                            error_summary=(
+                                "Discord native message forwarding is unavailable."
+                            ),
+                        ),
+                    )
+                try:
+                    forwarded = await sdk.forward_message(
+                        message=message,
+                        destination_channel_id=parent_channel_id,
+                    )
+                except DiscordSDKError as error:
+                    return _forwarding_result(
+                        created_result,
+                        _sdk_delivery_failure(error),
+                    )
+                return _forwarding_result(
+                    created_result,
+                    _sdk_message_result(
+                        forwarded,
+                        guild_id=guild_id,
+                        channel_id=parent_channel_id,
+                    ),
+                )
         except DiscordSDKError as error:
             return _sdk_delivery_failure(error)
         except TimeoutError:
+            if created_result is not None:
+                return _forwarding_result(created_result, _sdk_timeout_result())
             return _sdk_timeout_result()
-        return _sdk_message_result(message, guild_id=guild_id, channel_id=channel_id)
 
     async def create_file_message(
         self,
@@ -491,6 +534,17 @@ def _sdk_message_result(
         provider_message_key=f"discord:{guild_id}:{message.message_id}",
         error_kind=None,
         error_summary=None,
+    )
+
+
+def _forwarding_result(
+    created: DiscordDeliveryResult,
+    forwarded: DiscordDeliveryResult,
+) -> DiscordDeliveryResult:
+    """Retain the created Thread message identity with the surfacing outcome."""
+    return replace(
+        forwarded,
+        provider_message_key=created.provider_message_key,
     )
 
 

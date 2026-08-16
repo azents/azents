@@ -178,6 +178,70 @@ async def test_private_message_mutations_reuse_validated_channel_scope() -> None
 
 
 @pytest.mark.asyncio
+async def test_native_forward_uses_exact_public_thread_message() -> None:
+    """Forwarding uses public SDK objects and the exact created Message identity."""
+    http = _PrivateHTTP()
+    session = _session(http)
+    source = MagicMock(spec=discord.Thread)
+    source.id = 300
+    source.parent_id = 200
+    source.guild.id = 111
+    destination = MagicMock(spec=discord.TextChannel)
+    destination.id = 200
+    destination.guild.id = 111
+    forwarded = MagicMock(spec=discord.Message)
+    forwarded.id = 401
+    forwarded.channel = destination
+    forwarded.guild = destination.guild
+    partial = source.get_partial_message.return_value
+    partial.forward = AsyncMock(return_value=forwarded)
+    session._client.fetch_channel = AsyncMock(  # noqa: SLF001
+        side_effect=[source, destination]
+    )
+
+    result = await session.forward_message(
+        message=discord_sdk.DiscordSDKMessage("400", "300", "111"),
+        destination_channel_id="200",
+    )
+
+    assert result == discord_sdk.DiscordSDKMessage("401", "200", "111")
+    assert session._client.fetch_channel.await_args_list == [  # noqa: SLF001
+        ((300,),),
+        ((200,),),
+    ]
+    source.get_partial_message.assert_called_once_with(400)
+    partial.forward.assert_awaited_once_with(destination)
+    http.get_channel.assert_not_awaited()
+    http.get_message.assert_not_awaited()
+    http.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_native_forward_rejects_a_non_parent_destination() -> None:
+    """A caller cannot forward a Thread message to an unrelated channel."""
+    http = _PrivateHTTP()
+    session = _session(http)
+    source = MagicMock(spec=discord.Thread)
+    source.id = 300
+    source.parent_id = 200
+    source.guild.id = 111
+    destination = MagicMock(spec=discord.TextChannel)
+    destination.id = 999
+    destination.guild.id = 111
+    session._client.fetch_channel = AsyncMock(  # noqa: SLF001
+        side_effect=[source, destination]
+    )
+
+    with pytest.raises(DiscordSDKRequestRejected):
+        await session.forward_message(
+            message=discord_sdk.DiscordSDKMessage("400", "300", "111"),
+            destination_channel_id="999",
+        )
+
+    source.get_partial_message.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_private_thread_routes_validate_expected_identity() -> None:
     """Thread operations retain Guild, parent, identity, and name validation."""
     http = _PrivateHTTP()

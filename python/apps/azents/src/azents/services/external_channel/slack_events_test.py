@@ -1542,6 +1542,41 @@ async def test_channel_action_rate_limit_is_terminal_failed_without_retry() -> N
     assert result.error_kind == "rate_limited"
 
 
+async def test_thread_reply_broadcast_is_opt_in() -> None:
+    """Only an explicit terminal reply is surfaced to the parent channel."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"ok": True, "ts": "1721600001.000100"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        client = _client(http)
+        default = await client.post_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="Interim",
+            icon_url=None,
+        )
+        broadcast = await client.post_message(
+            bot_token="xoxb-secret",
+            tenant_id="T1",
+            channel_id="C1",
+            thread_ts="1721600000.000100",
+            markdown_text="Terminal",
+            icon_url=None,
+            reply_broadcast=True,
+        )
+
+    assert default.status == broadcast.status == "delivered"
+    default_payload = json.loads(requests[0].content)
+    broadcast_payload = json.loads(requests[1].content)
+    assert "reply_broadcast" not in default_payload
+    assert broadcast_payload["reply_broadcast"] is True
+
+
 async def test_custom_icon_rejection_falls_back_without_replaying_content() -> None:
     """A confirmed icon failure retries the same logical post with bot identity."""
     requests: list[httpx.Request] = []

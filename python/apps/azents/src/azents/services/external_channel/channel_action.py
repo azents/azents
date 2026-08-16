@@ -439,6 +439,35 @@ class ExternalChannelActionService:
                 await session.commit()
         return outcome
 
+    async def execute_binding_effect(
+        self,
+        plan: ProviderEffectPlan,
+        *,
+        file_storage: FileStorage | None = None,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+        authority: SessionResourceAuthority | None = None,
+        provider_delivery_service: RuntimeToProviderDeliveryExecutor | None = None,
+        resolve_runtime_target: RuntimeTargetResolver | None = None,
+    ) -> ProviderMutationOutcome | None:
+        """Revalidate and execute one process-local exact-Binding effect."""
+        async with self.session_manager() as session:
+            current = await self.repository.revalidate_binding_effect(
+                session,
+                plan=plan,
+            )
+        if current is None:
+            return None
+        return await self._deliver(
+            current,
+            file_storage=file_storage,
+            agent_id=agent_id,
+            session_id=session_id,
+            authority=authority,
+            provider_delivery_service=provider_delivery_service,
+            resolve_runtime_target=resolve_runtime_target,
+        )
+
     async def execute_terminal_control(
         self,
         plan: ProviderEffectPlan,
@@ -768,6 +797,18 @@ class ExternalChannelActionService:
                 text = payload.get("text")
                 if not isinstance(text, str):
                     return _discord_invalid_payload()
+                forward_to_parent = payload.get("forward_to_parent", False)
+                forward_parent_channel_id = payload.get("parent_channel_id")
+                if (
+                    not isinstance(forward_to_parent, bool)
+                    or forward_to_parent
+                    and (
+                        target.operation is not ExternalChannelDeliveryOperation.REPLY
+                        or not isinstance(forward_parent_channel_id, str)
+                        or not forward_parent_channel_id.isdigit()
+                    )
+                ):
+                    return _discord_invalid_payload()
                 components = _discord_components(payload.get("components"))
                 if payload.get("components") is not None and components is None:
                     return _discord_invalid_payload()
@@ -785,7 +826,11 @@ class ExternalChannelActionService:
                         context.session_url
                     )
                 if files:
-                    if components is not None or embeds is not None:
+                    if (
+                        components is not None
+                        or embeds is not None
+                        or forward_to_parent
+                    ):
                         return _discord_invalid_payload()
                     runtime_files = [
                         file
@@ -853,6 +898,12 @@ class ExternalChannelActionService:
                         channel_id=delivery_channel_id,
                         content=_discord_agent_content(target, text),
                         operation_key=operation_key,
+                        forward_to_parent=forward_to_parent,
+                        parent_channel_id=(
+                            forward_parent_channel_id
+                            if isinstance(forward_parent_channel_id, str)
+                            else None
+                        ),
                     )
                 return await discord_client.create_message(
                     bot_token=bot_token,
@@ -862,6 +913,12 @@ class ExternalChannelActionService:
                     operation_key=operation_key,
                     components=components,
                     embeds=embeds,
+                    forward_to_parent=forward_to_parent,
+                    parent_channel_id=(
+                        forward_parent_channel_id
+                        if isinstance(forward_parent_channel_id, str)
+                        else None
+                    ),
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
                 text = payload.get("text")
@@ -966,7 +1023,10 @@ class ExternalChannelActionService:
         match target.operation:
             case ExternalChannelDeliveryOperation.REPLY:
                 text = payload.get("text")
-                if not isinstance(text, str):
+                reply_broadcast = payload.get("reply_broadcast", False)
+                if not isinstance(text, str) or not isinstance(reply_broadcast, bool):
+                    return _invalid_payload()
+                if reply_broadcast and conversation_scope != "thread":
                     return _invalid_payload()
                 files = _outbound_files(payload.get("files"))
                 if files is None:
@@ -994,6 +1054,7 @@ class ExternalChannelActionService:
                     thread_ts=thread_ts,
                     markdown_text=prepend_agent_markdown(presentation, text),
                     icon_url=(None if presentation is None else presentation.icon_url),
+                    reply_broadcast=reply_broadcast,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_CREATE:
                 text = payload.get("text")
@@ -1080,6 +1141,20 @@ class ExternalChannelActionService:
         if payload_tenant_id is not None and payload_tenant_id != tenant_id:
             return _invalid_payload()
         control_kind = payload.get("control_kind")
+        if control_kind == "scheduled_task_registration":
+            text = payload.get("text")
+            blocks = _blocks(payload.get("blocks"))
+            if not isinstance(text, str) or blocks is None:
+                return _invalid_payload()
+            return await self.slack_client.post_blocks(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=prepend_agent_fallback(presentation, text),
+                blocks=prepend_agent_blocks(presentation, blocks),
+                icon_url=(None if presentation is None else presentation.icon_url),
+            )
         if control_kind == "agent_selector":
             selector_interaction_id = payload.get("selector_interaction_id")
             if (
