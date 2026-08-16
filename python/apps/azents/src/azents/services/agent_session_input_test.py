@@ -73,10 +73,6 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser, WorkspaceUserCreate
-from azents.services.agent_runtime.lifecycle_data import (
-    RuntimeOperationTarget,
-    RuntimeOperationTargetResolver,
-)
 from azents.services.exchange_file import (
     ExchangeFileInputClaimError,
     ExchangeFileService,
@@ -351,25 +347,11 @@ class _RejectingExchangeFileService(_ExchangeFileService):
 
 def _root_agent_session_creation_service() -> RootAgentSessionCreationService:
     """Build root Session creation service for tests."""
-    runtime_target_resolver = AsyncMock(spec=RuntimeOperationTargetResolver)
-    runtime_target_resolver.resolve_operation_target.return_value = (
-        RuntimeOperationTarget(
-            id="runtime-1",
-            runtime_capability_version=1,
-            desired_generation=1,
-            runner_generation=1,
-            configuration_sequence=1,
-            configuration_digest="a" * 64,
-            workspace_path="/workspace/agent",
-        )
-    )
     return RootAgentSessionCreationService(
         agent_session_repository=AgentSessionRepository(),
         agent_repository=AgentRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-        runtime_target_resolver=runtime_target_resolver,
     )
 
 
