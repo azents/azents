@@ -2019,8 +2019,10 @@ export const ChatInput = memo(function ChatInput({
             <Textarea
               ref={textareaRef}
               name="message"
-              autoComplete="off"
               inputMode="text"
+              autoCorrect="on"
+              autoCapitalize="sentences"
+              spellCheck
               variant="unstyled"
               placeholder={
                 inputDisabled
