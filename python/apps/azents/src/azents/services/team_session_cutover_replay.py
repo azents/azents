@@ -294,8 +294,7 @@ def _snapshot_work_drifted(
 ) -> bool:
     """Return whether canonical validation no longer observes candidate work."""
     return (
-        candidate.fifo_mailbox_item_id != snapshot.fifo_mailbox_item_id
-        or candidate.pending_command_id
+        candidate.pending_command_id
         != (
             snapshot.pending_command.id
             if snapshot.pending_command is not None
