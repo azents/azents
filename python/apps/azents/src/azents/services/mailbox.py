@@ -41,9 +41,12 @@ from azents.engine.events.action_messages import (
 )
 from azents.engine.events.types import (
     AgentMessagePayload,
+    AgentRunState,
     Event,
     ExternalChannelMessagePayload,
     FileOutputPart,
+    ScheduledTaskContinuationPayload,
+    ScheduledTaskTriggerPayload,
     SkillLoadedPayload,
     SystemErrorPayload,
     SystemReminderPayload,
@@ -81,10 +84,18 @@ from azents.repos.mailbox.data import (
     MailboxItem,
     MailboxItemCreate,
     MailboxPresentationItem,
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
     TurnActionContinuationMailboxPayload,
 )
+from azents.repos.scheduled_task.repository import ScheduledTaskRepository
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleRecord
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
+from azents.services.scheduled_task.rendering import (
+    render_scheduled_task_runtime_message,
+)
 from azents.services.session_resource_authority import SessionResourceAuthority
 from azents.services.session_title import (
     initial_title_from_event,
@@ -205,6 +216,15 @@ class PromotedMailboxItems:
 
 
 @dataclasses.dataclass(frozen=True)
+class ScheduledMailboxAdmission:
+    """Result of one atomic Scheduled trigger/continuation admission."""
+
+    run: AgentRunState | None
+    promoted: PromotedMailboxItems | None
+    stale: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class _PromotedMailboxItem:
     """Result of converting MailboxItem to model input and durable event kind."""
 
@@ -294,6 +314,12 @@ class MailboxService:
         EventTranscriptRepository, Depends(EventTranscriptRepository)
     ]
     agent_run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)]
+    scheduled_task_repository: Annotated[
+        ScheduledTaskRepository, Depends(ScheduledTaskRepository)
+    ]
+    scheduled_task_cycle_repository: Annotated[
+        ScheduledTaskCycleRepository, Depends(ScheduledTaskCycleRepository)
+    ]
     action_execution_repository: Annotated[
         ActionExecutionRepository, Depends(ActionExecutionRepository)
     ]
@@ -537,6 +563,140 @@ class MailboxService:
                 session,
                 session_id=session_id,
                 kind=MailboxItemKind.AGENT_MESSAGE,
+            )
+
+    async def admit_scheduled_mailbox_head(
+        self,
+        *,
+        session_id: str,
+        owner_generation: int,
+        expected_buffer_id: str | None,
+    ) -> ScheduledMailboxAdmission | None:
+        """Atomically admit one Scheduled FIFO head into a cycle-bound pending Run."""
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.lock_by_id(
+                session, session_id
+            )
+            if agent_session is None:
+                raise ValueError("AgentSession not found")
+            if agent_session.owner_generation != owner_generation:
+                raise MailboxOwnerGenerationStaleError(
+                    "Session owner generation changed before Scheduled admission"
+                )
+            buffer = await self.mailbox_item_repository.lock_oldest_by_session_id(
+                session, session_id
+            )
+            if buffer is None or buffer.id != expected_buffer_id:
+                return None
+            if buffer.kind not in {
+                MailboxItemKind.SCHEDULED_TASK_TRIGGER,
+                MailboxItemKind.SCHEDULED_TASK_CONTINUATION,
+            }:
+                return None
+            payload = buffer.payload
+            if isinstance(
+                payload,
+                ScheduledTaskTriggerMailboxPayload
+                | ScheduledTaskContinuationMailboxPayload,
+            ):
+                cycle_id = payload.cycle_id
+            else:
+                raise ValueError("Scheduled Task mailbox payload is malformed.")
+            cycle = await self.scheduled_task_cycle_repository.lock(
+                session,
+                agent_id=agent_session.agent_id,
+                session_id=session_id,
+                cycle_id=cycle_id,
+            )
+            if cycle is None:
+                await self.mailbox_item_repository.delete_claimed_by_ids(
+                    session, session_id, [buffer.id]
+                )
+                await session.commit()
+                return ScheduledMailboxAdmission(run=None, promoted=None, stale=True)
+
+            if buffer.kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER:
+                task = await self.scheduled_task_repository.get_by_session_and_id(
+                    session,
+                    session_id=session_id,
+                    task_id=cycle.state.task_id,
+                    lock=True,
+                )
+                if (
+                    cycle.state.phase != "admitted"
+                    or task is None
+                    or task.active_cycle_id != cycle_id
+                    or task.active_scheduled_for != cycle.state.scheduled_for
+                ):
+                    await self.scheduled_task_cycle_repository.delete_if_admitted(
+                        session,
+                        agent_id=agent_session.agent_id,
+                        session_id=session_id,
+                        cycle_id=cycle_id,
+                    )
+                    await self.mailbox_item_repository.delete_claimed_by_ids(
+                        session, session_id, [buffer.id]
+                    )
+                    await session.commit()
+                    return ScheduledMailboxAdmission(
+                        run=None, promoted=None, stale=True
+                    )
+            elif cycle.state.phase != "started":
+                await self.mailbox_item_repository.delete_claimed_by_ids(
+                    session, session_id, [buffer.id]
+                )
+                await session.commit()
+                return ScheduledMailboxAdmission(run=None, promoted=None, stale=True)
+
+            run = await self.agent_run_repository.create_pending(
+                session,
+                session_id=session_id,
+                parent_agent_run_id=None,
+                scheduled_task_cycle_id=cycle_id,
+            )
+            started_at = datetime.datetime.now(datetime.UTC)
+            if buffer.kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER:
+                await self.scheduled_task_cycle_repository.start(
+                    session, record=cycle, run_id=run.id, started_at=started_at
+                )
+            else:
+                await self.scheduled_task_cycle_repository.bind_run(
+                    session, record=cycle, run_id=run.id
+                )
+            promoted = self._scheduled_promoted_item(buffer, cycle)
+            inserted = await self._append_mailbox_item_events(
+                session, session_id, [promoted]
+            )
+            event_ids = [event.id for event in inserted]
+            await self.agent_run_repository.associate_input_events(
+                session, run_id=run.id, event_ids=event_ids
+            )
+            deleted = await self.mailbox_item_repository.delete_claimed_by_ids(
+                session, session_id, [buffer.id]
+            )
+            if deleted != 1:
+                raise RuntimeError("Scheduled Task mailbox admission lost its FIFO row")
+            await session.commit()
+            return ScheduledMailboxAdmission(
+                run=run,
+                promoted=PromotedMailboxItems(
+                    turn_effect=TurnEffect.ELIGIBLE,
+                    operation_action=None,
+                    requested_inference_profile=None,
+                    user_messages=[promoted.user_message]
+                    if promoted.user_message is not None
+                    else [],
+                    events=inserted,
+                    promoted_event_ids=event_ids,
+                    deleted_buffer_ids=[buffer.id],
+                    changed_session_agent_ids=[],
+                    claimed_count=1,
+                    inserted_count=len(inserted),
+                    deduped_count=0,
+                    complete_run=False,
+                    suppress_parent_result=False,
+                ),
+                stale=False,
             )
 
     async def flush_session_mailbox_items(
@@ -812,6 +972,55 @@ class MailboxService:
                 changed_ids.append(updated.id)
         return list(dict.fromkeys(changed_ids))
 
+    def _scheduled_promoted_item(
+        self,
+        buffer: MailboxItem,
+        cycle: ScheduledTaskCycleRecord,
+    ) -> _PromotedMailboxItem:
+        """Render Scheduled input from the immutable cycle snapshot."""
+        state = cycle.state
+        content = render_scheduled_task_runtime_message(
+            title=state.title,
+            objective=state.objective,
+            schedule_type=state.schedule_type,
+            scheduled_at=state.scheduled_at,
+            cron_expression=state.cron_expression,
+            timezone=state.timezone,
+            scheduled_for=state.scheduled_for,
+        )
+        user_message = make_run_user_message(
+            sender_user_id=None,
+            content=content,
+            metadata={"scheduled_task": "true"},
+            attachments=[],
+            external_id=f"{buffer.id}:scheduled_task",
+            attachment_source="mailbox_item",
+            requested_inference_profile=None,
+        )
+        if buffer.kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER:
+            event_kind = EventKind.SCHEDULED_TASK_TRIGGER
+            payload = ScheduledTaskTriggerPayload(
+                cycle_id=state.cycle_id,
+                title=state.title,
+                content=content,
+            )
+        else:
+            event_kind = EventKind.SCHEDULED_TASK_CONTINUATION
+            payload = ScheduledTaskContinuationPayload(
+                cycle_id=state.cycle_id,
+                title=state.title,
+                content=content,
+            )
+        return _PromotedMailboxItem(
+            buffer=buffer,
+            user_message=user_message,
+            event_kind=event_kind,
+            payload=_JSON_OBJECT_ADAPTER.validate_python(
+                payload.model_dump(mode="json")
+            ),
+            external_id=f"{buffer.id}:scheduled_task",
+        )
+
     async def _prepare_mailbox_item_attachments(
         self,
         *,
@@ -1044,7 +1253,7 @@ class MailboxService:
                 MailboxItemKind.SCHEDULED_TASK_TRIGGER
                 | MailboxItemKind.SCHEDULED_TASK_CONTINUATION
             ):
-                raise ValueError("Scheduled Task mailbox execution is unavailable.")
+                return _ScheduledTaskMailboxProcessor(self)
             case MailboxItemKind.TURN_ACTION_CONTINUATION:
                 return _TurnActionContinuationMailboxProcessor(self)
             case MailboxItemKind.AGENT_MESSAGE:
@@ -1405,6 +1614,21 @@ class _ExternalChannelContinuationMailboxProcessor:
             ],
             TurnEffect.ELIGIBLE,
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class _ScheduledTaskMailboxProcessor:
+    """Promote a Scheduled Task trigger or continuation as typed input."""
+
+    service: MailboxService
+
+    async def process(
+        self,
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
+        del context, buffer
+        return _preparation_outcome([], TurnEffect.NEUTRAL)
 
 
 @dataclasses.dataclass(frozen=True)

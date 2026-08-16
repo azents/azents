@@ -293,6 +293,7 @@ async def test_release_terminal_run_pins_preserves_pending(
         rdb_session,
         session_id=session_id,
         parent_agent_run_id=None,
+        scheduled_task_cycle_id=None,
     )
     pin_repo = ModelFilePinRepository()
     await pin_repo.pin_many(

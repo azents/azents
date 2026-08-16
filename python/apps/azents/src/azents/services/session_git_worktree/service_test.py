@@ -73,10 +73,13 @@ from azents.repos.mailbox.data import (
     AgentRemoveGitWorktreeContinuationResult,
     TurnActionContinuationMailboxPayload,
 )
+from azents.repos.scheduled_task.repository import ScheduledTaskRepository
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
+from azents.repos.toolkit_state import ToolkitStateRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
@@ -907,6 +910,10 @@ def _input_service(
             agent_session_repository=AgentSessionRepository(),
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
+            scheduled_task_repository=ScheduledTaskRepository(),
+            scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+                toolkit_state_repository=ToolkitStateRepository(),
+            ),
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
             external_channel_repository=ExternalChannelRepository(),
@@ -927,6 +934,10 @@ def _mailbox_service(
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
+        scheduled_task_repository=ScheduledTaskRepository(),
+        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+            toolkit_state_repository=ToolkitStateRepository(),
+        ),
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
         external_channel_repository=ExternalChannelRepository(),
@@ -984,6 +995,10 @@ async def _execute_first_setup_action(
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
+        scheduled_task_repository=ScheduledTaskRepository(),
+        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+            toolkit_state_repository=ToolkitStateRepository(),
+        ),
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
         external_channel_repository=ExternalChannelRepository(),
@@ -1026,6 +1041,10 @@ async def _execute_first_setup_action(
         agent_session_repository=AgentSessionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_run_repository=AgentRunRepository(),
+        scheduled_task_repository=ScheduledTaskRepository(),
+        scheduled_task_cycle_repository=ScheduledTaskCycleRepository(
+            toolkit_state_repository=ToolkitStateRepository(),
+        ),
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
         external_channel_repository=ExternalChannelRepository(),

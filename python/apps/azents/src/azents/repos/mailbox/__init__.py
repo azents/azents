@@ -265,6 +265,24 @@ class MailboxRepository:
             return None
         return self._build(rdb)
 
+    async def lock_by_session_and_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        buffer_id: str,
+    ) -> MailboxItem | None:
+        """Lock one exact MailboxItem inside its Session scope."""
+        rdb = await session.scalar(
+            sa.select(RDBMailboxItem)
+            .where(
+                RDBMailboxItem.session_id == session_id,
+                RDBMailboxItem.id == buffer_id,
+            )
+            .with_for_update()
+        )
+        return self._build(rdb) if rdb is not None else None
+
     async def delete_by_session_and_id(
         self,
         session: AsyncSession,

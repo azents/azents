@@ -1,14 +1,16 @@
 """Scheduled Task repository."""
 
+import datetime
 from typing import Any, cast
 
 import sqlalchemy as sa
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import ScheduledTaskScheduleType
 from azents.rdb.models.scheduled_task import RDBScheduledTask
 
-from .data import ScheduledTask, ScheduledTaskCreate
+from .data import ScheduledTask, ScheduledTaskCreate, ScheduledTaskReplace
 
 
 class ScheduledTaskRepository:
@@ -48,6 +50,24 @@ class ScheduledTaskRepository:
         )
         return self._build(rdb) if rdb is not None else None
 
+    async def get_by_session_and_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        task_id: str,
+        lock: bool = False,
+    ) -> ScheduledTask | None:
+        """Fetch one exact Task owned by one exact Session."""
+        query = sa.select(RDBScheduledTask).where(
+            RDBScheduledTask.session_id == session_id,
+            RDBScheduledTask.id == task_id,
+        )
+        if lock:
+            query = query.with_for_update()
+        rdb = await session.scalar(query)
+        return self._build(rdb) if rdb is not None else None
+
     async def lock_by_id(
         self,
         session: AsyncSession,
@@ -57,6 +77,28 @@ class ScheduledTaskRepository:
         rdb = await session.scalar(
             sa.select(RDBScheduledTask)
             .where(RDBScheduledTask.id == task_id)
+            .with_for_update()
+        )
+        return self._build(rdb) if rdb is not None else None
+
+    async def lock_claimed_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        lease_owner: str,
+        lease_token: datetime.datetime,
+        now: datetime.datetime,
+    ) -> ScheduledTask | None:
+        """Lock one Task only while its unexpired lease belongs to the caller."""
+        rdb = await session.scalar(
+            sa.select(RDBScheduledTask)
+            .where(
+                RDBScheduledTask.id == task_id,
+                RDBScheduledTask.lease_owner == lease_owner,
+                RDBScheduledTask.lease_until == lease_token,
+                RDBScheduledTask.lease_until > now,
+            )
             .with_for_update()
         )
         return self._build(rdb) if rdb is not None else None
@@ -77,6 +119,121 @@ class ScheduledTaskRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
+    async def replace(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        task_id: str,
+        replace: ScheduledTaskReplace,
+        preserve_active_cycle: bool = False,
+    ) -> ScheduledTask | None:
+        """Replace editable definition fields for one Session-owned Task."""
+        values: dict[str, object] = {
+            "title": replace.title,
+            "objective": replace.objective,
+            "schedule_type": replace.schedule_type,
+            "next_eligible_at": replace.next_eligible_at,
+            "binding_id": replace.binding_id,
+            "scheduled_at": replace.scheduled_at,
+            "cron_expression": replace.cron_expression,
+            "timezone": replace.timezone,
+            "pending_scheduled_for": None,
+            "lease_owner": None,
+            "lease_until": None,
+            "updated_at": sa.func.now(),
+        }
+        if not preserve_active_cycle:
+            values["active_cycle_id"] = None
+            values["active_scheduled_for"] = None
+        result = await session.execute(
+            sa.update(RDBScheduledTask)
+            .where(
+                RDBScheduledTask.session_id == session_id,
+                RDBScheduledTask.id == task_id,
+            )
+            .values(**values)
+            .returning(RDBScheduledTask)
+        )
+        await session.flush()
+        rdb = result.scalar_one_or_none()
+        return self._build(rdb) if rdb is not None else None
+
+    async def claim_due(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime.datetime,
+        lease_owner: str,
+        lease_until: datetime.datetime,
+        limit: int,
+    ) -> list[ScheduledTask]:
+        """Claim a bounded batch of due Tasks using PostgreSQL SKIP LOCKED."""
+        result = await session.execute(
+            sa.select(RDBScheduledTask)
+            .where(
+                RDBScheduledTask.next_eligible_at <= now,
+                sa.or_(
+                    RDBScheduledTask.active_cycle_id.is_(None),
+                    RDBScheduledTask.schedule_type == ScheduledTaskScheduleType.CRON,
+                ),
+                sa.or_(
+                    RDBScheduledTask.lease_until.is_(None),
+                    RDBScheduledTask.lease_until <= now,
+                ),
+            )
+            .order_by(
+                RDBScheduledTask.next_eligible_at.asc(),
+                RDBScheduledTask.id.asc(),
+            )
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        rows = list(result.scalars())
+        for row in rows:
+            row.lease_owner = lease_owner
+            row.lease_until = lease_until
+        await session.flush()
+        return [self._build(row) for row in rows]
+
+    async def complete_claim(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        lease_owner: str,
+        lease_token: datetime.datetime,
+        lease_now: datetime.datetime,
+        next_eligible_at: datetime.datetime,
+        active_cycle_id: str | None,
+        active_scheduled_for: datetime.datetime | None,
+        pending_scheduled_for: datetime.datetime | None,
+    ) -> bool:
+        """Persist one dispatch cursor transition and release its lease."""
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.update(RDBScheduledTask)
+                .where(
+                    RDBScheduledTask.id == task_id,
+                    RDBScheduledTask.lease_owner == lease_owner,
+                    RDBScheduledTask.lease_until == lease_token,
+                    RDBScheduledTask.lease_until > lease_now,
+                )
+                .values(
+                    next_eligible_at=next_eligible_at,
+                    active_cycle_id=active_cycle_id,
+                    active_scheduled_for=active_scheduled_for,
+                    pending_scheduled_for=pending_scheduled_for,
+                    lease_owner=None,
+                    lease_until=None,
+                    updated_at=sa.func.now(),
+                )
+            ),
+        )
+        await session.flush()
+        return bool(result.rowcount)
+
     async def delete_by_id(
         self,
         session: AsyncSession,
@@ -87,6 +244,26 @@ class ScheduledTaskRepository:
             CursorResult[Any],
             await session.execute(
                 sa.delete(RDBScheduledTask).where(RDBScheduledTask.id == task_id)
+            ),
+        )
+        await session.flush()
+        return bool(result.rowcount)
+
+    async def delete_by_session_and_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        task_id: str,
+    ) -> bool:
+        """Delete one Task only when its Session ownership matches exactly."""
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.delete(RDBScheduledTask).where(
+                    RDBScheduledTask.session_id == session_id,
+                    RDBScheduledTask.id == task_id,
+                )
             ),
         )
         await session.flush()

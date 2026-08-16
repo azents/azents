@@ -172,6 +172,7 @@ from azents.services.mailbox import (
     MailboxService,
     OperationActionInput,
     PromotedMailboxItems,
+    ScheduledMailboxAdmission,
     TurnEffect,
     fold_turn_eligibility,
 )
@@ -789,6 +790,7 @@ class RunExecutor:
                 "Canonical recoverable AgentRun claim is stale"
             )
         actionable_transcript_pending = False
+        scheduled_admission: ScheduledMailboxAdmission | None = None
         created_run = recoverable_run is None
         async with self.session_manager() as db_session:
             session_state = await self.agent_session_repository.get_by_id(
@@ -877,13 +879,31 @@ class RunExecutor:
                 )
                 turn_inference_state = None
 
-            agent_run = recoverable_run or (
-                await self.session_lifecycle.create_pending_agent_run(
-                    snapshot.session_id,
-                    owner_generation=owner_generation,
-                    input_event_ids=[],
+            scheduled_admission = None
+            if command is None and recoverable_run is None:
+                scheduled_admission = (
+                    await self.mailbox_item_service.admit_scheduled_mailbox_head(
+                        session_id=snapshot.session_id,
+                        owner_generation=owner_generation,
+                        expected_buffer_id=snapshot.fifo_mailbox_item_id,
+                    )
                 )
-            )
+            if scheduled_admission is not None:
+                if scheduled_admission.stale or scheduled_admission.run is None:
+                    return RunExecutionResult(
+                        toolkits=[],
+                        terminal_event_observed=False,
+                        no_actionable_work=True,
+                    )
+                agent_run = scheduled_admission.run
+            else:
+                agent_run = recoverable_run or (
+                    await self.session_lifecycle.create_pending_agent_run(
+                        snapshot.session_id,
+                        owner_generation=owner_generation,
+                        input_event_ids=[],
+                    )
+                )
 
         run_id = agent_run.id
         await self.vfs_projection_service.ensure_run_projection(
@@ -893,27 +913,41 @@ class RunExecutor:
             workspace_id=snapshot.workspace_id,
         )
         if command is None:
-            initial_input = await self.poll_run_inputs(
-                agent_id=snapshot.agent_id,
-                session_id=snapshot.session_id,
-                model=None,
-                required_inference_profile=selected_profile.profile,
-                active_run_id=run_id,
-                owner_generation=owner_generation,
-                expected_mailbox_item_id=snapshot.fifo_mailbox_item_id,
-                enforce_snapshot_head=True,
-                tool_admission_barrier=tool_admission_barrier,
-                initial_turn_eligible=(
-                    actionable_transcript_pending
-                    or (
-                        recoverable_run is not None
-                        and recoverable_run.status == AgentRunStatus.RUNNING
-                    )
-                ),
-                poll_fn=None,
-                process_actions=True,
-                dispatch_event=dispatch_event,
-            )
+            if scheduled_admission is not None:
+                promoted = scheduled_admission.promoted
+                if promoted is None:
+                    raise RuntimeError("Scheduled admission returned no promotion")
+                initial_input = RunInputPollResult(
+                    user_messages=promoted.user_messages,
+                    requested_inference_profile=None,
+                    promoted_event_ids=promoted.promoted_event_ids,
+                    has_actionable_work=True,
+                    context_invalidated=False,
+                    complete_run=False,
+                    suppress_parent_result=False,
+                )
+            else:
+                initial_input = await self.poll_run_inputs(
+                    agent_id=snapshot.agent_id,
+                    session_id=snapshot.session_id,
+                    model=None,
+                    required_inference_profile=selected_profile.profile,
+                    active_run_id=run_id,
+                    owner_generation=owner_generation,
+                    expected_mailbox_item_id=snapshot.fifo_mailbox_item_id,
+                    enforce_snapshot_head=True,
+                    tool_admission_barrier=tool_admission_barrier,
+                    initial_turn_eligible=(
+                        actionable_transcript_pending
+                        or (
+                            recoverable_run is not None
+                            and recoverable_run.status == AgentRunStatus.RUNNING
+                        )
+                    ),
+                    poll_fn=None,
+                    process_actions=True,
+                    dispatch_event=dispatch_event,
+                )
             if initial_input.requested_inference_profile is not None:
                 selected_profile = RequestedProfileSelection(
                     profile=initial_input.requested_inference_profile,

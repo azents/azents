@@ -363,6 +363,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     session,
                     session_id=child.agent_session_id,
                     parent_agent_run_id=parent_run.id,
+                    scheduled_task_cycle_id=None,
                 )
                 await self.agent_session_repository.set_inference_state(
                     session,

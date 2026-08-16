@@ -13,6 +13,15 @@ from azents.services.file_lifecycle_cleanup import (
     FileLifecycleCleanupService,
     FileLifecycleCleanupSummary,
 )
+from azents.services.scheduled_task.service import (
+    ScheduledTaskDispatcher,
+    ScheduledTaskDispatchSummary,
+)
+
+from .user_scheduled_task_dispatch import (
+    get_user_scheduled_task_dispatcher,
+    user_scheduled_task_dispatch_handler,
+)
 
 
 class _Container:
@@ -37,6 +46,18 @@ class _AutoArchiveContainer:
         """Return the configured chat session service."""
         assert target is ChatSessionService
         return self.service
+
+
+class _ScheduledTaskDispatchContainer:
+    """Container test double that resolves the user Task dispatcher."""
+
+    def __init__(self, dispatcher: ScheduledTaskDispatcher) -> None:
+        self.dispatcher = dispatcher
+
+    async def solve(self, target: object) -> object:
+        """Return the configured dispatcher composition."""
+        assert target is get_user_scheduled_task_dispatcher
+        return self.dispatcher
 
 
 @pytest.mark.asyncio
@@ -67,6 +88,63 @@ async def test_session_auto_archive_handler_returns_batch_summary() -> None:
         "skipped": 3,
     }
     service.auto_archive_once.assert_awaited_once_with()
+
+
+@pytest.mark.asyncio
+async def test_user_scheduled_task_dispatch_handler_returns_aggregate_summary() -> None:
+    """The registered handler passes the Scheduler lease owner to the dispatcher."""
+    summary = ScheduledTaskDispatchSummary(
+        claimed=5,
+        admitted=2,
+        coalesced=1,
+        skipped=2,
+        wake_failed=1,
+    )
+    dispatcher = cast(Any, Mock())
+    dispatcher.dispatch_once = AsyncMock(return_value=summary)
+    now = datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC)
+    context = TaskContext(
+        task_key="user_scheduled_task_dispatch",
+        attempt_started_at=now,
+        lease_owner="scheduler-1",
+        deadline=now + datetime.timedelta(minutes=2),
+        manual_triggered=False,
+        container=cast(
+            Any,
+            _ScheduledTaskDispatchContainer(dispatcher),
+        ),
+    )
+
+    result = await user_scheduled_task_dispatch_handler(context)
+
+    assert result.summary == {
+        "task_key": "user_scheduled_task_dispatch",
+        "attempt_started_at": now.isoformat(),
+        "manual_triggered": False,
+        "claimed": 5,
+        "admitted": 2,
+        "coalesced": 1,
+        "skipped": 2,
+        "wake_failed": 1,
+    }
+    dispatcher.dispatch_once.assert_awaited_once_with(lease_owner="scheduler-1")
+
+
+def test_user_scheduled_task_dispatch_is_registered_once() -> None:
+    """The existing Scheduler registry owns one bounded user Task dispatcher."""
+    definitions = registry.get_task_definitions()
+    matches = [
+        definition
+        for definition in definitions
+        if definition.key == "user_scheduled_task_dispatch"
+    ]
+
+    assert matches == [registry.USER_SCHEDULED_TASK_DISPATCH_TASK]
+    definition = matches[0]
+    assert definition.interval == datetime.timedelta(seconds=10)
+    assert definition.timeout == datetime.timedelta(minutes=2)
+    assert definition.retry_policy.kind == "bounded_backoff"
+    assert definition.enabled_by_default is True
 
 
 @pytest.mark.asyncio
