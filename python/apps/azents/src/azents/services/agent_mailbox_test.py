@@ -60,6 +60,7 @@ def _terminal_run(status: AgentRunStatus) -> AgentRunState:
     return AgentRunState(
         id=_RUN_ID,
         session_id="child-session",
+        scheduled_task_cycle_id=None,
         run_index=3,
         phase=AgentRunPhase.IDLE,
         status=status,

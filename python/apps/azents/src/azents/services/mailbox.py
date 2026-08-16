@@ -1040,6 +1040,11 @@ class MailboxService:
                 return _GoalContinuationMailboxProcessor(self)
             case MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
                 return _ExternalChannelContinuationMailboxProcessor(self)
+            case (
+                MailboxItemKind.SCHEDULED_TASK_TRIGGER
+                | MailboxItemKind.SCHEDULED_TASK_CONTINUATION
+            ):
+                raise ValueError("Scheduled Task mailbox execution is unavailable.")
             case MailboxItemKind.TURN_ACTION_CONTINUATION:
                 return _TurnActionContinuationMailboxProcessor(self)
             case MailboxItemKind.AGENT_MESSAGE:
@@ -1784,6 +1789,11 @@ def _buffer_requires_inference(buffer: MailboxItem) -> bool:
             | MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE
         ):
             return True
+        case (
+            MailboxItemKind.SCHEDULED_TASK_TRIGGER
+            | MailboxItemKind.SCHEDULED_TASK_CONTINUATION
+        ):
+            return False
         case MailboxItemKind.ACTION_MESSAGE:
             if buffer.presentation.action is None:
                 raise ValueError("Action message input buffer requires action payload")

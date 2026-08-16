@@ -1042,6 +1042,7 @@ class TestChatWriteService:
                 session,
                 AgentRunCreate(
                     session_id=agent_session.id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                 ),
             )

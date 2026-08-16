@@ -37,6 +37,7 @@ from azents.repos.mailbox.data import (
     MailboxPresentationItem,
     TurnActionContinuationMailboxPayload,
 )
+from azents.services.chat.data import PendingMailboxExternalChannelPresentation
 
 from .live_events import (
     InMemoryLiveEventStore,
@@ -379,6 +380,7 @@ def test_external_invocation_pending_projection_exposes_safe_snapshot() -> None:
     assert projection.mailbox_item_id == mailbox_item.id
     assert projection.items[0].id == (f"{mailbox_item.id}:external_channel_message:0")
     presentation = projection.items[0].presentation
+    assert isinstance(presentation, PendingMailboxExternalChannelPresentation)
     assert presentation.type == "external_channel_message"
     assert presentation.body == "Deploy is ready."
     assert not hasattr(presentation, "provider_tenant_id")

@@ -314,6 +314,7 @@ class TestSubagentTreeProjection:
                 session,
                 AgentRunCreate(
                     session_id=root_agent.agent_session_id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                     run_index=1,
                 ),
@@ -330,6 +331,7 @@ class TestSubagentTreeProjection:
                 session,
                 AgentRunCreate(
                     session_id=child.agent_session_id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                     run_index=2,
                 ),
@@ -347,6 +349,7 @@ class TestSubagentTreeProjection:
                 session,
                 AgentRunCreate(
                     session_id=nested.agent_session_id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                     run_index=1,
                 ),
@@ -458,6 +461,7 @@ class TestSubagentTreeProjection:
                 session,
                 AgentRunCreate(
                     session_id=root_agent.agent_session_id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                     run_index=1,
                 ),
@@ -474,6 +478,7 @@ class TestSubagentTreeProjection:
                 session,
                 AgentRunCreate(
                     session_id=completed_child.agent_session_id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                     run_index=1,
                 ),
@@ -491,6 +496,7 @@ class TestSubagentTreeProjection:
                 session,
                 AgentRunCreate(
                     session_id=running_grandchild.agent_session_id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                     run_index=1,
                 ),
@@ -499,6 +505,7 @@ class TestSubagentTreeProjection:
                 session,
                 AgentRunCreate(
                     session_id=failed_grandchild.agent_session_id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                     run_index=1,
                 ),

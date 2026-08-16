@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Literal, TypeGuard
 from pydantic import BaseModel, ConfigDict, Field
 
 from azents.engine.events.types import Attachment as EventAttachment
-from azents.engine.events.types import Event
+from azents.engine.events.types import Event, public_event_payload
 from azents.repos.action_execution.data import ActionExecutionProjection
 
 if TYPE_CHECKING:
@@ -83,6 +83,11 @@ def chat_attachment_from_event(
 def chat_event_transport_dump(event: Event) -> dict[str, object]:
     """Convert Event to chat REST/WS transport wire dict."""
     dumped = event.model_dump(mode="json")
+    dumped["payload"] = public_event_payload(
+        event.kind,
+        event.payload,
+        exclude_none=False,
+    )
     payload = dumped.get("payload")
     if isinstance(payload, dict):
         _project_payload_attachments(payload)

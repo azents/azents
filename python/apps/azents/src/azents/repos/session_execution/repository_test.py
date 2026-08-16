@@ -142,6 +142,7 @@ class TestSessionExecutionRepository:
         )
         run = RDBAgentRun(
             session_id=agent_session.id,
+            scheduled_task_cycle_id=None,
             run_index=1,
             parent_agent_run_id=None,
             status=AgentRunStatus.RUNNING,

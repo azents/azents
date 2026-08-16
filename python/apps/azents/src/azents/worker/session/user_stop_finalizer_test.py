@@ -420,6 +420,7 @@ def _running_run(session_id: str) -> AgentRunState:
     return AgentRunState(
         id="11111111111111111111111111111111",
         session_id=session_id,
+        scheduled_task_cycle_id=None,
         run_index=1,
         phase=AgentRunPhase.STREAMING_MODEL,
         status=AgentRunStatus.RUNNING,

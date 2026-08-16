@@ -884,6 +884,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=parent_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1098,6 +1099,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1187,6 +1189,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1196,6 +1199,7 @@ class TestEventExecutionRepositories:
                 rdb_session,
                 AgentRunCreate(
                     session_id=session.id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                 ),
             )
@@ -1228,6 +1232,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1244,6 +1249,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
             terminal_finalization=finalize,
@@ -1290,6 +1296,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1341,6 +1348,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1395,6 +1403,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1435,6 +1444,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1489,6 +1499,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1556,6 +1567,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
                 phase=AgentRunPhase.WAITING_FOR_MODEL,
             ),
@@ -1564,6 +1576,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
             terminal_finalization=_noop_terminal_finalization,
@@ -1601,6 +1614,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1642,6 +1656,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1686,6 +1701,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=event_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1727,6 +1743,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1780,6 +1797,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1793,6 +1811,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=agent_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1853,6 +1872,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=first_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )
@@ -1860,6 +1880,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=first_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
             terminal_finalization=_noop_terminal_finalization,
@@ -1868,6 +1889,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentRunCreate(
                 session_id=second_session.id,
+                scheduled_task_cycle_id=None,
                 parent_agent_run_id=None,
             ),
         )

@@ -58,6 +58,9 @@ from azents.engine.events.types import (
     ProviderToolCallPayload,
     ReasoningPayload,
     RunMarkerPayload,
+    ScheduledTaskContinuationPayload,
+    ScheduledTaskResultPayload,
+    ScheduledTaskTriggerPayload,
     SkillLoadedPayload,
     SystemReminderPayload,
     ToolOutput,
@@ -492,6 +495,23 @@ class ResponsesRequestLowerer:
                 "role": "user",
                 "content": format_external_channel_continuation_reminder(
                     event.payload.metadata
+                ),
+            }
+        if isinstance(
+            event.payload,
+            ScheduledTaskTriggerPayload | ScheduledTaskContinuationPayload,
+        ):
+            return {
+                "role": "user",
+                "content": event.payload.content,
+            }
+        if isinstance(event.payload, ScheduledTaskResultPayload):
+            return {
+                "role": "assistant",
+                "content": (
+                    f"Scheduled Task: {event.payload.title}\n"
+                    f"Status: {event.payload.status}\n"
+                    f"Result: {event.payload.result}"
                 ),
             }
         if event.kind == EventKind.GOAL_UPDATED and isinstance(

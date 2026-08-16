@@ -50,6 +50,13 @@ class PendingMailboxExternalChannelContinuationPresentation(BaseModel):
     requested_inference_profile: RequestedInferenceProfile | None = None
 
 
+class PendingMailboxScheduledTaskPresentation(BaseModel):
+    """Safe pending Scheduled Task presentation."""
+
+    type: Literal["scheduled_task_trigger", "scheduled_task_continuation"]
+    content: str
+
+
 class PendingMailboxAgentMessagePresentation(BaseModel):
     """Safe pending Agent-to-Agent message presentation."""
 
@@ -91,6 +98,7 @@ PendingMailboxPresentation = Annotated[
     PendingMailboxUserMessagePresentation
     | PendingMailboxGoalContinuationPresentation
     | PendingMailboxExternalChannelContinuationPresentation
+    | PendingMailboxScheduledTaskPresentation
     | PendingMailboxAgentMessagePresentation
     | PendingMailboxExternalChannelPresentation
     | PendingMailboxActionPresentation,

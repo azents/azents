@@ -2,7 +2,7 @@
 
 import dataclasses
 import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
@@ -22,12 +22,16 @@ from azents.engine.events.types import (
     ExternalChannelMessagePayload,
     ProviderToolCallPayload,
     ReasoningPayload,
+    ScheduledTaskContinuationPayload,
+    ScheduledTaskResultPayload,
+    ScheduledTaskTriggerPayload,
     SkillLoadedPayload,
     SystemPromptAnalysisPayload,
     SystemPromptFragmentPayload,
     TokenUsagePayload,
     TurnMarkerPayload,
     UserMessagePayload,
+    public_event_payload,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
@@ -162,7 +166,10 @@ class SessionContextRawEvent(BaseModel):
         return cls(
             id=event.id,
             kind=event.kind,
-            payload=event.payload.model_dump(mode="json", exclude_none=True),
+            payload=cast(
+                dict[str, JSONValue],
+                public_event_payload(event.kind, event.payload),
+            ),
             external_id=event.external_id,
             adapter=event.adapter,
             provider=event.provider,
@@ -336,6 +343,13 @@ def _build_breakdown(
             chars["user"] += _content_chars(payload.content)
         elif isinstance(payload, ExternalChannelMessagePayload):
             chars["user"] += len(render_external_channel_message(payload))
+        elif isinstance(
+            payload,
+            ScheduledTaskTriggerPayload | ScheduledTaskContinuationPayload,
+        ):
+            chars["user"] += len(payload.content)
+        elif isinstance(payload, ScheduledTaskResultPayload):
+            chars["assistant"] += len(payload.result) + len(payload.title)
         elif isinstance(payload, SkillLoadedPayload):
             chars["user"] += len(payload.body)
         elif isinstance(payload, AssistantMessagePayload):
