@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from azents.api.public.external_channel.v1 import (
@@ -57,6 +58,25 @@ from azents.services.external_channel.management import (
     ManagedConnectionSetup,
     ManagedMultiConnectionSetup,
 )
+
+
+def _create_route_app() -> FastAPI:
+    """Create the External Channel management route app once."""
+    app = FastAPI()
+    app.include_router(
+        management_route_module.router,
+        prefix="/external-channel/v1",
+    )
+    return app
+
+
+_ROUTE_APP = _create_route_app()
+
+
+@pytest.fixture(autouse=True)
+def _reset_dependency_overrides() -> None:
+    """Prevent dependency overrides from leaking between tests."""
+    _ROUTE_APP.dependency_overrides.clear()
 
 
 def _connection() -> ManagedConnection:
@@ -150,7 +170,7 @@ def _client(
     role: WorkspaceUserRole = WorkspaceUserRole.OWNER,
     multi_app_enabled: bool = True,
 ) -> TestClient:
-    app = create_dummy_public_app()
+    app = _ROUTE_APP
     app.dependency_overrides[ExternalChannelManagementService] = lambda: service
     app.dependency_overrides[get_workspace_member] = lambda: WorkspaceMember(
         user_id="user-1",

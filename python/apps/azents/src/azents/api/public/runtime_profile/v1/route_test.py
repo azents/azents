@@ -3,10 +3,10 @@
 import datetime
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from azents.app import create_dummy_public_app
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permission, Permissions
 from azents.core.enums import WorkspaceUserRole
@@ -31,6 +31,24 @@ from azents.services.runtime_recreation.service import (
     RuntimeRecreationService,
     RuntimeRecreationUnavailable,
 )
+
+from . import router
+
+
+def _create_route_app() -> FastAPI:
+    """Create the Runtime Profile route app once for this test module."""
+    app = FastAPI()
+    app.include_router(router, prefix="/runtime-profile/v1")
+    return app
+
+
+_ROUTE_APP = _create_route_app()
+
+
+@pytest.fixture(autouse=True)
+def _reset_dependency_overrides() -> None:
+    """Prevent dependency overrides from leaking between tests."""
+    _ROUTE_APP.dependency_overrides.clear()
 
 
 def _operation() -> RuntimeRecreationOperation:
@@ -84,7 +102,7 @@ def _app(
     workspace_service: AsyncMock | None = None,
 ) -> FastAPI:
     """Create a Public API app with recreation dependencies overridden."""
-    app = create_dummy_public_app()
+    app = _ROUTE_APP
     app.dependency_overrides[RuntimeRecreationService] = lambda: service
     if workspace_service is not None:
         app.dependency_overrides[RuntimeProfileWorkspaceService] = lambda: (
