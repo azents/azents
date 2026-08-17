@@ -1,0 +1,23 @@
+name: Setup Docker Buildx
+description: Create a Docker container builder without downloading a remote action.
+
+outputs:
+  name:
+    description: Docker Buildx builder name.
+    value: ${{ steps.setup.outputs.name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Create Docker Buildx builder
+      id: setup
+      shell: bash
+      run: |
+        set -euo pipefail
+        builder_name="azents-builder"
+        docker buildx create \
+          --name "$builder_name" \
+          --driver docker-container \
+          --use
+        docker buildx inspect --bootstrap
+        printf 'name=%s\n' "$builder_name" >> "$GITHUB_OUTPUT"
