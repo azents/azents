@@ -31,6 +31,7 @@ from azents.core.external_channel_file import (
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.core.external_channel_session_presence import (
     ExternalChannelSessionPresenceState,
+    build_external_channel_scheduled_task_url,
     build_external_channel_session_url,
 )
 from azents.core.slack_external_channel_progress import (
@@ -122,6 +123,9 @@ from azents.services.external_channel.slack_settings import (
 )
 from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.scheduled_task.control import (
+    render_scheduled_task_discord_controls,
+)
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
@@ -793,6 +797,43 @@ class ExternalChannelActionService:
                         operation_key=operation_key,
                         components=control.components,
                         embeds=control.embeds,
+                    )
+                if (
+                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+                    and payload.get("control_kind") == "scheduled_task_registration"
+                ):
+                    text = payload.get("text")
+                    embeds = _discord_embeds(payload.get("embeds"))
+                    task_id = payload.get("task_id")
+                    delete_locator = payload.get("delete_locator")
+                    edit_url = (
+                        None
+                        if not isinstance(task_id, str)
+                        else _scheduled_task_edit_url(
+                            target,
+                            web_url=self.config.web_url,
+                            task_id=task_id,
+                        )
+                    )
+                    if (
+                        files
+                        or not isinstance(text, str)
+                        or embeds is None
+                        or not isinstance(delete_locator, str)
+                        or edit_url is None
+                    ):
+                        return _discord_invalid_payload()
+                    return await discord_client.create_message(
+                        bot_token=bot_token,
+                        guild_id=guild_id,
+                        channel_id=delivery_channel_id,
+                        content=_discord_agent_content(target, text),
+                        operation_key=operation_key,
+                        components=render_scheduled_task_discord_controls(
+                            edit_url=edit_url,
+                            delete_locator=delete_locator,
+                        ),
+                        embeds=embeds,
                     )
                 text = payload.get("text")
                 if not isinstance(text, str):
@@ -1653,6 +1694,31 @@ def _session_navigation_context(
     return _SessionNavigationContext(
         agent_name=target.agent_name,
         session_url=session_url,
+    )
+
+
+def _scheduled_task_edit_url(
+    target: ProviderTarget,
+    *,
+    web_url: str,
+    task_id: str,
+) -> str | None:
+    """Resolve one exact Scheduled Task Web editor from current target authority."""
+    if (
+        not isinstance(target.workspace_handle, str)
+        or not target.workspace_handle
+        or not isinstance(target.agent_id, str)
+        or not target.agent_id
+        or not isinstance(target.agent_session_id, str)
+        or not target.agent_session_id
+    ):
+        return None
+    return build_external_channel_scheduled_task_url(
+        web_url,
+        target.workspace_handle,
+        target.agent_id,
+        target.agent_session_id,
+        task_id,
     )
 
 

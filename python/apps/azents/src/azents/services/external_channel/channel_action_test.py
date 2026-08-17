@@ -704,25 +704,8 @@ async def test_discord_registration_accepts_bounded_embed_fields() -> None:
         {
             "control_kind": "scheduled_task_registration",
             "text": "Scheduled Task registered: Daily report",
-            "components": [
-                {
-                    "type": 1,
-                    "components": [
-                        {
-                            "type": 2,
-                            "style": 2,
-                            "label": "Edit",
-                            "custom_id": "st1:e:task:binding:signature",
-                        },
-                        {
-                            "type": 2,
-                            "style": 4,
-                            "label": "Delete",
-                            "custom_id": "st1:d:task:binding:signature",
-                        },
-                    ],
-                }
-            ],
+            "task_id": "task-1",
+            "delete_locator": "st1:d:task:binding:signature",
             "embeds": [
                 {
                     "title": "Scheduled Task registered",
@@ -748,7 +731,29 @@ async def test_discord_registration_accepts_bounded_embed_fields() -> None:
     create_call = create_message.await_args
     assert create_call is not None
     assert create_call.kwargs["embeds"] == target.request_payload["embeds"]
-    assert create_call.kwargs["components"] == target.request_payload["components"]
+    assert create_call.kwargs["components"] == [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Edit",
+                    "url": (
+                        "https://azents.example/w/team/agents/agent-1/"
+                        "sessions/session-1?page=scheduled-tasks&"
+                        "taskId=task-1&edit=1"
+                    ),
+                },
+                {
+                    "type": 2,
+                    "style": 4,
+                    "label": "Cancel",
+                    "custom_id": "st1:d:task:binding:signature",
+                },
+            ],
+        }
+    ]
 
 
 @pytest.mark.asyncio

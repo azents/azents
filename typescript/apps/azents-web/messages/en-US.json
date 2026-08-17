@@ -1508,7 +1508,7 @@
       "shellRuntimeRequiredDescription": "Shell settings become available after you <runtimeLink>add a managed Runtime</runtimeLink>.",
       "scheduledTasks": {
         "title": "Scheduled Tasks",
-        "description": "Run this Agent once or on a recurring schedule in an existing Session.",
+        "description": "Manage one-time and recurring runs for this Session.",
         "newTask": "New task",
         "listTitle": "Tasks",
         "emptyTitle": "No Scheduled Tasks yet",
@@ -1523,14 +1523,15 @@
         "sessionOnly": "Session only — no External Channel delivery",
         "nextEligible": "Next eligible {value}",
         "edit": "Edit",
-        "delete": "Delete",
+        "cancelTask": "Cancel task",
         "create": "Create task",
         "save": "Save changes",
         "cancel": "Cancel",
+        "keepTask": "Keep task",
         "conflictError": "This task changed or started before the operation completed. Reload the latest state and try again.",
-        "deleteConfirmTitle": "Delete Scheduled Task?",
-        "deleteConfirmDescription": "Delete “{title}”?",
-        "deletePermanent": "This permanently removes the future schedule. Current work that has already started is not cancelled.",
+        "cancelConfirmTitle": "Cancel Scheduled Task?",
+        "cancelConfirmDescription": "Cancel “{title}”?",
+        "cancelEffect": "Future runs will stop. Work that has already started continues.",
         "scheduleType": {
           "once": "One time",
           "cron": "Recurring"

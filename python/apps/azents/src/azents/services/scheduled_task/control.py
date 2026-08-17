@@ -43,7 +43,7 @@ _CONTROL_PREFIX = "st1"
 _CONTROL_SIGNATURE_BYTES = 12
 _MAX_IDENTIFIER_LENGTH = 64
 _MAX_DISCORD_CUSTOM_ID_LENGTH = 100
-ScheduledTaskControlAction = Literal["edit", "delete"]
+ScheduledTaskControlAction = Literal["edit", "delete", "confirm_delete"]
 
 
 class ScheduledTaskProviderControlError(ValueError):
@@ -194,7 +194,7 @@ def render_scheduled_task_slack_registration(
     delete_locator: str,
 ) -> tuple[str, list[dict[str, object]]]:
     """Render one bounded Slack Block Kit Task registration with controls."""
-    _validate_render_locators(task, edit_locator, delete_locator)
+    _validate_slack_render_locators(task, edit_locator, delete_locator)
     text = f"Scheduled Task registered: {task.title}"
     schedule = _schedule_presentation(task)
     return (
@@ -246,19 +246,22 @@ def render_scheduled_task_slack_registration(
                         "type": "button",
                         "action_id": "azents_scheduled_task_delete",
                         "style": "danger",
-                        "text": {"type": "plain_text", "text": "Delete"},
+                        "text": {"type": "plain_text", "text": "Cancel"},
                         "value": delete_locator,
                         "confirm": {
                             "title": {
                                 "type": "plain_text",
-                                "text": "Delete Scheduled Task?",
+                                "text": "Cancel Scheduled Task?",
                             },
                             "text": {
                                 "type": "mrkdwn",
-                                "text": "This removes the Scheduled Task.",
+                                "text": (
+                                    "Future runs will stop. Work that has already "
+                                    "started continues."
+                                ),
                             },
-                            "confirm": {"type": "plain_text", "text": "Delete"},
-                            "deny": {"type": "plain_text", "text": "Cancel"},
+                            "confirm": {"type": "plain_text", "text": "Cancel task"},
+                            "deny": {"type": "plain_text", "text": "Keep task"},
                         },
                     },
                 ],
@@ -270,11 +273,8 @@ def render_scheduled_task_slack_registration(
 def render_scheduled_task_discord_registration(
     *,
     task: ScheduledTask,
-    edit_locator: str,
-    delete_locator: str,
-) -> tuple[str, list[dict[str, object]], list[dict[str, object]]]:
-    """Render one Discord registration message with native Edit/Delete controls."""
-    _validate_render_locators(task, edit_locator, delete_locator)
+) -> tuple[str, list[dict[str, object]]]:
+    """Render one Discord registration message before current Web URL resolution."""
     text = f"Scheduled Task registered: {task.title}"
     schedule = _schedule_presentation(task)
     return (
@@ -294,21 +294,35 @@ def render_scheduled_task_discord_registration(
                 ],
             }
         ],
-        [
-            {
-                "type": 1,
-                "components": [
-                    {"type": 2, "style": 2, "label": "Edit", "custom_id": edit_locator},
-                    {
-                        "type": 2,
-                        "style": 4,
-                        "label": "Delete",
-                        "custom_id": delete_locator,
-                    },
-                ],
-            }
-        ],
     )
+
+
+def render_scheduled_task_discord_controls(
+    *,
+    edit_url: str,
+    delete_locator: str,
+) -> list[dict[str, object]]:
+    """Render a Web Edit link and one provider-authorized Cancel request."""
+    _validate_delete_locator(delete_locator)
+    return [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Edit",
+                    "url": edit_url,
+                },
+                {
+                    "type": 2,
+                    "style": 4,
+                    "label": "Cancel",
+                    "custom_id": delete_locator,
+                },
+            ],
+        }
+    ]
 
 
 @dataclass
@@ -354,8 +368,10 @@ class ScheduledTaskProviderControlService:
             raise ScheduledTaskProviderControlError(
                 "Scheduled Task edit is incomplete."
             )
-        if locator.action == "delete" and edit is not None:
-            raise ScheduledTaskProviderControlError("Scheduled Task delete is invalid.")
+        if locator.action != "edit" and edit is not None:
+            raise ScheduledTaskProviderControlError(
+                "Scheduled Task cancellation is invalid."
+            )
         async with self.session_manager() as session:
             service = self._task_service()
             candidate = await self.task_repository.get_by_id(session, locator.task_id)
@@ -382,7 +398,7 @@ class ScheduledTaskProviderControlService:
                 raise ScheduledTaskProviderControlError(
                     "Scheduled Task control is unavailable."
                 )
-            if locator.action == "delete":
+            if locator.action in {"delete", "confirm_delete"}:
                 deleted = await service.delete_locked_provider_target(
                     session,
                     target=target,
@@ -414,7 +430,7 @@ class ScheduledTaskProviderControlService:
             await session.commit()
             return ScheduledTaskProviderControlResult(action="edit", task=replacement)
 
-    async def load_for_edit(
+    async def load_for_control(
         self,
         *,
         interaction_id: str,
@@ -422,7 +438,7 @@ class ScheduledTaskProviderControlService:
         provider_parent_channel_id: str | None,
         provider_thread_resource_key: str | None,
     ) -> ScheduledTask:
-        """Revalidate a claimed edit-open component before rendering its modal."""
+        """Revalidate a claimed component before rendering its next control."""
         async with self.session_manager() as session:
             task = await self.task_repository.get_by_id(session, locator.task_id)
             if task is None or task.binding_id != locator.binding_id:
@@ -595,7 +611,7 @@ def _provider_context_matches_binding(
     return False
 
 
-def _validate_render_locators(
+def _validate_slack_render_locators(
     task: ScheduledTask,
     edit_locator: str,
     delete_locator: str,
@@ -609,8 +625,15 @@ def _validate_render_locators(
         raise ValueError("Scheduled Task registration controls exceed provider limits.")
 
 
+def _validate_delete_locator(delete_locator: str) -> None:
+    if not delete_locator:
+        raise ValueError("Scheduled Task registration controls are incomplete.")
+    if len(delete_locator) > _MAX_DISCORD_CUSTOM_ID_LENGTH:
+        raise ValueError("Scheduled Task registration controls exceed provider limits.")
+
+
 def _action_code(action: ScheduledTaskControlAction) -> str:
-    return {"edit": "e", "delete": "d"}[action]
+    return {"edit": "e", "delete": "d", "confirm_delete": "c"}[action]
 
 
 def _action_from_code(value: str) -> ScheduledTaskControlAction:
@@ -618,6 +641,8 @@ def _action_from_code(value: str) -> ScheduledTaskControlAction:
         return "edit"
     if value == "d":
         return "delete"
+    if value == "c":
+        return "confirm_delete"
     raise ValueError("Scheduled Task control locator is invalid.")
 
 

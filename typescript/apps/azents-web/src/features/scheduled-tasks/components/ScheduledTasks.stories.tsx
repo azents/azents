@@ -67,14 +67,6 @@ const teamSession: AgentSessionResponse = {
   updated_at: "2026-08-16T09:00:00Z",
 };
 
-const userSession: AgentSessionResponse = {
-  ...teamSession,
-  id: "session_private",
-  title: "Private planning notes",
-  product_mode: "user",
-  pinned: false,
-};
-
 const binding: ManagedBinding = {
   id: "binding_01",
   agent_session_id: teamSession.id,
@@ -165,10 +157,10 @@ const meta = {
   args: {
     handle: "engineering",
     agent,
+    sessionId: teamSession.id,
     state: {
       type: "LOADED",
       tasks: [recurringTask, oneTimeTask],
-      sessions: [teamSession, userSession],
     },
     detail: {
       type: "LOADED",
@@ -179,20 +171,18 @@ const meta = {
     },
     form: { type: "CLOSED" },
     selectedTaskId: recurringTask.id,
-    deleteTarget: null,
+    cancelTarget: null,
     mutationBusy: false,
     actionError: null,
-    creatingSession: false,
     onSelectTask: noop,
     onOpenCreate: noop,
     onOpenEdit: noop,
     onCloseForm: noop,
     onChangeDraft: noop,
     onSave: noop,
-    onCreateSession: noop,
-    onRequestDelete: noop,
-    onCancelDelete: noop,
-    onConfirmDelete: noop,
+    onRequestCancel: noop,
+    onCloseCancel: noop,
+    onConfirmCancel: noop,
   },
 } satisfies Meta<typeof ScheduledTasks>;
 
@@ -201,6 +191,18 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const RunningWithPending = {} satisfies Story;
+
+export const SessionScopedManagement = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("button", { name: "Cancel task" }),
+    ).toBeVisible();
+    await expect(
+      canvas.queryByText("Release coordination"),
+    ).not.toBeInTheDocument();
+  },
+} satisfies Story;
 
 export const OneTime = {
   args: {
@@ -215,24 +217,11 @@ export const OneTime = {
   },
 } satisfies Story;
 
-export const CanonicalSessionNavigation = {
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await expect(
-      canvas.getByRole("link", { name: /Release coordination/i }),
-    ).toHaveAttribute(
-      "href",
-      "/w/engineering/agents/agent_01/sessions/session_release",
-    );
-  },
-} satisfies Story;
-
 export const Empty = {
   args: {
     state: {
       type: "LOADED",
       tasks: [],
-      sessions: [teamSession, userSession],
     },
     selectedTaskId: null,
     detail: null,
@@ -353,7 +342,7 @@ export const ValidationError = {
       type: "CREATE",
       taskId: null,
       draft: {
-        sessionId: "",
+        sessionId: teamSession.id,
         title: "",
         objective: "",
         scheduleType: "once",
@@ -365,14 +354,14 @@ export const ValidationError = {
       bindings: [],
       bindingsLoading: false,
       bindingsError: null,
-      error: "sessionRequired",
+      error: "titleRequired",
     },
   },
 } satisfies Story;
 
-export const DeleteConfirmation = {
+export const CancelConfirmation = {
   args: {
-    deleteTarget: recurringTask,
+    cancelTarget: recurringTask,
   },
 } satisfies Story;
 

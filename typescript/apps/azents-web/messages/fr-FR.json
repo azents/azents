@@ -1508,7 +1508,7 @@
       "shellRuntimeRequiredDescription": "Les paramètres du shell deviennent disponibles après avoir <runtimeLink>ajouté un environnement géré</runtimeLink>.",
       "scheduledTasks": {
         "title": "Tâches planifiées",
-        "description": "Exécutez cet agent une fois ou selon une récurrence dans une session existante.",
+        "description": "Gérez les exécutions ponctuelles et récurrentes de cette session.",
         "newTask": "Nouvelle tâche",
         "listTitle": "Tâches",
         "emptyTitle": "Aucune tâche planifiée",
@@ -1523,14 +1523,15 @@
         "sessionOnly": "Session uniquement · aucune publication sur un canal externe",
         "nextEligible": "Prochaine exécution possible : {value}",
         "edit": "Modifier",
-        "delete": "Supprimer",
+        "cancelTask": "Annuler la tâche",
         "create": "Créer la tâche",
         "save": "Enregistrer",
         "cancel": "Annuler",
+        "keepTask": "Conserver la tâche",
         "conflictError": "La tâche a été modifiée ou démarrée avant la fin de l’opération. Rechargez son état actuel puis réessayez.",
-        "deleteConfirmTitle": "Supprimer la tâche planifiée ?",
-        "deleteConfirmDescription": "Supprimer « {title} » ?",
-        "deletePermanent": "La planification future sera définitivement supprimée. Le travail déjà démarré ne sera pas annulé.",
+        "cancelConfirmTitle": "Annuler la tâche planifiée ?",
+        "cancelConfirmDescription": "Annuler « {title} » ?",
+        "cancelEffect": "Les prochaines exécutions seront arrêtées. Le travail déjà démarré se poursuivra.",
         "scheduleType": {
           "once": "Une fois",
           "cron": "Récurrente"

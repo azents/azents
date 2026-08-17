@@ -1508,7 +1508,7 @@
       "shellRuntimeRequiredDescription": "<runtimeLink>관리형 Runtime을 추가</runtimeLink>한 뒤 Shell 설정을 변경할 수 있습니다.",
       "scheduledTasks": {
         "title": "예약 작업",
-        "description": "기존 세션에서 이 에이전트를 한 번 또는 반복 일정으로 실행합니다.",
+        "description": "이 세션의 일회성 및 반복 실행 일정을 관리합니다.",
         "newTask": "새 작업",
         "listTitle": "작업",
         "emptyTitle": "아직 예약 작업이 없습니다",
@@ -1523,14 +1523,15 @@
         "sessionOnly": "세션에서만 실행 · 외부 채널로 전달하지 않음",
         "nextEligible": "다음 실행 가능 시각: {value}",
         "edit": "편집",
-        "delete": "삭제",
+        "cancelTask": "작업 취소",
         "create": "작업 만들기",
         "save": "변경 사항 저장",
         "cancel": "취소",
+        "keepTask": "작업 유지",
         "conflictError": "작업이 이미 변경되었거나 실행을 시작했습니다. 최신 상태를 다시 불러온 뒤 시도하세요.",
-        "deleteConfirmTitle": "예약 작업을 삭제할까요?",
-        "deleteConfirmDescription": "“{title}” 작업을 삭제할까요?",
-        "deletePermanent": "앞으로의 일정이 영구적으로 삭제됩니다. 이미 시작된 현재 작업은 취소되지 않습니다.",
+        "cancelConfirmTitle": "예약 작업을 취소할까요?",
+        "cancelConfirmDescription": "“{title}” 작업을 취소할까요?",
+        "cancelEffect": "앞으로의 실행은 중단됩니다. 이미 시작된 작업은 계속 실행됩니다.",
         "scheduleType": {
           "once": "한 번",
           "cron": "반복"

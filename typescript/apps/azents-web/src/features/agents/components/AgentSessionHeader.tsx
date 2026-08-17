@@ -21,6 +21,7 @@ import {
 } from "@mantine/core";
 import { useDocumentTitle } from "@mantine/hooks";
 import {
+  IconCalendarClock,
   IconChartBar,
   IconFolderOpen,
   IconMenu2,
@@ -50,7 +51,7 @@ function isContextPage(value: string | null): boolean {
 
 function resolveActiveTab(
   page: string | null,
-): "chat" | "context" | "subagents" | "channels" {
+): "chat" | "context" | "subagents" | "channels" | "scheduled-tasks" {
   if (isContextPage(page)) {
     return "context";
   }
@@ -59,6 +60,9 @@ function resolveActiveTab(
   }
   if (page === "channels") {
     return "channels";
+  }
+  if (page === "scheduled-tasks") {
+    return "scheduled-tasks";
   }
   return "chat";
 }
@@ -202,6 +206,8 @@ export function AgentSessionHeader({
         router.push(`${basePath}/sessions/${sessionId}?page=subagents`);
       } else if (value === "channels") {
         router.push(`${basePath}/sessions/${sessionId}?page=channels`);
+      } else if (value === "scheduled-tasks") {
+        router.push(`${basePath}/sessions/${sessionId}?page=scheduled-tasks`);
       }
     },
     [router, basePath, sessionId],
@@ -375,6 +381,13 @@ export function AgentSessionHeader({
               style={{ flexShrink: 0 }}
             >
               {t("tabs.channels")}
+            </Tabs.Tab>
+            <Tabs.Tab
+              value="scheduled-tasks"
+              leftSection={<IconCalendarClock size={rem(14)} />}
+              style={{ flexShrink: 0 }}
+            >
+              {t("tabs.scheduledTasks")}
             </Tabs.Tab>
           </Tabs.List>
         </Tabs>
