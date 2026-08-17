@@ -2,7 +2,7 @@
 
 import datetime
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from cryptography.exceptions import InvalidSignature
@@ -22,6 +22,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelPrincipalCreate,
     ExternalChannelTrigger,
 )
+from azents.repos.scheduled_task.data import MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH
 from azents.services.external_channel.discord_api import (
     DiscordGuildCommandRole,
     DiscordGuildCommandSetCapability,
@@ -31,6 +32,7 @@ from azents.services.external_channel.discord_api import (
 from azents.services.external_channel.discord_events import (
     project_discord_message_command_source_event,
 )
+from azents.services.scheduled_task.control import ScheduledTaskEditInput
 
 MAX_DISCORD_INTERACTION_BODY_BYTES = 256 * 1024
 DISCORD_INTERACTION_TTL = datetime.timedelta(minutes=15)
@@ -96,6 +98,10 @@ class DiscordInteractionEnvelope:
     component_custom_id: str | None
     selected_value: str | None
     modal_custom_id: str | None
+    scheduled_task_edit: ScheduledTaskEditInput | None = field(
+        default=None,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -333,6 +339,11 @@ def parse_discord_interaction(raw_body: bytes) -> DiscordInteractionEnvelope:
         payload=payload,
         interaction_type=interaction_type,
     )
+    scheduled_task_edit = _scheduled_task_edit(
+        payload=payload,
+        interaction_type=interaction_type,
+        modal_custom_id=modal_custom_id,
+    )
     return DiscordInteractionEnvelope(
         interaction_id=interaction_id,
         interaction_type=interaction_type,
@@ -347,6 +358,7 @@ def parse_discord_interaction(raw_body: bytes) -> DiscordInteractionEnvelope:
         component_custom_id=component_custom_id,
         selected_value=selected_value,
         modal_custom_id=modal_custom_id,
+        scheduled_task_edit=scheduled_task_edit,
     )
 
 
@@ -548,3 +560,84 @@ def _modal_custom_id(
     if not isinstance(custom_id, str) or not custom_id or len(custom_id) > 100:
         raise DiscordInteractionInvalidPayload("Discord modal submission is invalid.")
     return custom_id
+
+
+def _scheduled_task_edit(
+    *,
+    payload: dict[str, object],
+    interaction_type: int,
+    modal_custom_id: str | None,
+) -> ScheduledTaskEditInput | None:
+    """Project exact bounded Scheduled Task edit fields from one known modal."""
+    if interaction_type != 5 or modal_custom_id is None:
+        return None
+    if not modal_custom_id.startswith("st1:e:"):
+        return None
+    data = payload.get("data")
+    components = (
+        data.get("components") if is_external_channel_projection(data) else None
+    )
+    if not isinstance(components, list) or len(components) > 5:
+        raise DiscordInteractionInvalidPayload(
+            "Discord Scheduled Task edit is invalid."
+        )
+    values: dict[str, str | None] = {}
+    for row in components:
+        row_components = (
+            row.get("components") if is_external_channel_projection(row) else None
+        )
+        if not isinstance(row_components, list) or len(row_components) != 1:
+            raise DiscordInteractionInvalidPayload(
+                "Discord Scheduled Task edit is invalid."
+            )
+        component = row_components[0]
+        if not is_external_channel_projection(component):
+            raise DiscordInteractionInvalidPayload(
+                "Discord Scheduled Task edit is invalid."
+            )
+        custom_id = component.get("custom_id")
+        value = component.get("value")
+        if (
+            not isinstance(custom_id, str)
+            or custom_id
+            not in {
+                "azents_scheduled_task_title",
+                "azents_scheduled_task_objective",
+                "azents_scheduled_task_at",
+                "azents_scheduled_task_cron",
+                "azents_scheduled_task_timezone",
+            }
+            or not isinstance(value, str)
+        ):
+            raise DiscordInteractionInvalidPayload(
+                "Discord Scheduled Task edit is invalid."
+            )
+        if custom_id in values:
+            raise DiscordInteractionInvalidPayload(
+                "Discord Scheduled Task edit is invalid."
+            )
+        limits = {
+            "azents_scheduled_task_title": 120,
+            "azents_scheduled_task_objective": MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
+            "azents_scheduled_task_at": 128,
+            "azents_scheduled_task_cron": 256,
+            "azents_scheduled_task_timezone": 128,
+        }
+        if len(value) > limits[custom_id]:
+            raise DiscordInteractionInvalidPayload(
+                "Discord Scheduled Task edit is invalid."
+            )
+        values[custom_id] = value.strip() or None
+    title = values.get("azents_scheduled_task_title")
+    objective = values.get("azents_scheduled_task_objective")
+    if not title or not objective or len(values) != 5:
+        raise DiscordInteractionInvalidPayload(
+            "Discord Scheduled Task edit is incomplete."
+        )
+    return ScheduledTaskEditInput(
+        title=title,
+        objective=objective,
+        at=values["azents_scheduled_task_at"],
+        cron=values["azents_scheduled_task_cron"],
+        timezone=values["azents_scheduled_task_timezone"],
+    )

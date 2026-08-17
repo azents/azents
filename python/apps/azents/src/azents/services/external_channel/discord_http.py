@@ -17,6 +17,10 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import ExternalChannelInteractionAdmission
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.scheduled_task.data import (
+    MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
+    ScheduledTask,
+)
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.discord_api import DiscordGuildCommandRole
 from azents.services.external_channel.discord_interaction import (
@@ -42,6 +46,11 @@ from azents.services.external_channel.discord_settings_scope import (
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
+)
+from azents.services.scheduled_task.control import (
+    ScheduledTaskProviderControlError,
+    ScheduledTaskProviderControlService,
+    parse_scheduled_task_control_locator,
 )
 
 
@@ -88,6 +97,10 @@ class DiscordHTTPAdmissionService:
     settings_response_service: Annotated[
         DiscordSettingsResponseService,
         Depends(DiscordSettingsResponseService),
+    ]
+    scheduled_task_control: Annotated[
+        ScheduledTaskProviderControlService,
+        Depends(ScheduledTaskProviderControlService),
     ]
 
     async def handle(
@@ -226,6 +239,13 @@ class DiscordHTTPAdmissionService:
                 admission=admission,
                 received_at=received_at,
             )
+        if custom_id.startswith("st1:"):
+            return await self._scheduled_task_component_result(
+                envelope=envelope,
+                admission=admission,
+                context=context,
+                received_at=received_at,
+            )
         if not custom_id.startswith("a:"):
             return await self._unsupported_result(
                 envelope=envelope,
@@ -352,6 +372,145 @@ class DiscordHTTPAdmissionService:
             control_delivery_connection_id=component_response.connection_id,
         )
 
+    async def _scheduled_task_component_result(
+        self,
+        *,
+        envelope: DiscordInteractionEnvelope,
+        admission: ExternalChannelInteractionAdmission,
+        context: DiscordSettingsContext,
+        received_at: datetime.datetime,
+    ) -> DiscordHTTPAdmissionResult:
+        """Render or apply one idempotently claimed Scheduled Task component."""
+        response: dict[str, object]
+        claim = await self.admission_service.begin_interaction_provider_mutation(
+            interaction_id=admission.interaction.id,
+            now=received_at,
+        )
+        if claim is None or not claim.claimed:
+            return DiscordHTTPAdmissionResult(envelope=envelope, admission=admission)
+        try:
+            locator = parse_scheduled_task_control_locator(
+                locator=envelope.component_custom_id or "",
+                secret=self.scheduled_task_control.config.auth.jwt.secret_key,
+            )
+            if locator.action == "edit":
+                task = await self.scheduled_task_control.load_for_edit(
+                    interaction_id=admission.interaction.id,
+                    locator=locator,
+                    provider_parent_channel_id=context.provider_parent_channel_id,
+                    provider_thread_resource_key=context.provider_thread_resource_key,
+                )
+                response = _scheduled_task_edit_modal(
+                    locator=envelope.component_custom_id or "",
+                    task=task,
+                )
+            else:
+                await self.scheduled_task_control.mutate(
+                    interaction_id=admission.interaction.id,
+                    locator=locator,
+                    provider_parent_channel_id=context.provider_parent_channel_id,
+                    provider_thread_resource_key=context.provider_thread_resource_key,
+                    origin_interaction_id=None,
+                    edit=None,
+                    now=received_at,
+                )
+                response = {
+                    "type": 7,
+                    "data": {
+                        "content": "Scheduled Task deleted.",
+                        "components": [],
+                    },
+                }
+        except ScheduledTaskProviderControlError, ValueError:
+            response = _scheduled_task_unavailable_component_response()
+        except Exception:
+            await self.admission_service.finish_interaction_provider_mutation(
+                interaction_id=admission.interaction.id,
+                status=ExternalChannelInteractionStatus.FAILED,
+                error_kind="scheduled_task_component_failed",
+                error_summary=(
+                    "Discord Scheduled Task component could not be processed."
+                ),
+            )
+            raise
+        await self.admission_service.finish_interaction_provider_mutation(
+            interaction_id=admission.interaction.id,
+            status=ExternalChannelInteractionStatus.COMPLETED,
+            error_kind=None,
+            error_summary=None,
+        )
+        return DiscordHTTPAdmissionResult(
+            envelope=envelope,
+            admission=admission,
+            response=response,
+        )
+
+    async def _scheduled_task_modal_result(
+        self,
+        *,
+        envelope: DiscordInteractionEnvelope,
+        admission: ExternalChannelInteractionAdmission,
+        context: DiscordSettingsContext,
+        received_at: datetime.datetime,
+    ) -> DiscordHTTPAdmissionResult:
+        """Apply one idempotently claimed Scheduled Task edit modal."""
+        response: dict[str, object]
+        claim = await self.admission_service.begin_interaction_provider_mutation(
+            interaction_id=admission.interaction.id,
+            now=received_at,
+        )
+        if claim is None or not claim.claimed:
+            return DiscordHTTPAdmissionResult(envelope=envelope, admission=admission)
+        try:
+            locator = parse_scheduled_task_control_locator(
+                locator=envelope.modal_custom_id or "",
+                secret=self.scheduled_task_control.config.auth.jwt.secret_key,
+            )
+            if locator.action != "edit" or envelope.scheduled_task_edit is None:
+                raise ScheduledTaskProviderControlError(
+                    "Scheduled Task control is unavailable."
+                )
+            await self.scheduled_task_control.mutate(
+                interaction_id=admission.interaction.id,
+                locator=locator,
+                provider_parent_channel_id=context.provider_parent_channel_id,
+                provider_thread_resource_key=context.provider_thread_resource_key,
+                origin_interaction_id=None,
+                edit=envelope.scheduled_task_edit,
+                now=received_at,
+            )
+            response = {
+                "type": 4,
+                "data": {"flags": 64, "content": "Scheduled Task saved."},
+            }
+        except ScheduledTaskProviderControlError, ValueError:
+            response = {
+                "type": 4,
+                "data": {
+                    "flags": 64,
+                    "content": "This Scheduled Task control is unavailable.",
+                },
+            }
+        except Exception:
+            await self.admission_service.finish_interaction_provider_mutation(
+                interaction_id=admission.interaction.id,
+                status=ExternalChannelInteractionStatus.FAILED,
+                error_kind="scheduled_task_modal_failed",
+                error_summary="Discord Scheduled Task modal could not be processed.",
+            )
+            raise
+        await self.admission_service.finish_interaction_provider_mutation(
+            interaction_id=admission.interaction.id,
+            status=ExternalChannelInteractionStatus.COMPLETED,
+            error_kind=None,
+            error_summary=None,
+        )
+        return DiscordHTTPAdmissionResult(
+            envelope=envelope,
+            admission=admission,
+            response=response,
+        )
+
     async def _modal_result(
         self,
         *,
@@ -361,6 +520,13 @@ class DiscordHTTPAdmissionService:
         received_at: datetime.datetime,
     ) -> DiscordHTTPAdmissionResult:
         custom_id = envelope.modal_custom_id
+        if custom_id is not None and custom_id.startswith("st1:"):
+            return await self._scheduled_task_modal_result(
+                envelope=envelope,
+                admission=admission,
+                context=context,
+                received_at=received_at,
+            )
         if custom_id is None or not custom_id.startswith("a:"):
             return await self._unsupported_result(
                 envelope=envelope,
@@ -382,6 +548,7 @@ class DiscordHTTPAdmissionService:
                 component_custom_id=custom_id,
                 selected_value=None,
                 modal_custom_id=None,
+                scheduled_task_edit=None,
             ),
             admission=admission,
             context=context,
@@ -593,5 +760,104 @@ def _already_linked_response() -> dict[str, object]:
                     "color": 0xFEE75C,
                 }
             ],
+        },
+    }
+
+
+def _scheduled_task_edit_modal(
+    *,
+    locator: str,
+    task: ScheduledTask,
+) -> dict[str, object]:
+    """Render a Discord modal from the current exact Scheduled Task snapshot."""
+    at = (
+        ""
+        if task.scheduled_at is None
+        else task.scheduled_at.astimezone(datetime.UTC)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    return {
+        "type": 9,
+        "data": {
+            "custom_id": locator,
+            "title": "Edit Scheduled Task",
+            "components": [
+                _scheduled_task_modal_input(
+                    custom_id="azents_scheduled_task_title",
+                    label="Title",
+                    value=task.title,
+                    style=1,
+                    required=True,
+                    max_length=120,
+                ),
+                _scheduled_task_modal_input(
+                    custom_id="azents_scheduled_task_objective",
+                    label="Objective",
+                    value=task.objective,
+                    style=2,
+                    required=True,
+                    max_length=MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
+                ),
+                _scheduled_task_modal_input(
+                    custom_id="azents_scheduled_task_at",
+                    label="Run once at (RFC3339 UTC)",
+                    value=at,
+                    style=1,
+                    required=False,
+                    max_length=128,
+                ),
+                _scheduled_task_modal_input(
+                    custom_id="azents_scheduled_task_cron",
+                    label="Cron expression",
+                    value=task.cron_expression or "",
+                    style=1,
+                    required=False,
+                    max_length=256,
+                ),
+                _scheduled_task_modal_input(
+                    custom_id="azents_scheduled_task_timezone",
+                    label="Cron timezone",
+                    value=task.timezone or "",
+                    style=1,
+                    required=False,
+                    max_length=128,
+                ),
+            ],
+        },
+    }
+
+
+def _scheduled_task_modal_input(
+    *,
+    custom_id: str,
+    label: str,
+    value: str,
+    style: int,
+    required: bool,
+    max_length: int,
+) -> dict[str, object]:
+    return {
+        "type": 1,
+        "components": [
+            {
+                "type": 4,
+                "custom_id": custom_id,
+                "label": label,
+                "value": value,
+                "style": style,
+                "required": required,
+                "max_length": max_length,
+            }
+        ],
+    }
+
+
+def _scheduled_task_unavailable_component_response() -> dict[str, object]:
+    return {
+        "type": 7,
+        "data": {
+            "content": "This Scheduled Task control is unavailable.",
+            "components": [],
         },
     }

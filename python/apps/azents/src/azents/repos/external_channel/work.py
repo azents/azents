@@ -13,9 +13,11 @@ from azents.core.enums import (
     AgentSessionStatus,
     ExternalChannelAccessRequestStatus,
     ExternalChannelActionMode,
+    ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
@@ -140,11 +142,21 @@ class ExternalChannelWorkRepository:
         operation_seed: str,
     ) -> ProviderEffectPlan | None:
         """Capture one process-local provider control from current domain state."""
-        connection = await session.scalar(
-            sa.select(RDBExternalChannelConnection).where(
-                RDBExternalChannelConnection.id == connection_id,
-                RDBExternalChannelConnection.disconnected_at.is_(None),
+        connection_conditions = [
+            RDBExternalChannelConnection.id == connection_id,
+            RDBExternalChannelConnection.disconnected_at.is_(None),
+        ]
+        if binding_id is not None:
+            connection_conditions.append(
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                )
             )
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection).where(*connection_conditions)
         )
         if connection is None:
             return None
@@ -169,6 +181,15 @@ class ExternalChannelWorkRepository:
                 sa.select(RDBExternalChannelAgentRoute).where(
                     RDBExternalChannelAgentRoute.id == route_id,
                     RDBExternalChannelAgentRoute.connection_id == connection.id,
+                    *(
+                        (
+                            RDBExternalChannelAgentRoute.catalog_status
+                            == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                            RDBExternalChannelAgentRoute.agent_id.is_not(None),
+                        )
+                        if binding_id is not None
+                        else ()
+                    ),
                 )
             )
         )
@@ -189,9 +210,14 @@ class ExternalChannelWorkRepository:
             return None
         if binding is not None:
             if route is None:
-                route = await session.get(
-                    RDBExternalChannelAgentRoute,
-                    binding.route_id,
+                route = await session.scalar(
+                    sa.select(RDBExternalChannelAgentRoute).where(
+                        RDBExternalChannelAgentRoute.id == binding.route_id,
+                        RDBExternalChannelAgentRoute.connection_id == connection.id,
+                        RDBExternalChannelAgentRoute.catalog_status
+                        == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                        RDBExternalChannelAgentRoute.agent_id.is_not(None),
+                    )
                 )
             if route is None or route.connection_id != connection.id:
                 return None
@@ -210,11 +236,16 @@ class ExternalChannelWorkRepository:
             if agent is None
             else await session.get(RDBWorkspace, agent.workspace_id)
         )
-        agent_session = (
-            None
-            if binding is None
-            else await session.get(RDBAgentSession, binding.agent_session_id)
-        )
+        agent_session = None
+        if binding is not None:
+            agent_session = await session.scalar(
+                sa.select(RDBAgentSession).where(
+                    RDBAgentSession.id == binding.agent_session_id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                )
+            )
+            if agent_session is None:
+                return None
         return ProviderEffectPlan(
             target=ProviderTarget(
                 operation=operation,
@@ -288,6 +319,223 @@ class ExternalChannelWorkRepository:
             request_payload=target.request_payload,
             operation_seed=plan.operation_key.value,
         )
+
+    async def prepare_binding_effect(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        operation: ExternalChannelDeliveryOperation,
+        slack_payload: dict[str, object],
+        discord_payload: dict[str, object],
+        operation_seed: str,
+    ) -> ProviderEffectPlan | None:
+        """Prepare one process-local effect for an exact current Binding."""
+        row = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelResource,
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelConnection,
+                )
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelBinding.route_id,
+                )
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
+                )
+                .join(
+                    RDBAgentSession,
+                    RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
+                )
+                .join(
+                    RDBAgent,
+                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                )
+                .where(
+                    RDBExternalChannelBinding.id == binding_id,
+                    RDBExternalChannelBinding.agent_session_id == session_id,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                    RDBExternalChannelResource.status
+                    == ExternalChannelResourceStatus.ACTIVE,
+                    RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    RDBExternalChannelAgentRoute.catalog_status
+                    == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                    RDBExternalChannelConnection.disconnected_at.is_(None),
+                    RDBExternalChannelConnection.status.in_(
+                        (
+                            ExternalChannelConnectionStatus.ACTIVE,
+                            ExternalChannelConnectionStatus.DEGRADED,
+                        )
+                    ),
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        binding, resource, route, connection = row
+        semantic_payload = (
+            slack_payload
+            if connection.provider is ExternalChannelProvider.SLACK
+            else discord_payload
+        )
+        request_payload = _provider_payload(
+            connection.provider,
+            resource.labels,
+        )
+        request_payload.update(semantic_payload)
+        return await self.prepare_direct_control(
+            session,
+            connection_id=connection.id,
+            resource_id=resource.id,
+            route_id=route.id,
+            binding_id=binding.id,
+            operation=operation,
+            request_payload=request_payload,
+            operation_seed=operation_seed,
+        )
+
+    async def revalidate_binding_effect(
+        self,
+        session: AsyncSession,
+        *,
+        plan: ProviderEffectPlan,
+    ) -> ProviderEffectPlan | None:
+        """Refresh an effect only while its exact Binding authority is unchanged."""
+        current = await self.revalidate_direct_control(session, plan=plan)
+        if current is None:
+            return None
+        expected = plan.target
+        actual = current.target
+        if (
+            actual.binding_id != expected.binding_id
+            or actual.resource_id != expected.resource_id
+            or actual.connection_id != expected.connection_id
+            or actual.provider is not expected.provider
+            or actual.app_mode is not expected.app_mode
+            or actual.agent_id != expected.agent_id
+            or actual.agent_session_id != expected.agent_session_id
+        ):
+            return None
+        return current
+
+    async def prepare_binding_reply_effects(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        text: str,
+        files: Sequence[ExternalChannelOutboundFileManifest],
+        operation_seed: str,
+        slack_reply_broadcast: bool,
+        discord_forward_to_parent: bool,
+    ) -> tuple[ProviderEffectPlan, ...]:
+        """Prepare ordered reply parts for one exact current Binding."""
+        row = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelResource,
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelConnection,
+                )
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelBinding.route_id,
+                )
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
+                )
+                .join(
+                    RDBAgentSession,
+                    RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
+                )
+                .join(
+                    RDBAgent,
+                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                )
+                .where(
+                    RDBExternalChannelBinding.id == binding_id,
+                    RDBExternalChannelBinding.agent_session_id == session_id,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                    RDBExternalChannelResource.status
+                    == ExternalChannelResourceStatus.ACTIVE,
+                    RDBExternalChannelAgentRoute.agent_id == agent_id,
+                    RDBExternalChannelAgentRoute.catalog_status
+                    == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                    RDBExternalChannelConnection.disconnected_at.is_(None),
+                    RDBExternalChannelConnection.status.in_(
+                        (
+                            ExternalChannelConnectionStatus.ACTIVE,
+                            ExternalChannelConnectionStatus.DEGRADED,
+                        )
+                    ),
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return ()
+        binding, resource, route, connection = row
+        payloads = _reply_parts(
+            provider=connection.provider,
+            labels=resource.labels,
+            text=text,
+            files=files,
+            slack_text_limit=SLACK_MARKDOWN_TEXT_MAX_LENGTH - 512,
+        )
+        plans: list[ProviderEffectPlan] = []
+        for ordinal, raw_payload in enumerate(payloads):
+            payload = dict(raw_payload)
+            if connection.provider is ExternalChannelProvider.SLACK:
+                payload["reply_broadcast"] = (
+                    slack_reply_broadcast
+                    and payload.get("conversation_scope") == "thread"
+                )
+            else:
+                payload["forward_to_parent"] = (
+                    discord_forward_to_parent
+                    and payload.get("conversation_scope") == "thread"
+                )
+            plan = await self.prepare_direct_control(
+                session,
+                connection_id=connection.id,
+                resource_id=resource.id,
+                route_id=route.id,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.REPLY,
+                request_payload=payload,
+                operation_seed=f"{operation_seed}:{ordinal}",
+            )
+            if plan is None:
+                return ()
+            plans.append(plan)
+        return tuple(plans)
 
     async def revalidate_terminal_control(
         self,
@@ -1449,6 +1697,8 @@ def _provider_payload(
                     "channel_id": thread_id,
                     "conversation_scope": "thread",
                 }
+                if isinstance(parent_channel_id, str) and parent_channel_id:
+                    payload["parent_channel_id"] = parent_channel_id
                 root_message_id = labels.get("root_message_id")
                 if delivery_channel_id is None and (
                     isinstance(parent_channel_id, str)
@@ -1479,17 +1729,24 @@ def _reply_parts(
     labels: dict[str, object] | None,
     text: str,
     files: Sequence[ExternalChannelOutboundFileManifest],
+    slack_text_limit: int | None = None,
 ) -> tuple[dict[str, object], ...]:
     """Lower one canonical reply into ordered provider-bound message parts."""
     match provider:
         case ExternalChannelProvider.SLACK:
-            return (
+            parts = (
+                (text,)
+                if slack_text_limit is None
+                else _split_slack_markdown(text, maximum=slack_text_limit)
+            )
+            return tuple(
                 _provider_payload(
                     provider,
                     labels,
-                    text=text,
-                    files=files,
-                ),
+                    text=part,
+                    files=files if ordinal == 0 else (),
+                )
+                for ordinal, part in enumerate(parts)
             )
         case ExternalChannelProvider.DISCORD:
             parts = split_discord_markdown(text)
@@ -1530,6 +1787,40 @@ def _reply_parts(
             )
         case _ as unreachable:
             assert_never(unreachable)
+
+
+def _split_slack_markdown(text: str, *, maximum: int) -> tuple[str, ...]:
+    """Split oversized Slack Markdown at stable line or word boundaries."""
+    if maximum <= 0 or maximum > SLACK_MARKDOWN_TEXT_MAX_LENGTH:
+        raise ValueError("Slack reply split maximum is invalid.")
+    if len(text) <= maximum:
+        return (text,)
+    parts: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= maximum:
+            parts.append(remaining)
+            break
+        split_at = remaining.rfind(
+            "\n",
+            1,
+            maximum + 1,
+        )
+        include_separator = 0 < split_at < maximum
+        if split_at <= 0:
+            split_at = remaining.rfind(
+                " ",
+                1,
+                maximum + 1,
+            )
+            include_separator = 0 < split_at < maximum
+        if split_at <= 0:
+            split_at = maximum
+        elif include_separator:
+            split_at += 1
+        parts.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+    return tuple(parts)
 
 
 def _discord_file_batches(

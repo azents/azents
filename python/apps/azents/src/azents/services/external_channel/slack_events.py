@@ -1300,6 +1300,7 @@ class SlackConversationClient:
         thread_ts: str | None,
         markdown_text: str,
         icon_url: str | None,
+        reply_broadcast: bool = False,
     ) -> SlackControlMessageResult:
         """Attempt one ordinary thread message without retry."""
         if len(markdown_text) > SLACK_MARKDOWN_TEXT_MAX_LENGTH:
@@ -1314,6 +1315,7 @@ class SlackConversationClient:
             return await self.web_client.chat_postMessage(
                 channel=channel_id,
                 thread_ts=thread_ts,
+                reply_broadcast=True if reply_broadcast else None,
                 markdown_text=markdown_text,
                 icon_url=icon_url if include_icon else None,
                 unfurl_links=False,
@@ -1329,6 +1331,7 @@ class SlackConversationClient:
                 "channel",
                 "icon_url",
                 "markdown_text",
+                "reply_broadcast",
                 "thread_ts",
                 "unfurl_links",
                 "unfurl_media",

@@ -28,12 +28,17 @@ from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToo
 from azents.engine.tooling.make_tool import make_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.scheduled_task.data import ScheduledTask
+from azents.repos.scheduled_task.data import (
+    MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
+    ScheduledTask,
+)
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectOutcome
+from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.scheduled_task.rendering import (
     render_scheduled_task_compaction_snapshot,
     render_scheduled_task_cycle_guidance,
@@ -63,7 +68,10 @@ class AddScheduledTaskInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     title: str = Field(min_length=1, max_length=120)
-    objective: str = Field(min_length=1, max_length=20_000)
+    objective: str = Field(
+        min_length=1,
+        max_length=MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
+    )
     at: str | None
     cron: str | None
     timezone: str | None
@@ -96,6 +104,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
         session_manager: SessionManager[AsyncSession],
         service: ScheduledTaskService,
         terminal_service: ScheduledTaskTerminalService,
+        channel_service: ScheduledTaskChannelService,
         cycle_repository: ScheduledTaskCycleRepository,
         run_repository: AgentRunRepository,
         workspace_id: str,
@@ -105,6 +114,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
         self.session_manager = session_manager
         self.service = service
         self.terminal_service = terminal_service
+        self.channel_service = channel_service
         self.cycle_repository = cycle_repository
         self.run_repository = run_repository
         self.workspace_id = workspace_id
@@ -235,7 +245,18 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                     )
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
-            return _json({"task": _task_definition(task), "created": True})
+            registration = await self.channel_service.execute_registration(task)
+            return _json(
+                {
+                    "task": _task_definition(task),
+                    "created": True,
+                    "registration": (
+                        None
+                        if registration is None
+                        else _provider_outcome_definition(registration)
+                    ),
+                }
+            )
 
         return make_tool(
             add_scheduled_task,
@@ -302,6 +323,13 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                 raise FunctionToolError(str(exc)) from None
             if outcome.created:
                 await context.publish_event(outcome.event)
+            provider_outcomes = (
+                ()
+                if outcome.effect_snapshot is None
+                else await self.channel_service.execute_terminal(
+                    outcome.effect_snapshot
+                )
+            )
             payload = outcome.event.payload
             if not isinstance(payload, ScheduledTaskResultPayload):
                 raise RuntimeError("Scheduled Task terminal Event payload is invalid.")
@@ -311,6 +339,22 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                         "status": payload.status,
                         "result": payload.result,
                         "recovered": not outcome.created,
+                        "outcomes": [
+                            {
+                                "operation": provider.operation.value,
+                                "part": provider.part,
+                                "status": provider.status,
+                                **(
+                                    {
+                                        "reason": provider.reason,
+                                        "detail": provider.detail,
+                                    }
+                                    if provider.reason is not None
+                                    else {}
+                                ),
+                            }
+                            for provider in provider_outcomes
+                        ],
                     }
                 ),
                 terminal_run=True,
@@ -371,12 +415,14 @@ class ScheduledToolkitProvider(ToolkitProvider[ScheduledToolkitConfig]):
         session_manager: SessionManager[AsyncSession],
         service: ScheduledTaskService,
         terminal_service: ScheduledTaskTerminalService,
+        channel_service: ScheduledTaskChannelService,
         cycle_repository: ScheduledTaskCycleRepository,
         run_repository: AgentRunRepository,
     ) -> None:
         self.session_manager = session_manager
         self.service = service
         self.terminal_service = terminal_service
+        self.channel_service = channel_service
         self.cycle_repository = cycle_repository
         self.run_repository = run_repository
 
@@ -391,6 +437,7 @@ class ScheduledToolkitProvider(ToolkitProvider[ScheduledToolkitConfig]):
             session_manager=self.session_manager,
             service=self.service,
             terminal_service=self.terminal_service,
+            channel_service=self.channel_service,
             cycle_repository=self.cycle_repository,
             run_repository=self.run_repository,
             workspace_id=context.workspace_id,
@@ -411,6 +458,25 @@ def _task_definition(task: ScheduledTask) -> dict[str, object]:
         "channel_id": task.binding_id,
         "next_eligible_at": _datetime_text(task.next_eligible_at),
         "pending_scheduled_for": _datetime_text(task.pending_scheduled_for),
+    }
+
+
+def _provider_outcome_definition(
+    outcome: ProviderEffectOutcome,
+) -> dict[str, object]:
+    """Return one identifier-free immediate provider outcome."""
+    return {
+        "operation": outcome.operation.value,
+        "part": outcome.part,
+        "status": outcome.status,
+        **(
+            {
+                "reason": outcome.reason,
+                "detail": outcome.detail,
+            }
+            if outcome.reason is not None
+            else {}
+        ),
     }
 
 

@@ -3,15 +3,18 @@
 import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from azents.core.enums import ScheduledTaskScheduleType
+from azents.core.enums import (
+    ExternalChannelWorkProjectionStatus,
+    ScheduledTaskScheduleType,
+)
 
 
 class ScheduledTaskCycleState(BaseModel):
     """Immutable occurrence snapshot plus mutable runtime admission state."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: Literal[1] = 1
     cycle_id: str = Field(min_length=32, max_length=32)
@@ -37,11 +40,30 @@ class ScheduledTaskCycleState(BaseModel):
         default_factory=list
     )
 
+    @model_validator(mode="after")
+    def validate_tracker_projection_parts(self) -> "ScheduledTaskCycleState":
+        """Require deterministic current Tracker projection identities."""
+        ordinals = [part.part_ordinal for part in self.tracker_current_projection_parts]
+        if ordinals != sorted(ordinals):
+            raise ValueError("Scheduled Tracker projection parts must be ordered.")
+        if len(ordinals) != len(set(ordinals)):
+            raise ValueError(
+                "Scheduled Tracker projection part ordinals must be unique."
+            )
+        if any(
+            part.desired_revision > self.tracker_desired_revision
+            for part in self.tracker_current_projection_parts
+        ):
+            raise ValueError(
+                "Scheduled Tracker projection revision exceeds desired state."
+            )
+        return self
+
 
 class ScheduledTaskCycleRecord(BaseModel):
     """Cycle state with Toolkit State row version for CAS updates."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     state: ScheduledTaskCycleState
     version: int = Field(ge=1)
@@ -51,7 +73,7 @@ class ScheduledTaskCycleRecord(BaseModel):
 class ScheduledTaskCycleSnapshot(BaseModel):
     """Immutable admitted Task snapshot used to create a cycle."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     cycle_id: str = Field(min_length=32, max_length=32)
     task_id: str = Field(min_length=32, max_length=32)
@@ -69,10 +91,11 @@ class ScheduledTaskCycleSnapshot(BaseModel):
 
 
 class ScheduledTrackerProjectionPart(BaseModel):
-    """Provider-neutral Scheduled Activity Tracker projection fragment."""
+    """Current provider projection state for one ordered Scheduled Tracker part."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    kind: Literal["text", "task", "status"]
-    text: str = Field(min_length=1)
-    task_index: int | None = Field(default=None, ge=0)
+    part_ordinal: int = Field(ge=0)
+    desired_revision: int = Field(ge=0)
+    status: ExternalChannelWorkProjectionStatus
+    provider_message_key: str | None

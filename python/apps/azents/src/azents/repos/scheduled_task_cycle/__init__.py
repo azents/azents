@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import ExternalChannelWorkProjectionStatus
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.repos.toolkit_state import ToolkitStateConflictError, ToolkitStateRepository
 from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpsert
@@ -198,6 +199,189 @@ class ScheduledTaskCycleRepository:
         )
         return self._build(updated)
 
+    async def update_progress(
+        self,
+        session: AsyncSession,
+        *,
+        record: ScheduledTaskCycleRecord,
+        progress_title: str,
+        ordered_tasks: list[str],
+    ) -> ScheduledTaskCycleRecord:
+        """Replace Scheduled progress and advance its independent desired revision."""
+        if record.state.phase != "started":
+            raise ValueError("Scheduled Task cycle is not started")
+        normalized_title = progress_title.strip()
+        if not normalized_title:
+            raise ValueError("Scheduled Task progress title must not be empty")
+        normalized_tasks = [task.strip() for task in ordered_tasks]
+        if not normalized_tasks or any(not task for task in normalized_tasks):
+            raise ValueError("Scheduled Task progress requires non-empty ordered tasks")
+        state = record.state.model_copy(
+            update={
+                "progress_title": normalized_title,
+                "ordered_tasks": normalized_tasks,
+                "tracker_desired_revision": (record.state.tracker_desired_revision + 1),
+            }
+        )
+        return await self._save_state(
+            session,
+            state=state,
+            expected_version=record.version,
+        )
+
+    async def claim_tracker_projection(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        cycle_id: str,
+        expected_desired_revision: int,
+        part_ordinal: int,
+    ) -> ScheduledTaskCycleRecord | None:
+        """Preclaim one current Tracker mutation without sharing Channel Work state."""
+        if expected_desired_revision < 0 or part_ordinal < 0:
+            raise ValueError(
+                "Scheduled Tracker revisions and ordinals must be non-negative"
+            )
+        for _ in range(3):
+            record = await self.get(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                cycle_id=cycle_id,
+            )
+            if (
+                record is None
+                or record.state.phase != "started"
+                or record.state.tracker_desired_revision != expected_desired_revision
+            ):
+                return None
+            existing = next(
+                (
+                    part
+                    for part in record.state.tracker_current_projection_parts
+                    if part.part_ordinal == part_ordinal
+                ),
+                None,
+            )
+            if (
+                existing is not None
+                and existing.desired_revision == expected_desired_revision
+            ):
+                return None
+            claimed = ScheduledTrackerProjectionPart(
+                part_ordinal=part_ordinal,
+                desired_revision=expected_desired_revision,
+                status=ExternalChannelWorkProjectionStatus.UNKNOWN,
+                provider_message_key=(
+                    None if existing is None else existing.provider_message_key
+                ),
+            )
+            projection_parts = [
+                part
+                for part in record.state.tracker_current_projection_parts
+                if part.part_ordinal != part_ordinal
+            ]
+            projection_parts.append(claimed)
+            projection_parts.sort(key=lambda part: part.part_ordinal)
+            state = record.state.model_copy(
+                update={"tracker_current_projection_parts": projection_parts}
+            )
+            try:
+                return await self._save_state(
+                    session,
+                    state=state,
+                    expected_version=record.version,
+                )
+            except ToolkitStateConflictError:
+                continue
+        raise ToolkitStateConflictError(
+            "Scheduled Tracker projection claim version conflict"
+        )
+
+    async def settle_tracker_projection(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        cycle_id: str,
+        expected_desired_revision: int,
+        part_ordinal: int,
+        status: ExternalChannelWorkProjectionStatus,
+        provider_message_key: str | None,
+    ) -> bool:
+        """Compare-and-set one current Scheduled Tracker provider outcome."""
+        if expected_desired_revision < 0 or part_ordinal < 0:
+            raise ValueError(
+                "Scheduled Tracker revisions and ordinals must be non-negative"
+            )
+        if (
+            status is ExternalChannelWorkProjectionStatus.PRESENT
+            and provider_message_key is None
+        ):
+            raise ValueError(
+                "Present Scheduled Tracker projection requires a message key"
+            )
+        for _ in range(3):
+            record = await self.get(
+                session,
+                agent_id=agent_id,
+                session_id=session_id,
+                cycle_id=cycle_id,
+            )
+            if (
+                record is None
+                or record.state.phase != "started"
+                or record.state.tracker_desired_revision != expected_desired_revision
+            ):
+                return False
+            existing = next(
+                (
+                    part
+                    for part in record.state.tracker_current_projection_parts
+                    if part.part_ordinal == part_ordinal
+                ),
+                None,
+            )
+            if (
+                existing is None
+                or existing.desired_revision != expected_desired_revision
+            ):
+                return False
+            if status is ExternalChannelWorkProjectionStatus.DELETED:
+                settled_message_key = None
+            elif provider_message_key is None:
+                settled_message_key = existing.provider_message_key
+            else:
+                settled_message_key = provider_message_key
+            settled = existing.model_copy(
+                update={
+                    "status": status,
+                    "provider_message_key": settled_message_key,
+                }
+            )
+            projection_parts = [
+                settled if part.part_ordinal == part_ordinal else part
+                for part in record.state.tracker_current_projection_parts
+            ]
+            state = record.state.model_copy(
+                update={"tracker_current_projection_parts": projection_parts}
+            )
+            try:
+                await self._save_state(
+                    session,
+                    state=state,
+                    expected_version=record.version,
+                )
+            except ToolkitStateConflictError:
+                continue
+            return True
+        raise ToolkitStateConflictError(
+            "Scheduled Tracker projection settlement version conflict"
+        )
+
     async def get_started(
         self,
         session: AsyncSession,
@@ -278,6 +462,28 @@ class ScheduledTaskCycleRepository:
             version=record.version,
             toolkit_state_id=record.id,
         )
+
+    async def _save_state(
+        self,
+        session: AsyncSession,
+        *,
+        state: ScheduledTaskCycleState,
+        expected_version: int,
+    ) -> ScheduledTaskCycleRecord:
+        """Persist one exact whole-cycle state replacement."""
+        updated = await self.toolkit_state_repository.save(
+            session,
+            ToolkitStateUpsert(
+                agent_id=state.agent_id,
+                session_id=state.session_id,
+                toolkit_namespace=self.NAMESPACE,
+                state_name=self.state_name(state.cycle_id),
+                state_json=state.model_dump(mode="json"),
+                schema_version=state.schema_version,
+                expected_version=expected_version,
+            ),
+        )
+        return self._build(updated)
 
 
 __all__ = [

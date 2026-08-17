@@ -2,6 +2,7 @@
 
 import datetime
 from collections.abc import Callable
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -46,6 +47,9 @@ from azents.repos.external_channel.work_state import (
 )
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
+from azents.services.external_channel.slack_events import (
+    SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+)
 from azents.testing.external_channel import make_provider_effect_plan
 
 
@@ -190,6 +194,148 @@ async def test_direct_control_ignores_connection_health_status() -> None:
     where_sql = _where_sql(connection_query)
     assert "external_channel_connections.status" not in where_sql
     assert "external_channel_connections.disconnected_at IS NULL" in where_sql
+
+
+@pytest.mark.parametrize(
+    ("provider", "labels", "flag_name"),
+    [
+        (
+            ExternalChannelProvider.SLACK,
+            {
+                "channel_id": "channel-1",
+                "thread_ts": "1.000001",
+                "conversation_scope": "thread",
+            },
+            "reply_broadcast",
+        ),
+        (
+            ExternalChannelProvider.DISCORD,
+            {
+                "guild_id": "111",
+                "thread_id": "333",
+                "parent_channel_id": "222",
+                "conversation_scope": "thread",
+            },
+            "forward_to_parent",
+        ),
+    ],
+)
+async def test_binding_reply_effects_preserve_exact_thread_surfacing(
+    provider: ExternalChannelProvider,
+    labels: dict[str, object],
+    flag_name: str,
+) -> None:
+    """Scheduled terminal parts retain provider-native parent surfacing intent."""
+    binding = SimpleNamespace(id="binding-1")
+    resource = SimpleNamespace(id="resource-1", labels=labels)
+    route = SimpleNamespace(id="route-1")
+    connection = SimpleNamespace(id="connection-1", provider=provider)
+    result = MagicMock()
+    result.one_or_none.return_value = (binding, resource, route, connection)
+    session = MagicMock(spec=AsyncSession)
+    session.execute = AsyncMock(return_value=result)
+    repository = ExternalChannelWorkRepository()
+    prepared = make_provider_effect_plan("scheduled-terminal")
+    repository.prepare_direct_control = AsyncMock(return_value=prepared)
+
+    plans = await repository.prepare_binding_reply_effects(
+        cast(AsyncSession, session),
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id=binding.id,
+        text="Completed.",
+        files=(),
+        operation_seed="scheduled-terminal:cycle-1",
+        slack_reply_broadcast=True,
+        discord_forward_to_parent=True,
+    )
+
+    assert plans == (prepared,)
+    prepare_call = repository.prepare_direct_control.await_args
+    assert prepare_call is not None
+    payload = prepare_call.kwargs["request_payload"]
+    assert payload[flag_name] is True
+    if provider is ExternalChannelProvider.DISCORD:
+        assert payload["parent_channel_id"] == "222"
+    execute_call = session.execute.await_args
+    assert execute_call is not None
+    where_sql = _where_sql(execute_call.args[0])
+    assert "external_channel_bindings.id" in where_sql
+    assert "external_channel_bindings.agent_session_id" in where_sql
+    assert "external_channel_agent_routes.agent_id" in where_sql
+
+
+async def test_binding_effect_revalidation_rejects_changed_agent_authority() -> None:
+    """A live Binding cannot silently move one captured effect to another Agent."""
+    plan = make_provider_effect_plan("scheduled-effect")
+    changed = replace(
+        plan,
+        target=replace(plan.target, agent_id="agent-2"),
+    )
+    repository = ExternalChannelWorkRepository()
+    repository.revalidate_direct_control = AsyncMock(return_value=changed)
+
+    current = await repository.revalidate_binding_effect(
+        cast(AsyncSession, object()),
+        plan=plan,
+    )
+
+    assert current is None
+
+
+async def test_slack_binding_reply_effects_split_oversized_terminal_text() -> None:
+    """Scheduled Slack terminal text is lowered into ordered bounded parts."""
+    binding = SimpleNamespace(id="binding-1")
+    resource = SimpleNamespace(
+        id="resource-1",
+        labels={
+            "channel_id": "channel-1",
+            "thread_ts": "1.000001",
+            "conversation_scope": "thread",
+        },
+    )
+    route = SimpleNamespace(id="route-1")
+    connection = SimpleNamespace(
+        id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
+    )
+    result = MagicMock()
+    result.one_or_none.return_value = (binding, resource, route, connection)
+    session = MagicMock(spec=AsyncSession)
+    session.execute = AsyncMock(return_value=result)
+    repository = ExternalChannelWorkRepository()
+    repository.prepare_direct_control = AsyncMock(
+        side_effect=[
+            make_provider_effect_plan("scheduled-terminal:0"),
+            make_provider_effect_plan("scheduled-terminal:1"),
+        ]
+    )
+
+    plans = await repository.prepare_binding_reply_effects(
+        cast(AsyncSession, session),
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id=binding.id,
+        text=("x" * 12_000) + "\ncontinued",
+        files=(),
+        operation_seed="scheduled-terminal:cycle-1",
+        slack_reply_broadcast=True,
+        discord_forward_to_parent=True,
+    )
+
+    assert len(plans) == 2
+    payloads = [
+        awaited.kwargs["request_payload"]
+        for awaited in repository.prepare_direct_control.await_args_list
+    ]
+    assert "".join(cast(str, payload["text"]) for payload in payloads) == (
+        ("x" * 12_000) + "\ncontinued"
+    )
+    assert all(
+        len(cast(str, payload["text"])) <= SLACK_MARKDOWN_TEXT_MAX_LENGTH - 512
+        for payload in payloads
+    )
+    assert all(payload["reply_broadcast"] is True for payload in payloads)
 
 
 @pytest.mark.parametrize(

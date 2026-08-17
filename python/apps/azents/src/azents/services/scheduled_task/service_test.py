@@ -1,5 +1,6 @@
 """Scheduled Task service and dispatcher tests."""
 
+import dataclasses
 import datetime
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -27,6 +28,7 @@ from azents.services.chat.live_events import mailbox_item_to_live_event
 from .service import (
     RDBScheduledTaskAuthorityValidator,
     ScheduledTaskDispatcher,
+    ScheduledTaskService,
 )
 
 _NOW = datetime.datetime(2026, 8, 16, 0, 0, tzinfo=datetime.UTC)
@@ -228,6 +230,52 @@ def _clock(*values: datetime.datetime) -> Callable[[], datetime.datetime]:
     return lambda: next(iterator)
 
 
+class _ProviderMutationTaskRepository:
+    """Record the shared provider mutation target lookup order."""
+
+    def __init__(
+        self,
+        *,
+        candidate: ScheduledTask,
+        locked: ScheduledTask,
+    ) -> None:
+        self.candidate = candidate
+        self.locked = locked
+        self.calls: list[str] = []
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        task_id: str,
+    ) -> ScheduledTask | None:
+        del session
+        self.calls.append("get_by_id")
+        return self.candidate if task_id == self.candidate.id else None
+
+    async def get_by_session_and_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        task_id: str,
+        lock: bool = False,
+    ) -> ScheduledTask | None:
+        del session
+        self.calls.append("get_by_session_and_id:lock" if lock else "get_by_session")
+        if session_id != self.candidate.session_id or task_id != self.candidate.id:
+            return None
+        return self.locked if lock else self.candidate
+
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        task_id: str,
+    ) -> ScheduledTask | None:
+        del session, task_id
+        self.calls.append("lock_by_id")
+        raise AssertionError("Provider mutation must not lock Task before Mailbox.")
+
+
 def _dispatcher(
     *,
     manager: _SessionManager,
@@ -252,6 +300,43 @@ def _dispatcher(
         batch_size=1,
         lease_duration=datetime.timedelta(minutes=1),
     )
+
+
+@pytest.mark.asyncio
+async def test_provider_mutation_uses_shared_lock_order_and_fences_binding() -> None:
+    """A changed Binding is rejected after Mailbox/cycle/Task locking, not before."""
+    candidate = dataclasses.replace(
+        _task(),
+        binding_id="binding-before-lock",
+    )
+    locked = dataclasses.replace(
+        candidate,
+        binding_id="binding-after-lock",
+    )
+    repository = _ProviderMutationTaskRepository(
+        candidate=candidate,
+        locked=locked,
+    )
+    service = ScheduledTaskService(
+        repository=cast(ScheduledTaskRepository, repository),
+        cycle_repository=cast(ScheduledTaskCycleRepository, object()),
+        mailbox_repository=cast(MailboxRepository, object()),
+        authority_validator=cast(RDBScheduledTaskAuthorityValidator, object()),
+    )
+
+    target = await service.lock_provider_mutation_target(
+        cast(AsyncSession, object()),
+        task_id=candidate.id,
+        expected_binding_id="binding-before-lock",
+    )
+
+    assert target is None
+    assert repository.calls == [
+        "get_by_id",
+        "get_by_session",
+        "get_by_session_and_id:lock",
+    ]
+    assert "lock_by_id" not in repository.calls
 
 
 @pytest.mark.asyncio

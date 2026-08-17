@@ -54,6 +54,10 @@ from azents.services.external_channel.file_transfer import (
 )
 from azents.services.external_channel.provider_effect import ProviderEffectOutcome
 from azents.services.file_storage import FileStorage
+from azents.services.scheduled_task.channel import (
+    ScheduledTaskChannelService,
+    ScheduledTaskProgressExecution,
+)
 
 
 def _snapshot(binding_id: str = "binding-1") -> ChannelWorkSnapshot:
@@ -170,8 +174,13 @@ def _toolkit(
     file_storage: FileStorage | None = None,
 ) -> ExternalChannelToolkit:
     transfer = file_transfer_service or _FileTransferService()
+    scheduled = AsyncMock()
+    scheduled.execute_progress.return_value = ScheduledTaskProgressExecution(
+        result=None
+    )
     toolkit = ExternalChannelToolkit(
         service=cast(ExternalChannelActionService, service),
+        scheduled_channel_service=cast(ScheduledTaskChannelService, scheduled),
         file_transfer_service=cast(ExternalChannelFileTransferService, transfer),
         agent_id="agent-1",
         session_id="session-1",

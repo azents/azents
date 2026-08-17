@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentRunStatus,
     EventKind,
+    ExternalChannelWorkProjectionStatus,
     ScheduledTaskScheduleType,
 )
 from azents.engine.events.types import Event, ScheduledTaskResultPayload
@@ -23,9 +24,13 @@ from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
+    ScheduledTrackerProjectionPart,
 )
 
-from .terminal import ScheduledTaskTerminalService
+from .terminal import (
+    ScheduledTaskTerminalEffectSnapshot,
+    ScheduledTaskTerminalService,
+)
 
 _NOW = datetime.datetime(2026, 8, 16, 12, 0, tzinfo=datetime.UTC)
 _RUN_ID = "r" * 32
@@ -38,7 +43,7 @@ async def _session_manager() -> AsyncIterator[AsyncSession]:
     yield cast(AsyncSession, object())
 
 
-def _cycle() -> ScheduledTaskCycleRecord:
+def _cycle(*, binding_id: str | None = None) -> ScheduledTaskCycleRecord:
     """Build one started cycle record."""
     return ScheduledTaskCycleRecord(
         state=ScheduledTaskCycleState(
@@ -48,7 +53,7 @@ def _cycle() -> ScheduledTaskCycleRecord:
             workspace_id="w" * 32,
             agent_id="a" * 32,
             session_id="s" * 32,
-            binding_id=None,
+            binding_id=binding_id,
             title="Daily report",
             objective="Prepare the report.",
             schedule_type=ScheduledTaskScheduleType.ONCE,
@@ -58,7 +63,17 @@ def _cycle() -> ScheduledTaskCycleRecord:
             scheduled_for=_NOW,
             current_run_id=_RUN_ID,
             started_at=_NOW,
-            progress_title=None,
+            progress_title="Preparing report…",
+            ordered_tasks=["Collect data", "Write summary"],
+            tracker_desired_revision=2,
+            tracker_current_projection_parts=[
+                ScheduledTrackerProjectionPart(
+                    part_ordinal=0,
+                    desired_revision=2,
+                    status=ExternalChannelWorkProjectionStatus.PRESENT,
+                    provider_message_key="slack:T1:C1:1.000001",
+                )
+            ],
         ),
         version=2,
         toolkit_state_id="k" * 32,
@@ -175,9 +190,9 @@ class _EventRepository:
 class _CycleRepository:
     """Cycle repository double enforcing the started snapshot."""
 
-    def __init__(self, order: list[str]) -> None:
+    def __init__(self, order: list[str], *, binding_id: str | None) -> None:
         self.order = order
-        self.record = _cycle()
+        self.record = _cycle(binding_id=binding_id)
         self.deleted: list[ScheduledTaskCycleRecord] = []
 
     async def lock(
@@ -260,6 +275,7 @@ def _service(
     order: list[str],
     task: ScheduledTask | None,
     existing_event: Event | None = None,
+    binding_id: str | None = None,
 ) -> tuple[
     ScheduledTaskTerminalService,
     _RunRepository,
@@ -270,7 +286,7 @@ def _service(
     """Compose the terminal service from assertion-visible doubles."""
     run_repository = _RunRepository(order)
     event_repository = _EventRepository(order, existing_event)
-    cycle_repository = _CycleRepository(order)
+    cycle_repository = _CycleRepository(order, binding_id=binding_id)
     task_repository = _TaskRepository(order, task)
     service = ScheduledTaskTerminalService(
         session_manager=cast(SessionManager[AsyncSession], _session_manager),
@@ -305,6 +321,7 @@ async def test_submit_commits_event_cycle_and_once_task_before_run_completion() 
     )
 
     assert outcome.created is True
+    assert outcome.effect_snapshot is None
     assert outcome.event.kind is EventKind.SCHEDULED_TASK_RESULT
     assert outcome.event.external_id == f"scheduled-task-result:{_CYCLE_ID}"
     assert outcome.event.payload == ScheduledTaskResultPayload(
@@ -353,6 +370,46 @@ async def test_submit_releases_recurring_task_for_pending_or_future_work() -> No
     assert "release_task" in order
 
 
+async def test_submit_captures_channel_effect_snapshot_before_cycle_deletion() -> None:
+    """A newly committed channel result retains one ordered process-local effect."""
+    order: list[str] = []
+    service, _, _, cycle_repository, _ = _service(
+        order=order,
+        task=None,
+        binding_id="b" * 32,
+    )
+
+    outcome = await service.submit(
+        workspace_id="w" * 32,
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        run_id=_RUN_ID,
+        status="failed",
+        result="  Provider authority is unavailable.  ",
+    )
+
+    assert outcome.effect_snapshot == ScheduledTaskTerminalEffectSnapshot(
+        cycle_id=_CYCLE_ID,
+        task_id="t" * 32,
+        workspace_id="w" * 32,
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        binding_id="b" * 32,
+        status="failed",
+        result="Provider authority is unavailable.",
+        tracker_desired_revision=2,
+        tracker_projection_parts=(
+            ScheduledTrackerProjectionPart(
+                part_ordinal=0,
+                desired_revision=2,
+                status=ExternalChannelWorkProjectionStatus.PRESENT,
+                provider_message_key="slack:T1:C1:1.000001",
+            ),
+        ),
+    )
+    assert cycle_repository.deleted == [_cycle(binding_id="b" * 32)]
+
+
 async def test_submit_recovers_existing_canonical_event_without_retransition() -> None:
     """A crash-replayed terminal call returns the committed Event idempotently."""
     existing = Event(
@@ -384,6 +441,7 @@ async def test_submit_recovers_existing_canonical_event_without_retransition() -
 
     assert outcome.created is False
     assert outcome.event == existing
+    assert outcome.effect_snapshot is None
     assert order == ["lock_run", "get_event", "update_run"]
     assert event_repository.creates == []
     assert cycle_repository.deleted == []

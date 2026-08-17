@@ -8,15 +8,22 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ScheduledTaskScheduleType
+from azents.core.enums import (
+    ExternalChannelWorkProjectionStatus,
+    ScheduledTaskScheduleType,
+)
 from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleSnapshot,
     ScheduledTaskCycleState,
+    ScheduledTrackerProjectionPart,
 )
-from azents.repos.toolkit_state import ToolkitStateRepository
+from azents.repos.toolkit_state import (
+    ToolkitStateConflictError,
+    ToolkitStateRepository,
+)
 from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpsert
 
 
@@ -50,6 +57,7 @@ class _ToolkitStateRepository(ToolkitStateRepository):
     def __init__(self) -> None:
         self.record: ToolkitStateRecord | None = None
         self.saves: list[ToolkitStateUpsert] = []
+        self.conflicts_remaining = 0
 
     async def get(
         self,
@@ -81,6 +89,9 @@ class _ToolkitStateRepository(ToolkitStateRepository):
     ) -> ToolkitStateRecord:
         """Record one create-or-CAS save and return its next version."""
         del session
+        if self.conflicts_remaining:
+            self.conflicts_remaining -= 1
+            raise ToolkitStateConflictError("fixture conflict")
         self.saves.append(state)
         version = 1 if state.expected_version is None else state.expected_version + 1
         now = _now()
@@ -220,6 +231,8 @@ async def test_create_admitted_persists_complete_snapshot() -> None:
     assert record.state.current_run_id is None
     assert record.state.started_at is None
     assert record.state.ordered_tasks == []
+    assert record.state.tracker_desired_revision == 0
+    assert record.state.tracker_current_projection_parts == []
     assert record.version == 1
     saved = state_repository.saves[0]
     assert saved.toolkit_namespace == "scheduled"
@@ -278,6 +291,162 @@ async def test_bind_run_preserves_started_snapshot() -> None:
     assert rebound.state.started_at == started.state.started_at
     assert rebound.state.objective == started.state.objective
     assert rebound.version == 3
+
+
+async def test_update_progress_advances_only_scheduled_tracker_revision() -> None:
+    """Progress replacement uses the exact cycle version and independent revision."""
+    repository, state_repository = _repository()
+    admitted = await repository.create_admitted(
+        cast(AsyncSession, object()),
+        _snapshot(),
+    )
+    started = await repository.start(
+        cast(AsyncSession, object()),
+        record=admitted,
+        run_id="r" * 32,
+        started_at=_now(),
+    )
+
+    updated = await repository.update_progress(
+        cast(AsyncSession, object()),
+        record=started,
+        progress_title="Preparing report…",
+        ordered_tasks=["Collect data", "Write summary"],
+    )
+
+    assert updated.state.progress_title == "Preparing report…"
+    assert updated.state.ordered_tasks == ["Collect data", "Write summary"]
+    assert updated.state.tracker_desired_revision == 1
+    assert updated.state.tracker_current_projection_parts == []
+    assert state_repository.saves[-1].expected_version == started.version
+
+
+async def test_tracker_claim_and_settlement_retry_cas_in_canonical_order() -> None:
+    """Tracker effects remain cycle/revision fenced and ordinal ordered."""
+    repository, state_repository = _repository()
+    admitted = await repository.create_admitted(
+        cast(AsyncSession, object()),
+        _snapshot(),
+    )
+    await repository.start(
+        cast(AsyncSession, object()),
+        record=admitted,
+        run_id="r" * 32,
+        started_at=_now(),
+    )
+    state_repository.conflicts_remaining = 1
+
+    second = await repository.claim_tracker_projection(
+        cast(AsyncSession, object()),
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        cycle_id="c" * 32,
+        expected_desired_revision=0,
+        part_ordinal=1,
+    )
+    first = await repository.claim_tracker_projection(
+        cast(AsyncSession, object()),
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        cycle_id="c" * 32,
+        expected_desired_revision=0,
+        part_ordinal=0,
+    )
+
+    assert second is not None
+    assert first is not None
+    assert [
+        part.part_ordinal for part in first.state.tracker_current_projection_parts
+    ] == [0, 1]
+    saves_before_duplicate = len(state_repository.saves)
+    assert (
+        await repository.claim_tracker_projection(
+            cast(AsyncSession, object()),
+            agent_id="a" * 32,
+            session_id="s" * 32,
+            cycle_id="c" * 32,
+            expected_desired_revision=0,
+            part_ordinal=0,
+        )
+        is None
+    )
+    assert len(state_repository.saves) == saves_before_duplicate
+    state_repository.conflicts_remaining = 1
+    assert await repository.settle_tracker_projection(
+        cast(AsyncSession, object()),
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        cycle_id="c" * 32,
+        expected_desired_revision=0,
+        part_ordinal=0,
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="slack:T1:C1:1.000001",
+    )
+    assert state_repository.record is not None
+    settled = ScheduledTaskCycleState.model_validate(state_repository.record.state_json)
+    assert settled.tracker_current_projection_parts[0] == (
+        ScheduledTrackerProjectionPart(
+            part_ordinal=0,
+            desired_revision=0,
+            status=ExternalChannelWorkProjectionStatus.PRESENT,
+            provider_message_key="slack:T1:C1:1.000001",
+        )
+    )
+
+
+async def test_tracker_settlement_rejects_stale_desired_revision() -> None:
+    """An old provider result cannot overwrite a newer Scheduled desired state."""
+    repository, state_repository = _repository()
+    admitted = await repository.create_admitted(
+        cast(AsyncSession, object()),
+        _snapshot(),
+    )
+    started = await repository.start(
+        cast(AsyncSession, object()),
+        record=admitted,
+        run_id="r" * 32,
+        started_at=_now(),
+    )
+    await repository.update_progress(
+        cast(AsyncSession, object()),
+        record=started,
+        progress_title="Preparing report…",
+        ordered_tasks=["Collect data"],
+    )
+    saves_before = len(state_repository.saves)
+
+    assert not await repository.settle_tracker_projection(
+        cast(AsyncSession, object()),
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        cycle_id="c" * 32,
+        expected_desired_revision=0,
+        part_ordinal=0,
+        status=ExternalChannelWorkProjectionStatus.PRESENT,
+        provider_message_key="slack:T1:C1:1.000001",
+    )
+    assert len(state_repository.saves) == saves_before
+
+
+def test_cycle_state_rejects_noncanonical_tracker_projection_parts() -> None:
+    """Persisted Scheduled projection state requires sorted unique ordinals."""
+    part = ScheduledTrackerProjectionPart(
+        part_ordinal=1,
+        desired_revision=0,
+        status=ExternalChannelWorkProjectionStatus.UNKNOWN,
+        provider_message_key=None,
+    )
+    with pytest.raises(ValueError, match="ordered"):
+        state = _cycle_state(
+            cycle_id="c" * 32,
+            phase="started",
+            scheduled_for=_now(),
+        ).model_dump(mode="json")
+        state["tracker_current_projection_parts"] = [
+            part.model_dump(mode="json"),
+            part.model_copy(update={"part_ordinal": 0}).model_dump(mode="json"),
+        ]
+        ScheduledTaskCycleState.model_validate(state)
 
 
 async def test_invalid_phase_transitions_are_rejected() -> None:

@@ -46,6 +46,7 @@ from azents.services.external_channel.discord_settings_scope import (
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
+from azents.services.scheduled_task.control import ScheduledTaskProviderControlService
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
 
@@ -288,6 +289,10 @@ def _service(
             settings_response_service=cast(
                 DiscordSettingsResponseService,
                 settings_response,
+            ),
+            scheduled_task_control=cast(
+                ScheduledTaskProviderControlService,
+                SimpleNamespace(),
             ),
         ),
         repository,

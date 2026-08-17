@@ -14,6 +14,7 @@ from azents.services.external_channel.discord_interaction import (
     parse_discord_interaction,
     verify_discord_interaction_signature,
 )
+from azents.services.scheduled_task.control import build_scheduled_task_control_locator
 
 
 def test_maps_supported_discord_interaction_types() -> None:
@@ -23,6 +24,84 @@ def test_maps_supported_discord_interaction_types() -> None:
     assert discord_interaction_type(4) is ExternalChannelInteractionType.OPTIONS
     assert discord_interaction_type(5) is ExternalChannelInteractionType.VIEW_SUBMISSION
     assert discord_interaction_type(1) is None
+
+
+def test_parses_scheduled_task_edit_modal_as_typed_request_local_input() -> None:
+    """The durable admission projection excludes transient Scheduled Task text."""
+    locator = build_scheduled_task_control_locator(
+        secret="secret",
+        action="edit",
+        task_id="01828d10-b4c3-7a12-94d6-8f43c4e195ce",
+        binding_id="01828d10-b4c3-7a12-94d6-8f43c4e195cf",
+    )
+    envelope = parse_discord_interaction(
+        json.dumps(
+            {
+                "id": "interaction-1",
+                "type": 5,
+                "application_id": "app-1",
+                "guild_id": "guild-1",
+                "channel_id": "thread-1",
+                "channel": {
+                    "id": "thread-1",
+                    "type": 11,
+                    "parent_id": "channel-1",
+                },
+                "member": {"user": {"id": "user-1"}},
+                "data": {
+                    "custom_id": locator,
+                    "components": [
+                        {
+                            "components": [
+                                {
+                                    "custom_id": "azents_scheduled_task_title",
+                                    "value": "Updated",
+                                }
+                            ]
+                        },
+                        {
+                            "components": [
+                                {
+                                    "custom_id": "azents_scheduled_task_objective",
+                                    "value": "Updated objective",
+                                }
+                            ]
+                        },
+                        {
+                            "components": [
+                                {
+                                    "custom_id": "azents_scheduled_task_at",
+                                    "value": "",
+                                }
+                            ]
+                        },
+                        {
+                            "components": [
+                                {
+                                    "custom_id": "azents_scheduled_task_cron",
+                                    "value": "0 9 * * *",
+                                }
+                            ]
+                        },
+                        {
+                            "components": [
+                                {
+                                    "custom_id": "azents_scheduled_task_timezone",
+                                    "value": "America/Los_Angeles",
+                                }
+                            ]
+                        },
+                    ],
+                },
+            }
+        ).encode()
+    )
+
+    assert envelope.modal_custom_id == locator
+    assert envelope.scheduled_task_edit is not None
+    assert envelope.scheduled_task_edit.title == "Updated"
+    assert envelope.scheduled_task_edit.at is None
+    assert envelope.scheduled_task_edit.cron == "0 9 * * *"
 
 
 def test_verifies_timestamp_prefixed_raw_body() -> None:

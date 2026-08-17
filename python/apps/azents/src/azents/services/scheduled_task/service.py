@@ -14,13 +14,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import (
+    AgentLifecycleStatus,
     AgentSessionStatus,
+    ExternalChannelConnectionStatus,
+    ExternalChannelResourceStatus,
+    ExternalChannelRouteCatalogStatus,
     MailboxItemKind,
     MailboxSchedulingMode,
     ScheduledTaskScheduleType,
 )
+from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.external_channel import RDBExternalChannelBinding
+from azents.rdb.models.external_channel import (
+    RDBExternalChannelAgentRoute,
+    RDBExternalChannelBinding,
+    RDBExternalChannelConnection,
+    RDBExternalChannelResource,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import (
@@ -28,6 +38,7 @@ from azents.repos.mailbox.data import (
     ScheduledTaskTriggerMailboxPayload,
 )
 from azents.repos.scheduled_task.data import (
+    MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
     ScheduledTask,
     ScheduledTaskCreate,
     ScheduledTaskReplace,
@@ -113,10 +124,43 @@ class RDBScheduledTaskAuthorityValidator:
         if binding_id is None:
             return
         binding = await session.scalar(
-            sa.select(RDBExternalChannelBinding).where(
+            sa.select(RDBExternalChannelBinding)
+            .join(
+                RDBExternalChannelResource,
+                RDBExternalChannelResource.id == RDBExternalChannelBinding.resource_id,
+            )
+            .join(
+                RDBExternalChannelAgentRoute,
+                RDBExternalChannelAgentRoute.id == RDBExternalChannelBinding.route_id,
+            )
+            .join(
+                RDBExternalChannelConnection,
+                RDBExternalChannelConnection.id
+                == RDBExternalChannelAgentRoute.connection_id,
+            )
+            .join(
+                RDBAgent,
+                RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+            )
+            .where(
                 RDBExternalChannelBinding.id == binding_id,
                 RDBExternalChannelBinding.agent_session_id == session_id,
                 RDBExternalChannelBinding.disconnected_at.is_(None),
+                RDBExternalChannelResource.connection_id
+                == RDBExternalChannelConnection.id,
+                RDBExternalChannelResource.status
+                == ExternalChannelResourceStatus.ACTIVE,
+                RDBExternalChannelAgentRoute.agent_id == agent_id,
+                RDBExternalChannelAgentRoute.catalog_status
+                == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                RDBExternalChannelConnection.disconnected_at.is_(None),
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
             )
         )
         if binding is None:
@@ -217,7 +261,11 @@ class ScheduledTaskService:
                 agent_id=agent_id,
                 session_id=session_id,
                 title=_required_text(title, "title", max_length=120),
-                objective=_required_text(objective, "objective"),
+                objective=_required_text(
+                    objective,
+                    "objective",
+                    max_length=MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
+                ),
                 schedule_type=schedule.schedule_type,
                 next_eligible_at=schedule.next_eligible_at,
                 binding_id=binding_id,
@@ -258,7 +306,60 @@ class ScheduledTaskService:
         )
         if target is None:
             return None
+        return await self.replace_locked_provider_target(
+            session,
+            target=target,
+            expected_binding_id=None,
+            title=title,
+            objective=objective,
+            at=at,
+            cron=cron,
+            timezone=timezone,
+            binding_id=binding_id,
+            now=now,
+        )
+
+    async def lock_provider_mutation_target(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        expected_binding_id: str,
+    ) -> ScheduledTaskMutationTarget | None:
+        """Lock one provider control target in the canonical mutation order."""
+        candidate = await self.repository.get_by_id(session, task_id)
+        if candidate is None:
+            return None
+        target = await self._lock_mutation_target(
+            session,
+            session_id=candidate.session_id,
+            task_id=task_id,
+        )
+        if target is None or target.task.binding_id != expected_binding_id:
+            return None
+        return target
+
+    async def replace_locked_provider_target(
+        self,
+        session: AsyncSession,
+        *,
+        target: ScheduledTaskMutationTarget,
+        expected_binding_id: str | None,
+        title: str,
+        objective: str,
+        at: str | None,
+        cron: str | None,
+        timezone: str | None,
+        binding_id: str | None,
+        now: datetime.datetime | None = None,
+    ) -> ScheduledTask | None:
+        """Replace a Task already locked by the shared provider mutation path."""
         current = target.task
+        if (
+            expected_binding_id is not None
+            and current.binding_id != expected_binding_id
+        ):
+            return None
         cycle = target.cycle
         await self.authority_validator.validate_target(
             session,
@@ -289,11 +390,15 @@ class ScheduledTaskService:
             )
         return await self.repository.replace(
             session,
-            session_id=session_id,
-            task_id=task_id,
+            session_id=current.session_id,
+            task_id=current.id,
             replace=ScheduledTaskReplace(
                 title=_required_text(title, "title", max_length=120),
-                objective=_required_text(objective, "objective"),
+                objective=_required_text(
+                    objective,
+                    "objective",
+                    max_length=MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
+                ),
                 schedule_type=schedule.schedule_type,
                 next_eligible_at=schedule.next_eligible_at,
                 binding_id=binding_id,
@@ -319,7 +424,26 @@ class ScheduledTaskService:
         )
         if target is None:
             return False
+        return await self.delete_locked_provider_target(
+            session,
+            target=target,
+            expected_binding_id=None,
+        )
+
+    async def delete_locked_provider_target(
+        self,
+        session: AsyncSession,
+        *,
+        target: ScheduledTaskMutationTarget,
+        expected_binding_id: str | None,
+    ) -> bool:
+        """Delete a Task already locked by the shared provider mutation path."""
         current = target.task
+        if (
+            expected_binding_id is not None
+            and current.binding_id != expected_binding_id
+        ):
+            return False
         cycle = target.cycle
         await self.authority_validator.validate(session, current)
         if cycle is not None and cycle.state.phase == "admitted":
@@ -328,8 +452,8 @@ class ScheduledTaskService:
             )
         return await self.repository.delete_by_session_and_id(
             session,
-            session_id=session_id,
-            task_id=task_id,
+            session_id=current.session_id,
+            task_id=current.id,
         )
 
     async def _lock_mutation_target(

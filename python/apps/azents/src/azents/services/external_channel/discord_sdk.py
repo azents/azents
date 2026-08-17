@@ -4,7 +4,7 @@ import contextlib
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 import discord
 from discord.http import handle_message_parameters
@@ -254,6 +254,20 @@ class DiscordSDKSession(Protocol):
         limit: int,
     ) -> tuple[dict[str, object], ...]:
         """Fetch and immediately project one bounded history page."""
+        ...
+
+
+@runtime_checkable
+class DiscordSDKMessageForwardingSession(Protocol):
+    """Public-SDK capability for forwarding one exact created message."""
+
+    async def forward_message(
+        self,
+        *,
+        message: DiscordSDKMessage,
+        destination_channel_id: str,
+    ) -> DiscordSDKMessage:
+        """Forward one exact message to its parent channel."""
         ...
 
 
@@ -578,6 +592,72 @@ class _DiscordPySession:
             payload,
             guild_id=guild_id,
             channel_id=channel_id,
+        )
+
+    async def forward_message(
+        self,
+        *,
+        message: DiscordSDKMessage,
+        destination_channel_id: str,
+    ) -> DiscordSDKMessage:
+        """Forward one exact Thread message through discord.py public APIs."""
+        try:
+            source = await self._client.fetch_channel(int(message.channel_id))
+            destination = await self._client.fetch_channel(int(destination_channel_id))
+        except (
+            TypeError,
+            ValueError,
+            discord.InvalidData,
+            discord.HTTPException,
+            OSError,
+        ) as error:
+            raise _sdk_error(error) from error
+        if (
+            not isinstance(source, discord.Thread)
+            or str(source.id) != message.channel_id
+            or str(source.guild.id) != message.guild_id
+            or source.parent_id is None
+            or str(source.parent_id) != destination_channel_id
+        ):
+            raise DiscordSDKRequestRejected(
+                "Discord forwarding source does not match the exact Thread."
+            )
+        if (
+            isinstance(destination, discord.Thread)
+            or not isinstance(
+                destination,
+                (discord.TextChannel, discord.VoiceChannel, discord.StageChannel),
+            )
+            or str(destination.id) != destination_channel_id
+            or str(destination.guild.id) != message.guild_id
+        ):
+            raise DiscordSDKRequestRejected(
+                "Discord forwarding destination does not match the Thread parent."
+            )
+        try:
+            forwarded = await source.get_partial_message(
+                int(message.message_id)
+            ).forward(destination)
+        except (
+            TypeError,
+            ValueError,
+            discord.InvalidData,
+            discord.HTTPException,
+            OSError,
+        ) as error:
+            raise _sdk_error(error) from error
+        if (
+            forwarded.guild is None
+            or str(forwarded.guild.id) != message.guild_id
+            or str(forwarded.channel.id) != destination_channel_id
+        ):
+            raise DiscordSDKRequestRejected(
+                "Discord forwarded Message response changed its destination."
+            )
+        return DiscordSDKMessage(
+            message_id=str(forwarded.id),
+            channel_id=destination_channel_id,
+            guild_id=message.guild_id,
         )
 
     async def update_message(

@@ -28,6 +28,7 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
 )
+from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.scheduled_task.service import ScheduledTaskService
 from azents.services.scheduled_task.terminal import (
     ScheduledTaskTerminalOutcome,
@@ -111,6 +112,9 @@ def _toolkit(
     """Compose one Toolkit with assertion-visible collaborators."""
     service = AsyncMock()
     terminal_service = AsyncMock()
+    channel_service = AsyncMock()
+    channel_service.execute_registration.return_value = None
+    channel_service.execute_terminal.return_value = ()
     cycle_repository = AsyncMock()
     run_repository = AsyncMock()
     run_repository.get_by_id.return_value = SimpleNamespace(
@@ -124,6 +128,7 @@ def _toolkit(
         session_manager=cast(SessionManager[AsyncSession], _session_manager),
         service=cast(ScheduledTaskService, service),
         terminal_service=cast(ScheduledTaskTerminalService, terminal_service),
+        channel_service=cast(ScheduledTaskChannelService, channel_service),
         cycle_repository=cast(ScheduledTaskCycleRepository, cycle_repository),
         run_repository=cast(AgentRunRepository, run_repository),
         workspace_id="w" * 32,
@@ -210,6 +215,7 @@ async def test_management_tools_derive_scope_and_project_execution_state() -> No
     deleted = json.loads(deleted_result)
 
     assert added["created"] is True
+    assert added["registration"] is None
     service.create.assert_awaited_once()
     _, create_kwargs = service.create.await_args
     assert create_kwargs["workspace_id"] == "w" * 32
@@ -246,6 +252,7 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
     terminal_service.submit.return_value = ScheduledTaskTerminalOutcome(
         event=event,
         created=True,
+        effect_snapshot=None,
     )
     state = await toolkit.update_context(_turn_context(publish_event))
     terminal_tool = state.tools[-1]
@@ -257,6 +264,7 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
     assert isinstance(result, FunctionToolResult)
     assert result.terminal_run is True
     assert json.loads(cast(str, result.output)) == {
+        "outcomes": [],
         "recovered": False,
         "result": "Completed.",
         "status": "finished",
