@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.action import Action
+from azentspublicclient.models.agent_create_git_worktree_action import AgentCreateGitWorktreeAction
 
-class TestAction(unittest.TestCase):
-    """Action unit test stubs"""
+class TestAgentCreateGitWorktreeAction(unittest.TestCase):
+    """AgentCreateGitWorktreeAction unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,55 +25,43 @@ class TestAction(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> Action:
-        """Test Action
+    def make_instance(self, include_optional) -> AgentCreateGitWorktreeAction:
+        """Test AgentCreateGitWorktreeAction
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `Action`
+        # uncomment below to create an instance of `AgentCreateGitWorktreeAction`
         """
-        model = Action()
+        model = AgentCreateGitWorktreeAction()
         if include_optional:
-            return Action(
-                type = 'command',
-                name = '0',
-                skill_path = '0',
-                source_project_path = '0',
-                starting_ref = '',
+            return AgentCreateGitWorktreeAction(
+                type = 'agent_create_git_worktree',
                 bridge_identity = '0',
                 originating_run_id = '0',
                 client_tool_call_id = '0',
                 session_agent_context_id = '0',
                 originating_agent_session_id = '0',
                 source_project_id = '0',
-                branch_name = '',
-                worktree_project_id = '0',
-                worktree_allocation_id = '0',
-                worktree_path = '0',
-                force = True
+                source_project_path = '0',
+                starting_ref = '',
+                branch_name = ''
             )
         else:
-            return Action(
-                name = '0',
-                skill_path = '0',
-                source_project_path = '0',
-                starting_ref = '',
+            return AgentCreateGitWorktreeAction(
                 bridge_identity = '0',
                 originating_run_id = '0',
                 client_tool_call_id = '0',
                 session_agent_context_id = '0',
                 originating_agent_session_id = '0',
                 source_project_id = '0',
+                source_project_path = '0',
+                starting_ref = '',
                 branch_name = '',
-                worktree_project_id = '0',
-                worktree_allocation_id = '0',
-                worktree_path = '0',
-                force = True,
         )
         """
 
-    def testAction(self):
-        """Test Action"""
+    def testAgentCreateGitWorktreeAction(self):
+        """Test AgentCreateGitWorktreeAction"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

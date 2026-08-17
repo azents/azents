@@ -22,12 +22,13 @@ from azentspublicclient.models.pending_mailbox_agent_message_presentation import
 from azentspublicclient.models.pending_mailbox_external_channel_continuation_presentation import PendingMailboxExternalChannelContinuationPresentation
 from azentspublicclient.models.pending_mailbox_external_channel_presentation import PendingMailboxExternalChannelPresentation
 from azentspublicclient.models.pending_mailbox_goal_continuation_presentation import PendingMailboxGoalContinuationPresentation
+from azentspublicclient.models.pending_mailbox_scheduled_task_presentation import PendingMailboxScheduledTaskPresentation
 from azentspublicclient.models.pending_mailbox_user_message_presentation import PendingMailboxUserMessagePresentation
 from pydantic import StrictStr, Field
 from typing import Union, List, Set, Optional, Dict
 from typing_extensions import Literal, Self
 
-PRESENTATION_ONE_OF_SCHEMAS = ["PendingMailboxActionPresentation", "PendingMailboxAgentMessagePresentation", "PendingMailboxExternalChannelContinuationPresentation", "PendingMailboxExternalChannelPresentation", "PendingMailboxGoalContinuationPresentation", "PendingMailboxUserMessagePresentation"]
+PRESENTATION_ONE_OF_SCHEMAS = ["PendingMailboxActionPresentation", "PendingMailboxAgentMessagePresentation", "PendingMailboxExternalChannelContinuationPresentation", "PendingMailboxExternalChannelPresentation", "PendingMailboxGoalContinuationPresentation", "PendingMailboxScheduledTaskPresentation", "PendingMailboxUserMessagePresentation"]
 
 class Presentation(BaseModel):
     """
@@ -39,14 +40,16 @@ class Presentation(BaseModel):
     oneof_schema_2_validator: Optional[PendingMailboxGoalContinuationPresentation] = None
     # data type: PendingMailboxExternalChannelContinuationPresentation
     oneof_schema_3_validator: Optional[PendingMailboxExternalChannelContinuationPresentation] = None
+    # data type: PendingMailboxScheduledTaskPresentation
+    oneof_schema_4_validator: Optional[PendingMailboxScheduledTaskPresentation] = None
     # data type: PendingMailboxAgentMessagePresentation
-    oneof_schema_4_validator: Optional[PendingMailboxAgentMessagePresentation] = None
+    oneof_schema_5_validator: Optional[PendingMailboxAgentMessagePresentation] = None
     # data type: PendingMailboxExternalChannelPresentation
-    oneof_schema_5_validator: Optional[PendingMailboxExternalChannelPresentation] = None
+    oneof_schema_6_validator: Optional[PendingMailboxExternalChannelPresentation] = None
     # data type: PendingMailboxActionPresentation
-    oneof_schema_6_validator: Optional[PendingMailboxActionPresentation] = None
-    actual_instance: Optional[Union[PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxUserMessagePresentation]] = None
-    one_of_schemas: Set[str] = { "PendingMailboxActionPresentation", "PendingMailboxAgentMessagePresentation", "PendingMailboxExternalChannelContinuationPresentation", "PendingMailboxExternalChannelPresentation", "PendingMailboxGoalContinuationPresentation", "PendingMailboxUserMessagePresentation" }
+    oneof_schema_7_validator: Optional[PendingMailboxActionPresentation] = None
+    actual_instance: Optional[Union[PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxScheduledTaskPresentation, PendingMailboxUserMessagePresentation]] = None
+    one_of_schemas: Set[str] = { "PendingMailboxActionPresentation", "PendingMailboxAgentMessagePresentation", "PendingMailboxExternalChannelContinuationPresentation", "PendingMailboxExternalChannelPresentation", "PendingMailboxGoalContinuationPresentation", "PendingMailboxScheduledTaskPresentation", "PendingMailboxUserMessagePresentation" }
 
     model_config = ConfigDict(
         validate_assignment=True,
@@ -87,6 +90,11 @@ class Presentation(BaseModel):
             error_messages.append(f"Error! Input type `{type(v)}` is not `PendingMailboxExternalChannelContinuationPresentation`")
         else:
             match += 1
+        # validate data type: PendingMailboxScheduledTaskPresentation
+        if not isinstance(v, PendingMailboxScheduledTaskPresentation):
+            error_messages.append(f"Error! Input type `{type(v)}` is not `PendingMailboxScheduledTaskPresentation`")
+        else:
+            match += 1
         # validate data type: PendingMailboxAgentMessagePresentation
         if not isinstance(v, PendingMailboxAgentMessagePresentation):
             error_messages.append(f"Error! Input type `{type(v)}` is not `PendingMailboxAgentMessagePresentation`")
@@ -104,10 +112,10 @@ class Presentation(BaseModel):
             match += 1
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when setting `actual_instance` in Presentation with oneOf schemas: PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxUserMessagePresentation. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when setting `actual_instance` in Presentation with oneOf schemas: PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxScheduledTaskPresentation, PendingMailboxUserMessagePresentation. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when setting `actual_instance` in Presentation with oneOf schemas: PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxUserMessagePresentation. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when setting `actual_instance` in Presentation with oneOf schemas: PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxScheduledTaskPresentation, PendingMailboxUserMessagePresentation. Details: " + ", ".join(error_messages))
         else:
             return v
 
@@ -140,6 +148,12 @@ class Presentation(BaseModel):
             match += 1
         except (ValidationError, ValueError) as e:
             error_messages.append(str(e))
+        # deserialize data into PendingMailboxScheduledTaskPresentation
+        try:
+            instance.actual_instance = PendingMailboxScheduledTaskPresentation.from_json(json_str)
+            match += 1
+        except (ValidationError, ValueError) as e:
+            error_messages.append(str(e))
         # deserialize data into PendingMailboxAgentMessagePresentation
         try:
             instance.actual_instance = PendingMailboxAgentMessagePresentation.from_json(json_str)
@@ -161,10 +175,10 @@ class Presentation(BaseModel):
 
         if match > 1:
             # more than 1 match
-            raise ValueError("Multiple matches found when deserializing the JSON string into Presentation with oneOf schemas: PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxUserMessagePresentation. Details: " + ", ".join(error_messages))
+            raise ValueError("Multiple matches found when deserializing the JSON string into Presentation with oneOf schemas: PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxScheduledTaskPresentation, PendingMailboxUserMessagePresentation. Details: " + ", ".join(error_messages))
         elif match == 0:
             # no match
-            raise ValueError("No match found when deserializing the JSON string into Presentation with oneOf schemas: PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxUserMessagePresentation. Details: " + ", ".join(error_messages))
+            raise ValueError("No match found when deserializing the JSON string into Presentation with oneOf schemas: PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxScheduledTaskPresentation, PendingMailboxUserMessagePresentation. Details: " + ", ".join(error_messages))
         else:
             return instance
 
@@ -178,7 +192,7 @@ class Presentation(BaseModel):
         else:
             return json.dumps(self.actual_instance)
 
-    def to_dict(self) -> Optional[Union[Dict[str, Any], PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxUserMessagePresentation]]:
+    def to_dict(self) -> Optional[Union[Dict[str, Any], PendingMailboxActionPresentation, PendingMailboxAgentMessagePresentation, PendingMailboxExternalChannelContinuationPresentation, PendingMailboxExternalChannelPresentation, PendingMailboxGoalContinuationPresentation, PendingMailboxScheduledTaskPresentation, PendingMailboxUserMessagePresentation]]:
         """Returns the dict representation of the actual instance"""
         if self.actual_instance is None:
             return None
