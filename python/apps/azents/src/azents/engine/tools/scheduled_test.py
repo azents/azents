@@ -8,9 +8,14 @@ from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, ScheduledTaskScheduleType
+from azents.core.external_channel_file import (
+    ExternalChannelOutboundFileManifest,
+    ExternalChannelOutboundFileSource,
+)
 from azents.core.tools import TurnContext
 from azents.engine.events.types import Event, ScheduledTaskResultPayload
 from azents.engine.hooks.types import (
@@ -19,7 +24,10 @@ from azents.engine.hooks.types import (
     ScheduledTaskSessionContinuationInput,
     SessionIdleHookContext,
 )
-from azents.engine.run.types import FunctionToolResult
+from azents.engine.run.types import FunctionToolError, FunctionToolResult
+from azents.engine.tools.runtime_instruction_context import (
+    RuntimeInstructionContextStore,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.scheduled_task.data import ScheduledTask
@@ -28,12 +36,17 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
 )
+from azents.services.external_channel.file_transfer import (
+    ExternalChannelFileTransferService,
+)
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.scheduled_task.service import ScheduledTaskService
 from azents.services.scheduled_task.terminal import (
+    ScheduledTaskTerminalEffectSnapshot,
     ScheduledTaskTerminalOutcome,
     ScheduledTaskTerminalService,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 from .scheduled import ScheduledToolkit
 
@@ -53,6 +66,7 @@ def _cycle(
     cycle_id: str = _CYCLE_ID,
     run_id: str = _RUN_ID,
     scheduled_for: datetime.datetime = _NOW,
+    binding_id: str | None = None,
 ) -> ScheduledTaskCycleRecord:
     """Build one started cycle record."""
     return ScheduledTaskCycleRecord(
@@ -63,7 +77,7 @@ def _cycle(
             workspace_id="w" * 32,
             agent_id="a" * 32,
             session_id="s" * 32,
-            binding_id=None,
+            binding_id=binding_id,
             title="Daily report",
             objective="Prepare the report.",
             schedule_type=ScheduledTaskScheduleType.ONCE,
@@ -108,13 +122,23 @@ def _task(*, active_cycle_id: str | None = None) -> ScheduledTask:
 def _toolkit(
     *,
     active_cycle: ScheduledTaskCycleRecord | None,
-) -> tuple[ScheduledToolkit, AsyncMock, AsyncMock, AsyncMock, AsyncMock]:
+    file_transfer_service: AsyncMock | None = None,
+) -> tuple[
+    ScheduledToolkit,
+    AsyncMock,
+    AsyncMock,
+    AsyncMock,
+    AsyncMock,
+    AsyncMock,
+    AsyncMock,
+]:
     """Compose one Toolkit with assertion-visible collaborators."""
     service = AsyncMock()
     terminal_service = AsyncMock()
     channel_service = AsyncMock()
     channel_service.execute_registration.return_value = None
     channel_service.execute_terminal.return_value = ()
+    transfer_service = file_transfer_service or AsyncMock()
     cycle_repository = AsyncMock()
     run_repository = AsyncMock()
     run_repository.get_by_id.return_value = SimpleNamespace(
@@ -129,6 +153,10 @@ def _toolkit(
         service=cast(ScheduledTaskService, service),
         terminal_service=cast(ScheduledTaskTerminalService, terminal_service),
         channel_service=cast(ScheduledTaskChannelService, channel_service),
+        file_transfer_service=cast(
+            ExternalChannelFileTransferService,
+            transfer_service,
+        ),
         cycle_repository=cast(ScheduledTaskCycleRepository, cycle_repository),
         run_repository=cast(AgentRunRepository, run_repository),
         workspace_id="w" * 32,
@@ -139,12 +167,18 @@ def _toolkit(
         toolkit,
         service,
         terminal_service,
+        channel_service,
+        transfer_service,
         cycle_repository,
         run_repository,
     )
 
 
-def _turn_context(publish_event: AsyncMock | None = None) -> TurnContext:
+def _turn_context(
+    publish_event: AsyncMock | None = None,
+    *,
+    resource_authority: object | None = None,
+) -> TurnContext:
     """Build one run-bound Toolkit context."""
     return TurnContext(
         workspace_id="w" * 32,
@@ -152,6 +186,7 @@ def _turn_context(publish_event: AsyncMock | None = None) -> TurnContext:
         run_id=_RUN_ID,
         session_id="s" * 32,
         publish_event=publish_event or AsyncMock(),
+        resource_authority=cast(SessionResourceAuthority | None, resource_authority),
     )
 
 
@@ -182,11 +217,18 @@ async def test_toolkit_exposes_management_tools_and_valid_cycle_terminal_tool() 
     assert "Set cron and timezone to null" in add_schema_json
     assert "requires at to be null" in add_schema_json
     assert "Must be null when at is supplied" in add_schema_json
+    submit_tool = active_state.tools[-1]
+    submit_schema_json = json.dumps(submit_tool.spec.input_schema)
+    assert "same bound conversation used by channel_action" in (
+        submit_tool.spec.description
+    )
+    assert "absolute POSIX Runtime path" in submit_schema_json
+    assert "exchange://" in submit_schema_json
 
 
 async def test_management_tools_derive_scope_and_project_execution_state() -> None:
     """Management actions use exact current Workspace, Agent, and Session scope."""
-    toolkit, service, _, cycle_repository, _ = _toolkit(active_cycle=None)
+    toolkit, service, _, _, _, cycle_repository, _ = _toolkit(active_cycle=None)
     created = _task()
     running = _task(active_cycle_id=_CYCLE_ID)
     service.create.return_value = created
@@ -239,7 +281,7 @@ async def test_management_tools_derive_scope_and_project_execution_state() -> No
 
 async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -> None:
     """A canonical terminal outcome becomes an engine-terminal tool result."""
-    toolkit, _, terminal_service, _, _ = _toolkit(active_cycle=_cycle())
+    toolkit, _, terminal_service, _, _, _, _ = _toolkit(active_cycle=_cycle())
     publish_event = AsyncMock()
     event = Event(
         id="e" * 32,
@@ -263,7 +305,7 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
     terminal_tool = state.tools[-1]
 
     result = await terminal_tool.handler(
-        json.dumps({"status": "finished", "result": "Completed."})
+        json.dumps({"status": "finished", "result": "Completed.", "files": None})
     )
 
     assert isinstance(result, FunctionToolResult)
@@ -285,9 +327,160 @@ async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -
     )
 
 
+async def test_terminal_tool_preflights_files_for_exact_bound_conversation() -> None:
+    """Terminal files reuse Channel Action validation and the cycle Binding."""
+    transfer_service = AsyncMock()
+    toolkit, _, terminal_service, channel_service, _, _, _ = _toolkit(
+        active_cycle=_cycle(binding_id="b" * 32),
+        file_transfer_service=transfer_service,
+    )
+    manifest = ExternalChannelOutboundFileManifest(
+        source=ExternalChannelOutboundFileSource.RUNTIME,
+        path="/workspace/agent/report.png",
+        filename="report.png",
+        media_type="image/png",
+        expected_size=128,
+    )
+    transfer_service.prepare_outbound.return_value = (manifest,)
+    file_storage = object()
+    provider_delivery_service = object()
+    resolve_runtime_target = object()
+    toolkit.runtime_context_store = cast(
+        RuntimeInstructionContextStore,
+        SimpleNamespace(
+            get=lambda: SimpleNamespace(
+                file_storage=file_storage,
+                provider_delivery_service=provider_delivery_service,
+                resolve_runtime_target=resolve_runtime_target,
+            )
+        ),
+    )
+    snapshot = ScheduledTaskTerminalEffectSnapshot(
+        cycle_id=_CYCLE_ID,
+        task_id="t" * 32,
+        workspace_id="w" * 32,
+        agent_id="a" * 32,
+        session_id="s" * 32,
+        binding_id="b" * 32,
+        status="finished",
+        result="Completed.",
+        tracker_desired_revision=0,
+        tracker_projection_parts=(),
+    )
+    event = Event(
+        id="e" * 32,
+        session_id="s" * 32,
+        kind=EventKind.SCHEDULED_TASK_RESULT,
+        payload=ScheduledTaskResultPayload(
+            title="Daily report",
+            scheduled_for=_NOW,
+            status="finished",
+            result="Completed.",
+        ),
+        external_id=f"scheduled-task-result:{_CYCLE_ID}",
+        created_at=_NOW,
+    )
+    terminal_service.submit.return_value = ScheduledTaskTerminalOutcome(
+        event=event,
+        created=True,
+        effect_snapshot=snapshot,
+    )
+    authority = object()
+    state = await toolkit.update_context(_turn_context(resource_authority=authority))
+
+    await state.tools[-1].handler(
+        json.dumps(
+            {
+                "status": "finished",
+                "result": "Completed.",
+                "files": ["/workspace/agent/report.png"],
+            }
+        )
+    )
+
+    transfer_service.prepare_outbound.assert_awaited_once_with(
+        session_id="s" * 32,
+        agent_id="a" * 32,
+        binding_id="b" * 32,
+        paths=["/workspace/agent/report.png"],
+        file_storage=file_storage,
+        authority=authority,
+    )
+    channel_service.execute_terminal.assert_awaited_once_with(
+        snapshot,
+        files=(manifest,),
+        file_storage=file_storage,
+        authority=authority,
+        provider_delivery_service=provider_delivery_service,
+        resolve_runtime_target=resolve_runtime_target,
+    )
+
+
+async def test_terminal_tool_rejects_files_for_session_only_cycle() -> None:
+    """A Session-only cycle cannot imply an External Channel file delivery."""
+    toolkit, _, terminal_service, _, _, _, _ = _toolkit(active_cycle=_cycle())
+    state = await toolkit.update_context(_turn_context())
+
+    with pytest.raises(FunctionToolError, match="channel-bound cycle"):
+        await state.tools[-1].handler(
+            json.dumps(
+                {
+                    "status": "finished",
+                    "result": "Completed.",
+                    "files": ["/workspace/agent/report.png"],
+                }
+            )
+        )
+
+    terminal_service.submit.assert_not_awaited()
+
+
+async def test_recovered_terminal_result_does_not_replay_requested_files() -> None:
+    """A recovered canonical result does not validate or republish new files."""
+    transfer_service = AsyncMock()
+    toolkit, _, terminal_service, channel_service, _, cycle_repository, _ = _toolkit(
+        active_cycle=_cycle(binding_id="b" * 32),
+        file_transfer_service=transfer_service,
+    )
+    event = Event(
+        id="e" * 32,
+        session_id="s" * 32,
+        kind=EventKind.SCHEDULED_TASK_RESULT,
+        payload=ScheduledTaskResultPayload(
+            title="Daily report",
+            scheduled_for=_NOW,
+            status="finished",
+            result="Canonical result.",
+        ),
+        external_id=f"scheduled-task-result:{_CYCLE_ID}",
+        created_at=_NOW,
+    )
+    terminal_service.submit.return_value = ScheduledTaskTerminalOutcome(
+        event=event,
+        created=False,
+        effect_snapshot=None,
+    )
+    state = await toolkit.update_context(_turn_context())
+    cycle_repository.get_started.return_value = None
+
+    result = await state.tools[-1].handler(
+        json.dumps(
+            {
+                "status": "finished",
+                "result": "Replayed value.",
+                "files": ["/workspace/agent/new-report.png"],
+            }
+        )
+    )
+
+    assert isinstance(result, FunctionToolResult)
+    transfer_service.prepare_outbound.assert_not_awaited()
+    channel_service.execute_terminal.assert_not_awaited()
+
+
 async def test_idle_and_compaction_hooks_use_all_started_cycles_in_order() -> None:
     """Toolkit continuity hooks project every current started cycle."""
-    toolkit, _, _, cycle_repository, _ = _toolkit(active_cycle=None)
+    toolkit, _, _, _, _, cycle_repository, _ = _toolkit(active_cycle=None)
     first = _cycle(cycle_id="a" * 32, scheduled_for=_NOW)
     second = _cycle(
         cycle_id="b" * 32,

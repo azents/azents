@@ -7,6 +7,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.external_channel_file import (
+    MAX_EXTERNAL_CHANNEL_FILES,
+    ExternalChannelOutboundFileManifest,
+)
 from azents.core.tools import (
     ResolveContext,
     Toolkit,
@@ -26,6 +30,9 @@ from azents.engine.hooks.types import (
 )
 from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
 from azents.engine.tooling.make_tool import make_tool
+from azents.engine.tools.runtime_instruction_context import (
+    RuntimeInstructionContextStore,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.scheduled_task.data import (
@@ -36,6 +43,9 @@ from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleRecord,
     ScheduledTaskCycleState,
+)
+from azents.services.external_channel.file_transfer import (
+    ExternalChannelFileTransferService,
 )
 from azents.services.external_channel.provider_effect import ProviderEffectOutcome
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
@@ -52,7 +62,11 @@ _ADD_DESCRIPTION = "Create one Scheduled Task in the current Session."
 _LIST_DESCRIPTION = "List active Scheduled Tasks in the current Session."
 _DELETE_DESCRIPTION = "Delete one exact Scheduled Task by task_id."
 _SUBMIT_DESCRIPTION = (
-    "Commit the finished or failed result of the current Scheduled Task cycle."
+    "Commit the finished or failed result of the current Scheduled Task cycle. "
+    "For a channel-bound cycle, the result message and files are delivered to the "
+    "exact same bound conversation used by channel_action; this does not select or "
+    "send to another Slack or Discord channel. Session-only cycles do not publish "
+    "externally and do not accept files."
 )
 
 
@@ -108,6 +122,18 @@ class SubmitScheduledTaskResultInput(BaseModel):
 
     status: Literal["finished", "failed"]
     result: str = Field(min_length=1, max_length=50_000)
+    files: list[str] | None = Field(
+        min_length=1,
+        max_length=MAX_EXTERNAL_CHANNEL_FILES,
+        description=(
+            "File source paths published with the terminal result to the same bound "
+            "conversation used by channel_action. Each item must be either an "
+            "absolute POSIX Runtime path beginning with `/` or an authorized "
+            "`exchange://{object_key}` URI. Relative paths and other URI schemes, "
+            "including `artifact://` and `azents://`, are unsupported. Set null for "
+            "Session-only cycles or when no files are needed."
+        ),
+    )
 
 
 class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
@@ -120,6 +146,7 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
         service: ScheduledTaskService,
         terminal_service: ScheduledTaskTerminalService,
         channel_service: ScheduledTaskChannelService,
+        file_transfer_service: ExternalChannelFileTransferService,
         cycle_repository: ScheduledTaskCycleRepository,
         run_repository: AgentRunRepository,
         workspace_id: str,
@@ -130,12 +157,21 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
         self.service = service
         self.terminal_service = terminal_service
         self.channel_service = channel_service
+        self.file_transfer_service = file_transfer_service
         self.cycle_repository = cycle_repository
         self.run_repository = run_repository
         self.workspace_id = workspace_id
         self.agent_id = agent_id
         self.session_id = session_id
         self.turn_context: TurnContext | None = None
+        self.runtime_context_store: RuntimeInstructionContextStore | None = None
+
+    def set_runtime_context_store(
+        self,
+        store: RuntimeInstructionContextStore,
+    ) -> None:
+        """Register current run-scoped Runtime file storage."""
+        self.runtime_context_store = store
 
     async def update_context(self, context: TurnContext) -> ToolkitState:
         """Expose management tools and the run-bound terminal action."""
@@ -326,6 +362,32 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
             if context is None:
                 raise FunctionToolError("Scheduled Task execution context is missing.")
             try:
+                cycle = await self._active_cycle(context.run_id)
+                runtime_context = (
+                    None
+                    if self.runtime_context_store is None
+                    else self.runtime_context_store.get()
+                )
+                manifests: tuple[ExternalChannelOutboundFileManifest, ...] = ()
+                if args.files is not None and cycle is not None:
+                    binding_id = cycle.state.binding_id
+                    if binding_id is None:
+                        raise ValueError(
+                            "Scheduled Task terminal files require a channel-bound "
+                            "cycle."
+                        )
+                    manifests = await self.file_transfer_service.prepare_outbound(
+                        session_id=self.session_id,
+                        agent_id=self.agent_id,
+                        binding_id=binding_id,
+                        paths=args.files,
+                        file_storage=(
+                            None
+                            if runtime_context is None
+                            else runtime_context.file_storage
+                        ),
+                        authority=context.resource_authority,
+                    )
                 outcome = await self.terminal_service.submit(
                     workspace_id=self.workspace_id,
                     agent_id=self.agent_id,
@@ -342,7 +404,24 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
                 ()
                 if outcome.effect_snapshot is None
                 else await self.channel_service.execute_terminal(
-                    outcome.effect_snapshot
+                    outcome.effect_snapshot,
+                    files=manifests,
+                    file_storage=(
+                        None
+                        if runtime_context is None
+                        else runtime_context.file_storage
+                    ),
+                    authority=context.resource_authority,
+                    provider_delivery_service=(
+                        None
+                        if runtime_context is None
+                        else runtime_context.provider_delivery_service
+                    ),
+                    resolve_runtime_target=(
+                        None
+                        if runtime_context is None
+                        else runtime_context.resolve_runtime_target
+                    ),
                 )
             )
             payload = outcome.event.payload
@@ -431,6 +510,7 @@ class ScheduledToolkitProvider(ToolkitProvider[ScheduledToolkitConfig]):
         service: ScheduledTaskService,
         terminal_service: ScheduledTaskTerminalService,
         channel_service: ScheduledTaskChannelService,
+        file_transfer_service: ExternalChannelFileTransferService,
         cycle_repository: ScheduledTaskCycleRepository,
         run_repository: AgentRunRepository,
     ) -> None:
@@ -438,6 +518,7 @@ class ScheduledToolkitProvider(ToolkitProvider[ScheduledToolkitConfig]):
         self.service = service
         self.terminal_service = terminal_service
         self.channel_service = channel_service
+        self.file_transfer_service = file_transfer_service
         self.cycle_repository = cycle_repository
         self.run_repository = run_repository
 
@@ -453,6 +534,7 @@ class ScheduledToolkitProvider(ToolkitProvider[ScheduledToolkitConfig]):
             service=self.service,
             terminal_service=self.terminal_service,
             channel_service=self.channel_service,
+            file_transfer_service=self.file_transfer_service,
             cycle_repository=self.cycle_repository,
             run_repository=self.run_repository,
             workspace_id=context.workspace_id,

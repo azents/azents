@@ -27,7 +27,7 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
 last_verified_at: 2026-08-17
-spec_version: 2
+spec_version: 3
 ---
 
 # Scheduled Task Domain Spec
@@ -192,8 +192,15 @@ locale-aware human schedule and occurrence, canonical cron/UTC detail, and the
 exact prompt. Legacy content that predates the structured runtime text remains
 visible as a complete fallback.
 
+`submit_scheduled_task_result` requires an explicit nullable `files` field. A
+channel-bound cycle accepts the same absolute Runtime paths and authorized
+`exchange://` URIs as `channel_action`, validates them against the cycle's exact
+Binding before terminalization, and publishes the terminal message and files
+through that same bound conversation. A Session-only cycle requires `files=null`.
+The process-local file manifests are not added to the canonical terminal Event.
+
 If a terminal call is recovered after the canonical Event already exists, the same
-Event is returned and no provider effect is replayed.
+Event is returned and no provider effect or new file validation is replayed.
 
 ## External Channel Presentation
 
@@ -255,6 +262,10 @@ prompt. The result payload contains only title, scheduled instant, terminal stat
 and result text.
 
 ## Changelog
+
+- **2026-08-17** (spec_version 3) — Added terminal result file publication through
+  the exact Scheduled cycle Binding, explicit Session-only file rejection, Runtime
+  file-context injection, and same-conversation execution guidance.
 
 - **2026-08-17** (spec_version 2) — Added collapsible title-first Web trigger and
   continuation presentation, human-first schedule labels, Schedule activity

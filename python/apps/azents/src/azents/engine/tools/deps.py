@@ -163,6 +163,10 @@ def get_scheduled_toolkit_provider(
         ScheduledTaskChannelService,
         Depends(get_scheduled_task_channel_service),
     ],
+    file_transfer_service: Annotated[
+        ExternalChannelFileTransferService,
+        Depends(),
+    ],
 ) -> ScheduledToolkitProvider:
     """Scheduled Toolkit dependency without ToolkitConfig or credentials."""
     service = ScheduledTaskService(
@@ -182,6 +186,7 @@ def get_scheduled_toolkit_provider(
             cycle_repository=cycle_repository,
         ),
         channel_service=channel_service,
+        file_transfer_service=file_transfer_service,
         cycle_repository=cycle_repository,
         run_repository=run_repository,
     )

@@ -54,10 +54,12 @@ def test_cycle_guidance_distinguishes_session_and_channel_execution() -> None:
     session_guidance = render_scheduled_task_cycle_guidance(_state())
     channel_guidance = render_scheduled_task_cycle_guidance(_state(binding_id="b" * 32))
 
-    assert "no external provider publication is required" in session_guidance
+    assert "no external provider publication is available" in session_guidance
     assert "`channel_action` only for interim progress" in channel_guidance
+    assert "files set to null" in session_guidance
     assert "`submit_scheduled_task_result`" in session_guidance
-    assert "`submit_scheduled_task_result`" in channel_guidance
+    assert "exact same bound conversation" in channel_guidance
+    assert "another Slack or Discord channel" in channel_guidance
 
 
 def test_schedule_presentation_uses_human_first_and_canonical_secondary_text() -> None:

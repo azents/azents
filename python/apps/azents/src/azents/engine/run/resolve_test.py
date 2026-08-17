@@ -49,7 +49,7 @@ from azents.engine.tools.dynamic_worktree import (
     DynamicWorktreeToolkitProvider,
 )
 from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
-from azents.engine.tools.scheduled import ScheduledToolkitProvider
+from azents.engine.tools.scheduled import ScheduledToolkit, ScheduledToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent.data import Agent
@@ -131,6 +131,7 @@ def _make_scheduled_provider() -> ScheduledToolkitProvider:
         service=cast(Any, object()),
         terminal_service=cast(Any, object()),
         channel_service=cast(Any, object()),
+        file_transfer_service=cast(Any, object()),
         cycle_repository=cast(Any, object()),
         run_repository=cast(Any, object()),
     )
@@ -1063,9 +1064,10 @@ class TestResolveAgentTools:
                 allowed_domains=(),
                 denied_domains=(),
             ),
+            builtin_toolkit_provider=_make_builtin_provider(),
             scheduled_toolkit_provider=provider,
             memory_enabled=False,
-            runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+            runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
         )
         subagent = await resolve_agent_tools(
             "agent-1",
@@ -1087,9 +1089,11 @@ class TestResolveAgentTools:
             runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
         )
 
-        assert [binding.slug for binding in root] == ["scheduled"]
-        assert root[0].use_prefix is False
-        assert root[0].toolkit_type is None
-        assert root[0].toolkit_config_id is None
-        assert root[0].source_revision is not None
+        assert [binding.slug for binding in root] == ["runtime", "scheduled"]
+        assert root[1].use_prefix is False
+        assert root[1].toolkit_type is None
+        assert root[1].toolkit_config_id is None
+        assert root[1].source_revision is not None
+        assert isinstance(root[1].toolkit, ScheduledToolkit)
+        assert root[1].toolkit.runtime_context_store is not None
         assert subagent == []
