@@ -264,6 +264,34 @@ void test("groups managed worktree tools with Git activity", () => {
   }
 });
 
+void test("groups all Scheduled Task tools with Schedule activity", () => {
+  for (const toolName of [
+    "add_scheduled_task",
+    "list_scheduled_tasks",
+    "delete_scheduled_task",
+    "submit_scheduled_task_result",
+  ]) {
+    const tool = clientToolMessage("tool-message", "call-1", toolName);
+    const items = projectChatPresentationItems(
+      [
+        event("call-1", "client_tool_call", {
+          call_id: "call-1",
+          name: toolName,
+          arguments: "{}",
+        }),
+      ],
+      [tool],
+    );
+
+    const activityEvent = activityAt(items, 0).events[0];
+    assert.ok(activityEvent);
+    assert.deepEqual(activityEvent.category, {
+      key: "schedule",
+      label: "schedule",
+    });
+  }
+});
+
 void test("closes Activity at an action-execution message boundary", () => {
   const firstTool = clientToolMessage("tool-message-1", "call-1");
   const secondTool = clientToolMessage("tool-message-2", "call-2");

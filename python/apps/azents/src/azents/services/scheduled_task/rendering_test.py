@@ -9,6 +9,8 @@ from .rendering import (
     SCHEDULED_COMPACTION_HEADING,
     render_scheduled_task_compaction_snapshot,
     render_scheduled_task_cycle_guidance,
+    render_scheduled_task_runtime_message,
+    render_scheduled_task_schedule,
     replace_scheduled_compaction_snapshot,
 )
 
@@ -56,6 +58,42 @@ def test_cycle_guidance_distinguishes_session_and_channel_execution() -> None:
     assert "`channel_action` only for interim progress" in channel_guidance
     assert "`submit_scheduled_task_result`" in session_guidance
     assert "`submit_scheduled_task_result`" in channel_guidance
+
+
+def test_schedule_presentation_uses_human_first_and_canonical_secondary_text() -> None:
+    """Common recurring schedules present readable timing before cron detail."""
+    presentation = render_scheduled_task_schedule(
+        schedule_type=ScheduledTaskScheduleType.CRON,
+        scheduled_at=None,
+        cron_expression="0 9 * * 1-5",
+        timezone="America/New_York",
+        scheduled_for=datetime.datetime(2026, 8, 17, 13, 0, tzinfo=datetime.UTC),
+    )
+
+    assert presentation.summary == "Every weekday at 9:00 AM EDT"
+    assert presentation.canonical == "0 9 * * 1-5 (America/New_York)"
+    assert presentation.occurrence == "August 17, 2026 at 9:00 AM EDT"
+    assert presentation.occurrence_canonical == "2026-08-17T13:00:00Z"
+
+
+def test_runtime_message_keeps_exact_prompt_after_structured_schedule() -> None:
+    """Trigger content exposes readable metadata and leaves the prompt exact."""
+    objective = "Prepare the report.\nKeep this second line exactly."
+
+    message = render_scheduled_task_runtime_message(
+        title="Daily report",
+        objective=objective,
+        schedule_type=ScheduledTaskScheduleType.ONCE,
+        scheduled_at=_NOW,
+        cron_expression=None,
+        timezone=None,
+        scheduled_for=_NOW,
+    )
+
+    assert "Schedule: August 16, 2026 at 12:00 PM UTC" in message
+    assert "Schedule details: 2026-08-16T12:00:00Z" in message
+    assert "Scheduled for details: 2026-08-16T12:00:00Z" in message
+    assert message.endswith(f"Prompt:\n{objective}")
 
 
 def test_compaction_snapshot_is_bounded_sanitized_and_identifier_free() -> None:

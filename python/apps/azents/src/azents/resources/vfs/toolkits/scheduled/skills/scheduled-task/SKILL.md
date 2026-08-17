@@ -62,6 +62,26 @@ behavior.
 
 ### 2. Interpret the schedule and timezone
 
+#### Schedule field contract
+
+Choose exactly one of these shapes:
+
+- **One-time:** `at` is a timezone-bearing RFC 3339 timestamp, while `cron=null`
+  and `timezone=null`.
+- **Recurring:** `at=null`, while `cron` is a standard five-field expression and
+  `timezone` is an IANA timezone identifier.
+
+`at` and `timezone` are mutually exclusive. Never send a separate `timezone`
+with `at`; the offset or `Z` inside `at` already defines the one-time instant.
+
+```json
+{"at":"2026-08-18T09:00:00+09:00","cron":null,"timezone":null}
+```
+
+```json
+{"at":null,"cron":"0 9 * * 1-5","timezone":"Asia/Seoul"}
+```
+
 - For a duration-relative request such as "one hour from now," derive the instant
   from the current time without asking for a timezone.
 - For a calendar-time request, use an explicitly stated timezone first.
@@ -127,7 +147,9 @@ Before calling the creation tool:
 
 - ensure the objective is actionable;
 - ensure the title is concise;
-- ensure exactly one valid canonical schedule is supplied;
+- verify the exact schedule shape: `at` with both recurrence fields null, or
+  `cron` plus `timezone` with `at` null;
+- reject any payload that combines `at` with `timezone`;
 - ensure `channel_id` is either `null` or one unchanged channel handle;
 - reject a new one-time schedule in the past; and
 - do not submit a guessed channel target.

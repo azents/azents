@@ -884,6 +884,131 @@ void test("specializes an accepted managed Git worktree removal request", () => 
   });
 });
 
+void test("renders a Scheduled Task creation without exposing the prompt collapsed", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "add_scheduled_task",
+      arguments: JSON.stringify({
+        title: "Daily report",
+        objective: "Prepare the daily operating report.",
+        at: null,
+        cron: "0 9 * * 1-5",
+        timezone: "America/New_York",
+        channel_id: "opaque-channel-handle",
+      }),
+      toolkitSource: {
+        toolkit_config_id: "scheduled",
+        toolkit_type: "builtin",
+        toolkit_name: "Scheduled Tasks",
+        toolkit_slug: "scheduled",
+      },
+      result: JSON.stringify({
+        task: {
+          task_id: "t".repeat(32),
+          title: "Daily report",
+          objective: "Prepare the daily operating report.",
+          at: null,
+          cron: "0 9 * * 1-5",
+          timezone: "America/New_York",
+          channel_id: "opaque-channel-handle",
+          next_eligible_at: "2026-08-18T13:00:00Z",
+          pending_scheduled_for: null,
+        },
+        created: true,
+        registration: null,
+      }),
+    }),
+  );
+
+  assert.equal(result.type, "specialized");
+  assert.equal(result.presentation.action, "addScheduledTask");
+  assert.equal(result.presentation.subject, "Daily report");
+  assert.equal(result.presentation.qualifier, "recurring");
+  assert.equal(
+    JSON.stringify({
+      action: result.presentation.action,
+      subject: result.presentation.subject,
+      qualifier: result.presentation.qualifier,
+    }).includes("Prepare the daily operating report."),
+    false,
+  );
+  assert.deepEqual(result.presentation.detail, {
+    type: "semantic",
+    fields: [
+      {
+        label: "schedule",
+        value: "0 9 * * 1-5 · America/New_York",
+      },
+      { label: "target", value: "channel" },
+      { label: "nextRun", value: "2026-08-18T13:00:00Z" },
+    ],
+    sections: [
+      {
+        label: "objective",
+        content: "Prepare the daily operating report.",
+      },
+    ],
+    items: [],
+  });
+});
+
+void test("renders Scheduled Task list, delete, and terminal result operations", () => {
+  const listed = knownToolPresentation(
+    toolCall({
+      name: "list_scheduled_tasks",
+      arguments: "{}",
+      result: JSON.stringify({
+        tasks: [
+          {
+            task_id: "t".repeat(32),
+            title: "Daily report",
+            objective: "Prepare the report.",
+            at: "2026-08-18T13:00:00Z",
+            cron: null,
+            timezone: null,
+            channel_id: null,
+            next_eligible_at: "2026-08-18T13:00:00Z",
+            pending_scheduled_for: null,
+            execution_state: "idle",
+          },
+        ],
+      }),
+    }),
+  );
+  const deleted = knownToolPresentation(
+    toolCall({
+      name: "delete_scheduled_task",
+      arguments: JSON.stringify({ task_id: "t".repeat(32) }),
+      result: JSON.stringify({ task_id: "t".repeat(32), deleted: true }),
+    }),
+  );
+  const submitted = knownToolPresentation(
+    toolCall({
+      name: "submit_scheduled_task_result",
+      arguments: JSON.stringify({
+        status: "finished",
+        result: "Completed.",
+      }),
+      result: JSON.stringify({
+        status: "finished",
+        result: "Completed.",
+        recovered: false,
+        outcomes: [],
+      }),
+    }),
+  );
+
+  assert.equal(listed.type, "specialized");
+  assert.equal(listed.presentation.action, "listScheduledTasks");
+  assert.equal(listed.presentation.qualifier, "1");
+  assert.equal(deleted.type, "specialized");
+  assert.equal(deleted.presentation.action, "deleteScheduledTask");
+  assert.equal(deleted.presentation.qualifier, "deleted");
+  assert.equal(submitted.type, "specialized");
+  assert.equal(submitted.presentation.action, "submitScheduledTaskResult");
+  assert.equal(submitted.presentation.qualifier, "finished");
+});
+
 void test("keeps sensitive builtin payloads out of collapsed summaries", () => {
   const cases = [
     {

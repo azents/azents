@@ -25,6 +25,7 @@ interface AgentMessageDisclosureProps {
   content: string;
   actions?: React.ReactNode;
   opacity?: number;
+  icon?: React.ReactNode;
 }
 
 export function AgentMessageDisclosure({
@@ -33,6 +34,7 @@ export function AgentMessageDisclosure({
   content,
   actions = null,
   opacity = 1,
+  icon = null,
 }: AgentMessageDisclosureProps): React.ReactElement {
   const [opened, { toggle }] = useDisclosure(false);
 
@@ -66,7 +68,7 @@ export function AgentMessageDisclosure({
               transition: chatChevronTransition,
             }}
           />
-          <IconRobot aria-hidden="true" size={14} stroke={1.8} />
+          {icon ?? <IconRobot aria-hidden="true" size={14} stroke={1.8} />}
           <Tooltip label={titleTooltip} openDelay={500}>
             <Text
               size="xs"

@@ -14,6 +14,7 @@ import {
 import {
   IconBook,
   IconBrain,
+  IconCalendarClock,
   IconClock,
   IconDots,
   IconDownload,
@@ -154,6 +155,11 @@ function presentationIcon(presentation: KnownToolPresentation): ReactElement {
     case "createGitWorktree":
     case "removeGitWorktree":
       return <IconGitBranch size={activityRowIconSize} />;
+    case "addScheduledTask":
+    case "listScheduledTasks":
+    case "deleteScheduledTask":
+    case "submitScheduledTaskResult":
+      return <IconCalendarClock size={activityRowIconSize} />;
   }
 }
 
@@ -235,6 +241,14 @@ function actionLabel(
       return t("action.removeGitWorktree");
     case "toolSearch":
       return t("action.toolSearch");
+    case "addScheduledTask":
+      return t("action.addScheduledTask");
+    case "listScheduledTasks":
+      return t("action.listScheduledTasks");
+    case "deleteScheduledTask":
+      return t("action.deleteScheduledTask");
+    case "submitScheduledTaskResult":
+      return t("action.submitScheduledTaskResult");
   }
 }
 
@@ -280,6 +294,10 @@ function presentationQualifier(
     case "createGitWorktree":
     case "removeGitWorktree":
     case "toolSearch":
+    case "addScheduledTask":
+    case "listScheduledTasks":
+    case "deleteScheduledTask":
+    case "submitScheduledTaskResult":
       return presentation.qualifier;
   }
 }
@@ -351,6 +369,18 @@ function detailLabel(
       return t("field.requestId");
     case "worktreePath":
       return t("field.worktreePath");
+    case "schedule":
+      return t("field.schedule");
+    case "target":
+      return t("field.target");
+    case "nextRun":
+      return t("field.nextRun");
+    case "taskId":
+      return t("field.taskId");
+    case "registration":
+      return t("field.registration");
+    case "recovered":
+      return t("field.recovered");
   }
 }
 

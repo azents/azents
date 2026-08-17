@@ -2506,7 +2506,11 @@
         "listAgents": "サブエージェントを一覧表示",
         "toolSearch": "ツールを検索",
         "createGitWorktree": "Git worktreeの作成をリクエスト",
-        "removeGitWorktree": "Git worktreeの削除をリクエスト"
+        "removeGitWorktree": "Git worktreeの削除をリクエスト",
+        "addScheduledTask": "Scheduled Taskを作成",
+        "listScheduledTasks": "Scheduled Taskを一覧表示",
+        "deleteScheduledTask": "Scheduled Taskを削除",
+        "submitScheduledTaskResult": "Scheduled Taskの結果を送信"
       },
       "field": {
         "source": "ソース",
@@ -2539,7 +2543,13 @@
         "branch": "ブランチ",
         "force": "強制削除",
         "requestId": "リクエストID",
-        "worktreePath": "Worktreeパス"
+        "worktreePath": "Worktreeパス",
+        "schedule": "スケジュール",
+        "target": "対象",
+        "nextRun": "次回実行",
+        "taskId": "タスクID",
+        "registration": "チャンネル登録",
+        "recovered": "復旧済み"
       },
       "changeAction": {
         "add": "追加",
@@ -2568,7 +2578,8 @@
       "categorySubagent": "サブエージェント",
       "categoryWait": "待機",
       "categoryOther": "その他",
-      "categoryGit": "Git"
+      "categoryGit": "Git",
+      "categorySchedule": "スケジュール"
     },
     "authorization": {
       "authorizationRequired": "認証が必要",
@@ -2790,6 +2801,24 @@
     },
     "agentMessage": {
       "title": "{name} エージェントからのメッセージ"
+    },
+    "scheduledTaskMessage": {
+      "title": "Scheduled Task · {title}",
+      "fallbackTitle": "Scheduled Task",
+      "schedule": "スケジュール",
+      "scheduledFor": "実行予定時刻",
+      "scheduleDetails": "スケジュール詳細",
+      "prompt": "プロンプト",
+      "recurrence": {
+        "everyMinute": "毎分 · {timezone}",
+        "everyMinutes": "{count}分ごと · {timezone}",
+        "hourly": "毎時{minute}分 · {timezone}",
+        "daily": "毎日 {time}",
+        "weekdays": "平日 {time}",
+        "weekends": "週末 {time}",
+        "weekly": "毎週{days} {time}",
+        "recurring": "繰り返しスケジュール · {timezone}"
+      }
     },
     "addWorkspace": "Add workspace",
     "addExistingProject": "Add existing Project",

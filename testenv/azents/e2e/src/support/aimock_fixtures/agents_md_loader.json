@@ -2302,7 +2302,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Scheduled Task work is due.\nTitle: Scheduled Task E2E once\nObjective: Submit the deterministic Scheduled Task E2E result.\nSchedule: 2099-01-02T03:04:05Z\nScheduled for: 2099-01-02T03:04:05Z\nContinue autonomously across Agent runs until the objective is complete. If required information, authority, user choice, or another prerequisite is unavailable after reasonable attempts, submit a failed result explaining what is missing. Submit a finished or failed Scheduled Task result explicitly.",
+        "userMessage": "Scheduled Task work is due.\nTitle: Scheduled Task E2E once\nSchedule: January 2, 2099 at 3:04 AM UTC\nSchedule details: 2099-01-02T03:04:05Z\nScheduled for: January 2, 2099 at 3:04 AM UTC\nScheduled for details: 2099-01-02T03:04:05Z\nExecution guidance: Continue autonomously across Agent runs until the objective is complete. If required information, authority, user choice, or another prerequisite is unavailable after reasonable attempts, submit a failed result explaining what is missing. Submit a finished or failed Scheduled Task result explicitly.\nPrompt:\nSubmit the deterministic Scheduled Task E2E result.",
         "hasToolResult": false
       },
       "response": {

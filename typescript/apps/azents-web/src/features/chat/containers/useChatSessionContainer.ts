@@ -1040,6 +1040,25 @@ function mapEvents(
           },
         ];
       }
+      case "scheduled_task_trigger":
+      case "scheduled_task_continuation": {
+        return [
+          ...messages,
+          {
+            id: event.id,
+            role: "user",
+            content: stringField(payload, "content"),
+            createdAt: event.created_at,
+            status: "complete",
+            metadata: {
+              ...eventMetadata(event),
+              source: "scheduled_task",
+              message_kind: event.kind,
+              title: stringField(payload, "title") ?? "",
+            },
+          },
+        ];
+      }
       case "assistant_message": {
         const content = contentText(payload.content);
         const attachments = [

@@ -178,6 +178,11 @@ async def test_toolkit_exposes_management_tools_and_valid_cycle_terminal_tool() 
         _turn_context()
     )
 
+    add_schema_json = json.dumps(management_state.tools[0].spec.input_schema)
+    assert "Set cron and timezone to null" in add_schema_json
+    assert "requires at to be null" in add_schema_json
+    assert "Must be null when at is supplied" in add_schema_json
+
 
 async def test_management_tools_derive_scope_and_project_execution_state() -> None:
     """Management actions use exact current Workspace, Agent, and Session scope."""

@@ -2506,7 +2506,11 @@
         "listAgents": "Sous-agents listés",
         "toolSearch": "Outils recherchés",
         "createGitWorktree": "Création du worktree Git demandée",
-        "removeGitWorktree": "Suppression du worktree Git demandée"
+        "removeGitWorktree": "Suppression du worktree Git demandée",
+        "addScheduledTask": "Tâche planifiée créée",
+        "listScheduledTasks": "Tâches planifiées listées",
+        "deleteScheduledTask": "Tâche planifiée supprimée",
+        "submitScheduledTaskResult": "Résultat de la tâche planifiée envoyé"
       },
       "field": {
         "source": "Source",
@@ -2539,7 +2543,13 @@
         "branch": "Branche",
         "force": "Suppression forcée",
         "requestId": "ID de requête",
-        "worktreePath": "Chemin du worktree"
+        "worktreePath": "Chemin du worktree",
+        "schedule": "Planification",
+        "target": "Cible",
+        "nextRun": "Prochaine exécution",
+        "taskId": "ID de tâche",
+        "registration": "Enregistrement du canal",
+        "recovered": "Récupéré"
       },
       "changeAction": {
         "add": "Ajouté",
@@ -2568,7 +2578,8 @@
       "categorySubagent": "Sous-agent",
       "categoryWait": "Attente",
       "categoryOther": "Autre",
-      "categoryGit": "Git"
+      "categoryGit": "Git",
+      "categorySchedule": "Planification"
     },
     "authorization": {
       "authorizationRequired": "Autorisation requise",
@@ -2790,6 +2801,24 @@
     },
     "agentMessage": {
       "title": "Message de l’agent {name}"
+    },
+    "scheduledTaskMessage": {
+      "title": "Tâche planifiée · {title}",
+      "fallbackTitle": "Tâche planifiée",
+      "schedule": "Planification",
+      "scheduledFor": "Exécution prévue",
+      "scheduleDetails": "Détails de la planification",
+      "prompt": "Prompt",
+      "recurrence": {
+        "everyMinute": "Chaque minute · {timezone}",
+        "everyMinutes": "Toutes les {count} minutes · {timezone}",
+        "hourly": "Toutes les heures à la minute {minute} · {timezone}",
+        "daily": "Tous les jours à {time}",
+        "weekdays": "Chaque jour ouvré à {time}",
+        "weekends": "Chaque week-end à {time}",
+        "weekly": "Chaque {days} à {time}",
+        "recurring": "Planification récurrente · {timezone}"
+      }
     },
     "addWorkspace": "Add workspace",
     "addExistingProject": "Add existing Project",

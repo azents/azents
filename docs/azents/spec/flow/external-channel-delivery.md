@@ -35,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-16
-spec_version: 44
+last_verified_at: 2026-08-17
+spec_version: 45
 ---
 
 # External Channel Delivery and Channel Work
@@ -418,7 +418,9 @@ Scheduled Task provider effects use the same immediate process-local execution
 boundary as other External Channel effects but have Scheduled-owned state.
 
 - Task creation commits before one registration message with native Edit/Delete
-  controls is attempted.
+  controls is attempted. Slack and Discord both show the Task title prominently,
+  use a human-readable schedule and next-run label as the primary presentation,
+  and retain canonical cron or UTC schedule text only as secondary detail.
 - Run start may create one Scheduled Activity Tracker.
 - Scheduled-bound `channel_action continue` may publish a reply and replace the
   current progress title and ordered task list for the exact Binding.
@@ -433,6 +435,10 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+
+- **2026-08-17** (spec_version 45) — Made Slack and Discord Scheduled Task
+  registration messages title-first with human-readable schedule and next-run
+  labels while retaining canonical schedule detail and signed controls.
 
 - **2026-08-16** (spec_version 44) — Added commit-first Scheduled registration,
   progress, exact-thread terminal presentation, and explicit no-replay behavior.
