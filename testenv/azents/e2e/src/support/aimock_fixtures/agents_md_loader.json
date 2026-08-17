@@ -2312,7 +2312,8 @@
             "name": "submit_scheduled_task_result",
             "arguments": {
               "status": "finished",
-              "result": "SCHEDULED_TASK_E2E_FINISHED"
+              "result": "SCHEDULED_TASK_E2E_FINISHED",
+              "files": null
             }
           }
         ]
