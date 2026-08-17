@@ -21,6 +21,9 @@ from azents.engine.events.types import (
     ProviderToolCallPayload,
     ProviderToolReference,
     ProviderToolSemanticContent,
+    ScheduledTaskContinuationPayload,
+    ScheduledTaskResultPayload,
+    ScheduledTaskTriggerPayload,
     UserMessagePayload,
     build_native_compat_key,
 )
@@ -208,6 +211,51 @@ def test_external_channel_message_projects_source_metadata() -> None:
     assert "lifecycle" not in message.metadata
     assert "correction_of_revision_id" not in message.metadata
     assert message.metadata["event_render_key"] == f"event:{external_id}"
+
+
+def test_scheduled_task_events_validate_without_chat_message_projection() -> None:
+    """Scheduled Task lifecycle events remain available to REST history."""
+    scheduled_for = datetime.datetime(2030, 1, 2, 3, 4, 5, tzinfo=datetime.UTC)
+    cases = [
+        (
+            EventKind.SCHEDULED_TASK_TRIGGER,
+            ScheduledTaskTriggerPayload(
+                cycle_id="c" * 32,
+                title="Scheduled report",
+                content="Scheduled Task work is due.",
+            ),
+        ),
+        (
+            EventKind.SCHEDULED_TASK_CONTINUATION,
+            ScheduledTaskContinuationPayload(
+                cycle_id="c" * 32,
+                title="Scheduled report",
+                content="Continue Scheduled Task work.",
+            ),
+        ),
+        (
+            EventKind.SCHEDULED_TASK_RESULT,
+            ScheduledTaskResultPayload(
+                title="Scheduled report",
+                scheduled_for=scheduled_for,
+                status="finished",
+                result="Report completed.",
+            ),
+        ),
+    ]
+
+    for model_order, (kind, payload) in enumerate(cases, start=1):
+        row = RDBEvent(
+            session_id="session-1",
+            kind=kind,
+            payload=_JSON_PAYLOAD_ADAPTER.validate_python(
+                payload.model_dump(mode="json")
+            ),
+            model_order=model_order,
+        )
+        row.created_at = scheduled_for
+
+        assert event_to_chat_message(row) is None
 
 
 def test_provider_tool_call_projects_semantic_output_and_references() -> None:

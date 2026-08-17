@@ -33,11 +33,14 @@ code_paths:
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
   - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
   - python/apps/azents/src/azents/engine/tools/external_channel.py
+  - python/apps/azents/src/azents/engine/tools/scheduled.py
   - python/apps/azents/src/azents/engine/tooling/execution_context.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
+  - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
+  - python/apps/azents/src/azents/resources/vfs/toolkits/scheduled/**
   - python/apps/azents/src/azents/worker/deps.py
   - python/apps/azents/src/azents/worker/session/toolkit_scope.py
   - python/apps/azents/src/azents/repos/mcp_oauth_connection/**
@@ -53,8 +56,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-08-12
-spec_version: 92
+last_verified_at: 2026-08-16
+spec_version: 93
 ---
 
 # Toolkit
@@ -808,7 +811,37 @@ reply. It sends no reply, progress create/update, file, or unrelated provider ef
 The finished Work is no longer eligible for idle continuation. Ordinary Session Todo
 state remains separate and never becomes the Channel Work source of truth.
 
+## Scheduled Toolkit
+
+Scheduled Toolkit is a root-only, automatically connected Toolkit with no
+Workspace ToolkitConfig. Its management tools are always available in eligible
+root Runs:
+
+- `add_scheduled_task`
+- `list_scheduled_tasks`
+- `delete_scheduled_task`
+
+`submit_scheduled_task_result` is added only when the current AgentRun has an
+exact valid started Scheduled Task cycle. The terminal tool commits the canonical
+Session result and returns a terminal Tool result so execution ends without
+another model turn.
+
+Scheduled occurrence state uses Session-scoped Toolkit State with namespace
+`scheduled` and one cycle-specific state identity. It remains distinct from Todo,
+Goal, and External Channel Work state. The Toolkit registers both
+`on_session_idle` and `on_compaction_summary`: idle continuation emits typed
+Scheduled Task inputs for every current started cycle, while compaction replaces
+the sanitized active-work snapshot without creating another persistence source.
+
+The Toolkit also owns the release-bundled `scheduled-task` managed Skill under
+the immutable `azents://` VFS. The Skill is projected for eligible root Runs
+without requiring a separate Toolkit setup row.
+
 ## Changelog
+
+- **2026-08-16** (spec_version 93) — Added the root-only auto-bound Scheduled
+  Toolkit, exact management and terminal tools, cycle Toolkit State, idle and
+  compaction hooks, and release-bundled Scheduled Task Skill.
 
 - **2026-08-12** (spec_version 92) — Added the auto-bound Dynamic Worktree Toolkit, exact
   current-context create/remove authority, durable idempotent admission, and the closed

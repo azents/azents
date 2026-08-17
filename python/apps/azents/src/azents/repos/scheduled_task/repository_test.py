@@ -1,6 +1,7 @@
 """Scheduled Task repository tests."""
 
 import datetime
+from types import SimpleNamespace
 from typing import cast
 
 import sqlalchemy as sa
@@ -109,6 +110,42 @@ class _DeleteSession:
 
     async def flush(self) -> None:
         self.flushed = True
+
+
+class _ExpiredUpdatedAtTask(SimpleNamespace):
+    """Raise when conversion reads updated_at before an explicit refresh."""
+
+    updated_at_loaded: bool = True
+
+    def __getattribute__(self, name: str) -> object:
+        if name == "updated_at" and not super().__getattribute__("updated_at_loaded"):
+            raise RuntimeError("updated_at remains expired")
+        return super().__getattribute__(name)
+
+
+class _ClaimSession:
+    """Async session double that expires server-updated timestamps on flush."""
+
+    def __init__(self, row: _ExpiredUpdatedAtTask) -> None:
+        self.row = row
+        self.query: object | None = None
+        self.refreshed: list[tuple[object, list[str]]] = []
+
+    async def execute(self, query: object) -> _ScalarResult:
+        self.query = query
+        return _ScalarResult([cast(RDBScheduledTask, self.row)])
+
+    async def flush(self) -> None:
+        self.row.updated_at_loaded = False
+
+    async def refresh(
+        self,
+        row: object,
+        *,
+        attribute_names: list[str],
+    ) -> None:
+        self.refreshed.append((row, attribute_names))
+        self.row.updated_at_loaded = True
 
 
 def _sql(statement: object) -> str:
@@ -222,6 +259,44 @@ class TestScheduledTaskRepository:
             "ORDER BY scheduled_tasks.created_at ASC, scheduled_tasks.id ASC"
             in statement
         )
+
+    async def test_claim_due_refreshes_updated_at_before_conversion(self) -> None:
+        """Claim refreshes the server-updated timestamp before DTO conversion."""
+        row = _ExpiredUpdatedAtTask(
+            id="a" * 32,
+            workspace_id="w" * 32,
+            agent_id="a" * 32,
+            session_id="s" * 32,
+            binding_id=None,
+            title="Daily report",
+            objective="Prepare the report.",
+            schedule_type=ScheduledTaskScheduleType.ONCE,
+            scheduled_at=_dt(1),
+            cron_expression=None,
+            timezone=None,
+            next_eligible_at=_dt(1),
+            active_cycle_id=None,
+            active_scheduled_for=None,
+            pending_scheduled_for=None,
+            lease_owner=None,
+            lease_until=None,
+            created_at=_dt(0),
+            updated_at=_dt(0),
+        )
+        session = _ClaimSession(row)
+
+        claimed = await ScheduledTaskRepository().claim_due(
+            cast(AsyncSession, session),
+            now=_dt(1),
+            lease_owner="scheduler-1",
+            lease_until=_dt(5),
+            limit=1,
+        )
+
+        assert claimed[0].updated_at == _dt(0)
+        assert row.lease_owner == "scheduler-1"
+        assert row.lease_until == _dt(5)
+        assert session.refreshed == [(row, ["updated_at"])]
 
     async def test_delete_by_id_reports_exact_row_count(self) -> None:
         """Exact deletion reports whether one row was removed."""

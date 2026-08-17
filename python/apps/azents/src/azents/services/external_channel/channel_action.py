@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Annotated, assert_never, cast
+from typing import Annotated, NotRequired, TypedDict, assert_never, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -1871,22 +1871,83 @@ def _discord_embeds(value: object) -> list[dict[str, object]] | None:
             "title",
             "description",
             "color",
+            "fields",
         }:
             return None
         title = embed.get("title")
         description = embed.get("description")
         color = embed.get("color")
+        fields = _discord_embed_fields(embed.get("fields"))
         if (
-            not isinstance(title, str)
-            or not title
-            or len(title) > 256
-            or not isinstance(description, str)
-            or not description
-            or len(description) > 4_096
+            (title is not None and not isinstance(title, str))
+            or isinstance(title, str)
+            and (not title or len(title) > 256)
+            or (description is not None and not isinstance(description, str))
+            or isinstance(description, str)
+            and (not description or len(description) > 4_096)
+            or (embed.get("fields") is not None and fields is None)
+            or title is None
+            and description is None
+            and not fields
             or not isinstance(color, int)
             or not 0 <= color <= 0xFFFFFF
-            or len(title) + len(description) > 6_000
+            or sum(
+                (
+                    len(title) if isinstance(title, str) else 0,
+                    len(description) if isinstance(description, str) else 0,
+                    *(
+                        len(field["name"]) + len(field["value"])
+                        for field in fields or []
+                    ),
+                )
+            )
+            > 6_000
         ):
             return None
         embeds.append(embed)
     return embeds
+
+
+class _DiscordEmbedField(TypedDict):
+    """One validated Discord Embed field."""
+
+    name: str
+    value: str
+    inline: NotRequired[bool]
+
+
+def _discord_embed_fields(value: object) -> list[_DiscordEmbedField] | None:
+    """Validate the generated bounded Discord Embed field subset."""
+    if value is None:
+        return []
+    if not isinstance(value, list) or not value or len(value) > 25:
+        return None
+    fields: list[_DiscordEmbedField] = []
+    for field in value:
+        if not is_external_channel_projection(field) or set(field) not in (
+            {"name", "value"},
+            {"name", "value", "inline"},
+        ):
+            return None
+        name = field.get("name")
+        field_value = field.get("value")
+        inline = field.get("inline")
+        if (
+            not isinstance(name, str)
+            or not name
+            or len(name) > 256
+            or not isinstance(field_value, str)
+            or not field_value
+            or len(field_value) > 1_024
+            or inline is not None
+            and not isinstance(inline, bool)
+        ):
+            return None
+        fields.append(
+            {
+                "name": name,
+                "value": field_value,
+                **({"inline": inline} if isinstance(inline, bool) else {}),
+            }
+        )
+    return fields

@@ -17,13 +17,14 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-11 | 65 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-16 | 149 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-14 | 61 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-16 | 62 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-13 | 26 |
+| [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-17 | 1 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-12 | 92 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-16 | 93 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-06 | 10 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-13 | 67 |
 
@@ -36,19 +37,19 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-13 | 26 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-03 | 33 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-11 | 23 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-13 | 43 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-11 | 36 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-16 | 34 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-16 | 44 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-16 | 37 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-16 | 43 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-10 | 41 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-16 | 13 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-17 | 14 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-16 | 28 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-13 | 29 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-17 | 30 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-13 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-01 | 6 |
 
@@ -347,7 +348,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Sandbox Restore Retry and Explicit Reset Historical Requirements Reconstruction](requirements/sandbox-260524-sandbox-restore.md) | sandbox-260524 | 2026-05-24 | - |
 | [Sandbox System Redesign Historical Requirements Reconstruction](requirements/sandbox-260525-sandbox-redesign.md) | sandbox-260525 | 2026-05-25 | - |
 | [Scheduled Tasks Discussion Historical Requirements Reconstruction](requirements/scheduled-260331-scheduled-tasks.md) | scheduled-260331 | 2026-03-31 | - |
-| [Agent Scheduled Tasks Requirements](requirements/scheduled-260816-agent-scheduled-tasks.md) | scheduled-260816 | 2026-08-16 | - |
+| [Agent Scheduled Tasks Requirements](requirements/scheduled-260816-agent-scheduled-tasks.md) | scheduled-260816 | 2026-08-16 | 2026-08-17 |
 | [Use Default OpenAI SDK HTTP Retries Historical Requirements Reconstruction](requirements/sdk-260716-openai-sdk-http-retries.md) | sdk-260716 | 2026-07-16 | - |
 | [Tool Search and a Bounded Model-Visible Tool Working Set Historical Requirements Reconstruction](requirements/search-260717-search-bounded-working-set.md) | search-260717 | 2026-07-17 | - |
 | [Reset the Tool Search Working Set on Successful Compaction Historical Requirements Reconstruction](requirements/search-260720-search-working-set-on-compaction.md) | search-260720 | 2026-07-20 | - |

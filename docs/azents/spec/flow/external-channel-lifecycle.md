@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-11
-spec_version: 36
+last_verified_at: 2026-08-16
+spec_version: 37
 ---
 
 # External Channel Lifecycle
@@ -275,7 +275,25 @@ ended work, ordered task state, and the Activity Tracker projection state. Bindi
 disconnect also uses an in-product confirmation
 dialog. Restore controls do not imply provider reactivation.
 
+## Scheduled Task Cleanup
+
+Binding disconnect, route removal, connection removal, and App uninstall delete
+Scheduled Task definitions and pre-start trigger/admitted-cycle state that target
+the affected Binding. A cycle that already crossed the start-admission boundary
+remains valid Session work, but the disconnected Binding no longer authorizes
+progress, registration, or terminal provider effects.
+
+Session archive removes every Task and pre-start Scheduled input in the archived
+tree. It may preserve active Runs only when each running Session is executing a
+started Scheduled cycle; unrelated active work still blocks archive. Restore does
+not recreate removed scheduling authority. Permanent purge waits for preserved
+started cycles, removes residual Task/trigger/cycle state, and verifies absence
+before finalization.
+
 ## Changelog
+
+- **2026-08-16** (spec_version 37) — Added Scheduled Task Binding termination,
+  Session archive/restore, started-cycle preservation, and purge absence rules.
 
 - **2026-08-11** (spec_version 36) — Reused one authenticated pinned `discord.py`
   Client session across Discord activation metadata and command reconciliation while

@@ -605,10 +605,13 @@ class ScheduledTaskDispatcher:
         lease_owner: str,
         now: datetime.datetime | None = None,
     ) -> ScheduledTaskDispatchSummary:
-        """Claim and admit due Tasks; ``now`` is claim-time test input only."""
+        """Claim and admit due Tasks at one optional controlled pass instant."""
+        controlled_now = _utc(now) if now is not None else None
         summary = ScheduledTaskDispatchSummary()
         for _ in range(self.batch_size):
-            claim_now = _utc(now if now is not None else self.clock())
+            claim_now = (
+                controlled_now if controlled_now is not None else _utc(self.clock())
+            )
             async with self.session_manager() as session:
                 claimed = await self.task_repository.claim_due(
                     session,
@@ -625,7 +628,10 @@ class ScheduledTaskDispatcher:
                 task_id=task.id,
                 lease_owner=lease_owner,
                 lease_token=_lease_token(task),
-                now=_utc(self.clock()),
+                now=(
+                    controlled_now if controlled_now is not None else _utc(self.clock())
+                ),
+                controlled_now=controlled_now,
             )
             summary = summary.plus(
                 ScheduledTaskDispatchSummary(
@@ -654,6 +660,7 @@ class ScheduledTaskDispatcher:
         lease_owner: str,
         lease_token: datetime.datetime,
         now: datetime.datetime,
+        controlled_now: datetime.datetime | None,
     ) -> ScheduledTaskDispatchOutcome:
         async with self.session_manager() as session:
             task = await self.task_repository.lock_claimed_by_id(
@@ -665,7 +672,19 @@ class ScheduledTaskDispatcher:
             )
             if task is None:
                 raise RuntimeError("Scheduled Task claim fence was lost.")
-            await self.authority_validator.validate(session, task)
+            try:
+                await self.authority_validator.validate(session, task)
+            except InvalidScheduledTaskSchedule as error:
+                deleted = await self.task_repository.delete_by_session_and_id(
+                    session,
+                    session_id=task.session_id,
+                    task_id=task.id,
+                )
+                if not deleted:
+                    raise RuntimeError(
+                        "Scheduled Task authority cleanup lost its claim fence."
+                    ) from error
+                return ScheduledTaskDispatchOutcome(skipped=True)
             if task.active_cycle_id is not None:
                 if task.schedule_type is not ScheduledTaskScheduleType.CRON:
                     await self._complete_claim(
@@ -673,7 +692,7 @@ class ScheduledTaskDispatcher:
                         task,
                         lease_owner=lease_owner,
                         lease_token=_lease_token(task),
-                        lease_now=_utc(self.clock()),
+                        lease_now=self._lease_now(controlled_now),
                         next_eligible_at=task.next_eligible_at,
                         pending_scheduled_for=task.pending_scheduled_for,
                     )
@@ -691,7 +710,7 @@ class ScheduledTaskDispatcher:
                     task,
                     lease_owner=lease_owner,
                     lease_token=_lease_token(task),
-                    lease_now=_utc(self.clock()),
+                    lease_now=self._lease_now(controlled_now),
                     next_eligible_at=future,
                     pending_scheduled_for=pending,
                 )
@@ -776,13 +795,20 @@ class ScheduledTaskDispatcher:
                 task,
                 lease_owner=lease_owner,
                 lease_token=_lease_token(task),
-                lease_now=_utc(self.clock()),
+                lease_now=self._lease_now(controlled_now),
                 next_eligible_at=next_eligible_at,
                 active_cycle_id=cycle_id,
                 active_scheduled_for=scheduled_for,
                 pending_scheduled_for=None,
             )
             return ScheduledTaskDispatchOutcome(admitted=True)
+
+    def _lease_now(
+        self,
+        controlled_now: datetime.datetime | None,
+    ) -> datetime.datetime:
+        """Return the controlled pass instant or the current lease-fence time."""
+        return controlled_now if controlled_now is not None else _utc(self.clock())
 
     async def _complete_claim(
         self,

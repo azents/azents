@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-13
-spec_version: 29
+last_verified_at: 2026-08-17
+spec_version: 30
 ---
 
 # E2E Primary Test Strategy
@@ -118,6 +118,29 @@ Consumer policy:
 E2E and fixture/prerequisite diagnostic read only snapshot during test and do not run doctor again.
 
 E2E tests reproduce product behavior through user-facing UI, public/internal test APIs, slash commands, OAuth flow, or documented fixture/prerequisite setup. They must not insert, update, or delete product rows directly to manufacture feature state. Cleanup SQL is allowed only in explicitly scoped reset helpers, not inside feature scenario tests.
+
+Scheduled Task required E2E creates Workspace, Agent, Runtime, Session, and Task
+state through Public/Admin APIs and generated clients. A credential-free
+testenv-only Scheduler route on the existing Admin E2E server accepts one
+timezone-aware instant and executes one bounded due-dispatch pass. The route is
+mounted only when `AZ_TESTENV_API_ENABLED` is explicitly set. This avoids wall-clock
+waiting, direct product database mutation, production Scheduler configuration
+changes, and another suite-level service startup.
+
+Scheduled Task E2E is intentionally limited to two focused user journeys:
+
+1. create one Session-only one-time Task, read it through generated-client list and
+   get, then delete it through the same public API;
+2. create one Session-only Task due at the exact controlled instant, dispatch it
+   through the ordinary Mailbox and Worker path, observe its durable terminal
+   Session result, and verify automatic one-time deletion.
+
+Schedule validation and authorization variants, recurring cursor and coalescing,
+pre-start and post-start lifecycle races, provider registration and publication,
+Slack and Discord exact-thread behavior, provider failure/no-replay, Session and
+Binding cleanup, Web state projection, and compaction ordering and sanitization are
+covered by focused backend or frontend contract tests. They do not create a
+provider, lifecycle, compaction, or browser E2E cross-product.
 
 ## CI Policy
 
@@ -265,6 +288,11 @@ External substrate features such as Agent Runtime Provider are recorded in two l
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
+
+- **2026-08-17** (spec_version 30) — Added focused Scheduled Task
+  generated-client creation/readback and due-now execution journeys, moved
+  provider, lifecycle, recurrence, Web, and compaction combinations to focused
+  contract tests, and retained deterministic dispatch on the existing E2E server.
 
 - **2026-08-13** — v29. Replaced marker-selected deterministic, focused Runtime
   Provider, Web Surface, and unused live groupings with folder-owned `required` and

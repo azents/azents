@@ -12,14 +12,17 @@ code_paths:
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
   - python/apps/azents/src/azents/engine/tooling/toolkit_state.py
+  - python/apps/azents/src/azents/engine/tools/scheduled.py
+  - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
+  - python/apps/azents/src/azents/services/scheduled_task/rendering.py
   - python/apps/azents/src/azents/engine/run/commands.py
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-08-03
-spec_version: 33
+last_verified_at: 2026-08-16
+spec_version: 34
 ---
 
 # Context Compaction
@@ -221,6 +224,9 @@ the immediate shape of the recent interaction.
   hook dispatch completes.
 - Todo summary enrichment appends a `Todo Snapshot` section only when Todo state is non-empty.
 - Goal summary enrichment appends a `Goal Snapshot` section only for unfinished non-empty Goal state.
+- Scheduled summary enrichment replaces one bounded Scheduled Task section with
+  sanitized current started-cycle snapshots in deterministic order. It omits
+  admitted and terminalized cycles and does not mutate Toolkit State.
 - The stored summary content includes a bounded `Recent User Messages` section from
   the last five user messages and a bounded `Recent Transcript` section from the last
   five completed model turns, using `turn_marker` boundaries.
@@ -252,7 +258,24 @@ The immutable revision projected into a run remains the compaction input even
 when provider-current state later changes. Corrections appear only when a later
 authorized batch appends the corresponding revision event.
 
+## Scheduled Task Continuity
+
+Scheduled Toolkit enriches the generated summary before continuity history is
+appended. It removes any stale Scheduled Task section and inserts current started
+cycles ordered by their stable cycle state. Each entry retains only the title,
+objective, schedule, scheduled instant, progress title, and ordered work items
+needed to continue autonomously. Internal Task, cycle, Run, lease, Binding, and
+provider-message identities are omitted.
+
+The enricher reads the current Session-scoped cycle Toolkit State and creates no
+new durable authority. Task deletion, Session archive, or Binding disconnect does
+not remove a preserved started cycle from the summary until that cycle
+terminalizes.
+
 ## Changelog
+
+- **2026-08-16** (spec_version 34) — Added deterministic sanitized Scheduled Task
+  started-cycle summary replacement before bounded continuity history.
 
 - **2026-08-03** (spec_version 33) — Increased dynamic summary output headroom to 8% with a 50k-character limit and made checkpoint detail scale with task complexity without imposing a fixed target length.
 - **2026-08-03** (spec_version 32) — Reframed compaction output as an execution-ready general-agent checkpoint that reconstructs the current objective and furthest verified execution state.

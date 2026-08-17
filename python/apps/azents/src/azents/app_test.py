@@ -4,10 +4,12 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from azcommon.logging import RuntimeEnvironment
 
 from azents.app import (
     _create_container,
     create_public_api_app,
+    create_testenv_api_app,
     run_with_container,
 )
 from azents.core.enums import JobRuntimeBackend
@@ -16,6 +18,39 @@ from azents.job_runtime.deps import (
     get_job_runtime,
 )
 from azents.utils.appctx import AppContext
+
+
+@pytest.mark.parametrize(
+    ("enabled", "runtime_env", "message"),
+    [
+        (
+            False,
+            RuntimeEnvironment.LOCAL,
+            "AZ_TESTENV_API_ENABLED",
+        ),
+        (
+            True,
+            RuntimeEnvironment.DEPLOYED,
+            "AZ_RUNTIME_ENV=local",
+        ),
+    ],
+)
+def test_testenv_app_rejects_disabled_or_nonlocal_startup(
+    enabled: bool,
+    runtime_env: RuntimeEnvironment,
+    message: str,
+) -> None:
+    """Testenv routes never start without explicit enablement and local mode."""
+    config = cast(
+        Any,
+        MagicMock(
+            testenv_api_enabled=enabled,
+            runtime_env=runtime_env,
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        create_testenv_api_app(config)
 
 
 @pytest.mark.asyncio

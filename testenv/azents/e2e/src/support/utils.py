@@ -58,6 +58,17 @@ class TwoMemberTeamSession:
     session_id: str
 
 
+@dataclass(frozen=True)
+class AgentSessionSetup:
+    """Public-API-created Workspace, Agent, and primary Team Session."""
+
+    access_token: str
+    email: str
+    workspace_handle: str
+    agent_id: str
+    session_id: str
+
+
 PNG_1X1: bytes = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
     b"\x00\x00\x00\x01\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02"
@@ -291,10 +302,23 @@ def create_chat_session_with_agent(
     :param server_url: Public API server URL (http://host:port)
     :return: (access_token, session_id, agent_id) t
     """
-    uniq = unique()
-    token, _, _ = authenticate_user(
-        public_api_client, admin_api_client, email=f"file-test-{uniq}@example.com"
+    setup = create_agent_session_setup(
+        public_api_client,
+        admin_api_client,
+        server_url,
     )
+    return setup.access_token, setup.session_id, setup.agent_id
+
+
+def create_agent_session_setup(
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    server_url: str,
+) -> AgentSessionSetup:
+    """Create one Workspace, Agent, Runtime, and initialized primary Session."""
+    uniq = unique()
+    email = f"file-test-{uniq}@example.com"
+    token, _, _ = authenticate_user(public_api_client, admin_api_client, email=email)
 
     # workspace create
     ws_api = PublicWorkspaceV1Api(public_api_client)
@@ -384,7 +408,13 @@ def create_chat_session_with_agent(
     )
     response.raise_for_status()
 
-    return token, session_id, agent.id
+    return AgentSessionSetup(
+        access_token=token,
+        email=email,
+        workspace_handle=handle,
+        agent_id=agent.id,
+        session_id=session_id,
+    )
 
 
 def create_two_member_team_session(

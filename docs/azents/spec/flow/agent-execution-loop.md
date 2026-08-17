@@ -1226,6 +1226,21 @@ durable `goal_updated` control event with the updated Goal snapshot and wakes th
 way. `goal_updated` lowers to a user-role compatible prompt that tells the model the active Goal was
 updated by the user.
 
+Scheduled Toolkit is another idle hook provider. It returns one
+`ScheduledTaskSessionContinuationInput` for each current started cycle in
+deterministic order. The common idle-continuation transaction converts each input
+to a typed `scheduled_task_continuation` Mailbox item with a deterministic
+provider-local identity. Promotion appends the corresponding dedicated Event and
+binds the fresh AgentRun back to the same cycle. Admitted or terminalized cycles
+do not continue.
+
+When `submit_scheduled_task_result` returns a terminal client-tool result, the
+execution loop requires the canonical `scheduled_task_result` Event and
+AgentRun terminal-result projection to have committed first. The terminal tool
+call completes the Run without another model turn. A recovered duplicate result
+uses the existing cycle-derived Event identity and does not replay provider
+effects.
+
 ## External Channel Inputs, Tools, and Continuation
 
 Synchronous External Channel acceptance atomically commits the real Session, immutable
@@ -1274,6 +1289,10 @@ projections retain the dedicated kind, and the UI labels it with a channel/messa
 icon.
 
 ## Changelog
+
+- **2026-08-16** (spec_version 156) — Added Scheduled Task start binding, typed
+  multi-cycle idle continuation, and terminal-tool completion without another
+  model turn.
 
 - **2026-08-12** (spec_version 155) — Added the closed Agent-managed worktree tool-to-TurnAction
   bridge, forced post-tool polling, atomic terminal continuation, predecessor completion fence,

@@ -1,7 +1,8 @@
 ---
 title: "Agent Scheduled Tasks Design"
 created: 2026-08-16
-updated: 2026-08-16
+updated: 2026-08-17
+implemented: 2026-08-17
 tags: [scheduled-task, agent, session, scheduler, toolkit, external-channel, api, frontend]
 document_role: primary
 document_type: design
@@ -14,7 +15,7 @@ snapshot_id: scheduled-260816
 - Document reference: `scheduled-260816/DESIGN`
 - Requirements: [Agent Scheduled Tasks Requirements](../requirements/scheduled-260816-agent-scheduled-tasks.md) (`scheduled-260816/REQ`)
 - ADR: [Agent Scheduled Tasks](../adr/scheduled-260816-agent-scheduled-tasks.md) (`scheduled-260816/ADR`)
-- Design revision: `3`
+- Design revision: `4`
 - Mode: Collaborative
 - Decision owner: requester
 
@@ -853,88 +854,57 @@ replay.
 
 ### E2E primary verification matrix
 
-| Scenario | Session-only | Slack parent | Slack thread | Discord parent | Discord thread |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Create, list, inspect, edit, delete | Required | Required | Required | Required | Required |
-| One-time due execution and terminal result | Required | Required | Required | Required | Required |
-| Recurring continuation across Runs | Required | Representative | Representative | Representative | Representative |
-| Registration controls | N/A | Required | Required | Required | Required |
-| Activity Tracker and interim progress | N/A | Required | Required | Required | Required |
-| Exact-thread parent surfacing | N/A | N/A | Required | N/A | Required |
-| Provider failure without canonical rollback | N/A | Required | Representative | Required | Representative |
+| Journey | E2E responsibility | Contract-test responsibility |
+| --- | --- | --- |
+| Public API schedule creation and readback | Create one Session-only one-time Task through the generated client, then verify list, get, and delete through the same public surface | Canonical validation, Workspace and Session authority, opaque Binding identity, replacement, and conflict matrices |
+| Due-now one-time execution | Create one Session-only Task, dispatch at its exact scheduled instant, verify ordinary admission, durable terminal history, and automatic one-time deletion | Claims and leases, recurring cursor and coalescing, lifecycle races, provider publication, exact-thread behavior, recovery, Web projection, and compaction matrices |
 
 ### E2E plan
 
-Automated E2E tests use a deterministic test clock and testenv dispatcher control so
-they never wait for wall-clock cron boundaries. They verify:
+Automated E2E uses the generated Python client and one deterministic testenv
+dispatcher control, without wall-clock waiting or direct product database mutation.
+It contains two focused journeys:
 
-1. natural-language Agent creation loads the managed Skill and calls the exact
-   management tool;
-2. ordinary Session creation uses null channel target;
-3. source External Channel and explicit alternate Binding selection preserve exact
-   opaque handles;
-4. invalid, stale, disconnected, unauthorized, and wrong-Session identifiers fail
-   closed;
-5. one-time and cron schedule validation;
-6. same-Session context across recurring cycles;
-7. multiple Runs continue until the terminal tool;
-8. missed one-time recovery and cron coalescing;
-9. one active plus at most one pending occurrence per Task;
-10. pre-start deletion suppresses execution;
-11. post-start deletion preserves continuation and terminal result;
-12. Session archive and Binding disconnect delete associated Tasks and pre-start
-    work while preserving started Run continuation and Session terminal results,
-    including Scheduled-only archive admission and rejection of unrelated active
-    Runs or archived-Session continuations;
-13. canonical Session result survives provider failure;
-14. Slack thread parts use broadcast and Discord Thread parts are forwarded in order;
-15. UI CRUD, dedicated Session create/select, progress display, and Session
-    navigation; and
-16. no terminal history, pause, resume, rerun, or cancel-current-cycle UI appears;
-    and
-17. repeated compaction with multiple started cycles and unrelated current Runs
-    preserves sanitized current-work snapshots in deterministic tie order, replaces
-    stale Scheduled sections, and omits admitted or terminalized state as of the
-    read snapshot, including after Task deletion, Session archive, or Binding
-    disconnect.
+1. create a Session-only one-time Task, read it through list and get, and delete it;
+2. create a Session-only one-time Task due at the controlled dispatcher instant,
+   admit it through the ordinary Mailbox and Worker path, observe its durable
+   terminal Session result, and verify automatic one-time deletion.
+
+This boundary keeps one real management flow and one real execution flow while
+avoiding an E2E cross-product. Natural-language tool selection, schedule and
+authorization variants, recurring lifecycle, provider targets and failures,
+exact-thread publication, lifecycle cleanup, Web state projection, and compaction
+ordering are deterministic backend or frontend contract-test responsibilities.
 
 ### Testenv and fixtures
 
-Testenv support is required because real-time scheduling, crash boundaries, and
-provider failure classification are not deterministic through browser actions alone.
-Add:
+Testenv support is required only to execute one bounded dispatcher pass at an exact
+aware instant. The credential-free route is mounted only when
+`AZ_TESTENV_API_ENABLED` is explicitly set and reuses the existing E2E Admin server
+process; it is absent when that testenv setting is disabled. Task, Session, and
+Agent state is created through Public/Admin APIs; the execution journey uses the
+ordinary Worker and deterministic AIMock terminal-tool response.
 
-- clock-controlled Task creation and due-dispatch fixtures;
-- explicit dispatcher tick and worker-drain controls;
-- fake Slack and Discord provider adapters recording ordered operations;
-- provider outcomes for delivered, failed, unknown, and not attempted;
-- Session/Binding fixtures for parent and exact-thread targets;
-- lifecycle fixtures for archive, disconnect, route removal, and App uninstall;
-- worker crash points before admission commit, after admission commit, after start,
-  after terminal commit, and during provider effects; and
-- seeded Sessions containing multiple Tasks and unrelated FIFO input.
-
-Real Slack and Discord credentials are optional live verification prerequisites.
-CI-required product behavior uses deterministic fake providers. Live-provider suites
-may skip only when their declared credential snapshot is absent; when credentials are
-present, provider rejection or contract drift fails the suite.
+Provider, lifecycle, recurrence, recovery, and compaction combinations use focused
+backend fixtures and fakes. They do not add required E2E journeys or external
+credential prerequisites.
 
 ### Evidence
 
 CI evidence includes:
 
-- API responses and generated-client type checks;
-- Session history and live-event snapshots;
-- Task/cycle/Mailbox database invariant assertions;
-- ordered fake-provider operation records;
-- Web E2E screenshots for list, create/edit, progress, and terminal navigation;
-- exact-thread multipart ordering assertions; and
-- crash-recovery and no-replay assertions.
+- generated-client create/list/get/delete responses;
+- deterministic dispatch summary;
+- durable Session result history and automatic one-time deletion; and
+- focused backend and frontend contract-test results.
 
-Backend unit and integration tests additionally cover cron/DST calculation, SQL
-constraints and leases, exhaustive unions and all model lowerers, Toolkit State
-optimistic conflicts, compaction-summary ordering and sanitization, terminal
-idempotency, provider projection fences, and lifecycle registry ownership.
+Backend unit and integration tests cover cron/DST calculation, SQL constraints and
+leases, recurring cursor and coalescing, exhaustive unions and all model lowerers,
+Toolkit State optimistic conflicts, compaction-summary ordering and sanitization,
+terminal idempotency, provider presentation and projection fences, exact-thread
+publication, lifecycle cleanup, and registry ownership. Frontend checks cover the
+dedicated management surface, Session selection, current-cycle projection, and
+absence of unsupported lifecycle controls.
 
 ## Alternatives, Assumptions, and Non-Blocking Risks
 
@@ -951,7 +921,8 @@ Non-blocking implementation risks:
   source message to be forwardable. Provider rejection remains an immediate failed
   outcome and does not permit generated-summary fallback.
 - DST behavior can surprise users even when cron semantics are correct. UI schedule
-  preview and E2E DST fixtures should make the next instants visible.
+  preview and focused schedule-calculation tests should make the next instants
+  visible.
 - Provider interaction modals differ between Slack and Discord. Their local control
   layout is agent-owned as long as both reload and revalidate the same Task before
   mutation.
@@ -992,7 +963,7 @@ new authorities.
 
 ## Design Authority
 
-- Design revision: `3`
+- Design revision: `4`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -1029,7 +1000,7 @@ new authorities.
 
 - Mode: `Collaborative`
 - Decision owner: `requester`
-- Approved on: `2026-08-16`
-- Approved Design revision: `3`
+- Approved on: `2026-08-17`
+- Approved Design revision: `4`
 - Approved authority IDs: `M1`–`M15`
-- Approved scope: All material mechanisms in revision 3, including PostgreSQL scheduling authority, FIFO Session admission, Scheduled-owned cycle state and provider projections, canonical Session terminal results before one-attempt provider effects, exact Binding preservation, lifecycle removal of Tasks and pre-start work without interruption of started cycles, Public API and Web management, release-bundled Agent guidance, sanitized compaction continuity for started work, new typed protocol variants, and additive migration without legacy compatibility.
+- Approved scope: All material mechanisms in revision 4, including PostgreSQL scheduling authority, FIFO Session admission, Scheduled-owned cycle state and provider projections, canonical Session terminal results before one-attempt provider effects, exact Binding preservation, lifecycle removal of Tasks and pre-start work without interruption of started cycles, Public API and Web management, release-bundled Agent guidance, sanitized compaction continuity for started work, new typed protocol variants, and additive migration without legacy compatibility. Revision 4 retains M1–M15 unchanged and allocates the two core user journeys to E2E while assigning combinatorial behavior to focused backend and frontend contract tests.

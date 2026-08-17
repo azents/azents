@@ -29,6 +29,9 @@ from azents.engine.events.types import (
     ProviderToolCallPayload,
     ReasoningPayload,
     RunMarkerPayload,
+    ScheduledTaskContinuationPayload,
+    ScheduledTaskResultPayload,
+    ScheduledTaskTriggerPayload,
     SkillLoadedPayload,
     SystemErrorPayload,
     SystemReminderPayload,
@@ -109,6 +112,12 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
             return SystemErrorPayload.model_validate(row.payload)
         case EventKind.UNKNOWN_ADAPTER_OUTPUT:
             return UnknownAdapterOutputPayload.model_validate(row.payload)
+        case EventKind.SCHEDULED_TASK_TRIGGER:
+            return ScheduledTaskTriggerPayload.model_validate(row.payload)
+        case EventKind.SCHEDULED_TASK_CONTINUATION:
+            return ScheduledTaskContinuationPayload.model_validate(row.payload)
+        case EventKind.SCHEDULED_TASK_RESULT:
+            return ScheduledTaskResultPayload.model_validate(row.payload)
         case _:
             raise ValueError("Unsupported event kind")
 

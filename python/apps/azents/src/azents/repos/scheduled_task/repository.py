@@ -194,6 +194,8 @@ class ScheduledTaskRepository:
             row.lease_owner = lease_owner
             row.lease_until = lease_until
         await session.flush()
+        for row in rows:
+            await session.refresh(row, attribute_names=["updated_at"])
         return [self._build(row) for row in rows]
 
     async def complete_claim(

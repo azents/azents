@@ -21,6 +21,7 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItem, MailboxItemCreate
 from azents.repos.scheduled_task.data import ScheduledTask
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
+from azents.repos.scheduled_task.schedule import InvalidScheduledTaskSchedule
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleSnapshot
 from azents.services.chat.live_events import mailbox_item_to_live_event
@@ -72,6 +73,7 @@ class _TaskRepository:
         self.claim_calls = 0
         self.lock_calls: list[dict[str, object]] = []
         self.complete_calls: list[dict[str, object]] = []
+        self.delete_calls: list[dict[str, str]] = []
 
     async def claim_due(
         self,
@@ -130,6 +132,23 @@ class _TaskRepository:
         assert isinstance(lease_now, datetime.datetime)
         return lease_token > lease_now
 
+    async def delete_by_session_and_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        task_id: str,
+    ) -> bool:
+        tx = cast(_TransactionSession, session)
+        tx.staged.append("task_deleted")
+        self.delete_calls.append(
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+            }
+        )
+        return session_id == self.claimed.session_id and task_id == self.claimed.id
+
 
 class _CycleRepository:
     """Stage admitted cycle creation inside the fake transaction."""
@@ -169,7 +188,10 @@ class _MailboxRepository:
 
 
 class _AuthorityValidator:
-    """Accept every test Task authority target."""
+    """Accept or reject one test Task authority target."""
+
+    def __init__(self, error: InvalidScheduledTaskSchedule | None) -> None:
+        self.error = error
 
     async def validate(
         self,
@@ -177,6 +199,96 @@ class _AuthorityValidator:
         task: ScheduledTask,
     ) -> None:
         del session, task
+        if self.error is not None:
+            raise self.error
+
+
+class _SelectiveAuthorityValidator:
+    """Reject one exact Task while accepting later work in the same pass."""
+
+    def __init__(self, invalid_task_id: str) -> None:
+        self.invalid_task_id = invalid_task_id
+
+    async def validate(
+        self,
+        session: AsyncSession,
+        task: ScheduledTask,
+    ) -> None:
+        del session
+        if task.id == self.invalid_task_id:
+            raise InvalidScheduledTaskSchedule("Session authority is stale.")
+
+
+class _SequentialTaskRepository(_TaskRepository):
+    """Claim exact Tasks in order for one multi-item dispatcher pass."""
+
+    def __init__(self, tasks: list[ScheduledTask]) -> None:
+        super().__init__(claimed=tasks[0], locked=tasks[0])
+        self.tasks = tasks
+
+    async def claim_due(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime.datetime,
+        lease_owner: str,
+        lease_until: datetime.datetime,
+        limit: int,
+    ) -> list[ScheduledTask]:
+        del session, now, lease_owner, lease_until
+        assert limit == 1
+        index = self.claim_calls
+        self.claim_calls += 1
+        return [self.tasks[index]] if index < len(self.tasks) else []
+
+    async def lock_claimed_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        lease_owner: str,
+        lease_token: datetime.datetime,
+        now: datetime.datetime,
+    ) -> ScheduledTask | None:
+        del session
+        self.lock_calls.append(
+            {
+                "task_id": task_id,
+                "lease_owner": lease_owner,
+                "lease_token": lease_token,
+                "now": now,
+            }
+        )
+        task = next((item for item in self.tasks if item.id == task_id), None)
+        lease_until = None if task is None else task.lease_until
+        if (
+            task is None
+            or task.lease_owner != lease_owner
+            or lease_until != lease_token
+            or lease_until is None
+            or lease_until <= now
+        ):
+            return None
+        return task
+
+    async def delete_by_session_and_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        task_id: str,
+    ) -> bool:
+        tx = cast(_TransactionSession, session)
+        tx.staged.append("task_deleted")
+        self.delete_calls.append(
+            {
+                "session_id": session_id,
+                "task_id": task_id,
+            }
+        )
+        return any(
+            task.id == task_id and task.session_id == session_id for task in self.tasks
+        )
 
 
 class _Broker:
@@ -284,6 +396,8 @@ def _dispatcher(
     mailbox_repository: _MailboxRepository,
     broker: _Broker,
     clock: Callable[[], datetime.datetime],
+    authority_validator: _AuthorityValidator | _SelectiveAuthorityValidator,
+    batch_size: int = 1,
 ) -> ScheduledTaskDispatcher:
     """Compose a dispatcher from deterministic fakes."""
     return ScheduledTaskDispatcher(
@@ -293,11 +407,11 @@ def _dispatcher(
         broker=cast(SessionBroker, broker),
         authority_validator=cast(
             RDBScheduledTaskAuthorityValidator,
-            _AuthorityValidator(),
+            authority_validator,
         ),
         task_repository=cast(ScheduledTaskRepository, repository),
         clock=clock,
-        batch_size=1,
+        batch_size=batch_size,
         lease_duration=datetime.timedelta(minutes=1),
     )
 
@@ -356,6 +470,7 @@ async def test_dispatch_rejects_same_owner_newer_lease_token() -> None:
         mailbox_repository=mailbox_repository,
         broker=broker,
         clock=_clock(_NOW + datetime.timedelta(seconds=10)),
+        authority_validator=_AuthorityValidator(None),
     )
 
     with pytest.raises(RuntimeError, match="claim fence was lost"):
@@ -384,13 +499,15 @@ async def test_dispatch_rolls_back_when_lease_expires_during_admission() -> None
         mailbox_repository=mailbox_repository,
         broker=broker,
         clock=_clock(
+            _NOW,
             _NOW + datetime.timedelta(seconds=30),
             _NOW + datetime.timedelta(minutes=1, seconds=1),
         ),
+        authority_validator=_AuthorityValidator(None),
     )
 
     with pytest.raises(RuntimeError, match="claim fence was lost"):
-        await dispatcher.dispatch_once(lease_owner="scheduler-1", now=_NOW)
+        await dispatcher.dispatch_once(lease_owner="scheduler-1")
 
     assert len(cycle_repository.snapshots) == 1
     assert len(mailbox_repository.creates) == 1
@@ -421,6 +538,7 @@ async def test_dispatch_coalesces_active_recurring_occurrence_without_wake() -> 
             _NOW + datetime.timedelta(minutes=5),
             _NOW + datetime.timedelta(minutes=5, seconds=1),
         ),
+        authority_validator=_AuthorityValidator(None),
     )
 
     summary = await dispatcher.dispatch_once(
@@ -456,6 +574,7 @@ async def test_dispatch_commits_trigger_before_counting_wake_failure() -> None:
             _NOW + datetime.timedelta(seconds=10),
             _NOW + datetime.timedelta(seconds=20),
         ),
+        authority_validator=_AuthorityValidator(None),
     )
 
     summary = await dispatcher.dispatch_once(lease_owner="scheduler-1", now=_NOW)
@@ -500,3 +619,87 @@ async def test_dispatch_commits_trigger_before_counting_wake_failure() -> None:
     assert "Scheduled for: 2026-08-16T00:00:00Z" in event.payload.content
     assert "submit a failed result explaining what is missing" in event.payload.content
     assert broker.messages == [SessionWakeUp(session_id=task.session_id)]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_controlled_now_drives_recurring_cursor_and_lease() -> None:
+    """A test-controlled pass never mixes its instant with the wall clock."""
+    controlled_now = _NOW + datetime.timedelta(minutes=5)
+    task = _task(
+        schedule_type=ScheduledTaskScheduleType.CRON,
+        lease_until=controlled_now + datetime.timedelta(minutes=1),
+    )
+    manager = _SessionManager()
+    repository = _TaskRepository(claimed=task, locked=task)
+    cycle_repository = _CycleRepository()
+    mailbox_repository = _MailboxRepository()
+    broker = _Broker()
+
+    def unexpected_clock() -> datetime.datetime:
+        raise AssertionError("Controlled dispatch must not read the wall clock.")
+
+    dispatcher = _dispatcher(
+        manager=manager,
+        repository=repository,
+        cycle_repository=cycle_repository,
+        mailbox_repository=mailbox_repository,
+        broker=broker,
+        clock=unexpected_clock,
+        authority_validator=_AuthorityValidator(None),
+    )
+
+    summary = await dispatcher.dispatch_once(
+        lease_owner="scheduler-1",
+        now=controlled_now,
+    )
+
+    assert summary.admitted == 1
+    assert cycle_repository.snapshots[0].scheduled_for == _NOW
+    assert repository.complete_calls[0]["lease_now"] == controlled_now
+    assert repository.complete_calls[0]["next_eligible_at"] == (
+        controlled_now + datetime.timedelta(minutes=1)
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_deletes_invalid_authority_and_continues() -> None:
+    """Invalid authority fails closed without aborting later work in the pass."""
+    invalid = _task()
+    valid = dataclasses.replace(
+        _task(),
+        id="v" * 32,
+        session_id="r" * 32,
+    )
+    manager = _SessionManager()
+    repository = _SequentialTaskRepository([invalid, valid])
+    cycle_repository = _CycleRepository()
+    mailbox_repository = _MailboxRepository()
+    broker = _Broker()
+    dispatcher = _dispatcher(
+        manager=manager,
+        repository=repository,
+        cycle_repository=cycle_repository,
+        mailbox_repository=mailbox_repository,
+        broker=broker,
+        clock=_clock(),
+        authority_validator=_SelectiveAuthorityValidator(invalid.id),
+        batch_size=2,
+    )
+
+    summary = await dispatcher.dispatch_once(lease_owner="scheduler-1", now=_NOW)
+
+    assert summary.claimed == 2
+    assert summary.admitted == 1
+    assert summary.skipped == 1
+    assert repository.delete_calls == [
+        {
+            "session_id": invalid.session_id,
+            "task_id": invalid.id,
+        }
+    ]
+    assert len(repository.complete_calls) == 1
+    assert len(cycle_repository.snapshots) == 1
+    assert cycle_repository.snapshots[0].task_id == valid.id
+    assert len(mailbox_repository.creates) == 1
+    assert manager.committed == ["task_deleted", "cycle", "mailbox"]
+    assert broker.messages == [SessionWakeUp(session_id=valid.session_id)]
