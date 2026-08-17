@@ -667,7 +667,7 @@ def test_openai_sdk_lowerer_uses_standard_image_generation_tool(
 
 
 def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
-    """Replay only valid generated-image fields for stateless ChatGPT."""
+    """Complete legacy running image state when replaying stateless ChatGPT."""
     lowerer = OpenAIResponsesLowerer(
         provider="chatgpt_oauth",
         model="gpt-5.1",
@@ -691,7 +691,7 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
         item={
             "type": "image_generation_call",
             "id": "image-call-1",
-            "status": "completed",
+            "status": "generating",
             "action": "generate",
             "revised_prompt": "output-only prompt",
             "provider_extension": "output-only value",
@@ -704,7 +704,7 @@ def test_chatgpt_oauth_rehydrates_image_generation_with_store_false() -> None:
         payload=ProviderToolCallPayload(
             call_id="image-call-1",
             name="image_generation",
-            status="completed",
+            status="running",
             semantic=ProviderToolSemanticContent(
                 input=None,
                 output=[
@@ -2349,7 +2349,7 @@ def test_typed_normalizer_extracts_transient_generated_image() -> None:
                 {
                     "type": "image_generation_call",
                     "id": "image-call-1",
-                    "status": "completed",
+                    "status": "generating",
                     "result": _PNG_BASE64,
                 }
             ]
@@ -2360,8 +2360,10 @@ def test_typed_normalizer_extracts_transient_generated_image() -> None:
     assert len(completed.events) == 1
     payload = completed.events[0].payload
     assert isinstance(payload, ProviderToolCallPayload)
+    assert payload.status == "completed"
     assert payload.output == []
     assert "result" not in payload.native_artifact.item
+    assert payload.native_artifact.item["status"] == "generating"
     assert len(completed.pending_provider_files) == 1
     pending = completed.pending_provider_files[0]
     assert pending.call_id == "image-call-1"

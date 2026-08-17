@@ -230,7 +230,7 @@ class ResponsesOutputNormalizer:
             call_payload = ProviderToolCallPayload(
                 call_id=call_id,
                 name=provider_tool.name,
-                status=_canonical_provider_tool_status(output_item.get("status")),
+                status=_durable_provider_tool_status(output_item),
                 semantic=provider_tool.semantic,
                 native_artifact=artifact,
             )
@@ -686,6 +686,31 @@ def _canonical_provider_tool_status(
     if normalized == "interrupted":
         return "interrupted"
     return None
+
+
+def _durable_provider_tool_status(
+    output_item: dict[str, object],
+) -> (
+    Literal[
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted",
+    ]
+    | None
+):
+    """Use a generated image result as proof that its provider call completed."""
+    status = _canonical_provider_tool_status(output_item.get("status"))
+    result = output_item.get("result")
+    if (
+        output_item.get("type") == "image_generation_call"
+        and status in {None, "running"}
+        and isinstance(result, str)
+        and result
+    ):
+        return "completed"
+    return status
 
 
 def _incomplete_response_model_error(

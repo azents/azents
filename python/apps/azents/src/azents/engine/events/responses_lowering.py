@@ -982,10 +982,10 @@ def _lower_image_generation_native_item(
 ) -> dict[str, object]:
     """Rebuild one generated-image replay item for the Responses input schema."""
     native_status = native_item.get("status")
-    if isinstance(native_status, str) and native_status in {
-        "in_progress",
+    if result is not None:
+        replay_status = "completed"
+    elif isinstance(native_status, str) and native_status in {
         "completed",
-        "generating",
         "failed",
     }:
         replay_status = native_status
