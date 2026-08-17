@@ -16,6 +16,7 @@ from azents.core.enums import (
     AgentSessionKind,
     AgentSessionPrimaryKind,
     AgentSessionProductMode,
+    AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
@@ -1599,6 +1600,48 @@ class TestAgentSessionRepository:
                 title=None,
                 last_task_message=None,
             )
+
+    async def test_admit_input_wakeup_rejects_a_stop_request_atomically(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Wake admission returns the Session only while input remains eligible."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "input-wakeup-cas-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "input-wakeup-cas",
+        )
+        repo = AgentSessionRepository()
+        agent_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+
+        admitted = await repo.admit_input_wakeup(rdb_session, agent_session.id)
+
+        assert admitted is not None
+        assert admitted.run_state is AgentSessionRunState.RUNNING
+        stopped = await repo.request_stop(
+            rdb_session,
+            session_id=agent_session.id,
+            stop_request_id="input-wakeup-stop",
+            stop_requester_user_id=None,
+        )
+        assert stopped is not None
+
+        rejected = await repo.admit_input_wakeup(rdb_session, agent_session.id)
+
+        assert rejected is None
 
     async def test_subtree_stop_lock_serializes_concurrent_child_creation(
         self,

@@ -786,7 +786,7 @@ class ExternalChannelIngressDrainService:
                     raise RuntimeError(
                         "External Channel final control ownership disappeared."
                     )
-                target_session = await self.agent_session_repository.lock_by_id(
+                target_session = await self.agent_session_repository.get_by_id(
                     session,
                     batch.session_id,
                 )
@@ -835,10 +835,16 @@ class ExternalChannelIngressDrainService:
                     await self._reset_claim(batch)
                     return True
             if mailbox_results:
-                await self.agent_session_repository.mark_running_for_input_wakeup(
-                    session,
-                    batch.session_id,
+                admitted_session = (
+                    await self.agent_session_repository.admit_input_wakeup(
+                        session,
+                        batch.session_id,
+                    )
                 )
+                if admitted_session is None:
+                    await session.rollback()
+                    await self._reset_claim(batch)
+                    return True
                 wake = (mailbox_results[0].mailbox_item.id, batch.session_id)
             for failure in bounded_failures:
                 message = (
@@ -970,7 +976,7 @@ class ExternalChannelIngressDrainService:
             session,
             binding_id=batch.binding_id,
         )
-        target_session = await self.agent_session_repository.lock_by_id(
+        target_session = await self.agent_session_repository.get_by_id(
             session,
             batch.session_id,
         )

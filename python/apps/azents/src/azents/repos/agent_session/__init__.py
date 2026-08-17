@@ -1824,6 +1824,37 @@ class AgentSessionRepository:
         )
         await session.flush()
 
+    async def admit_input_wakeup(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> AgentSession | None:
+        """Atomically validate an input-eligible Session and request its wake."""
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.stop_requested_at.is_(None),
+            )
+            .values(
+                run_state=AgentSessionRunState.RUNNING,
+                run_heartbeat_at=sa.case(
+                    (
+                        RDBAgentSession.run_state != AgentSessionRunState.RUNNING,
+                        sa.func.now(),
+                    ),
+                    else_=RDBAgentSession.run_heartbeat_at,
+                ),
+            )
+            .returning(RDBAgentSession)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build(rdb)
+
     async def consume_pending_idle_continuation(
         self,
         session: AsyncSession,

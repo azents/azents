@@ -6,8 +6,8 @@ import datetime
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
-from unittest.mock import AsyncMock
+from typing import Any, cast
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import sqlalchemy as sa
@@ -1615,6 +1615,69 @@ async def test_admit_scheduled_continuation_rebinds_started_cycle(
 class TestMailboxService:
     """Validate MailboxService behavior."""
 
+    async def test_mailbox_batch_advances_last_user_input_once(self) -> None:
+        """Multiple promoted inputs share one maximum-timestamp update."""
+        repository = MagicMock(spec=EventTranscriptRepository)
+        repository.get_by_external_id = AsyncMock(return_value=None)
+        first_at = datetime.datetime(2026, 8, 17, 12, 0, tzinfo=datetime.UTC)
+        second_at = first_at + datetime.timedelta(seconds=1)
+        repository.append_with_deferred_last_user_input_at = AsyncMock(
+            side_effect=[
+                SimpleNamespace(
+                    id="event-1",
+                    kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                    created_at=first_at,
+                ),
+                SimpleNamespace(
+                    id="event-2",
+                    kind=EventKind.USER_MESSAGE,
+                    created_at=second_at,
+                ),
+            ]
+        )
+        repository.advance_session_last_user_input_at = AsyncMock()
+        service = _mailbox_item_service(
+            _unit_session_manager,
+            event_transcript_repository=repository,
+        )
+        session = AsyncMock(spec=AsyncSession)
+        promoted = [
+            SimpleNamespace(
+                external_id="external-1",
+                event_kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                payload={},
+                item_key=None,
+                buffer=SimpleNamespace(
+                    id="buffer-1",
+                    presentation=SimpleNamespace(item_key=None),
+                ),
+            ),
+            SimpleNamespace(
+                external_id="external-2",
+                event_kind=EventKind.USER_MESSAGE,
+                payload={},
+                item_key=None,
+                buffer=SimpleNamespace(
+                    id="buffer-2",
+                    presentation=SimpleNamespace(item_key=None),
+                ),
+            ),
+        ]
+
+        inserted = await service._append_mailbox_item_events(  # noqa: SLF001
+            session,
+            "session-1",
+            cast(Any, promoted),
+        )
+
+        assert [event.id for event in inserted] == ["event-1", "event-2"]
+        assert repository.append_with_deferred_last_user_input_at.await_count == 2
+        repository.advance_session_last_user_input_at.assert_awaited_once_with(
+            session,
+            session_id="session-1",
+            created_at=second_at,
+        )
+
     async def test_flush_admits_agent_remove_as_operation_action(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
@@ -2317,7 +2380,7 @@ class TestMailboxService:
         event_repository = EventTranscriptRepository()
         monkeypatch.setattr(
             event_repository,
-            "append",
+            "append_with_deferred_last_user_input_at",
             AsyncMock(side_effect=RuntimeError("event append failed")),
         )
         service = _mailbox_item_service(

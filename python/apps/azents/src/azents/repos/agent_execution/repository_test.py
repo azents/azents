@@ -288,6 +288,44 @@ class TestEventExecutionRepositories:
         assert stored_session.last_user_input_at == appended.created_at
         assert stored_session.last_activity_at == appended.created_at
 
+    async def test_last_user_input_at_never_moves_backward(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """An older batch timestamp cannot regress Session recency."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            handle="monotonic-last-input-ws",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repository = EventTranscriptRepository()
+        newer = event_session.created_at + datetime.timedelta(days=1)
+
+        await repository.advance_session_last_user_input_at(
+            rdb_session,
+            session_id=event_session.id,
+            created_at=newer,
+        )
+        await repository.advance_session_last_user_input_at(
+            rdb_session,
+            session_id=event_session.id,
+            created_at=event_session.created_at,
+        )
+        stored_session = await rdb_session.get(RDBAgentSession, event_session.id)
+        assert stored_session is not None
+        await rdb_session.refresh(stored_session)
+
+        assert stored_session.last_user_input_at == newer
+
     async def test_action_message_updates_last_activity_at(
         self,
         rdb_session: AsyncSession,
