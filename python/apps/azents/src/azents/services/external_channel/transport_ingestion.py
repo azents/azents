@@ -214,7 +214,22 @@ class ExternalChannelTransportIngestionService:
             thread_id=normalized.thread_id,
             message_id=normalized.message_id,
         )
-        if normalized.thread_id is not None:
+        if _discord_provisioned_root_starter_replay(
+            resource=resource,
+            channel_id=normalized.channel_id,
+            thread_id=normalized.thread_id,
+            parent_channel_id=normalized.parent_channel_id,
+            message_id=normalized.message_id,
+        ):
+            assert resource is not None
+            assert normalized.thread_id is not None
+            assert normalized.parent_channel_id is not None
+            provider_resource_key = resource.provider_resource_key
+            provider_channel_id = normalized.parent_channel_id
+            provider_thread_key = None
+            delivery_thread_key = normalized.thread_id
+            scope_kind = ExternalChannelConversationScopeKind.PARENT_CHANNEL
+        elif normalized.thread_id is not None:
             if normalized.parent_channel_id is None:
                 return _terminal_rejection()
             provider_resource_key = (
@@ -350,10 +365,37 @@ def _discord_resource_key(*, guild_id: str, conversation_id: str) -> str:
 
 
 def _discord_delivery_channel(resource: ExternalChannelResource | None) -> str | None:
+    return _discord_resource_label(resource, "delivery_channel_id")
+
+
+def _discord_resource_label(
+    resource: ExternalChannelResource | None,
+    key: str,
+) -> str | None:
     if resource is None or resource.labels is None:
         return None
-    value = resource.labels.get("delivery_channel_id")
+    value = resource.labels.get(key)
     return value if isinstance(value, str) and value else None
+
+
+def _discord_provisioned_root_starter_replay(
+    *,
+    resource: ExternalChannelResource | None,
+    channel_id: str,
+    thread_id: str | None,
+    parent_channel_id: str | None,
+    message_id: str,
+) -> bool:
+    """Recognize a starter replay from a Thread provisioned for one root message."""
+    return (
+        thread_id is not None
+        and parent_channel_id is not None
+        and channel_id == thread_id
+        and message_id == thread_id
+        and _discord_resource_label(resource, "source_channel_id") == parent_channel_id
+        and _discord_resource_label(resource, "root_message_id") == message_id
+        and _discord_resource_label(resource, "delivery_channel_id") == thread_id
+    )
 
 
 def _retryable_failure() -> ExternalChannelIngestionOutcome:

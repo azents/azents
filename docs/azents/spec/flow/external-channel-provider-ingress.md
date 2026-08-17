@@ -61,8 +61,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-14
-spec_version: 41
+last_verified_at: 2026-08-16
+spec_version: 43
 ---
 
 # External Channel Provider Ingress
@@ -273,7 +273,12 @@ durable queue content.
    physical source Resource and resolves the effective target Resource. Slack uses the
    parent channel for `location=channel` and the exact root/thread conversation for
    `location=threads`. Discord parent messages use the parent channel, while messages
-   inside an existing Discord Thread always use that Thread as an independent target.
+   inside an existing Discord Thread use that Thread as an independent target.
+   When Discord re-emits the exact starter message after Azents provisions a delivery
+   Thread for a parent-channel root, exact retained source-channel, root-message, and
+   delivery-channel labels normalize that replay back to the original parent-channel
+   root scope while preserving the delivery Thread identity. Provider-native Thread
+   starters remain independent Thread targets.
    An ordinary non-invocation stops before queue insertion when no connected Binding
    exists or its response mode is `mention_only`. Parent-channel participation and
    `all_messages` authority never admit ordinary traffic from an unbound Discord
@@ -340,6 +345,15 @@ durable queue content.
    `SessionWakeUp(session_id)`. Broker failure does not roll back mailbox input.
    Existing pending-mailbox and stuck-Session recovery consume the committed input
    without provider resend or a durable wake row.
+
+The Local Job Runtime and drain emit content-free structured diagnostics for one
+execution lifecycle. The execution key correlates Job Runtime timeout or handled
+failure with lease acquisition or coalescing, owner readiness, batch preparation,
+transactional finalization, cancellation, coordination exhaustion, and idle lease
+release. Drain logs include bounded owner, connection, Session, lease generation,
+batch, provider-set, count, stage, deadline, and duration fields. They never include
+message bodies, provider payloads, credentials, tokens, signed URLs, attachment
+contents, or raw provider exception text.
 
 Provisioning and item history each have at most five provider attempts and at most five
 minutes of original owner/item age. Retryable preparation retains every item unchanged,
@@ -480,6 +494,12 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-16** (spec_version 43) — Added content-free execution, lease, batch,
+  stage, deadline, cancellation, and duration correlation for ingress drain
+  diagnostics.
+- **2026-08-16** (spec_version 42) — Normalized the exact Discord starter replay from
+  an Azents-provisioned delivery Thread back to its parent-channel root history scope
+  while preserving provider-native Thread starter scope.
 - **2026-08-14** (spec_version 41) — Made Discord Thread participation independent
   from its parent channel: unbound Thread traffic is mention-gated, while an existing
   Thread Binding retains its own `all_messages` continuation.

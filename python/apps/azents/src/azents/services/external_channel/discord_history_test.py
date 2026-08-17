@@ -114,6 +114,25 @@ def _deadline(seconds: float = 1) -> ExternalChannelOperationDeadline:
 async def test_root_history_fetches_only_canonical_sdk_message() -> None:
     """An unthreaded root never imports unrelated parent-channel history."""
     exact = _message(100, content="Need help")
+    exact["attachments"] = {
+        "files": [
+            {
+                "provider": "discord",
+                "provider_file_id": "500",
+                "name": "selfie.png",
+                "title": None,
+                "media_type": "image/png",
+                "declared_size": 123,
+                "mode": None,
+                "external": False,
+                "file_access": None,
+                "supported": True,
+                "unsupported_reason": None,
+                "source_channel_id": "200",
+            }
+        ]
+    }
+    exact["attachments_truncated"] = False
     exact["embeds"] = [
         {
             "title": "Incident",
@@ -137,13 +156,29 @@ async def test_root_history_fetches_only_canonical_sdk_message() -> None:
 
     assert [message.message_id for message in page.messages] == ["100"]
     assert page.messages[0].attachment_metadata == {
+        "files": [
+            {
+                "provider": "discord",
+                "provider_file_id": "500",
+                "name": "selfie.png",
+                "title": None,
+                "media_type": "image/png",
+                "declared_size": 123,
+                "mode": None,
+                "external": False,
+                "file_access": None,
+                "supported": True,
+                "unsupported_reason": None,
+                "source_channel_id": "200",
+            }
+        ],
         "embeds": [
             {
                 "title": "Incident",
                 "description": "A visible provider card.",
                 "has_image": True,
             }
-        ]
+        ],
     }
     assert page.next_cursor is None
     assert factory.opens == 1

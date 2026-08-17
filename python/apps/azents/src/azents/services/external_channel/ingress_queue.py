@@ -1,5 +1,6 @@
 """Durable Session-bound External Channel ingress admission and draining."""
 
+import asyncio
 import dataclasses
 import datetime
 import enum
@@ -8,6 +9,7 @@ import logging
 import time
 from typing import Annotated, Literal, assert_never
 
+from azcommon.logging import bind_extra
 from azcommon.uuid import uuid7
 from fastapi import Depends
 from pydantic import BaseModel
@@ -244,8 +246,10 @@ class ExternalChannelIngressDrainService:
         *,
         owner_id: str,
         deadline: datetime.datetime,
+        job_execution_key: str,
     ) -> None:
         """Acquire one conversation-owner lease and process due batches until idle."""
+        drain_started_at = time.perf_counter()
         lease_owner = uuid7().hex
         now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:
@@ -258,14 +262,66 @@ class ExternalChannelIngressDrainService:
             )
             await session.commit()
         if claim is None:
+            logger.info(
+                "External Channel ingress drain did not acquire lease",
+                extra={
+                    "job_execution_key": job_execution_key,
+                    "external_channel_ingress_owner_id": owner_id,
+                    "external_channel_ingress_lease_owner": lease_owner,
+                    "external_channel_ingress_drain_duration_seconds": max(
+                        0.0,
+                        time.perf_counter() - drain_started_at,
+                    ),
+                    "job_deadline": deadline.isoformat(),
+                },
+            )
             return
+        L = bind_extra(
+            logger,
+            {
+                "job_execution_key": job_execution_key,
+                "external_channel_ingress_owner_id": owner_id,
+                "external_channel_ingress_lease_owner": lease_owner,
+                "external_channel_ingress_lease_generation": (
+                    claim.owner.lease_generation
+                ),
+                "external_channel_connection_id": claim.owner.connection_id,
+                "external_channel_session_id": claim.owner.session_id,
+            },
+        )
+        L.info(
+            "External Channel ingress drain acquired lease",
+            extra={
+                "external_channel_ingress_owner_ready": claim.owner.ready,
+                "external_channel_ingress_owner_age_seconds": max(
+                    0,
+                    int((now - claim.owner.created_at).total_seconds()),
+                ),
+                "external_channel_ingress_lease_expires_at": min(
+                    deadline,
+                    now + _LEASE_DURATION,
+                ).isoformat(),
+                "job_deadline": deadline.isoformat(),
+            },
+        )
         if not claim.owner.ready and not await self._prepare_owner(
             owner=claim.owner,
             lease_owner=lease_owner,
             lease_generation=claim.owner.lease_generation,
         ):
+            L.info(
+                "External Channel ingress drain stopped during owner preparation",
+                extra={
+                    "external_channel_ingress_drain_duration_seconds": max(
+                        0.0,
+                        time.perf_counter() - drain_started_at,
+                    )
+                },
+            )
             return
         coordination_retries = 0
+        processed_batch_count = 0
+        processed_item_count = 0
         while True:
             now = datetime.datetime.now(datetime.UTC)
             async with self.session_manager() as session:
@@ -286,15 +342,97 @@ class ExternalChannelIngressDrainService:
                         lease_generation=claim.owner.lease_generation,
                     )
                     await session.commit()
+                L.info(
+                    "External Channel ingress drain released idle lease",
+                    extra={
+                        "external_channel_ingress_processed_batch_count": (
+                            processed_batch_count
+                        ),
+                        "external_channel_ingress_processed_item_count": (
+                            processed_item_count
+                        ),
+                        "external_channel_ingress_drain_duration_seconds": max(
+                            0.0,
+                            time.perf_counter() - drain_started_at,
+                        ),
+                    },
+                )
                 return
             self.metrics.record_claim(len(batch.items))
-            started_at = time.perf_counter()
+            processed_batch_count += 1
+            processed_item_count += len(batch.items)
+            batch_started_at = time.perf_counter()
+            batch_logger = bind_extra(
+                L,
+                {
+                    "external_channel_ingress_batch_id": batch.batch_id,
+                    "external_channel_ingress_batch_item_count": len(batch.items),
+                    "external_channel_ingress_providers": sorted(
+                        {item.provider.value for item in batch.items}
+                    ),
+                },
+            )
+            stage = "provider_preparation"
+            batch_logger.info("External Channel ingress batch preparation started")
             try:
                 prepared = await self._prepare_batch(batch, deadline=deadline)
+                batch_logger.info(
+                    "External Channel ingress batch preparation completed",
+                    extra={
+                        "external_channel_ingress_prepared_success_count": sum(
+                            isinstance(item, _PreparedSuccess) for item in prepared
+                        ),
+                        "external_channel_ingress_prepared_suppressed_count": sum(
+                            isinstance(item, _PreparedSuppressed) for item in prepared
+                        ),
+                        "external_channel_ingress_prepared_failure_count": sum(
+                            isinstance(item, _PreparedFailure) for item in prepared
+                        ),
+                        "external_channel_ingress_stage_duration_seconds": max(
+                            0.0,
+                            time.perf_counter() - batch_started_at,
+                        ),
+                    },
+                )
+                stage = "transactional_finalization"
+                finalization_started_at = time.perf_counter()
+                batch_logger.info("External Channel ingress batch finalization started")
                 stale = await self._finalize_batch(batch, prepared=prepared)
+                batch_logger.info(
+                    "External Channel ingress batch finalization completed",
+                    extra={
+                        "external_channel_ingress_coordination_stale": stale,
+                        "external_channel_ingress_stage_duration_seconds": max(
+                            0.0,
+                            time.perf_counter() - finalization_started_at,
+                        ),
+                        "external_channel_ingress_batch_duration_seconds": max(
+                            0.0,
+                            time.perf_counter() - batch_started_at,
+                        ),
+                    },
+                )
+            except asyncio.CancelledError:
+                batch_logger.warning(
+                    "External Channel ingress batch processing cancelled",
+                    extra={
+                        "external_channel_ingress_active_stage": stage,
+                        "external_channel_ingress_batch_duration_seconds": max(
+                            0.0,
+                            time.perf_counter() - batch_started_at,
+                        ),
+                        "external_channel_ingress_deadline_remaining_seconds": max(
+                            0.0,
+                            (
+                                deadline - datetime.datetime.now(datetime.UTC)
+                            ).total_seconds(),
+                        ),
+                    },
+                )
+                raise
             finally:
                 self.metrics.record_processing_duration(
-                    time.perf_counter() - started_at
+                    time.perf_counter() - batch_started_at
                 )
             if stale:
                 coordination_retries += 1
@@ -303,6 +441,19 @@ class ExternalChannelIngressDrainService:
                         owner_id=owner_id,
                         lease_owner=lease_owner,
                         lease_generation=claim.owner.lease_generation,
+                    )
+                    L.warning(
+                        "External Channel ingress drain released lease after "
+                        "coordination exhaustion",
+                        extra={
+                            "external_channel_ingress_coordination_retry_count": (
+                                coordination_retries
+                            ),
+                            "external_channel_ingress_drain_duration_seconds": max(
+                                0.0,
+                                time.perf_counter() - drain_started_at,
+                            ),
+                        },
                     )
                     return
                 continue
@@ -987,6 +1138,7 @@ async def execute_external_channel_ingress_job(
     await service.drain(
         owner_id=payload.owner_id,
         deadline=context.request.deadline,
+        job_execution_key=context.request.execution_key,
     )
     return {"owner_id": payload.owner_id}
 

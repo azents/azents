@@ -362,6 +362,17 @@ def project_discord_message(
         projection["attachments_truncated"] = (
             len(attachments) > MAX_EXTERNAL_CHANNEL_FILES
         )
+    elif is_external_channel_projection(attachments):
+        projection["attachments"] = _project_attachment_metadata(
+            attachments,
+            source_channel_id=channel_id,
+        )
+        files = attachments.get("files")
+        projection["attachments_truncated"] = (
+            message.get("attachments_truncated") is True
+            or isinstance(files, list)
+            and len(files) > MAX_EXTERNAL_CHANNEL_FILES
+        )
     embeds = message.get("embeds")
     if isinstance(embeds, list):
         projection["embeds"] = _project_embeds(embeds)
@@ -560,6 +571,30 @@ def _project_attachments(
                 else ExternalChannelFileUnsupportedReason.MISSING_FILE_ID
             ),
         )
+        projected_metadata = metadata.model_dump(mode="json")
+        projected_metadata["source_channel_id"] = source_channel_id
+        files.append(projected_metadata)
+    return {"files": files}
+
+
+def _project_attachment_metadata(
+    attachments: dict[str, object],
+    *,
+    source_channel_id: str,
+) -> dict[str, object]:
+    """Revalidate an existing bounded attachment projection without dropping it."""
+    raw_files = attachments.get("files")
+    if not isinstance(raw_files, list):
+        raise ValueError("Discord attachment projection is invalid.")
+    files: list[dict[str, object]] = []
+    for raw_file in raw_files[:MAX_EXTERNAL_CHANNEL_FILES]:
+        if not is_external_channel_projection(raw_file):
+            continue
+        values = dict(raw_file)
+        values.pop("source_channel_id", None)
+        metadata = ExternalChannelFileMetadata.model_validate(values)
+        if metadata.provider is not ExternalChannelProvider.DISCORD:
+            raise ValueError("Discord attachment provider is invalid.")
         projected_metadata = metadata.model_dump(mode="json")
         projected_metadata["source_channel_id"] = source_channel_id
         files.append(projected_metadata)
