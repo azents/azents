@@ -213,6 +213,15 @@ export const AgentProfileLinksToDirectory = {
   },
 } satisfies Story;
 
+export const ScheduledTasksNavigation = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("link", { name: /Scheduled Tasks/i }),
+    ).toHaveAttribute("href", "/w/engineering/agents/agent_01/scheduled-tasks");
+  },
+} satisfies Story;
+
 export const UserMenuOpen = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

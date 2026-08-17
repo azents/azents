@@ -924,7 +924,8 @@
           "settings": "Settings",
           "projects": "Projects",
           "context": "Context",
-          "channels": "Channels"
+          "channels": "Channels",
+          "scheduledTasks": "Scheduled Tasks"
         },
         "status": {
           "enabled": "Active",
@@ -1504,7 +1505,93 @@
       "runtimeFreeDefaultTitle": "No Runtime is the default",
       "runtimeFreeDefaultDescription": "Without a Runtime, the agent keeps model, Memory, external channel, and remote tool access. Select an available Profile only when local shell, files, Workspace, Project, Git, build, or test capabilities are required.",
       "shellRuntimeRequiredTitle": "Managed Runtime required",
-      "shellRuntimeRequiredDescription": "Shell settings become available after you <runtimeLink>add a managed Runtime</runtimeLink>."
+      "shellRuntimeRequiredDescription": "Shell settings become available after you <runtimeLink>add a managed Runtime</runtimeLink>.",
+      "scheduledTasks": {
+        "title": "Scheduled Tasks",
+        "description": "Run this Agent once or on a recurring schedule in an existing Session.",
+        "newTask": "New task",
+        "listTitle": "Tasks",
+        "emptyTitle": "No Scheduled Tasks yet",
+        "emptyDescription": "Create a task to run this Agent at a specific time or on a recurring schedule.",
+        "selectTitle": "Select a task",
+        "selectDescription": "Choose a Scheduled Task to inspect its schedule, target, and current progress.",
+        "sessionFallback": "Untitled Session",
+        "objective": "Objective",
+        "schedule": "Schedule",
+        "session": "Session",
+        "deliveryTarget": "Delivery target",
+        "sessionOnly": "Session only — no External Channel delivery",
+        "nextEligible": "Next eligible {value}",
+        "edit": "Edit",
+        "delete": "Delete",
+        "create": "Create task",
+        "save": "Save changes",
+        "cancel": "Cancel",
+        "conflictError": "This task changed or started before the operation completed. Reload the latest state and try again.",
+        "deleteConfirmTitle": "Delete Scheduled Task?",
+        "deleteConfirmDescription": "Delete “{title}”?",
+        "deletePermanent": "This permanently removes the future schedule. Current work that has already started is not cancelled.",
+        "scheduleType": {
+          "once": "One time",
+          "cron": "Recurring"
+        },
+        "executionState": {
+          "idle": "Waiting",
+          "admitted": "Queued",
+          "running": "Running",
+          "running_with_pending": "Running · next occurrence pending"
+        },
+        "location": {
+          "channel": "Channel",
+          "threads": "Thread"
+        },
+        "cycle": {
+          "title": "Current cycle",
+          "description": "Progress for the occurrence currently queued or running.",
+          "empty": "No occurrence is currently queued or running.",
+          "inProgress": "Scheduled work in progress",
+          "scheduledFor": "Scheduled for {value}",
+          "startedAt": "Started {value}",
+          "orderedTasks": "Current tasks",
+          "phase": {
+            "admitted": "Queued",
+            "started": "Started"
+          }
+        },
+        "form": {
+          "createTitle": "Create Scheduled Task",
+          "editTitle": "Edit Scheduled Task",
+          "sessionLabel": "Session",
+          "sessionDescription": "Select the existing Team or private Session that will own the scheduled work.",
+          "sessionEditDescription": "A Scheduled Task stays with its original Session.",
+          "teamSessions": "Team Sessions",
+          "userSessions": "My private Sessions",
+          "createTeamSession": "Create empty Team Session",
+          "titleLabel": "Task title",
+          "objectiveLabel": "Objective",
+          "objectiveDescription": "Plain-text instructions the Agent should complete for each occurrence.",
+          "scheduleTypeLabel": "Schedule type",
+          "oneTimeLabel": "Run at",
+          "oneTimeDescription": "Uses your local date and time and stores the instant in UTC.",
+          "cronLabel": "Cron expression",
+          "cronDescription": "Standard five-field cron expression.",
+          "timezoneLabel": "Timezone",
+          "timezoneDescription": "IANA timezone used to evaluate the cron schedule.",
+          "bindingLabel": "External Channel target (optional)",
+          "bindingDescription": "Choose an active Binding from the selected Session. The task still runs in the Session.",
+          "bindingLoading": "Loading targets…",
+          "bindingPlaceholder": "Session only"
+        },
+        "validation": {
+          "sessionRequired": "Select a Session.",
+          "titleRequired": "Enter a task title.",
+          "objectiveRequired": "Enter an objective.",
+          "oneTimeRequired": "Choose a date and time.",
+          "oneTimeInvalid": "Enter a valid date and time.",
+          "cronRequired": "Enter a cron expression.",
+          "timezoneRequired": "Enter an IANA timezone."
+        }
+      }
     },
     "toolkits": {
       "headline": "Toolkits",

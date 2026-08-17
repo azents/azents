@@ -924,7 +924,8 @@
           "settings": "설정",
           "projects": "프로젝트",
           "context": "컨텍스트",
-          "channels": "채널"
+          "channels": "채널",
+          "scheduledTasks": "예약 작업"
         },
         "status": {
           "enabled": "활성",
@@ -1504,7 +1505,93 @@
       "runtimeFreeDefaultTitle": "기본값은 Runtime 없음입니다",
       "runtimeFreeDefaultDescription": "Runtime이 없어도 모델, Memory, 외부 채널, 원격 도구는 사용할 수 있습니다. 로컬 Shell, 파일, Workspace, Project, Git, 빌드, 테스트가 필요할 때만 사용 가능한 Profile을 선택하세요.",
       "shellRuntimeRequiredTitle": "관리형 Runtime이 필요합니다",
-      "shellRuntimeRequiredDescription": "<runtimeLink>관리형 Runtime을 추가</runtimeLink>한 뒤 Shell 설정을 변경할 수 있습니다."
+      "shellRuntimeRequiredDescription": "<runtimeLink>관리형 Runtime을 추가</runtimeLink>한 뒤 Shell 설정을 변경할 수 있습니다.",
+      "scheduledTasks": {
+        "title": "예약 작업",
+        "description": "기존 세션에서 이 에이전트를 한 번 또는 반복 일정으로 실행합니다.",
+        "newTask": "새 작업",
+        "listTitle": "작업",
+        "emptyTitle": "아직 예약 작업이 없습니다",
+        "emptyDescription": "특정 시각이나 반복 일정에 이 에이전트를 실행할 작업을 만드세요.",
+        "selectTitle": "작업을 선택하세요",
+        "selectDescription": "예약 작업을 선택하면 일정, 대상, 현재 진행 상황을 확인할 수 있습니다.",
+        "sessionFallback": "제목 없는 세션",
+        "objective": "목표",
+        "schedule": "일정",
+        "session": "세션",
+        "deliveryTarget": "전달 대상",
+        "sessionOnly": "세션에서만 실행 · 외부 채널로 전달하지 않음",
+        "nextEligible": "다음 실행 가능 시각: {value}",
+        "edit": "편집",
+        "delete": "삭제",
+        "create": "작업 만들기",
+        "save": "변경 사항 저장",
+        "cancel": "취소",
+        "conflictError": "작업이 이미 변경되었거나 실행을 시작했습니다. 최신 상태를 다시 불러온 뒤 시도하세요.",
+        "deleteConfirmTitle": "예약 작업을 삭제할까요?",
+        "deleteConfirmDescription": "“{title}” 작업을 삭제할까요?",
+        "deletePermanent": "앞으로의 일정이 영구적으로 삭제됩니다. 이미 시작된 현재 작업은 취소되지 않습니다.",
+        "scheduleType": {
+          "once": "한 번",
+          "cron": "반복"
+        },
+        "executionState": {
+          "idle": "대기",
+          "admitted": "실행 대기열",
+          "running": "실행 중",
+          "running_with_pending": "실행 중 · 다음 일정 대기"
+        },
+        "location": {
+          "channel": "채널",
+          "threads": "스레드"
+        },
+        "cycle": {
+          "title": "현재 실행",
+          "description": "현재 대기 중이거나 실행 중인 일정의 진행 상황입니다.",
+          "empty": "현재 대기 중이거나 실행 중인 일정이 없습니다.",
+          "inProgress": "예약 작업 진행 중",
+          "scheduledFor": "예정 시각: {value}",
+          "startedAt": "시작 시각: {value}",
+          "orderedTasks": "현재 작업 목록",
+          "phase": {
+            "admitted": "대기열 등록",
+            "started": "시작됨"
+          }
+        },
+        "form": {
+          "createTitle": "예약 작업 만들기",
+          "editTitle": "예약 작업 편집",
+          "sessionLabel": "세션",
+          "sessionDescription": "예약 작업을 소유할 기존 팀 세션 또는 개인 세션을 선택하세요.",
+          "sessionEditDescription": "예약 작업의 기존 세션은 변경할 수 없습니다.",
+          "teamSessions": "팀 세션",
+          "userSessions": "내 개인 세션",
+          "createTeamSession": "빈 팀 세션 만들기",
+          "titleLabel": "작업 제목",
+          "objectiveLabel": "목표",
+          "objectiveDescription": "각 실행에서 에이전트가 완료해야 할 내용을 일반 텍스트로 입력하세요.",
+          "scheduleTypeLabel": "일정 유형",
+          "oneTimeLabel": "실행 시각",
+          "oneTimeDescription": "현재 기기의 현지 시각을 사용하고 UTC 시각으로 저장합니다.",
+          "cronLabel": "Cron 표현식",
+          "cronDescription": "표준 5필드 Cron 표현식을 입력하세요.",
+          "timezoneLabel": "시간대",
+          "timezoneDescription": "Cron 일정을 계산할 IANA 시간대입니다.",
+          "bindingLabel": "외부 채널 대상(선택 사항)",
+          "bindingDescription": "선택한 세션의 활성 Binding을 고르세요. 작업 자체는 세션에서 실행됩니다.",
+          "bindingLoading": "대상을 불러오는 중…",
+          "bindingPlaceholder": "세션에서만 실행"
+        },
+        "validation": {
+          "sessionRequired": "세션을 선택하세요.",
+          "titleRequired": "작업 제목을 입력하세요.",
+          "objectiveRequired": "목표를 입력하세요.",
+          "oneTimeRequired": "날짜와 시각을 선택하세요.",
+          "oneTimeInvalid": "올바른 날짜와 시각을 입력하세요.",
+          "cronRequired": "Cron 표현식을 입력하세요.",
+          "timezoneRequired": "IANA 시간대를 입력하세요."
+        }
+      }
     },
     "toolkits": {
       "headline": "툴킷",

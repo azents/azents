@@ -924,7 +924,8 @@
           "settings": "Paramètres",
           "projects": "Projets",
           "context": "Contexte",
-          "channels": "Canaux"
+          "channels": "Canaux",
+          "scheduledTasks": "Tâches planifiées"
         },
         "status": {
           "enabled": "Actif",
@@ -1504,7 +1505,93 @@
       "runtimeFreeDefaultTitle": "Aucun environnement par défaut",
       "runtimeFreeDefaultDescription": "Sans environnement, l’agent conserve l’accès au modèle, à la mémoire, aux canaux externes et aux outils distants. Sélectionnez un profil uniquement si le shell local, les fichiers, l’espace de travail, les projets, Git, la compilation ou les tests sont nécessaires.",
       "shellRuntimeRequiredTitle": "Environnement géré requis",
-      "shellRuntimeRequiredDescription": "Les paramètres du shell deviennent disponibles après avoir <runtimeLink>ajouté un environnement géré</runtimeLink>."
+      "shellRuntimeRequiredDescription": "Les paramètres du shell deviennent disponibles après avoir <runtimeLink>ajouté un environnement géré</runtimeLink>.",
+      "scheduledTasks": {
+        "title": "Tâches planifiées",
+        "description": "Exécutez cet agent une fois ou selon une récurrence dans une session existante.",
+        "newTask": "Nouvelle tâche",
+        "listTitle": "Tâches",
+        "emptyTitle": "Aucune tâche planifiée",
+        "emptyDescription": "Créez une tâche pour exécuter cet agent à une heure précise ou selon une récurrence.",
+        "selectTitle": "Sélectionnez une tâche",
+        "selectDescription": "Choisissez une tâche planifiée pour consulter sa planification, sa destination et sa progression.",
+        "sessionFallback": "Session sans titre",
+        "objective": "Objectif",
+        "schedule": "Planification",
+        "session": "Session",
+        "deliveryTarget": "Destination",
+        "sessionOnly": "Session uniquement · aucune publication sur un canal externe",
+        "nextEligible": "Prochaine exécution possible : {value}",
+        "edit": "Modifier",
+        "delete": "Supprimer",
+        "create": "Créer la tâche",
+        "save": "Enregistrer",
+        "cancel": "Annuler",
+        "conflictError": "La tâche a été modifiée ou démarrée avant la fin de l’opération. Rechargez son état actuel puis réessayez.",
+        "deleteConfirmTitle": "Supprimer la tâche planifiée ?",
+        "deleteConfirmDescription": "Supprimer « {title} » ?",
+        "deletePermanent": "La planification future sera définitivement supprimée. Le travail déjà démarré ne sera pas annulé.",
+        "scheduleType": {
+          "once": "Une fois",
+          "cron": "Récurrente"
+        },
+        "executionState": {
+          "idle": "En attente",
+          "admitted": "En file",
+          "running": "En cours",
+          "running_with_pending": "En cours · prochaine occurrence en attente"
+        },
+        "location": {
+          "channel": "Canal",
+          "threads": "Fil"
+        },
+        "cycle": {
+          "title": "Exécution actuelle",
+          "description": "Progression de l’occurrence actuellement en file ou en cours.",
+          "empty": "Aucune occurrence n’est actuellement en file ou en cours.",
+          "inProgress": "Travail planifié en cours",
+          "scheduledFor": "Planifiée pour {value}",
+          "startedAt": "Démarrée le {value}",
+          "orderedTasks": "Tâches actuelles",
+          "phase": {
+            "admitted": "En file",
+            "started": "Démarrée"
+          }
+        },
+        "form": {
+          "createTitle": "Créer une tâche planifiée",
+          "editTitle": "Modifier la tâche planifiée",
+          "sessionLabel": "Session",
+          "sessionDescription": "Sélectionnez la session d’équipe ou privée existante qui possédera le travail planifié.",
+          "sessionEditDescription": "Une tâche planifiée reste liée à sa session d’origine.",
+          "teamSessions": "Sessions d’équipe",
+          "userSessions": "Mes sessions privées",
+          "createTeamSession": "Créer une session d’équipe vide",
+          "titleLabel": "Titre de la tâche",
+          "objectiveLabel": "Objectif",
+          "objectiveDescription": "Instructions en texte brut que l’agent doit accomplir à chaque occurrence.",
+          "scheduleTypeLabel": "Type de planification",
+          "oneTimeLabel": "Exécuter le",
+          "oneTimeDescription": "Utilise la date et l’heure locales de votre appareil et enregistre l’instant en UTC.",
+          "cronLabel": "Expression Cron",
+          "cronDescription": "Expression Cron standard à cinq champs.",
+          "timezoneLabel": "Fuseau horaire",
+          "timezoneDescription": "Fuseau horaire IANA utilisé pour calculer la planification Cron.",
+          "bindingLabel": "Destination de canal externe (facultative)",
+          "bindingDescription": "Choisissez un Binding actif de la session sélectionnée. La tâche s’exécute toujours dans la session.",
+          "bindingLoading": "Chargement des destinations…",
+          "bindingPlaceholder": "Session uniquement"
+        },
+        "validation": {
+          "sessionRequired": "Sélectionnez une session.",
+          "titleRequired": "Saisissez un titre.",
+          "objectiveRequired": "Saisissez un objectif.",
+          "oneTimeRequired": "Choisissez une date et une heure.",
+          "oneTimeInvalid": "Saisissez une date et une heure valides.",
+          "cronRequired": "Saisissez une expression Cron.",
+          "timezoneRequired": "Saisissez un fuseau horaire IANA."
+        }
+      }
     },
     "toolkits": {
       "headline": "Toolkits",

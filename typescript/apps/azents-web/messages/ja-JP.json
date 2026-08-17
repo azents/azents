@@ -924,7 +924,8 @@
           "settings": "設定",
           "projects": "プロジェクト",
           "context": "コンテキスト",
-          "channels": "チャンネル"
+          "channels": "チャンネル",
+          "scheduledTasks": "スケジュールタスク"
         },
         "status": {
           "enabled": "有効",
@@ -1504,7 +1505,93 @@
       "runtimeFreeDefaultTitle": "デフォルトはランタイムなしです",
       "runtimeFreeDefaultDescription": "ランタイムがなくても、モデル、メモリ、外部チャネル、リモートツールは利用できます。ローカルシェル、ファイル、ワークスペース、プロジェクト、Git、ビルド、テストが必要な場合のみプロファイルを選択してください。",
       "shellRuntimeRequiredTitle": "管理対象ランタイムが必要です",
-      "shellRuntimeRequiredDescription": "<runtimeLink>管理対象ランタイムを追加</runtimeLink>すると、シェル設定を変更できます。"
+      "shellRuntimeRequiredDescription": "<runtimeLink>管理対象ランタイムを追加</runtimeLink>すると、シェル設定を変更できます。",
+      "scheduledTasks": {
+        "title": "スケジュールタスク",
+        "description": "既存のセッションで、このエージェントを一度だけ、または繰り返し実行します。",
+        "newTask": "新しいタスク",
+        "listTitle": "タスク",
+        "emptyTitle": "スケジュールタスクはまだありません",
+        "emptyDescription": "指定した時刻または繰り返しスケジュールでエージェントを実行するタスクを作成します。",
+        "selectTitle": "タスクを選択",
+        "selectDescription": "スケジュールタスクを選択すると、スケジュール、対象、現在の進捗を確認できます。",
+        "sessionFallback": "無題のセッション",
+        "objective": "目的",
+        "schedule": "スケジュール",
+        "session": "セッション",
+        "deliveryTarget": "配信先",
+        "sessionOnly": "セッション内のみ · 外部チャンネルには配信しません",
+        "nextEligible": "次回実行可能日時: {value}",
+        "edit": "編集",
+        "delete": "削除",
+        "create": "タスクを作成",
+        "save": "変更を保存",
+        "cancel": "キャンセル",
+        "conflictError": "操作の完了前にタスクが変更されたか、実行が開始されました。最新の状態を読み込み直して再試行してください。",
+        "deleteConfirmTitle": "スケジュールタスクを削除しますか？",
+        "deleteConfirmDescription": "「{title}」を削除しますか？",
+        "deletePermanent": "今後のスケジュールは完全に削除されます。すでに開始した現在の作業はキャンセルされません。",
+        "scheduleType": {
+          "once": "一度だけ",
+          "cron": "繰り返し"
+        },
+        "executionState": {
+          "idle": "待機中",
+          "admitted": "キュー済み",
+          "running": "実行中",
+          "running_with_pending": "実行中 · 次回分を待機"
+        },
+        "location": {
+          "channel": "チャンネル",
+          "threads": "スレッド"
+        },
+        "cycle": {
+          "title": "現在の実行",
+          "description": "現在キューに入っている、または実行中の回の進捗です。",
+          "empty": "現在キューに入っている、または実行中の回はありません。",
+          "inProgress": "スケジュールされた作業を実行中",
+          "scheduledFor": "予定日時: {value}",
+          "startedAt": "開始日時: {value}",
+          "orderedTasks": "現在のタスク",
+          "phase": {
+            "admitted": "キュー済み",
+            "started": "開始済み"
+          }
+        },
+        "form": {
+          "createTitle": "スケジュールタスクを作成",
+          "editTitle": "スケジュールタスクを編集",
+          "sessionLabel": "セッション",
+          "sessionDescription": "スケジュールされた作業を所有する既存のチームまたはプライベートセッションを選択します。",
+          "sessionEditDescription": "スケジュールタスクは作成時のセッションに固定されます。",
+          "teamSessions": "チームセッション",
+          "userSessions": "自分のプライベートセッション",
+          "createTeamSession": "空のチームセッションを作成",
+          "titleLabel": "タスク名",
+          "objectiveLabel": "目的",
+          "objectiveDescription": "各実行でエージェントが完了する内容をプレーンテキストで入力します。",
+          "scheduleTypeLabel": "スケジュール種別",
+          "oneTimeLabel": "実行日時",
+          "oneTimeDescription": "端末の現地日時を使用し、UTCの日時として保存します。",
+          "cronLabel": "Cron式",
+          "cronDescription": "標準の5フィールドCron式を入力します。",
+          "timezoneLabel": "タイムゾーン",
+          "timezoneDescription": "Cronスケジュールの計算に使用するIANAタイムゾーンです。",
+          "bindingLabel": "外部チャンネルの配信先（任意）",
+          "bindingDescription": "選択したセッションの有効なBindingを選びます。タスク自体はセッションで実行されます。",
+          "bindingLoading": "配信先を読み込み中…",
+          "bindingPlaceholder": "セッション内のみ"
+        },
+        "validation": {
+          "sessionRequired": "セッションを選択してください。",
+          "titleRequired": "タスク名を入力してください。",
+          "objectiveRequired": "目的を入力してください。",
+          "oneTimeRequired": "日付と時刻を選択してください。",
+          "oneTimeInvalid": "有効な日付と時刻を入力してください。",
+          "cronRequired": "Cron式を入力してください。",
+          "timezoneRequired": "IANAタイムゾーンを入力してください。"
+        }
+      }
     },
     "toolkits": {
       "headline": "ツールキット",
