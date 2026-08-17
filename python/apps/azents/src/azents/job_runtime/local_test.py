@@ -2,7 +2,6 @@
 
 import asyncio
 import datetime
-import logging
 from collections.abc import Callable
 from typing import cast
 
@@ -219,71 +218,6 @@ async def test_deadline_cancels_cooperative_handler() -> None:
     assert outcome.error_code == "TimeoutError"
     assert cancelled.is_set()
     assert runtime.active_count == 0
-
-
-@pytest.mark.asyncio
-async def test_handler_deadline_logs_safe_execution_correlation(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """A handler timeout identifies its stage without logging request payload."""
-    private_payload = "private-provider-token"
-
-    async def handler(_context: JobExecutionContext) -> None:
-        await asyncio.Event().wait()
-
-    runtime = _runtime(handler)
-    request = JobRequest(
-        handler_key="test.handler",
-        execution_key="external-channel-ingress:owner-1:lifecycle-1",
-        deadline=datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=0.01),
-        payload={"private": private_payload},
-    )
-
-    with caplog.at_level(logging.WARNING):
-        outcome = await (await runtime.submit(request)).wait()
-
-    assert outcome.status is JobOutcomeStatus.TIMED_OUT
-    assert private_payload not in caplog.text
-    record = next(
-        record
-        for record in caplog.records
-        if record.message == "Registered job execution timed out"
-    )
-    assert record.__dict__["job_handler_key"] == "test.handler"
-    assert record.__dict__["job_execution_key"] == request.execution_key
-    assert record.__dict__["job_timeout_stage"] == "handler"
-    assert record.__dict__["job_handler_settled_after_cancellation"] is True
-    assert isinstance(record.__dict__["job_duration_seconds"], float)
-
-
-@pytest.mark.asyncio
-async def test_handler_failure_logs_only_safe_error_metadata(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """A handled exception omits its potentially sensitive message and traceback."""
-    private_error = "signed-provider-url-with-secret"
-
-    async def handler(_context: JobExecutionContext) -> None:
-        raise RuntimeError(private_error)
-
-    runtime = _runtime(handler)
-    request = _request("external-channel-ingress:owner-1:lifecycle-1")
-
-    with caplog.at_level(logging.ERROR):
-        outcome = await (await runtime.submit(request)).wait()
-
-    assert outcome.status is JobOutcomeStatus.FAILED
-    assert private_error not in caplog.text
-    record = next(
-        record
-        for record in caplog.records
-        if record.message == "Registered job handler failed"
-    )
-    assert record.exc_info is None
-    assert record.__dict__["job_handler_key"] == "test.handler"
-    assert record.__dict__["job_execution_key"] == request.execution_key
-    assert record.__dict__["job_error_code"] == "RuntimeError"
-    assert isinstance(record.__dict__["job_duration_seconds"], float)
 
 
 class _TrackedContainer:

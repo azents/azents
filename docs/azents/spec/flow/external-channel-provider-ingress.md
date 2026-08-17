@@ -61,8 +61,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-16
-spec_version: 43
+last_verified_at: 2026-08-17
+spec_version: 45
 ---
 
 # External Channel Provider Ingress
@@ -346,23 +346,16 @@ durable queue content.
    Existing pending-mailbox and stuck-Session recovery consume the committed input
    without provider resend or a durable wake row.
 
-The Local Job Runtime and drain emit content-free structured diagnostics for one
-execution lifecycle. The execution key correlates Job Runtime timeout or handled
-failure with lease acquisition or coalescing, owner readiness, batch preparation,
-transactional finalization, cancellation, coordination exhaustion, and idle lease
-release. Drain logs include bounded owner, connection, Session, lease generation,
-batch, provider-set, count, stage, deadline, and duration fields. They never include
-message bodies, provider payloads, credentials, tokens, signed URLs, attachment
-contents, or raw provider exception text.
-
 Provisioning and item history each have at most five provider attempts and at most five
 minutes of original owner/item age. Retryable preparation retains every item unchanged,
 sets one bounded owner due time, releases the lease, and is not resubmitted before that
 time. Attempt/age exhaustion, excessive delay, stale authority, malformed provider
 data, stopped Session state, and terminal provider classifications emit one sanitized
 warning and remove the applicable active owner/items or item. Raw provider errors and
-message content are never logged. A later eligible provider redelivery may create a new
-owner only after the terminal owner is gone.
+message content are never logged. An exact-trigger-missing classification emits a
+specific sanitized warning, deletes that item without retry or mailbox admission, and
+continues processing the remaining batch. A later eligible provider redelivery may
+create a new owner only after the terminal owner is gone.
 
 An exact connected thread Binding wins route resolution. Otherwise Single uses its
 sole route, Multi uses one valid channel default, and the active participation setting
@@ -494,6 +487,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-17** (spec_version 45) — Made exact-trigger-missing ingress explicitly
+  warn, delete the item without retry or mailbox admission, and continue the batch.
+- **2026-08-17** (spec_version 44) — Removed the broad ingress-drain diagnostic
+  lifecycle contract introduced in version 43.
 - **2026-08-16** (spec_version 43) — Added content-free execution, lease, batch,
   stage, deadline, cancellation, and duration correlation for ingress drain
   diagnostics.

@@ -177,7 +177,6 @@ class LocalJobRuntime:
 
     async def _execute(self, request: JobRequest) -> JobOutcome:
         """Run one registered handler inside a task-local DI container."""
-        started_at = time.perf_counter()
         handler = self.handlers.get(request.handler_key)
         if handler is None:
             return JobOutcome.failed(
@@ -185,22 +184,10 @@ class LocalJobRuntime:
             )
         remaining = self._remaining_seconds(request)
         if remaining <= 0:
-            self._log_timeout(
-                request,
-                stage="before_concurrency_wait",
-                started_at=started_at,
-                handler_settled=None,
-            )
             return JobOutcome.timed_out()
         try:
             await asyncio.wait_for(self._semaphore.acquire(), timeout=remaining)
         except TimeoutError:
-            self._log_timeout(
-                request,
-                stage="concurrency_wait",
-                started_at=started_at,
-                handler_settled=None,
-            )
             return JobOutcome.timed_out()
 
         container_stack: AsyncExitStack | None = AsyncExitStack()
@@ -208,22 +195,10 @@ class LocalJobRuntime:
         try:
             remaining = self._remaining_seconds(request)
             if remaining <= 0:
-                self._log_timeout(
-                    request,
-                    stage="before_container_start",
-                    started_at=started_at,
-                    handler_settled=None,
-                )
                 return JobOutcome.timed_out()
             container_context = self.container_factory()
             remaining = self._remaining_seconds(request)
             if remaining <= 0:
-                self._log_timeout(
-                    request,
-                    stage="before_container_enter",
-                    started_at=started_at,
-                    handler_settled=None,
-                )
                 return JobOutcome.timed_out()
             try:
                 container = await asyncio.wait_for(
@@ -231,21 +206,9 @@ class LocalJobRuntime:
                     timeout=remaining,
                 )
             except TimeoutError:
-                self._log_timeout(
-                    request,
-                    stage="container_enter",
-                    started_at=started_at,
-                    handler_settled=None,
-                )
                 return JobOutcome.timed_out()
             remaining = self._remaining_seconds(request)
             if remaining <= 0:
-                self._log_timeout(
-                    request,
-                    stage="before_handler",
-                    started_at=started_at,
-                    handler_settled=None,
-                )
                 return JobOutcome.timed_out()
             handler_task = asyncio.ensure_future(
                 handler(JobExecutionContext(request=request, container=container))
@@ -273,12 +236,6 @@ class LocalJobRuntime:
                     )
                     container_stack = None
                     release_semaphore = False
-                self._log_timeout(
-                    request,
-                    stage="handler",
-                    started_at=started_at,
-                    handler_settled=settled,
-                )
                 return JobOutcome.timed_out()
             try:
                 result = handler_task.result()
@@ -288,18 +245,6 @@ class LocalJobRuntime:
             except asyncio.CancelledError:
                 raise
             except Exception as error:
-                logger.error(
-                    "Registered job handler failed",
-                    extra={
-                        "job_handler_key": request.handler_key,
-                        "job_execution_key": request.execution_key,
-                        "job_error_code": type(error).__name__,
-                        "job_duration_seconds": max(
-                            0.0,
-                            time.perf_counter() - started_at,
-                        ),
-                    },
-                )
                 return JobOutcome.failed(error)
         finally:
             if container_stack is not None:
@@ -421,27 +366,3 @@ class LocalJobRuntime:
     def _remaining_seconds(request: JobRequest) -> float:
         """Return seconds remaining before one request's absolute deadline."""
         return (request.deadline - datetime.datetime.now(datetime.UTC)).total_seconds()
-
-    @staticmethod
-    def _log_timeout(
-        request: JobRequest,
-        *,
-        stage: str,
-        started_at: float,
-        handler_settled: bool | None,
-    ) -> None:
-        """Record one content-free absolute-deadline outcome."""
-        logger.warning(
-            "Registered job execution timed out",
-            extra={
-                "job_handler_key": request.handler_key,
-                "job_execution_key": request.execution_key,
-                "job_timeout_stage": stage,
-                "job_handler_settled_after_cancellation": handler_settled,
-                "job_deadline": request.deadline.isoformat(),
-                "job_duration_seconds": max(
-                    0.0,
-                    time.perf_counter() - started_at,
-                ),
-            },
-        )
