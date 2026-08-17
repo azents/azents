@@ -4,6 +4,7 @@ import logging
 from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -30,14 +31,30 @@ from azents.testing.external_channel import make_provider_effect_plan
 from .route import router
 
 
+def _create_route_app() -> FastAPI:
+    """Create the External Channel callback route app once."""
+    app = FastAPI()
+    app.include_router(router, prefix="/external-channel/v1")
+    return app
+
+
+_ROUTE_APP = _create_route_app()
+
+
+@pytest.fixture(autouse=True)
+def _reset_dependency_overrides() -> None:
+    """Prevent dependency overrides from leaking between tests."""
+    _ROUTE_APP.dependency_overrides.clear()
+
+
 def _client(service: AsyncMock) -> TestClient:
-    app = create_dummy_public_app()
+    app = _ROUTE_APP
     app.dependency_overrides[SlackHTTPAdmissionService] = lambda: service
     return TestClient(app)
 
 
 def _discord_client(service: AsyncMock) -> TestClient:
-    app = create_dummy_public_app()
+    app = _ROUTE_APP
     app.dependency_overrides[DiscordHTTPAdmissionService] = lambda: service
     return TestClient(app)
 

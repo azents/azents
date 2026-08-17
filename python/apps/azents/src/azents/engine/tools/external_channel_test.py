@@ -1,10 +1,14 @@
 """External Channel root Toolkit tests."""
 
 import json
+import logging
 from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorTransferFailure,
+)
 
 from azents.core.enums import (
     ExternalChannelActionMode,
@@ -44,6 +48,8 @@ from azents.services.external_channel.channel_action import (
 )
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileDownloadResult,
+    ExternalChannelFileTransferExecutionError,
+    ExternalChannelFileTransferFailure,
     ExternalChannelFileTransferService,
 )
 from azents.services.external_channel.provider_effect import ProviderEffectOutcome
@@ -146,6 +152,19 @@ class _FileTransferService:
                 expected_size=42,
             ),
         )
+
+
+class _FailingFileTransferService(_FileTransferService):
+    def __init__(self, error: ExternalChannelFileTransferExecutionError) -> None:
+        super().__init__()
+        self.error = error
+
+    async def download(
+        self,
+        **kwargs: object,
+    ) -> ExternalChannelFileDownloadResult:
+        self.calls.append(kwargs)
+        raise self.error
 
 
 def _toolkit(
@@ -383,6 +402,92 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
         runtime_id="runtime-1",
         desired_generation=1,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stage", "cause", "detail", "coordinator_failure"),
+    [
+        (
+            "runtime_transfer",
+            "ServerToRuntimeTransferError",
+            "Prepared object size does not match source",
+            CoordinatorTransferFailure.STREAM,
+        ),
+        (
+            "provider_staging_cleanup",
+            "S3TransferCleanupRequired",
+            None,
+            None,
+        ),
+    ],
+)
+async def test_download_external_file_logs_secret_free_failure_context(
+    caplog: pytest.LogCaptureFixture,
+    stage: str,
+    cause: str,
+    detail: str | None,
+    coordinator_failure: CoordinatorTransferFailure | None,
+) -> None:
+    """Handled download failures retain searchable transfer correlation fields."""
+    transfer = _FailingFileTransferService(
+        ExternalChannelFileTransferExecutionError(
+            "Failed to write the Runtime file: /tmp/file.jpg.",
+            failure=ExternalChannelFileTransferFailure(
+                stage=stage,
+                cause=cause,
+                detail=detail,
+                coordinator_failure=coordinator_failure,
+            ),
+        )
+    )
+    toolkit = _toolkit(
+        _ActionService([_snapshot()]),
+        file_transfer_service=transfer,
+        file_storage=cast(FileStorage, object()),
+    )
+    state = await toolkit.update_context(_turn_context())
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="azents.engine.tools.external_channel",
+    ):
+        with pytest.raises(FunctionToolError, match="Failed to write"):
+            await state.tools[1].handler(
+                json.dumps(
+                    {
+                        "file": (
+                            "external-file:v1:discord:binding-1:channel-1:"
+                            "message-1:file-1"
+                        ),
+                        "path": "/tmp/file.jpg",
+                        "overwrite": True,
+                    }
+                )
+            )
+
+    record = caplog.records[-1]
+    fields = record.__dict__
+    assert record.message == "External Channel file download failed"
+    assert fields["session_id"] == "session-1"
+    assert fields["agent_id"] == "agent-1"
+    assert fields["operation_id"] == "run-current"
+    assert fields["runtime_id"] == "runtime-1"
+    assert fields["runtime_generation"] == 1
+    assert fields["external_channel_provider"] == "discord"
+    assert fields["external_channel_binding_id"] == "binding-1"
+    assert fields["external_channel_provider_file_id"] == "file-1"
+    assert fields["external_channel_provider_channel_id"] == "channel-1"
+    assert fields["external_channel_provider_message_id"] == "message-1"
+    assert fields["destination_path"] == "/tmp/file.jpg"
+    assert fields["overwrite"] is True
+    assert fields["failure_stage"] == stage
+    assert fields["failure_cause"] == cause
+    assert fields["failure_detail"] == detail
+    assert fields["coordinator_failure"] == (
+        None if coordinator_failure is None else coordinator_failure.value
+    )
+    assert "external-file:" not in record.getMessage()
 
 
 @pytest.mark.asyncio

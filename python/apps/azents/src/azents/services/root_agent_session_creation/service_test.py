@@ -1,7 +1,6 @@
 """Root AgentSession creation service tests."""
 
 import asyncio
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -34,10 +33,6 @@ from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
-from azents.services.agent_runtime.lifecycle_data import (
-    RuntimeOperationTarget,
-    RuntimeOperationTargetResolver,
-)
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import RootAgentSessionCreationService
@@ -124,25 +119,11 @@ async def _create_agent(
 
 def _service() -> RootAgentSessionCreationService:
     """Build the shared root Session creation boundary."""
-    runtime_target_resolver = AsyncMock(spec=RuntimeOperationTargetResolver)
-    runtime_target_resolver.resolve_operation_target.return_value = (
-        RuntimeOperationTarget(
-            id="runtime-1",
-            runtime_capability_version=1,
-            desired_generation=1,
-            runner_generation=1,
-            configuration_sequence=1,
-            configuration_digest="a" * 64,
-            workspace_path="/workspace/agent",
-        )
-    )
     return RootAgentSessionCreationService(
         agent_session_repository=AgentSessionRepository(),
         agent_repository=AgentRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-        runtime_target_resolver=runtime_target_resolver,
     )
 
 
@@ -238,11 +219,11 @@ class TestRootAgentSessionCreationService:
                 workspace_intent=AgentDefaultRootWorkspaceIntent(),
             )
 
-    async def test_empty_explicit_intent_uses_runner_reported_workspace_path(
+    async def test_empty_explicit_intent_does_not_require_runtime_state(
         self,
         rdb_session: AsyncSession,
     ) -> None:
-        """Creating a Project-free root Session uses persisted workspace evidence."""
+        """Creating a Project-free root Session does not resolve Runtime state."""
         workspace_id = await _create_workspace(rdb_session, "root-empty-runtime")
         agent_id = await _create_agent(
             rdb_session,
@@ -268,11 +249,11 @@ class TestRootAgentSessionCreationService:
 
         assert result.initial_project_paths == ()
 
-    async def test_explicit_paths_are_normalized_and_never_merge_policy(
+    async def test_prevalidated_explicit_paths_never_merge_policy(
         self,
         rdb_session: AsyncSession,
     ) -> None:
-        """Explicit paths win over defaults, including an intentional empty intent."""
+        """Prevalidated explicit paths win over defaults, including empty intent."""
         workspace_id = await _create_workspace(rdb_session, "root-explicit")
         agent_id = await _create_agent(
             rdb_session,
@@ -295,7 +276,6 @@ class TestRootAgentSessionCreationService:
             ),
             workspace_intent=ExplicitRootWorkspaceIntent(
                 existing_project_paths=[
-                    " /workspace/agent/explicit/../explicit ",
                     "/workspace/agent/explicit",
                 ],
             ),
@@ -366,6 +346,7 @@ class TestRootAgentSessionCreationService:
                 "/workspace/agent/policy-b",
             ],
             revision=7,
+            workspace_path=None,
         )
         service = _service()
 
@@ -373,6 +354,16 @@ class TestRootAgentSessionCreationService:
             rdb_session,
             workspace_id=workspace_id,
             agent_id=agent_id,
+        )
+        await rdb_session.execute(
+            sa.delete(RDBAgentAutomaticProjectItem).where(
+                RDBAgentAutomaticProjectItem.agent_id == agent_id
+            )
+        )
+        await rdb_session.execute(
+            sa.delete(RDBAgentAutomaticProjectSetting).where(
+                RDBAgentAutomaticProjectSetting.agent_id == agent_id
+            )
         )
         reused = await service.ensure_team_primary(
             rdb_session,
