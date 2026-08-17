@@ -152,6 +152,30 @@ class ExternalChannelFileDownloadResult:
 
 
 @dataclass(frozen=True)
+class ExternalChannelFileTransferFailure:
+    """Structured diagnostics for one handled provider-to-Runtime failure."""
+
+    stage: str
+    cause: str
+    detail: str | None
+    coordinator_failure: CoordinatorTransferFailure | None
+
+
+class ExternalChannelFileTransferExecutionError(ExternalChannelFileTransferError):
+    """Handled transfer failure with operator-visible structured diagnostics."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure: ExternalChannelFileTransferFailure,
+    ) -> None:
+        """Preserve the public message and non-secret diagnostic classification."""
+        super().__init__(message)
+        self.failure = failure
+
+
+@dataclass(frozen=True)
 class _DiscordAttachmentSource:
     """Validated current Discord attachment source."""
 
@@ -473,12 +497,24 @@ class ExternalChannelFileTransferService:
         ) as error:
             raise _map_slack_download_error(error, limit=limit) from None
         except ServerToRuntimeTransferError as error:
-            raise ExternalChannelFileTransferError(
-                _slack_transfer_error_message(error, path=path)
+            raise ExternalChannelFileTransferExecutionError(
+                _slack_transfer_error_message(error, path=path),
+                failure=ExternalChannelFileTransferFailure(
+                    stage="runtime_transfer",
+                    cause=type(error).__name__,
+                    detail=str(error),
+                    coordinator_failure=error.failure,
+                ),
             ) from None
         except grpc.aio.AioRpcError:
-            raise ExternalChannelFileTransferError(
-                f"Failed to write the Runtime file: {path}."
+            raise ExternalChannelFileTransferExecutionError(
+                f"Failed to write the Runtime file: {path}.",
+                failure=ExternalChannelFileTransferFailure(
+                    stage="runtime_transfer",
+                    cause="AioRpcError",
+                    detail=None,
+                    coordinator_failure=None,
+                ),
             ) from None
         except PermissionError:
             raise ExternalChannelFileTransferError(
@@ -493,8 +529,14 @@ class ExternalChannelFileTransferService:
                 f"Failed to write the Runtime file: {error.detail}"
             ) from None
         except S3TransferCleanupRequired:
-            raise ExternalChannelFileTransferError(
-                "Failed to stage the Slack file for Runtime transfer."
+            raise ExternalChannelFileTransferExecutionError(
+                "Failed to stage the Slack file for Runtime transfer.",
+                failure=ExternalChannelFileTransferFailure(
+                    stage="provider_staging_cleanup",
+                    cause="S3TransferCleanupRequired",
+                    detail=None,
+                    coordinator_failure=None,
+                ),
             ) from None
         except ValueError as error:
             message = str(error)
@@ -627,16 +669,34 @@ class ExternalChannelFileTransferService:
         except DiscordFileProviderError as error:
             raise _map_discord_download_error(error, limit=limit) from None
         except ServerToRuntimeTransferError as error:
-            raise ExternalChannelFileTransferError(
-                _discord_transfer_error_message(error, path=path)
+            raise ExternalChannelFileTransferExecutionError(
+                _discord_transfer_error_message(error, path=path),
+                failure=ExternalChannelFileTransferFailure(
+                    stage="runtime_transfer",
+                    cause=type(error).__name__,
+                    detail=str(error),
+                    coordinator_failure=error.failure,
+                ),
             ) from None
         except grpc.aio.AioRpcError:
-            raise ExternalChannelFileTransferError(
-                f"Failed to write the Runtime file: {path}."
+            raise ExternalChannelFileTransferExecutionError(
+                f"Failed to write the Runtime file: {path}.",
+                failure=ExternalChannelFileTransferFailure(
+                    stage="runtime_transfer",
+                    cause="AioRpcError",
+                    detail=None,
+                    coordinator_failure=None,
+                ),
             ) from None
         except S3TransferCleanupRequired:
-            raise ExternalChannelFileTransferError(
-                "Failed to stage the Discord attachment for Runtime transfer."
+            raise ExternalChannelFileTransferExecutionError(
+                "Failed to stage the Discord attachment for Runtime transfer.",
+                failure=ExternalChannelFileTransferFailure(
+                    stage="provider_staging_cleanup",
+                    cause="S3TransferCleanupRequired",
+                    detail=None,
+                    coordinator_failure=None,
+                ),
             ) from None
         except RuntimeStorageError as error:
             raise ExternalChannelFileTransferError(

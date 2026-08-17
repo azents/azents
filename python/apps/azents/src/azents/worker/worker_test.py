@@ -739,7 +739,6 @@ def _execution_snapshot(
         session_agent_context_id="context-001",
         execution_mode=AgentSessionKind.ROOT,
         owner_generation=owner_generation,
-        fifo_mailbox_item_id=None,
         pending_command=pending_command,
         recoverable_run_id=None,
         recoverable_run_status=None,
@@ -1691,10 +1690,7 @@ async def test_boundary_poll_broadcasts_mailbox_item_taxonomy_actions(
 
     assert poll_result.user_messages == [user_message]
     assert poll_result.context_invalidated is False
-    assert promotion.calls == [
-        ("session-1", "gpt-test"),
-        ("session-1", "gpt-test"),
-    ]
+    assert promotion.calls == [("session-1", "gpt-test")]
     assert scheduled_title_events == ["session-1:1123456789abcdef0123456789abcdeb"]
     event_types = [event.get("type") for _, event in broadcast.events]
     assert event_types == ["history_event_appended", "mailbox_item_removed"]

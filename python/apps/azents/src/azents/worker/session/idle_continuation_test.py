@@ -299,7 +299,6 @@ def _snapshot(
         session_agent_context_id="context-001",
         execution_mode=AgentSessionKind.ROOT,
         owner_generation=1,
-        fifo_mailbox_item_id=None,
         pending_command=None,
         recoverable_run_id=None,
         recoverable_run_status=None,

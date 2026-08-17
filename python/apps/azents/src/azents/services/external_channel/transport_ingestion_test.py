@@ -50,10 +50,12 @@ class _Repository:
         provider_resource: ExternalChannelResource | None = None,
         delivery_resource: ExternalChannelResource | None = None,
         configuration_generation: int = 2,
+        expected_delivery_channel_id: str = "201",
     ) -> None:
         self.provider_resource = provider_resource
         self.delivery_resource = delivery_resource
         self.configuration_generation = configuration_generation
+        self.expected_delivery_channel_id = expected_delivery_channel_id
 
     async def get_owned_discord_gateway_configuration(
         self,
@@ -97,11 +99,8 @@ class _Repository:
         guild_id: str,
         delivery_channel_id: str,
     ) -> ExternalChannelResource | None:
-        assert (connection_id, guild_id, delivery_channel_id) == (
-            "connection-1",
-            "300",
-            "201",
-        )
+        assert (connection_id, guild_id) == ("connection-1", "300")
+        assert delivery_channel_id == self.expected_delivery_channel_id
         return self.delivery_resource
 
 
@@ -498,6 +497,74 @@ async def test_discord_bound_thread_uses_retained_resource_identity() -> None:
     request = ingestion.requests[0]
     assert request.locator.provider_resource_key == "discord:300:100"
     assert request.locator.invocation is False
+
+
+@pytest.mark.asyncio
+async def test_discord_provisioned_thread_starter_reuses_root_scope() -> None:
+    """A starter replay from an Azents-created Thread remains the root trigger."""
+    resource = cast(
+        ExternalChannelResource,
+        SimpleNamespace(
+            provider_resource_key="discord:300:100",
+            labels={
+                "source_channel_id": "200",
+                "parent_channel_id": "200",
+                "root_message_id": "100",
+                "thread_id": "100",
+                "delivery_channel_id": "100",
+            },
+        ),
+    )
+    service, ingestion = _service(repository=_Repository(provider_resource=resource))
+
+    await service.ingest_discord_event(
+        event=_discord_event(
+            channel_id="100",
+            thread_id="100",
+            parent_channel_id="200",
+            invocation=True,
+            files=[{"provider_file_id": "F100"}],
+        ),
+        authority=_authority(ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP),
+        deadline=external_channel_transport_deadline(_NOW),
+    )
+
+    request = ingestion.requests[0]
+    assert request.scope.kind is ExternalChannelConversationScopeKind.PARENT_CHANNEL
+    assert request.scope.provider_channel_id == "200"
+    assert request.scope.provider_thread_key is None
+    assert request.locator.provider_channel_id == "200"
+    assert request.locator.provider_parent_channel_id == "200"
+    assert request.locator.provider_thread_key is None
+    assert request.locator.delivery_thread_key == "100"
+    assert request.locator.provider_resource_key == "discord:300:100"
+    assert request.locator.expected_file_count == 1
+
+
+@pytest.mark.asyncio
+async def test_discord_provider_native_thread_starter_keeps_thread_scope() -> None:
+    """A provider-native Thread starter is not mistaken for a provisioned replay."""
+    service, ingestion = _service(
+        repository=_Repository(expected_delivery_channel_id="100")
+    )
+
+    await service.ingest_discord_event(
+        event=_discord_event(
+            channel_id="100",
+            thread_id="100",
+            parent_channel_id="200",
+            invocation=True,
+        ),
+        authority=_authority(ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP),
+        deadline=external_channel_transport_deadline(_NOW),
+    )
+
+    request = ingestion.requests[0]
+    assert request.scope.kind is ExternalChannelConversationScopeKind.THREAD
+    assert request.scope.provider_channel_id == "100"
+    assert request.scope.provider_thread_key == "100"
+    assert request.locator.provider_channel_id == "100"
+    assert request.locator.provider_thread_key == "100"
 
 
 @pytest.mark.asyncio

@@ -132,6 +132,16 @@ def test_projects_invalid_attachment_size_as_advisory_metadata() -> None:
     assert files[0]["unsupported_reason"] is None
 
 
+def test_reprojection_preserves_bounded_attachment_metadata() -> None:
+    """History normalization can safely re-project SDK attachment metadata."""
+    first = _event().message
+
+    second = project_discord_message(message=first, guild_id="300")
+
+    assert second["attachments"] == first["attachments"]
+    assert second["attachments_truncated"] is False
+
+
 def test_projects_connected_bot_managed_role_as_invocation() -> None:
     """A provider-owned Bot role is equivalent to directly mentioning that Bot."""
     gateway_event = _event()
