@@ -816,6 +816,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=event_session.id,
             parent_agent_run_id=None,
+            scheduled_task_cycle_id=None,
         )
         await repo.associate_input_events(
             rdb_session,
@@ -892,6 +893,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=child_session.id,
             parent_agent_run_id=parent.id,
+            scheduled_task_cycle_id=None,
         )
         activated = await repo.activate_pending(
             rdb_session,
@@ -952,6 +954,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=run_session.id,
             parent_agent_run_id=None,
+            scheduled_task_cycle_id=None,
         )
 
         with pytest.raises(
@@ -990,6 +993,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=event_session.id,
             parent_agent_run_id=None,
+            scheduled_task_cycle_id=None,
         )
         first = make_vfs_projection(
             [
@@ -1067,6 +1071,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=event_session.id,
             parent_agent_run_id=None,
+            scheduled_task_cycle_id=None,
         )
         projection = make_vfs_projection([])
 
@@ -1369,6 +1374,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             session_id=agent_session.id,
             parent_agent_run_id=None,
+            scheduled_task_cycle_id=None,
         )
         await repo.activate_pending(
             rdb_session,

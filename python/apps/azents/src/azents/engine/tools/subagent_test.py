@@ -1257,6 +1257,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
         {
             "session_id": child.agent_session_id,
             "parent_agent_run_id": _PARENT_RUN_ID,
+            "scheduled_task_cycle_id": None,
         }
     ]
     assert repo.inference_states == [
@@ -1317,6 +1318,7 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
     assert run_repo.pending_creates[0] == {
         "session_id": "researcher-session",
         "parent_agent_run_id": _PARENT_RUN_ID,
+        "scheduled_task_cycle_id": None,
     }
     child_state = repo.inference_states[0]
     assert child_state[0] == "researcher-session"

@@ -336,6 +336,45 @@ class TestMailboxRepository:
         assert deleted_again is False
         assert await repo.get_by_id(rdb_session, created.id) is None
 
+    async def test_lock_by_session_and_id_is_exactly_session_scoped(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Exact locking returns only the requested Session-owned MailboxItem."""
+        session_id, user_id, _ = await _create_agent_session(
+            rdb_session,
+            handle="input-buffer-lock",
+            slug="input-buffer-lock",
+        )
+        other_session_id, _, _ = await _create_agent_session(
+            rdb_session,
+            handle="input-buffer-lock-other",
+            slug="input-buffer-lock-other",
+        )
+        repo = MailboxRepository()
+        created = await repo.create(
+            rdb_session,
+            _create_payload(
+                session_id=session_id,
+                user_id=user_id,
+                content="lock me",
+            ),
+        )
+
+        wrong_session = await repo.lock_by_session_and_id(
+            rdb_session,
+            session_id=other_session_id,
+            buffer_id=created.id,
+        )
+        locked = await repo.lock_by_session_and_id(
+            rdb_session,
+            session_id=session_id,
+            buffer_id=created.id,
+        )
+
+        assert wrong_session is None
+        assert locked == created
+
     async def test_claim_for_flush_and_delete_claimed_are_session_scoped(
         self,
         rdb_session: AsyncSession,

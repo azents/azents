@@ -183,6 +183,27 @@ class TestScheduledTaskRepository:
         assert f"WHERE scheduled_tasks.id = '{task.id}'" in statement
         assert statement.endswith("FOR UPDATE")
 
+    async def test_lock_claimed_by_id_fences_owner_token_and_expiry(self) -> None:
+        """Claim locking includes owner, lease token, and unexpired predicates."""
+        task = _rdb_task()
+        task.lease_owner = "scheduler-1"
+        task.lease_until = _dt(5)
+        session = _ScalarSession(task)
+        result = await ScheduledTaskRepository().lock_claimed_by_id(
+            cast(AsyncSession, session),
+            task_id=task.id,
+            lease_owner="scheduler-1",
+            lease_token=_dt(5),
+            now=_dt(1),
+        )
+
+        assert result is not None
+        statement = _sql(session.query)
+        assert "scheduled_tasks.lease_owner = 'scheduler-1'" in statement
+        assert "scheduled_tasks.lease_until = " in statement
+        assert "scheduled_tasks.lease_until > " in statement
+        assert statement.endswith("FOR UPDATE")
+
     async def test_list_by_session_id_preserves_repository_order(self) -> None:
         """Session-scoped list converts every ORM row."""
         rows = [_rdb_task("a" * 32), _rdb_task("b" * 32)]

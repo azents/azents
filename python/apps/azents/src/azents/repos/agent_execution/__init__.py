@@ -568,6 +568,7 @@ class AgentRunRepository:
         *,
         session_id: str,
         parent_agent_run_id: str | None,
+        scheduled_task_cycle_id: str | None,
     ) -> AgentRunState:
         """Create a model-independent pending run without cancelling an active run."""
         locked_session_id = await session.scalar(
@@ -580,7 +581,7 @@ class AgentRunRepository:
         run_index = await self.next_run_index(session, session_id=session_id)
         rdb = RDBAgentRun(
             session_id=session_id,
-            scheduled_task_cycle_id=None,
+            scheduled_task_cycle_id=scheduled_task_cycle_id,
             run_index=run_index,
             parent_agent_run_id=parent_agent_run_id,
             phase=AgentRunPhase.IDLE,

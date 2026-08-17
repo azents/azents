@@ -129,6 +129,31 @@ def test_external_channel_continuation_payload_is_distinct_from_goal() -> None:
     assert item.payload.type == "external_channel_continuation"
 
 
+@pytest.mark.parametrize(
+    "payload_type",
+    ("scheduled_task_trigger", "scheduled_task_continuation"),
+)
+def test_scheduled_payload_requires_titled_canonical_presentation(
+    payload_type: str,
+) -> None:
+    """Scheduled envelopes reject missing title metadata at typed ingress."""
+    with pytest.raises(ValidationError, match="title is missing"):
+        TypeAdapter(MailboxEnvelopePayload).validate_python(
+            {
+                "type": payload_type,
+                "cycle_id": "c" * 32,
+                "items": [
+                    {
+                        "item_key": f"{payload_type}:0",
+                        "presentation_kind": payload_type,
+                        "content": "Scheduled Task work is due.",
+                        "metadata": {},
+                    }
+                ],
+            }
+        )
+
+
 def test_turn_action_continuation_decodes_closed_typed_payload() -> None:
     """Persisted bridge continuation JSON decodes without raw business unions."""
     raw = {

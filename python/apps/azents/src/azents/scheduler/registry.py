@@ -10,6 +10,9 @@ from azents.scheduler.types import (
     TaskContext,
     TaskResult,
 )
+from azents.scheduler.user_scheduled_task_dispatch import (
+    user_scheduled_task_dispatch_handler,
+)
 from azents.services.agent_decommission import AgentDecommissionService
 from azents.services.agent_runtime_removal import AgentRuntimeRemovalService
 from azents.services.archived_session_purge import ArchivedSessionPurgeService
@@ -301,6 +304,20 @@ FILE_LIFECYCLE_CLEANUP_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+USER_SCHEDULED_TASK_DISPATCH_TASK = ScheduledTaskDefinition(
+    key="user_scheduled_task_dispatch",
+    description="Admit due user Scheduled Tasks into their existing Session FIFO.",
+    interval=datetime.timedelta(seconds=10),
+    timeout=datetime.timedelta(minutes=2),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(seconds=10),
+        max_delay=datetime.timedelta(minutes=5),
+    ),
+    handler=user_scheduled_task_dispatch_handler,
+    enabled_by_default=True,
+)
+
 SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     HEARTBEAT_TASK,
     SYSTEM_CATALOG_PROJECTION_TASK,
@@ -311,6 +328,7 @@ SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     AGENT_RUNTIME_REMOVAL_TASK,
     OWNER_LIFECYCLE_TASK,
     FILE_LIFECYCLE_CLEANUP_TASK,
+    USER_SCHEDULED_TASK_DISPATCH_TASK,
 )
 
 

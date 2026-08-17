@@ -65,12 +65,26 @@ class ScheduledTaskTriggerMailboxPayload(MailboxPayloadBase):
     type: Literal["scheduled_task_trigger"]
     cycle_id: str = Field(min_length=32, max_length=32)
 
+    @model_validator(mode="after")
+    def validate_scheduled_presentation(self) -> "ScheduledTaskTriggerMailboxPayload":
+        """Require one titled canonical Scheduled trigger presentation."""
+        _validate_scheduled_presentation(self, self.type)
+        return self
+
 
 class ScheduledTaskContinuationMailboxPayload(MailboxPayloadBase):
     """Typed Scheduled Task cycle continuation mailbox payload."""
 
     type: Literal["scheduled_task_continuation"]
     cycle_id: str = Field(min_length=32, max_length=32)
+
+    @model_validator(mode="after")
+    def validate_scheduled_presentation(
+        self,
+    ) -> "ScheduledTaskContinuationMailboxPayload":
+        """Require one titled canonical Scheduled continuation presentation."""
+        _validate_scheduled_presentation(self, self.type)
+        return self
 
 
 class AgentCreateGitWorktreeContinuationResult(BaseModel):
@@ -165,6 +179,21 @@ MailboxEnvelopePayload: TypeAlias = Annotated[
     | TurnActionMailboxPayload,
     Field(discriminator="type"),
 ]
+
+
+def _validate_scheduled_presentation(
+    payload: MailboxPayloadBase,
+    expected_kind: str,
+) -> None:
+    """Validate one model-visible Scheduled Task presentation envelope."""
+    if len(payload.items) != 1:
+        raise ValueError("Scheduled Task mailbox payload requires one item.")
+    item = payload.items[0]
+    if item.item_key != f"{expected_kind}:0" or item.presentation_kind != expected_kind:
+        raise ValueError("Scheduled Task mailbox presentation shape is invalid.")
+    title = item.metadata.get("title")
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError("Scheduled Task mailbox title is missing.")
 
 
 def mailbox_payload_from_fields(

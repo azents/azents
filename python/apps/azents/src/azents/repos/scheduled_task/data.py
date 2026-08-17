@@ -46,3 +46,17 @@ class ScheduledTaskCreate:
     scheduled_at: datetime.datetime | None
     cron_expression: str | None
     timezone: str | None
+
+
+@dataclass(frozen=True)
+class ScheduledTaskReplace:
+    """Editable definition values for one existing Scheduled Task."""
+
+    title: str
+    objective: str
+    schedule_type: ScheduledTaskScheduleType
+    next_eligible_at: datetime.datetime
+    binding_id: str | None
+    scheduled_at: datetime.datetime | None
+    cron_expression: str | None
+    timezone: str | None

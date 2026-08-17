@@ -471,6 +471,7 @@ class SessionLifecycleService:
                 db_session,
                 session_id=session_id,
                 parent_agent_run_id=None,
+                scheduled_task_cycle_id=None,
             )
             await self.agent_run_repository.associate_input_events(
                 db_session,
