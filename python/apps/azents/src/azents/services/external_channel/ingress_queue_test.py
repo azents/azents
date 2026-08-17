@@ -833,6 +833,91 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
     wake_dispatcher.dispatch.assert_awaited_once()
 
 
+async def test_missing_trigger_warns_and_is_ignored_while_batch_continues(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A missing trigger is deleted without mailbox input or blocking later work."""
+    missing_item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+    )
+    successful_item = _item(
+        item_id="item-2",
+        trigger_key="message-2",
+        trigger_position="00000000000000000002",
+    )
+    missing_row = SimpleNamespace(id=missing_item.id)
+    successful_row = SimpleNamespace(id=successful_item.id)
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=[missing_row, successful_row])
+    transaction = _Session()
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="azents.services.external_channel.ingress_queue",
+    ):
+        stale = await service._finalize_batch(  # noqa: SLF001
+            _batch(missing_item, successful_item),
+            prepared=[
+                _PreparedFailure(
+                    item=missing_item,
+                    durable_cursor=None,
+                    category=ExternalChannelIngressFailureCategory.TRIGGER_MISSING,
+                    retryable=False,
+                    retry_after_seconds=None,
+                ),
+                _PreparedSuccess(
+                    item=successful_item,
+                    durable_cursor=None,
+                    history=_history(
+                        trigger_key=successful_item.trigger_provider_message_key,
+                        trigger_position=successful_item.trigger_position,
+                    ),
+                ),
+            ],
+        )
+
+    assert stale is False
+    queue_repository.move_to_retry_tail.assert_not_awaited()
+    finish_args = queue_repository.finish_batch.await_args
+    assert finish_args.kwargs["deleted_items"] == [missing_row, successful_row]
+    enqueues = mailbox_service.enqueue_many.await_args.args[1]
+    assert len(enqueues) == 1
+    assert (
+        enqueues[0]
+        .payload.items[0]
+        .metadata["external_channel_message"]["provider_message_key"]
+        == successful_item.trigger_provider_message_key
+    )
+    warning = next(
+        record
+        for record in caplog.records
+        if record.message
+        == "External Channel ingress trigger was missing; item ignored"
+    )
+    assert warning.__dict__["external_channel_ingress_id"] == missing_item.id
+    assert warning.__dict__["external_channel_failure_category"] == "trigger_missing"
+    transaction.commit.assert_awaited_once()
+    wake_dispatcher.dispatch.assert_awaited_once()
+
+
 @pytest.mark.parametrize(
     "provider",
     [ExternalChannelProvider.SLACK, ExternalChannelProvider.DISCORD],

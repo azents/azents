@@ -741,6 +741,13 @@ class ExternalChannelIngressDrainService:
                         cursor_suppressions += 1
                         delete_items.append(locked_item)
                     case _PreparedFailure() as failure:
+                        if (
+                            failure.category
+                            is ExternalChannelIngressFailureCategory.TRIGGER_MISSING
+                        ):
+                            bounded_failures.append(failure)
+                            delete_items.append(locked_item)
+                            continue
                         covered_position = successful_positions.get(
                             item.conversation_position_id
                         )
@@ -834,8 +841,14 @@ class ExternalChannelIngressDrainService:
                 )
                 wake = (mailbox_results[0].mailbox_item.id, batch.session_id)
             for failure in bounded_failures:
+                message = (
+                    "External Channel ingress trigger was missing; item ignored"
+                    if failure.category
+                    is ExternalChannelIngressFailureCategory.TRIGGER_MISSING
+                    else "External Channel ingress item exceeded its active lifecycle"
+                )
                 logger.warning(
-                    "External Channel ingress item exceeded its active lifecycle",
+                    message,
                     extra={
                         "external_channel_ingress_id": failure.item.id,
                         "external_channel_provider": failure.item.provider.value,
