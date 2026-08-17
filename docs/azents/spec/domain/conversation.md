@@ -101,8 +101,8 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-last_verified_at: 2026-08-15
-spec_version: 148
+last_verified_at: 2026-08-16
+spec_version: 149
 ---
 
 # Conversation & Events
@@ -1155,7 +1155,30 @@ Provider history remains outside Conversation persistence; the source-attributed
 Event snapshots and other Session-owned projection state follow the AgentSession
 lifecycle.
 
-## 12. Changelog
+## 12. Scheduled Task Events
+
+The closed Mailbox and Event contracts include
+`scheduled_task_trigger`, `scheduled_task_continuation`, and
+`scheduled_task_result`.
+
+Trigger and continuation Mailbox items are internal wake-producing Session input.
+Promotion appends their dedicated Event kinds and preserves their source identity;
+they are not editable user-authored chat messages. A trigger promotion also binds
+the new AgentRun to the exact admitted Scheduled Task cycle. Continuation starts a
+fresh Run for an already-started cycle.
+
+`scheduled_task_result` is the canonical durable terminal result. Its payload
+contains title, scheduled instant, `finished` or `failed` status, and result text.
+The history API preserves the typed Event payload even though Scheduled control
+events do not project into ordinary chat-message rows. Pending live projections
+identify trigger and continuation work with dedicated Scheduled Task
+presentations.
+
+## 13. Changelog
+
+- **2026-08-16** — v149. Added typed Scheduled Task trigger, continuation, and
+  result Mailbox/Event/history/live projection contracts and exact Run-cycle
+  binding at promotion.
 
 - **2026-08-15** — v148. Removed stale user-facing Scheduled Task ownership, obsolete source/API
   paths, and the obsolete standalone command route. Aligned External Channel mailbox terminology and

@@ -2,6 +2,7 @@
 title: "Agent Scheduled Tasks Requirements"
 created: 2026-08-16
 updated: 2026-08-16
+implemented: 2026-08-17
 tags: [scheduled-task, agent, session, external-channel, skill, slack, discord]
 document_role: primary
 document_type: requirements

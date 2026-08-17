@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from azcommon import di
+from azcommon.logging import RuntimeEnvironment
 from fastapi import FastAPI
 from starlette.types import Lifespan
 
@@ -160,6 +161,10 @@ def create_testenv_api_app(
     :param config: app settings
     :return: Testenv API FastAPI instance
     """
+    if not config.testenv_api_enabled:
+        raise RuntimeError("Testenv API requires AZ_TESTENV_API_ENABLED.")
+    if config.runtime_env != RuntimeEnvironment.LOCAL:
+        raise RuntimeError("Testenv API requires AZ_RUNTIME_ENV=local.")
     app = _create_fastapi_instance(
         config,
         title="Azents Testenv API",

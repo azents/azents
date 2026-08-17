@@ -34,8 +34,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-08-11
-spec_version: 23
+last_verified_at: 2026-08-16
+spec_version: 24
 ---
 
 # External Channel Authorization
@@ -221,7 +221,24 @@ locks and deletes the selected grant row, preventing future invocation without
 deleting canonical messages, projected Session history, or unrelated grants.
 Binding and connection disconnect remain separate lifecycle operations.
 
+## Scheduled Task Authorization
+
+Scheduled Task creation and replacement accept only an exact active Binding
+already connected to the selected Session and Agent. The opaque Binding ID is
+never resolved by label, provider coordinate, parent conversation, or fuzzy
+matching. Public API and Agent-tool paths both fail closed when the Session,
+Binding, route, resource, connection, or Agent authority is stale.
+
+Signed Slack and Discord registration controls carry the exact Task and Binding
+identities but no actor or provider credential. Callback handling revalidates the
+provider principal, durable interaction, current Task target, and exact connected
+Binding before Edit or Delete. A valid provider principal for another Binding or
+Session cannot mutate the Task.
+
 ## Changelog
+
+- **2026-08-16** (spec_version 24) — Added fail-closed exact-Binding authority for
+  Scheduled Task management and signed provider controls.
 
 - **2026-08-11** (spec_version 23) — Made exact active-trigger correlation explicit
   for approval replay and connected ingress: the replayed or `all_messages` trigger is

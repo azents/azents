@@ -64,8 +64,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-14
-spec_version: 61
+last_verified_at: 2026-08-16
+spec_version: 62
 ---
 
 # External Channel
@@ -460,7 +460,25 @@ Agent administrator; unauthorized and missing requests are returned as not found
 
 Connection responses expose provider identity, capabilities, health, route relationship, and redacted credential state. They never return ciphertext or decrypted secret values.
 
+## Scheduled Task Binding
+
+A Scheduled Task may retain one exact connected Binding as an optional
+presentation target. The Binding ID remains opaque and is revalidated against the
+current Workspace, Agent, Session, resource, route, connection, and Agent
+lifecycle before management or provider mutation. No parent/thread substitution
+or fallback Binding is allowed.
+
+Scheduled registration, progress, and terminal presentation reuse the common
+provider-effect planning and execution primitives but own separate Scheduled
+cycle projection state. They do not read or mutate Channel Work state. Signed
+provider Edit/Delete controls bind the exact Task and Binding and revalidate the
+current provider principal and interaction before mutation.
+
 ## Changelog
+
+- **2026-08-16** (spec_version 62) — Added exact opaque Scheduled Task Binding
+  authority, signed provider controls, and Scheduled-owned provider projection
+  state distinct from Channel Work.
 
 - **2026-08-14** (spec_version 61) — Corrected Discord Thread isolation to include
   independent participation: an unbound Thread requires its own explicit invocation,

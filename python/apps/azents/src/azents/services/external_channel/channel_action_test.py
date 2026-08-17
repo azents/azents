@@ -630,6 +630,72 @@ async def test_discord_terminal_thread_reply_forwards_to_exact_parent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_discord_registration_accepts_bounded_embed_fields() -> None:
+    """Scheduled registration fields reach the provider-bound message."""
+    create_message = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+    )
+    target.request_payload.update(
+        {
+            "control_kind": "scheduled_task_registration",
+            "text": "Scheduled Task registered: Daily report",
+            "components": [
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "style": 2,
+                            "label": "Edit",
+                            "custom_id": "st1:e:task:binding:signature",
+                        },
+                        {
+                            "type": 2,
+                            "style": 4,
+                            "label": "Delete",
+                            "custom_id": "st1:d:task:binding:signature",
+                        },
+                    ],
+                }
+            ],
+            "embeds": [
+                {
+                    "title": "Scheduled Task registered",
+                    "color": 0x5865F2,
+                    "fields": [{"name": "Schedule", "value": "At 2099-03-01"}],
+                }
+            ],
+        }
+    )
+    target.request_payload.pop("blocks")
+
+    result = await ExternalChannelActionService._deliver_discord(
+        _service(discord_client=_DiscordClientDelegate(create_message=create_message)),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-registration"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    assert result.status == "delivered"
+    create_call = create_message.await_args
+    assert create_call is not None
+    assert create_call.kwargs["embeds"] == target.request_payload["embeds"]
+    assert create_call.kwargs["components"] == target.request_payload["components"]
+
+
+@pytest.mark.asyncio
 async def test_discord_parent_file_delivery_does_not_open_sdk_session() -> None:
     """The multipart direct gap does not add an unnecessary Discord login."""
     create_file_message = AsyncMock(

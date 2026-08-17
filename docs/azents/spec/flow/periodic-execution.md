@@ -8,6 +8,7 @@ code_paths:
   - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/src/azents/scheduler/executor.py
   - python/apps/azents/src/azents/scheduler/service.py
+  - python/apps/azents/src/azents/scheduler/user_scheduled_task_dispatch.py
   - python/apps/azents/src/azents/job_runtime/deps.py
   - python/apps/azents/src/azents/job_runtime/local.py
   - python/apps/azents/src/azents/job_runtime/registry.py
@@ -24,6 +25,10 @@ code_paths:
   - python/apps/azents/src/azents/repos/scheduled_task_state/__init__.py
   - python/apps/azents/src/azents/repos/scheduled_task_state/data.py
   - python/apps/azents/src/azents/rdb/models/scheduled_task_state.py
+  - python/apps/azents/src/azents/rdb/models/scheduled_task.py
+  - python/apps/azents/src/azents/repos/scheduled_task/**
+  - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
+  - python/apps/azents/src/azents/services/scheduled_task/service.py
   - python/apps/azents/src/azents/rdb/models/archived_session_retention.py
   - python/apps/azents/src/cli/scheduler.py
   - python/apps/azents/src/cli/devserver.py
@@ -31,13 +36,16 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-08-15
-spec_version: 12
+last_verified_at: 2026-08-16
+spec_version: 13
 ---
 
 # Periodic Execution Flow Spec
 
-Azents periodic execution is the system-owned scheduler flow for lightweight maintenance and synchronization jobs. It is separate from user/agent-facing scheduled tasks.
+Azents periodic execution uses one dedicated Scheduler role for code-registered
+maintenance jobs and for bounded admission of user/agent-facing Scheduled Tasks.
+The two domains share process packaging and polling but keep separate durable
+authorities and execution paths.
 
 ## Runtime roles
 
@@ -62,13 +70,25 @@ A definition includes:
 - async handler
 - default enabled flag
 
-The database does not store task definitions or schedule overrides. It stores current runtime state only.
+For the code-owned maintenance registry, the database does not store task
+definitions or schedule overrides. It stores current runtime state only. User
+Scheduled Task definitions and cron cursors are a separate product domain stored
+in `scheduled_tasks`; the maintenance registry stores only the dispatcher
+definition that scans that domain.
 
 Registered tasks include `scheduler_heartbeat`, `model_catalog_system_projection`,
 `archived_session_retention_recalculation`, `archived_session_purge`, `session_auto_archive`,
 `agent_decommission`, `agent_runtime_removal`, `owner_lifecycle`, and
-`file_lifecycle_cleanup`. `scheduler_heartbeat` is a no-op heartbeat that returns a small execution
+`file_lifecycle_cleanup`, plus the user Scheduled Task dispatcher definition.
+`scheduler_heartbeat` is a no-op heartbeat that returns a small execution
 summary and has no external network dependency.
+
+The user Scheduled Task dispatcher definition remains code-owned, but its handler
+does not use `scheduled_task_states` as product state. Each execution asks the
+Scheduled Task domain service to claim a bounded set of due `scheduled_tasks`
+rows, admit typed Session Mailbox work, and return aggregate claimed, admitted,
+coalesced, skipped, and wake-failure counters. The Scheduler Job Runtime waits
+only for that bounded admission pass, not for Agent work to finish.
 
 ## Execution backend
 
@@ -106,6 +126,11 @@ The row stores:
 - created/updated timestamps
 
 There is no attempt history table. Attempt details are emitted through structured logs and the current state row stores only the latest summary. The `file_lifecycle_cleanup` handler also emits a `File lifecycle cleanup completed` log after a successful pass. Its structured fields include the task key, manual-trigger flag, and the cleanup result counters stored in the task summary.
+
+User-defined Task definitions, schedule cursors, occurrence fences, and due leases
+are stored separately in `scheduled_tasks`; active occurrence state is stored in
+Session-scoped Scheduled Toolkit State. Neither is projected into
+`scheduled_task_states`.
 
 ## Scheduler loop
 
@@ -295,9 +320,10 @@ Manual trigger does not execute handlers directly. It validates that the task ke
 
 The periodic execution flow does not provide:
 
-- user-defined scheduled tasks;
+- direct execution of user Scheduled Task objectives inside the Scheduler role;
 - Admin API or Admin UI controls;
-- DB-defined schedules or runtime schedule overrides;
+- DB-defined schedules or runtime schedule overrides for the code-owned
+  maintenance registry;
 - attempt history tables;
 - Temporal workflows or activities;
 - external model catalog source sync by itself.
@@ -306,6 +332,9 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-08-16** — v13. Added the code-owned user Scheduled Task dispatcher to the
+  existing Scheduler role while keeping product `scheduled_tasks` and cycle
+  Toolkit State separate from maintenance `scheduled_task_states`.
 - **2026-08-15** — v12. Replaced the removed `TaskExecutor` description with the shared
   Job Runtime execution path, completed the registered task inventory, and added current Job Runtime
   and lifecycle-service authority paths. Removed obsolete ArgoCD manifest references.

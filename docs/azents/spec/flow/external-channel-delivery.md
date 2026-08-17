@@ -35,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-13
-spec_version: 43
+last_verified_at: 2026-08-16
+spec_version: 44
 ---
 
 # External Channel Delivery and Channel Work
@@ -412,7 +412,30 @@ Other cleanup paths resolve current credentials normally. Each captured plan is
 attempted at most once; failure, ambiguity, cancellation, or process termination does
 not roll back the terminal lifecycle transition and creates no recovery work.
 
+## Scheduled Task Presentation
+
+Scheduled Task provider effects use the same immediate process-local execution
+boundary as other External Channel effects but have Scheduled-owned state.
+
+- Task creation commits before one registration message with native Edit/Delete
+  controls is attempted.
+- Run start may create one Scheduled Activity Tracker.
+- Scheduled-bound `channel_action continue` may publish a reply and replace the
+  current progress title and ordered task list for the exact Binding.
+- Terminal publication starts only after the canonical Session
+  `scheduled_task_result` commits.
+- Slack thread terminal replies use broadcast for parent surfacing. Discord
+  thread terminal parts are forwarded to the parent channel in order.
+
+Each effect is attempted once. Failure, ambiguity, cancellation, process loss, or
+revoked authority is returned as a sanitized outcome and creates no retry,
+outbox, compensation, canonical rollback, or fallback target. Recovery of an
+already-committed terminal result does not replay provider publication.
+
 ## Changelog
+
+- **2026-08-16** (spec_version 44) — Added commit-first Scheduled registration,
+  progress, exact-thread terminal presentation, and explicit no-replay behavior.
 
 - **2026-08-11** (spec_version 42) — Made silent `ignore` completion delete the
   selected binding's current Slack or Discord Activity Tracker without a final reply,

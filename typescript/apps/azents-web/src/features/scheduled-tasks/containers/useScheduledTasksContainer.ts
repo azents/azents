@@ -75,7 +75,9 @@ export function useScheduledTasksContainer({
   agent,
 }: ScheduledTasksContainerProps): ScheduledTasksContainerOutput {
   const utils = trpc.useUtils();
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskIdOverride, setSelectedTaskId] = useState<string | null>(
+    null,
+  );
   const [form, setForm] = useState<ScheduledTaskFormState>({ type: "CLOSED" });
   const [deleteTarget, setDeleteTarget] =
     useState<ScheduledTaskResponse | null>(null);
@@ -94,6 +96,11 @@ export function useScheduledTasksContainer({
     refetchInterval: 5_000,
     staleTime: 0,
   });
+  const selectedTaskId =
+    selectedTaskIdOverride ??
+    (tasksQuery.data?.items.length === 1
+      ? (tasksQuery.data.items[0]?.id ?? null)
+      : null);
   const teamSessionsQuery =
     trpc.scheduledTask.listSelectableTeamSessions.useQuery(
       teamSessionListInput,
