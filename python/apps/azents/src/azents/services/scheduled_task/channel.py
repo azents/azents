@@ -394,6 +394,12 @@ class ScheduledTaskChannelService:
     async def execute_terminal(
         self,
         snapshot: ScheduledTaskTerminalEffectSnapshot,
+        *,
+        files: Sequence[ExternalChannelOutboundFileManifest],
+        file_storage: FileStorage | None,
+        authority: SessionResourceAuthority | None,
+        provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
+        resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> tuple[ProviderEffectOutcome, ...]:
         """Publish terminal parts then attempt every captured Tracker cleanup."""
         async with self.session_manager() as session:
@@ -403,7 +409,7 @@ class ScheduledTaskChannelService:
                 session_id=snapshot.session_id,
                 binding_id=snapshot.binding_id,
                 text=snapshot.result,
-                files=(),
+                files=files,
                 operation_seed=f"scheduled-terminal:{snapshot.cycle_id}",
                 slack_reply_broadcast=True,
                 discord_forward_to_parent=True,
@@ -441,7 +447,15 @@ class ScheduledTaskChannelService:
                 )
             )
         for part, plan in enumerate(reply_plans):
-            outcome = await self.action_service.execute_binding_effect(plan)
+            outcome = await self.action_service.execute_binding_effect(
+                plan,
+                file_storage=file_storage,
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
+                authority=authority,
+                provider_delivery_service=provider_delivery_service,
+                resolve_runtime_target=resolve_runtime_target,
+            )
             outcomes.append(
                 _provider_outcome(
                     operation=plan.target.operation,

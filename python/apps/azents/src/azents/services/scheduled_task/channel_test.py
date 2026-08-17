@@ -20,6 +20,10 @@ from azents.core.enums import (
     ExternalChannelWorkTaskStatus,
     ScheduledTaskScheduleType,
 )
+from azents.core.external_channel_file import (
+    ExternalChannelOutboundFileManifest,
+    ExternalChannelOutboundFileSource,
+)
 from azents.core.external_channel_progress import ExternalChannelWorkTask
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
@@ -31,8 +35,12 @@ from azents.repos.scheduled_task_cycle.data import (
     ScheduledTaskCycleState,
     ScheduledTrackerProjectionPart,
 )
+from azents.runtime.transfer.runtime_to_provider import (
+    RuntimeToProviderDeliveryExecutor,
+)
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
+    RuntimeTargetResolver,
 )
 from azents.services.external_channel.provider_effect import (
     ProviderEffectPlan,
@@ -40,10 +48,12 @@ from azents.services.external_channel.provider_effect import (
     ProviderOperationKey,
     ProviderTarget,
 )
+from azents.services.file_storage import FileStorage
 from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.scheduled_task.terminal import (
     ScheduledTaskTerminalEffectSnapshot,
 )
+from azents.services.session_resource_authority import SessionResourceAuthority
 
 _NOW = datetime.datetime(2026, 8, 16, 12, 0, tzinfo=datetime.UTC)
 _AGENT_ID = "a" * 32
@@ -531,8 +541,32 @@ async def test_terminal_cleanup_runs_after_failed_publication() -> None:
             ),
         ),
     )
+    manifest = ExternalChannelOutboundFileManifest(
+        source=ExternalChannelOutboundFileSource.RUNTIME,
+        path="/workspace/agent/report.png",
+        filename="report.png",
+        media_type="image/png",
+        expected_size=128,
+    )
+    file_storage = cast(FileStorage, object())
+    authority = cast(SessionResourceAuthority, object())
+    provider_delivery_service = object()
+    resolve_runtime_target = object()
 
-    outcomes = await service.execute_terminal(snapshot)
+    outcomes = await service.execute_terminal(
+        snapshot,
+        files=(manifest,),
+        file_storage=file_storage,
+        authority=authority,
+        provider_delivery_service=cast(
+            RuntimeToProviderDeliveryExecutor,
+            provider_delivery_service,
+        ),
+        resolve_runtime_target=cast(
+            RuntimeTargetResolver,
+            resolve_runtime_target,
+        ),
+    )
 
     assert [outcome.operation for outcome in outcomes] == [
         ExternalChannelDeliveryOperation.REPLY,
@@ -542,10 +576,28 @@ async def test_terminal_cleanup_runs_after_failed_publication() -> None:
     assert outcomes[0].status == "failed"
     assert outcomes[2].status == "delivered"
     assert action_service.execute_binding_effect.await_args_list == [
-        call(reply_one),
-        call(reply_two),
+        call(
+            reply_one,
+            file_storage=file_storage,
+            agent_id=_AGENT_ID,
+            session_id=_SESSION_ID,
+            authority=authority,
+            provider_delivery_service=provider_delivery_service,
+            resolve_runtime_target=resolve_runtime_target,
+        ),
+        call(
+            reply_two,
+            file_storage=file_storage,
+            agent_id=_AGENT_ID,
+            session_id=_SESSION_ID,
+            authority=authority,
+            provider_delivery_service=provider_delivery_service,
+            resolve_runtime_target=resolve_runtime_target,
+        ),
         call(cleanup),
     ]
     _, reply_kwargs = provider_repository.prepare_binding_reply_effects.await_args
+    assert reply_kwargs["binding_id"] == _BINDING_ID
+    assert reply_kwargs["files"] == (manifest,)
     assert reply_kwargs["slack_reply_broadcast"] is True
     assert reply_kwargs["discord_forward_to_parent"] is True

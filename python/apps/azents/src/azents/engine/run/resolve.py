@@ -72,7 +72,7 @@ from azents.engine.tools.goal import GoalToolkit, GoalToolkitProvider
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
-from azents.engine.tools.scheduled import ScheduledToolkitProvider
+from azents.engine.tools.scheduled import ScheduledToolkit, ScheduledToolkitProvider
 from azents.engine.tools.skill import SkillToolkit, SkillToolkitProvider
 from azents.engine.tools.todo import TodoToolkit, TodoToolkitProvider
 from azents.rdb.session import SessionManager
@@ -1765,6 +1765,11 @@ async def resolve_agent_tools(
                 scheduled_context,
             ),
         )
+        if (
+            isinstance(scheduled_resolved, ScheduledToolkit)
+            and instruction_context_store is not None
+        ):
+            scheduled_resolved.set_runtime_context_store(instruction_context_store)
         pending.append(
             (
                 scheduled_toolkit_provider,

@@ -36,7 +36,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-17
-spec_version: 45
+spec_version: 46
 ---
 
 # External Channel Delivery and Channel Work
@@ -424,6 +424,10 @@ boundary as other External Channel effects but have Scheduled-owned state.
 - Run start may create one Scheduled Activity Tracker.
 - Scheduled-bound `channel_action continue` may publish a reply and replace the
   current progress title and ordered task list for the exact Binding.
+- `submit_scheduled_task_result` may attach the same validated Runtime or Exchange
+  file sources as `channel_action`. The terminal reply and files use the active
+  cycle's exact Binding and conversation; the Agent does not choose another
+  provider channel. Session-only cycles cannot publish terminal files.
 - Terminal publication starts only after the canonical Session
   `scheduled_task_result` commits.
 - Slack thread terminal replies use broadcast for parent surfacing. Discord
@@ -435,6 +439,10 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+
+- **2026-08-17** (spec_version 46) — Added Scheduled terminal file delivery through
+  the exact current Binding with the same outbound file validation and Runtime
+  transfer context as `channel_action`.
 
 - **2026-08-17** (spec_version 45) — Made Slack and Discord Scheduled Task
   registration messages title-first with human-readable schedule and next-run

@@ -112,9 +112,15 @@ def render_scheduled_task_cycle_guidance(state: ScheduledTaskCycleState) -> str:
     """Render active-cycle-only dynamic execution guidance."""
     channel_guidance = (
         "Use `channel_action` only for interim progress and publication. "
-        "Only `submit_scheduled_task_result` can finish this Scheduled Task cycle."
+        "`submit_scheduled_task_result` finishes this Scheduled Task cycle and "
+        "delivers its terminal message and files to the exact same bound "
+        "conversation used by `channel_action`; do not describe this as sending to "
+        "another Slack or Discord channel."
         if state.binding_id is not None
-        else "This cycle is Session-only; no external provider publication is required."
+        else (
+            "This cycle is Session-only; submit the terminal result with files set "
+            "to null because no external provider publication is available."
+        )
     )
     runtime_message = render_scheduled_task_runtime_message(
         title=state.title,

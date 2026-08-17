@@ -192,3 +192,22 @@ or stale identifier.
 6. Report both deletion and replacement outcomes accurately.
 
 Do not describe replacement as an in-place update.
+
+## Completing scheduled work
+
+Use `submit_scheduled_task_result` to finish or fail the active Scheduled Task
+cycle. Always supply `files` explicitly:
+
+- set `files=null` when no files are needed;
+- for a channel-bound cycle, supply the same absolute Runtime paths or authorized
+  `exchange://` URIs accepted by `channel_action`; and
+- for a Session-only cycle, set `files=null` because no External Channel
+  publication is available.
+
+For a channel-bound cycle, the terminal result message and files are delivered to
+the exact same bound conversation represented by `channel_action`. Do not select
+another channel, reconstruct a provider identifier, or describe the result as
+having been separately sent to another Slack or Discord channel.
+
+Use `channel_action` only for interim progress while the Scheduled Task remains
+active. It does not replace terminal result submission.
