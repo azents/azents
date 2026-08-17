@@ -19,12 +19,16 @@ from azents.engine.hooks.types import (
     ExternalChannelSessionContinuationInput,
     GoalSessionContinuationInput,
     RuntimeHooks,
+    ScheduledTaskSessionContinuationInput,
     SessionContinuationInput,
     SessionIdleHookContext,
     SessionIdleResult,
 )
 from azents.engine.run.contracts import ToolkitBinding
-from azents.repos.mailbox.data import MailboxItem
+from azents.repos.mailbox.data import (
+    MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+)
 from azents.services.mailbox import (
     MailboxAdmissionResult,
     MailboxEnqueue,
@@ -69,6 +73,7 @@ class _MailboxService:
                     metadata=input.metadata,
                     attachments=input.attachments,
                     file_parts=input.file_parts,
+                    payload=input.payload,
                     created_at=datetime.datetime.now(datetime.UTC),
                 ),
                 created=True,
@@ -443,6 +448,53 @@ async def test_consume_stores_external_channel_continuation_separately() -> None
         EventKind.EXTERNAL_CHANNEL_CONTINUATION
     )
     assert repository.consumed == [("session-001", "run-001", True)]
+    assert broker.sent_messages == [SessionWakeUp(session_id=snapshot.session_id)]
+
+
+@pytest.mark.asyncio
+async def test_consume_stores_typed_scheduled_task_continuation() -> None:
+    """Scheduled continuation preserves its internal cycle binding and presentation."""
+    mailbox_item_service = _MailboxService()
+    event_publisher = _EventPublisher()
+    broker = _Broker()
+    repository = _AgentSessionRepository()
+    toolkit = _IdleToolkit(
+        [
+            ScheduledTaskSessionContinuationInput(
+                cycle_id="c" * 32,
+                title="Daily report",
+                content="Continue the Scheduled Task.",
+                metadata={"source": "scheduled_task"},
+            )
+        ]
+    )
+
+    result = await _service(
+        mailbox_item_service=mailbox_item_service,
+        event_publisher=event_publisher,
+        broker=broker,
+        agent_session_repository=repository,
+    ).consume(
+        snapshot := _snapshot(),
+        toolkits=[ToolkitBinding(toolkit, "scheduled", False)],
+        run_id="run-001",
+    )
+
+    assert result is True
+    [enqueue] = mailbox_item_service.enqueued_batches[0]
+    assert enqueue.kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION
+    assert enqueue.metadata == {
+        "source": "scheduled_task",
+        "provider_slug": "scheduled",
+        "cycle_id": "c" * 32,
+        "title": "Daily report",
+    }
+    assert enqueue.idempotency_key == "idle_continuation:run-001:scheduled:0"
+    assert isinstance(enqueue.payload, ScheduledTaskContinuationMailboxPayload)
+    assert enqueue.payload.cycle_id == "c" * 32
+    assert enqueue.payload.items[0].content == "Continue the Scheduled Task."
+    event = event_publisher.dispatched[0][1]
+    assert event.kind is EventKind.SCHEDULED_TASK_CONTINUATION
     assert broker.sent_messages == [SessionWakeUp(session_id=snapshot.session_id)]
 
 

@@ -217,6 +217,54 @@ class ScheduledTaskCycleRepository:
             return None
         return record
 
+    async def list_started(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+    ) -> list[ScheduledTaskCycleRecord]:
+        """List current started cycles in deterministic occurrence order."""
+        result = await session.execute(
+            sa.select(RDBToolkitState).where(
+                RDBToolkitState.agent_id == agent_id,
+                RDBToolkitState.session_id == session_id,
+                RDBToolkitState.toolkit_namespace == self.NAMESPACE,
+            )
+        )
+        records = [
+            self._build_rdb(rdb)
+            for rdb in result.scalars()
+            if rdb.state_name.startswith("cycle:")
+        ]
+        started = [record for record in records if record.state.phase == "started"]
+        return sorted(
+            started,
+            key=lambda record: (
+                record.state.scheduled_for,
+                record.state.cycle_id,
+            ),
+        )
+
+    async def delete_started(
+        self,
+        session: AsyncSession,
+        *,
+        record: ScheduledTaskCycleRecord,
+    ) -> bool:
+        """Delete one exact locked started cycle after terminal commit."""
+        if record.state.phase != "started":
+            raise ValueError("Scheduled Task cycle is not started")
+        result = await session.execute(
+            sa.delete(RDBToolkitState)
+            .where(
+                RDBToolkitState.id == record.toolkit_state_id,
+                RDBToolkitState.version == record.version,
+            )
+            .returning(RDBToolkitState.id)
+        )
+        return result.scalar_one_or_none() is not None
+
     def _build(self, record: ToolkitStateRecord) -> ScheduledTaskCycleRecord:
         return ScheduledTaskCycleRecord(
             state=ScheduledTaskCycleState.model_validate(record.state_json),

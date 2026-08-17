@@ -95,6 +95,12 @@ class FunctionToolResult(BaseModel):
         exclude=True,
         repr=False,
     )
+    terminal_run: bool = Field(
+        default=False,
+        exclude=True,
+        repr=False,
+        description="Complete the current AgentRun after this result is durable.",
+    )
 
 
 # Async function taking JSON string args and returning string or ToolResult

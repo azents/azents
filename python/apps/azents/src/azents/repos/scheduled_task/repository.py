@@ -269,6 +269,61 @@ class ScheduledTaskRepository:
         await session.flush()
         return bool(result.rowcount)
 
+    async def delete_completed_once(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        cycle_id: str,
+    ) -> bool:
+        """Delete a one-time Task only while it owns the completed cycle."""
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.delete(RDBScheduledTask).where(
+                    RDBScheduledTask.id == task_id,
+                    RDBScheduledTask.schedule_type == ScheduledTaskScheduleType.ONCE,
+                    RDBScheduledTask.active_cycle_id == cycle_id,
+                )
+            ),
+        )
+        await session.flush()
+        return bool(result.rowcount)
+
+    async def release_completed_recurring(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        cycle_id: str,
+    ) -> bool:
+        """Release a recurring Task fence and expose pending or future work."""
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.update(RDBScheduledTask)
+                .where(
+                    RDBScheduledTask.id == task_id,
+                    RDBScheduledTask.schedule_type == ScheduledTaskScheduleType.CRON,
+                    RDBScheduledTask.active_cycle_id == cycle_id,
+                )
+                .values(
+                    next_eligible_at=sa.func.coalesce(
+                        RDBScheduledTask.pending_scheduled_for,
+                        RDBScheduledTask.next_eligible_at,
+                    ),
+                    active_cycle_id=None,
+                    active_scheduled_for=None,
+                    pending_scheduled_for=None,
+                    lease_owner=None,
+                    lease_until=None,
+                    updated_at=sa.func.now(),
+                )
+            ),
+        )
+        await session.flush()
+        return bool(result.rowcount)
+
     def _build(self, rdb: RDBScheduledTask) -> ScheduledTask:
         """Convert one ORM row to its persistence data contract."""
         return ScheduledTask(

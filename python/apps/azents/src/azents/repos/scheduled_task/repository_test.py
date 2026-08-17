@@ -243,3 +243,48 @@ class TestScheduledTaskRepository:
             "a" * 32,
         )
         assert session.flushed is True
+
+    async def test_delete_completed_once_fences_task_cycle_and_schedule_type(
+        self,
+    ) -> None:
+        """One-time completion deletes only its exact active cycle owner."""
+        session = _DeleteSession(rowcount=1)
+
+        assert await ScheduledTaskRepository().delete_completed_once(
+            cast(AsyncSession, session),
+            task_id="t" * 32,
+            cycle_id="c" * 32,
+        )
+
+        statement = _sql(session.query)
+        assert "scheduled_tasks.id = 'tttttttttttttttttttttttttttttttt'" in statement
+        assert "scheduled_tasks.schedule_type = 'once'" in statement
+        assert (
+            "scheduled_tasks.active_cycle_id = 'cccccccccccccccccccccccccccccccc'"
+        ) in statement
+        assert session.flushed is True
+
+    async def test_release_completed_recurring_exposes_pending_or_future_cursor(
+        self,
+    ) -> None:
+        """Recurring completion atomically clears every active ownership field."""
+        session = _DeleteSession(rowcount=1)
+
+        assert await ScheduledTaskRepository().release_completed_recurring(
+            cast(AsyncSession, session),
+            task_id="t" * 32,
+            cycle_id="c" * 32,
+        )
+
+        statement = _sql(session.query)
+        assert "scheduled_tasks.schedule_type = 'cron'" in statement
+        assert (
+            "next_eligible_at=coalesce(scheduled_tasks.pending_scheduled_for, "
+            "scheduled_tasks.next_eligible_at)"
+        ) in statement
+        assert "active_cycle_id=NULL" in statement
+        assert "active_scheduled_for=NULL" in statement
+        assert "pending_scheduled_for=NULL" in statement
+        assert "lease_owner=NULL" in statement
+        assert "lease_until=NULL" in statement
+        assert session.flushed is True

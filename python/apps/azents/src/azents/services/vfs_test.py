@@ -3,9 +3,11 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import Any, cast
 
 import pytest
 
+from azents.core.tools import ToolkitExecutionMode, ToolkitProvider
 from azents.core.vfs import (
     VfsProjection,
     make_vfs_projection,
@@ -203,6 +205,13 @@ class _UnusedToolkitRepository:
         raise AssertionError("Toolkit repository is not used for no attachments")
 
 
+class _ScheduledReleaseProvider:
+    """Required provider source without a ToolkitConfig attachment."""
+
+    slug = "scheduled"
+    vfs_resource_root = "resources/vfs/toolkits/scheduled"
+
+
 @asynccontextmanager
 async def _session_manager() -> AsyncIterator[_Session]:
     yield _Session(agent_id="", workspace_id="")
@@ -219,6 +228,7 @@ def _projection_service(
         agent_session_repository=_SessionRepository(),
         agent_toolkit_repository=_NoAttachmentsRepository(),
         toolkit_repository=_UnusedToolkitRepository(),
+        required_provider_sources={},
     )
 
 
@@ -243,6 +253,7 @@ async def test_preview_includes_platform_skill_creator_without_attachments() -> 
         agent_session_repository=_UnusedSessionRepository(),
         agent_toolkit_repository=_NoAttachmentsRepository(),
         toolkit_repository=_UnusedToolkitRepository(),
+        required_provider_sources={},
     )
 
     projection = await service.build_preview(
@@ -251,6 +262,80 @@ async def test_preview_includes_platform_skill_creator_without_attachments() -> 
     )
 
     assert projection.find("azents://skills/azents/skill-creator/SKILL.md")
+
+
+async def test_preview_includes_required_scheduled_skill_without_attachment() -> None:
+    """Root preview projects the required Scheduled release source."""
+    provider = cast(ToolkitProvider[Any], _ScheduledReleaseProvider())
+    service = VfsProjectionService(
+        session_manager=_session_manager,
+        toolkit_registry={},
+        catalog=ReleaseVfsCatalog(),
+        agent_run_repository=_UnusedRunRepository(),
+        agent_session_repository=_UnusedSessionRepository(),
+        agent_toolkit_repository=_NoAttachmentsRepository(),
+        toolkit_repository=_UnusedToolkitRepository(),
+        required_provider_sources={"scheduled": provider},
+    )
+
+    projection = await service.build_preview(
+        agent_id="agent-1",
+        workspace_id="workspace-1",
+    )
+
+    entry = projection.find("azents://skills/scheduled/scheduled-task/SKILL.md")
+    assert entry is not None
+    assert "name: scheduled-task" in entry.decode_body().decode()
+
+
+@pytest.mark.parametrize(
+    ("execution_mode", "included"),
+    [
+        (ToolkitExecutionMode.ROOT, True),
+        (ToolkitExecutionMode.SUBAGENT, False),
+    ],
+)
+async def test_run_projection_scopes_required_source_to_root_execution(
+    execution_mode: ToolkitExecutionMode,
+    included: bool,
+) -> None:
+    """Persisted root projections include Scheduled while subagents exclude it."""
+    provider = cast(ToolkitProvider[Any], _ScheduledReleaseProvider())
+    service = VfsProjectionService(
+        session_manager=_session_manager,
+        toolkit_registry={},
+        catalog=ReleaseVfsCatalog(),
+        agent_run_repository=_MappedRunRepository(
+            {
+                "run-1": _Run(
+                    session_id="session-1",
+                    vfs_projection=None,
+                )
+            }
+        ),
+        agent_session_repository=_MappedSessionRepository(
+            {
+                "session-1": _Session(
+                    agent_id="agent-1",
+                    workspace_id="workspace-1",
+                )
+            }
+        ),
+        agent_toolkit_repository=_NoAttachmentsRepository(),
+        toolkit_repository=_UnusedToolkitRepository(),
+        required_provider_sources={"scheduled": provider},
+    )
+
+    projection = await service.ensure_run_projection(
+        run_id="run-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        workspace_id="workspace-1",
+        execution_mode=execution_mode,
+    )
+
+    entry = projection.find("azents://skills/scheduled/scheduled-task/SKILL.md")
+    assert (entry is not None) is included
 
 
 async def test_resolve_file_returns_projection_provenance_and_verified_entry() -> None:
@@ -366,6 +451,7 @@ async def test_subagent_run_loads_its_own_projection() -> None:
         ),
         agent_toolkit_repository=_NoAttachmentsRepository(),
         toolkit_repository=_UnusedToolkitRepository(),
+        required_provider_sources={},
     )
 
     loaded = await service.load_run_projection(

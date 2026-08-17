@@ -667,6 +667,7 @@ def _tool_result_payload(
             )
             for generated in result.generated_files
         ],
+        terminal_run=result.terminal_run,
     )
 
 

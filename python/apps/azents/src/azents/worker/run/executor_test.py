@@ -44,7 +44,7 @@ from azents.core.runtime_capabilities import (
     RuntimeCapability,
     RuntimeCapabilityResolver,
 )
-from azents.core.tools import ToolkitContext, ToolkitProvider
+from azents.core.tools import ToolkitContext, ToolkitExecutionMode, ToolkitProvider
 from azents.core.vfs import VfsProjection, make_vfs_projection
 from azents.engine.events.action_messages import (
     AgentCreateGitWorktreeAction,
@@ -110,6 +110,7 @@ from azents.engine.tools.dynamic_worktree import (
 )
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.goal import GoalToolkitProvider
+from azents.engine.tools.scheduled import ScheduledToolkitProvider
 from azents.engine.tools.skill import SkillToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.engine.tools.todo import TodoToolkitProvider
@@ -218,8 +219,10 @@ class _VfsProjectionService:
         agent_id: str,
         session_id: str,
         workspace_id: str,
+        execution_mode: ToolkitExecutionMode,
     ) -> VfsProjection:
         """Record projection admission before input promotion."""
+        del execution_mode
         if self.order is not None:
             self.order.append("vfs")
         self.calls.append((run_id, agent_id, session_id, workspace_id))
@@ -1368,6 +1371,7 @@ def _executor(
         claude_rules_toolkit_provider=cast(ClaudeRulesToolkitProvider, object()),
         todo_toolkit_provider=cast(TodoToolkitProvider, object()),
         goal_toolkit_provider=cast(GoalToolkitProvider, object()),
+        scheduled_toolkit_provider=cast(ScheduledToolkitProvider, object()),
         external_channel_toolkit_provider=cast(
             ExternalChannelToolkitProvider,
             object(),

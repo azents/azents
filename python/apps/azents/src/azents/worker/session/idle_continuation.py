@@ -16,6 +16,7 @@ from azents.engine.hooks.dispatcher import (
 from azents.engine.hooks.types import (
     ExternalChannelSessionContinuationInput,
     GoalSessionContinuationInput,
+    ScheduledTaskSessionContinuationInput,
     SessionContinuationInput,
     SessionIdleHookContext,
 )
@@ -26,6 +27,10 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
+from azents.repos.mailbox.data import (
+    MailboxPresentationItem,
+    ScheduledTaskContinuationMailboxPayload,
+)
 from azents.services.chat.live_events import mailbox_item_to_live_event
 from azents.services.mailbox import MailboxEnqueue, MailboxService
 from azents.worker.deps import get_worker_broker
@@ -201,11 +206,29 @@ class IdleContinuationService:
                 mailbox_kind = MailboxItemKind.GOAL_CONTINUATION
             case ExternalChannelSessionContinuationInput():
                 mailbox_kind = MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
+            case ScheduledTaskSessionContinuationInput():
+                mailbox_kind = MailboxItemKind.SCHEDULED_TASK_CONTINUATION
             case _:
                 assert_never(continuation)
         metadata: dict[str, JSONValue] = dict(continuation.metadata)
         if continuation.hook_provider_slug is not None:
             metadata["provider_slug"] = continuation.hook_provider_slug
+        payload = None
+        if isinstance(continuation, ScheduledTaskSessionContinuationInput):
+            metadata["cycle_id"] = continuation.cycle_id
+            metadata["title"] = continuation.title
+            payload = ScheduledTaskContinuationMailboxPayload(
+                type="scheduled_task_continuation",
+                cycle_id=continuation.cycle_id,
+                items=[
+                    MailboxPresentationItem(
+                        item_key="scheduled_task_continuation:0",
+                        presentation_kind="scheduled_task_continuation",
+                        content=continuation.content,
+                        metadata={"title": continuation.title},
+                    )
+                ],
+            )
         return MailboxEnqueue(
             session_id=session_id,
             kind=mailbox_kind,
@@ -225,6 +248,7 @@ class IdleContinuationService:
             action=None,
             attachments=[],
             file_parts=[],
+            payload=payload,
         )
 
 

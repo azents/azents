@@ -20,14 +20,18 @@ from azents.engine.tools.google_analytics import GoogleAnalyticsToolkitProvider
 from azents.engine.tools.kubernetes import KubernetesToolkitProvider
 from azents.engine.tools.mcp import McpToolkitProvider
 from azents.engine.tools.notion import NotionToolkitProvider
+from azents.engine.tools.scheduled import ScheduledToolkitProvider
 from azents.engine.tools.sentry import SentryToolkitProvider
 from azents.engine.tools.skill import SkillStateStore, SkillToolkitProvider
 from azents.engine.tools.todo import TodoStateStore, TodoToolkitProvider
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
+from azents.repos.scheduled_task.repository import ScheduledTaskRepository
+from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.artifact import ArtifactService
 from azents.services.external_channel.channel_action import (
@@ -39,6 +43,11 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
+from azents.services.scheduled_task.service import (
+    RDBScheduledTaskAuthorityValidator,
+    ScheduledTaskService,
+)
+from azents.services.scheduled_task.terminal import ScheduledTaskTerminalService
 from azents.services.vfs import ReleaseVfsCatalog, VfsProjectionService
 from azents.testing.runtime_hooks import TestenvRuntimeHookQAProvider
 from azents.utils.appctx import AppContext
@@ -110,6 +119,41 @@ async def get_release_vfs_catalog(
     return await appctx.get_variable(f"{__name__}.release_vfs_catalog", create)
 
 
+def get_scheduled_toolkit_provider(
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+    cycle_repository: Annotated[
+        ScheduledTaskCycleRepository, Depends(ScheduledTaskCycleRepository)
+    ],
+    run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
+    task_repository: Annotated[
+        ScheduledTaskRepository, Depends(ScheduledTaskRepository)
+    ],
+    mailbox_repository: Annotated[MailboxRepository, Depends(MailboxRepository)],
+) -> ScheduledToolkitProvider:
+    """Scheduled Toolkit dependency without ToolkitConfig or credentials."""
+    service = ScheduledTaskService(
+        repository=task_repository,
+        cycle_repository=cycle_repository,
+        mailbox_repository=mailbox_repository,
+        authority_validator=RDBScheduledTaskAuthorityValidator(),
+    )
+    return ScheduledToolkitProvider(
+        session_manager=session_manager,
+        service=service,
+        terminal_service=ScheduledTaskTerminalService(
+            session_manager=session_manager,
+            run_repository=run_repository,
+            event_repository=EventTranscriptRepository(),
+            task_repository=task_repository,
+            cycle_repository=cycle_repository,
+        ),
+        cycle_repository=cycle_repository,
+        run_repository=run_repository,
+    )
+
+
 def get_vfs_projection_service(
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -118,6 +162,9 @@ def get_vfs_projection_service(
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ],
     catalog: Annotated[ReleaseVfsCatalog, Depends(get_release_vfs_catalog)],
+    scheduled_toolkit_provider: Annotated[
+        ScheduledToolkitProvider, Depends(get_scheduled_toolkit_provider)
+    ],
 ) -> VfsProjectionService[AsyncSession]:
     """Create the run VFS projection service."""
     return VfsProjectionService(
@@ -128,6 +175,9 @@ def get_vfs_projection_service(
         agent_session_repository=AgentSessionRepository(),
         agent_toolkit_repository=AgentToolkitRepository(),
         toolkit_repository=ToolkitRepository(),
+        required_provider_sources={
+            scheduled_toolkit_provider.slug: scheduled_toolkit_provider
+        },
     )
 
 

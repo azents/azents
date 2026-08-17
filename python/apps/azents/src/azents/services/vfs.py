@@ -12,7 +12,7 @@ from importlib import resources
 from importlib.resources.abc import Traversable
 from typing import Any, AsyncContextManager, Generic, Protocol, TypeVar
 
-from azents.core.tools import ToolkitProvider
+from azents.core.tools import ToolkitExecutionMode, ToolkitProvider
 from azents.core.vfs import (
     AZENTS_VFS_SUPPORTED_MOUNTS,
     VfsFileEntry,
@@ -249,6 +249,7 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
     agent_session_repository: VfsSessionRepository[VfsSessionT_contra]
     agent_toolkit_repository: VfsAgentToolkitRepository[VfsSessionT_contra]
     toolkit_repository: VfsToolkitRepository[VfsSessionT_contra]
+    required_provider_sources: Mapping[str, ToolkitProvider[Any]]
 
     async def build_preview(
         self,
@@ -257,10 +258,25 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
         workspace_id: str,
     ) -> VfsProjection:
         """Build a non-persisted projection from current eligible release sources."""
+        return await self._build_projection(
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            include_required_sources=True,
+        )
+
+    async def _build_projection(
+        self,
+        *,
+        agent_id: str,
+        workspace_id: str,
+        include_required_sources: bool,
+    ) -> VfsProjection:
+        """Build one projection with execution-mode-specific required sources."""
         started_at = time.monotonic()
         provider_specs = await self._eligible_provider_specs(
             agent_id=agent_id,
             workspace_id=workspace_id,
+            include_required_sources=include_required_sources,
         )
         catalog_snapshot = await self.catalog.snapshot(
             [GLOBAL_RELEASE_SOURCE, *provider_specs]
@@ -291,6 +307,7 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
         agent_id: str,
         session_id: str,
         workspace_id: str,
+        execution_mode: ToolkitExecutionMode,
     ) -> VfsProjection:
         """Return the run's immutable projection, creating it exactly once."""
         async with self.session_manager() as session:
@@ -309,9 +326,10 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
         if run.vfs_projection is not None:
             return run.vfs_projection
 
-        candidate = await self.build_preview(
+        candidate = await self._build_projection(
             agent_id=agent_id,
             workspace_id=workspace_id,
+            include_required_sources=execution_mode is ToolkitExecutionMode.ROOT,
         )
         async with self.session_manager() as session:
             projection = await self.agent_run_repository.set_vfs_projection_if_unset(
@@ -451,6 +469,7 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
         *,
         agent_id: str,
         workspace_id: str,
+        include_required_sources: bool,
     ) -> list[VfsSourceSpec]:
         """Return enabled Provider release sources eligible for one Agent."""
         async with self.session_manager() as session:
@@ -465,7 +484,9 @@ class VfsProjectionService(Generic[VfsSessionT_contra]):
                 )
                 for attachment in attachments
             }
-        eligible_providers: dict[str, ToolkitProvider[Any]] = {}
+        eligible_providers: dict[str, ToolkitProvider[Any]] = (
+            dict(self.required_provider_sources) if include_required_sources else {}
+        )
         for attachment in attachments:
             toolkit = toolkit_configs[attachment.id]
             if (

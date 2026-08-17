@@ -582,6 +582,7 @@ class ClientToolResultPayload(BaseModel):
         exclude=True,
         repr=False,
     )
+    terminal_run: bool = Field(default=False, exclude=True, repr=False)
 
 
 class TokenUsagePayload(BaseModel):

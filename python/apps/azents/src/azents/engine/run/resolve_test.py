@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
-from typing import ClassVar, cast
+from typing import Any, ClassVar, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -49,6 +49,7 @@ from azents.engine.tools.dynamic_worktree import (
     DynamicWorktreeToolkitProvider,
 )
 from azents.engine.tools.goal import GoalStateStore, GoalToolkitProvider
+from azents.engine.tools.scheduled import ScheduledToolkitProvider
 from azents.engine.tools.subagent import SubagentToolkitProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent.data import Agent
@@ -121,6 +122,17 @@ def _session_manager_for(
         yield session
 
     return manager
+
+
+def _make_scheduled_provider() -> ScheduledToolkitProvider:
+    """Create a provider whose collaborators are not exercised during resolution."""
+    return ScheduledToolkitProvider(
+        session_manager=cast(Any, object()),
+        service=cast(Any, object()),
+        terminal_service=cast(Any, object()),
+        cycle_repository=cast(Any, object()),
+        run_repository=cast(Any, object()),
+    )
 
 
 def _make_agent(
@@ -1016,6 +1028,7 @@ class TestResolveAgentTools:
             goal_toolkit_provider=GoalToolkitProvider(
                 store=GoalStateStore(session_manager=goal_session_manager)
             ),
+            scheduled_toolkit_provider=_make_scheduled_provider(),
             memory_enabled=True,
             runtime_capability_resolver=_runtime_capability_resolver(enabled=True),
         )
@@ -1025,3 +1038,57 @@ class TestResolveAgentTools:
             "runtime",
             "claude_rules",
         ]
+
+    async def test_scheduled_toolkit_is_unprefixed_and_root_only(self) -> None:
+        """Scheduled auto-binding needs no attachment, config, or credentials."""
+        session = AsyncMock(spec=AsyncSession)
+        session.get.return_value = None
+        agent_toolkit_repository = AsyncMock()
+        agent_toolkit_repository.list_by_agent.return_value = []
+        provider = _make_scheduled_provider()
+
+        root = await resolve_agent_tools(
+            "agent-1",
+            _make_toolkit_context(),
+            execution_mode=ToolkitExecutionMode.ROOT,
+            toolkit_registry={},
+            agent_toolkit_repository=agent_toolkit_repository,
+            toolkit_repository=AsyncMock(),
+            session_manager=_session_manager_for(session),
+            web_url="https://example.test",
+            oauth_secret_key="secret",
+            mcp_proxy_url=None,
+            runtime_domain_config=RuntimeDomainConfig(
+                allowed_domains=(),
+                denied_domains=(),
+            ),
+            scheduled_toolkit_provider=provider,
+            memory_enabled=False,
+            runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+        )
+        subagent = await resolve_agent_tools(
+            "agent-1",
+            _make_toolkit_context(),
+            execution_mode=ToolkitExecutionMode.SUBAGENT,
+            toolkit_registry={},
+            agent_toolkit_repository=agent_toolkit_repository,
+            toolkit_repository=AsyncMock(),
+            session_manager=_session_manager_for(session),
+            web_url="https://example.test",
+            oauth_secret_key="secret",
+            mcp_proxy_url=None,
+            runtime_domain_config=RuntimeDomainConfig(
+                allowed_domains=(),
+                denied_domains=(),
+            ),
+            scheduled_toolkit_provider=provider,
+            memory_enabled=False,
+            runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
+        )
+
+        assert [binding.slug for binding in root] == ["scheduled"]
+        assert root[0].use_prefix is False
+        assert root[0].toolkit_type is None
+        assert root[0].toolkit_config_id is None
+        assert root[0].source_revision is not None
+        assert subagent == []

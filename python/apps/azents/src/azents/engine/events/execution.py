@@ -412,6 +412,8 @@ class AgentRunExecution[
                             ),
                             [repaired_event],
                         )
+                if await self._complete_committed_terminal_run(request):
+                    return AgentRunStatus.COMPLETED
                 await self._publish_phase(
                     AgentRunPhase.PREPARING_INPUT,
                     model_call_started_at,
@@ -669,7 +671,7 @@ class AgentRunExecution[
                         await finish_turn("completed")
                         continue
                     try:
-                        await self._execute_tools(
+                        terminal_tool_completed = await self._execute_tools(
                             request.run_id,
                             request.session_id,
                             client_tool_calls,
@@ -707,6 +709,11 @@ class AgentRunExecution[
                             )
                         await finish_turn("cancelled")
                         return AgentRunStatus.INTERRUPTED
+                    if terminal_tool_completed:
+                        completed = await self._complete_committed_terminal_run(request)
+                        if completed:
+                            await finish_turn("completed")
+                            return AgentRunStatus.COMPLETED
                     bridge_observation = request.turn_action_bridge_boundary.consume()
                     if bridge_observation is not None:
                         if poll_input_events is None:
@@ -923,9 +930,10 @@ class AgentRunExecution[
         tool_calls: Sequence[ClientToolCallPayload],
         *,
         tool_executor: ClientToolExecutor,
-    ) -> None:
+    ) -> bool:
         """Run foreground calls in parallel and durably complete each one."""
         completed_call_ids: set[str] = set()
+        terminal_run = False
         tasks_by_call_id = {
             call.call_id: asyncio.create_task(
                 self._execute_tool_with_call(call, tool_executor=tool_executor)
@@ -941,6 +949,9 @@ class AgentRunExecution[
                     session_id=session_id,
                     call=outcome.call,
                     result=outcome.result,
+                )
+                terminal_run = terminal_run or (
+                    outcome.result.status == "completed" and outcome.result.terminal_run
                 )
                 completed_call_ids.add(outcome.call.call_id)
         except asyncio.CancelledError as exc:
@@ -997,6 +1008,7 @@ class AgentRunExecution[
                     )
                 raise _ToolExecutionUserInterrupted from exc
             raise
+        return terminal_run
 
     async def _execute_tool_with_call(
         self,
@@ -1155,11 +1167,52 @@ class AgentRunExecution[
             for call_id, call in calls_by_id.items()
             if call_id not in result_call_ids
         ]
-        appended = await self._append_cancelled_tool_results_in_session(
-            session,
-            request.session_id,
-            unresolved_calls,
-            run_id=request.run_id,
+        terminal_calls: list[ClientToolCallPayload] = []
+        if (
+            run_state.scheduled_task_cycle_id is not None
+            and run_state.terminal_result_event_id is not None
+        ):
+            terminal_calls = [
+                call
+                for call in unresolved_calls
+                if call.name == "submit_scheduled_task_result"
+            ]
+        appended: list[Event] = []
+        for call in terminal_calls:
+            appended.append(
+                await self._finalize_tool_result_in_session(
+                    session,
+                    run_id=request.run_id,
+                    session_id=request.session_id,
+                    call=call,
+                    result=ClientToolResultPayload(
+                        call_id=call.call_id,
+                        name=call.name,
+                        wire_dialect=call.wire_dialect,
+                        status="completed",
+                        output=[
+                            OutputTextPart(
+                                text=(
+                                    "The Scheduled Task result was already committed."
+                                )
+                            )
+                        ],
+                        terminal_run=True,
+                    ),
+                )
+            )
+        terminal_call_ids = {call.call_id for call in terminal_calls}
+        appended.extend(
+            await self._append_cancelled_tool_results_in_session(
+                session,
+                request.session_id,
+                [
+                    call
+                    for call in unresolved_calls
+                    if call.call_id not in terminal_call_ids
+                ],
+                run_id=request.run_id,
+            )
         )
 
         stale_resolved_ids = {
@@ -1185,6 +1238,41 @@ class AgentRunExecution[
                 active_tool_calls=remaining,
             )
         return appended
+
+    async def _complete_committed_terminal_run(
+        self,
+        request: AgentRunExecutionRequest,
+    ) -> bool:
+        """Complete a Run whose terminal client tool already committed its result."""
+        async with self.session_manager() as session:
+            run = await self.run_repo.get_by_id(session, request.run_id)
+            if (
+                run is None
+                or run.status is not AgentRunStatus.RUNNING
+                or run.scheduled_task_cycle_id is None
+                or run.terminal_result_event_id is None
+                or run.terminal_result_message is None
+            ):
+                return False
+            run_marker = await self._append_run_marker(
+                session,
+                request.session_id,
+                request.run_id,
+                "completed",
+            )
+            await self._mark_terminal(
+                session,
+                request.run_id,
+                AgentRunStatus.COMPLETED,
+                terminal_result_event_id=run.terminal_result_event_id,
+                terminal_result_message=run.terminal_result_message,
+            )
+        if self.output_sink is not None:
+            await self.output_sink(
+                NormalizedAdapterOutput(needs_follow_up=False, events=[]),
+                [run_marker],
+            )
+        return True
 
     async def _append_cancelled_tool_results(
         self,
