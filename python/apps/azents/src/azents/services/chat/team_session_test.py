@@ -415,9 +415,7 @@ def _service(
             agent_session_repository=AgentSessionRepository(),
             agent_repository=AgentRepository(),
             automatic_project_repository=AgentAutomaticProjectRepository(),
-            agent_runtime_repository=AgentRuntimeRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            runtime_target_resolver=_RuntimeTargetResolver(),
         ),
         archived_session_retention_repository=ArchivedSessionRetentionRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
@@ -1220,6 +1218,69 @@ class TestChatSessionTeamSessions:
         ]
         assert sessions[0].primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY
         assert sessions[1].primary_kind is None
+
+    async def test_team_session_reads_do_not_create_team_primary(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Session directory reads remain empty and side-effect free."""
+        workspace_id = await _create_workspace(rdb_session, "team-session-read-only")
+        user_id = await _create_user(
+            rdb_session,
+            "team-session-read-only@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-session-read-only-agent",
+            workspace_path=None,
+        )
+        await rdb_session.commit()
+        service = _service(rdb_session_manager)
+
+        listed = await service.list_agent_sessions(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        unread = await service.list_agent_sessions_with_unread_terminal_run(
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        directory = await service.list_agent_session_directory(
+            agent_id=agent_id,
+            user_id=user_id,
+            status=AgentSessionStatus.ACTIVE,
+            offset=0,
+            limit=20,
+        )
+        sidebar = await service.get_agent_session_sidebar_summary(
+            agent_id=agent_id,
+            user_id=user_id,
+            recent_limit=20,
+        )
+
+        assert isinstance(listed, Success)
+        assert listed.value == []
+        assert isinstance(unread, Success)
+        assert unread.value == []
+        assert isinstance(directory, Success)
+        assert directory.value.items == []
+        assert directory.value.total_count == 0
+        assert isinstance(sidebar, Success)
+        assert sidebar.value.pinned == []
+        assert sidebar.value.recent == []
+        async with rdb_session_manager() as verify_session:
+            primary = await AgentSessionRepository().get_team_primary_by_agent_id(
+                verify_session,
+                agent_id,
+            )
+        assert primary is None
 
     async def test_list_agent_sessions_projects_tree_auto_archive_deadline(
         self,

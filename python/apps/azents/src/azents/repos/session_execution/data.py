@@ -19,7 +19,7 @@ class PendingCommandSnapshot:
 
 @dataclasses.dataclass(frozen=True)
 class CanonicalExecutionSnapshot:
-    """Immutable validated execution identity and work expectation."""
+    """Immutable validated execution authority and non-mailbox work state."""
 
     session_id: str
     root_session_id: str
@@ -31,7 +31,6 @@ class CanonicalExecutionSnapshot:
     session_agent_context_id: str
     execution_mode: AgentSessionKind
     owner_generation: int
-    fifo_mailbox_item_id: str | None
     pending_command: PendingCommandSnapshot | None
     recoverable_run_id: str | None
     recoverable_run_status: AgentRunStatus | None

@@ -268,7 +268,7 @@ class TestSessionExecutionRepository:
             rdb_session,
             handle="execution-archived-scheduled",
         )
-        mailbox_item_id = await _archive_with_scheduled_continuation(
+        await _archive_with_scheduled_continuation(
             rdb_session,
             agent_session=agent_session,
             phase="started",
@@ -280,7 +280,7 @@ class TestSessionExecutionRepository:
             owner_generation=agent_session.owner_generation,
         )
 
-        assert snapshot.fifo_mailbox_item_id == mailbox_item_id
+        assert snapshot.session_id == agent_session.id
         assert snapshot.recoverable_run_id is None
 
     async def test_archived_started_continuation_survives_agent_decommission_fence(
@@ -292,7 +292,7 @@ class TestSessionExecutionRepository:
             rdb_session,
             handle="execution-archived-decommissioning",
         )
-        mailbox_item_id = await _archive_with_scheduled_continuation(
+        await _archive_with_scheduled_continuation(
             rdb_session,
             agent_session=agent_session,
             phase="started",
@@ -308,7 +308,8 @@ class TestSessionExecutionRepository:
             owner_generation=agent_session.owner_generation,
         )
 
-        assert snapshot.fifo_mailbox_item_id == mailbox_item_id
+        assert snapshot.session_id == agent_session.id
+        assert snapshot.agent_id == agent_id
 
     async def test_load_canonical_snapshot_rejects_archived_admitted_continuation(
         self,
