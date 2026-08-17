@@ -1492,8 +1492,9 @@ class MailboxService:
     ) -> list[Event]:
         """Append MailboxItem event input to transcript."""
         inserted: list[Event] = []
+        repository = self.event_transcript_repository
         for item in promoted:
-            existing = await self.event_transcript_repository.get_by_external_id(
+            existing = await repository.get_by_external_id(
                 session,
                 session_id,
                 item.external_id,
@@ -1501,7 +1502,7 @@ class MailboxService:
             if existing is not None:
                 continue
             inserted.append(
-                await self.event_transcript_repository.append(
+                await repository.append_with_deferred_last_user_input_at(
                     session,
                     EventCreate(
                         session_id=session_id,
@@ -1516,6 +1517,24 @@ class MailboxService:
                         external_id=item.external_id,
                     ),
                 )
+            )
+        latest_user_input_at = max(
+            (
+                event.created_at
+                for event in inserted
+                if event.kind
+                in {
+                    EventKind.USER_MESSAGE,
+                    EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                }
+            ),
+            default=None,
+        )
+        if latest_user_input_at is not None:
+            await repository.advance_session_last_user_input_at(
+                session,
+                session_id=session_id,
+                created_at=latest_user_input_at,
             )
         return inserted
 

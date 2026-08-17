@@ -382,6 +382,7 @@ async def _accepted_control_plan_case(
     *,
     existing_binding: bool,
     stopping_session: bool = False,
+    admission_succeeds: bool = True,
     access_granted: bool = True,
     separate_target: bool = False,
 ) -> SimpleNamespace:
@@ -412,16 +413,18 @@ async def _accepted_control_plan_case(
     store = _store(repository=repository, work_repository=work_repository)
     store.session_manager = MagicMock(return_value=session_context())
     store.mailbox_service = mailbox_service
-    store.agent_session_repository = MagicMock()
-    store.agent_session_repository.lock_by_id = AsyncMock(
-        return_value=SimpleNamespace(
-            status=AgentSessionStatus.ACTIVE,
-            stop_requested_at=(
-                datetime.datetime.now(datetime.UTC) if stopping_session else None
-            ),
-        )
+    target_session = SimpleNamespace(
+        status=AgentSessionStatus.ACTIVE,
+        stop_requested_at=(
+            datetime.datetime.now(datetime.UTC) if stopping_session else None
+        ),
     )
-    store.agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
+    store.agent_session_repository = MagicMock()
+    store.agent_session_repository.lock_by_id = AsyncMock()
+    store.agent_session_repository.get_by_id = AsyncMock(return_value=target_session)
+    store.agent_session_repository.admit_input_wakeup = AsyncMock(
+        return_value=target_session if admission_succeeds else None
+    )
 
     request = _slack_request()
     connection = ExternalChannelConnection.model_construct(id="connection-1")
@@ -536,6 +539,8 @@ async def _accepted_control_plan_case(
         settings_plan=settings_plan,
         progress_plan=progress_plan,
         repository=repository,
+        agent_session_repository=store.agent_session_repository,
+        session=session,
     )
 
 
@@ -554,6 +559,8 @@ async def test_new_binding_admission_includes_joined_presence() -> None:
     assert call["desired_progress"].state == "checking"
     case.presence_intent.assert_awaited_once()
     case.settings_intent.assert_not_awaited()
+    case.agent_session_repository.lock_by_id.assert_not_awaited()
+    case.agent_session_repository.admit_input_wakeup.assert_awaited_once()
 
 
 async def test_existing_binding_admission_excludes_joined_presence() -> None:
@@ -583,6 +590,25 @@ async def test_existing_binding_admission_rejects_a_stopping_session() -> None:
     case.work_repository.ensure_active_work.assert_not_awaited()
     case.presence_intent.assert_not_awaited()
     case.settings_intent.assert_not_awaited()
+    case.agent_session_repository.admit_input_wakeup.assert_not_awaited()
+
+
+async def test_admission_cas_failure_rolls_back_prepared_input() -> None:
+    """A concurrent stop prevents canonical mailbox admission from committing."""
+    case = await _accepted_control_plan_case(
+        existing_binding=True,
+        admission_succeeds=False,
+    )
+
+    assert case.acceptance.status == "terminal_rejection"
+    assert (
+        case.acceptance.reason
+        is ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+    )
+    case.session.rollback.assert_awaited_once()
+    case.session.commit.assert_not_awaited()
+    case.agent_session_repository.lock_by_id.assert_not_awaited()
+    case.agent_session_repository.admit_input_wakeup.assert_awaited_once()
 
 
 async def test_access_request_retains_source_and_effective_target_resources() -> None:

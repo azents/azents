@@ -121,7 +121,11 @@ class EventTranscriptRepository:
         paths, guarantee atomic idempotency with DB upsert.
         """
         if create.external_id is not None:
-            return await self._append_with_external_id(session, create)
+            return await self._append_with_external_id(
+                session,
+                create,
+                update_last_user_input_at=True,
+            )
 
         payload = _validate_payload(create.kind, create.payload)
         model_order = (
@@ -147,10 +151,26 @@ class EventTranscriptRepository:
         await self._update_session_last_activity_at(session, rdb)
         return self._build(rdb)
 
+    async def append_with_deferred_last_user_input_at(
+        self,
+        session: AsyncSession,
+        create: EventCreate,
+    ) -> Event:
+        """Append an idempotent event while deferring its user-input projection."""
+        if create.external_id is None:
+            raise ValueError("Deferred user-input projection requires External ID")
+        return await self._append_with_external_id(
+            session,
+            create,
+            update_last_user_input_at=False,
+        )
+
     async def _append_with_external_id(
         self,
         session: AsyncSession,
         create: EventCreate,
+        *,
+        update_last_user_input_at: bool,
     ) -> Event:
         """Atomically append event with External ID."""
         external_id = create.external_id
@@ -189,7 +209,8 @@ class EventTranscriptRepository:
         inserted = result.scalar_one_or_none()
         if inserted is not None:
             await session.flush()
-            await self._update_session_last_user_input_at(session, inserted)
+            if update_last_user_input_at:
+                await self._update_session_last_user_input_at(session, inserted)
             await self._update_session_last_activity_at(session, inserted)
             return self._build(inserted)
 
@@ -213,10 +234,29 @@ class EventTranscriptRepository:
             EventKind.EXTERNAL_CHANNEL_MESSAGE,
         }:
             return
+        await self.advance_session_last_user_input_at(
+            session,
+            session_id=event.session_id,
+            created_at=event.created_at,
+        )
+
+    async def advance_session_last_user_input_at(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        created_at: datetime.datetime,
+    ) -> None:
+        """Advance the Session user-input projection monotonically."""
         await session.execute(
             sa.update(RDBAgentSession)
-            .where(RDBAgentSession.id == event.session_id)
-            .values(last_user_input_at=event.created_at)
+            .where(RDBAgentSession.id == session_id)
+            .values(
+                last_user_input_at=sa.func.greatest(
+                    RDBAgentSession.last_user_input_at,
+                    created_at,
+                )
+            )
         )
         await session.flush()
 

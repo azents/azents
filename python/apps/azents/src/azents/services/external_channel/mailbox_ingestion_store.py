@@ -635,7 +635,7 @@ class ExternalChannelMailboxIngestionStore:
                 )
                 binding = creation.binding
                 session_created = creation.session_created
-            target_session = await self.agent_session_repository.lock_by_id(
+            target_session = await self.agent_session_repository.get_by_id(
                 session,
                 binding.agent_session_id,
             )
@@ -746,10 +746,6 @@ class ExternalChannelMailboxIngestionStore:
                 if enqueue.mailbox_item.idempotency_key == trigger_idempotency_key
             )
             created = trigger_enqueue.created
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                binding.agent_session_id,
-            )
             if not replay_after_position:
                 advance = self.repository.advance_conversation_position_if_current
                 advanced = await advance(
@@ -778,6 +774,15 @@ class ExternalChannelMailboxIngestionStore:
                 conversation=conversation,
                 now=now,
             )
+            admitted_session = await self.agent_session_repository.admit_input_wakeup(
+                session,
+                binding.agent_session_id,
+            )
+            if admitted_session is None:
+                await session.rollback()
+                return _rejected(
+                    ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+                )
             await session.commit()
             if session_created:
                 logger.info(

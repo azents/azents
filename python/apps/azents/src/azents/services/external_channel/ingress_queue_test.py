@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionStatus,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelIngressAuthorityKind,
@@ -403,10 +404,17 @@ def _collaborators(
 
     mailbox_service.enqueue_many = AsyncMock(side_effect=enqueue_many)
     agent_session_repository = MagicMock()
-    agent_session_repository.lock_by_id = AsyncMock(
+    agent_session_repository.lock_by_id = AsyncMock()
+    agent_session_repository.get_by_id = AsyncMock(
+        return_value=SimpleNamespace(
+            agent_id="agent-1",
+            status=AgentSessionStatus.ACTIVE,
+            stop_requested_at=None,
+        )
+    )
+    agent_session_repository.admit_input_wakeup = AsyncMock(
         return_value=SimpleNamespace(agent_id="agent-1")
     )
-    agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
     wake_dispatcher = MagicMock()
     wake_dispatcher.dispatch = AsyncMock(return_value="dispatched")
     return (
@@ -417,6 +425,47 @@ def _collaborators(
         wake_dispatcher,
         drain,
     )
+
+
+async def test_ownership_check_reads_session_without_a_row_lock() -> None:
+    """Ownership filtering defers Session serialization to the final CAS."""
+    item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+    )
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=[SimpleNamespace(id=item.id)])
+    service = _service(
+        session_manager=_session_manager(_Session()),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+    )
+    connection = await repository.lock_connection_for_routing(
+        cast(AsyncSession, MagicMock()),
+        connection_id=item.connection_id,
+    )
+
+    current = await service._ownership_current(  # noqa: SLF001
+        cast(AsyncSession, MagicMock()),
+        item=item,
+        batch=_batch(item),
+        connection=connection,
+        now=_NOW,
+    )
+
+    assert current is True
+    agent_session_repository.get_by_id.assert_awaited_once()
+    agent_session_repository.lock_by_id.assert_not_awaited()
 
 
 async def test_late_cursor_cas_conflict_rolls_back_and_resets_claim(
@@ -476,7 +525,64 @@ async def test_late_cursor_cas_conflict_rolls_back_and_resets_claim(
         items=[row],
     )
     queue_repository.finish_batch.assert_not_awaited()
-    agent_session_repository.mark_running_for_input_wakeup.assert_not_awaited()
+    agent_session_repository.admit_input_wakeup.assert_not_awaited()
+    wake_dispatcher.dispatch.assert_not_awaited()
+
+
+async def test_session_admission_cas_failure_rolls_back_and_resets_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Session that starts stopping cannot commit prepared mailbox input."""
+    item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+    )
+    row = SimpleNamespace(id=item.id)
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=[row])
+    agent_session_repository.admit_input_wakeup.return_value = None
+    transaction = _Session()
+    reset_transaction = _Session()
+    service = _service(
+        session_manager=_session_manager(transaction, reset_transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    stale = await service._finalize_batch(  # noqa: SLF001
+        _batch(item),
+        prepared=[
+            _PreparedSuccess(
+                item=item,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=item.trigger_provider_message_key,
+                    trigger_position=item.trigger_position,
+                ),
+            )
+        ],
+    )
+
+    assert stale is True
+    transaction.rollback.assert_awaited_once()
+    reset_transaction.commit.assert_awaited_once()
+    queue_repository.finish_batch.assert_not_awaited()
+    agent_session_repository.lock_by_id.assert_not_awaited()
+    agent_session_repository.admit_input_wakeup.assert_awaited_once_with(
+        transaction,
+        "session-1",
+    )
     wake_dispatcher.dispatch.assert_not_awaited()
 
 
@@ -828,6 +934,11 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
         position_id="position-1",
         expected_read_through_position=None,
         read_through_position="00000000000000000002",
+    )
+    agent_session_repository.lock_by_id.assert_not_awaited()
+    agent_session_repository.admit_input_wakeup.assert_awaited_once_with(
+        transaction,
+        "session-1",
     )
     transaction.commit.assert_awaited_once()
     wake_dispatcher.dispatch.assert_awaited_once()
@@ -1326,7 +1437,7 @@ async def test_stale_ownership_does_not_enqueue_or_advance_cursor_and_logs_safel
     assert stale is False
     mailbox_service.enqueue_many.assert_not_awaited()
     repository.advance_conversation_position_if_current.assert_not_awaited()
-    agent_session_repository.mark_running_for_input_wakeup.assert_not_awaited()
+    agent_session_repository.admit_input_wakeup.assert_not_awaited()
     wake_dispatcher.dispatch.assert_not_awaited()
     assert private_body not in caplog.text
     record = next(
