@@ -57,6 +57,7 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
+from azents.services.chat.data import PendingMailboxUserMessagePresentation
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.mailbox import MailboxService
@@ -316,6 +317,7 @@ class TestChatSessionMailboxItem:
         assert envelope.mailbox_item_id == buffer_id
         assert envelope.items[0].mailbox_item_id == buffer_id
         presentation = envelope.items[0].presentation
+        assert isinstance(presentation, PendingMailboxUserMessagePresentation)
         assert presentation.type == "user_message"
         assert presentation.requested_inference_profile is not None
         assert presentation.requested_inference_profile.model_target_label == "main"
@@ -382,6 +384,7 @@ class TestChatSessionMailboxItem:
                 session,
                 AgentRunCreate(
                     session_id=session_id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                     phase=AgentRunPhase.WAITING_FOR_MODEL,
                 ),
@@ -508,6 +511,7 @@ class TestChatSessionMailboxItem:
                 session,
                 AgentRunCreate(
                     session_id=session_id,
+                    scheduled_task_cycle_id=None,
                     parent_agent_run_id=None,
                     phase=AgentRunPhase.COMPACTING,
                 ),

@@ -57,6 +57,9 @@ from azents.engine.events.types import (
     OutputContentPart,
     OutputTextPart,
     ProviderToolCallPayload,
+    ScheduledTaskContinuationPayload,
+    ScheduledTaskResultPayload,
+    ScheduledTaskTriggerPayload,
     SystemReminderPayload,
     ToolOutput,
     ToolOutputPart,
@@ -859,6 +862,20 @@ def _model_visible_event_value(event: Event) -> object | None:
             "role": "user",
             "content": format_external_channel_continuation_reminder(payload.metadata),
         }
+    if isinstance(
+        payload,
+        ScheduledTaskTriggerPayload | ScheduledTaskContinuationPayload,
+    ):
+        return {"role": "user", "content": payload.content}
+    if isinstance(payload, ScheduledTaskResultPayload):
+        return {
+            "role": "assistant",
+            "content": (
+                f"Scheduled Task: {payload.title}\n"
+                f"Status: {payload.status}\n"
+                f"Result: {payload.result}"
+            ),
+        }
     if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):
         return {"role": "user", "content": _format_goal_updated_event_reminder(payload)}
     if isinstance(payload, UserMessagePayload):
@@ -936,6 +953,23 @@ def _model_visible_event_text(
         return _format_continuity_block(
             "User",
             format_external_channel_continuation_reminder(payload.metadata),
+            include_label=include_label,
+        )
+    if isinstance(
+        payload,
+        ScheduledTaskTriggerPayload | ScheduledTaskContinuationPayload,
+    ):
+        return _format_continuity_block(
+            "User",
+            payload.content,
+            include_label=include_label,
+        )
+    if isinstance(payload, ScheduledTaskResultPayload):
+        return _format_continuity_block(
+            "Assistant",
+            f"Scheduled Task: {payload.title}\n"
+            f"Status: {payload.status}\n"
+            f"Result: {payload.result}",
             include_label=include_label,
         )
     if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):

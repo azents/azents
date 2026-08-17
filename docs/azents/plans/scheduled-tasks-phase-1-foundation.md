@@ -19,11 +19,13 @@ tags: [scheduled-task, database, migration, mailbox, events, engine]
 - Deliverables: One generated linear migration; new Task model/repository data
   contracts; nullable AgentRun cycle binding; typed trigger, continuation, and result
   payload readers; complete Event/Mailbox validation, lowering, filtering,
-  history/live/public projections; focused migration and protocol tests.
+  history/live/public projections; generated-client compatibility and exhaustive
+  existing Web pending-mailbox projection; focused migration and protocol tests.
 - Non-goals: Scheduler dispatch, Task service mutations, Agent tools, cycle admission,
   ScheduledToolkit, Skill VFS activation, idle continuation production, terminal tool
-  execution, provider effects, lifecycle cleanup, Public API, generated clients, Web
-  UI, testenv/E2E journeys, Living Spec promotion, or `implemented` dates.
+  execution, provider effects, lifecycle cleanup, new Public API routes, Scheduled
+  management UI, testenv/E2E journeys, Living Spec promotion, or `implemented`
+  dates.
 - Interfaces: New `scheduled_tasks` table and PostgreSQL schedule enum exactly match
   M1; `agent_runs.scheduled_task_cycle_id` is nullable and has no Task foreign key;
   Mailbox/Event kinds are `scheduled_task_trigger`,
@@ -48,7 +50,7 @@ tags: [scheduled-task, database, migration, mailbox, events, engine]
 
 | Workstream | Owner | Owned paths | Depends on | Output | Validation |
 | --- | --- | --- | --- | --- | --- |
-| Approved artifacts and shared integration | `/root` | `docs/azents/{requirements,adr,design,plans}/scheduled-*`, shared enum/composition files, migration generation and revision marker | approved revision 3 | tracked authority and plans, generated migration, conflict-free shared contracts | snapshot validator, docs frontmatter/index hook, migration-head check, diff check |
+| Approved artifacts and shared integration | `/root` | `docs/azents/{requirements,adr,design,plans}/scheduled-*`, shared enum/composition files, migration generation and revision marker, generated-client verification, `typescript/apps/azents-web/src/features/chat/pendingMessageProjection*` | approved revision 3 | tracked authority and plans, generated migration, conflict-free shared contracts, exhaustive safe pending projection for new variants | snapshot validator, docs frontmatter/index hook, migration-head check, Python and TypeScript client generation, Web focused tests/typecheck, diff check |
 | Task persistence contracts | `/root/scheduled-data-scheduler-scout` | new `rdb/models/scheduled_task.py`, new `repos/scheduled_task/**`, focused model/repository tests | shared schedule enum and migration contract | Task ORM/data/repository foundation without runtime producers | targeted pytest, Ruff, formatter, ty |
 | AgentRun and closed protocol readers | `/root/scheduled-toolkit-runtime-scout` | AgentRun model/repository data, Mailbox payload union, Event payload registry, lowerers, filters, history/live/public projections and focused tests | shared enum names and public payload contract | nullable cycle binding and exhaustive trigger/continuation/result readers | targeted pytest, exhaustive typecheck, Ruff, formatter |
 | Independent review | `/root/scheduled-stack-reviewer` | read-only complete Phase 1 diff | stable implementation and focused evidence | authority/migration/protocol/removal/scope report | written findings with exact evidence |
@@ -64,13 +66,15 @@ tags: [scheduled-task, database, migration, mailbox, events, engine]
   removal, lifecycle-precondition, and scope-drift findings.
 - Final validation: Generated migration and revision checks; pytest-alembic and
   focused model/repository/Mailbox/Event/lowerer/projection tests; affected Python
-  Ruff check and format check; Azents `ty --error-on-warning`; docs snapshot and
-  frontmatter validation; Skill validator; legacy/duplicate-authority searches; and
-  `git diff --check`.
+  Ruff check and format check; Azents `ty --error-on-warning`; generated public
+  client compatibility; focused Web tests, format, lint, typecheck, and build; docs
+  snapshot and frontmatter validation; Skill validator; legacy/duplicate-authority
+  searches; and `git diff --check`.
 - Scope-drift check: Confirm complete reader coverage for M13 and exact M1/M3/M4/M14
   schema contracts. Confirm the phase emits no Scheduled work, exposes no management
-  surface, changes no `scheduled_task_states` semantics, introduces no provider
-  effect or lifecycle behavior, and adds no compatibility path or second authority.
+  surface beyond safe rendering through the existing pending-mailbox UI, changes no
+  `scheduled_task_states` semantics, introduces no provider effect or lifecycle
+  behavior, and adds no compatibility path or second authority.
 - Context checkpoint: Phase starts from `origin/main` commit `da30e50f7` with the
   approved Requirements/ADR/Design and managed Skill package untracked but externally
   backed up. Readiness review found no material decision or Design delta. Phase 2

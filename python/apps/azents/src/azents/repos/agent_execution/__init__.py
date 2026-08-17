@@ -60,6 +60,9 @@ _ACTIVITY_EVENT_KINDS = frozenset(
     {
         EventKind.USER_MESSAGE,
         EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        EventKind.SCHEDULED_TASK_TRIGGER,
+        EventKind.SCHEDULED_TASK_CONTINUATION,
+        EventKind.SCHEDULED_TASK_RESULT,
         EventKind.ACTION_MESSAGE,
         EventKind.AGENT_MESSAGE,
         EventKind.ASSISTANT_MESSAGE,
@@ -540,6 +543,7 @@ class AgentRunRepository:
             run_index = (max_run_index or 0) + 1
         rdb = RDBAgentRun(
             session_id=create.session_id,
+            scheduled_task_cycle_id=create.scheduled_task_cycle_id,
             run_index=run_index,
             parent_agent_run_id=create.parent_agent_run_id,
             phase=create.phase,
@@ -576,6 +580,7 @@ class AgentRunRepository:
         run_index = await self.next_run_index(session, session_id=session_id)
         rdb = RDBAgentRun(
             session_id=session_id,
+            scheduled_task_cycle_id=None,
             run_index=run_index,
             parent_agent_run_id=parent_agent_run_id,
             phase=AgentRunPhase.IDLE,
@@ -1345,6 +1350,7 @@ class AgentRunRepository:
         return AgentRunState(
             id=rdb.id,
             session_id=rdb.session_id,
+            scheduled_task_cycle_id=rdb.scheduled_task_cycle_id,
             run_index=rdb.run_index,
             phase=rdb.phase,
             status=rdb.status,

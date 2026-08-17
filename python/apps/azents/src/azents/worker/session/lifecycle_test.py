@@ -366,6 +366,7 @@ def _running_run() -> AgentRunState:
     return AgentRunState(
         id="1123456789abcdef0123456789abcdef",
         session_id="session-001",
+        scheduled_task_cycle_id=None,
         run_index=1,
         phase=AgentRunPhase.EXECUTING_TOOLS,
         status=AgentRunStatus.RUNNING,

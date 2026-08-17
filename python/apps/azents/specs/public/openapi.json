@@ -18548,6 +18548,9 @@
           "user_message",
           "goal_continuation",
           "external_channel_continuation",
+          "scheduled_task_trigger",
+          "scheduled_task_continuation",
+          "scheduled_task_result",
           "goal_updated",
           "action_message",
           "agent_message",
@@ -24229,6 +24232,9 @@
                 "$ref": "#/components/schemas/PendingMailboxExternalChannelContinuationPresentation"
               },
               {
+                "$ref": "#/components/schemas/PendingMailboxScheduledTaskPresentation"
+              },
+              {
                 "$ref": "#/components/schemas/PendingMailboxAgentMessagePresentation"
               },
               {
@@ -24247,6 +24253,8 @@
                 "external_channel_continuation": "#/components/schemas/PendingMailboxExternalChannelContinuationPresentation",
                 "external_channel_message": "#/components/schemas/PendingMailboxExternalChannelPresentation",
                 "goal_continuation": "#/components/schemas/PendingMailboxGoalContinuationPresentation",
+                "scheduled_task_continuation": "#/components/schemas/PendingMailboxScheduledTaskPresentation",
+                "scheduled_task_trigger": "#/components/schemas/PendingMailboxScheduledTaskPresentation",
                 "user_message": "#/components/schemas/PendingMailboxUserMessagePresentation"
               }
             }
@@ -24263,6 +24271,29 @@
         ],
         "title": "PendingMailboxItem",
         "description": "One stable pending mailbox presentation item."
+      },
+      "PendingMailboxScheduledTaskPresentation": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "scheduled_task_trigger",
+              "scheduled_task_continuation"
+            ],
+            "title": "Type"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "content"
+        ],
+        "title": "PendingMailboxScheduledTaskPresentation",
+        "description": "Safe pending Scheduled Task presentation."
       },
       "PendingMailboxUserMessagePresentation": {
         "properties": {

@@ -220,6 +220,7 @@ async def test_user_stop_converges_interrupted_run_before_parent_delivery() -> N
         AgentRunState(
             id="11111111111111111111111111111111",
             session_id=source.agent_session_id,
+            scheduled_task_cycle_id=None,
             run_index=1,
             phase=AgentRunPhase.IDLE,
             status=AgentRunStatus.INTERRUPTED,

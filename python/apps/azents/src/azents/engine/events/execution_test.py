@@ -166,6 +166,7 @@ class _RunRepo:
         return AgentRunState(
             id=run_id if len(run_id) == 32 else "1" * 32,
             session_id="session-1",
+            scheduled_task_cycle_id=None,
             run_index=1,
             phase=self.phases[-1] if self.phases else AgentRunPhase.IDLE,
             status=self.terminal or AgentRunStatus.RUNNING,

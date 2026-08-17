@@ -38,6 +38,11 @@ class AgentRunCreate(BaseModel):
 
     id: str | None = Field(default=None, description="AgentRun ID")
     session_id: str = Field(description="AgentSession ID")
+    scheduled_task_cycle_id: str | None = Field(
+        min_length=32,
+        max_length=32,
+        description="Scheduled Task cycle binding",
+    )
     parent_agent_run_id: str | None
     run_index: int | None = Field(
         default=None,

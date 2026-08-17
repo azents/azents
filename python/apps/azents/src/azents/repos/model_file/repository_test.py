@@ -98,6 +98,7 @@ async def _create_agent_session(session: AsyncSession) -> tuple[str, str, str, s
         session,
         AgentRunCreate(
             session_id=agent_session.id,
+            scheduled_task_cycle_id=None,
             parent_agent_run_id=None,
         ),
     )
@@ -277,6 +278,7 @@ async def test_release_terminal_run_pins_preserves_pending(
         rdb_session,
         AgentRunCreate(
             session_id=session_id,
+            scheduled_task_cycle_id=None,
             parent_agent_run_id=None,
         ),
         terminal_finalization=_noop_terminal_finalization,

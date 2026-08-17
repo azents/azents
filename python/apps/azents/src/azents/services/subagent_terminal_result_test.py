@@ -76,6 +76,7 @@ def _run(
     return AgentRunState(
         id=run_id,
         session_id=session_id,
+        scheduled_task_cycle_id=None,
         run_index=run_index,
         phase=AgentRunPhase.IDLE,
         status=status,

@@ -113,6 +113,7 @@ def _running_run(run_id: str) -> AgentRunState:
     return AgentRunState(
         id=run_id,
         session_id="session-001",
+        scheduled_task_cycle_id=None,
         run_index=1,
         phase=AgentRunPhase.WAITING_FOR_MODEL,
         status=AgentRunStatus.RUNNING,

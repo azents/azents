@@ -305,6 +305,13 @@ class ScheduledTaskStatus(enum.StrEnum):
     FAILED = "failed"
 
 
+class ScheduledTaskScheduleType(enum.StrEnum):
+    """User Scheduled Task schedule type."""
+
+    ONCE = "once"
+    CRON = "cron"
+
+
 class JobRuntimeBackend(enum.StrEnum):
     """Configured application background execution backend."""
 
@@ -347,6 +354,8 @@ class MailboxItemKind(enum.StrEnum):
     USER_MESSAGE = "user_message"
     GOAL_CONTINUATION = "goal_continuation"
     EXTERNAL_CHANNEL_CONTINUATION = "external_channel_continuation"
+    SCHEDULED_TASK_TRIGGER = "scheduled_task_trigger"
+    SCHEDULED_TASK_CONTINUATION = "scheduled_task_continuation"
     TURN_ACTION_CONTINUATION = "turn_action_continuation"
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"
@@ -366,6 +375,9 @@ class EventKind(enum.StrEnum):
     USER_MESSAGE = "user_message"
     GOAL_CONTINUATION = "goal_continuation"
     EXTERNAL_CHANNEL_CONTINUATION = "external_channel_continuation"
+    SCHEDULED_TASK_TRIGGER = "scheduled_task_trigger"
+    SCHEDULED_TASK_CONTINUATION = "scheduled_task_continuation"
+    SCHEDULED_TASK_RESULT = "scheduled_task_result"
     GOAL_UPDATED = "goal_updated"
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"

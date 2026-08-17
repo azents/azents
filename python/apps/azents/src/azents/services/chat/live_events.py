@@ -35,11 +35,17 @@ from azents.engine.events.types import (
     OutputTextPart,
     ProviderToolCallPayload,
     ReasoningPayload,
+    ScheduledTaskContinuationPayload,
+    ScheduledTaskTriggerPayload,
     ToolkitSourceSnapshot,
     UserContentPart,
     UserMessagePayload,
 )
-from azents.repos.mailbox.data import MailboxItem
+from azents.repos.mailbox.data import (
+    MailboxItem,
+    ScheduledTaskContinuationMailboxPayload,
+    ScheduledTaskTriggerMailboxPayload,
+)
 from azents.services.chat.data import (
     PendingMailboxActionPresentation,
     PendingMailboxAgentMessagePresentation,
@@ -48,6 +54,7 @@ from azents.services.chat.data import (
     PendingMailboxExternalChannelPresentation,
     PendingMailboxGoalContinuationPresentation,
     PendingMailboxItem,
+    PendingMailboxScheduledTaskPresentation,
     PendingMailboxUserMessagePresentation,
 )
 from azents.utils.appctx import AppContext
@@ -355,6 +362,14 @@ def mailbox_item_to_pending_projection(
                     mailbox_item
                 ),
             )
+        elif mailbox_item.kind in {
+            MailboxItemKind.SCHEDULED_TASK_TRIGGER,
+            MailboxItemKind.SCHEDULED_TASK_CONTINUATION,
+        }:
+            presentation = PendingMailboxScheduledTaskPresentation(
+                type=mailbox_item.kind.value,
+                content=item.content,
+            )
         elif mailbox_item.kind is MailboxItemKind.AGENT_MESSAGE:
             message_kind = item.metadata.get("message_kind")
             if message_kind not in {
@@ -482,22 +497,53 @@ def mailbox_item_to_live_event(mailbox_item: MailboxItem) -> Event | None:
         metadata["input_buffer_id"] = mailbox_item.id
         metadata["live_projection"] = "input_buffer"
         requested_profile = _mailbox_item_requested_profile(mailbox_item)
-        payload = UserMessagePayload(
-            sender_user_id=mailbox_item.sender_user_id,
-            content=content,
-            attachments=[],
-            metadata=metadata,
-            requested_inference_profile=requested_profile,
-            applied_inference_profile=(
-                AppliedInferenceProfile(
-                    model_target_label=requested_profile.model_target_label,
-                    model_display_name=None,
-                    reasoning_effort=requested_profile.reasoning_effort,
-                )
-                if requested_profile is not None
-                else None
-            ),
-        )
+        if mailbox_item.kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER:
+            if not isinstance(
+                mailbox_item.payload,
+                ScheduledTaskTriggerMailboxPayload,
+            ):
+                raise ValueError("Scheduled Task trigger payload is malformed")
+            cycle_id = mailbox_item.payload.cycle_id
+            title = mailbox_item.presentation.metadata.get("title")
+            if not isinstance(title, str) or not title:
+                raise ValueError("Scheduled Task trigger title is missing")
+            payload = ScheduledTaskTriggerPayload(
+                cycle_id=cycle_id,
+                title=title,
+                content=mailbox_item.presentation.content,
+            )
+        elif mailbox_item.kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION:
+            if not isinstance(
+                mailbox_item.payload,
+                ScheduledTaskContinuationMailboxPayload,
+            ):
+                raise ValueError("Scheduled Task continuation payload is malformed")
+            cycle_id = mailbox_item.payload.cycle_id
+            title = mailbox_item.presentation.metadata.get("title")
+            if not isinstance(title, str) or not title:
+                raise ValueError("Scheduled Task continuation title is missing")
+            payload = ScheduledTaskContinuationPayload(
+                cycle_id=cycle_id,
+                title=title,
+                content=mailbox_item.presentation.content,
+            )
+        else:
+            payload = UserMessagePayload(
+                sender_user_id=mailbox_item.sender_user_id,
+                content=content,
+                attachments=[],
+                metadata=metadata,
+                requested_inference_profile=requested_profile,
+                applied_inference_profile=(
+                    AppliedInferenceProfile(
+                        model_target_label=requested_profile.model_target_label,
+                        model_display_name=None,
+                        reasoning_effort=requested_profile.reasoning_effort,
+                    )
+                    if requested_profile is not None
+                    else None
+                ),
+            )
     return Event(
         id=mailbox_item.id,
         session_id=mailbox_item.session_id,
@@ -523,6 +569,10 @@ def _event_kind_for_mailbox_item(kind: MailboxItemKind) -> EventKind:
             return EventKind.GOAL_CONTINUATION
         case MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
             return EventKind.EXTERNAL_CHANNEL_CONTINUATION
+        case MailboxItemKind.SCHEDULED_TASK_TRIGGER:
+            return EventKind.SCHEDULED_TASK_TRIGGER
+        case MailboxItemKind.SCHEDULED_TASK_CONTINUATION:
+            return EventKind.SCHEDULED_TASK_CONTINUATION
         case MailboxItemKind.ACTION_MESSAGE:
             return EventKind.ACTION_MESSAGE
         case MailboxItemKind.AGENT_MESSAGE:

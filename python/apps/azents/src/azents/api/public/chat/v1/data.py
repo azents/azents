@@ -29,7 +29,7 @@ from azents.engine.events.action_messages import (
     CreateGitWorktreeAction,
     PersistedChatAction,
 )
-from azents.engine.events.types import Event, UserMessagePayload
+from azents.engine.events.types import Event, UserMessagePayload, public_event_payload
 from azents.engine.tools.goal import GoalStateSnapshot
 from azents.engine.tools.todo import TodoItemSnapshot, TodoStateSnapshot
 from azents.rdb.models.event import JSONValue
@@ -1747,7 +1747,7 @@ class ChatEventResponse(BaseModel):
         event: Event,
     ) -> Self:
         """Convert from Event domain model."""
-        payload = event.payload.model_dump(mode="json", exclude_none=True)
+        payload = public_event_payload(event.kind, event.payload)
         if (
             isinstance(event.payload, (ActionMessagePayload, UserMessagePayload))
             and event.payload.requested_inference_profile is not None

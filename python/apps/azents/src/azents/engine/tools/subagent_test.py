@@ -497,6 +497,7 @@ class _AgentRunRepository:
         self.parent_run = AgentRunState(
             id=_PARENT_RUN_ID,
             session_id="root-session",
+            scheduled_task_cycle_id=None,
             run_index=1,
             phase=AgentRunPhase.EXECUTING_TOOLS,
             status=AgentRunStatus.RUNNING,
@@ -518,6 +519,7 @@ class _AgentRunRepository:
             "child-session": AgentRunState(
                 id="run".rjust(32, "0"),
                 session_id="child-session",
+                scheduled_task_cycle_id=None,
                 run_index=1,
                 phase=AgentRunPhase.IDLE,
                 status=AgentRunStatus.COMPLETED,
@@ -1695,6 +1697,7 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
     run_repo.latest_by_session_id["child-session"] = AgentRunState(
         id="running-run".rjust(32, "0"),
         session_id="child-session",
+        scheduled_task_cycle_id=None,
         run_index=2,
         phase=AgentRunPhase.EXECUTING_TOOLS,
         status=AgentRunStatus.RUNNING,

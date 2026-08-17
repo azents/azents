@@ -5,6 +5,7 @@ import datetime
 import pytest
 from pydantic import ValidationError
 
+from azents.api.public.chat.v1.data import ChatEventResponse
 from azents.core.enums import (
     AgentRunStatus,
     EventKind,
@@ -31,16 +32,21 @@ from azents.engine.events.types import (
     ProviderToolCallPayload,
     ProviderToolReference,
     ProviderToolSemanticContent,
+    ScheduledTaskContinuationPayload,
+    ScheduledTaskResultPayload,
+    ScheduledTaskTriggerPayload,
     SystemErrorPayload,
     TokenUsagePayload,
     TurnMarkerPayload,
     UserMessagePayload,
     build_native_compat_key,
+    public_event_payload,
     upgrade_persisted_active_tool_call,
     validate_event_payload,
     validate_persisted_event_payload,
 )
 from azents.engine.run.types import FunctionToolResult
+from azents.transport.chat import chat_event_transport_dump
 
 
 def _artifact() -> NativeArtifact:
@@ -556,3 +562,62 @@ def test_event_token_usage_requires_raw_payload() -> None:
                 "total_tokens": 15,
             }
         )
+
+
+def test_scheduled_task_payloads_are_closed_protocol_variants() -> None:
+    trigger = validate_event_payload(
+        EventKind.SCHEDULED_TASK_TRIGGER,
+        {
+            "cycle_id": "c" * 32,
+            "title": "Nightly report",
+            "content": "Continue the scheduled objective.",
+        },
+    )
+    continuation = validate_event_payload(
+        EventKind.SCHEDULED_TASK_CONTINUATION,
+        {
+            "cycle_id": "c" * 32,
+            "title": "Nightly report",
+            "content": "Resume the scheduled objective.",
+        },
+    )
+    result = validate_event_payload(
+        EventKind.SCHEDULED_TASK_RESULT,
+        {
+            "title": "Nightly report",
+            "scheduled_for": datetime.datetime.now(datetime.UTC),
+            "status": "finished",
+            "result": "Report completed.",
+        },
+    )
+
+    assert isinstance(trigger, ScheduledTaskTriggerPayload)
+    assert isinstance(continuation, ScheduledTaskContinuationPayload)
+    assert isinstance(result, ScheduledTaskResultPayload)
+    assert "cycle_id" not in result.model_dump(mode="json")
+
+
+def test_scheduled_cycle_identity_is_sanitized_at_public_boundaries() -> None:
+    event = Event(
+        id="e" * 32,
+        session_id="s" * 32,
+        kind=EventKind.SCHEDULED_TASK_TRIGGER,
+        payload=ScheduledTaskTriggerPayload(
+            cycle_id="c" * 32,
+            title="Nightly report",
+            content="Continue the scheduled objective.",
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    canonical = event.payload.model_dump(mode="json")
+    public_payload = public_event_payload(event.kind, event.payload)
+    history_payload = ChatEventResponse.from_domain(event).payload
+    live_payload = chat_event_transport_dump(event)["payload"]
+
+    assert canonical["cycle_id"] == "c" * 32
+    for projected in (public_payload, history_payload, live_payload):
+        assert projected == {
+            "title": "Nightly report",
+            "content": "Continue the scheduled objective.",
+        }

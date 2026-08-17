@@ -59,6 +59,20 @@ class ExternalChannelContinuationMailboxPayload(MailboxPayloadBase):
     type: Literal["external_channel_continuation"]
 
 
+class ScheduledTaskTriggerMailboxPayload(MailboxPayloadBase):
+    """Typed Scheduled Task cycle trigger mailbox payload."""
+
+    type: Literal["scheduled_task_trigger"]
+    cycle_id: str = Field(min_length=32, max_length=32)
+
+
+class ScheduledTaskContinuationMailboxPayload(MailboxPayloadBase):
+    """Typed Scheduled Task cycle continuation mailbox payload."""
+
+    type: Literal["scheduled_task_continuation"]
+    cycle_id: str = Field(min_length=32, max_length=32)
+
+
 class AgentCreateGitWorktreeContinuationResult(BaseModel):
     """Bounded model-facing result for an Agent worktree create action."""
 
@@ -143,6 +157,8 @@ MailboxEnvelopePayload: TypeAlias = Annotated[
     UserMessageMailboxPayload
     | GoalContinuationMailboxPayload
     | ExternalChannelContinuationMailboxPayload
+    | ScheduledTaskTriggerMailboxPayload
+    | ScheduledTaskContinuationMailboxPayload
     | TurnActionContinuationMailboxPayload
     | AgentMessageMailboxPayload
     | ExternalChannelMessageMailboxPayload
@@ -176,6 +192,18 @@ def mailbox_payload_from_fields(
         return GoalContinuationMailboxPayload(type=kind.value, items=[item])
     if kind is MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
         return ExternalChannelContinuationMailboxPayload(type=kind.value, items=[item])
+    if kind is MailboxItemKind.SCHEDULED_TASK_TRIGGER:
+        return ScheduledTaskTriggerMailboxPayload(
+            type=kind.value,
+            cycle_id=metadata.get("cycle_id", ""),
+            items=[item],
+        )
+    if kind is MailboxItemKind.SCHEDULED_TASK_CONTINUATION:
+        return ScheduledTaskContinuationMailboxPayload(
+            type=kind.value,
+            cycle_id=metadata.get("cycle_id", ""),
+            items=[item],
+        )
     if kind is MailboxItemKind.TURN_ACTION_CONTINUATION:
         raise ValueError(
             "TurnAction continuation admission requires its closed typed payload"

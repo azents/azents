@@ -446,6 +446,37 @@ class ExternalChannelMessagePayload(BaseModel):
         return self
 
 
+class ScheduledTaskTriggerPayload(BaseModel):
+    """Scheduled Task cycle admission trigger."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cycle_id: str = Field(min_length=32, max_length=32)
+    title: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+
+
+class ScheduledTaskContinuationPayload(BaseModel):
+    """Scheduled Task cycle continuation request."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cycle_id: str = Field(min_length=32, max_length=32)
+    title: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+
+
+class ScheduledTaskResultPayload(BaseModel):
+    """Public Scheduled Task terminal result."""
+
+    model_config = ConfigDict(frozen=True)
+
+    title: str = Field(min_length=1)
+    scheduled_for: datetime.datetime
+    status: Literal["finished", "failed"]
+    result: str = Field(min_length=1)
+
+
 class AssistantMessagePayload(BaseModel):
     """Assistant message payload."""
 
@@ -723,6 +754,9 @@ EventPayload = (
     UserMessagePayload
     | AgentMessagePayload
     | ExternalChannelMessagePayload
+    | ScheduledTaskTriggerPayload
+    | ScheduledTaskContinuationPayload
+    | ScheduledTaskResultPayload
     | AssistantMessagePayload
     | ReasoningPayload
     | ClientToolCallPayload
@@ -750,6 +784,9 @@ PAYLOAD_BY_KIND: dict[EventKind, type[BaseModel]] = {
     EventKind.ACTION_MESSAGE: ActionMessagePayload,
     EventKind.AGENT_MESSAGE: AgentMessagePayload,
     EventKind.EXTERNAL_CHANNEL_MESSAGE: ExternalChannelMessagePayload,
+    EventKind.SCHEDULED_TASK_TRIGGER: ScheduledTaskTriggerPayload,
+    EventKind.SCHEDULED_TASK_CONTINUATION: ScheduledTaskContinuationPayload,
+    EventKind.SCHEDULED_TASK_RESULT: ScheduledTaskResultPayload,
     EventKind.ACTION_EXECUTION_RESULT: ActionExecutionResultPayload,
     EventKind.SKILL_LOADED: SkillLoadedPayload,
     EventKind.GOAL_BRIEFING: GoalBriefingPayload,
@@ -791,6 +828,22 @@ def validate_persisted_event_payload(
         kind,
         upgrade_persisted_client_tool_payload(kind, payload),
     )
+
+
+def public_event_payload(
+    kind: EventKind,
+    payload: EventPayload,
+    *,
+    exclude_none: bool = True,
+) -> dict[str, object]:
+    """Project an Event payload without internal Scheduled cycle identity."""
+    serialized = dict(payload.model_dump(mode="json", exclude_none=exclude_none))
+    if kind in {
+        EventKind.SCHEDULED_TASK_TRIGGER,
+        EventKind.SCHEDULED_TASK_CONTINUATION,
+    }:
+        serialized.pop("cycle_id", None)
+    return serialized
 
 
 NATIVE_ARTIFACT_REQUIRED_KINDS = frozenset(
@@ -868,6 +921,7 @@ class AgentRunState(BaseModel):
 
     id: str = Field(min_length=32, max_length=32)
     session_id: str = Field(min_length=1)
+    scheduled_task_cycle_id: str | None = Field(min_length=32, max_length=32)
     run_index: int = Field(ge=1)
     phase: AgentRunPhase
     status: AgentRunStatus

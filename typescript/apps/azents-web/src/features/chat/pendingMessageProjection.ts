@@ -115,5 +115,18 @@ export function pendingMailboxMessage(
         status: "complete",
         inferenceProfile: presentation.requested_inference_profile,
       };
+    case "scheduled_task_trigger":
+    case "scheduled_task_continuation":
+      return {
+        id: item.id,
+        role: "user",
+        content: presentation.content,
+        createdAt: item.created_at,
+        status: "complete",
+        metadata: {
+          source: "scheduled_task",
+          message_kind: presentation.type,
+        },
+      };
   }
 }
