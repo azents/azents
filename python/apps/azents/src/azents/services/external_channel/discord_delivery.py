@@ -396,15 +396,63 @@ class DiscordDeliveryClient:
         content: str,
         files: tuple[DiscordOutboundFile, ...],
         operation_key: ProviderOperationKey,
+        forward_to_parent: bool,
+        parent_channel_id: str | None,
     ) -> DiscordDeliveryResult:
-        """Create one nonce-fenced multipart message through approved gap G2."""
-        return await self.file_transport.create_file_message(
+        """Create one multipart message and optionally forward it to its parent."""
+        if forward_to_parent and parent_channel_id is None:
+            return _rejected_result()
+        created = await self.file_transport.create_file_message(
             bot_token=bot_token,
             guild_id=guild_id,
             channel_id=channel_id,
             content=content,
             files=files,
             nonce=discord_delivery_nonce(operation_key),
+        )
+        if created.status != "delivered" or not forward_to_parent:
+            return created
+        message = _file_message_identity(
+            created,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        )
+        if message is None:
+            return _forwarding_result(
+                created,
+                _unknown_result(
+                    error_kind="response_shape_invalid",
+                    error_summary="Discord file message identity was invalid.",
+                ),
+            )
+        assert parent_channel_id is not None
+        try:
+            async with self._open_sdk(bot_token=bot_token) as sdk:
+                if not isinstance(sdk, DiscordSDKMessageForwardingSession):
+                    return _forwarding_result(
+                        created,
+                        _unknown_result(
+                            error_kind="provider_ambiguous",
+                            error_summary=(
+                                "Discord native message forwarding is unavailable."
+                            ),
+                        ),
+                    )
+                forwarded = await sdk.forward_message(
+                    message=message,
+                    destination_channel_id=parent_channel_id,
+                )
+        except DiscordSDKError as error:
+            return _forwarding_result(created, _sdk_delivery_failure(error))
+        except TimeoutError:
+            return _forwarding_result(created, _sdk_timeout_result())
+        return _forwarding_result(
+            created,
+            _sdk_message_result(
+                forwarded,
+                guild_id=guild_id,
+                channel_id=parent_channel_id,
+            ),
         )
 
     async def update_message(
@@ -545,6 +593,26 @@ def _forwarding_result(
     return replace(
         forwarded,
         provider_message_key=created.provider_message_key,
+    )
+
+
+def _file_message_identity(
+    created: DiscordDeliveryResult,
+    *,
+    guild_id: str,
+    channel_id: str,
+) -> DiscordSDKMessage | None:
+    prefix = f"discord:{guild_id}:"
+    provider_message_key = created.provider_message_key
+    if provider_message_key is None or not provider_message_key.startswith(prefix):
+        return None
+    message_id = provider_message_key.removeprefix(prefix)
+    if not message_id.isdigit():
+        return None
+    return DiscordSDKMessage(
+        message_id=message_id,
+        channel_id=channel_id,
+        guild_id=guild_id,
     )
 
 
