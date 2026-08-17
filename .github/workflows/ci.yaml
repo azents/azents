@@ -346,6 +346,10 @@ jobs:
     name: ci-e2e-${{ matrix.lane }}
     needs:
       - changes
+      - ci-python
+      - ci-typescript
+      - ci-helm
+      - ci-docker-build
       - ci_testenv_support_run
       - ci_e2e_plan
     if: needs.ci_e2e_plan.result == 'success'
