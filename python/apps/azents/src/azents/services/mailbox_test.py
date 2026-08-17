@@ -135,6 +135,7 @@ from .mailbox import (
     PreparedMailboxFiles,
     TurnEffect,
     VfsFileResolver,
+    _buffer_requires_inference,
     build_external_channel_mailbox_payload,
     fold_turn_eligibility,
 )
@@ -3448,23 +3449,23 @@ async def test_external_channel_message_projection() -> None:
             created_model_file_ids=[],
         ),
     )
-    context_outcome = await processor.process(
-        preparation_context,
-        mailbox_item(
-            item=context,
-            mailbox_id="buffer-1",
-            initial_title_eligible=False,
-        ),
+    context_buffer = mailbox_item(
+        item=context,
+        mailbox_id="buffer-1",
+        initial_title_eligible=False,
     )
-    invocation_outcome = await processor.process(
-        preparation_context,
-        mailbox_item(
-            item=invocation,
-            mailbox_id="buffer-2",
-            initial_title_eligible=True,
-        ),
+    invocation_buffer = mailbox_item(
+        item=invocation,
+        mailbox_id="buffer-2",
+        initial_title_eligible=True,
     )
+    context_outcome = await processor.process(preparation_context, context_buffer)
+    invocation_outcome = await processor.process(preparation_context, invocation_buffer)
 
+    assert context_outcome.turn_effect is TurnEffect.ELIGIBLE
+    assert invocation_outcome.turn_effect is TurnEffect.ELIGIBLE
+    assert _buffer_requires_inference(context_buffer)
+    assert _buffer_requires_inference(invocation_buffer)
     assert [item.external_id for item in context_outcome.promoted] == [
         "external-channel:buffer-1:context-omitted",
         "external-channel:binding-1:C123:1.0:1",

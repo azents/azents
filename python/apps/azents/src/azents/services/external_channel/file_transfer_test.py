@@ -72,6 +72,7 @@ from azents.services.external_channel.discord_files import (
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileDownloadResult,
     ExternalChannelFileTransferError,
+    ExternalChannelFileTransferExecutionError,
     ExternalChannelFileTransferService,
     ExternalChannelInboundStagingConfiguration,
     ServerToRuntimeTransferExecutor,
@@ -984,7 +985,10 @@ async def test_terminal_runtime_failure_is_not_reported_as_success() -> None:
         slack_client=_SlackClient(),
     )
 
-    with pytest.raises(ExternalChannelFileTransferError, match="Runtime file"):
+    with pytest.raises(
+        ExternalChannelFileTransferExecutionError,
+        match="Runtime file",
+    ) as raised:
         await _download(
             service,
             transfer=_TransferService(
@@ -999,6 +1003,13 @@ async def test_terminal_runtime_failure_is_not_reported_as_success() -> None:
             overwrite=False,
             file_storage=cast(FileStorage, _FileStorage()),
         )
+
+    assert raised.value.failure.stage == "runtime_transfer"
+    assert raised.value.failure.cause == "ServerToRuntimeTransferError"
+    assert raised.value.failure.detail == (
+        "Runtime transfer failed before destination commit"
+    )
+    assert raised.value.failure.coordinator_failure is None
 
 
 @pytest.mark.asyncio
@@ -1035,6 +1046,11 @@ async def test_runtime_grpc_transport_failure_is_controlled() -> None:
 
     assert "AioRpcError" not in str(raised.value)
     assert "coordinator endpoint unavailable" not in str(raised.value)
+    assert isinstance(raised.value, ExternalChannelFileTransferExecutionError)
+    assert raised.value.failure.stage == "runtime_transfer"
+    assert raised.value.failure.cause == "AioRpcError"
+    assert raised.value.failure.detail is None
+    assert raised.value.failure.coordinator_failure is None
 
 
 @pytest.mark.asyncio
@@ -1102,6 +1118,17 @@ async def test_inbound_staging_and_terminal_failures_remain_controlled(
         )
 
     assert "bucket/internal-key" not in str(raised.value)
+    assert isinstance(raised.value, ExternalChannelFileTransferExecutionError)
+    if isinstance(error, ServerToRuntimeTransferError):
+        assert raised.value.failure.stage == "runtime_transfer"
+        assert raised.value.failure.cause == "ServerToRuntimeTransferError"
+        assert raised.value.failure.detail == str(error)
+        assert raised.value.failure.coordinator_failure is error.failure
+    else:
+        assert raised.value.failure.stage == "provider_staging_cleanup"
+        assert raised.value.failure.cause == "S3TransferCleanupRequired"
+        assert raised.value.failure.detail is None
+        assert raised.value.failure.coordinator_failure is None
 
 
 @pytest.mark.asyncio

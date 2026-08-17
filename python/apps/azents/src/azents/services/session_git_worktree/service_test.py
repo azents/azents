@@ -891,12 +891,7 @@ def _input_service(
             agent_session_repository=AgentSessionRepository(),
             agent_repository=AgentRepository(),
             automatic_project_repository=AgentAutomaticProjectRepository(),
-            agent_runtime_repository=_RuntimeRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
-            runtime_target_resolver=_RuntimeTargetResolver(
-                session_manager,
-                _RuntimeRepository(),
-            ),
         ),
         chat_write_request_repository=ChatWriteRequestRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),

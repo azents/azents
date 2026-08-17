@@ -78,8 +78,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-13
-spec_version: 155
+last_verified_at: 2026-08-16
+spec_version: 156
 ---
 
 # Agent Execution Loop
@@ -96,7 +96,12 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker reads exactly one FIFO InputBuffer head, resolves the requested profile and attachment metadata outside a database session, and then locks the same head for atomic preparation. After the worker creates or claims the AgentRun, it ensures that run's immutable managed-file projection before calling input promotion or resolving a managed SkillAction.
+1. After claiming Session ownership, the Worker repeatedly reads the current FIFO InputBuffer head
+   until the mailbox is empty or another execution boundary stops consumption. The canonical
+   execution snapshot does not pin a mailbox head. For each row, the Worker resolves the requested
+   profile and attachment metadata outside a database session and then locks the same head for atomic
+   preparation. After the Worker creates or claims the AgentRun, it ensures that run's immutable
+   managed-file projection before calling input promotion or resolving a managed SkillAction.
 2. Preparation atomically updates the Session inference snapshot, applies Goal/Skill side effects, appends canonical events, associates run input, and deletes the source buffer. A changed FIFO head restarts preparation instead of applying a stale resolution.
 3. Worker executes buffer-keyed operation TurnActions such as `create_git_worktree` before the next model dispatch. The current Session owner generation admits the execution before buffer deletion; active state and progress remain in execution tables until one atomic terminal handover appends durable history and deletes live state.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
