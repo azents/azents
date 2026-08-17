@@ -630,6 +630,62 @@ async def test_discord_terminal_thread_reply_forwards_to_exact_parent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_discord_terminal_thread_files_forward_to_exact_parent() -> None:
+    """Scheduled terminal files retain exact Thread native forwarding."""
+    create_file_message = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    target = _target(
+        provider=ExternalChannelProvider.DISCORD,
+        operation=ExternalChannelDeliveryOperation.REPLY,
+    )
+    target.request_payload.update(
+        {
+            "conversation_scope": "thread",
+            "channel_id": "444",
+            "parent_channel_id": "222",
+            "forward_to_parent": True,
+            "files": [
+                {
+                    "source": "exchange",
+                    "path": "exchange://file-1",
+                    "filename": "report.txt",
+                    "media_type": "text/plain",
+                    "expected_size": 12,
+                }
+            ],
+        }
+    )
+    target.request_payload.pop("blocks")
+    target.request_payload.pop("embeds")
+
+    result = await ExternalChannelActionService._deliver_discord(
+        _service(
+            discord_client=_DiscordClientDelegate(
+                create_file_message=create_file_message
+            )
+        ),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-terminal-file"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=cast(Any, object()),
+    )
+
+    assert result.status == "delivered"
+    create_call = create_file_message.await_args
+    assert create_call is not None
+    assert create_call.kwargs["forward_to_parent"] is True
+    assert create_call.kwargs["parent_channel_id"] == "222"
+
+
+@pytest.mark.asyncio
 async def test_discord_registration_accepts_bounded_embed_fields() -> None:
     """Scheduled registration fields reach the provider-bound message."""
     create_message = AsyncMock(

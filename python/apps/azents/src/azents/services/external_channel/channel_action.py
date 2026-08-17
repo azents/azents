@@ -826,11 +826,7 @@ class ExternalChannelActionService:
                         context.session_url
                     )
                 if files:
-                    if (
-                        components is not None
-                        or embeds is not None
-                        or forward_to_parent
-                    ):
+                    if components is not None or embeds is not None:
                         return _discord_invalid_payload()
                     runtime_files = [
                         file
@@ -890,6 +886,12 @@ class ExternalChannelActionService:
                             for file in files
                         ),
                         operation_key=operation_key,
+                        forward_to_parent=forward_to_parent,
+                        parent_channel_id=(
+                            forward_parent_channel_id
+                            if isinstance(forward_parent_channel_id, str)
+                            else None
+                        ),
                     )
                 if components is None and embeds is None:
                     return await discord_client.create_message(

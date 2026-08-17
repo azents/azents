@@ -397,11 +397,48 @@ async def test_file_message_delegates_only_to_g2_transport() -> None:
         content="file",
         files=(),
         operation_key=ProviderOperationKey.from_seed("file-1"),
+        forward_to_parent=False,
+        parent_channel_id=None,
     )
 
     assert result.status == "delivered"
     assert session.calls == []
     assert transport.calls[0]["nonce"] == ProviderOperationKey.from_seed("file-1").value
+
+
+@pytest.mark.asyncio
+async def test_file_message_can_forward_the_exact_created_message() -> None:
+    """A multipart Thread message is forwarded only after its exact create."""
+    session = _SDKSession()
+    client, transport = _client(session)
+
+    result = await client.create_file_message(
+        bot_token="discord-secret",
+        guild_id="111",
+        channel_id="333",
+        content="file",
+        files=(),
+        operation_key=ProviderOperationKey.from_seed("file-terminal"),
+        forward_to_parent=True,
+        parent_channel_id="222",
+    )
+
+    assert result == DiscordDeliveryResult(
+        "delivered",
+        "discord:111:777",
+        None,
+        None,
+    )
+    assert len(transport.calls) == 1
+    assert session.calls == [
+        (
+            "forward_message",
+            {
+                "message": DiscordSDKMessage("777", "333", "111"),
+                "destination_channel_id": "222",
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
