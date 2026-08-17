@@ -3,11 +3,11 @@
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
+import pytest
 from azcommon.result import Failure, Success
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from azents.app import create_dummy_public_app
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.enums import WorkspaceUserRole
 from azents.repos.agent_automatic_project.data import AgentAutomaticProjectPolicy
@@ -18,6 +18,24 @@ from azents.services.agent_automatic_project.data import (
     AutomaticSessionProjectsRuntimeUnavailable,
 )
 from azents.services.session_workspace_project import InvalidProjectPath
+
+from . import router
+
+
+def _create_route_app() -> FastAPI:
+    """Create the Agent route app once for this test module."""
+    app = FastAPI()
+    app.include_router(router, prefix="/agent/v1")
+    return app
+
+
+_ROUTE_APP = _create_route_app()
+
+
+@pytest.fixture(autouse=True)
+def _reset_dependency_overrides() -> None:
+    """Prevent dependency overrides from leaking between tests."""
+    _ROUTE_APP.dependency_overrides.clear()
 
 
 def _policy() -> AgentAutomaticProjectPolicy:
@@ -35,7 +53,7 @@ def _policy() -> AgentAutomaticProjectPolicy:
 
 def _app(service: AsyncMock) -> FastAPI:
     """Create a public API app with policy service and member overrides."""
-    app = create_dummy_public_app()
+    app = _ROUTE_APP
     app.dependency_overrides[AgentAutomaticProjectService] = lambda: service
     app.dependency_overrides[get_workspace_member] = lambda: WorkspaceMember(
         user_id="user-1",

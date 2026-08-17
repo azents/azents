@@ -1,6 +1,7 @@
 """Root-only External Channel Action toolkit."""
 
 import json
+import logging
 import textwrap
 from typing import Literal
 
@@ -12,6 +13,7 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
+    ExternalChannelFileLocator,
 )
 from azents.core.external_channel_progress import (
     MAX_EXTERNAL_CHANNEL_TASK_SOURCES,
@@ -51,11 +53,13 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkSnapshot,
     ChannelWorkTask,
 )
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferError,
+    ExternalChannelFileTransferExecutionError,
     ExternalChannelFileTransferService,
 )
 from azents.services.external_channel.slack_events import (
@@ -65,6 +69,7 @@ from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 EXTERNAL_CHANNEL_TOOLKIT_SLUG = "external_channel"
+_LOGGER = logging.getLogger(__name__)
 _COMPACTION_HEADING = "## Channel Work Snapshot"
 _STATIC_PROMPT = textwrap.dedent(
     """\
@@ -453,6 +458,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                 raise FunctionToolError(
                     "Runtime file storage is unavailable for this run."
                 )
+            transfer_target = None
             try:
                 transfer_target = await context.resolve_runtime_target()
                 result = await self.file_transfer_service.download(
@@ -467,8 +473,36 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     transfer_target=transfer_target,
                 )
             except ExternalChannelFileTransferError as error:
+                _LOGGER.warning(
+                    "External Channel file download failed",
+                    exc_info=True,
+                    extra=_external_file_download_failure_log_fields(
+                        file=args.file,
+                        path=args.path,
+                        overwrite=args.overwrite,
+                        session_id=self.session_id,
+                        agent_id=self.agent_id,
+                        operation_id=self.run_id,
+                        transfer_target=transfer_target,
+                        error=error,
+                    ),
+                )
                 raise FunctionToolError(str(error)) from None
             except RuntimeStorageError as error:
+                _LOGGER.warning(
+                    "External Channel Runtime storage operation failed",
+                    exc_info=True,
+                    extra=_external_file_download_failure_log_fields(
+                        file=args.file,
+                        path=args.path,
+                        overwrite=args.overwrite,
+                        session_id=self.session_id,
+                        agent_id=self.agent_id,
+                        operation_id=self.run_id,
+                        transfer_target=transfer_target,
+                        error=error,
+                    ),
+                )
                 raise FunctionToolError(error.detail) from None
             return json.dumps(
                 {
@@ -486,6 +520,73 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
             description=_DOWNLOAD_EXTERNAL_FILE_DESCRIPTION,
             input_model=DownloadExternalFileInput,
         )
+
+
+def _external_file_download_failure_log_fields(
+    *,
+    file: str,
+    path: str,
+    overwrite: bool,
+    session_id: str,
+    agent_id: str,
+    operation_id: str,
+    transfer_target: ServerToRuntimeTarget | None,
+    error: ExternalChannelFileTransferError | RuntimeStorageError,
+) -> dict[str, object]:
+    """Return secret-free correlation fields for one handled download failure."""
+    try:
+        locator = ExternalChannelFileLocator.parse(file)
+    except ValueError:
+        locator = None
+    if isinstance(error, ExternalChannelFileTransferExecutionError):
+        failure_stage = error.failure.stage
+        failure_cause = error.failure.cause
+        failure_detail = error.failure.detail
+        coordinator_failure = (
+            None
+            if error.failure.coordinator_failure is None
+            else error.failure.coordinator_failure.value
+        )
+    elif isinstance(error, RuntimeStorageError):
+        failure_stage = "runtime_storage"
+        failure_cause = type(error).__name__
+        failure_detail = error.detail
+        coordinator_failure = None
+    else:
+        failure_stage = "validation_or_authorization"
+        failure_cause = type(error).__name__
+        failure_detail = str(error)
+        coordinator_failure = None
+    return {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "operation_id": operation_id,
+        "runtime_id": None if transfer_target is None else transfer_target.runtime_id,
+        "runtime_generation": (
+            None if transfer_target is None else transfer_target.desired_generation
+        ),
+        "external_channel_provider": (
+            None if locator is None else locator.provider.value
+        ),
+        "external_channel_binding_id": (
+            None if locator is None else locator.binding_id
+        ),
+        "external_channel_provider_file_id": (
+            None if locator is None else locator.provider_file_id
+        ),
+        "external_channel_provider_channel_id": (
+            None if locator is None else locator.provider_channel_id
+        ),
+        "external_channel_provider_message_id": (
+            None if locator is None else locator.provider_message_id
+        ),
+        "destination_path": path,
+        "overwrite": overwrite,
+        "failure_stage": failure_stage,
+        "failure_cause": failure_cause,
+        "failure_detail": failure_detail,
+        "coordinator_failure": coordinator_failure,
+    }
 
 
 class ExternalChannelToolkitProvider(ToolkitProvider[ExternalChannelToolkitConfig]):

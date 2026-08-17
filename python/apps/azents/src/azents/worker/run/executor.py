@@ -171,6 +171,7 @@ from azents.services.mailbox import (
     MailboxPreparationStaleError,
     MailboxService,
     OperationActionInput,
+    PendingInputInferenceProfile,
     PromotedMailboxItems,
     ScheduledMailboxAdmission,
     TurnEffect,
@@ -885,7 +886,7 @@ class RunExecutor:
                     await self.mailbox_item_service.admit_scheduled_mailbox_head(
                         session_id=snapshot.session_id,
                         owner_generation=owner_generation,
-                        expected_buffer_id=snapshot.fifo_mailbox_item_id,
+                        expected_buffer_id=pending_input.mailbox_item_id,
                     )
                 )
             if scheduled_admission is not None:
@@ -934,8 +935,6 @@ class RunExecutor:
                     required_inference_profile=selected_profile.profile,
                     active_run_id=run_id,
                     owner_generation=owner_generation,
-                    expected_mailbox_item_id=snapshot.fifo_mailbox_item_id,
-                    enforce_snapshot_head=True,
                     tool_admission_barrier=tool_admission_barrier,
                     initial_turn_eligible=(
                         actionable_transcript_pending
@@ -2386,8 +2385,6 @@ class RunExecutor:
                 required_inference_profile=requested_inference_profile,
                 active_run_id=run_id,
                 owner_generation=owner_generation,
-                expected_mailbox_item_id=None,
-                enforce_snapshot_head=False,
                 tool_admission_barrier=tool_admission_barrier,
                 initial_turn_eligible=True,
                 poll_fn=poll_fn,
@@ -2420,8 +2417,6 @@ class RunExecutor:
         required_inference_profile: RequestedInferenceProfile | None,
         active_run_id: str | None,
         owner_generation: int,
-        expected_mailbox_item_id: str | None,
-        enforce_snapshot_head: bool,
         tool_admission_barrier: ToolAdmissionBarrier,
         initial_turn_eligible: bool,
         poll_fn: PollMessages | None,
@@ -2437,30 +2432,14 @@ class RunExecutor:
         suppress_parent_result = False
         turn_eligible = initial_turn_eligible
         preparation_failed = False
-        first_promotion = True
         while True:
             pending_profile = (
                 await self.mailbox_item_service.peek_pending_inference_profile(
                     session_id
                 )
             )
-            if enforce_snapshot_head:
-                if first_promotion:
-                    if pending_profile.mailbox_item_id != expected_mailbox_item_id:
-                        raise CanonicalExecutionWorkDriftError(
-                            "Canonical input buffer FIFO head changed before promotion"
-                        )
-                elif pending_profile.exists:
-                    raise CanonicalExecutionWorkDriftError(
-                        "New input buffer FIFO head requires a fresh snapshot"
-                    )
-                else:
-                    break
-            expected_buffer_id = (
-                expected_mailbox_item_id
-                if first_promotion and enforce_snapshot_head
-                else pending_profile.mailbox_item_id
-            )
+            if not pending_profile.exists:
+                break
             profile_changed = (
                 initial_turn_eligible
                 and pending_profile.exists
@@ -2475,10 +2454,9 @@ class RunExecutor:
                 required_inference_profile=selected_profile,
                 active_run_id=active_run_id,
                 owner_generation=owner_generation,
-                expected_buffer_id=expected_buffer_id,
+                pending=pending_profile,
                 include_action_messages=process_actions,
             )
-            first_promotion = False
             await self._publish_session_agent_tree_changes(
                 promoted.changed_session_agent_ids,
                 dispatch_event=dispatch_event,
@@ -2844,7 +2822,7 @@ class RunExecutor:
         required_inference_profile: RequestedInferenceProfile | None,
         active_run_id: str | None,
         owner_generation: int,
-        expected_buffer_id: str | None,
+        pending: PendingInputInferenceProfile,
         include_action_messages: bool,
     ) -> PromotedMailboxItems:
         """Promote input buffers and publish the matching live-state changes."""
@@ -2853,13 +2831,6 @@ class RunExecutor:
             "Input buffer flush started before model boundary",
             extra={"session_id": session_id, "model": model},
         )
-        pending = await self.mailbox_item_service.peek_pending_inference_profile(
-            session_id
-        )
-        if pending.mailbox_item_id != expected_buffer_id:
-            raise CanonicalExecutionWorkDriftError(
-                "Input buffer FIFO head changed before preparation"
-            )
         prepared_inference_state: SessionInferenceState | None = None
         profile_resolution_failure: str | None = None
         if pending.requires_inference:
@@ -2920,7 +2891,7 @@ class RunExecutor:
                 owner_generation=owner_generation,
                 model=model,
                 required_inference_profile=required_inference_profile,
-                expected_buffer_id=expected_buffer_id,
+                expected_buffer_id=pending.mailbox_item_id,
                 prepared_inference_state=prepared_inference_state,
                 profile_resolution_failure=profile_resolution_failure,
                 active_run_id=active_run_id,

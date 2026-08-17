@@ -13,7 +13,6 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
-from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.workspace import RDBWorkspace
@@ -39,7 +38,7 @@ class SessionExecutionRepository:
         session_id: str,
         owner_generation: int,
     ) -> CanonicalExecutionSnapshot:
-        """Lock and validate execution authority and expected durable work."""
+        """Lock and validate execution authority and non-mailbox work state."""
         agent_session = await session.scalar(
             sa.select(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
@@ -114,12 +113,6 @@ class SessionExecutionRepository:
         self._validate_execution_mode(agent_session, current, root)
         await self._validate_parent_lineage(session, current, root)
 
-        oldest_input = await session.scalar(
-            sa.select(RDBMailboxItem.id)
-            .where(RDBMailboxItem.session_id == session_id)
-            .order_by(RDBMailboxItem.id.asc())
-            .limit(1)
-        )
         pending_command = self._pending_command(agent_session)
         recoverable_runs = list(
             (
@@ -161,7 +154,6 @@ class SessionExecutionRepository:
             session_agent_context_id=context.id,
             execution_mode=agent_session.session_kind,
             owner_generation=owner_generation,
-            fifo_mailbox_item_id=oldest_input,
             pending_command=pending_command,
             recoverable_run_id=(
                 recoverable_run.id if recoverable_run is not None else None
