@@ -698,11 +698,6 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-            await self.root_agent_session_creation_service.ensure_team_primary(
-                session,
-                workspace_id=agent.workspace_id,
-                agent_id=agent_id,
-            )
             sessions = await self.agent_session_repository.list_active_by_agent_id(
                 session,
                 agent_id,
@@ -729,11 +724,6 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-            await self.root_agent_session_creation_service.ensure_team_primary(
-                session,
-                workspace_id=agent.workspace_id,
-                agent_id=agent_id,
-            )
             sessions = await (
                 self.agent_session_repository.list_active_unread_by_agent_id(
                     session,
@@ -796,11 +786,6 @@ class ChatSessionService:
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
             if status is AgentSessionStatus.ACTIVE:
-                await self.root_agent_session_creation_service.ensure_team_primary(
-                    session,
-                    workspace_id=agent.workspace_id,
-                    agent_id=agent_id,
-                )
                 list_active_page = (
                     self.agent_session_repository.list_active_unread_page_by_agent_id
                 )
@@ -858,11 +843,6 @@ class ChatSessionService:
             )
             if workspace_user is None:
                 return Failure(NotWorkspaceMember())
-            await self.root_agent_session_creation_service.ensure_team_primary(
-                session,
-                workspace_id=agent.workspace_id,
-                agent_id=agent_id,
-            )
             get_sidebar_summary = (
                 self.agent_session_repository.list_active_sidebar_summary_by_agent_id
             )

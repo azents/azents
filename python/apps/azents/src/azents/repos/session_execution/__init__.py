@@ -43,7 +43,7 @@ class SessionExecutionRepository:
         session_id: str,
         owner_generation: int,
     ) -> CanonicalExecutionSnapshot:
-        """Lock and validate execution authority and expected durable work."""
+        """Lock and validate execution authority and non-mailbox work state."""
         agent_session = await session.scalar(
             sa.select(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
@@ -187,9 +187,6 @@ class SessionExecutionRepository:
             session_agent_context_id=context.id,
             execution_mode=agent_session.session_kind,
             owner_generation=owner_generation,
-            fifo_mailbox_item_id=(
-                oldest_input.id if oldest_input is not None else None
-            ),
             pending_command=pending_command,
             recoverable_run_id=(
                 recoverable_run.id if recoverable_run is not None else None

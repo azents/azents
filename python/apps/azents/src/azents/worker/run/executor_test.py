@@ -26,6 +26,12 @@ from azents.core.enums import (
     AgentRuntimeCapability,
     AgentSessionKind,
     EventKind,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
@@ -57,6 +63,7 @@ from azents.engine.events.types import (
     AgentRunState,
     AssistantMessagePayload,
     Event,
+    ExternalChannelMessagePayload,
     NativeArtifact,
     RunMarkerPayload,
     SystemErrorPayload,
@@ -115,16 +122,22 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import PendingSessionCommand
+from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.mailbox.data import MailboxItem
 from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.mailbox import (
+    ExternalChannelMessageMailboxProcessor,
+    MailboxPreparationContext,
     MailboxService,
     PendingInputInferenceProfile,
+    PreparedMailboxFiles,
     PromotedMailboxItems,
     ScheduledMailboxAdmission,
     TurnEffect,
+    build_external_channel_mailbox_payload,
 )
 from azents.services.model_file import ModelFileService
 from azents.services.session_git_worktree import (
@@ -640,9 +653,11 @@ class _MailboxService:
 
     def __init__(
         self,
-        scheduled_admission: ScheduledMailboxAdmission | None = None,
+        scheduled_admission: ScheduledMailboxAdmission | None,
+        mailbox_item_id: str,
     ) -> None:
         self.scheduled_admission = scheduled_admission
+        self.mailbox_item_id = mailbox_item_id
         self.scheduled_admission_calls: list[tuple[str, int, str | None]] = []
 
     async def admit_scheduled_mailbox_head(
@@ -665,7 +680,7 @@ class _MailboxService:
         """Return one implicit pending input by default."""
         del session_id
         return PendingInputInferenceProfile(
-            mailbox_item_id="buffer-1",
+            mailbox_item_id=self.mailbox_item_id,
             requires_inference=True,
             exists=True,
             requested_inference_profile=None,
@@ -1301,7 +1316,10 @@ def _executor(
     if live_event_projector is None:
         live_event_projector = _LiveEventProjector()
     if mailbox_item_service is None:
-        mailbox_item_service = _MailboxService()
+        mailbox_item_service = _MailboxService(
+            scheduled_admission=None,
+            mailbox_item_id="buffer-1",
+        )
     if session_git_worktree_service is None:
         session_git_worktree_service = _SessionGitWorktreeService()
     if vfs_projection_service is None:
@@ -1576,7 +1594,6 @@ def test_matching_session_inference_state_preserves_resolved_model() -> None:
 def _message(
     *,
     owner_generation: int = 1,
-    fifo_mailbox_item_id: str | None = None,
     recoverable_run: _PendingRun | None = None,
     pending_command: PendingSessionCommand | None = None,
 ) -> CanonicalExecutionSnapshot:
@@ -1592,7 +1609,6 @@ def _message(
         session_agent_context_id="context-001",
         execution_mode=AgentSessionKind.ROOT,
         owner_generation=owner_generation,
-        fifo_mailbox_item_id=fifo_mailbox_item_id,
         pending_command=(
             PendingCommandSnapshot(
                 id=pending_command.id,
@@ -1937,7 +1953,7 @@ async def test_execute_uses_atomic_scheduled_admission(
         requested_inference_profile=None,
     )
     mailbox_service = _MailboxService(
-        ScheduledMailboxAdmission(
+        scheduled_admission=ScheduledMailboxAdmission(
             run=scheduled_run,
             promoted=PromotedMailboxItems(
                 operation_action=None,
@@ -1955,7 +1971,8 @@ async def test_execute_uses_atomic_scheduled_admission(
                 suppress_parent_result=False,
             ),
             stale=False,
-        )
+        ),
+        mailbox_item_id="scheduled-buffer-001",
     )
     order: list[str] = []
     lifecycle = _SessionLifecycle(order)
@@ -1974,7 +1991,7 @@ async def test_execute_uses_atomic_scheduled_admission(
     _patch_successful_resolution(monkeypatch)
 
     result = await executor.execute(
-        _message(fifo_mailbox_item_id="scheduled-buffer-001"),
+        _message(),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -1999,7 +2016,12 @@ async def test_execute_uses_atomic_scheduled_admission(
 async def test_execute_discards_stale_scheduled_admission() -> None:
     """A stale Scheduled trigger is consumed without creating another Run."""
     mailbox_service = _MailboxService(
-        ScheduledMailboxAdmission(run=None, promoted=None, stale=True)
+        scheduled_admission=ScheduledMailboxAdmission(
+            run=None,
+            promoted=None,
+            stale=True,
+        ),
+        mailbox_item_id="scheduled-buffer-001",
     )
     lifecycle = _SessionLifecycle()
     vfs_projection_service = _VfsProjectionService()
@@ -2010,7 +2032,7 @@ async def test_execute_discards_stale_scheduled_admission() -> None:
     )
 
     result = await executor.execute(
-        _message(fifo_mailbox_item_id="scheduled-buffer-001"),
+        _message(),
         poll_fn=None,
         check_stop=None,
         prepare_toolkits=None,
@@ -3068,84 +3090,157 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
 
 
 @pytest.mark.asyncio
-async def test_poll_run_inputs_rejects_fifo_head_changed_from_snapshot(
+async def test_poll_run_inputs_consumes_external_channel_batch_under_one_lease(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Initial promotion cannot substitute a newly observed FIFO head."""
+    """The Session owner consumes context and invocation rows before an empty read."""
     executor = _executor()
-    promoted = False
+    created_at = datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC)
+    context = ExternalChannelMailboxProjectionItem(
+        invocation_id="batch-1",
+        binding_id="binding-1",
+        trigger_provider_message_key="C123:1.0:2",
+        prompt_role="context",
+        context_omitted=True,
+        sequence=0,
+        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+        body="Context",
+        attachment_metadata={},
+        reference_mappings=None,
+        resource_id="resource-1",
+        provider_resource_key="C123:1.0",
+        resource_type=ExternalChannelResourceType.THREAD,
+        resource_labels={"channel_id": "C123", "thread_ts": "1.0"},
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="T1",
+        provider_message_key="C123:1.0:1",
+        provider_position="1",
+        principal_id="principal-1",
+        provider_user_id="U1",
+        sender_display_name="Alice",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        provider_created_at=created_at,
+        provider_updated_at=None,
+        original_url=None,
+    )
+    invocation = context.model_copy(
+        update={
+            "prompt_role": "invocation",
+            "context_omitted": False,
+            "sequence": 1,
+            "body": "Invoke",
+            "provider_message_key": "C123:1.0:2",
+            "provider_position": "2",
+        }
+    )
 
-    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
-        nonlocal promoted
-        del args, kwargs
-        promoted = True
-        raise AssertionError("A mismatched canonical head must not be promoted")
-
-    monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
-
-    with pytest.raises(CanonicalExecutionWorkDriftError):
-        await executor.poll_run_inputs(
-            agent_id="agent-1",
+    def mailbox_item(
+        item: ExternalChannelMailboxProjectionItem,
+        mailbox_id: str,
+    ) -> MailboxItem:
+        return MailboxItem(
+            id=mailbox_id,
             session_id="session-1",
-            model="gpt-test",
-            required_inference_profile=None,
-            active_run_id=None,
-            owner_generation=1,
-            expected_mailbox_item_id="snapshot-buffer",
-            enforce_snapshot_head=True,
-            tool_admission_barrier=ToolAdmissionBarrier(),
-            initial_turn_eligible=False,
-            poll_fn=None,
-            process_actions=False,
-            dispatch_event=_noop_dispatch_event,
+            kind=MailboxItemKind.EXTERNAL_CHANNEL_MESSAGE,
+            scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
+            sender_user_id=None,
+            order_group="00000000000000000000000000000001",
+            order_sequence=item.sequence,
+            content="",
+            idempotency_key=f"external-channel-message:{item.sequence}",
+            metadata={},
+            payload=build_external_channel_mailbox_payload(
+                item,
+                context_omitted=item.context_omitted,
+                initial_title_eligible=item.prompt_role == "invocation",
+            ),
+            action=None,
+            attachments=[],
+            file_parts=[],
+            created_at=created_at,
         )
 
-    assert promoted is False
-
-
-@pytest.mark.asyncio
-async def test_poll_run_inputs_requires_fresh_snapshot_for_next_fifo_head(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A second FIFO head is not silently processed under the first snapshot."""
-    executor = _executor()
+    buffers = {
+        "buffer-context": mailbox_item(context, "buffer-context"),
+        "buffer-invocation": mailbox_item(invocation, "buffer-invocation"),
+    }
     profiles = [
         PendingInputInferenceProfile(
-            mailbox_item_id="buffer-1",
-            requires_inference=False,
+            mailbox_item_id="buffer-context",
+            requires_inference=True,
             exists=True,
             requested_inference_profile=None,
         ),
         PendingInputInferenceProfile(
-            mailbox_item_id="buffer-2",
-            requires_inference=False,
+            mailbox_item_id="buffer-invocation",
+            requires_inference=True,
             exists=True,
+            requested_inference_profile=None,
+        ),
+        PendingInputInferenceProfile(
+            mailbox_item_id=None,
+            requires_inference=False,
+            exists=False,
             requested_inference_profile=None,
         ),
     ]
-    expected_buffer_ids: list[str | None] = []
+    processor = ExternalChannelMessageMailboxProcessor(
+        cast(MailboxService, SimpleNamespace())
+    )
+    preparation_context = MailboxPreparationContext(
+        session=cast(AsyncSession, object()),
+        session_id="session-1",
+        active_run_id=None,
+        required_inference_profile=None,
+        prepared_inference_state=None,
+        prepared_files=PreparedMailboxFiles(
+            attachments=[],
+            file_parts=[],
+            created_model_file_ids=[],
+        ),
+    )
+    promoted_buffer_ids: list[str] = []
+    promoted_events: list[Event] = []
 
     async def peek(session_id: str) -> PendingInputInferenceProfile:
-        del session_id
+        assert session_id == "session-1"
         return profiles.pop(0)
 
     async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
         del args
-        expected_buffer_ids.append(cast(str | None, kwargs["expected_buffer_id"]))
+        pending = cast(PendingInputInferenceProfile, kwargs["pending"])
+        assert pending.mailbox_item_id is not None
+        buffer = buffers[pending.mailbox_item_id]
+        outcome = await processor.process(preparation_context, buffer)
+        events = [
+            Event(
+                id=f"{index + len(promoted_events) + 1:032x}",
+                session_id="session-1",
+                kind=item.event_kind,
+                payload=item.payload,
+                external_id=item.external_id,
+                created_at=created_at,
+            )
+            for index, item in enumerate(outcome.promoted)
+        ]
+        promoted_buffer_ids.append(buffer.id)
+        promoted_events.extend(events)
         return PromotedMailboxItems(
             operation_action=None,
-            turn_effect=TurnEffect.NEUTRAL,
+            turn_effect=outcome.turn_effect,
             requested_inference_profile=None,
-            promoted_event_ids=[],
+            promoted_event_ids=[event.id for event in events],
             user_messages=[],
-            events=[],
-            deleted_buffer_ids=["buffer-1"],
+            events=events,
+            deleted_buffer_ids=[buffer.id],
             changed_session_agent_ids=[],
             claimed_count=1,
-            inserted_count=0,
+            inserted_count=len(events),
             deduped_count=0,
-            complete_run=False,
-            suppress_parent_result=False,
+            complete_run=outcome.complete_run,
+            suppress_parent_result=outcome.suppress_parent_result,
         )
 
     monkeypatch.setattr(
@@ -3155,24 +3250,145 @@ async def test_poll_run_inputs_requires_fresh_snapshot_for_next_fifo_head(
     )
     monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
 
-    with pytest.raises(CanonicalExecutionWorkDriftError):
-        await executor.poll_run_inputs(
-            agent_id="agent-1",
-            session_id="session-1",
-            model="gpt-test",
-            required_inference_profile=None,
-            active_run_id=None,
-            owner_generation=1,
-            expected_mailbox_item_id="buffer-1",
-            enforce_snapshot_head=True,
-            tool_admission_barrier=ToolAdmissionBarrier(),
-            initial_turn_eligible=False,
-            poll_fn=None,
-            process_actions=False,
-            dispatch_event=_noop_dispatch_event,
+    async def has_actionable_model_input(session_id: str) -> bool:
+        assert session_id == "session-1"
+        return True
+
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+
+    result = await executor.poll_run_inputs(
+        agent_id="agent-1",
+        session_id="session-1",
+        model="gpt-test",
+        required_inference_profile=None,
+        active_run_id=None,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        initial_turn_eligible=False,
+        poll_fn=None,
+        process_actions=False,
+        dispatch_event=_noop_dispatch_event,
+    )
+
+    assert result.has_actionable_work is True
+    assert promoted_buffer_ids == ["buffer-context", "buffer-invocation"]
+    assert [event.kind for event in promoted_events] == [
+        EventKind.SYSTEM_REMINDER,
+        EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        EventKind.EXTERNAL_CHANNEL_MESSAGE,
+    ]
+    assert [
+        event.payload.prompt_role
+        for event in promoted_events
+        if isinstance(event.payload, ExternalChannelMessagePayload)
+    ] == ["context", "invocation"]
+    assert profiles == []
+
+
+@pytest.mark.asyncio
+async def test_poll_run_inputs_defers_append_after_empty_read_to_next_wake(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An append after an empty read is consumed by the next leased wake-up."""
+    executor = _executor()
+    profiles = [
+        PendingInputInferenceProfile(
+            mailbox_item_id=None,
+            requires_inference=False,
+            exists=False,
+            requested_inference_profile=None,
+        ),
+        PendingInputInferenceProfile(
+            mailbox_item_id="appended-buffer",
+            requires_inference=True,
+            exists=True,
+            requested_inference_profile=None,
+        ),
+        PendingInputInferenceProfile(
+            mailbox_item_id=None,
+            requires_inference=False,
+            exists=False,
+            requested_inference_profile=None,
+        ),
+    ]
+    promoted_buffer_ids: list[str] = []
+
+    async def peek(session_id: str) -> PendingInputInferenceProfile:
+        assert session_id == "session-1"
+        return profiles.pop(0)
+
+    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+        del args
+        pending = cast(PendingInputInferenceProfile, kwargs["pending"])
+        assert pending.mailbox_item_id is not None
+        promoted_buffer_ids.append(pending.mailbox_item_id)
+        return PromotedMailboxItems(
+            operation_action=None,
+            turn_effect=TurnEffect.ELIGIBLE,
+            requested_inference_profile=None,
+            promoted_event_ids=["appended-event"],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=[pending.mailbox_item_id],
+            changed_session_agent_ids=[],
+            claimed_count=1,
+            inserted_count=1,
+            deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         )
 
-    assert expected_buffer_ids == ["buffer-1"]
+    async def has_actionable_model_input(session_id: str) -> bool:
+        assert session_id == "session-1"
+        return True
+
+    monkeypatch.setattr(
+        executor.mailbox_item_service,
+        "peek_pending_inference_profile",
+        peek,
+    )
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+
+    first = await executor.poll_run_inputs(
+        agent_id="agent-1",
+        session_id="session-1",
+        model="gpt-test",
+        required_inference_profile=None,
+        active_run_id=None,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        initial_turn_eligible=False,
+        poll_fn=None,
+        process_actions=False,
+        dispatch_event=_noop_dispatch_event,
+    )
+    second = await executor.poll_run_inputs(
+        agent_id="agent-1",
+        session_id="session-1",
+        model="gpt-test",
+        required_inference_profile=None,
+        active_run_id=None,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        initial_turn_eligible=False,
+        poll_fn=None,
+        process_actions=False,
+        dispatch_event=_noop_dispatch_event,
+    )
+
+    assert first.has_actionable_work is False
+    assert second.has_actionable_work is True
+    assert promoted_buffer_ids == ["appended-buffer"]
+    assert profiles == []
 
 
 @pytest.mark.asyncio
@@ -3285,8 +3501,6 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
         required_inference_profile=None,
         active_run_id=None,
         owner_generation=1,
-        expected_mailbox_item_id=None,
-        enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=False,
         poll_fn=None,
@@ -3377,8 +3591,6 @@ async def test_poll_run_inputs_stops_fifo_after_bridge_action_completion(
         required_inference_profile=None,
         active_run_id="run-1",
         owner_generation=1,
-        expected_mailbox_item_id=None,
-        enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=True,
         poll_fn=queued_poll,
@@ -3451,8 +3663,6 @@ async def test_poll_run_inputs_completes_predecessor_without_promoting_continuat
         required_inference_profile=None,
         active_run_id="run-1",
         owner_generation=1,
-        expected_mailbox_item_id=None,
-        enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=True,
         poll_fn=queued_poll,
@@ -3525,21 +3735,6 @@ async def test_poll_run_inputs_consumes_mixed_eligible_boundary(
             complete_run=False,
             suppress_parent_result=False,
         ),
-        PromotedMailboxItems(
-            operation_action=None,
-            turn_effect=TurnEffect.NEUTRAL,
-            requested_inference_profile=None,
-            promoted_event_ids=[],
-            user_messages=[],
-            events=[],
-            deleted_buffer_ids=[],
-            changed_session_agent_ids=[],
-            claimed_count=0,
-            inserted_count=0,
-            deduped_count=0,
-            complete_run=False,
-            suppress_parent_result=False,
-        ),
     ]
 
     async def peek(session_id: str) -> PendingInputInferenceProfile:
@@ -3573,8 +3768,6 @@ async def test_poll_run_inputs_consumes_mixed_eligible_boundary(
         required_inference_profile=None,
         active_run_id="run-1",
         owner_generation=1,
-        expected_mailbox_item_id=None,
-        enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=False,
         poll_fn=None,
@@ -3670,8 +3863,6 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
         required_inference_profile=None,
         active_run_id="run-1",
         owner_generation=1,
-        expected_mailbox_item_id=None,
-        enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=True,
         poll_fn=None,
@@ -3749,8 +3940,6 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
         required_inference_profile=None,
         active_run_id="run-1",
         owner_generation=1,
-        expected_mailbox_item_id=None,
-        enforce_snapshot_head=False,
         tool_admission_barrier=ToolAdmissionBarrier(),
         initial_turn_eligible=False,
         poll_fn=None,

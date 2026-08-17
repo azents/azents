@@ -27,8 +27,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/cli/team_session_cutover.py
-last_verified_at: 2026-08-12
-spec_version: 27
+last_verified_at: 2026-08-16
+spec_version: 28
 ---
 
 # Run Resume
@@ -52,18 +52,23 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 
 `SessionWakeUp(session_id)` is only a routing signal. On every ordinary recovery, the Worker claims
 the Session owner generation before loading one immutable PostgreSQL canonical snapshot of the active
-Session, Agent, Workspace, root tree/context, and exact pending work. The snapshot has no User
-identity: a requester, Human sender, provider principal, Agent creator, Workspace owner, viewer,
-approver, uploader, or fallback cannot supply execution authority. Any stale generation, inactive or
-cross-lineage Session, or drift between expected and locked durable work fails closed.
+Session, Agent, Workspace, root tree/context, pending command, recoverable Run, and idle continuation.
+Mailbox state is not captured in this snapshot. The leased Session runner reads and consumes the
+current FIFO directly, so producer appends remain ordinary queue activity rather than invalidating
+execution authority. The snapshot has no User identity: a requester, Human sender, provider
+principal, Agent creator, Workspace owner, viewer, approver, uploader, or fallback cannot supply
+execution authority. Any stale generation, inactive or cross-lineage Session, or drift in snapshotted
+non-mailbox work fails closed.
 
 The coordinated Team Session cutover uses a separate bounded preflight/replay command. Candidate
 selection is PostgreSQL-only and considers pending InputBuffers, pending commands, recoverable Runs,
 idle continuations, and durable stop requests. Preflight validates each candidate against the same
-canonical snapshot without Redis I/O or message/file/credential content. Replay fail-closes the batch
-when a selected candidate is invalid; otherwise it fences the owner generation, purges Redis routing
-state, and emits only `SessionWakeUp(session_id)`. Redis is notification/ownership state, never
-replay truth. Old or rich broker payloads are rejected rather than decoded through compatibility.
+canonical authority and non-mailbox work snapshot without Redis I/O or
+message/file/credential content. Mailbox presence remains part of replay candidate selection rather
+than canonical execution authority. Replay fail-closes the batch when a selected candidate is
+invalid; otherwise it fences the owner generation, purges Redis routing state, and emits only
+`SessionWakeUp(session_id)`. Redis is notification/ownership state, never replay truth. Old or rich
+broker payloads are rejected rather than decoded through compatibility.
 
 ## Ownership Lease
 

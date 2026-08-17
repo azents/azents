@@ -209,8 +209,6 @@ def _candidate(
 
 def _snapshot(
     session_id: str = "session-1",
-    *,
-    fifo_mailbox_item_id: str | None = "input-1",
 ) -> CanonicalExecutionSnapshot:
     """Create a matching validated canonical snapshot."""
     return CanonicalExecutionSnapshot(
@@ -224,7 +222,6 @@ def _snapshot(
         session_agent_context_id="context-1",
         execution_mode=AgentSessionKind.ROOT,
         owner_generation=3,
-        fifo_mailbox_item_id=fifo_mailbox_item_id,
         pending_command=None,
         recoverable_run_id=None,
         recoverable_run_status=AgentRunStatus.RUNNING,
@@ -328,10 +325,10 @@ async def test_preflight_rejects_stale_owner_without_broker_effect() -> None:
 
 @pytest.mark.asyncio
 async def test_preflight_accepts_older_queue_only_input_before_wake_input() -> None:
-    """Wake presence and canonical all-input FIFO identity remain separate."""
+    """Mailbox candidate state remains outside canonical execution authority."""
     service, _repository, broker, broker_provider_calls = _service(
         _candidate(fifo_mailbox_item_id="queue-only-input"),
-        _snapshot(fifo_mailbox_item_id="queue-only-input"),
+        _snapshot(),
     )
 
     report = await service.preflight(batch_size=10, after_session_id=None)

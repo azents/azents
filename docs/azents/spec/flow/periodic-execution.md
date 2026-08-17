@@ -36,8 +36,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-08-16
-spec_version: 13
+last_verified_at: 2026-08-17
+spec_version: 14
 ---
 
 # Periodic Execution Flow Spec
@@ -103,7 +103,10 @@ bounded process-local concurrency, enforces the absolute deadline and cancellati
 one task-local DI container for each execution. The `scheduler.task` adapter resolves the current
 code-registered definition, reconstructs `TaskContext`, and invokes its async handler. The same Job
 Runtime also hosts External Channel ingress through a separate registered handler; Scheduler claims
-do not use ingress coalescing or rerun behavior.
+do not use ingress coalescing or rerun behavior. A handled handler exception emits one structured
+exception log with the handler key, execution key, safe exception class, and duration. An absolute
+deadline outcome emits one warning with the handler key, execution key, deadline, elapsed duration,
+timeout stage, and whether handler cancellation settled during the configured grace period.
 
 `job_runtime_backend=temporal` is a recognized configuration value but fails application composition
 because that backend is not implemented. Scheduler task handlers do not import Temporal APIs.
@@ -332,9 +335,11 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
-- **2026-08-16** — v13. Added the code-owned user Scheduled Task dispatcher to the
+- **2026-08-17** — v14. Added the code-owned user Scheduled Task dispatcher to the
   existing Scheduler role while keeping product `scheduled_tasks` and cycle
   Toolkit State separate from maintenance `scheduled_task_states`.
+- **2026-08-16** — v13. Added the shared Job Runtime's content-free structured
+  handler-failure and stage-specific absolute-deadline diagnostics.
 - **2026-08-15** — v12. Replaced the removed `TaskExecutor` description with the shared
   Job Runtime execution path, completed the registered task inventory, and added current Job Runtime
   and lifecycle-service authority paths. Removed obsolete ArgoCD manifest references.

@@ -41,13 +41,13 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-16 | 44 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-16 | 37 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-14 | 41 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-16 | 43 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-10 | 41 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-16 | 13 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-12 | 27 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-17 | 14 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-16 | 28 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-17 | 30 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-13 | 3 |

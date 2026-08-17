@@ -482,6 +482,7 @@ async def test_late_cursor_cas_conflict_rolls_back_and_resets_claim(
 
 async def test_coordination_exhaustion_releases_current_lease(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Four stale finalizations release the lease for producer recovery."""
     item = _item(
@@ -495,9 +496,11 @@ async def test_coordination_exhaustion_releases_current_lease(
         return_value=ExternalChannelIngressLeaseClaim(
             owner=ExternalChannelIngressOwner.model_construct(
                 id="owner-1",
+                connection_id="connection-1",
                 binding_id="binding-1",
                 session_id="session-1",
                 lease_generation=7,
+                created_at=_NOW,
             )
         )
     )
@@ -519,10 +522,12 @@ async def test_coordination_exhaustion_releases_current_lease(
     monkeypatch.setattr(service, "_prepare_batch", prepare)
     monkeypatch.setattr(service, "_finalize_batch", finalize)
 
-    await service.drain(
-        owner_id="owner-1",
-        deadline=_NOW + datetime.timedelta(minutes=20),
-    )
+    with caplog.at_level(logging.INFO):
+        await service.drain(
+            owner_id="owner-1",
+            deadline=_NOW + datetime.timedelta(minutes=20),
+            job_execution_key="external-channel-ingress:owner-1:lifecycle-1",
+        )
 
     assert queue_repository.claim_due_batch.await_count == 4
     assert prepare.await_count == 4
@@ -536,6 +541,152 @@ async def test_coordination_exhaustion_releases_current_lease(
         lease_generation=7,
     )
     assert all(transaction.commit.await_count == 1 for transaction in transactions)
+    lease_record = next(
+        record
+        for record in caplog.records
+        if record.message == "External Channel ingress drain acquired lease"
+    )
+    assert lease_record.__dict__["external_channel_ingress_owner_id"] == "owner-1"
+    assert lease_record.__dict__["external_channel_ingress_lease_generation"] == 7
+    assert (
+        lease_record.__dict__["job_execution_key"]
+        == "external-channel-ingress:owner-1:lifecycle-1"
+    )
+    batch_records = [
+        record
+        for record in caplog.records
+        if record.message == "External Channel ingress batch preparation started"
+    ]
+    assert len(batch_records) == 4
+    assert all(
+        record.__dict__["external_channel_ingress_batch_id"] == "batch-1"
+        for record in batch_records
+    )
+    exhaustion_record = next(
+        record
+        for record in caplog.records
+        if record.message
+        == "External Channel ingress drain released lease after coordination exhaustion"
+    )
+    assert (
+        exhaustion_record.__dict__["external_channel_ingress_coordination_retry_count"]
+        == 4
+    )
+
+
+async def test_drain_logs_when_lease_is_not_acquired(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A coalesced drain records its job and owner correlation before returning."""
+    queue_repository = MagicMock()
+    queue_repository.claim_lease = AsyncMock(return_value=None)
+    transaction = _Session()
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=MagicMock(),
+        queue_repository=queue_repository,
+        mailbox_service=MagicMock(),
+        agent_session_repository=MagicMock(),
+        wake_dispatcher=MagicMock(),
+    )
+
+    with caplog.at_level(logging.INFO):
+        await service.drain(
+            owner_id="owner-1",
+            deadline=_NOW + datetime.timedelta(minutes=10),
+            job_execution_key="external-channel-ingress:owner-1:lifecycle-1",
+        )
+
+    transaction.commit.assert_awaited_once()
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "External Channel ingress drain did not acquire lease"
+    )
+    assert record.__dict__["external_channel_ingress_owner_id"] == "owner-1"
+    assert (
+        record.__dict__["job_execution_key"]
+        == "external-channel-ingress:owner-1:lifecycle-1"
+    )
+    assert isinstance(
+        record.__dict__["external_channel_ingress_drain_duration_seconds"],
+        float,
+    )
+
+
+async def test_drain_cancellation_logs_active_batch_stage(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Job cancellation identifies the active ingress stage and fenced batch."""
+    item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+    )
+    batch = _batch(item)
+    queue_repository = MagicMock()
+    queue_repository.claim_lease = AsyncMock(
+        return_value=ExternalChannelIngressLeaseClaim(
+            owner=ExternalChannelIngressOwner.model_construct(
+                id="owner-1",
+                connection_id="connection-1",
+                binding_id="binding-1",
+                session_id="session-1",
+                lease_generation=3,
+                created_at=_NOW,
+            )
+        )
+    )
+    queue_repository.claim_due_batch = AsyncMock(return_value=batch)
+    service = _service(
+        session_manager=_session_manager(_Session(), _Session()),
+        repository=MagicMock(),
+        queue_repository=queue_repository,
+        mailbox_service=MagicMock(),
+        agent_session_repository=MagicMock(),
+        wake_dispatcher=MagicMock(),
+    )
+    started = asyncio.Event()
+
+    async def prepare(
+        _batch_value: ExternalChannelIngressBatch,
+        *,
+        deadline: datetime.datetime,
+    ) -> list[_PreparedFailure]:
+        del deadline
+        started.set()
+        await asyncio.Event().wait()
+        return []
+
+    monkeypatch.setattr(service, "_prepare_batch", prepare)
+    with caplog.at_level(logging.INFO):
+        task = asyncio.create_task(
+            service.drain(
+                owner_id="owner-1",
+                deadline=_NOW + datetime.timedelta(minutes=10),
+                job_execution_key="external-channel-ingress:owner-1:lifecycle-1",
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "External Channel ingress batch processing cancelled"
+    )
+    assert record.__dict__["external_channel_ingress_active_stage"] == (
+        "provider_preparation"
+    )
+    assert record.__dict__["external_channel_ingress_batch_id"] == "batch-1"
+    assert record.__dict__["external_channel_ingress_lease_generation"] == 3
+    assert (
+        record.__dict__["job_execution_key"]
+        == "external-channel-ingress:owner-1:lifecycle-1"
+    )
 
 
 async def test_finalization_connection_first_order_prevents_admission_deadlock(

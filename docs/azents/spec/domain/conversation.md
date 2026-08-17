@@ -218,8 +218,9 @@ and automatic-archive projections; archived rows retain archive time, purge dead
 immutable retention snapshot. `GET /chat/v1/agents/{agent_id}/sessions/sidebar` returns every pinned
 active Team root session plus at most 20 distinct recent non-pinned active Team root sessions in
 separate `pinned` and `recent` arrays; it never returns User, archived, or subagent sessions. Both
-reads validate Agent membership, and active reads retain Team-primary ensure behavior. Each session item
-includes `run_state` so azents-web can mark running sessions in the Agent rail session list. `POST
+reads validate Agent membership and are side-effect free: they never ensure or create a Team-primary
+Session and never wait for Runtime state. Each session item includes `run_state` so azents-web can
+mark running sessions in the Agent rail session list. `POST
 /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session. The current request
 shape is `existing_project_paths` plus ordered `setup_actions`.
 `existing_project_paths` registers explicit Project paths supplied by the client and does not copy
@@ -964,7 +965,9 @@ Exchange file or creates a replacement ModelFile, and model rich input comes onl
 stored on the mailbox item at its creation boundary. If the identity changed while external preparation
 ran, the worker discards the stale result and starts again. Successful preparation atomically updates
 the complete Session inference snapshot, applies Goal/Skill state changes, appends canonical events,
-associates input events with the active run, and deletes the source mailbox item.
+associates input events with the active run, and deletes the source mailbox item. After one row
+commits, the same leased runner reads the next FIFO head without rebuilding canonical execution
+authority. Concurrent appends are consumed by a later loop iteration or wake-up.
 
 Canonical outcomes are:
 
@@ -1180,6 +1183,8 @@ presentations.
   result Mailbox/Event/history/live projection contracts and exact Run-cycle
   binding at promotion.
 
+- **2026-08-17** — v149. Made Team session directory/sidebar reads side-effect free and removed
+  Runtime I/O from root Session creation, preventing Agent-row/Runtime reconciliation deadlocks.
 - **2026-08-15** — v148. Removed stale user-facing Scheduled Task ownership, obsolete source/API
   paths, and the obsolete standalone command route. Aligned External Channel mailbox terminology and
   projection behavior with independent canonical message rows and `prompt_role`.
