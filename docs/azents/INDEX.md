@@ -347,6 +347,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Sandbox Restore Retry and Explicit Reset Historical Requirements Reconstruction](requirements/sandbox-260524-sandbox-restore.md) | sandbox-260524 | 2026-05-24 | - |
 | [Sandbox System Redesign Historical Requirements Reconstruction](requirements/sandbox-260525-sandbox-redesign.md) | sandbox-260525 | 2026-05-25 | - |
 | [Scheduled Tasks Discussion Historical Requirements Reconstruction](requirements/scheduled-260331-scheduled-tasks.md) | scheduled-260331 | 2026-03-31 | - |
+| [Agent Scheduled Tasks Requirements](requirements/scheduled-260816-agent-scheduled-tasks.md) | scheduled-260816 | 2026-08-16 | - |
 | [Use Default OpenAI SDK HTTP Retries Historical Requirements Reconstruction](requirements/sdk-260716-openai-sdk-http-retries.md) | sdk-260716 | 2026-07-16 | - |
 | [Tool Search and a Bounded Model-Visible Tool Working Set Historical Requirements Reconstruction](requirements/search-260717-search-bounded-working-set.md) | search-260717 | 2026-07-17 | - |
 | [Reset the Tool Search Working Set on Successful Compaction Historical Requirements Reconstruction](requirements/search-260720-search-working-set-on-compaction.md) | search-260720 | 2026-07-20 | - |
@@ -737,6 +738,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Sandbox Restore Retry and Explicit Reset Historical Decision Reconstruction](adr/sandbox-260524-sandbox-restore.md)
 - [Sandbox System Redesign](adr/sandbox-260525-sandbox-redesign.md)
 - [Scheduled Tasks Discussion](adr/scheduled-260331-scheduled-tasks.md)
+- [Agent Scheduled Tasks](adr/scheduled-260816-agent-scheduled-tasks.md)
 - [Use Default OpenAI SDK HTTP Retries](adr/sdk-260716-openai-sdk-http-retries.md)
 - [Tool Search and a Bounded Model-Visible Tool Working Set](adr/search-260717-search-bounded-working-set.md)
 - [Reset the Tool Search Working Set on Successful Compaction](adr/search-260720-search-working-set-on-compaction.md)
