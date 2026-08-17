@@ -1,7 +1,7 @@
 """Provider-neutral External Channel Session presence controls."""
 
 from typing import Literal, assert_never
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import quote, urlencode, urlparse, urlunparse
 
 ExternalChannelSessionPresenceState = Literal["joined", "left"]
 
@@ -21,6 +21,33 @@ def build_external_channel_session_url(
         f"/sessions/{quote(session_id, safe='')}"
     )
     return urlunparse(parsed._replace(path=path, query="", fragment=""))
+
+
+def build_external_channel_scheduled_task_url(
+    web_url: str,
+    workspace_handle: str,
+    agent_id: str,
+    session_id: str,
+    task_id: str,
+) -> str | None:
+    """Build the exact Web edit route for one Session-owned Scheduled Task."""
+    session_url = build_external_channel_session_url(
+        web_url,
+        workspace_handle,
+        agent_id,
+        session_id,
+    )
+    if session_url is None:
+        return None
+    parsed = urlparse(session_url)
+    query = urlencode(
+        {
+            "page": "scheduled-tasks",
+            "taskId": task_id,
+            "edit": "1",
+        }
+    )
+    return urlunparse(parsed._replace(query=query))
 
 
 def session_presence_payload(

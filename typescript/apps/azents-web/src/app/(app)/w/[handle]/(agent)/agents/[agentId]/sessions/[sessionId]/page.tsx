@@ -3,11 +3,17 @@ import { notFound, redirect } from "next/navigation";
 import { AgentChatTabPage } from "@/features/agents/AgentChatTabPage";
 import { AgentContextPage } from "@/features/agents/AgentContextPage";
 import { AgentSubagentsPage } from "@/features/agents/AgentSubagentsPage";
+import { ScheduledTasksPage } from "@/features/scheduled-tasks/ScheduledTasksPage";
 import { SessionChannelsPage } from "@/features/session-channels/SessionChannelsPage";
 import { trpc } from "@/trpc/server";
 import type { AgentContextPageView } from "@/features/agents/AgentContextPage";
 
-type SessionPageView = "chat" | "subagents" | "channels" | AgentContextPageView;
+type SessionPageView =
+  | "chat"
+  | "subagents"
+  | "channels"
+  | "scheduled-tasks"
+  | AgentContextPageView;
 
 function parsePageView(value?: string | string[]): SessionPageView {
   const rawValue = Array.isArray(value) ? value[0] : value;
@@ -16,7 +22,8 @@ function parsePageView(value?: string | string[]): SessionPageView {
     rawValue === "system-prompt" ||
     rawValue === "raw-events" ||
     rawValue === "subagents" ||
-    rawValue === "channels"
+    rawValue === "channels" ||
+    rawValue === "scheduled-tasks"
   ) {
     return rawValue;
   }
@@ -28,7 +35,11 @@ export default async function Page({
   searchParams,
 }: {
   params: Promise<{ handle: string; agentId: string; sessionId: string }>;
-  searchParams: Promise<{ page?: string | string[] }>;
+  searchParams: Promise<{
+    page?: string | string[];
+    taskId?: string | string[];
+    edit?: string | string[];
+  }>;
 }): Promise<React.ReactElement> {
   const [{ handle, agentId, sessionId }, query] = await Promise.all([
     params,
@@ -59,6 +70,21 @@ export default async function Page({
           handle={handle}
           agent={agent}
           sessionId={sessionId}
+        />
+      );
+    }
+    if (view === "scheduled-tasks") {
+      const taskId = Array.isArray(query.taskId)
+        ? (query.taskId[0] ?? null)
+        : (query.taskId ?? null);
+      const edit = Array.isArray(query.edit) ? query.edit[0] : query.edit;
+      return (
+        <ScheduledTasksPage
+          handle={handle}
+          agent={agent}
+          sessionId={sessionId}
+          initialTaskId={taskId}
+          openInitialTaskForEdit={edit === "1" && taskId !== null}
         />
       );
     }

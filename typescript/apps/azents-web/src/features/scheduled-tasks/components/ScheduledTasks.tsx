@@ -29,22 +29,18 @@ import {
   IconChevronRight,
   IconCircleDot,
   IconClock,
-  IconExternalLink,
   IconPencil,
   IconPlus,
   IconRoute,
-  IconTrash,
+  IconX,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
-import { AgentSettingsHeader } from "@/features/agents/components/AgentSettingsHeader";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useLocale } from "@/shared/providers/locale";
 import type { ScheduledTasksContainerOutput } from "../containers/useScheduledTasksContainer";
 import type { ScheduledTaskDraft } from "../types";
 import type { SupportedLocale } from "@/shared/lib/locale";
 import type {
-  AgentSessionResponse,
   ScheduledTaskCurrentCycleResponse,
   ScheduledTaskResponse,
 } from "@azents/public-client";
@@ -69,17 +65,6 @@ function executionColor(
     case "running_with_pending":
       return "orange";
   }
-}
-
-function sessionLabel(session: AgentSessionResponse, fallback: string): string {
-  return session.title?.trim() || fallback;
-}
-
-function taskSessionLabel(
-  task: ScheduledTaskResponse,
-  fallback: string,
-): string {
-  return task.session.title?.trim() || fallback;
 }
 
 function scheduleSummary(
@@ -150,9 +135,6 @@ function TaskList({
                 <Text size="xs" c="dimmed" truncate>
                   {scheduleSummary(task, locale)}
                 </Text>
-                <Text size="xs" c="dimmed" truncate>
-                  {taskSessionLabel(task, t("sessionFallback"))}
-                </Text>
               </Stack>
             }
             rightSection={<IconChevronRight size={rem(16)} />}
@@ -216,19 +198,15 @@ function CurrentCycle({
 }
 
 function TaskDetail({
-  workspaceHandle,
-  agentId,
   detail,
   mutationBusy,
   locale,
   onOpenEdit,
-  onRequestDelete,
+  onRequestCancel,
 }: Pick<
   ScheduledTasksContainerOutput,
-  "detail" | "mutationBusy" | "onOpenEdit" | "onRequestDelete"
+  "detail" | "mutationBusy" | "onOpenEdit" | "onRequestCancel"
 > & {
-  workspaceHandle: string;
-  agentId: string;
   locale: SupportedLocale;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents.scheduledTasks");
@@ -298,11 +276,11 @@ function TaskDetail({
             variant="subtle"
             color="red"
             size="compact-sm"
-            leftSection={<IconTrash size={rem(14)} />}
+            leftSection={<IconX size={rem(14)} />}
             disabled={mutationBusy}
-            onClick={() => onRequestDelete(task)}
+            onClick={() => onRequestCancel(task)}
           >
-            {t("delete")}
+            {t("cancelTask")}
           </Button>
         </Group>
       </Group>
@@ -319,40 +297,22 @@ function TaskDetail({
         </Text>
       </Box>
 
-      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
-        <Box>
-          <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-            {t("schedule")}
-          </Text>
-          <Group gap="xs" mt="xs" wrap="nowrap" align="flex-start">
-            <IconClock size={rem(16)} />
-            <Box>
-              <Text size="sm" fw={600}>
-                {t(`scheduleType.${task.schedule_type}`)}
-              </Text>
-              <Text size="sm" c="dimmed">
-                {scheduleSummary(task, locale)}
-              </Text>
-            </Box>
-          </Group>
-        </Box>
-        <Box>
-          <Text size="xs" fw={700} c="dimmed" tt="uppercase">
-            {t("session")}
-          </Text>
-          <Button
-            component={Link}
-            href={`/w/${workspaceHandle}/agents/${agentId}/sessions/${task.session.id}`}
-            variant="subtle"
-            size="compact-sm"
-            px={0}
-            rightSection={<IconExternalLink size={rem(14)} />}
-            styles={{ inner: { justifyContent: "flex-start" } }}
-          >
-            {taskSessionLabel(task, t("sessionFallback"))}
-          </Button>
-        </Box>
-      </SimpleGrid>
+      <Box>
+        <Text size="xs" fw={700} c="dimmed" tt="uppercase">
+          {t("schedule")}
+        </Text>
+        <Group gap="xs" mt="xs" wrap="nowrap" align="flex-start">
+          <IconClock size={rem(16)} />
+          <Box>
+            <Text size="sm" fw={600}>
+              {t(`scheduleType.${task.schedule_type}`)}
+            </Text>
+            <Text size="sm" c="dimmed">
+              {scheduleSummary(task, locale)}
+            </Text>
+          </Box>
+        </Group>
+      </Box>
 
       <Box>
         <Text size="xs" fw={700} c="dimmed" tt="uppercase">
@@ -408,54 +368,25 @@ function TaskDetail({
 }
 
 function TaskForm({
-  state,
   form,
   mutationBusy,
   actionError,
-  creatingSession,
   onCloseForm,
   onChangeDraft,
-  onCreateSession,
   onSave,
 }: Pick<
   ScheduledTasksContainerOutput,
-  | "state"
   | "form"
   | "mutationBusy"
   | "actionError"
-  | "creatingSession"
   | "onCloseForm"
   | "onChangeDraft"
-  | "onCreateSession"
   | "onSave"
 >): React.ReactElement {
   const t = useTranslations("workspace.agents.scheduledTasks");
   if (form.type === "CLOSED") {
     return <></>;
   }
-  const sessions = state.type === "LOADED" ? state.sessions : [];
-  const teamSessions = sessions.filter(
-    (session) => session.product_mode === "team",
-  );
-  const userSessions = sessions.filter(
-    (session) => session.product_mode === "user",
-  );
-  const sessionData = [
-    {
-      group: t("form.teamSessions"),
-      items: teamSessions.map((session) => ({
-        value: session.id,
-        label: sessionLabel(session, t("sessionFallback")),
-      })),
-    },
-    {
-      group: t("form.userSessions"),
-      items: userSessions.map((session) => ({
-        value: session.id,
-        label: sessionLabel(session, t("sessionFallback")),
-      })),
-    },
-  ].filter((group) => group.items.length > 0);
   const bindingData = form.bindings.map((binding) => ({
     value: binding.id,
     label: `${binding.resource_label} · ${binding.provider} · ${t(
@@ -490,38 +421,6 @@ function TaskForm({
             {t(`validation.${form.error}`)}
           </Alert>
         )}
-        <Box>
-          <Select
-            label={t("form.sessionLabel")}
-            description={
-              form.type === "EDIT"
-                ? t("form.sessionEditDescription")
-                : t("form.sessionDescription")
-            }
-            data={sessionData}
-            value={form.draft.sessionId || null}
-            disabled={form.type === "EDIT" || mutationBusy}
-            searchable
-            allowDeselect={false}
-            onChange={(value) =>
-              updateDraft({ sessionId: value ?? "", channelId: null })
-            }
-          />
-          {form.type === "CREATE" && (
-            <Button
-              variant="subtle"
-              size="compact-sm"
-              mt="xs"
-              px={0}
-              leftSection={<IconPlus size={rem(14)} />}
-              loading={creatingSession}
-              disabled={mutationBusy}
-              onClick={onCreateSession}
-            >
-              {t("form.createTeamSession")}
-            </Button>
-          )}
-        </Box>
         <TextInput
           label={t("form.titleLabel")}
           value={form.draft.title}
@@ -636,26 +535,22 @@ function TaskForm({
 }
 
 export function ScheduledTasks({
-  handle,
-  agent,
   state,
   detail,
   form,
   selectedTaskId,
-  deleteTarget,
+  cancelTarget,
   mutationBusy,
   actionError,
-  creatingSession,
   onSelectTask,
   onOpenCreate,
   onOpenEdit,
   onCloseForm,
   onChangeDraft,
   onSave,
-  onCreateSession,
-  onRequestDelete,
-  onCancelDelete,
-  onConfirmDelete,
+  onRequestCancel,
+  onCloseCancel,
+  onConfirmCancel,
 }: ScheduledTasksContainerOutput): React.ReactElement {
   const t = useTranslations("workspace.agents.scheduledTasks");
   const { locale } = useLocale();
@@ -663,20 +558,17 @@ export function ScheduledTasks({
   return (
     <>
       <TaskForm
-        state={state}
         form={form}
         mutationBusy={mutationBusy}
         actionError={actionError}
-        creatingSession={creatingSession}
         onCloseForm={onCloseForm}
         onChangeDraft={onChangeDraft}
-        onCreateSession={onCreateSession}
         onSave={onSave}
       />
       <Modal
-        opened={deleteTarget !== null}
-        onClose={onCancelDelete}
-        title={t("deleteConfirmTitle")}
+        opened={cancelTarget !== null}
+        onClose={onCloseCancel}
+        title={t("cancelConfirmTitle")}
         centered
       >
         <Stack gap="md">
@@ -688,49 +580,37 @@ export function ScheduledTasks({
             </Alert>
           )}
           <Text size="sm">
-            {t("deleteConfirmDescription", {
-              title: deleteTarget?.title ?? "",
+            {t("cancelConfirmDescription", {
+              title: cancelTarget?.title ?? "",
             })}
           </Text>
           <Alert color="red" icon={<IconAlertCircle size={rem(18)} />}>
-            {t("deletePermanent")}
+            {t("cancelEffect")}
           </Alert>
           <Group justify="flex-end">
             <Button
               variant="default"
               disabled={mutationBusy}
-              onClick={onCancelDelete}
+              onClick={onCloseCancel}
             >
-              {t("cancel")}
+              {t("keepTask")}
             </Button>
             <Button
               color="red"
               loading={mutationBusy}
-              onClick={onConfirmDelete}
+              onClick={onConfirmCancel}
             >
-              {t("delete")}
+              {t("cancelTask")}
             </Button>
           </Group>
         </Stack>
       </Modal>
 
       <Box
-        h="100%"
+        flex={1}
         mih={0}
         style={{ display: "flex", flexDirection: "column" }}
       >
-        <AgentSettingsHeader
-          agent={agent}
-          controls={
-            <Button
-              size="compact-sm"
-              leftSection={<IconPlus size={rem(16)} />}
-              onClick={onOpenCreate}
-            >
-              {t("newTask")}
-            </Button>
-          }
-        />
         <ScrollArea flex={1} mih={0} type="auto">
           <Stack
             gap="lg"
@@ -739,14 +619,23 @@ export function ScheduledTasks({
             mx="auto"
             w="100%"
           >
-            <Box>
-              <Text fw={700} size="xl">
-                {t("title")}
-              </Text>
-              <Text size="sm" c="dimmed">
-                {t("description")}
-              </Text>
-            </Box>
+            <Group justify="space-between" align="flex-start" wrap="wrap">
+              <Box>
+                <Text fw={700} size="xl">
+                  {t("title")}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  {t("description")}
+                </Text>
+              </Box>
+              <Button
+                size="compact-sm"
+                leftSection={<IconPlus size={rem(16)} />}
+                onClick={onOpenCreate}
+              >
+                {t("newTask")}
+              </Button>
+            </Group>
 
             {actionError !== null && (
               <Alert color="red" icon={<IconAlertCircle size={rem(18)} />}>
@@ -789,13 +678,11 @@ export function ScheduledTasks({
                 </Paper>
                 <Paper withBorder radius="lg" style={{ overflow: "hidden" }}>
                   <TaskDetail
-                    workspaceHandle={handle}
-                    agentId={agent.id}
                     detail={detail}
                     mutationBusy={mutationBusy}
                     locale={locale}
                     onOpenEdit={onOpenEdit}
-                    onRequestDelete={onRequestDelete}
+                    onRequestCancel={onRequestCancel}
                   />
                 </Paper>
               </SimpleGrid>

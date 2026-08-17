@@ -24,6 +24,7 @@ from azents.services.scheduled_task.control import (
     _provider_context_matches_binding,
     build_scheduled_task_control_locator,
     parse_scheduled_task_control_locator,
+    render_scheduled_task_discord_controls,
     render_scheduled_task_discord_registration,
     render_scheduled_task_slack_registration,
 )
@@ -222,6 +223,23 @@ def test_signed_locator_round_trips_exact_action_task_and_binding() -> None:
     )
 
 
+def test_signed_locator_round_trips_discord_cancel_confirmation() -> None:
+    """The second Discord cancellation step remains signed and task-scoped."""
+    locator = build_scheduled_task_control_locator(
+        secret=_SECRET,
+        action="confirm_delete",
+        task_id=_TASK_ID,
+        binding_id=_BINDING_ID,
+    )
+
+    parsed = parse_scheduled_task_control_locator(locator=locator, secret=_SECRET)
+    assert (parsed.action, parsed.task_id, parsed.binding_id) == (
+        "confirm_delete",
+        _TASK_ID,
+        _BINDING_ID,
+    )
+
+
 @pytest.mark.parametrize("part", [1, 2, 3, 4])
 def test_signed_locator_rejects_tampering(part: int) -> None:
     """Changing version, action, Task, Binding, or signature denies mutation."""
@@ -241,8 +259,8 @@ def test_signed_locator_rejects_tampering(part: int) -> None:
         )
 
 
-def test_registration_renderers_include_exact_edit_and_delete_controls() -> None:
-    """Slack Block Kit and Discord components retain distinct signed actions."""
+def test_registration_renderers_use_web_edit_and_cancel_controls() -> None:
+    """Registration controls use Web edit and provider-authorized cancellation."""
     task = _task()
     edit = build_scheduled_task_control_locator(
         secret=_SECRET,
@@ -262,9 +280,9 @@ def test_registration_renderers_include_exact_edit_and_delete_controls() -> None
         edit_locator=edit,
         delete_locator=delete,
     )
-    discord_text, embeds, components = render_scheduled_task_discord_registration(
-        task=task,
-        edit_locator=edit,
+    discord_text, embeds = render_scheduled_task_discord_registration(task=task)
+    components = render_scheduled_task_discord_controls(
+        edit_url="https://azents.example/task",
         delete_locator=delete,
     )
 
@@ -276,6 +294,7 @@ def test_registration_renderers_include_exact_edit_and_delete_controls() -> None
     assert is_external_channel_projection(delete_button)
     assert edit_button["value"] == edit
     assert delete_button["value"] == delete
+    assert delete_button["text"] == {"type": "plain_text", "text": "Cancel"}
     assert "Objective" not in str(slack_blocks)
     assert task.objective not in str(slack_blocks)
     assert slack_blocks[0] == {
@@ -295,11 +314,13 @@ def test_registration_renderers_include_exact_edit_and_delete_controls() -> None
     assert task.objective not in str(embeds)
     discord_actions = components[0]["components"]
     assert isinstance(discord_actions, list)
-    discord_action_ids: list[object] = []
-    for button in discord_actions:
-        assert is_external_channel_projection(button)
-        discord_action_ids.append(button["custom_id"])
-    assert discord_action_ids == [edit, delete]
+    edit_button, cancel_button = discord_actions
+    assert is_external_channel_projection(edit_button)
+    assert is_external_channel_projection(cancel_button)
+    assert edit_button["url"] == "https://azents.example/task"
+    assert "custom_id" not in edit_button
+    assert cancel_button["label"] == "Cancel"
+    assert cancel_button["custom_id"] == delete
 
 
 def test_provider_context_matches_exact_parent_or_thread_binding_only() -> None:

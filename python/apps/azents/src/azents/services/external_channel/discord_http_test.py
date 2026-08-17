@@ -19,6 +19,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
@@ -28,8 +29,12 @@ from azents.repos.external_channel.data import (
     ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.scheduled_task.data import ScheduledTask
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
-from azents.services.external_channel.discord_http import DiscordHTTPAdmissionService
+from azents.services.external_channel.discord_http import (
+    DiscordHTTPAdmissionService,
+    _scheduled_task_cancel_confirmation_response,
+)
 from azents.services.external_channel.discord_interaction import (
     DiscordInteractionInvalidPayload,
     DiscordInteractionUnauthorized,
@@ -49,6 +54,33 @@ from azents.services.external_channel.shortcut_source import (
 from azents.services.scheduled_task.control import ScheduledTaskProviderControlService
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
+
+
+def test_scheduled_task_cancel_confirmation_is_ephemeral() -> None:
+    """Discord cancellation requires one explicit provider-native second step."""
+    response = _scheduled_task_cancel_confirmation_response(
+        task=cast(ScheduledTask, SimpleNamespace(title="Daily report")),
+        confirm_locator="st1:c:task:binding:signature",
+    )
+
+    assert response["type"] == 4
+    data = response["data"]
+    assert is_external_channel_projection(data)
+    assert data["flags"] == 64
+    assert "Future runs will stop." in str(data["content"])
+    assert data["components"] == [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 4,
+                    "label": "Confirm cancel",
+                    "custom_id": "st1:c:task:binding:signature",
+                }
+            ],
+        }
+    ]
 
 
 class _RepositoryDouble:

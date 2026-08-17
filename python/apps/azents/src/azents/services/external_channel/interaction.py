@@ -710,7 +710,7 @@ class ExternalChannelInteractionProcessor:
                     raise ScheduledTaskProviderControlError(
                         "Scheduled Task control is unavailable."
                     )
-                task = await self.scheduled_task_control.load_for_edit(
+                task = await self.scheduled_task_control.load_for_control(
                     interaction_id=interaction.id,
                     locator=locator,
                     provider_parent_channel_id=handoff.provider_parent_channel_id,
@@ -754,7 +754,7 @@ class ExternalChannelInteractionProcessor:
                 view = _scheduled_task_notice_view(
                     "Scheduled Task saved."
                     if result.action == "edit"
-                    else "Scheduled Task deleted."
+                    else "Scheduled Task cancelled."
                 )
         except (ScheduledTaskProviderControlError, ValueError) as error:
             view = _scheduled_task_notice_view(str(error))

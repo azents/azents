@@ -125,14 +125,8 @@ class ScheduledTaskChannelService:
             edit_locator=edit_locator,
             delete_locator=delete_locator,
         )
-        (
-            discord_text,
-            discord_embeds,
-            discord_components,
-        ) = render_scheduled_task_discord_registration(
+        discord_text, discord_embeds = render_scheduled_task_discord_registration(
             task=task,
-            edit_locator=edit_locator,
-            delete_locator=delete_locator,
         )
         async with self.session_manager() as session:
             plan = await self.provider_repository.prepare_binding_effect(
@@ -150,7 +144,8 @@ class ScheduledTaskChannelService:
                     "control_kind": "scheduled_task_registration",
                     "text": discord_text,
                     "embeds": discord_embeds,
-                    "components": discord_components,
+                    "task_id": task.id,
+                    "delete_locator": delete_locator,
                 },
                 operation_seed=f"scheduled-registration:{task.id}",
             )

@@ -15,19 +15,22 @@ code_paths:
   - python/apps/azents/src/azents/resources/vfs/toolkits/scheduled/**
   - python/apps/azents/src/azents/scheduler/user_scheduled_task_dispatch.py
   - python/apps/azents/src/azents/services/scheduled_task/**
+  - python/apps/azents/src/azents/services/external_channel/channel_action.py
+  - python/apps/azents/src/azents/services/external_channel/discord_http.py
   - python/libs/azents-public-client/src/azentspublicclient/api/scheduled_task_v1_api.py
   - python/libs/azents-public-client/src/azentspublicclient/models/scheduled_task_*.py
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/features/scheduled-tasks/**
+  - typescript/apps/azents-web/src/features/agents/components/AgentSessionHeader.tsx
   - typescript/apps/azents-web/src/trpc/routers/scheduledTask.ts
-  - typescript/apps/azents-web/src/app/(app)/w/[handle]/(agent)/agents/[agentId]/scheduled-tasks/page.tsx
+  - typescript/apps/azents-web/src/app/(app)/w/[handle]/(agent)/agents/[agentId]/sessions/[sessionId]/page.tsx
   - testenv/azents/e2e/src/tests/required/public/test_scheduled_tasks.py
 api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
 last_verified_at: 2026-08-17
-spec_version: 3
+spec_version: 4
 ---
 
 # Scheduled Task Domain Spec
@@ -98,11 +101,14 @@ cycles. Management projections derive `idle`, `admitted`, `running`, or
 identity. Current-cycle responses omit internal cycle, Run, lease, and
 provider-message identities.
 
-The dedicated Web route uses generated Public API client functions through tRPC.
-It provides list/detail, create, replace, delete, Session create/select, schedule
-editing, optional connected-channel selection, current progress, and canonical
-Session navigation. It does not expose transcript/history, pause, resume, rerun,
-or cancel-current-cycle controls.
+Each concrete Session page exposes a Scheduled Tasks tab backed by generated
+Public API client functions through tRPC. The tab lists only that Session's Tasks
+and fixes create, edit, and connected-channel selection to the current Session.
+It provides list/detail, create, replace, future-schedule cancellation, schedule
+editing, optional connected-channel selection, and current progress. Cancellation
+requires explicit confirmation and uses the existing Public API delete operation.
+It does not expose transcript/history, pause, resume, rerun, or
+cancel-current-cycle controls.
 
 ## Agent Toolkit and Skill
 
@@ -207,7 +213,10 @@ Event is returned and no provider effect or new file validation is replayed.
 A Task may target one exact connected Slack or Discord Binding.
 
 - Creation commits the Task before attempting one provider-native registration
-  message with signed Edit and Delete controls.
+  message. Slack retains native Edit and confirmed Cancel controls. Discord uses
+  an Edit link to the exact Session Web tab and Task editor plus a Cancel button
+  that first returns an ephemeral confirmation; only the signed confirmation
+  control executes the mutation.
 - A started cycle owns its own progress Tracker state. It reuses lower-level
   External Channel provider primitives but never reuses Channel Work state.
 - Progress messages and Tracker updates are immediate one-attempt effects.
@@ -221,9 +230,11 @@ Provider failure, ambiguity, process loss, or revoked Binding authority never ro
 back the canonical Session result and does not create an outbox, replay worker, or
 fallback destination.
 
-Provider Edit/Delete callbacks carry a bounded signed locator containing the exact
+Provider mutation callbacks carry a bounded signed locator containing the exact
 Task and Binding IDs. The callback revalidates current principal, interaction,
-Task, Session, and Binding authority before mutation.
+Task, Session, and Binding authority before mutation. Discord performs this
+authorization both before showing its confirmation and before the confirmed
+cancellation.
 
 ## Lifecycle
 
@@ -262,6 +273,11 @@ prompt. The result payload contains only title, scheduled instant, terminal stat
 and result text.
 
 ## Changelog
+
+- **2026-08-17** (spec_version 4) — Moved Web management into each concrete
+  Session tab, fixed creation and editing to that Session, renamed destructive UI
+  behavior to cancellation, and replaced Discord native editing with an exact Web
+  edit link plus ephemeral confirmed cancellation.
 
 - **2026-08-17** (spec_version 3) — Added terminal result file publication through
   the exact Scheduled cycle Binding, explicit Session-only file rejection, Runtime

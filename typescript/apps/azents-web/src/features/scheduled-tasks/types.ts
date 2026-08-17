@@ -1,5 +1,4 @@
 import type {
-  AgentSessionResponse,
   ManagedBinding,
   ScheduledTaskCurrentCycleResponse,
   ScheduledTaskResponse,
@@ -8,11 +7,7 @@ import type {
 export type ScheduledTasksState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }
-  | {
-      type: "LOADED";
-      tasks: ScheduledTaskResponse[];
-      sessions: AgentSessionResponse[];
-    };
+  | { type: "LOADED"; tasks: ScheduledTaskResponse[] };
 
 export type ScheduledTaskDetailState =
   | { type: "LOADING" }

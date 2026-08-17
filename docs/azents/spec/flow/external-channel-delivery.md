@@ -17,6 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
+  - python/apps/azents/src/azents/services/external_channel/discord_http.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
   - python/apps/azents/src/azents/services/external_channel/presentation.py
@@ -26,6 +27,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_presentation.py
   - python/apps/azents/src/azents/services/external_channel/thread_title.py
   - python/apps/azents/src/azents/services/session_title.py
+  - python/apps/azents/src/azents/services/scheduled_task/channel.py
+  - python/apps/azents/src/azents/services/scheduled_task/control.py
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
@@ -36,7 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-17
-spec_version: 46
+spec_version: 47
 ---
 
 # External Channel Delivery and Channel Work
@@ -417,10 +420,15 @@ not roll back the terminal lifecycle transition and creates no recovery work.
 Scheduled Task provider effects use the same immediate process-local execution
 boundary as other External Channel effects but have Scheduled-owned state.
 
-- Task creation commits before one registration message with native Edit/Delete
-  controls is attempted. Slack and Discord both show the Task title prominently,
-  use a human-readable schedule and next-run label as the primary presentation,
-  and retain canonical cron or UTC schedule text only as secondary detail.
+- Task creation commits before one registration message is attempted. Slack uses
+  native Edit and confirmed Cancel controls. Discord resolves an exact
+  authorization-derived Session and Task Web edit URL at delivery time and pairs
+  it with a signed Cancel control. The first Discord Cancel interaction
+  reauthorizes the exact Task and Binding and returns an ephemeral confirmation;
+  only its separately signed confirmation reauthorizes and executes the mutation.
+  Both providers show the Task title prominently, use a human-readable schedule
+  and next-run label as the primary presentation, and retain canonical cron or UTC
+  schedule text only as secondary detail.
 - Run start may create one Scheduled Activity Tracker.
 - Scheduled-bound `channel_action continue` may publish a reply and replace the
   current progress title and ordered task list for the exact Binding.
@@ -439,6 +447,11 @@ outbox, compensation, canonical rollback, or fallback target. Recovery of an
 already-committed terminal result does not replay provider publication.
 
 ## Changelog
+
+- **2026-08-17** (spec_version 47) — Replaced Discord Scheduled Task native edit
+  controls with exact Session Web editor links and added provider-authorized
+  ephemeral cancellation confirmation; Slack and Web destructive copy now use
+  Cancel terminology.
 
 - **2026-08-17** (spec_version 46) — Added Scheduled terminal file delivery through
   the exact current Binding with the same outbound file validation and Runtime

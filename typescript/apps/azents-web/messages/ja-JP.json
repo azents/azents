@@ -1508,7 +1508,7 @@
       "shellRuntimeRequiredDescription": "<runtimeLink>管理対象ランタイムを追加</runtimeLink>すると、シェル設定を変更できます。",
       "scheduledTasks": {
         "title": "スケジュールタスク",
-        "description": "既存のセッションで、このエージェントを一度だけ、または繰り返し実行します。",
+        "description": "このセッションの単発実行と繰り返し実行を管理します。",
         "newTask": "新しいタスク",
         "listTitle": "タスク",
         "emptyTitle": "スケジュールタスクはまだありません",
@@ -1523,14 +1523,15 @@
         "sessionOnly": "セッション内のみ · 外部チャンネルには配信しません",
         "nextEligible": "次回実行可能日時: {value}",
         "edit": "編集",
-        "delete": "削除",
+        "cancelTask": "タスクをキャンセル",
         "create": "タスクを作成",
         "save": "変更を保存",
         "cancel": "キャンセル",
+        "keepTask": "タスクを維持",
         "conflictError": "操作の完了前にタスクが変更されたか、実行が開始されました。最新の状態を読み込み直して再試行してください。",
-        "deleteConfirmTitle": "スケジュールタスクを削除しますか？",
-        "deleteConfirmDescription": "「{title}」を削除しますか？",
-        "deletePermanent": "今後のスケジュールは完全に削除されます。すでに開始した現在の作業はキャンセルされません。",
+        "cancelConfirmTitle": "スケジュールタスクをキャンセルしますか？",
+        "cancelConfirmDescription": "「{title}」をキャンセルしますか？",
+        "cancelEffect": "今後の実行は停止します。すでに開始した作業はそのまま続行されます。",
         "scheduleType": {
           "once": "一度だけ",
           "cron": "繰り返し"

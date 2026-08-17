@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { parseScheduledTaskDraft, toLocalDateTimeInput } from "../schemas";
 import type {
@@ -18,29 +18,31 @@ import type {
 export interface ScheduledTasksContainerProps {
   handle: string;
   agent: AgentResponse;
+  sessionId: string;
+  initialTaskId: string | null;
+  openInitialTaskForEdit: boolean;
 }
 
 export interface ScheduledTasksContainerOutput {
   handle: string;
   agent: AgentResponse;
+  sessionId: string;
   state: ScheduledTasksState;
   detail: ScheduledTaskDetailState | null;
   form: ScheduledTaskFormState;
   selectedTaskId: string | null;
-  deleteTarget: ScheduledTaskResponse | null;
+  cancelTarget: ScheduledTaskResponse | null;
   mutationBusy: boolean;
   actionError: ScheduledTaskActionError | null;
-  creatingSession: boolean;
   onSelectTask: (taskId: string | null) => void;
   onOpenCreate: () => void;
   onOpenEdit: (task: ScheduledTaskResponse) => void;
   onCloseForm: () => void;
   onChangeDraft: (draft: ScheduledTaskDraft) => void;
   onSave: () => void;
-  onCreateSession: () => void;
-  onRequestDelete: (task: ScheduledTaskResponse) => void;
-  onCancelDelete: () => void;
-  onConfirmDelete: () => void;
+  onRequestCancel: (task: ScheduledTaskResponse) => void;
+  onCloseCancel: () => void;
+  onConfirmCancel: () => void;
 }
 
 function emptyDraft(sessionId: string): ScheduledTaskDraft {
@@ -73,41 +75,40 @@ function taskDraft(task: ScheduledTaskResponse): ScheduledTaskDraft {
 export function useScheduledTasksContainer({
   handle,
   agent,
+  sessionId,
+  initialTaskId,
+  openInitialTaskForEdit,
 }: ScheduledTasksContainerProps): ScheduledTasksContainerOutput {
   const utils = trpc.useUtils();
   const [selectedTaskIdOverride, setSelectedTaskId] = useState<string | null>(
-    null,
+    initialTaskId,
   );
   const [form, setForm] = useState<ScheduledTaskFormState>({ type: "CLOSED" });
-  const [deleteTarget, setDeleteTarget] =
+  const [cancelTarget, setCancelTarget] =
     useState<ScheduledTaskResponse | null>(null);
   const [actionError, setActionError] =
     useState<ScheduledTaskActionError | null>(null);
+  const initialEditHandled = useRef(false);
   const taskListInput = useMemo(
-    () => ({ handle, agentId: agent.id, sessionId: null }),
-    [agent.id, handle],
-  );
-  const teamSessionListInput = useMemo(
-    () => ({ agentId: agent.id }),
-    [agent.id],
+    () => ({ handle, agentId: agent.id, sessionId }),
+    [agent.id, handle, sessionId],
   );
 
   const tasksQuery = trpc.scheduledTask.list.useQuery(taskListInput, {
     refetchInterval: 5_000,
     staleTime: 0,
   });
-  const selectedTaskId =
+  const requestedTaskId =
     selectedTaskIdOverride ??
     (tasksQuery.data?.items.length === 1
       ? (tasksQuery.data.items[0]?.id ?? null)
       : null);
-  const teamSessionsQuery =
-    trpc.scheduledTask.listSelectableTeamSessions.useQuery(
-      teamSessionListInput,
-    );
-  const userSessionsQuery = trpc.chat.listAgentUserSessions.useQuery({
-    agentId: agent.id,
-  });
+  const selectedTaskId =
+    requestedTaskId !== null &&
+    tasksQuery.isSuccess &&
+    !tasksQuery.data.items.some((task) => task.id === requestedTaskId)
+      ? null
+      : requestedTaskId;
   const detailQuery = trpc.scheduledTask.get.useQuery(
     { handle, agentId: agent.id, taskId: selectedTaskId ?? "" },
     {
@@ -124,10 +125,9 @@ export function useScheduledTasksContainer({
       staleTime: 0,
     },
   );
-  const formSessionId = form.type === "CLOSED" ? null : form.draft.sessionId;
   const bindingsQuery = trpc.externalChannel.listSessionChannels.useQuery(
-    { handle, agentId: agent.id, sessionId: formSessionId ?? "" },
-    { enabled: formSessionId !== null && formSessionId !== "" },
+    { handle, agentId: agent.id, sessionId },
+    { enabled: form.type !== "CLOSED" },
   );
 
   const refresh = useCallback(
@@ -179,8 +179,8 @@ export function useScheduledTasksContainer({
   });
   const deleteMutation = trpc.scheduledTask.delete.useMutation({
     onSuccess: async () => {
-      const taskId = deleteTarget?.id;
-      setDeleteTarget(null);
+      const taskId = cancelTarget?.id;
+      setCancelTarget(null);
       if (selectedTaskId === taskId) {
         setSelectedTaskId(null);
       }
@@ -193,64 +193,38 @@ export function useScheduledTasksContainer({
           : { type: "ERROR", message: error.message },
       ),
   });
-  const createSessionMutation = trpc.chat.createTeamAgentSession.useMutation({
-    onSuccess: async (session) => {
-      await Promise.all([
-        utils.scheduledTask.listSelectableTeamSessions.invalidate(
-          teamSessionListInput,
-        ),
-        utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id }),
-      ]);
-      setForm((current) =>
-        current.type === "CLOSED"
-          ? current
-          : {
-              ...current,
-              draft: {
-                ...current.draft,
-                sessionId: session.id,
-                channelId: null,
-              },
-            },
-      );
-    },
-    onError: (error) =>
-      setActionError({ type: "ERROR", message: error.message }),
-  });
 
-  const sessions = useMemo(
-    () => [
-      ...(teamSessionsQuery.data?.items ?? []),
-      ...(userSessionsQuery.data?.items ?? []),
+  const state: ScheduledTasksState = tasksQuery.isPending
+    ? { type: "LOADING" }
+    : tasksQuery.isError
+      ? { type: "ERROR", message: tasksQuery.error.message }
+      : { type: "LOADED", tasks: tasksQuery.data.items };
+  const detail = useMemo<ScheduledTaskDetailState | null>(
+    () =>
+      selectedTaskId === null
+        ? null
+        : detailQuery.isPending
+          ? { type: "LOADING" }
+          : detailQuery.isError
+            ? { type: "ERROR", message: detailQuery.error.message }
+            : {
+                type: "LOADED",
+                task: detailQuery.data,
+                cycle: cycleQuery.data?.current_cycle ?? null,
+                cycleLoading: cycleQuery.isPending,
+                cycleError: cycleQuery.error?.message ?? null,
+              },
+    [
+      cycleQuery.data,
+      cycleQuery.error,
+      cycleQuery.isPending,
+      detailQuery.data,
+      detailQuery.error,
+      detailQuery.isError,
+      detailQuery.isPending,
+      selectedTaskId,
     ],
-    [teamSessionsQuery.data?.items, userSessionsQuery.data?.items],
   );
-  const state: ScheduledTasksState =
-    tasksQuery.isPending ||
-    teamSessionsQuery.isPending ||
-    userSessionsQuery.isPending
-      ? { type: "LOADING" }
-      : tasksQuery.isError
-        ? { type: "ERROR", message: tasksQuery.error.message }
-        : teamSessionsQuery.isError
-          ? { type: "ERROR", message: teamSessionsQuery.error.message }
-          : userSessionsQuery.isError
-            ? { type: "ERROR", message: userSessionsQuery.error.message }
-            : { type: "LOADED", tasks: tasksQuery.data.items, sessions };
-  const detail: ScheduledTaskDetailState | null =
-    selectedTaskId === null
-      ? null
-      : detailQuery.isPending
-        ? { type: "LOADING" }
-        : detailQuery.isError
-          ? { type: "ERROR", message: detailQuery.error.message }
-          : {
-              type: "LOADED",
-              task: detailQuery.data,
-              cycle: cycleQuery.data?.current_cycle ?? null,
-              cycleLoading: cycleQuery.isPending,
-              cycleError: cycleQuery.error?.message ?? null,
-            };
 
   const bindings =
     bindingsQuery.data?.items.filter(
@@ -270,17 +244,39 @@ export function useScheduledTasksContainer({
     replaceMutation.isPending ||
     deleteMutation.isPending;
 
+  useEffect(() => {
+    if (
+      initialEditHandled.current ||
+      !openInitialTaskForEdit ||
+      initialTaskId === null ||
+      detail?.type !== "LOADED" ||
+      detail.task.id !== initialTaskId
+    ) {
+      return;
+    }
+    initialEditHandled.current = true;
+    setForm({
+      type: "EDIT",
+      taskId: detail.task.id,
+      draft: taskDraft(detail.task),
+      bindings: [],
+      bindingsLoading: false,
+      bindingsError: null,
+      error: null,
+    });
+  }, [detail, initialTaskId, openInitialTaskForEdit]);
+
   return {
     handle,
     agent,
+    sessionId,
     state,
     detail,
     form: effectiveForm,
     selectedTaskId,
-    deleteTarget,
+    cancelTarget,
     mutationBusy,
     actionError,
-    creatingSession: createSessionMutation.isPending,
     onSelectTask: (taskId) => {
       setActionError(null);
       setSelectedTaskId(taskId);
@@ -290,7 +286,7 @@ export function useScheduledTasksContainer({
       setForm({
         type: "CREATE",
         taskId: null,
-        draft: emptyDraft(sessions[0]?.id ?? ""),
+        draft: emptyDraft(sessionId),
         bindings: [],
         bindingsLoading: false,
         bindingsError: null,
@@ -339,33 +335,25 @@ export function useScheduledTasksContainer({
         channelId: values.channelId,
       };
       if (form.type === "CREATE") {
-        createMutation.mutate({ ...common, sessionId: values.sessionId });
+        createMutation.mutate({ ...common, sessionId });
       } else if (form.taskId !== null) {
         replaceMutation.mutate({ ...common, taskId: form.taskId });
       }
     },
-    onCreateSession: () => {
+    onRequestCancel: (task) => {
       setActionError(null);
-      createSessionMutation.mutate({
-        agentId: agent.id,
-        existingProjectPaths: [],
-        setupActions: [],
-      });
+      setCancelTarget(task);
     },
-    onRequestDelete: (task) => {
-      setActionError(null);
-      setDeleteTarget(task);
-    },
-    onCancelDelete: () => setDeleteTarget(null),
-    onConfirmDelete: () => {
-      if (deleteTarget === null) {
+    onCloseCancel: () => setCancelTarget(null),
+    onConfirmCancel: () => {
+      if (cancelTarget === null) {
         return;
       }
       setActionError(null);
       deleteMutation.mutate({
         handle,
         agentId: agent.id,
-        taskId: deleteTarget.id,
+        taskId: cancelTarget.id,
       });
     },
   };
