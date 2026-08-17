@@ -8,14 +8,19 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionKind,
     AgentSessionStatus,
+    MailboxItemKind,
     SessionAgentKind,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
+from azents.rdb.models.toolkit_state import RDBToolkitState
 from azents.rdb.models.workspace import RDBWorkspace
+from azents.repos.mailbox.data import ScheduledTaskContinuationMailboxPayload
+from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
 
 from .data import CanonicalExecutionSnapshot, PendingCommandSnapshot
 
@@ -46,7 +51,25 @@ class SessionExecutionRepository:
         )
         if agent_session is None:
             raise CanonicalExecutionSnapshotError("AgentSession not found")
-        if agent_session.status is not AgentSessionStatus.ACTIVE:
+        oldest_input = await session.scalar(
+            sa.select(RDBMailboxItem)
+            .where(RDBMailboxItem.session_id == session_id)
+            .order_by(
+                RDBMailboxItem.order_group,
+                RDBMailboxItem.order_sequence,
+                RDBMailboxItem.id,
+            )
+            .limit(1)
+        )
+        archived_scheduled_continuation = await self._archived_scheduled_continuation(
+            session,
+            agent_session=agent_session,
+            oldest_input=oldest_input,
+        )
+        if (
+            agent_session.status is not AgentSessionStatus.ACTIVE
+            and not archived_scheduled_continuation
+        ):
             raise CanonicalExecutionSnapshotError("AgentSession is not active")
         if agent_session.owner_generation != owner_generation:
             raise CanonicalExecutionOwnerGenerationStaleError(
@@ -58,10 +81,14 @@ class SessionExecutionRepository:
             raise CanonicalExecutionSnapshotError("Session Agent not found")
         if agent.workspace_id != agent_session.workspace_id:
             raise CanonicalExecutionSnapshotError("Session Agent Workspace mismatch")
-        if (
-            agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            or not agent.enabled
-        ):
+        lifecycle_allows_execution = (
+            agent.lifecycle_status is AgentLifecycleStatus.ACTIVE
+            or (
+                archived_scheduled_continuation
+                and agent.lifecycle_status is AgentLifecycleStatus.DECOMMISSIONING
+            )
+        )
+        if not lifecycle_allows_execution or not agent.enabled:
             raise CanonicalExecutionSnapshotError("Session Agent is not active")
         workspace = await session.get(RDBWorkspace, agent_session.workspace_id)
         if workspace is None:
@@ -101,7 +128,13 @@ class SessionExecutionRepository:
                 "SessionAgentContext authority mismatch"
             )
         root_session = await session.get(RDBAgentSession, root.agent_session_id)
-        if root_session is None or root_session.status is not AgentSessionStatus.ACTIVE:
+        if root_session is None or (
+            root_session.status is not AgentSessionStatus.ACTIVE
+            and not (
+                archived_scheduled_continuation
+                and root_session.status is AgentSessionStatus.ARCHIVED
+            )
+        ):
             raise CanonicalExecutionSnapshotError("Root AgentSession is not active")
         if (
             root_session.agent_id != agent_session.agent_id
@@ -162,6 +195,42 @@ class SessionExecutionRepository:
                 recoverable_run.status if recoverable_run is not None else None
             ),
             pending_idle_continuation_run_id=pending_idle_run_id,
+        )
+
+    async def _archived_scheduled_continuation(
+        self,
+        session: AsyncSession,
+        *,
+        agent_session: RDBAgentSession,
+        oldest_input: RDBMailboxItem | None,
+    ) -> bool:
+        """Validate the sole archived-Session execution admission exception."""
+        if agent_session.status is not AgentSessionStatus.ARCHIVED:
+            return False
+        if (
+            oldest_input is None
+            or oldest_input.kind is not MailboxItemKind.SCHEDULED_TASK_CONTINUATION
+        ):
+            return False
+        payload = ScheduledTaskContinuationMailboxPayload.model_validate(
+            oldest_input.payload
+        )
+        cycle_row = await session.scalar(
+            sa.select(RDBToolkitState).where(
+                RDBToolkitState.agent_id == agent_session.agent_id,
+                RDBToolkitState.session_id == agent_session.id,
+                RDBToolkitState.toolkit_namespace == "scheduled",
+                RDBToolkitState.state_name == f"cycle:{payload.cycle_id}",
+            )
+        )
+        if cycle_row is None:
+            return False
+        cycle = ScheduledTaskCycleState.model_validate(cycle_row.state_json)
+        return (
+            cycle.phase == "started"
+            and cycle.workspace_id == agent_session.workspace_id
+            and cycle.agent_id == agent_session.agent_id
+            and cycle.session_id == agent_session.id
         )
 
     def _pending_command(

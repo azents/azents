@@ -48,6 +48,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.message import MessageRepository
+from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
@@ -68,6 +69,7 @@ from azents.services.model_file import ModelFileService
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
+from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_lifecycle.registry import (
     get_session_lifecycle_orchestrator,
@@ -234,6 +236,9 @@ def _service(
         external_channel_lifecycle_service=cast(
             ExternalChannelLifecycleService,
             object(),
+        ),
+        scheduled_task_lifecycle_service=ScheduledTaskLifecycleService(
+            ScheduledTaskLifecycleRepository()
         ),
         session_manager=rdb_session_manager,
         runtime_target_resolver=cast(RuntimeOperationTargetResolver, object()),

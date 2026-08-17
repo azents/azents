@@ -400,8 +400,20 @@ class _OrchestratorDouble:
 class _ExternalChannelDouble:
     """External channel lifecycle double."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, allows_active_runs: bool = False) -> None:
         self.cleanup_calls = 0
+        self.allows_active_runs = allows_active_runs
+
+    async def archive_allows_active_runs(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+        running_session_ids: Sequence[str],
+    ) -> bool:
+        """Return configured Scheduled archive eligibility."""
+        del session, session_ids, running_session_ids
+        return self.allows_active_runs
 
     async def archive_participant(
         self,
@@ -439,6 +451,7 @@ def _service(
     memory: _MemoryRepositoryDouble | None = None,
     users: _UserRepositoryDouble | None = None,
     retained_references: _RetainedReferenceRepositoryDouble | None = None,
+    scheduled_lifecycle: _ExternalChannelDouble | None = None,
 ) -> tuple[
     OwnerLifecycleService,
     _OwnerLifecycleRepositoryDouble,
@@ -468,6 +481,9 @@ def _service(
         external_channel_repository=retained_repo,
         lifecycle_orchestrator=_OrchestratorDouble(),
         external_channel_lifecycle_service=_ExternalChannelDouble(),
+        scheduled_task_lifecycle_service=(
+            scheduled_lifecycle or _ExternalChannelDouble()
+        ),
         broker=broker,
     )
     return service, lifecycle_repo, retention_repo, memory_repo, user_repo, broker
@@ -525,6 +541,45 @@ async def test_membership_archive_skips_team_scope_by_listing_only_user_roots() 
     assert sessions.archived == []
     assert retention.scheduled == []
     assert lifecycle_repo.completed == ["m2"]
+
+
+@pytest.mark.asyncio
+async def test_membership_archive_preserves_started_scheduled_run_without_stop() -> (
+    None
+):
+    """Owner lifecycle archives a valid started Scheduled Run without interruption."""
+    job = _job(
+        job_id="m-scheduled",
+        kind=OwnerLifecycleKind.MEMBERSHIP_ARCHIVE,
+        workspace_id="workspace-1",
+    )
+    sessions = _SessionRepositoryDouble(
+        active_roots=[
+            _Root(
+                id="root-scheduled",
+                status=AgentSessionStatus.ACTIVE,
+                run_state=AgentSessionRunState.RUNNING,
+            )
+        ]
+    )
+    service, lifecycle_repo, retention, _, _, broker = _service(
+        jobs=[job],
+        sessions=sessions,
+        runs=_RunRepositoryDouble(active=True),
+        scheduled_lifecycle=_ExternalChannelDouble(allows_active_runs=True),
+    )
+
+    summary = await service.process_once(
+        lease_owner="worker-1",
+        deadline=datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5),
+    )
+
+    assert summary.completed_count == 1
+    assert sessions.archived == ["root-scheduled"]
+    assert sessions.stops == []
+    assert broker.signals == []
+    assert lifecycle_repo.completed == ["m-scheduled"]
+    assert retention.scheduled[0][0] == "root-scheduled"
 
 
 @pytest.mark.asyncio

@@ -54,6 +54,7 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.work import terminate_binding_with_plans
 from azents.repos.external_channel.work_state import ExternalChannelWorkStateStore
+from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 _NONTERMINAL_SETUP_CLAIM_STATUSES = (
@@ -87,9 +88,14 @@ class ExternalChannelLifecycleRepository:
     def __init__(
         self,
         work_state_store: ExternalChannelWorkStateStore | None = None,
+        scheduled_task_lifecycle_repository: ScheduledTaskLifecycleRepository
+        | None = None,
     ) -> None:
         """Create the lifecycle repository."""
         self.work_state_store = work_state_store or ExternalChannelWorkStateStore()
+        self.scheduled_task_lifecycle_repository = (
+            scheduled_task_lifecycle_repository or ScheduledTaskLifecycleRepository()
+        )
 
     async def terminate_session_tree(
         self,
@@ -138,6 +144,9 @@ class ExternalChannelLifecycleRepository:
                 await terminate_binding_with_plans(
                     session,
                     work_state_store=self.work_state_store,
+                    scheduled_task_lifecycle_repository=(
+                        self.scheduled_task_lifecycle_repository
+                    ),
                     binding=binding,
                     resource=resource,
                     now=now,
@@ -1252,6 +1261,9 @@ class ExternalChannelLifecycleRepository:
                 await terminate_binding_with_plans(
                     session,
                     work_state_store=self.work_state_store,
+                    scheduled_task_lifecycle_repository=(
+                        self.scheduled_task_lifecycle_repository
+                    ),
                     binding=binding,
                     resource=resource,
                     now=now,

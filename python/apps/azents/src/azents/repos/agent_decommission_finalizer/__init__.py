@@ -25,6 +25,7 @@ from azents.rdb.models.external_channel import (
 )
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.model_file import RDBModelFile
+from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.models.toolkit import RDBAgentToolkit
 from azents.rdb.models.toolkit_state import RDBToolkitState
@@ -123,6 +124,7 @@ class AgentDecommissionFinalizerRepository:
             (RDBExchangeFile, "ExchangeFile"),
             (RDBModelFile, "ModelFile"),
             (RDBSessionAgentContext, "SessionAgentContext"),
+            (RDBScheduledTask, "ScheduledTask"),
             (RDBToolkitState, "ToolkitState"),
             (RDBExternalChannelAgentRoute, "ExternalChannelAgentRoute"),
             (RDBExternalChannelAccessGrant, "ExternalChannelAccessGrant"),

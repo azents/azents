@@ -54,6 +54,9 @@ from azents.repos.external_channel.work_state import (
     ChannelWorkStateMutation,
     ExternalChannelWorkStateStore,
 )
+from azents.repos.scheduled_task.lifecycle import (
+    ScheduledTaskLifecycleRepository,
+)
 from azents.services.external_channel.discord_delivery import (
     DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
     DISCORD_DEFAULT_MAX_FILE_BYTES,
@@ -1928,6 +1931,7 @@ async def terminate_binding_with_plans(
     binding: RDBExternalChannelBinding,
     resource: RDBExternalChannelResource,
     work_state_store: ExternalChannelWorkStateStore,
+    scheduled_task_lifecycle_repository: ScheduledTaskLifecycleRepository,
     now: datetime.datetime,
     reason: str,
     emit_leave_presence: bool,
@@ -1951,7 +1955,11 @@ async def terminate_binding_with_plans(
     if connection is None or agent_session is None or agent is None:
         raise RuntimeError("External Channel binding authority disappeared.")
 
-    plans: list[ProviderEffectPlan] = []
+    scheduled_cleanup = await scheduled_task_lifecycle_repository.terminate_binding(
+        session,
+        binding_id=binding.id,
+    )
+    plans: list[ProviderEffectPlan] = list(scheduled_cleanup.cleanup_plans)
 
     def append_plan(
         operation: ExternalChannelDeliveryOperation,

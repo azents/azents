@@ -15,6 +15,7 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionEndReason,
     AgentSessionProductMode,
+    AgentSessionRunState,
     AgentSessionStatus,
     EventKind,
     ExternalChannelPrincipalAuthorType,
@@ -1425,11 +1426,11 @@ class TestEventExecutionRepositories:
         assert rdb_agent_session is not None
         assert rdb_agent_session.pending_idle_continuation_run_id is None
 
-    async def test_archived_session_cannot_consume_pending_idle_continuation(
+    async def test_archived_idle_boundary_requires_scheduled_allowance(
         self,
         rdb_session: AsyncSession,
     ) -> None:
-        """A stale completed boundary cannot reactivate an archived Session."""
+        """Archived consumption requires the caller-validated Scheduled exception."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
             rdb_session,
             "event-runtime-archived-idle-boundary",
@@ -1472,6 +1473,7 @@ class TestEventExecutionRepositories:
             session_id=agent_session.id,
             run_id=completed.id,
             continue_running=True,
+            allow_archived_scheduled_continuation=False,
         )
 
         rdb_agent_session = await rdb_session.get(RDBAgentSession, agent_session.id)
@@ -1480,6 +1482,20 @@ class TestEventExecutionRepositories:
         assert consumed is False
         assert rdb_agent_session.status is AgentSessionStatus.ARCHIVED
         assert rdb_agent_session.pending_idle_continuation_run_id == completed.id
+
+        consumed = await session_repository.consume_pending_idle_continuation(
+            rdb_session,
+            session_id=agent_session.id,
+            run_id=completed.id,
+            continue_running=True,
+            allow_archived_scheduled_continuation=True,
+        )
+
+        await rdb_session.refresh(rdb_agent_session)
+        assert consumed is True
+        assert rdb_agent_session.status is AgentSessionStatus.ARCHIVED
+        assert rdb_agent_session.run_state is AgentSessionRunState.RUNNING
+        assert rdb_agent_session.pending_idle_continuation_run_id is None
 
     async def test_agent_run_retry_state_updates_and_clears_on_terminal(
         self,

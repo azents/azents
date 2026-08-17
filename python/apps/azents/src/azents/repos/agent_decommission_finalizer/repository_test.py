@@ -29,7 +29,7 @@ class _ExistsSessionDouble:
 @pytest.mark.asyncio
 async def test_finalizer_rejects_remaining_external_channel_route() -> None:
     """An Agent route remains a hard finalization fence after Session purge."""
-    session = cast(AsyncSession, _ExistsSessionDouble([False] * 6 + [True]))
+    session = cast(AsyncSession, _ExistsSessionDouble([False] * 7 + [True]))
 
     with pytest.raises(
         RuntimeError,

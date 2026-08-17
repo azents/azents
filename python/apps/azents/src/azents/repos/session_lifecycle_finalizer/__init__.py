@@ -9,6 +9,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessRequest,
     RDBExternalChannelBinding,
 )
+from azents.rdb.models.scheduled_task import RDBScheduledTask
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import (
     RDBSessionAgentContext,
@@ -32,6 +33,13 @@ class SessionLifecycleFinalizerRepository:
             session,
             session_ids=session_ids,
         )
+        scheduled_task_id = await session.scalar(
+            sa.select(RDBScheduledTask.id)
+            .where(RDBScheduledTask.session_id.in_(session_ids))
+            .limit(1)
+        )
+        if scheduled_task_id is not None:
+            raise RuntimeError("Scheduled Tasks remain for the purged Session tree.")
         root_session_agent_id = await session.scalar(
             sa.select(RDBSessionAgent.id).where(
                 RDBSessionAgent.agent_session_id == root_session_id

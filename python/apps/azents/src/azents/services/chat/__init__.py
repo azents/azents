@@ -90,6 +90,7 @@ from azents.services.root_agent_session_creation.data import (
     ExplicitRootWorkspaceIntent,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
+from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService
 from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,
     GitWorktreeWorkspaceItem,
@@ -399,6 +400,10 @@ class ChatSessionService:
     external_channel_lifecycle_service: Annotated[
         ExternalChannelLifecycleService,
         Depends(ExternalChannelLifecycleService),
+    ]
+    scheduled_task_lifecycle_service: Annotated[
+        ScheduledTaskLifecycleService,
+        Depends(ScheduledTaskLifecycleService),
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -1295,9 +1300,7 @@ class ChatSessionService:
             )
             session_ids = [item.id for item in tree]
             if not tree or any(
-                item.status != AgentSessionStatus.ACTIVE
-                or item.run_state == AgentSessionRunState.RUNNING
-                for item in tree
+                item.status != AgentSessionStatus.ACTIVE for item in tree
             ):
                 return Failure(RunningSessionArchiveBlocked())
             root = next((item for item in tree if item.id == session_id), None)
@@ -1305,9 +1308,16 @@ class ChatSessionService:
                 return Failure(SessionNotFound())
             if root.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY:
                 return Failure(PrimarySessionArchiveBlocked())
-            if await self.agent_run_repository.has_active_for_session_ids(
-                session,
-                session_ids=session_ids,
+            if not await (
+                self.scheduled_task_lifecycle_service.archive_allows_active_runs(
+                    session,
+                    session_ids=session_ids,
+                    running_session_ids=[
+                        item.id
+                        for item in tree
+                        if item.run_state == AgentSessionRunState.RUNNING
+                    ],
+                )
             ):
                 return Failure(RunningSessionArchiveBlocked())
             archived_at = datetime.datetime.now(datetime.UTC)
@@ -1350,15 +1360,24 @@ class ChatSessionService:
             ) -> None:
                 """Run a participant inside this Session tree lock transaction."""
                 nonlocal archive_cleanup_plans
-                result = (
+                scheduled_result = (
+                    await self.scheduled_task_lifecycle_service.archive_participant(
+                        session,
+                        definition,
+                        context,
+                    )
+                )
+                if scheduled_result is not None:
+                    archive_cleanup_plans += scheduled_result.cleanup_plans
+                external_result = (
                     await self.external_channel_lifecycle_service.archive_participant(
                         session,
                         definition,
                         context,
                     )
                 )
-                if result is not None:
-                    archive_cleanup_plans = result.cleanup_plans
+                if external_result is not None:
+                    archive_cleanup_plans += external_result.cleanup_plans
 
             await self.lifecycle_orchestrator.archive(
                 context=SessionLifecycleTransitionContext(
@@ -1756,6 +1775,11 @@ class ChatSessionService:
                 context: SessionLifecycleTransitionContext,
             ) -> None:
                 """Validate a participant inside this Session tree lock transaction."""
+                await self.scheduled_task_lifecycle_service.restore_participant(
+                    session,
+                    definition,
+                    context,
+                )
                 await self.external_channel_lifecycle_service.restore_participant(
                     session,
                     definition,
