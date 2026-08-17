@@ -115,6 +115,31 @@ export const AgentMailboxMessage = {
   },
 } satisfies Story;
 
+export const ScheduledTaskTrigger = {
+  args: {
+    message: createChatMessage({
+      id: "scheduled-task-trigger",
+      role: "user",
+      content: [
+        "Scheduled Task work is due.",
+        "Title: Daily operating report",
+        "Schedule: Every weekday at 9:00 AM EDT",
+        "Schedule details: 0 9 * * 1-5 (America/New_York)",
+        "Scheduled for: August 17, 2026 at 9:00 AM EDT",
+        "Scheduled for details: 2026-08-17T13:00:00Z",
+        "Execution guidance: Continue autonomously.",
+        "Prompt:",
+        "Prepare the daily operating report and highlight critical changes.",
+      ].join("\n"),
+      metadata: {
+        source: "scheduled_task",
+        message_kind: "scheduled_task_trigger",
+        title: "Daily operating report",
+      },
+    }),
+  },
+} satisfies Story;
+
 export const DimmedAfterEdit = {
   args: {
     message: createChatMessage({

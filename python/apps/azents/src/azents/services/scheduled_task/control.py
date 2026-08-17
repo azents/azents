@@ -30,6 +30,10 @@ from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.data import ScheduledTask
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
+from azents.services.scheduled_task.rendering import (
+    ScheduledTaskSchedulePresentation,
+    render_scheduled_task_schedule,
+)
 from azents.services.scheduled_task.service import (
     RDBScheduledTaskAuthorityValidator,
     ScheduledTaskService,
@@ -192,22 +196,42 @@ def render_scheduled_task_slack_registration(
     """Render one bounded Slack Block Kit Task registration with controls."""
     _validate_render_locators(task, edit_locator, delete_locator)
     text = f"Scheduled Task registered: {task.title}"
+    schedule = _schedule_presentation(task)
     return (
         text,
         [
             {
-                "type": "section",
+                "type": "header",
                 "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Scheduled Task:* {_slack(task.title)}",
+                    "type": "plain_text",
+                    "text": "Scheduled Task registered",
                 },
             },
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"*Schedule:* {_slack(_schedule_text(task))}",
+                    "text": f"*{_slack(task.title)}*",
                 },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"*Schedule:* {_slack(schedule.summary)}\n"
+                        f"*Next run:* {_slack(schedule.occurrence)}"
+                    ),
+                },
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"Schedule details: `{_slack(schedule.canonical)}`",
+                    }
+                ],
             },
             {
                 "type": "actions",
@@ -252,14 +276,21 @@ def render_scheduled_task_discord_registration(
     """Render one Discord registration message with native Edit/Delete controls."""
     _validate_render_locators(task, edit_locator, delete_locator)
     text = f"Scheduled Task registered: {task.title}"
+    schedule = _schedule_presentation(task)
     return (
         text,
         [
             {
-                "title": "Scheduled Task registered",
+                "title": task.title[:256],
+                "description": "Scheduled Task registered",
                 "color": 0x5865F2,
                 "fields": [
-                    {"name": "Schedule", "value": _schedule_text(task)[:1_024]},
+                    {"name": "Schedule", "value": schedule.summary[:1_024]},
+                    {"name": "Next run", "value": schedule.occurrence[:1_024]},
+                    {
+                        "name": "Schedule details",
+                        "value": schedule.canonical[:1_024],
+                    },
                 ],
             }
         ],
@@ -607,18 +638,16 @@ def _require_identifier(value: str) -> None:
         raise ValueError("Scheduled Task control locator is invalid.")
 
 
-def _schedule_text(task: ScheduledTask) -> str:
-    if task.schedule_type.value == "once":
-        if task.scheduled_at is None:
-            raise ValueError("Scheduled Task schedule is invalid.")
-        return (
-            task.scheduled_at.astimezone(datetime.UTC)
-            .isoformat()
-            .replace("+00:00", "Z")
-        )
-    if task.cron_expression is None or task.timezone is None:
-        raise ValueError("Scheduled Task schedule is invalid.")
-    return f"{task.cron_expression} ({task.timezone})"
+def _schedule_presentation(
+    task: ScheduledTask,
+) -> ScheduledTaskSchedulePresentation:
+    return render_scheduled_task_schedule(
+        schedule_type=task.schedule_type,
+        scheduled_at=task.scheduled_at,
+        cron_expression=task.cron_expression,
+        timezone=task.timezone,
+        scheduled_for=task.next_eligible_at,
+    )
 
 
 def _slack(value: str, limit: int = 500) -> str:

@@ -130,6 +130,8 @@ function categoryLabel(
       return t("categoryWait");
     case "git":
       return t("categoryGit");
+    case "schedule":
+      return t("categorySchedule");
     case "other":
       return t("categoryOther");
     default:

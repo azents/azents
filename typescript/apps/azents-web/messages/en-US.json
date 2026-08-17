@@ -2506,7 +2506,11 @@
         "listAgents": "Listed Subagents",
         "toolSearch": "Searched tools",
         "createGitWorktree": "Requested Git worktree creation",
-        "removeGitWorktree": "Requested Git worktree removal"
+        "removeGitWorktree": "Requested Git worktree removal",
+        "addScheduledTask": "Created Scheduled Task",
+        "listScheduledTasks": "Listed Scheduled Tasks",
+        "deleteScheduledTask": "Deleted Scheduled Task",
+        "submitScheduledTaskResult": "Submitted Scheduled Task result"
       },
       "field": {
         "source": "Source",
@@ -2539,7 +2543,13 @@
         "branch": "Branch",
         "force": "Force removal",
         "requestId": "Request ID",
-        "worktreePath": "Worktree path"
+        "worktreePath": "Worktree path",
+        "schedule": "Schedule",
+        "target": "Target",
+        "nextRun": "Next run",
+        "taskId": "Task ID",
+        "registration": "Channel registration",
+        "recovered": "Recovered"
       },
       "changeAction": {
         "add": "Added",
@@ -2568,7 +2578,8 @@
       "categorySubagent": "Subagent",
       "categoryWait": "Wait",
       "categoryOther": "Other",
-      "categoryGit": "Git"
+      "categoryGit": "Git",
+      "categorySchedule": "Schedule"
     },
     "authorization": {
       "authorizationRequired": "Authorization required",
@@ -2790,6 +2801,24 @@
     },
     "agentMessage": {
       "title": "Message from agent {name}"
+    },
+    "scheduledTaskMessage": {
+      "title": "Scheduled Task · {title}",
+      "fallbackTitle": "Scheduled Task",
+      "schedule": "Schedule",
+      "scheduledFor": "Scheduled for",
+      "scheduleDetails": "Schedule details",
+      "prompt": "Prompt",
+      "recurrence": {
+        "everyMinute": "Every minute · {timezone}",
+        "everyMinutes": "Every {count} minutes · {timezone}",
+        "hourly": "Every hour at minute {minute} · {timezone}",
+        "daily": "Every day at {time}",
+        "weekdays": "Every weekday at {time}",
+        "weekends": "Every weekend at {time}",
+        "weekly": "Every {days} at {time}",
+        "recurring": "Recurring schedule · {timezone}"
+      }
     },
     "addWorkspace": "Add workspace",
     "addExistingProject": "Add existing Project",

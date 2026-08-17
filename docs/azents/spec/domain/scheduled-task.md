@@ -17,6 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/services/scheduled_task/**
   - python/libs/azents-public-client/src/azentspublicclient/api/scheduled_task_v1_api.py
   - python/libs/azents-public-client/src/azentspublicclient/models/scheduled_task_*.py
+  - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/features/scheduled-tasks/**
   - typescript/apps/azents-web/src/trpc/routers/scheduledTask.ts
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/(agent)/agents/[agentId]/scheduled-tasks/page.tsx
@@ -26,7 +27,7 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
 last_verified_at: 2026-08-17
-spec_version: 1
+spec_version: 2
 ---
 
 # Scheduled Task Domain Spec
@@ -121,7 +122,16 @@ non-empty result. A Scheduled-bound `channel_action` may report progress only wi
 The release-bundled `scheduled-task` Skill is projected from the immutable
 `azents://` managed Skill VFS. It explains schedule interpretation, Session and
 Binding selection, exact-ID management, autonomous continuation, and explicit
-terminal result submission.
+terminal result submission. Its creation contract states the mutually exclusive
+field shapes explicitly: one-time work supplies aware `at` with `cron` and
+`timezone` null, while recurring work supplies `cron` plus IANA `timezone` with
+`at` null.
+
+Chat activity groups all four Scheduled tools under the Schedule category. Their
+tool-call rows use dedicated summaries and bounded details for title, schedule,
+Session-only versus channel-bound target, next run, objective, provider
+registration, and terminal outcome instead of raw generic argument/result dumps.
+Prompt text remains outside the collapsed summary.
 
 ## Due Dispatch and Start Admission
 
@@ -175,8 +185,12 @@ Toolkit State only and introduces no additional persistence authority.
 6. commit before any provider effect.
 
 The tool result terminalizes the current AgentRun without another model turn. The
-Session history API retains the typed Scheduled Task Event payload even though
-trigger and continuation controls do not project as ordinary chat messages.
+Session history API retains the typed Scheduled Task Event payload. Web chat
+projects trigger and continuation controls as dedicated collapsible Scheduled Task
+messages: the collapsed row shows the Task title, while expanded content shows a
+locale-aware human schedule and occurrence, canonical cron/UTC detail, and the
+exact prompt. Legacy content that predates the structured runtime text remains
+visible as a complete fallback.
 
 If a terminal call is recovered after the canonical Event already exists, the same
 Event is returned and no provider effect is replayed.
@@ -235,8 +249,17 @@ The closed Mailbox/Event unions include:
 
 Trigger and continuation controls use dedicated payloads and model-input lowering.
 Pending live projections identify them as internal Scheduled Task work rather than
-editable user messages. The result payload contains only title, scheduled instant,
-terminal status, and result text.
+editable user messages. Trigger and continuation content carries human-first
+schedule labels, canonical secondary details, execution guidance, and the exact
+prompt. The result payload contains only title, scheduled instant, terminal status,
+and result text.
+
+## Changelog
+
+- **2026-08-17** (spec_version 2) — Added collapsible title-first Web trigger and
+  continuation presentation, human-first schedule labels, Schedule activity
+  grouping, enriched Scheduled tool rows, and explicit Skill schedule-shape
+  exclusivity.
 
 ## Verification
 

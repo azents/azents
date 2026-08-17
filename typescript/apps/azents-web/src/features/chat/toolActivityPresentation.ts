@@ -206,6 +206,18 @@ function messageHasAttachments(message: ChatMessage | null): boolean {
 function activityCategoryForTool(call: ToolActivityCall): ActivityCategory {
   if (
     call.type === "client" &&
+    [
+      "add_scheduled_task",
+      "list_scheduled_tasks",
+      "delete_scheduled_task",
+      "submit_scheduled_task_result",
+    ].includes(call.toolCall.name)
+  ) {
+    return { key: "schedule", label: "schedule" };
+  }
+
+  if (
+    call.type === "client" &&
     call.toolCall.toolkitSource !== null &&
     typeof call.toolCall.toolkitSource !== "undefined" &&
     "toolkit_config_id" in call.toolCall.toolkitSource

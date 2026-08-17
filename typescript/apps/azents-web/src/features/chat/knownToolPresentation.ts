@@ -43,6 +43,10 @@ export type KnownToolAction =
   | "listAgents"
   | "createGitWorktree"
   | "removeGitWorktree"
+  | "addScheduledTask"
+  | "listScheduledTasks"
+  | "deleteScheduledTask"
+  | "submitScheduledTaskResult"
   | "toolSearch";
 
 export type KnownToolDetailLabel =
@@ -76,7 +80,13 @@ export type KnownToolDetailLabel =
   | "branch"
   | "force"
   | "requestId"
-  | "worktreePath";
+  | "worktreePath"
+  | "schedule"
+  | "target"
+  | "nextRun"
+  | "taskId"
+  | "registration"
+  | "recovered";
 
 export interface OutputDetail {
   language: string | null;
@@ -300,6 +310,58 @@ const toolSearchInputSchema = z.object({
   query: z.string().min(1),
   limit: z.number().int().min(1).max(10).optional(),
 });
+const addScheduledTaskInputSchema = z.object({
+  title: z.string().min(1),
+  objective: z.string().min(1),
+  at: z.string().min(1).nullable(),
+  cron: z.string().min(1).nullable(),
+  timezone: z.string().min(1).nullable(),
+  channel_id: z.string().min(1).nullable(),
+});
+const deleteScheduledTaskInputSchema = z.object({
+  task_id: z.string().min(1),
+});
+const submitScheduledTaskResultInputSchema = z.object({
+  status: z.union([z.literal("finished"), z.literal("failed")]),
+  result: z.string().min(1),
+});
+const scheduledTaskDefinitionSchema = z.object({
+  task_id: z.string().min(1),
+  title: z.string().min(1),
+  objective: z.string().min(1),
+  at: z.string().min(1).nullable(),
+  cron: z.string().min(1).nullable(),
+  timezone: z.string().min(1).nullable(),
+  channel_id: z.string().min(1).nullable(),
+  next_eligible_at: z.string().min(1).nullable(),
+  pending_scheduled_for: z.string().min(1).nullable(),
+  execution_state: z.string().min(1).optional(),
+});
+const providerOutcomeSchema = z.object({
+  operation: z.string().min(1),
+  part: z.number().int().nonnegative(),
+  status: z.string().min(1),
+  reason: z.string().min(1).optional(),
+  detail: z.string().min(1).optional(),
+});
+const addScheduledTaskResultSchema = z.object({
+  task: scheduledTaskDefinitionSchema,
+  created: z.boolean(),
+  registration: providerOutcomeSchema.nullable(),
+});
+const listScheduledTasksResultSchema = z.object({
+  tasks: z.array(scheduledTaskDefinitionSchema),
+});
+const deleteScheduledTaskResultSchema = z.object({
+  task_id: z.string().min(1),
+  deleted: z.boolean(),
+});
+const submitScheduledTaskResultSchema = z.object({
+  status: z.union([z.literal("finished"), z.literal("failed")]),
+  result: z.string(),
+  recovered: z.boolean(),
+  outcomes: z.array(providerOutcomeSchema),
+});
 const managedGitWorktreeRequestResultSchema = z.object({
   accepted: z.literal(true),
   message: z.string().min(1),
@@ -437,6 +499,62 @@ function skillName(path: string): string {
   return segments.at(-1) === "SKILL.md"
     ? (segments.at(-2) ?? "Skill")
     : (segments.at(-1) ?? "Skill");
+}
+
+const scheduledToolNames = new Set([
+  "add_scheduled_task",
+  "list_scheduled_tasks",
+  "delete_scheduled_task",
+  "submit_scheduled_task_result",
+]);
+
+function scheduledToolSource(toolCall: ActiveToolCall): boolean {
+  const source = toolCall.toolkitSource;
+  return (
+    source !== null &&
+    typeof source !== "undefined" &&
+    "toolkit_slug" in source &&
+    source.toolkit_slug === "scheduled" &&
+    scheduledToolNames.has(toolCall.name)
+  );
+}
+
+function scheduledInputSchedule(input: {
+  at: string | null;
+  cron: string | null;
+  timezone: string | null;
+}): string | null {
+  if (input.at !== null && input.cron === null && input.timezone === null) {
+    return input.at;
+  }
+  if (input.at === null && input.cron !== null && input.timezone !== null) {
+    return `${input.cron} · ${input.timezone}`;
+  }
+  return null;
+}
+
+function scheduledTaskSchedule(
+  task: z.infer<typeof scheduledTaskDefinitionSchema>,
+): string {
+  return task.at ?? `${task.cron ?? "—"} · ${task.timezone ?? "—"}`;
+}
+
+function scheduledTaskFields(
+  task: z.infer<typeof scheduledTaskDefinitionSchema>,
+): SemanticField[] {
+  return [
+    { label: "schedule", value: scheduledTaskSchedule(task) },
+    {
+      label: "target",
+      value: task.channel_id === null ? "session" : "channel",
+    },
+    ...(task.next_eligible_at === null
+      ? []
+      : [{ label: "nextRun" as const, value: task.next_eligible_at }]),
+    ...(task.execution_state
+      ? [{ label: "status" as const, value: task.execution_state }]
+      : []),
+  ];
 }
 
 function outputDetail(
@@ -672,7 +790,8 @@ export function knownToolPresentation(
 ): KnownToolPresentationResult {
   if (
     toolCall.toolkitSource !== null &&
-    typeof toolCall.toolkitSource !== "undefined"
+    typeof toolCall.toolkitSource !== "undefined" &&
+    !scheduledToolSource(toolCall)
   ) {
     return generic("unregistered");
   }
@@ -980,6 +1099,161 @@ export function knownToolPresentation(
                 type: "todo",
                 items,
               },
+        );
+      }
+      case "add_scheduled_task": {
+        const input = addScheduledTaskInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const inputSchedule = scheduledInputSchedule(input.data);
+        if (inputSchedule === null) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, addScheduledTaskResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        const task = result?.task;
+        return presentation(
+          "addScheduledTask",
+          task?.title ?? input.data.title,
+          input.data.at === null ? "recurring" : "once",
+          semanticDetail({
+            fields:
+              typeof task === "undefined"
+                ? [
+                    { label: "schedule", value: inputSchedule },
+                    {
+                      label: "target",
+                      value:
+                        input.data.channel_id === null ? "session" : "channel",
+                    },
+                  ]
+                : scheduledTaskFields(task),
+            sections: [
+              { label: "objective", content: input.data.objective },
+              ...(result?.registration === null ||
+              typeof result?.registration === "undefined"
+                ? []
+                : [
+                    {
+                      label: "registration" as const,
+                      content: [
+                        result.registration.status,
+                        result.registration.reason,
+                        result.registration.detail,
+                      ]
+                        .filter(
+                          (value): value is string =>
+                            typeof value === "string" && value.length > 0,
+                        )
+                        .join(" · "),
+                    },
+                  ]),
+            ],
+          }),
+        );
+      }
+      case "list_scheduled_tasks": {
+        const input = emptyInputSchema.safeParse(argumentsResult.value);
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, listScheduledTasksResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "listScheduledTasks",
+          null,
+          result === null ? null : String(result.tasks.length),
+          result === null
+            ? null
+            : semanticDetail({
+                items: result.tasks.map((task) => ({
+                  title: task.title,
+                  subtitle: `${scheduledTaskSchedule(task)} · ${
+                    task.channel_id === null ? "session" : "channel"
+                  }`,
+                  content: task.objective,
+                })),
+              }),
+        );
+      }
+      case "delete_scheduled_task": {
+        const input = deleteScheduledTaskInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, deleteScheduledTaskResultSchema)
+          : null;
+        if (
+          completed(toolCall) &&
+          (result === null || result.task_id !== input.data.task_id)
+        ) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "deleteScheduledTask",
+          null,
+          result === null ? null : result.deleted ? "deleted" : "not-found",
+          semanticDetail({
+            fields: [{ label: "taskId", value: input.data.task_id }],
+          }),
+        );
+      }
+      case "submit_scheduled_task_result": {
+        const input = submitScheduledTaskResultInputSchema.safeParse(
+          argumentsResult.value,
+        );
+        if (!input.success) {
+          return generic("invalid-arguments");
+        }
+        const result = completed(toolCall)
+          ? parsedResult(toolCall, submitScheduledTaskResultSchema)
+          : null;
+        if (completed(toolCall) && result === null) {
+          return generic("invalid-output");
+        }
+        return presentation(
+          "submitScheduledTaskResult",
+          null,
+          result?.status ?? input.data.status,
+          semanticDetail({
+            fields: [
+              { label: "status", value: result?.status ?? input.data.status },
+              ...(result === null
+                ? []
+                : [
+                    {
+                      label: "recovered" as const,
+                      value: String(result.recovered),
+                    },
+                  ]),
+            ],
+            sections: [
+              {
+                label: "result",
+                content: result?.result ?? input.data.result,
+              },
+            ],
+            items:
+              result?.outcomes.map((outcome) => ({
+                title: outcome.operation,
+                subtitle: outcome.status,
+                content: outcome.reason ?? outcome.detail ?? null,
+              })) ?? [],
+          }),
         );
       }
       case "load_skill": {

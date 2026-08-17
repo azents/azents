@@ -11,6 +11,17 @@ schedule.
 4. Produce the canonical schedule fields.
 5. Validate the result before creation.
 
+## Canonical field shapes
+
+The two accepted shapes are mutually exclusive:
+
+- one-time: `at=<aware RFC3339>`, `cron=null`, `timezone=null`;
+- recurring: `at=null`, `cron=<five fields>`, `timezone=<IANA identifier>`.
+
+Never combine `at` with a separate `timezone`. A one-time `at` value carries its
+own `Z` or explicit UTC offset. The `timezone` field exists only to evaluate a
+recurring cron expression.
+
 ## One-time schedules
 
 Use one timezone-bearing RFC 3339 timestamp. The timestamp must contain `Z` or an

@@ -278,8 +278,20 @@ def test_registration_renderers_include_exact_edit_and_delete_controls() -> None
     assert delete_button["value"] == delete
     assert "Objective" not in str(slack_blocks)
     assert task.objective not in str(slack_blocks)
-    assert embeds[0]["title"] == "Scheduled Task registered"
-    assert "description" not in embeds[0]
+    assert slack_blocks[0] == {
+        "type": "header",
+        "text": {
+            "type": "plain_text",
+            "text": "Scheduled Task registered",
+        },
+    }
+    assert "Daily report" in str(slack_blocks)
+    assert "Every weekday at 9:00 AM PDT" in str(slack_blocks)
+    assert "0 9 * * 1-5 (America/Los_Angeles)" in str(slack_blocks)
+    assert embeds[0]["title"] == task.title
+    assert embeds[0]["description"] == "Scheduled Task registered"
+    assert "Every weekday at 9:00 AM PDT" in str(embeds)
+    assert "0 9 * * 1-5 (America/Los_Angeles)" in str(embeds)
     assert task.objective not in str(embeds)
     discord_actions = components[0]["components"]
     assert isinstance(discord_actions, list)

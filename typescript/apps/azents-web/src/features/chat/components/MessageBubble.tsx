@@ -43,6 +43,7 @@ import classes from "./MessageBubble.module.css";
 import { MessageMetadataSurface } from "./MessageMetadataFooter";
 import { ProviderToolCallCard } from "./ProviderToolCallCard";
 import { RunRetryCard } from "./RunRetryCard";
+import { ScheduledTaskMessageDisclosure } from "./ScheduledTaskMessageDisclosure";
 import { ToolCallCard } from "./ToolCallCard";
 import type { ChatMessage } from "../types";
 
@@ -266,6 +267,10 @@ function UserTextMessage({
 
 function isAgentMailboxMessage(message: ChatMessage): boolean {
   return message.metadata?.source === "agent_mailbox";
+}
+
+function isScheduledTaskMessage(message: ChatMessage): boolean {
+  return message.metadata?.source === "scheduled_task";
 }
 
 function agentNameFromPath(path: string): string {
@@ -617,6 +622,27 @@ export const MessageBubble = memo(function MessageBubble({
         <ExternalChannelMessage
           source={externalChannelSource}
           partial={message.status === "partial"}
+          actions={
+            additionalActions ? (
+              <MessageActionRow
+                content={message.content}
+                createdAt={message.createdAt}
+                align="user"
+                inferenceProfile={message.inferenceProfile}
+                additionalActions={additionalActions}
+              />
+            ) : null
+          }
+        />
+      </Box>
+    );
+  }
+
+  if (message.role === "user" && isScheduledTaskMessage(message)) {
+    return (
+      <Box opacity={messageOpacity}>
+        <ScheduledTaskMessageDisclosure
+          message={message}
           actions={
             additionalActions ? (
               <MessageActionRow
