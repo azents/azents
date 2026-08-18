@@ -47,6 +47,7 @@ import {
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
 import { isRecord, isString } from "@/shared/lib/unknown-value";
+import { normalizeStoredInferenceProfile } from "../composerInferenceProfile";
 import { AttachmentPreviewBar } from "./AttachmentPreviewBar";
 import classes from "./ChatInput.module.css";
 import { TodoPreviewBar } from "./TodoPreviewBar";
@@ -264,27 +265,6 @@ function knownReasoningEffort(
     default:
       return null;
   }
-}
-
-function normalizeStoredInferenceProfile(
-  value: unknown,
-): RequestedInferenceProfile | null {
-  if (
-    !isRecord(value) ||
-    !isString(value.model_target_label) ||
-    value.model_target_label.length === 0 ||
-    !("reasoning_effort" in value)
-  ) {
-    return null;
-  }
-  const reasoningEffort = value.reasoning_effort;
-  if (reasoningEffort !== null && !isString(reasoningEffort)) {
-    return null;
-  }
-  return {
-    model_target_label: value.model_target_label,
-    reasoning_effort: knownReasoningEffort(reasoningEffort),
-  };
 }
 
 function parseComposerDraft(raw: string): ComposerDraft {
