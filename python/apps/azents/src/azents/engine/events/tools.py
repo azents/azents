@@ -456,6 +456,7 @@ def _tool_catalog_source(binding: ToolkitBinding) -> ToolCatalogSource:
         toolkit_class=binding.toolkit.__class__.__name__,
         display_name=binding.toolkit.display_name.strip(),
         use_prefix=binding.use_prefix,
+        always_expose_tools=binding.always_expose_tools,
         toolkit_config_id=binding.toolkit_config_id,
         routing_metadata=tuple(routing_metadata),
     )
@@ -499,6 +500,7 @@ def _toolkit_update_context_log_extra(
         "toolkit_class": binding.toolkit.__class__.__name__,
         "toolkit_display_name": binding.toolkit.display_name,
         "use_prefix": binding.use_prefix,
+        "always_expose_tools": binding.always_expose_tools,
         "duration_seconds": round(duration_seconds, 3),
         "threshold_seconds": _SLOW_TOOLKIT_UPDATE_CONTEXT_SECONDS,
     }
@@ -519,6 +521,7 @@ def _toolkit_prompt_metadata(binding: ToolkitBinding) -> dict[str, str]:
     metadata: dict[str, str] = {
         "toolkit_class": binding.toolkit.__class__.__name__,
         "use_prefix": str(binding.use_prefix).lower(),
+        "always_expose_tools": str(binding.always_expose_tools).lower(),
     }
     if binding.slug:
         metadata["slug"] = binding.slug

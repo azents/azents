@@ -1616,6 +1616,8 @@
       "deniedDomainsPlaceholder": "Type a domain and press Enter",
       "deniedDomainsDescription": "Always blocked regardless of allowed domains",
       "enabledLabel": "Enabled",
+      "alwaysExposeToolsLabel": "Always expose tools",
+      "alwaysExposeToolsDescription": "Keep every tool from this toolkit visible to the model instead of requiring Tool Search.",
       "scopesSection": "Scopes",
       "noScopes": "No scopes configured",
       "scopeWorkspace": "Workspace",

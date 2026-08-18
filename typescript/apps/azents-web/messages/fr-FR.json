@@ -1616,6 +1616,8 @@
       "deniedDomainsPlaceholder": "Saisissez un domaine et appuyez sur Entrée",
       "deniedDomainsDescription": "Toujours bloqués, indépendamment des domaines autorisés",
       "enabledLabel": "Activé",
+      "alwaysExposeToolsLabel": "Toujours exposer les outils",
+      "alwaysExposeToolsDescription": "Garde tous les outils de ce toolkit visibles par le modèle sans passer par la recherche d’outils.",
       "scopesSection": "Portées",
       "noScopes": "Aucune portée configurée",
       "scopeWorkspace": "Espace de travail",

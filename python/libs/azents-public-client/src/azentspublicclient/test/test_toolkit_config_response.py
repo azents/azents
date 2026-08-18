@@ -45,6 +45,7 @@ class TestToolkitConfigResponse(unittest.TestCase):
                 prompt = '',
                 has_credentials = True,
                 enabled = True,
+                always_expose_tools = True,
                 oauth_connection = azentspublicclient.models.mcpo_auth_connection_summary_response.MCPOAuthConnectionSummaryResponse(
                     status = 'connected', 
                     issuer = '', 
@@ -69,6 +70,7 @@ class TestToolkitConfigResponse(unittest.TestCase):
                 config = { },
                 prompt = '',
                 enabled = True,
+                always_expose_tools = True,
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )

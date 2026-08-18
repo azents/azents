@@ -16,6 +16,7 @@ def test_toolkit_config_create_request_accepts_underscore_slug() -> None:
     )
 
     assert request.slug == "home_kubernetes"
+    assert request.always_expose_tools is False
 
 
 def test_toolkit_config_create_request_rejects_dash_slug() -> None:
@@ -36,6 +37,16 @@ def test_toolkit_config_update_request_accepts_underscore_slug() -> None:
     request = adapter.validate_python({"slug": "home_kubernetes"})
 
     assert request.get("slug") == "home_kubernetes"
+
+
+def test_toolkit_config_update_request_accepts_always_expose_tools() -> None:
+    adapter: TypeAdapter[ToolkitConfigUpdateRequest] = TypeAdapter(
+        ToolkitConfigUpdateRequest
+    )
+
+    request = adapter.validate_python({"always_expose_tools": True})
+
+    assert request.get("always_expose_tools") is True
 
 
 def test_toolkit_config_update_request_rejects_dash_slug() -> None:

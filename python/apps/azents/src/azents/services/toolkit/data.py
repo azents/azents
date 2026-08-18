@@ -96,6 +96,9 @@ class ToolkitCreateInput(BaseModel):
         default=None, description="Credentials JSON object"
     )
     enabled: bool = Field(default=True, description="Enabled flag")
+    always_expose_tools: bool = Field(
+        description="Whether every tool bypasses Tool Search and remains visible",
+    )
 
 
 class ToolkitUpdateInput(TypedDict, total=False):
@@ -115,6 +118,12 @@ class ToolkitUpdateInput(TypedDict, total=False):
         Field(description="Credentials JSON object (delete when None)"),
     ]
     enabled: Annotated[bool, Field(description="Enabled flag")]
+    always_expose_tools: Annotated[
+        bool,
+        Field(
+            description="Whether every tool bypasses Tool Search and remains visible"
+        ),
+    ]
 
 
 class ToolkitScopeCreateInput(BaseModel):

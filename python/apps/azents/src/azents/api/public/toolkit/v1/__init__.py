@@ -94,6 +94,7 @@ async def create_toolkit_config(
         prompt=request_body.prompt,
         credentials=request_body.credentials,
         enabled=request_body.enabled,
+        always_expose_tools=request_body.always_expose_tools,
     )
     result = await service.create(create_input, user_id=member.user_id)
     if result.success:

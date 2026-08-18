@@ -53,6 +53,8 @@ class ToolkitBinding(NamedTuple):
     :param source_revision: Opaque non-secret source revision for this binding.
         Equal stable identities with unequal revisions replace their
         session-managed Toolkit instance before the Run starts.
+    :param always_expose_tools: Whether every tool from this registered ToolkitConfig
+        bypasses Tool Search and remains directly model-visible.
     """
 
     toolkit: Toolkit[Any]
@@ -61,6 +63,7 @@ class ToolkitBinding(NamedTuple):
     toolkit_type: str | None = None
     toolkit_config_id: str | None = None
     source_revision: str = ""
+    always_expose_tools: bool = False
 
 
 @dataclasses.dataclass(frozen=True)

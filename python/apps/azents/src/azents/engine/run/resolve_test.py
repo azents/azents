@@ -265,6 +265,25 @@ class _FailingToolkitProvider(ToolkitProvider[_TestToolkitConfig]):
         raise self.exception
 
 
+class _SuccessfulToolkitProvider(ToolkitProvider[_TestToolkitConfig]):
+    """Registered Toolkit provider that resolves a minimal Toolkit."""
+
+    slug: ClassVar[str] = "test"
+    name: ClassVar[str] = "Test"
+    description: ClassVar[str] = "Test Toolkit"
+    system_prompt: ClassVar[str] = ""
+    config_model: ClassVar[type[BaseModel]] = _TestToolkitConfig
+
+    async def resolve(
+        self,
+        config: _TestToolkitConfig,
+        context: ResolveContext,
+    ) -> Toolkit[_TestToolkitConfig]:
+        """Return a resolved Toolkit instance."""
+        del config, context
+        return Toolkit()
+
+
 def _make_toolkit_context() -> ToolkitContext:
     """Create ToolkitContext for resolve_agent_tools tests."""
     return ToolkitContext(
@@ -320,6 +339,7 @@ async def _resolve_failing_registered_toolkit(
     provider: ToolkitProvider[_TestToolkitConfig],
     *,
     toolkit_config: dict[str, object] | None = None,
+    always_expose_tools: bool = False,
 ) -> list[ToolkitBinding]:
     """Resolve one registered Toolkit using the supplied provider."""
     agent_toolkit_repository = AsyncMock()
@@ -344,6 +364,7 @@ async def _resolve_failing_registered_toolkit(
         prompt=None,
         credentials=None,
         enabled=True,
+        always_expose_tools=always_expose_tools,
         revision=1,
         created_at=_NOW,
         updated_at=_NOW,
@@ -366,6 +387,17 @@ async def _resolve_failing_registered_toolkit(
         memory_enabled=False,
         runtime_capability_resolver=_runtime_capability_resolver(enabled=False),
     )
+
+
+async def test_registered_toolkit_binding_captures_direct_exposure_policy() -> None:
+    """Carry the persisted ToolkitConfig policy into the immutable binding."""
+    bindings = await _resolve_failing_registered_toolkit(
+        _SuccessfulToolkitProvider(),
+        always_expose_tools=True,
+    )
+
+    assert len(bindings) == 1
+    assert bindings[0].always_expose_tools is True
 
 
 def _make_turn_context() -> TurnContext:

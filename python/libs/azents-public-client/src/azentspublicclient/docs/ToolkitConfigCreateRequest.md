@@ -14,6 +14,7 @@ Name | Type | Description | Notes
 **prompt** | **str** |  | [optional] 
 **credentials** | **Dict[str, object]** |  | [optional] 
 **enabled** | **bool** | Enabled state | [optional] [default to True]
+**always_expose_tools** | **bool** | Expose every toolkit tool directly instead of through Tool Search | [optional] [default to False]
 
 ## Example
 

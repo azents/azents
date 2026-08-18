@@ -1298,6 +1298,7 @@ async def resolve_agent_tools(
     # toolkit_type is populated only for DB-registered toolkits; auto-binding is None
     registered_toolkit_config_ids: dict[int, str] = {}
     registered_toolkit_revisions: dict[int, str] = {}
+    registered_toolkit_always_expose_tools: dict[int, bool] = {}
     pending: list[
         tuple[
             ToolkitProvider[Any],
@@ -1356,6 +1357,9 @@ async def resolve_agent_tools(
             resolved.display_name = provider.name
             registered_toolkit_config_ids[id(resolved)] = at.toolkit_id
             registered_toolkit_revisions[id(resolved)] = str(toolkit.revision)
+            registered_toolkit_always_expose_tools[id(resolved)] = (
+                toolkit.always_expose_tools
+            )
         except ValidationError, ValueError:
             logger.warning(
                 "Skipping Toolkit with invalid persisted configuration",
@@ -1941,6 +1945,10 @@ async def resolve_agent_tools(
                 config=_cfg,
                 execution_mode=execution_mode,
                 context=context,
+            ),
+            always_expose_tools=registered_toolkit_always_expose_tools.get(
+                id(_resolved),
+                False,
             ),
         )
         for _prov, _resolved, _cfg, _slug, _prompt, _pfx, _ttype, _modes in pending

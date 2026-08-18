@@ -41,7 +41,8 @@ class TestToolkitConfigUpdateRequest(unittest.TestCase):
                 config = { },
                 prompt = '',
                 credentials = { },
-                enabled = True
+                enabled = True,
+                always_expose_tools = True
             )
         else:
             return ToolkitConfigUpdateRequest(

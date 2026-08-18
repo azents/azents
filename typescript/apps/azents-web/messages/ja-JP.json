@@ -1616,6 +1616,8 @@
       "deniedDomainsPlaceholder": "ドメインを入力してEnter",
       "deniedDomainsDescription": "許可ドメインの設定に関係なく常にブロック",
       "enabledLabel": "有効状態",
+      "alwaysExposeToolsLabel": "ツールを常に表示",
+      "alwaysExposeToolsDescription": "このツールキットのすべてのツールをツール検索なしでモデルに常時表示します。",
       "scopesSection": "スコープ",
       "noScopes": "設定されたスコープはありません",
       "scopeWorkspace": "ワークスペース",

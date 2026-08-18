@@ -13,6 +13,7 @@ Name | Type | Description | Notes
 **prompt** | **str** |  | [optional] 
 **credentials** | **Dict[str, object]** |  | [optional] 
 **enabled** | **bool** | Enabled flag | [optional] 
+**always_expose_tools** | **bool** | Whether every tool bypasses Tool Search and remains visible | [optional] 
 
 ## Example
 
