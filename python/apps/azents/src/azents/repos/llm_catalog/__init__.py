@@ -752,6 +752,118 @@ class LLMCatalogRepository:
 class LiteLLMSourceSnapshotRepository:
     """Repository for LiteLLM source snapshots."""
 
+    async def lock_authority(
+        self,
+        session: AsyncSession,
+        *,
+        source_key: str,
+    ) -> None:
+        """Serialize source authority validation and publication."""
+        await session.execute(
+            sa.select(sa.func.pg_advisory_xact_lock(sa.func.hashtext(source_key)))
+        )
+
+    async def begin_attempt(
+        self,
+        session: AsyncSession,
+        *,
+        source_key: str,
+        started_at: datetime.datetime,
+    ) -> str:
+        """Create a source-only synchronization attempt."""
+        await session.execute(
+            sa.update(RDBLLMCatalogSyncAttempt)
+            .where(
+                RDBLLMCatalogSyncAttempt.catalog_id.is_(None),
+                RDBLLMCatalogSyncAttempt.source_key == source_key,
+                RDBLLMCatalogSyncAttempt.status == LLMCatalogAttemptStatus.RUNNING,
+            )
+            .values(
+                status=LLMCatalogAttemptStatus.FAILED,
+                finished_at=started_at,
+                failure_code="LiteLLMSourceSyncInterrupted",
+                failure_message=(
+                    "A newer source synchronization replaced an unfinished attempt."
+                ),
+                action_hint="Use the newer source synchronization result.",
+                diagnostics={"failure_category": "source_sync_interrupted"},
+            )
+        )
+        attempt_id = uuid7().hex
+        session.add(
+            RDBLLMCatalogSyncAttempt(
+                id=attempt_id,
+                catalog_id=None,
+                source_key=source_key,
+                status=LLMCatalogAttemptStatus.RUNNING,
+                started_at=started_at,
+                fetched_count=0,
+                matched_count=0,
+                skipped_count=0,
+                hidden_count=0,
+            )
+        )
+        await session.flush()
+        return attempt_id
+
+    async def mark_attempt_succeeded(
+        self,
+        session: AsyncSession,
+        *,
+        attempt_id: str,
+        finished_at: datetime.datetime,
+        produced_snapshot_id: str,
+        fetched_count: int,
+        diagnostics: dict[str, Any],
+    ) -> None:
+        """Mark a source synchronization attempt as successful."""
+        await session.execute(
+            sa.update(RDBLLMCatalogSyncAttempt)
+            .where(RDBLLMCatalogSyncAttempt.id == attempt_id)
+            .values(
+                status=LLMCatalogAttemptStatus.SUCCEEDED,
+                finished_at=finished_at,
+                produced_snapshot_id=produced_snapshot_id,
+                fetched_count=fetched_count,
+                matched_count=fetched_count,
+                skipped_count=0,
+                hidden_count=0,
+                diagnostics=diagnostics,
+            )
+        )
+        await session.flush()
+
+    async def mark_attempt_failed(
+        self,
+        session: AsyncSession,
+        *,
+        attempt_id: str,
+        finished_at: datetime.datetime,
+        failure_code: str,
+        failure_message: str,
+        action_hint: str,
+        fetched_count: int,
+        diagnostics: dict[str, Any],
+    ) -> None:
+        """Mark a source synchronization attempt as failed."""
+        await session.execute(
+            sa.update(RDBLLMCatalogSyncAttempt)
+            .where(RDBLLMCatalogSyncAttempt.id == attempt_id)
+            .values(
+                status=LLMCatalogAttemptStatus.FAILED,
+                finished_at=finished_at,
+                failure_code=failure_code,
+                failure_message=failure_message,
+                action_hint=action_hint,
+                fetched_count=fetched_count,
+                matched_count=0,
+                skipped_count=fetched_count,
+                hidden_count=0,
+                diagnostics=diagnostics,
+            )
+        )
+        await session.flush()
+
     async def create_if_missing(
         self,
         session: AsyncSession,
@@ -788,6 +900,48 @@ class LiteLLMSourceSnapshotRepository:
         await session.flush()
         return self._build(rdb)
 
+    async def upsert_validated_remote(
+        self,
+        session: AsyncSession,
+        *,
+        source_key: str,
+        source_url: str,
+        source_hash: str,
+        model_count: int,
+        litellm_version: str,
+        payload: dict[str, Any],
+    ) -> LiteLLMSourceSnapshot:
+        """Store a validated remote snapshot and promote matching legacy content."""
+        result = await session.execute(
+            insert(RDBLiteLLMSourceSnapshot)
+            .values(
+                id=uuid7().hex,
+                source_key=source_key,
+                source_url=source_url,
+                source_hash=source_hash,
+                model_count=model_count,
+                litellm_version=litellm_version,
+                loaded_source="remote",
+                payload=payload,
+            )
+            .on_conflict_do_update(
+                index_elements=["source_hash"],
+                set_={
+                    "source_key": source_key,
+                    "source_url": source_url,
+                    "model_count": model_count,
+                    "litellm_version": litellm_version,
+                    "loaded_source": "remote",
+                    "payload": payload,
+                    "created_at": sa.func.now(),
+                },
+            )
+            .returning(RDBLiteLLMSourceSnapshot)
+        )
+        rdb = result.scalar_one()
+        await session.flush()
+        return self._build(rdb)
+
     async def get_by_source_hash(
         self,
         session: AsyncSession,
@@ -815,6 +969,70 @@ class LiteLLMSourceSnapshotRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def get_latest_authoritative(
+        self,
+        session: AsyncSession,
+        *,
+        source_key: str,
+    ) -> LiteLLMSourceSnapshot | None:
+        """Fetch the latest explicitly validated remote source snapshot."""
+        result = await session.execute(
+            sa.select(RDBLiteLLMSourceSnapshot)
+            .where(
+                RDBLiteLLMSourceSnapshot.source_key == source_key,
+                RDBLiteLLMSourceSnapshot.loaded_source == "remote",
+            )
+            .order_by(
+                RDBLiteLLMSourceSnapshot.created_at.desc(),
+                RDBLiteLLMSourceSnapshot.id.desc(),
+            )
+            .limit(1)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return self._build(rdb)
+
+    async def get_latest_attempt(
+        self,
+        session: AsyncSession,
+        *,
+        source_key: str,
+    ) -> LLMCatalogSyncAttempt | None:
+        """Fetch the latest source-only synchronization attempt."""
+        result = await session.execute(
+            sa.select(RDBLLMCatalogSyncAttempt)
+            .where(
+                RDBLLMCatalogSyncAttempt.catalog_id.is_(None),
+                RDBLLMCatalogSyncAttempt.source_key == source_key,
+            )
+            .order_by(
+                RDBLLMCatalogSyncAttempt.started_at.desc(),
+                RDBLLMCatalogSyncAttempt.id.desc(),
+            )
+            .limit(1)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        return LLMCatalogSyncAttempt(
+            id=rdb.id,
+            catalog_id=rdb.catalog_id,
+            source_key=rdb.source_key,
+            status=rdb.status,
+            started_at=rdb.started_at,
+            finished_at=rdb.finished_at,
+            produced_snapshot_id=rdb.produced_snapshot_id,
+            failure_code=rdb.failure_code,
+            failure_message=rdb.failure_message,
+            action_hint=rdb.action_hint,
+            fetched_count=rdb.fetched_count,
+            matched_count=rdb.matched_count,
+            skipped_count=rdb.skipped_count,
+            hidden_count=rdb.hidden_count,
+            diagnostics=rdb.diagnostics,
+        )
 
     def _build(self, rdb: RDBLiteLLMSourceSnapshot) -> LiteLLMSourceSnapshot:
         return LiteLLMSourceSnapshot(

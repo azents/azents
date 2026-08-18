@@ -3,15 +3,19 @@
 import dataclasses
 import datetime
 import hashlib
+import importlib.metadata
 import json
 import re
+from collections.abc import AsyncIterator
+from importlib.resources import files
 from typing import Annotated, Any, assert_never
 
+import httpx
 import litellm
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from litellm.types.utils import ProviderSpecificModelInfo
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import AgentModelSelection, AgentModelSelectionInput
@@ -87,11 +91,58 @@ from azents.testing.deterministic_model_listing import (
 )
 
 _LITELLM_SOURCE_KEY = "litellm_model_cost"
-_LITELLM_SOURCE_URL = (
-    "https://raw.githubusercontent.com/BerriAI/litellm/main/"
-    "model_prices_and_context_window.json"
-)
+_LITELLM_SOURCE_TIMEOUT_SECONDS = 20.0
+_LITELLM_SOURCE_MIN_REMOVAL_COUNT = 50
+_LITELLM_SOURCE_MIN_REMOVAL_RATIO = 0.02
+_LITELLM_PAYLOAD_ADAPTER = TypeAdapter(dict[str, dict[str, Any]])
+_LITELLM_ALIAS_LIST_ADAPTER = TypeAdapter(list[str])
 _PROVIDER_MODEL_INFO_ADAPTER = TypeAdapter(ProviderSpecificModelInfo)
+
+
+async def _get_litellm_source_http_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Create the LiteLLM source HTTP client."""
+    async with httpx.AsyncClient(timeout=_LITELLM_SOURCE_TIMEOUT_SECONDS) as client:
+        yield client
+
+
+def _get_litellm_source_url() -> str:
+    """Return the configured LiteLLM model metadata URL."""
+    return litellm.model_cost_map_url
+
+
+def _get_litellm_version() -> str:
+    """Return the installed LiteLLM package version."""
+    return importlib.metadata.version("litellm")
+
+
+@dataclasses.dataclass(frozen=True)
+class LiteLLMSourceLoader:
+    """Load remote and package-bundled LiteLLM model metadata."""
+
+    http_client: Annotated[httpx.AsyncClient, Depends(_get_litellm_source_http_client)]
+    source_url: Annotated[str, Depends(_get_litellm_source_url)]
+    litellm_version: Annotated[str, Depends(_get_litellm_version)]
+
+    async def fetch_remote(self) -> dict[str, dict[str, Any]]:
+        """Fetch and decode the configured remote model metadata."""
+        response = await self.http_client.get(self.source_url)
+        response.raise_for_status()
+        payload = _LITELLM_PAYLOAD_ADAPTER.validate_python(response.json())
+        return _expand_litellm_source_aliases(payload)
+
+    def load_bundled_fallback(self) -> dict[str, dict[str, Any]]:
+        """Load and decode LiteLLM's package-bundled fallback metadata."""
+        content = (
+            files("litellm")
+            .joinpath("model_prices_and_context_window_backup.json")
+            .read_text(encoding="utf-8")
+        )
+        payload = _LITELLM_PAYLOAD_ADAPTER.validate_json(content)
+        return _expand_litellm_source_aliases(payload)
+
+
+class LiteLLMSourceSyncError(RuntimeError):
+    """LiteLLM source ingestion failed without changing source authority."""
 
 
 def _get_integration_repository(
@@ -508,22 +559,187 @@ class LiteLLMSourceSyncService:
     snapshot_repository: Annotated[
         LiteLLMSourceSnapshotRepository, Depends(LiteLLMSourceSnapshotRepository)
     ]
+    source_loader: Annotated[LiteLLMSourceLoader, Depends(LiteLLMSourceLoader)]
 
     async def sync_current_source(self) -> LiteLLMSourceSnapshot:
-        """Store current LiteLLM model cost map as a source snapshot."""
-        payload = current_litellm_model_cost_payload()
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        source_hash = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        """Ingest and publish the configured remote LiteLLM source."""
+        started_at = _utcnow()
         async with self.session_manager() as session:
-            return await self.snapshot_repository.create_if_missing(
+            attempt_id = await self.snapshot_repository.begin_attempt(
                 session,
                 source_key=_LITELLM_SOURCE_KEY,
-                source_url=_LITELLM_SOURCE_URL,
-                source_hash=source_hash,
-                model_count=len(payload),
-                litellm_version=getattr(litellm, "__version__", None),
-                loaded_source="litellm_runtime",
+                started_at=started_at,
+            )
+
+        try:
+            payload = await self.source_loader.fetch_remote()
+        except (
+            httpx.HTTPError,
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            ValidationError,
+        ) as exc:
+            await self._record_remote_failure(
+                attempt_id=attempt_id,
+                error=exc,
+            )
+            raise LiteLLMSourceSyncError(
+                "The remote LiteLLM model catalog could not be ingested."
+            ) from exc
+
+        source_hash = _source_payload_hash(payload)
+        rejection_message: str | None = None
+        superseded = False
+        snapshot: LiteLLMSourceSnapshot | None = None
+        async with self.session_manager() as session:
+            await self.snapshot_repository.lock_authority(
+                session,
+                source_key=_LITELLM_SOURCE_KEY,
+            )
+            previous = await self.snapshot_repository.get_latest_authoritative(
+                session,
+                source_key=_LITELLM_SOURCE_KEY,
+            )
+            diagnostics = _source_change_diagnostics(
+                previous=previous,
                 payload=payload,
+                source_kind="remote",
+                source_url=self.source_loader.source_url,
+                source_hash=source_hash,
+            )
+            latest_attempt = await self.snapshot_repository.get_latest_attempt(
+                session,
+                source_key=_LITELLM_SOURCE_KEY,
+            )
+            if latest_attempt is None or latest_attempt.id != attempt_id:
+                superseded = True
+                await self.snapshot_repository.mark_attempt_failed(
+                    session,
+                    attempt_id=attempt_id,
+                    finished_at=_utcnow(),
+                    failure_code="LiteLLMSourceSyncSuperseded",
+                    failure_message=(
+                        "A newer LiteLLM source synchronization attempt superseded "
+                        "this result."
+                    ),
+                    action_hint="Use the newer source synchronization result.",
+                    fetched_count=len(payload),
+                    diagnostics=diagnostics,
+                )
+            elif _material_source_reduction(previous=previous, payload=payload):
+                rejection_message = (
+                    "The remote LiteLLM model catalog is materially smaller than "
+                    "the current authoritative snapshot."
+                )
+                await self.snapshot_repository.mark_attempt_failed(
+                    session,
+                    attempt_id=attempt_id,
+                    finished_at=_utcnow(),
+                    failure_code="LiteLLMSourceModelCountReduction",
+                    failure_message=rejection_message,
+                    action_hint=(
+                        "Verify the upstream removals before replacing the "
+                        "authoritative source."
+                    ),
+                    fetched_count=len(payload),
+                    diagnostics=diagnostics,
+                )
+            else:
+                snapshot = await self.snapshot_repository.upsert_validated_remote(
+                    session,
+                    source_key=_LITELLM_SOURCE_KEY,
+                    source_url=self.source_loader.source_url,
+                    source_hash=source_hash,
+                    model_count=len(payload),
+                    litellm_version=self.source_loader.litellm_version,
+                    payload=payload,
+                )
+                await self.snapshot_repository.mark_attempt_succeeded(
+                    session,
+                    attempt_id=attempt_id,
+                    finished_at=_utcnow(),
+                    produced_snapshot_id=snapshot.id,
+                    fetched_count=len(payload),
+                    diagnostics=diagnostics,
+                )
+        if superseded:
+            raise LiteLLMSourceSyncError(
+                "The LiteLLM source synchronization was superseded."
+            )
+        if rejection_message is not None:
+            raise LiteLLMSourceSyncError(rejection_message)
+        if snapshot is None:
+            raise RuntimeError("Validated LiteLLM source snapshot was not stored.")
+        return snapshot
+
+    async def get_authoritative_source(self) -> LiteLLMSourceSnapshot:
+        """Return the latest explicitly validated remote DB snapshot."""
+        async with self.session_manager() as session:
+            snapshot = await self.snapshot_repository.get_latest_authoritative(
+                session,
+                source_key=_LITELLM_SOURCE_KEY,
+            )
+        if snapshot is None:
+            raise LiteLLMSourceSyncError(
+                "No validated remote LiteLLM source snapshot is available."
+            )
+        return snapshot
+
+    async def _record_remote_failure(
+        self,
+        *,
+        attempt_id: str,
+        error: (
+            httpx.HTTPError
+            | json.JSONDecodeError
+            | UnicodeDecodeError
+            | ValidationError
+        ),
+    ) -> None:
+        """Record remote failure and bundled fallback provenance."""
+        fallback_payload: dict[str, dict[str, Any]] | None = None
+        fallback_failure: str | None = None
+        try:
+            fallback_payload = self.source_loader.load_bundled_fallback()
+        except (
+            OSError,
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            ValidationError,
+        ) as exc:
+            fallback_failure = str(exc)
+
+        diagnostics: dict[str, Any] = {
+            "source_kind": "bundled_fallback",
+            "source_url": self.source_loader.source_url,
+            "fetch_failure_reason": str(error),
+            "litellm_version": self.source_loader.litellm_version,
+        }
+        if fallback_payload is not None:
+            diagnostics.update(
+                {
+                    "fallback_content_hash": _source_payload_hash(fallback_payload),
+                    "fallback_model_count": len(fallback_payload),
+                    "fallback_provider_counts": _source_provider_counts(
+                        fallback_payload
+                    ),
+                }
+            )
+        if fallback_failure is not None:
+            diagnostics["fallback_failure_reason"] = fallback_failure
+
+        async with self.session_manager() as session:
+            await self.snapshot_repository.mark_attempt_failed(
+                session,
+                attempt_id=attempt_id,
+                finished_at=_utcnow(),
+                failure_code=type(error).__name__,
+                failure_message=str(error),
+                action_hint=(
+                    "Retry after the configured LiteLLM source becomes available."
+                ),
+                fetched_count=0,
+                diagnostics=diagnostics,
             )
 
 
@@ -769,7 +985,14 @@ class IntegrationCatalogProjectionService:
         attempt_id = claim
 
         try:
-            source_snapshot = await self.source_sync_service.sync_current_source()
+            source_snapshot: LiteLLMSourceSnapshot | None = None
+            if deterministic_listing is None and integration.provider in (
+                LLMProvider.AWS_BEDROCK,
+                LLMProvider.GOOGLE_VERTEX_AI,
+            ):
+                source_snapshot = (
+                    await self.source_sync_service.get_authoritative_source()
+                )
             if deterministic_failure:
                 raise ListingProviderError(
                     "Deterministic user catalog listing failed.",
@@ -831,27 +1054,27 @@ class IntegrationCatalogProjectionService:
                     integration_id=integration.id,
                     provider=integration.provider,
                     listing=deterministic_listing,
-                    source_hash=source_snapshot.source_hash,
                 )
             elif integration.provider == LLMProvider.CHATGPT_OAUTH:
                 entries = project_chatgpt_integration_entries(
                     integration_id=integration.id,
                     listing=listing,
-                    source_hash=source_snapshot.source_hash,
                 )
             elif integration.provider == LLMProvider.KIMI_OAUTH:
                 entries = project_kimi_integration_entries(
                     integration_id=integration.id,
                     listing=listing,
-                    source_hash=source_snapshot.source_hash,
                 )
             elif integration.provider == LLMProvider.OPENROUTER:
                 entries = project_openrouter_integration_entries(
                     integration_id=integration.id,
                     listing=listing,
-                    source_hash=source_snapshot.source_hash,
                 )
             else:
+                if source_snapshot is None:
+                    raise RuntimeError(
+                        "Integration projection requires a LiteLLM source snapshot."
+                    )
                 entries = project_integration_entries(
                     integration_id=integration.id,
                     provider=integration.provider,
@@ -879,14 +1102,20 @@ class IntegrationCatalogProjectionService:
                 snapshot_id = await self.catalog_repository.replace_current_snapshot(
                     session,
                     catalog=catalog,
-                    source_snapshot_id=source_snapshot.id,
+                    source_snapshot_id=(
+                        source_snapshot.id if source_snapshot is not None else None
+                    ),
                     entries=entries,
                     diagnostics=_projection_diagnostics(
                         entries=entries,
                         listing=listing,
                         context={
                             "integration_id": integration.id,
-                            "source_key": source_snapshot.source_key,
+                            "source_key": (
+                                source_snapshot.source_key
+                                if source_snapshot is not None
+                                else None
+                            ),
                         },
                     ),
                 )
@@ -1007,12 +1236,101 @@ class IntegrationCatalogProjectionService:
         )
 
 
-def current_litellm_model_cost_payload() -> dict[str, Any]:
-    """Return the current LiteLLM model cost map payload."""
-    model_cost = getattr(litellm, "model_cost", None)
-    if not isinstance(model_cost, dict):
-        raise RuntimeError("LiteLLM model cost map is unavailable")
-    return {str(key): value for key, value in model_cost.items()}
+def _source_payload_hash(payload: dict[str, dict[str, Any]]) -> str:
+    """Compute the canonical source payload hash."""
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _expand_litellm_source_aliases(
+    payload: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Expand LiteLLM aliases without replacing canonical model entries."""
+    expanded = {model_key: dict(metadata) for model_key, metadata in payload.items()}
+    aliases_to_add: dict[str, dict[str, Any]] = {}
+    for metadata in expanded.values():
+        aliases_value = metadata.pop("aliases", None)
+        if aliases_value is None:
+            continue
+        aliases = _LITELLM_ALIAS_LIST_ADAPTER.validate_python(aliases_value)
+        for alias in aliases:
+            if alias in expanded or alias in aliases_to_add:
+                continue
+            aliases_to_add[alias] = metadata
+    expanded.update(aliases_to_add)
+    return expanded
+
+
+def _source_provider_counts(
+    payload: dict[str, dict[str, Any]],
+) -> dict[str, int]:
+    """Count source entries by LiteLLM provider."""
+    counts: dict[str, int] = {}
+    for metadata in payload.values():
+        provider = metadata.get("litellm_provider")
+        provider_key = provider if isinstance(provider, str) else "unknown"
+        counts[provider_key] = counts.get(provider_key, 0) + 1
+    return counts
+
+
+def _source_change_diagnostics(
+    *,
+    previous: LiteLLMSourceSnapshot | None,
+    payload: dict[str, dict[str, Any]],
+    source_kind: str,
+    source_url: str,
+    source_hash: str,
+) -> dict[str, Any]:
+    """Build source provenance and model/provider change diagnostics."""
+    previous_payload = previous.payload if previous is not None else {}
+    previous_models = set(previous_payload)
+    current_models = set(payload)
+    previous_provider_counts = _source_provider_counts(
+        _LITELLM_PAYLOAD_ADAPTER.validate_python(previous_payload)
+    )
+    current_provider_counts = _source_provider_counts(payload)
+    provider_count_changes = {
+        provider: {
+            "previous": previous_provider_counts.get(provider, 0),
+            "current": current_provider_counts.get(provider, 0),
+            "delta": (
+                current_provider_counts.get(provider, 0)
+                - previous_provider_counts.get(provider, 0)
+            ),
+        }
+        for provider in sorted(
+            previous_provider_counts.keys() | current_provider_counts
+        )
+        if previous_provider_counts.get(provider, 0)
+        != current_provider_counts.get(provider, 0)
+    }
+    return {
+        "source_kind": source_kind,
+        "source_url": source_url,
+        "content_hash": source_hash,
+        "model_count": len(payload),
+        "previous_snapshot_id": previous.id if previous is not None else None,
+        "previous_model_count": (
+            previous.model_count if previous is not None else None
+        ),
+        "added_models": sorted(current_models - previous_models),
+        "removed_models": sorted(previous_models - current_models),
+        "provider_count_changes": provider_count_changes,
+    }
+
+
+def _material_source_reduction(
+    *,
+    previous: LiteLLMSourceSnapshot | None,
+    payload: dict[str, dict[str, Any]],
+) -> bool:
+    """Return whether candidate model-count shrinkage requires quarantine."""
+    if previous is None or previous.model_count == 0:
+        return False
+    removed_count = previous.model_count - len(payload)
+    if removed_count < _LITELLM_SOURCE_MIN_REMOVAL_COUNT:
+        return False
+    return removed_count / previous.model_count >= _LITELLM_SOURCE_MIN_REMOVAL_RATIO
 
 
 def _deterministic_listing_failure(
@@ -1059,7 +1377,6 @@ def project_deterministic_integration_entries(
     integration_id: str,
     provider: LLMProvider,
     listing: ModelListingOutput,
-    source_hash: str,
 ) -> list[LLMCatalogEntryCreate]:
     """Project deterministic testenv listing directly into integration catalog."""
     entries: list[LLMCatalogEntryCreate] = []
@@ -1084,7 +1401,6 @@ def project_deterministic_integration_entries(
                 family=candidate.model_family,
                 source_metadata={
                     "provider_listing_source": listing.summary.source,
-                    "source_hash": source_hash,
                 },
                 projection_metadata={
                     "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
@@ -1101,7 +1417,6 @@ def project_chatgpt_integration_entries(
     *,
     integration_id: str,
     listing: ModelListingOutput,
-    source_hash: str,
 ) -> list[LLMCatalogEntryCreate]:
     """Project ChatGPT backend models without requiring LiteLLM metadata."""
     entries: list[LLMCatalogEntryCreate] = []
@@ -1123,7 +1438,6 @@ def project_chatgpt_integration_entries(
                 source_metadata={
                     "provider_listing_source": listing.summary.source,
                     "provider_metadata": candidate.source_metadata,
-                    "source_hash": source_hash,
                 },
                 projection_metadata={
                     "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
@@ -1139,7 +1453,6 @@ def project_kimi_integration_entries(
     *,
     integration_id: str,
     listing: ModelListingOutput,
-    source_hash: str,
 ) -> list[LLMCatalogEntryCreate]:
     """Project Kimi account models without a LiteLLM metadata gate."""
     entries: list[LLMCatalogEntryCreate] = []
@@ -1165,7 +1478,6 @@ def project_kimi_integration_entries(
                 source_metadata={
                     "provider_listing_source": listing.summary.source,
                     "provider_metadata": candidate.source_metadata,
-                    "source_hash": source_hash,
                 },
                 projection_metadata={
                     "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
@@ -1182,7 +1494,6 @@ def project_openrouter_integration_entries(
     *,
     integration_id: str,
     listing: ModelListingOutput,
-    source_hash: str,
 ) -> list[LLMCatalogEntryCreate]:
     """Project OpenRouter account models without LiteLLM visibility matching."""
     entries: list[LLMCatalogEntryCreate] = []
@@ -1208,7 +1519,6 @@ def project_openrouter_integration_entries(
                 source_metadata={
                     "provider_listing_source": listing.summary.source,
                     "provider_metadata": candidate.source_metadata,
-                    "source_hash": source_hash,
                 },
                 projection_metadata={
                     "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,

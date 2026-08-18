@@ -2,10 +2,29 @@
 
 import datetime
 
+import httpx
+from azcommon.result import Success
+from cryptography.fernet import Fernet
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from azents.core.credentials import ApiKeySecrets
+from azents.core.crypto import CredentialCipher
 from azents.core.enums import LLMCatalogEntryVisibility, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities, ModelCompatibilityCapabilities
+from azents.rdb.session import SessionManager
+from azents.repos.llm_catalog import (
+    LiteLLMSourceSnapshotRepository,
+    LLMCatalogRepository,
+)
 from azents.repos.llm_catalog.data import LiteLLMSourceSnapshot
+from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
+from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
+from azents.repos.workspace import WorkspaceRepository
+from azents.repos.workspace.data import WorkspaceCreate
 from azents.services.llm_catalog import (
+    IntegrationCatalogProjectionService,
+    LiteLLMSourceLoader,
+    LiteLLMSourceSyncService,
     project_chatgpt_integration_entries,
     project_integration_entries,
     project_kimi_integration_entries,
@@ -121,7 +140,6 @@ def test_project_chatgpt_entries_does_not_require_litellm_metadata() -> None:
     entries = project_chatgpt_integration_entries(
         integration_id="integration-id",
         listing=listing,
-        source_hash="source-hash",
     )
 
     [entry] = entries
@@ -136,6 +154,8 @@ def test_project_chatgpt_entries_does_not_require_litellm_metadata() -> None:
         "lowerer_target": "litellm",
         "freshness_rank": 5060,
     }
+    assert entry.source_metadata is not None
+    assert "source_hash" not in entry.source_metadata
 
 
 def test_project_kimi_entries_does_not_require_litellm_metadata() -> None:
@@ -172,7 +192,6 @@ def test_project_kimi_entries_does_not_require_litellm_metadata() -> None:
     entries = project_kimi_integration_entries(
         integration_id="integration-id",
         listing=listing,
-        source_hash="source-hash",
     )
 
     [entry] = entries
@@ -186,6 +205,8 @@ def test_project_kimi_entries_does_not_require_litellm_metadata() -> None:
         "target_metadata_match_required": False,
         "freshness_rank": 2050,
     }
+    assert entry.source_metadata is not None
+    assert "source_hash" not in entry.source_metadata
 
 
 def test_project_openrouter_entries_does_not_require_litellm_metadata() -> None:
@@ -222,7 +243,6 @@ def test_project_openrouter_entries_does_not_require_litellm_metadata() -> None:
     entries = project_openrouter_integration_entries(
         integration_id="integration-id",
         listing=listing,
-        source_hash="source-hash",
     )
 
     [entry] = entries
@@ -236,3 +256,68 @@ def test_project_openrouter_entries_does_not_require_litellm_metadata() -> None:
         "target_metadata_match_required": False,
         "freshness_rank": 0,
     }
+    assert entry.source_metadata is not None
+    assert "source_hash" not in entry.source_metadata
+
+
+async def test_deterministic_integration_sync_does_not_require_source_authority(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Sync direct integration projections without a LiteLLM source snapshot."""
+    async with rdb_session_manager() as session:
+        workspace_result = await WorkspaceRepository().create(
+            session,
+            WorkspaceCreate(
+                name="Direct catalog workspace",
+                handle="direct-catalog-workspace",
+            ),
+        )
+        assert isinstance(workspace_result, Success)
+        workspace_id = await WorkspaceRepository().resolve_id(
+            session,
+            "direct-catalog-workspace",
+        )
+        assert workspace_id is not None
+
+        integration_repository = LLMProviderIntegrationRepository(
+            CredentialCipher(Fernet.generate_key().decode())
+        )
+        integration = await integration_repository.create(
+            session,
+            LLMProviderIntegrationCreate(
+                workspace_id=workspace_id,
+                provider=LLMProvider.OPENROUTER,
+                name="__testenv_model_listing:deterministic-openrouter",
+                secrets=ApiKeySecrets(api_key="fixture"),
+                config=None,
+                enabled=True,
+            ),
+        )
+
+    def unexpected_source_request(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(f"unexpected LiteLLM source request: {request.url}")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(unexpected_source_request)
+    ) as client:
+        result = await IntegrationCatalogProjectionService(
+            session_manager=rdb_session_manager,
+            catalog_repository=LLMCatalogRepository(),
+            integration_repository=integration_repository,
+            source_sync_service=LiteLLMSourceSyncService(
+                session_manager=rdb_session_manager,
+                snapshot_repository=LiteLLMSourceSnapshotRepository(),
+                source_loader=LiteLLMSourceLoader(
+                    http_client=client,
+                    source_url="https://catalog.example.test/models.json",
+                    litellm_version="1.91.3",
+                ),
+            ),
+        ).sync_integration_catalog(
+            integration_id=integration.id,
+            workspace_id=workspace_id,
+        )
+
+    assert isinstance(result, Success)
+    assert result.value.snapshot_id is not None
+    assert result.value.visible_count == 2
