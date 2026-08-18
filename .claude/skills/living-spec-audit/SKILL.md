@@ -6,8 +6,8 @@ description: Audit current implementation against `docs/azents/spec/**/*.md`, up
 # Living Spec Audit
 
 Compare Living Specs with reachable current implementation behavior. Treat the
-implementation as authoritative and correct only `docs/azents/spec/**/*.md`.
-Never change implementation as an audit correction.
+implementation as authoritative after excluding unambiguous defects, and correct
+only `docs/azents/spec/**/*.md`. Never change implementation as an audit correction.
 
 Keep coverage checkpoints in `.claude/living-spec-audit-state.json`. Keep findings,
 reasoning, issue identifiers, and pull request identifiers out of that state file.
@@ -105,10 +105,14 @@ For clear drift:
 Do not modify Requirements, accepted ADRs, implemented Designs, or implementation.
 Read those documents only for terminology or historical context.
 
-If reachable behavior is clear but appears defective, document the actual behavior
-and report the suspected defect separately. If competing implementation paths make
-the actual behavior uncertain, do not invent spec text; report the ambiguity and
-create a verification issue when durable handoff is required.
+If reachable behavior is unambiguously defective, do not encode the defect as product
+behavior. Preserve the existing correct Spec contract, or correct it only when the
+intended behavior is established by reliable product evidence. Create a GitHub issue
+for the implementation defect before completing the audit.
+
+If competing implementation paths make the actual behavior uncertain, do not invent
+spec text; report the ambiguity and create a verification issue when durable handoff
+is required.
 
 ## Report
 
