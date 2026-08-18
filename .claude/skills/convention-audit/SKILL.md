@@ -108,10 +108,37 @@ Report inspection details to the current conversation context. Use this structur
 If there are no findings, state that explicitly. Do not create placeholder issues or
 changes.
 
-Create focused pull requests only for findings whose corrections are clear and
-low-risk. Keep uncertain findings in the conversation report without editing code.
-Never place findings, excerpts, reasoning, pull request identifiers, or conversation
-identifiers in the audit state file.
+Classify each finding before taking action:
+
+- **Clear and low-risk correction:** create a focused pull request.
+- **Confirmed and material, but not safely fixable in a focused pull request:** create
+  a repository issue for durable handoff.
+- **Ambiguous convention interpretation or likely false positive:** report it to the
+  current conversation and request clarification without creating an issue or editing
+  code.
+
+For a handoff issue, include:
+
+- the exact convention path and requirement;
+- every confirmed code location;
+- severity and concrete impact;
+- why direct correction is unsafe or too broad;
+- decisions, ownership, or coordination required; and
+- a suggested remediation direction and the audited commit.
+
+Write the issue body to a temporary Markdown file and pass it with `--body-file`.
+Do not build multiline issue text in an inline shell argument.
+
+```bash
+gh issue create \
+  --title "chore(conventions): <concise violation summary>" \
+  --body-file /tmp/convention-audit-issue.md
+rm /tmp/convention-audit-issue.md
+```
+
+Report the created issue in the current conversation. Never place findings, excerpts,
+reasoning, issue or pull request identifiers, or conversation identifiers in the
+audit state file.
 
 ## Complete the checkpoint
 
@@ -119,7 +146,13 @@ Advance the checkpoint only after:
 
 - all work represented by the plan is complete;
 - the result has been successfully reported to the current conversation; and
+- every required handoff issue has been created successfully; and
 - any intended pull request has been created successfully.
+
+A completed checkpoint means that the range was inspected, not that it is free of
+violations. Advance the checkpoint for a confirmed unresolved finding after its
+required handoff succeeds. Otherwise the same inspected range would be selected
+repeatedly instead of remaining tracked by its durable issue.
 
 The planner and completion command reject tracked working-tree or index changes.
 After completion writes the state file, submit that checkpoint change through the
@@ -147,5 +180,5 @@ It stores only:
 - each range's latest checked commit, time, and convention revision.
 
 It replaces checkpoints in place and prunes ranges that no longer exist. Inspection
-content belongs in the current conversation, while code corrections belong in pull
-requests.
+content belongs in the current conversation, unresolved confirmed work belongs in
+repository issues, and code corrections belong in pull requests.
