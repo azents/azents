@@ -175,48 +175,10 @@ def _wait_for_live_content(
     _wait_until(
         content_visible,
         timeout=timeout,
-        message=f"live content did not appear: {content!r}, {observed!r}",
+        message=lambda: f"live content did not appear: {content!r}, {observed!r}",
     )
     assert observed is not None
     return observed
-
-
-def _wait_for_ws_live_content(
-    websocket: Connection,
-    *,
-    content: str,
-    timeout: float = 10,
-) -> dict[str, object]:
-    """Wait until one WebSocket live event contains the model partial marker."""
-    deadline = time.monotonic() + timeout
-    observed: list[object] = []
-    while time.monotonic() < deadline:
-        remaining = max(0.1, deadline - time.monotonic())
-        try:
-            action = wait_for_ws_action(
-                websocket,
-                action_type="live_event_upserted",
-                timeout=remaining,
-            )
-        except TimeoutError as exc:
-            raise TimeoutError(
-                f"WebSocket live content did not appear: {content!r}, {observed!r}"
-            ) from exc
-        event = json_object_payload(
-            action.get("event"),
-            label="WebSocket live event",
-        )
-        event_payload = json_object_payload(
-            event.get("payload"),
-            label="WebSocket live event payload",
-        )
-        event_content = event_payload.get("content")
-        observed.append(event_content)
-        if isinstance(event_content, str) and content in event_content:
-            return action
-    raise TimeoutError(
-        f"WebSocket live content did not appear: {content!r}, {observed!r}"
-    )
 
 
 def _wait_for_retry_without_content(
@@ -740,31 +702,29 @@ class TestModelStreamWatchdog:
             token=workspace.token,
             agent_id=agent_id,
         )
-        with connect_chat(
+        result = run_message(
             public_api_client=public_api_client,
-            server_url=azents_public_server_url,
+            public_url=azents_public_server_url,
             token=workspace.token,
+            agent_id=agent_id,
             session_id=session_id,
-        ) as websocket:
-            subscribed = wait_for_ws_action(websocket, action_type="subscribed")
-            assert subscribed.get("session_id") == session_id
-            result = run_message(
-                public_api_client=public_api_client,
-                public_url=azents_public_server_url,
-                token=workspace.token,
-                agent_id=agent_id,
-                session_id=session_id,
-                message=_USER_STOP_PROMPT,
-            )
-            _wait_for_ws_live_content(
-                websocket,
-                content=_USER_STOP_PARTIAL,
-            )
-            _post_stop(
-                public_url=azents_public_server_url,
-                token=workspace.token,
-                session_id=result.session_id,
-            )
+            message=_USER_STOP_PROMPT,
+        )
+        live = _wait_for_live_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            content=_USER_STOP_PARTIAL,
+        )
+        run_payload = live.get("run")
+        assert run_payload is not None, live
+        run = json_object_payload(run_payload, label="live run")
+        assert run.get("retry") is None, live
+        _post_stop(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+        )
         payload = _wait_for_interrupted_partial(
             public_url=azents_public_server_url,
             token=workspace.token,
