@@ -63,7 +63,7 @@ def _wait_until(
     condition: Callable[[], bool],
     *,
     timeout: float,
-    message: str,
+    message: str | Callable[[], str],
 ) -> None:
     """Poll a product-visible condition until it succeeds."""
     deadline = time.monotonic() + timeout
@@ -71,7 +71,9 @@ def _wait_until(
         if condition():
             return
         time.sleep(0.05)
-    raise TimeoutError(message)
+    if isinstance(message, str):
+        raise TimeoutError(message)
+    raise TimeoutError(message())
 
 
 def _wait_for_idle_run_boundary(
@@ -177,6 +179,44 @@ def _wait_for_live_content(
     )
     assert observed is not None
     return observed
+
+
+def _wait_for_ws_live_content(
+    websocket: Connection,
+    *,
+    content: str,
+    timeout: float = 10,
+) -> dict[str, object]:
+    """Wait until one WebSocket live event contains the model partial marker."""
+    deadline = time.monotonic() + timeout
+    observed: list[object] = []
+    while time.monotonic() < deadline:
+        remaining = max(0.1, deadline - time.monotonic())
+        try:
+            action = wait_for_ws_action(
+                websocket,
+                action_type="live_event_upserted",
+                timeout=remaining,
+            )
+        except TimeoutError as exc:
+            raise TimeoutError(
+                f"WebSocket live content did not appear: {content!r}, {observed!r}"
+            ) from exc
+        event = json_object_payload(
+            action.get("event"),
+            label="WebSocket live event",
+        )
+        event_payload = json_object_payload(
+            event.get("payload"),
+            label="WebSocket live event payload",
+        )
+        event_content = event_payload.get("content")
+        observed.append(event_content)
+        if isinstance(event_content, str) and content in event_content:
+            return action
+    raise TimeoutError(
+        f"WebSocket live content did not appear: {content!r}, {observed!r}"
+    )
 
 
 def _wait_for_retry_without_content(
@@ -454,7 +494,7 @@ def _wait_for_interrupted_partial(
     _wait_until(
         interrupted,
         timeout=timeout,
-        message=f"interrupted partial did not become durable: {observed!r}",
+        message=lambda: f"interrupted partial did not become durable: {observed!r}",
     )
     assert observed is not None
     return observed
@@ -695,24 +735,36 @@ class TestModelStreamWatchdog:
             azents_public_server_url,
         )
         agent_id = create_agent(public_api_client, workspace)
-        result = run_message(
-            public_api_client=public_api_client,
-            public_url=azents_public_server_url,
+        session_id = team_primary_session_id(
+            server_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
-            message=_USER_STOP_PROMPT,
         )
-        _wait_for_live_content(
-            public_url=azents_public_server_url,
+        with connect_chat(
+            public_api_client=public_api_client,
+            server_url=azents_public_server_url,
             token=workspace.token,
-            session_id=result.session_id,
-            content=_USER_STOP_PARTIAL,
-        )
-        _post_stop(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-        )
+            session_id=session_id,
+        ) as websocket:
+            subscribed = wait_for_ws_action(websocket, action_type="subscribed")
+            assert subscribed.get("session_id") == session_id
+            result = run_message(
+                public_api_client=public_api_client,
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=session_id,
+                message=_USER_STOP_PROMPT,
+            )
+            _wait_for_ws_live_content(
+                websocket,
+                content=_USER_STOP_PARTIAL,
+            )
+            _post_stop(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=result.session_id,
+            )
         payload = _wait_for_interrupted_partial(
             public_url=azents_public_server_url,
             token=workspace.token,
