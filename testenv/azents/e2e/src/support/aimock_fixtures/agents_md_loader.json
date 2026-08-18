@@ -2044,36 +2044,6 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Watchdog user stop preserves partial",
-        "hasToolResult": false,
-        "turnIndex": 0
-      },
-      "response": {
-        "content": "WATCHDOG_STOP_PARTIAL abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
-      },
-      "chunkSize": 24,
-      "recordedTimings": {
-        "ttftMs": 0,
-        "interChunkDelaysMs": [
-          0,
-          0,
-          250,
-          250,
-          250,
-          250,
-          250,
-          250,
-          250,
-          250,
-          0,
-          0
-        ],
-        "totalDurationMs": 2000
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
         "systemMessage": "You are a context compaction engine for a long-running agent.",
         "userMessage": "Provider compaction failure seed",
         "sequenceIndex": 0
