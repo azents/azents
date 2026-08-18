@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.credentials import XaiOAuthConfig, XaiOAuthSecrets
 from azents.core.crypto import CredentialCipher
 from azents.core.deps import get_credential_cipher
-from azents.core.enums import LLMProvider
+from azents.core.enums import LLMCatalogLowererTarget, LLMProvider
 from azents.core.xai_oauth import (
     XaiOAuthConnectionMethod,
     XaiOAuthConnectionStatus,
@@ -20,6 +20,7 @@ from azents.core.xai_oauth import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationCreate
 from azents.repos.xai_oauth_session import XaiOAuthSessionRepository
@@ -88,12 +89,14 @@ class XaiOAuthService:
         integration_repo: Annotated[
             LLMProviderIntegrationRepository, Depends(_get_integration_repo)
         ],
+        catalog_repo: Annotated[LLMCatalogRepository, Depends(LLMCatalogRepository)],
         client: Annotated[XaiOAuthClient, Depends(_get_client)],
     ) -> None:
         """Inject service dependencies."""
         self._session_manager = session_manager
         self._session_repo = session_repo
         self._integration_repo = integration_repo
+        self._catalog_repo = catalog_repo
         self._client = client
 
     async def start_device(
@@ -307,6 +310,12 @@ class XaiOAuthService:
                                 last_refreshed_at=now,
                             ),
                         ),
+                    )
+                    await self._catalog_repo.ensure_integration_catalog(
+                        session,
+                        integration_id=integration.id,
+                        provider=integration.provider,
+                        lowerer_target=LLMCatalogLowererTarget.LITELLM,
                     )
                 return Success(XaiOAuthExchangeOutput(integration=integration))
             case Failure(error):

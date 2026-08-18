@@ -1,6 +1,7 @@
 """Provider-visible model listing adapter tests."""
 
 import datetime
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -18,6 +19,8 @@ from azents.core.credentials import (
     ChatGPTOAuthSecrets,
     KimiOAuthConfig,
     KimiOAuthSecrets,
+    XaiOAuthConfig,
+    XaiOAuthSecrets,
 )
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelModality, ModelReasoningEffort
@@ -93,6 +96,49 @@ def _kimi_integration() -> LLMProviderIntegrationWithSecrets:
     )
 
 
+def _xai_api_key_integration() -> LLMProviderIntegrationWithSecrets:
+    """Build one xAI developer API integration."""
+    now = datetime.datetime.now(datetime.UTC)
+    return LLMProviderIntegrationWithSecrets(
+        id="xai-integration-id",
+        workspace_id="workspace-id",
+        provider=LLMProvider.XAI,
+        name="xAI API key",
+        config=None,
+        enabled=True,
+        created_at=now,
+        updated_at=now,
+        secrets=ApiKeySecrets(api_key="xai-test-key"),
+    )
+
+
+def _xai_oauth_integration() -> LLMProviderIntegrationWithSecrets:
+    """Build one connected xAI OAuth integration."""
+    now = datetime.datetime.now(datetime.UTC)
+    return LLMProviderIntegrationWithSecrets(
+        id="xai-oauth-integration-id",
+        workspace_id="workspace-id",
+        provider=LLMProvider.XAI_OAUTH,
+        name="xAI Grok OAuth",
+        config=XaiOAuthConfig(
+            account_id="xai-account-id",
+            email="user@example.test",
+            connection_method="device",
+            status="connected",
+            connected_at=now,
+            last_refreshed_at=now,
+        ),
+        enabled=True,
+        created_at=now,
+        updated_at=now,
+        secrets=XaiOAuthSecrets(
+            access_token="xai-access-token",
+            refresh_token="xai-refresh-token",
+            expires_at=now + datetime.timedelta(hours=1),
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     ("code", "status_code", "blocked"),
     [
@@ -158,6 +204,192 @@ def test_invalid_provider_response_remains_retryable() -> None:
     assert not providers.automatic_retry_blocked_for_listing_error(
         providers.InvalidProviderResponseError("missing models")
     )
+
+
+class _FakeXaiModels:
+    async def list(self) -> SimpleNamespace:
+        """Return one API-key-visible model."""
+        return SimpleNamespace(
+            data=[
+                SimpleNamespace(
+                    id="grok-4.7-api",
+                    created=1_787_000_000,
+                    owned_by="xai",
+                )
+            ]
+        )
+
+
+class _FakeXaiSdkClient:
+    def __init__(self, *, api_key: str, base_url: str, timeout: float) -> None:
+        assert api_key == "xai-test-key"
+        assert base_url == providers.resolve_xai_api_base_url()
+        assert timeout == 20.0
+        self.models = _FakeXaiModels()
+
+    async def __aenter__(self) -> "_FakeXaiSdkClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        del args
+
+
+async def test_list_xai_api_key_models_uses_sdk_and_conservative_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use the SDK boundary without inventing omitted capabilities."""
+    monkeypatch.setattr(providers, "AsyncOpenAI", _FakeXaiSdkClient)
+
+    result = await providers.list_xai_models_for_integration(_xai_api_key_integration())
+
+    assert result.summary.source == "xai:developer_models"
+    assert result.summary.returned_count == 1
+    [candidate] = result.models
+    assert candidate.model_identifier == "grok-4.7-api"
+    assert candidate.model_developer == LLMModelDeveloper.XAI
+    assert candidate.normalized_capabilities.modalities.input == [ModelModality.TEXT]
+    assert candidate.normalized_capabilities.modalities.output == [ModelModality.TEXT]
+    assert candidate.normalized_capabilities.tool_calling.supported is False
+    assert candidate.normalized_capabilities.reasoning.supported is False
+    assert candidate.normalized_capabilities.built_in_tools.supported == []
+    assert candidate.source_metadata == {"created": 1_787_000_000}
+
+
+class _FakeXaiOAuthAsyncClient:
+    def __init__(self, *, timeout: float) -> None:
+        assert timeout == 20.0
+
+    async def __aenter__(self) -> "_FakeXaiOAuthAsyncClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        del args
+
+    async def get(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        assert url == f"{providers.resolve_xai_usage_base_url()}/models"
+        assert headers["Authorization"] == "Bearer xai-access-token"
+        assert headers["x-userid"] == "xai-account-id"
+        assert headers["X-XAI-Token-Auth"] == "xai-grok-cli"
+        assert headers["x-grok-client-version"] == providers.XAI_MODELS_CLIENT_VERSION
+        assert headers["x-grok-client-identifier"] == "grok-shell"
+        assert headers["x-grok-client-mode"] == "interactive"
+        return httpx.Response(
+            status_code=200,
+            request=httpx.Request("GET", url),
+            json={
+                "object": "list",
+                "data": [
+                    {
+                        "id": "grok-4.6",
+                        "model": "grok-4.6",
+                        "name": "Grok 4.6",
+                        "context_window": 500000,
+                        "api_backend": "responses",
+                        "supports_reasoning_effort": True,
+                        "reasoning_efforts": [
+                            {"id": "xhigh", "default": True},
+                            {"id": "high", "default": True},
+                            {"id": "medium"},
+                            {"id": "low"},
+                        ],
+                        "supports_backend_search": True,
+                        "auto_compact_threshold_percent": 90,
+                        "compaction_at_tokens": True,
+                        "show_model_fingerprint": True,
+                        "provider_instructions": "must not be persisted",
+                    },
+                    {
+                        "id": "grok-4.5",
+                        "context_window": 500000,
+                        "api_backend": "responses",
+                        "supports_reasoning_effort": True,
+                        "reasoning_efforts": [
+                            {"value": "high"},
+                            {"value": "medium"},
+                            {"value": "low"},
+                        ],
+                        "supports_backend_search": True,
+                    },
+                ],
+            },
+        )
+
+
+async def test_list_xai_oauth_models_projects_verified_account_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve provider-owned capabilities and discard unsafe unknown fields."""
+    monkeypatch.setattr(httpx, "AsyncClient", _FakeXaiOAuthAsyncClient)
+
+    result = await providers.list_xai_models_for_integration(_xai_oauth_integration())
+
+    assert result.summary.source == "xai_oauth:grok_models"
+    assert [model.model_identifier for model in result.models] == [
+        "grok-4.6",
+        "grok-4.5",
+    ]
+    current, previous = result.models
+    assert current.normalized_capabilities.context_window.max_input_tokens == 500000
+    assert current.normalized_capabilities.compatibility.responses_api is True
+    assert current.normalized_capabilities.reasoning.effort_levels == [
+        ModelReasoningEffort.LOW,
+        ModelReasoningEffort.MEDIUM,
+        ModelReasoningEffort.HIGH,
+        ModelReasoningEffort.XHIGH,
+    ]
+    assert current.normalized_capabilities.built_in_tools.supported == ["web_search"]
+    assert current.source_metadata is not None
+    assert "provider_instructions" not in current.source_metadata
+    assert current.source_metadata["auto_compact_threshold_percent"] == 90
+    assert previous.normalized_capabilities.reasoning.effort_levels == [
+        ModelReasoningEffort.LOW,
+        ModelReasoningEffort.MEDIUM,
+        ModelReasoningEffort.HIGH,
+    ]
+
+
+class _RejectedXaiOAuthAsyncClient:
+    def __init__(self, *, timeout: float) -> None:
+        assert timeout == 20.0
+
+    async def __aenter__(self) -> "_RejectedXaiOAuthAsyncClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        del args
+
+    async def get(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+    ) -> httpx.Response:
+        del headers
+        return httpx.Response(
+            status_code=403,
+            request=httpx.Request("GET", url),
+            json={"error": "token xai-access-token is not entitled"},
+        )
+
+
+async def test_xai_listing_failure_is_sanitized_and_classified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not persist provider bodies or credential values in listing errors."""
+    monkeypatch.setattr(httpx, "AsyncClient", _RejectedXaiOAuthAsyncClient)
+
+    with pytest.raises(providers.XaiListingProviderError) as caught:
+        await providers.list_xai_models_for_integration(_xai_oauth_integration())
+
+    assert caught.value.failure_code == "XaiEntitlementDenied"
+    assert caught.value.automatic_retry_blocked is True
+    assert str(caught.value) == "xAI model listing failed."
+    assert caught.value.__cause__ is None
 
 
 class _FakeAsyncClient:

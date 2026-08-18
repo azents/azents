@@ -76,14 +76,29 @@ from azents.services.kimi_oauth.data import (
 from azents.services.kimi_oauth.runtime import (
     ensure_runtime_tokens as ensure_kimi_runtime_tokens,
 )
-from azents.services.model_listing.data import ModelListingOutput
+from azents.services.model_listing.data import (
+    ModelListingOutput,
+    NormalizedModelCandidate,
+)
 from azents.services.model_listing.providers import (
     ListingProviderError,
+    XaiListingProviderError,
     list_bedrock_models_for_integration,
     list_chatgpt_models_for_integration,
     list_kimi_models_for_integration,
     list_openrouter_models_for_integration,
     list_vertex_models_for_integration,
+    list_xai_models_for_integration,
+)
+from azents.services.xai_oauth.data import (
+    ProviderEntitlementDenied as XaiProviderEntitlementDenied,
+)
+from azents.services.xai_oauth.data import ProviderRejected as XaiProviderRejected
+from azents.services.xai_oauth.data import (
+    ProviderUnavailable as XaiProviderUnavailable,
+)
+from azents.services.xai_oauth.runtime import (
+    ensure_runtime_tokens as ensure_xai_runtime_tokens,
 )
 from azents.testing.deterministic_model_listing import (
     build_deterministic_listing,
@@ -154,8 +169,6 @@ def _get_integration_repository(
 
 _SYSTEM_PROVIDER_TO_LITELLM_PROVIDER: dict[LLMProvider, tuple[str, ...]] = {
     LLMProvider.OPENAI: ("openai",),
-    LLMProvider.XAI: ("xai",),
-    LLMProvider.XAI_OAUTH: ("xai",),
     LLMProvider.ANTHROPIC: ("anthropic",),
     LLMProvider.GOOGLE_GEMINI: ("gemini",),
 }
@@ -1046,6 +1059,39 @@ class IntegrationCatalogProjectionService:
                             )
                         case _:
                             assert_never(error)
+            elif integration.provider == LLMProvider.XAI_OAUTH:
+                xai_token_result = await ensure_xai_runtime_tokens(
+                    integration=integration,
+                    integration_repository=self.integration_repository,
+                    session_manager=self.session_manager,
+                )
+                if xai_token_result.success:
+                    integration = xai_token_result.value
+                else:
+                    error = xai_token_result.error
+                    match error:
+                        case (
+                            XaiProviderRejected(reason=reason)
+                            | XaiProviderEntitlementDenied(reason=reason)
+                        ):
+                            raise ListingProviderError(
+                                reason,
+                                automatic_retry_blocked=True,
+                            )
+                        case XaiProviderUnavailable(reason=reason):
+                            raise ListingProviderError(
+                                reason,
+                                automatic_retry_blocked=False,
+                            )
+                        case _:
+                            assert_never(error)
+            if integration.provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+                try:
+                    source_snapshot = (
+                        await self.source_sync_service.get_authoritative_source()
+                    )
+                except LiteLLMSourceSyncError:
+                    source_snapshot = None
             listing = deterministic_listing or await _list_provider_visible_models(
                 integration
             )
@@ -1069,6 +1115,13 @@ class IntegrationCatalogProjectionService:
                 entries = project_openrouter_integration_entries(
                     integration_id=integration.id,
                     listing=listing,
+                )
+            elif integration.provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+                entries = project_xai_integration_entries(
+                    integration_id=integration.id,
+                    provider=integration.provider,
+                    listing=listing,
+                    source_snapshot=source_snapshot,
                 )
             else:
                 if source_snapshot is None:
@@ -1191,8 +1244,12 @@ class IntegrationCatalogProjectionService:
     ) -> SystemCatalogProjectionSummary:
         """Persist a provider failure and return its catalog state."""
         cause = error.__cause__
-        failure_code = type(cause).__name__ if cause else type(error).__name__
-        failure_message = str(cause or error)
+        if isinstance(error, XaiListingProviderError):
+            failure_code = error.failure_code
+            failure_message = str(error)
+        else:
+            failure_code = type(cause).__name__ if cause else type(error).__name__
+            failure_message = str(cause or error)
         automatic_retry_blocked = error.automatic_retry_blocked
         action_hint = (
             "Check integration credentials and provider permissions."
@@ -1367,6 +1424,8 @@ async def _list_provider_visible_models(
         return await list_kimi_models_for_integration(integration)
     if integration.provider == LLMProvider.OPENROUTER:
         return await list_openrouter_models_for_integration(integration)
+    if integration.provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}:
+        return await list_xai_models_for_integration(integration)
     if integration.provider == LLMProvider.GOOGLE_VERTEX_AI:
         return await list_vertex_models_for_integration(integration)
     raise RuntimeError("Unsupported integration catalog provider")
@@ -1529,6 +1588,142 @@ def project_openrouter_integration_entries(
             )
         )
     return entries
+
+
+def project_xai_integration_entries(
+    *,
+    integration_id: str,
+    provider: LLMProvider,
+    listing: ModelListingOutput,
+    source_snapshot: LiteLLMSourceSnapshot | None,
+) -> list[LLMCatalogEntryCreate]:
+    """Project provider-visible xAI models with optional LiteLLM enrichment."""
+    entries: list[LLMCatalogEntryCreate] = []
+    for candidate in listing.models:
+        source_key = f"xai/{candidate.model_identifier}"
+        metadata: dict[str, Any] | None = None
+        if source_snapshot is not None:
+            source_value = source_snapshot.payload.get(source_key)
+            if isinstance(source_value, dict):
+                metadata = source_value
+        try:
+            capabilities = _merge_xai_capabilities(
+                candidate=candidate,
+                provider=provider,
+                metadata=metadata,
+            )
+        except ValidationError:
+            metadata = None
+            capabilities = candidate.normalized_capabilities.model_copy(deep=True)
+        entries.append(
+            LLMCatalogEntryCreate(
+                provider=provider,
+                provider_model_identifier=candidate.model_identifier,
+                lowerer_target=LLMCatalogLowererTarget.LITELLM,
+                runtime_model_identifier=to_runtime_model(
+                    provider,
+                    candidate.model_identifier,
+                ),
+                display_name=candidate.model_display_name,
+                normalized_capabilities=capabilities.model_dump(mode="json"),
+                lifecycle_status=LLMModelLifecycleStatus.ACTIVE,
+                visibility_status=LLMCatalogEntryVisibility.SELECTABLE,
+                provider_integration_id=integration_id,
+                publisher=LLMModelDeveloper.XAI.value,
+                family=candidate.model_family,
+                source_metadata={
+                    "provider_listing_source": listing.summary.source,
+                    "provider_metadata": candidate.source_metadata,
+                    "target_projection_key": source_key,
+                    "target_metadata": _xai_enrichment_source_metadata(metadata),
+                    "source_hash": (
+                        source_snapshot.source_hash
+                        if source_snapshot is not None
+                        else None
+                    ),
+                },
+                projection_metadata={
+                    "lowerer_target": LLMCatalogLowererTarget.LITELLM.value,
+                    "target_metadata_match_required": False,
+                    "matched": metadata is not None,
+                    "freshness_rank": model_freshness_rank(candidate.model_identifier),
+                    "exact_projection_key": source_key,
+                },
+                hidden_reason=None,
+            )
+        )
+    return entries
+
+
+def _merge_xai_capabilities(
+    *,
+    candidate: NormalizedModelCandidate,
+    provider: LLMProvider,
+    metadata: dict[str, Any] | None,
+) -> ModelCapabilities:
+    """Fill xAI-omitted capability fields without overriding provider values."""
+    provider_capabilities = candidate.normalized_capabilities.model_copy(deep=True)
+    if metadata is None:
+        return provider_capabilities
+    enrichment = _capabilities_from_litellm_metadata(
+        metadata,
+        provider=provider,
+        model_identifier=candidate.model_identifier,
+    )
+    provider_metadata = candidate.source_metadata or {}
+
+    if "context_window" not in provider_metadata:
+        provider_capabilities.context_window.max_input_tokens = (
+            enrichment.context_window.max_input_tokens
+        )
+    provider_capabilities.context_window.max_output_tokens = (
+        enrichment.context_window.max_output_tokens
+    )
+    if "input_modalities" not in provider_metadata:
+        provider_capabilities.modalities.input = enrichment.modalities.input
+    provider_capabilities.modalities.output = enrichment.modalities.output
+    provider_capabilities.tool_calling = enrichment.tool_calling
+    if "supports_reasoning_effort" not in provider_metadata:
+        provider_capabilities.reasoning = enrichment.reasoning
+
+    provider_tools = set(provider_capabilities.built_in_tools.supported)
+    enrichment_tools = set(enrichment.built_in_tools.supported)
+    if "supports_backend_search" not in provider_metadata:
+        if "web_search" in enrichment_tools:
+            provider_tools.add("web_search")
+    elif provider_metadata["supports_backend_search"] is not True:
+        provider_tools.discard("web_search")
+    if "image_generation" in enrichment_tools:
+        provider_tools.add("image_generation")
+    provider_capabilities.built_in_tools.supported = [
+        tool for tool in ("web_search", "image_generation") if tool in provider_tools
+    ]
+    provider_capabilities.parameters = enrichment.parameters
+    if "api_backend" not in provider_metadata:
+        provider_capabilities.compatibility.responses_api = (
+            enrichment.compatibility.responses_api
+        )
+    return provider_capabilities
+
+
+def _xai_enrichment_source_metadata(
+    metadata: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Keep bounded LiteLLM pricing enrichment without raw source retention."""
+    if metadata is None:
+        return None
+    keys = (
+        "input_cost_per_token",
+        "output_cost_per_token",
+        "cache_read_input_token_cost",
+        "cache_creation_input_token_cost",
+        "input_cost_per_image",
+        "output_cost_per_image",
+        "input_cost_per_audio_token",
+        "output_cost_per_audio_token",
+    )
+    values = {key: metadata[key] for key in keys if key in metadata}
+    return values or None
 
 
 def project_integration_entries(
@@ -1708,6 +1903,11 @@ def _projection_diagnostics(
     exact_match_misses: list[str] = []
     for entry in entries:
         if entry.hidden_reason is None:
+            if (
+                entry.provider in {LLMProvider.XAI, LLMProvider.XAI_OAUTH}
+                and (entry.projection_metadata or {}).get("matched") is False
+            ):
+                exact_match_misses.append(entry.provider_model_identifier)
             continue
         hidden_reasons[entry.hidden_reason] = (
             hidden_reasons.get(entry.hidden_reason, 0) + 1

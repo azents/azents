@@ -12,6 +12,7 @@ XAI_OAUTH_TOKEN_URL = f"{XAI_OAUTH_ISSUER}/oauth2/token"
 XAI_OAUTH_SCOPE = "openid profile email offline_access api:access grok-cli:access"
 XAI_USAGE_BASE_URL = "https://cli-chat-proxy.grok.com/v1"
 XAI_USAGE_CLIENT_VERSION = "0.2.105"
+XAI_MODELS_CLIENT_VERSION = "1.0.5"
 
 
 def resolve_xai_usage_base_url() -> str:

@@ -17,7 +17,7 @@ Details of all living specs. Synchronized from frontmatter.
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-08-16 | 62 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-31 | 14 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
-| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-08-18 | 19 |
+| model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-08-18 | 20 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-13 | 26 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-08-18 | 4 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
@@ -47,5 +47,5 @@ Details of all living specs. Synchronized from frontmatter.
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-08-18 | 28 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-17 | 30 |
-| [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-08-13 | 3 |
-| [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-08-01 | 6 |
+| [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
+| [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-08-18 | 7 |

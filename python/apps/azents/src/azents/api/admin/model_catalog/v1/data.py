@@ -17,8 +17,6 @@ class SystemCatalogProvider(enum.StrEnum):
     """Provider with a system-owned model catalog."""
 
     OPENAI = LLMProvider.OPENAI.value
-    XAI = LLMProvider.XAI.value
-    XAI_OAUTH = LLMProvider.XAI_OAUTH.value
     ANTHROPIC = LLMProvider.ANTHROPIC.value
     GOOGLE_GEMINI = LLMProvider.GOOGLE_GEMINI.value
 

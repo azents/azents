@@ -8195,8 +8195,6 @@
         "type": "string",
         "enum": [
           "openai",
-          "xai",
-          "xai_oauth",
           "anthropic",
           "google_gemini"
         ],

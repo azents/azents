@@ -27,8 +27,6 @@ class SystemCatalogProvider(str, Enum):
     allowed enum values
     """
     OPENAI = 'openai'
-    XAI = 'xai'
-    XAI_OAUTH = 'xai_oauth'
     ANTHROPIC = 'anthropic'
     GOOGLE_GEMINI = 'google_gemini'
 

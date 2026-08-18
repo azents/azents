@@ -29,7 +29,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
 last_verified_at: 2026-08-18
-spec_version: 19
+spec_version: 20
 ---
 
 # Model Catalog Domain Spec
@@ -42,8 +42,8 @@ The model catalog stores projected model choices for Agent and Workspace model s
 
 Catalogs have two ownership scopes.
 
-- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, xAI API key, xAI OAuth, Anthropic, and Google Gemini using the active lowerer target projection source.
-- Integration catalog: scoped to a provider integration for providers whose visible models depend on customer credential, account, region, or project. Current user-scoped integration catalogs cover AWS Bedrock, ChatGPT OAuth, Google Vertex AI, and OpenRouter.
+- System catalog: managed by Azents for providers whose selectable models are not scoped to a customer integration. Current system catalogs cover OpenAI, Anthropic, and Google Gemini using the active lowerer target projection source.
+- Integration catalog: scoped to a provider integration for providers whose visible models depend on customer credential, account, region, or project. Current user-scoped integration catalogs cover AWS Bedrock, ChatGPT OAuth, xAI API key, xAI OAuth, Kimi OAuth, Google Vertex AI, and OpenRouter.
 
 An integration-scoped catalog is created in the same transaction as its provider integration. Public reads for integration-scoped providers use only that catalog and never fall back to a system catalog. For providers with system-owned model visibility, the picker resolves the provider system catalog through the enabled integration.
 
@@ -90,8 +90,11 @@ unchanged. Process restart does not reconstruct source authority from the
 process-local `litellm.model_cost` object. Bedrock and Vertex integration sync
 read the authoritative DB snapshot and never call the remote LiteLLM source.
 ChatGPT OAuth, Kimi OAuth, OpenRouter, and deterministic fixture projections do
-not require or attach a LiteLLM source snapshot. Historical content-addressed
-source snapshots are retained while their storage remains negligible; projection
+not require or attach a LiteLLM source snapshot. xAI integration projection may
+attach the latest authoritative snapshot for optional capability and pricing
+enrichment, but source absence or a model-key miss never blocks provider-authoritative
+visibility. Historical content-addressed source snapshots are retained while their
+storage remains negligible; projection
 snapshots continue to retain only the current successful version. A newly started
 source attempt terminalizes any unfinished earlier source attempt before remote
 work begins.
@@ -99,6 +102,8 @@ work begins.
 ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, reasoning efforts, modalities, and context window. Request-dialect hints are excluded from normalized capabilities and stored projection metadata. Following Codex's provider-level capability policy, every API-supported and picker-visible ChatGPT OAuth model is projected with the semantic `web_search` built-in tool capability. `image_generation` is projected only from an explicit trusted source flag or the maintained OpenAI-family model support policy shared with OpenAI system catalog projection. ChatGPT entries do not require a matching LiteLLM model metadata key or source snapshot.
 
 OpenRouter integration catalogs fetch the authenticated account-visible text-output model list from the fixed OpenRouter `/models/user` endpoint. Every valid returned model is eligible for direct projection without a model, publisher, family, upstream-provider, or LiteLLM metadata allowlist. Exact provider identifiers are preserved and receive the `openrouter/` runtime prefix. Recognized publisher aliases map to the canonical model developer; an unrecognized publisher maps to `other` and never falls back to Anthropic. OpenRouter capabilities remain conservative: missing or unverified metadata disables an individual capability rather than hiding the model. The initial projection can advertise text and verified image input, text output, function tools, reasoning, standard parameters, and semantic `web_search`; it does not advertise PDF, audio, video, image generation, prompt caching, or strict structured output.
+
+xAI API-key integration catalogs call the configured developer API through the installed OpenAI-compatible SDK. xAI OAuth integration catalogs refresh the stored OAuth credential when required and then call the authenticated Grok CLI proxy model endpoint with the pinned CLI request identity. Each response is authoritative only for that integration, so API-key and OAuth integrations may publish different model sets. Every valid provider-listed model remains selectable without a LiteLLM match. Provider-supplied context window, reasoning-effort, backend-search, and Responses-backend values take precedence; an exact `xai/<model>` LiteLLM entry or expanded alias may fill omitted capability fields and bounded pricing metadata. Missing source authority and exact-match misses remain diagnostic and leave unknown capabilities disabled.
 
 Reasoning capabilities are projected from LiteLLM's canonical provider model metadata schema. Explicit effort levels are reconstructed in the deterministic order `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. The optional `none`, `minimal`, `xhigh`, and `max` levels follow their corresponding LiteLLM support flags. Every model marked as reasoning-capable receives the baseline `low`, `medium`, and `high` levels, except that an explicit `supports_low_reasoning_effort: false` removes `low`. A model with no projected effort levels allows no explicit effort override; an empty list is not interpreted as unrestricted support.
 
@@ -129,7 +134,7 @@ The read path must not call provider listing APIs, models.dev, or remote LiteLLM
 
 The integration catalog sync endpoint refreshes the stored catalog for one integration.
 
-For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored LiteLLM source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. For Kimi OAuth, sync refreshes the token when necessary, calls the authenticated Kimi Code model endpoint with the encrypted device identity, and directly projects valid account-visible models. For OpenRouter, sync calls the fixed authenticated account-model endpoint and projects every valid text-output model directly without requiring a LiteLLM metadata match.
+For AWS Bedrock and Google Vertex AI, sync fetches the provider-visible model list and projects it against the stored LiteLLM source snapshot. For ChatGPT OAuth, sync refreshes the OAuth token when necessary, calls the account-scoped Codex model endpoint with the fixed compatibility client version, and projects backend-visible models directly. For xAI API key, sync calls the developer model endpoint with that integration's key. For xAI OAuth, sync refreshes the token when necessary and calls the Grok account model endpoint. Both xAI paths project provider visibility directly and use LiteLLM only as optional fill-only enrichment. For Kimi OAuth, sync refreshes the token when necessary, calls the authenticated Kimi Code model endpoint with the encrypted device identity, and directly projects valid account-visible models. For OpenRouter, sync calls the fixed authenticated account-model endpoint and projects every valid text-output model directly without requiring a LiteLLM metadata match.
 
 Integration catalog synchronization has four triggers:
 
@@ -150,7 +155,7 @@ The picker disables sync while its mutation is pending, while an attempt is runn
 
 The deterministic E2E fixture integration participates in create/update background triggers so stable product tests can verify the lifecycle without live provider credentials. This fixture support is not a production provider behavior.
 
-System catalog sync is not user-triggered from the public picker. It is invoked by periodic execution infrastructure and can be operated separately from normal user reads. Admin model catalog operations can list system catalog states, refresh all supported system catalogs, or refresh one supported provider catalog, including the stable `xai` catalog. Every Admin model-catalog operation requires an authenticated Azents user bearer token with a live persisted `system_admin` assignment; no shared machine credential or unauthenticated mode is supported.
+System catalog sync is not user-triggered from the public picker. It is invoked by periodic execution infrastructure and can be operated separately from normal user reads. Admin model catalog operations can list system catalog states, refresh all supported system catalogs, or refresh one supported system provider catalog. xAI catalogs are integration-owned and are refreshed only through the public integration lifecycle. Every Admin model-catalog operation requires an authenticated Azents user bearer token with a live persisted `system_admin` assignment; no shared machine credential or unauthenticated mode is supported.
 
 ## Submit normalization
 
@@ -180,6 +185,7 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-08-18 | 20 | Replaced xAI system catalogs with credential-specific integration discovery and optional fill-only LiteLLM enrichment |
 | 2026-08-18 | 19 | Made explicitly validated remote LiteLLM DB snapshots authoritative, quarantined fallback/malformed/materially smaller sources, and removed remote source fetching from integration sync |
 | 2026-08-01 | 18 | Split Workspace model selection and LLM integration settings into focused routes and containers while preserving catalog query, sync, and submit authority |
 | 2026-07-21 | 17 | Clarified that provider-request declaration limits apply whenever the Agent has Tool Search enabled, which is the default for newly created Agents |
@@ -201,4 +207,4 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 ## Current implementation notes
 
-The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use the latest explicitly validated remote LiteLLM DB snapshot for the active lowerer target. The process-local or package-bundled LiteLLM model map is diagnostic fallback data only and cannot replace source authority. ChatGPT OAuth has no system catalog; its account-scoped integration catalog is the only model-visibility source. OpenRouter also has no system catalog; its authenticated integration catalog is authoritative for model visibility and does not require LiteLLM metadata matching. The separate `xai` and `xai_oauth` system catalogs are both projected from LiteLLM provider family `xai`; provider-facing model identifiers remove the `xai/` prefix, and runtime invocation reconstructs the LiteLLM `xai/` route prefix.
+The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use the latest explicitly validated remote LiteLLM DB snapshot for the active lowerer target. The process-local or package-bundled LiteLLM model map is diagnostic fallback data only and cannot replace source authority. ChatGPT OAuth, OpenRouter, xAI API key, and xAI OAuth have no system catalog; their authenticated integration catalogs are authoritative for model visibility. The xAI projections may enrich provider-visible models from an exact or expanded-alias LiteLLM `xai/<model>` entry without requiring a match. Provider-facing xAI model identifiers omit the `xai/` prefix, and runtime invocation reconstructs the LiteLLM route prefix.
