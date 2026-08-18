@@ -363,6 +363,67 @@ class TestAgentSessionRepository:
             assert context.agent_runtime_id == runtime.id
             assert context.binding_state is SessionWorkingFolderBindingState.PENDING
 
+    async def test_lock_by_id_acquires_agent_parent_before_session(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """An Agent writer cannot deadlock with a concurrent Session lock."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        repository = AgentSessionRepository()
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
+            workspace_id = await _create_workspace(
+                setup_session,
+                f"session-parent-lock-order-{suffix}",
+            )
+            agent_id = await _create_agent(
+                setup_session,
+                workspace_id,
+                f"session-parent-lock-order-{suffix}",
+            )
+            created = await repository.create(
+                setup_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            await setup_session.commit()
+
+        async def lock_session() -> str:
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as competing_session:
+                locked = await repository.lock_by_id(competing_session, created.id)
+                assert locked is not None
+                await competing_session.commit()
+                return locked.id
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as agent_holder:
+            locked_agent_id = await agent_holder.scalar(
+                sa.select(RDBAgent.id).where(RDBAgent.id == agent_id).with_for_update()
+            )
+            assert locked_agent_id == agent_id
+            competing_lock = asyncio.create_task(lock_session())
+            await asyncio.sleep(0.1)
+
+            locked = await asyncio.wait_for(
+                repository.lock_by_id(agent_holder, created.id),
+                timeout=5,
+            )
+            assert locked is not None
+            await agent_holder.commit()
+
+        assert await asyncio.wait_for(competing_lock, timeout=5) == created.id
+
     async def test_root_context_rejects_runtime_removing(
         self,
         rdb_session: AsyncSession,

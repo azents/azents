@@ -326,6 +326,69 @@ class TestEventExecutionRepositories:
 
         assert stored_session.last_user_input_at == newer
 
+    async def test_mailbox_batch_advances_session_projections_monotonically(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Advance both Session recency projections from one inserted batch."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            handle="batch-session-projections-ws",
+        )
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repository = EventTranscriptRepository()
+        user_event = await repository.append_with_deferred_session_projections(
+            rdb_session,
+            EventCreate(
+                session_id=event_session.id,
+                kind=EventKind.USER_MESSAGE,
+                payload=UserMessagePayload(
+                    sender_user_id=None,
+                    content="Start the batch",
+                ).model_dump(mode="json"),
+                external_id="batch-user-event",
+            ),
+        )
+        action_event = await repository.append_with_deferred_session_projections(
+            rdb_session,
+            EventCreate(
+                session_id=event_session.id,
+                kind=EventKind.ACTION_MESSAGE,
+                payload=ActionMessagePayload(
+                    sender_user_id=None,
+                    action=GoalAction(),
+                    message="Track the batch.",
+                ).model_dump(mode="json"),
+                external_id="batch-action-event",
+            ),
+        )
+
+        await repository.advance_session_projections(
+            rdb_session,
+            session_id=event_session.id,
+            events=[user_event, action_event],
+        )
+        await repository.advance_session_projections(
+            rdb_session,
+            session_id=event_session.id,
+            events=[user_event],
+        )
+        stored_session = await rdb_session.get(RDBAgentSession, event_session.id)
+        assert stored_session is not None
+        await rdb_session.refresh(stored_session)
+
+        assert stored_session.last_user_input_at == user_event.created_at
+        assert stored_session.last_activity_at == action_event.created_at
+
     async def test_action_message_updates_last_activity_at(
         self,
         rdb_session: AsyncSession,

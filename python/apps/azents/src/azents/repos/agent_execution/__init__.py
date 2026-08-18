@@ -38,6 +38,7 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
 from azents.rdb.models.event import JSONValue, RDBEvent
 from azents.rdb.models.session_agent import RDBSessionAgent
+from azents.repos.agent_session import AgentSessionRepository
 
 from .data import (
     AgentRunCreate,
@@ -124,7 +125,7 @@ class EventTranscriptRepository:
             return await self._append_with_external_id(
                 session,
                 create,
-                update_last_user_input_at=True,
+                update_session_projections=True,
             )
 
         payload = _validate_payload(create.kind, create.payload)
@@ -147,22 +148,26 @@ class EventTranscriptRepository:
         )
         session.add(rdb)
         await session.flush()
-        await self._update_session_last_user_input_at(session, rdb)
-        await self._update_session_last_activity_at(session, rdb)
-        return self._build(rdb)
+        event = self._build(rdb)
+        await self.advance_session_projections(
+            session,
+            session_id=event.session_id,
+            events=[event],
+        )
+        return event
 
-    async def append_with_deferred_last_user_input_at(
+    async def append_with_deferred_session_projections(
         self,
         session: AsyncSession,
         create: EventCreate,
     ) -> Event:
-        """Append an idempotent event while deferring its user-input projection."""
+        """Append an idempotent event while deferring Session projections."""
         if create.external_id is None:
-            raise ValueError("Deferred user-input projection requires External ID")
+            raise ValueError("Deferred Session projections require External ID")
         return await self._append_with_external_id(
             session,
             create,
-            update_last_user_input_at=False,
+            update_session_projections=False,
         )
 
     async def _append_with_external_id(
@@ -170,7 +175,7 @@ class EventTranscriptRepository:
         session: AsyncSession,
         create: EventCreate,
         *,
-        update_last_user_input_at: bool,
+        update_session_projections: bool,
     ) -> Event:
         """Atomically append event with External ID."""
         external_id = create.external_id
@@ -209,10 +214,14 @@ class EventTranscriptRepository:
         inserted = result.scalar_one_or_none()
         if inserted is not None:
             await session.flush()
-            if update_last_user_input_at:
-                await self._update_session_last_user_input_at(session, inserted)
-            await self._update_session_last_activity_at(session, inserted)
-            return self._build(inserted)
+            event = self._build(inserted)
+            if update_session_projections:
+                await self.advance_session_projections(
+                    session,
+                    session_id=event.session_id,
+                    events=[event],
+                )
+            return event
 
         existing = await self.get_by_external_id(
             session,
@@ -223,23 +232,6 @@ class EventTranscriptRepository:
             raise RuntimeError("Event idempotent append failed")
         return existing
 
-    async def _update_session_last_user_input_at(
-        self,
-        session: AsyncSession,
-        event: RDBEvent,
-    ) -> None:
-        """Update AgentSession latest user input timestamp for user messages."""
-        if event.kind not in {
-            EventKind.USER_MESSAGE,
-            EventKind.EXTERNAL_CHANNEL_MESSAGE,
-        }:
-            return
-        await self.advance_session_last_user_input_at(
-            session,
-            session_id=event.session_id,
-            created_at=event.created_at,
-        )
-
     async def advance_session_last_user_input_at(
         self,
         session: AsyncSession,
@@ -248,6 +240,11 @@ class EventTranscriptRepository:
         created_at: datetime.datetime,
     ) -> None:
         """Advance the Session user-input projection monotonically."""
+        if not await AgentSessionRepository().lock_agent_parent_for_session(
+            session,
+            session_id,
+        ):
+            return
         await session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
@@ -260,21 +257,56 @@ class EventTranscriptRepository:
         )
         await session.flush()
 
-    async def _update_session_last_activity_at(
+    async def advance_session_projections(
         self,
         session: AsyncSession,
-        event: RDBEvent,
+        *,
+        session_id: str,
+        events: Sequence[Event],
     ) -> None:
-        """Advance the Session activity projection for qualifying durable events."""
-        if event.kind not in _ACTIVITY_EVENT_KINDS:
+        """Advance Session recency projections once for one inserted event batch."""
+        latest_user_input_at = max(
+            (
+                event.created_at
+                for event in events
+                if event.kind
+                in {
+                    EventKind.USER_MESSAGE,
+                    EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                }
+            ),
+            default=None,
+        )
+        latest_activity_at = max(
+            (
+                event.created_at
+                for event in events
+                if event.kind in _ACTIVITY_EVENT_KINDS
+            ),
+            default=None,
+        )
+        values: dict[str, object] = {}
+        if latest_user_input_at is not None:
+            values["last_user_input_at"] = sa.func.greatest(
+                RDBAgentSession.last_user_input_at,
+                latest_user_input_at,
+            )
+        if latest_activity_at is not None:
+            values["last_activity_at"] = sa.func.greatest(
+                RDBAgentSession.last_activity_at,
+                latest_activity_at,
+            )
+        if not values:
+            return
+        if not await AgentSessionRepository().lock_agent_parent_for_session(
+            session,
+            session_id,
+        ):
             return
         await session.execute(
             sa.update(RDBAgentSession)
-            .where(
-                RDBAgentSession.id == event.session_id,
-                RDBAgentSession.last_activity_at < event.created_at,
-            )
-            .values(last_activity_at=event.created_at)
+            .where(RDBAgentSession.id == session_id)
+            .values(**values)
         )
         await session.flush()
 

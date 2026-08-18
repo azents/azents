@@ -1,5 +1,6 @@
 """DB-only effective-target admission tests."""
 
+import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
@@ -10,9 +11,12 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionStatus,
     ExternalChannelAppMode,
     ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
+    ExternalChannelIngressAuthorityKind,
+    ExternalChannelIngressProfile,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
@@ -132,10 +136,19 @@ def _request(
                 expected_file_count=None,
             ),
             scope=SimpleNamespace(
+                connection_id="connection-1",
                 kind=ExternalChannelConversationScopeKind.THREAD,
                 provider_channel_id="thread-1",
                 provider_thread_key="thread-1",
             ),
+            authority=SimpleNamespace(
+                ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+                configuration_generation=1,
+                kind=ExternalChannelIngressAuthorityKind.LEASE,
+                lease_owner="lease-owner-1",
+                lease_generation=1,
+            ),
+            initial_title_eligible=False,
         ),
     )
 
@@ -287,6 +300,87 @@ async def test_unbound_all_messages_non_invocation_stops_before_queue(
     commit.assert_awaited_once()
     repository.create_principal_idempotent.assert_not_awaited()
     queue_repository.admit.assert_not_awaited()
+
+
+async def test_bound_trigger_checks_session_without_row_lock() -> None:
+    """Queue admission reads Session availability without serializing the row."""
+    commit = AsyncMock()
+    session = cast(AsyncSession, SimpleNamespace(commit=commit))
+    repository = MagicMock()
+    repository.create_principal_idempotent = AsyncMock(
+        return_value=SimpleNamespace(id="principal-1")
+    )
+    repository.get_active_block = AsyncMock(return_value=None)
+    repository.get_active_access_grant = AsyncMock(return_value=SimpleNamespace())
+    repository.create_conversation_position_idempotent = AsyncMock(
+        return_value=SimpleNamespace(id="position-1")
+    )
+    queue_repository = MagicMock()
+    queue_repository.admit = AsyncMock(
+        return_value=SimpleNamespace(
+            owner=SimpleNamespace(
+                id="owner-1",
+                created_at=datetime.datetime.now(datetime.UTC),
+            ),
+            created=True,
+            replaced_stale_owner=False,
+        )
+    )
+    service = _service(
+        repository,
+        session_manager=_session_manager(session),
+        queue_repository=queue_repository,
+    )
+    service.agent_session_repository = MagicMock()
+    service.agent_session_repository.get_by_id = AsyncMock(
+        return_value=SimpleNamespace(
+            status=AgentSessionStatus.ACTIVE,
+            stop_requested_at=None,
+        )
+    )
+    service.agent_session_repository.lock_by_id = AsyncMock()
+    service._submit = AsyncMock()  # noqa: SLF001
+    source = _resource("source-1", ExternalChannelResourceType.THREAD)
+    route = _route().model_copy(update={"open_access_enabled": False})
+    target = SimpleNamespace(
+        resource=source,
+        route=route,
+        setting=None,
+        binding=_binding(ExternalChannelResponseMode.ALL_MESSAGES),
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+    )
+
+    with (
+        patch.object(
+            ExternalChannelIngressAdmissionService,
+            "_lock_authority",
+            new=AsyncMock(return_value=_connection()),
+        ),
+        patch.object(
+            ExternalChannelIngressAdmissionService,
+            "_ensure_source_resource",
+            new=AsyncMock(return_value=source),
+        ),
+        patch.object(
+            ExternalChannelIngressAdmissionService,
+            "_resolve_target",
+            new=AsyncMock(return_value=cast(Any, target)),
+        ),
+    ):
+        outcome = await service.admit_current_trigger(
+            provider_event_id="event-1",
+            request=_request(),
+        )
+
+    assert outcome is not None
+    assert outcome.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
+    service.agent_session_repository.get_by_id.assert_awaited_once_with(
+        session,
+        "session-1",
+    )
+    service.agent_session_repository.lock_by_id.assert_not_awaited()
+    queue_repository.admit.assert_awaited_once()
+    commit.assert_awaited_once()
 
 
 async def test_discord_channel_location_keeps_thread_as_owner_target() -> None:

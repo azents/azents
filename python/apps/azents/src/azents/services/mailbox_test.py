@@ -1616,12 +1616,12 @@ class TestMailboxService:
     """Validate MailboxService behavior."""
 
     async def test_mailbox_batch_advances_last_user_input_once(self) -> None:
-        """Multiple promoted inputs share one maximum-timestamp update."""
+        """Multiple promoted inputs share one Session projection update."""
         repository = MagicMock(spec=EventTranscriptRepository)
         repository.get_by_external_id = AsyncMock(return_value=None)
         first_at = datetime.datetime(2026, 8, 17, 12, 0, tzinfo=datetime.UTC)
         second_at = first_at + datetime.timedelta(seconds=1)
-        repository.append_with_deferred_last_user_input_at = AsyncMock(
+        repository.append_with_deferred_session_projections = AsyncMock(
             side_effect=[
                 SimpleNamespace(
                     id="event-1",
@@ -1635,7 +1635,7 @@ class TestMailboxService:
                 ),
             ]
         )
-        repository.advance_session_last_user_input_at = AsyncMock()
+        repository.advance_session_projections = AsyncMock()
         service = _mailbox_item_service(
             _unit_session_manager,
             event_transcript_repository=repository,
@@ -1671,12 +1671,50 @@ class TestMailboxService:
         )
 
         assert [event.id for event in inserted] == ["event-1", "event-2"]
-        assert repository.append_with_deferred_last_user_input_at.await_count == 2
-        repository.advance_session_last_user_input_at.assert_awaited_once_with(
+        assert repository.append_with_deferred_session_projections.await_count == 2
+        repository.advance_session_projections.assert_awaited_once_with(
             session,
             session_id="session-1",
-            created_at=second_at,
+            events=inserted,
         )
+
+    async def test_deduplicated_mailbox_batch_skips_session_projection_update(
+        self,
+    ) -> None:
+        """Replayed mailbox events do not advance Session projections again."""
+        repository = MagicMock(spec=EventTranscriptRepository)
+        repository.get_by_external_id = AsyncMock(
+            return_value=SimpleNamespace(id="existing-event")
+        )
+        repository.append_with_deferred_session_projections = AsyncMock()
+        repository.advance_session_projections = AsyncMock()
+        service = _mailbox_item_service(
+            _unit_session_manager,
+            event_transcript_repository=repository,
+        )
+        session = AsyncMock(spec=AsyncSession)
+        promoted = [
+            SimpleNamespace(
+                external_id="external-1",
+                event_kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                payload={},
+                item_key=None,
+                buffer=SimpleNamespace(
+                    id="buffer-1",
+                    presentation=SimpleNamespace(item_key=None),
+                ),
+            )
+        ]
+
+        inserted = await service._append_mailbox_item_events(  # noqa: SLF001
+            session,
+            "session-1",
+            cast(Any, promoted),
+        )
+
+        assert inserted == []
+        repository.append_with_deferred_session_projections.assert_not_awaited()
+        repository.advance_session_projections.assert_not_awaited()
 
     async def test_flush_admits_agent_remove_as_operation_action(
         self,
@@ -2380,7 +2418,7 @@ class TestMailboxService:
         event_repository = EventTranscriptRepository()
         monkeypatch.setattr(
             event_repository,
-            "append_with_deferred_last_user_input_at",
+            "append_with_deferred_session_projections",
             AsyncMock(side_effect=RuntimeError("event append failed")),
         )
         service = _mailbox_item_service(

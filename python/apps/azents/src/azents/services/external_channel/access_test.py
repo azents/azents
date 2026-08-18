@@ -431,12 +431,13 @@ async def test_allow_rejects_existing_binding_with_stopping_session() -> None:
     repository.lock_resource = AsyncMock(return_value=resource)
     repository.lock_connected_binding_by_resource = AsyncMock(return_value=binding)
     agent_session_repository = MagicMock()
-    agent_session_repository.lock_by_id = AsyncMock(
+    agent_session_repository.get_by_id = AsyncMock(
         return_value=SimpleNamespace(
             status=AgentSessionStatus.ACTIVE,
             stop_requested_at=now,
         )
     )
+    agent_session_repository.lock_by_id = AsyncMock()
     provisioning = MagicMock()
     provisioning.prepare = AsyncMock()
     service = ExternalChannelAccessService(
@@ -462,5 +463,6 @@ async def test_allow_rejects_existing_binding_with_stopping_session() -> None:
             now=now,
         )
 
-    agent_session_repository.lock_by_id.assert_awaited_once()
+    agent_session_repository.get_by_id.assert_awaited_once()
+    agent_session_repository.lock_by_id.assert_not_awaited()
     provisioning.prepare.assert_not_awaited()

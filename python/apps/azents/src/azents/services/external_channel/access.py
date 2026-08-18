@@ -459,7 +459,7 @@ class ExternalChannelAccessService:
                     raise ExternalChannelAccessDecisionError(
                         "The external conversation is already bound to another route."
                     )
-                target_session = await self.agent_session_repository.lock_by_id(
+                target_session = await self.agent_session_repository.get_by_id(
                     session,
                     binding.agent_session_id,
                 )

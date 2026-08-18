@@ -101,8 +101,8 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-last_verified_at: 2026-08-16
-spec_version: 149
+last_verified_at: 2026-08-18
+spec_version: 150
 ---
 
 # Conversation & Events
@@ -352,8 +352,11 @@ an Agent.
 
 Every Session has a non-null `last_activity_at` baseline and a root-level `pinned` flag. Durable user,
 Agent, and tool transcript events advance `last_activity_at` monotonically; list ordering remains
-based on the separate user-input projection. An Agent's positive `auto_archive_ttl_days` configuration
-defaults to 30 days. The `session_auto_archive` scheduler task considers only active, non-primary,
+based on the separate user-input projection. One mailbox promotion batch advances both projections
+with one conditional Session update based only on newly inserted events. Session updates and retained
+Session row locks acquire the referenced Agent in FK-compatible `KEY SHARE` mode first, preserving one
+`Agent -> AgentSession` lock order across input admission and promotion. An Agent's positive
+`auto_archive_ttl_days` configuration defaults to 30 days. The `session_auto_archive` scheduler task considers only active, non-primary,
 unpinned root Sessions, locks each complete tree, and rechecks the current Agent TTL, root pin,
 maximum `last_activity_at` across all tree Sessions, subtree run state, and active runs. A tree is
 eligible only when its maximum activity is at least the configured TTL in the past. It then invokes
@@ -1179,6 +1182,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-08-18** — v150. Batched mailbox recency projections into one monotonic
+  Session update and established Agent-before-Session FK lock ordering for input
+  admission and promotion.
 - **2026-08-16** — v149. Added typed Scheduled Task trigger, continuation, and
   result Mailbox/Event/history/live projection contracts and exact Run-cycle
   binding at promotion.
