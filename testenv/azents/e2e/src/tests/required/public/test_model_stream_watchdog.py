@@ -63,7 +63,7 @@ def _wait_until(
     condition: Callable[[], bool],
     *,
     timeout: float,
-    message: str,
+    message: str | Callable[[], str],
 ) -> None:
     """Poll a product-visible condition until it succeeds."""
     deadline = time.monotonic() + timeout
@@ -71,7 +71,9 @@ def _wait_until(
         if condition():
             return
         time.sleep(0.05)
-    raise TimeoutError(message)
+    if isinstance(message, str):
+        raise TimeoutError(message)
+    raise TimeoutError(message())
 
 
 def _wait_for_idle_run_boundary(
@@ -173,7 +175,7 @@ def _wait_for_live_content(
     _wait_until(
         content_visible,
         timeout=timeout,
-        message=f"live content did not appear: {content!r}, {observed!r}",
+        message=lambda: f"live content did not appear: {content!r}, {observed!r}",
     )
     assert observed is not None
     return observed
@@ -454,7 +456,7 @@ def _wait_for_interrupted_partial(
     _wait_until(
         interrupted,
         timeout=timeout,
-        message=f"interrupted partial did not become durable: {observed!r}",
+        message=lambda: f"interrupted partial did not become durable: {observed!r}",
     )
     assert observed is not None
     return observed
@@ -695,19 +697,29 @@ class TestModelStreamWatchdog:
             azents_public_server_url,
         )
         agent_id = create_agent(public_api_client, workspace)
+        session_id = team_primary_session_id(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+        )
         result = run_message(
             public_api_client=public_api_client,
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
+            session_id=session_id,
             message=_USER_STOP_PROMPT,
         )
-        _wait_for_live_content(
+        live = _wait_for_live_content(
             public_url=azents_public_server_url,
             token=workspace.token,
             session_id=result.session_id,
             content=_USER_STOP_PARTIAL,
         )
+        run_payload = live.get("run")
+        assert run_payload is not None, live
+        run = json_object_payload(run_payload, label="live run")
+        assert run.get("retry") is None, live
         _post_stop(
             public_url=azents_public_server_url,
             token=workspace.token,

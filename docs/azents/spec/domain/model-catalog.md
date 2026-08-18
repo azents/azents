@@ -28,8 +28,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/containers/useWorkspaceModelSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-08-01
-spec_version: 18
+last_verified_at: 2026-08-18
+spec_version: 19
 ---
 
 # Model Catalog Domain Spec
@@ -69,9 +69,34 @@ Only entries with selectable visibility are returned by the public picker list A
 
 ## Source snapshots and sync attempts
 
-LiteLLM is the current lowerer target projection source. The source sync service records LiteLLM source snapshots before projection. System and integration projections use the stored LiteLLM source snapshot rather than fetching external model metadata from the picker read path.
+LiteLLM is the current lowerer target projection source. System synchronization
+fetches the configured `LITELLM_MODEL_COST_MAP_URL` through an explicit source
+ingestion boundary, validates the JSON object, expands LiteLLM model aliases, and
+records a source-only sync attempt before any system projection is replaced. A
+successful attempt stores or
+promotes a content-addressed snapshot with `remote` provenance, source URL, fetch
+time, content hash, model count, LiteLLM package version, and payload.
 
-ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, reasoning efforts, modalities, and context window. Request-dialect hints are excluded from normalized capabilities and stored projection metadata. Following Codex's provider-level capability policy, every API-supported and picker-visible ChatGPT OAuth model is projected with the semantic `web_search` built-in tool capability. `image_generation` is projected only from an explicit trusted source flag or the maintained OpenAI-family model support policy shared with OpenAI system catalog projection. ChatGPT entries do not require a matching LiteLLM model metadata key; the LiteLLM source snapshot remains attached to the catalog snapshot because the existing lowerer-target catalog lifecycle requires one.
+The latest validated remote DB snapshot is authoritative. A transport failure,
+malformed payload, or bundled package fallback records a failed source attempt with
+the fallback count, hash, package version, and failure reason but does not publish
+the fallback as source authority. An unexplained reduction of at least 50 models
+and at least two percent from the current authoritative snapshot is quarantined in
+the same way. Source attempt diagnostics record the complete added and removed
+model identifier sets plus provider-level count changes before publication.
+
+Failed or blocked source ingestion leaves existing system catalog snapshots
+unchanged. Process restart does not reconstruct source authority from the
+process-local `litellm.model_cost` object. Bedrock and Vertex integration sync
+read the authoritative DB snapshot and never call the remote LiteLLM source.
+ChatGPT OAuth, Kimi OAuth, OpenRouter, and deterministic fixture projections do
+not require or attach a LiteLLM source snapshot. Historical content-addressed
+source snapshots are retained while their storage remains negligible; projection
+snapshots continue to retain only the current successful version. A newly started
+source attempt terminalizes any unfinished earlier source attempt before remote
+work begins.
+
+ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, reasoning efforts, modalities, and context window. Request-dialect hints are excluded from normalized capabilities and stored projection metadata. Following Codex's provider-level capability policy, every API-supported and picker-visible ChatGPT OAuth model is projected with the semantic `web_search` built-in tool capability. `image_generation` is projected only from an explicit trusted source flag or the maintained OpenAI-family model support policy shared with OpenAI system catalog projection. ChatGPT entries do not require a matching LiteLLM model metadata key or source snapshot.
 
 OpenRouter integration catalogs fetch the authenticated account-visible text-output model list from the fixed OpenRouter `/models/user` endpoint. Every valid returned model is eligible for direct projection without a model, publisher, family, upstream-provider, or LiteLLM metadata allowlist. Exact provider identifiers are preserved and receive the `openrouter/` runtime prefix. Recognized publisher aliases map to the canonical model developer; an unrecognized publisher maps to `other` and never falls back to Anthropic. OpenRouter capabilities remain conservative: missing or unverified metadata disables an individual capability rather than hiding the model. The initial projection can advertise text and verified image input, text output, function tools, reasoning, standard parameters, and semantic `web_search`; it does not advertise PDF, audio, video, image generation, prompt caching, or strict structured output.
 
@@ -155,6 +180,7 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-08-18 | 19 | Made explicitly validated remote LiteLLM DB snapshots authoritative, quarantined fallback/malformed/materially smaller sources, and removed remote source fetching from integration sync |
 | 2026-08-01 | 18 | Split Workspace model selection and LLM integration settings into focused routes and containers while preserving catalog query, sync, and submit authority |
 | 2026-07-21 | 17 | Clarified that provider-request declaration limits apply whenever the Agent has Tool Search enabled, which is the default for newly created Agents |
 | 2026-07-19 | 15 | Added the Agent-opt-in provider-request tool-limit registry as the narrow call-time exception to saved model-selection snapshot semantics |
@@ -175,4 +201,4 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 ## Current implementation notes
 
-The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use LiteLLM projection source data for the active lowerer target. ChatGPT OAuth has no system catalog; its account-scoped integration catalog is the only model-visibility source. OpenRouter also has no system catalog; its authenticated integration catalog is authoritative for model visibility and does not require LiteLLM metadata matching. The separate `xai` and `xai_oauth` system catalogs are both projected from LiteLLM provider family `xai`; provider-facing identifiers remove the `xai/` prefix, and runtime invocation reconstructs the LiteLLM `xai/` route prefix.
+The current implementation does not use models.dev for model catalog source data. OpenAI and Anthropic provider API listing are not part of the current model catalog path. Current system providers use the latest explicitly validated remote LiteLLM DB snapshot for the active lowerer target. The process-local or package-bundled LiteLLM model map is diagnostic fallback data only and cannot replace source authority. ChatGPT OAuth has no system catalog; its account-scoped integration catalog is the only model-visibility source. OpenRouter also has no system catalog; its authenticated integration catalog is authoritative for model visibility and does not require LiteLLM metadata matching. The separate `xai` and `xai_oauth` system catalogs are both projected from LiteLLM provider family `xai`; provider-facing model identifiers remove the `xai/` prefix, and runtime invocation reconstructs the LiteLLM `xai/` route prefix.

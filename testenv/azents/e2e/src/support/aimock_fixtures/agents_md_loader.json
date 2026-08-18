@@ -2051,11 +2051,24 @@
       "response": {
         "content": "WATCHDOG_STOP_PARTIAL abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
       },
-      "chunkSize": 4,
-      "streamingProfile": {
-        "ttft": 0,
-        "tps": 20,
-        "jitter": 0
+      "chunkSize": 24,
+      "recordedTimings": {
+        "ttftMs": 0,
+        "interChunkDelaysMs": [
+          0,
+          0,
+          250,
+          250,
+          250,
+          250,
+          250,
+          250,
+          250,
+          250,
+          0,
+          0
+        ],
+        "totalDurationMs": 2000
       }
     },
     {
