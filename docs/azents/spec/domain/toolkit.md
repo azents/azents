@@ -7,9 +7,9 @@ domain: toolkit
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/src/azents/core/tools.py
+  - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/core/vfs.py
-  - python/apps/azents/src/azents/toolkit/**
-  - python/apps/azents/src/azents/shell_environment/**
+  - python/apps/azents/src/azents/repos/toolkit/**
   - python/apps/azents/src/azents/services/toolkit/**
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/github_platform_system_setting/runtime.py
@@ -17,7 +17,6 @@ code_paths:
   - python/apps/azents/src/azents/api/public/toolkit/v1/**
   - python/apps/azents/src/azents/rdb/models/github_user_installation.py
   - python/apps/azents/src/azents/services/agent_runtime/**
-  - python/apps/azents/src/azents/services/shell_environment/**
   - python/apps/azents/src/azents/engine/hooks/**
   - python/apps/azents/src/azents/engine/client_tools.py
   - python/apps/azents/src/azents/engine/events/**
@@ -42,6 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
   - python/apps/azents/src/azents/resources/vfs/toolkits/scheduled/**
   - python/apps/azents/src/azents/worker/deps.py
+  - python/apps/azents/src/azents/worker/run/executor.py
   - python/apps/azents/src/azents/worker/session/toolkit_scope.py
   - python/apps/azents/src/azents/repos/mcp_oauth_connection/**
   - python/apps/azents/src/azents/rdb/models/toolkit_state.py
@@ -52,12 +52,10 @@ code_paths:
   - typescript/apps/azents-web/src/features/toolkits/**
   - typescript/apps/azents-web/src/features/toolkit-setup/**
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
-  - typescript/apps/azents-web/src/trpc/routers/shellEnvironment.ts
 api_routes:
   - /toolkit/v1
-  - /shell-environment/v1
-last_verified_at: 2026-08-16
-spec_version: 93
+last_verified_at: 2026-08-18
+spec_version: 94
 ---
 
 # Toolkit
@@ -70,7 +68,7 @@ This domain covers four feature groups.
 
 1. **Toolkit bundle** — external service integration tools such as MCP / GitHub / GCP / AWS / Notion / Sentry / GoogleAnalytics / Kubernetes. Implemented by three tables: `ToolkitConfig` + `ToolkitScope` + `AgentToolkit`.
 2. **MCP OAuth2 connection** — toolkit-level OAuth2 client/token state for remote MCP servers. Implemented by `MCPOAuthConnection`.
-3. **ShellEnvironment** — Agent Runtime network domain restriction profile. Implemented by `ShellEnvironment` + `ShellEnvironmentScope`. Unlike other toolkits, Shell is **not mounted through AgentToolkit** and is injected directly into Runtime settings.
+3. **Auto-bound platform capabilities** — Runtime, Memory, Goal, Todo, Skill, Subagent, Scheduled Task, and other platform-owned Toolkits resolved from the current Agent, Session, Run, and Runtime capability snapshot without a persisted ToolkitConfig.
 4. **Managed Skill VFS** — immutable run-scoped `azents://` resources for release-bundled global and Toolkit Provider Skills. Managed files remain outside the Runtime filesystem until `import_file` materializes one selected entry.
 
 All credentials are stored in DB with Fernet (`AZ_CREDENTIAL_ENCRYPTION_KEY`) symmetric encryption and are never exposed in agent prompt. (`CredentialCipher`, [`python/apps/azents/src/azents/core/crypto.py`](../../../../python/apps/azents/src/azents/core/crypto.py))
@@ -95,12 +93,10 @@ contexts. User-brought credentials are not a Team capability.
 ```mermaid
 erDiagram
     WORKSPACE ||--o{ TOOLKIT_CONFIG : owns
-    WORKSPACE ||--o{ SHELL_ENVIRONMENT : owns
     TOOLKIT_CONFIG ||--o{ TOOLKIT_SCOPE : has
     TOOLKIT_CONFIG ||--o{ AGENT_TOOLKIT : attached_to
     TOOLKIT_CONFIG ||--o| MCP_OAUTH_CONNECTION : oauth_connection
     AGENT ||--o{ AGENT_TOOLKIT : mounts
-    SHELL_ENVIRONMENT ||--o{ SHELL_ENVIRONMENT_SCOPE : has
 ```
 
 ### Entities
@@ -109,12 +105,10 @@ erDiagram
 - **ToolkitScope** — workspace visibility scope for ToolkitConfig. `scope_type` is `WORKSPACE`; `scope_id` is the Workspace ID. WORKSPACE scope is automatically added on creation. ([`services/toolkit/__init__.py`](../../../../python/apps/azents/src/azents/services/toolkit/__init__.py))
 - **AgentToolkit** — Agent ↔ ToolkitConfig link. `(agent_id, toolkit_id)` is UNIQUE. Denormalized `toolkit_type` column supports enforcing **one toolkit type per Agent**.
 - **MCPOAuthConnection** — Toolkit-level MCP OAuth client registration and token state. `toolkit_id` is UNIQUE; client IDs, client secrets, access tokens, and refresh tokens are encrypted. Status is `connected` or `reconnect_required`.
-- **ShellEnvironment** — workspace-owned network domain profile. Lists `allowed_domains`, `denied_domains`. Workspace can have at most one `is_default=True` row, enforced by partial unique index.
-- **ShellEnvironmentScope** — ShellEnvironment visibility scope. Reuses same `ToolkitScopeType` enum as ToolkitScope.
 
 ### Enum / Type
 
-- `ToolkitType` (code-level) — one of `shell`, `mcp`, `github`, `notion`, `gcp`, `aws`, `sentry`, `google_analytics`, `kubernetes`, `envvar`. DB column is free string but runtime must match key registered in `get_toolkit_registry`. ([`core/tools.py` L71-88](../../../../python/apps/azents/src/azents/core/tools.py))
+- `ToolkitType` (code-level) — one of `shell`, `mcp`, `github`, `notion`, `gcp`, `aws`, `sentry`, `google_analytics`, `kubernetes`, `envvar`. DB column is free string but runtime must match key registered in `get_toolkit_registry`. `shell` remains the internal built-in Provider slug; Public API creation of a persisted Shell ToolkitConfig is rejected. ([`core/tools.py` L71-88](../../../../python/apps/azents/src/azents/core/tools.py))
 
   `envvar` is a generic environment variable injection toolkit. Long-lived API tokens (Notion / OpenAI / Sentry, etc.) can be stored and injected as child process env during agent shell execution. It implements `Toolkit.expose_env()` protocol. Unlike MCP-based toolkit, credentials are exposed inside Runtime. See [sandbox-credential-injection design (archived)](../../design/sandbox-260421-sandbox-credential-injection-2026.md).
 
@@ -351,12 +345,13 @@ Strong invariant: **raw credential is never exposed in agent prompt**.
 - **Output layer**: API response (`ToolkitConfigResponse`) does not return plaintext credentials, only exposes existence as `has_credentials: bool` (`ToolkitOutput.has_credentials`). ([`services/toolkit/data.py` L13-21](../../../../python/apps/azents/src/azents/services/toolkit/data.py))
 - **Runtime injection**: credential is passed only to toolkit provider as `ResolveContext.credentials_json`, and is used as header/token only for network calls to MCP server. LLM system prompt includes only administrator-provided `ToolkitConfig.prompt`.
 
-### Runtime Tool Execution and Shell Environment
+### Runtime Tool Execution and Network Authority
 
 Runtime file/process tools (`exec_command` / `write_stdin` / `import_file` / `present_file` /
 `read` / `write` / `grep` / `glob` / ...) are auto-bound only when the captured Agent capability
-snapshot grants the declared Runtime capability. ShellEnvironment is a profile determining **which
-domains are allowed for external network calls**.
+snapshot grants the declared Runtime capability. The current Workspace Runtime Profile and its
+resolved Provider configuration own outbound network authority. ToolkitConfig owns persisted
+external-service integration configuration.
 
 Projection and execution are separate fences. A managed-but-stopped Agent may project an authorized
 operation and lazily start/wait when that operation executes. Runtime-free and removing Agents omit
@@ -364,11 +359,16 @@ the capability before Runtime ensure, Profile resolution, Runner dispatch, or cr
 Every admitted operation rechecks the captured capability version and current state before external
 side effects; a concurrent removal fails closed instead of retargeting another Runtime incarnation.
 
-Memory Read and Memory Write are resolved as separate auto-bound capabilities. Memory Read exposes `list_memories`, `get_memory`, and `search_memories`. Memory Write exposes `save_memory` and `delete_memory`. Root execution mode binds both when Agent memory is enabled. The future subagent execution mode keeps Memory Read eligible and excludes Memory Write from auto-binding.
+Memory Read and Memory Write are resolved as separate auto-bound capabilities. Memory Read exposes `list_memories`, `get_memory`, and `search_memories`. Memory Write exposes `save_memory` and `delete_memory`. Root execution mode binds both when Agent memory is enabled. Subagent execution mode keeps Memory Read eligible and excludes Memory Write from auto-binding.
 
-- ShellToolkitConfig has fields `allowed_domains`, `denied_domains`, `agent_data_root`, `memory_enabled` ([`core/tools.py` L331-356](../../../../python/apps/azents/src/azents/core/tools.py)).
-- Runtime reads allow/block lists from Runtime settings, builds `SandboxDomainConfig`, and Agent Runtime lifecycle path passes it to Provider allocation policy ([`services/agent_runtime`](../../../../python/apps/azents/src/azents/services/agent_runtime), [`runtime`](../../../../python/apps/azents/src/azents/runtime)).
-- If `allowed_domains` is empty, it runs in "allow all" mode (only denied_domains applied).
+- `ShellToolkitConfig` is the internal shared configuration model for auto-bound Builtin, Memory,
+  and Runtime Toolkit instances. It carries `allowed_domains`, `denied_domains`, `agent_data_root`,
+  and `memory_enabled`; the Worker currently supplies empty domain lists and the Agent's persisted
+  Memory setting when resolving these Toolkits. ([`core/tools.py`](../../../../python/apps/azents/src/azents/core/tools.py), [`worker/run/executor.py`](../../../../python/apps/azents/src/azents/worker/run/executor.py))
+- Provider network enforcement is resolved independently through the canonical Runtime Profile
+  configuration envelope. Kubernetes Profile and Workspace policy may select direct,
+  proxy-required, or no-network authority; Docker remains direct-only under its supported Profile
+  contract. ([`core/runtime_profile.py`](../../../../python/apps/azents/src/azents/core/runtime_profile.py), [`services/agent_runtime`](../../../../python/apps/azents/src/azents/services/agent_runtime))
 - Runtime file tools guide the LLM-facing path surface for durable working files under the current Runner-reported Agent Workspace and temporary files under `/tmp/**`. Static tool schemas name the Agent Workspace generically, while the dynamic Runtime prompt renders the exact current root. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports only files under the current durable Agent Workspace as user-visible `exchange://{object_key}` attachment.
 - Runtime transfer, publication, and provider-delivery services are required parts of the Runtime Toolkit rather than optional capabilities. Toolkit context construction never waits for Runner readiness. The Runtime static prompt reads only the bounded current desired configuration state from PostgreSQL, renders available or blocked behavior without claiming physical readiness, and captures its positive configuration sequence, digest, and desired target generation as execution authority. An absent state, or an unconfigured, blocked, or malformed desired slot, leaves Runtime operations unavailable.
 - Each ordinary Runtime-backed Tool resolves a bounded exact target only when it executes and may request start/wait according to that operation contract. A prompt-bound target must still match the captured sequence, digest, and desired generation. Qualification requires the current desired slot to be ready, the bounded applied slot to be the exact promoted desired sequence, exact Provider and Runner digest evidence admitted under their current connection generations, the Provider connected and running on the current desired generation, a ready positive Runner generation, and current Workspace evidence. The returned operation target freezes Runtime ID, Runtime capability version, desired generation, Runner generation, configuration sequence and digest, and Workspace path. Supersession or drift fails the Tool rather than executing against a substituted Runtime. Skill filesystem projection is non-starting and succeeds only from an immediately qualified current target.
@@ -561,7 +561,7 @@ clears only after validated `agent_result` promotion advances the direct child's
 
 ### Goal/Todo Prompt and Result Stability
 
-Goal and Todo auto-bound toolkits expose fixed tool definitions independent of current stored state. Their Toolkit prompts are fixed instruction text and do not include the current Goal objective/status or Todo list. The model can call `get_goal` when it needs exact Goal state; Todo UI/state snapshots remain the user-visible source of truth for Todo state. Goal Toolkit is root/user-facing and is filtered out of future subagent-mode auto-binding.
+Goal and Todo auto-bound toolkits expose fixed tool definitions independent of current stored state. Their Toolkit prompts are fixed instruction text and do not include the current Goal objective/status or Todo list. The model can call `get_goal` when it needs exact Goal state; Todo UI/state snapshots remain the user-visible source of truth for Todo state. Goal Toolkit is root/user-facing and is filtered out of subagent-mode auto-binding.
 
 `update_todo` persists the new state and publishes `TodoStateChanged`, but returns compact acknowledgement text (`Done`) instead of echoing the full Todo JSON. During compaction, Todo Toolkit appends a readable `Todo Snapshot` to the compaction summary only when the Todo list is non-empty. Goal Toolkit similarly appends a readable `Goal Snapshot` only for unfinished non-empty Goal state.
 
@@ -572,7 +572,7 @@ Goal and Todo auto-bound toolkits expose fixed tool definitions independent of c
 | `memory_read` | auto-bound when Agent memory is enabled; eligible for root and subagent execution modes | — |
 | `subagent` | auto-bound collaboration toolkit; eligible for root and subagent execution modes | `spawn_agent`, `send_message`, `followup_task`, `wait_agent`, `interrupt_agent`, `list_agents` |
 | `memory_write` | auto-bound when Agent memory is enabled and execution mode is root | — |
-| `runtime` | auto-bound only when the Agent is `managed` and shell-gated Runtime capabilities are enabled. Domain restriction by ShellEnvironment. | — |
+| `runtime` | auto-bound only when the Agent is `managed` and shell-gated Runtime capabilities are enabled. Network authority comes from the current Workspace Runtime Profile configuration. | — |
 | `claude_rules` | auto-bound only when managed filesystem capability is granted; exposes hooks only, no model-visible tools | — |
 | `mcp` | ToolkitConfig.enabled=True and `auth_type` satisfied (`none`/`header`/`bearer`/`oauth2`) | `encrypted_credentials` for static auth or `MCPOAuthConnection` for OAuth2 |
 | `github` | depends on `github_auth_type` — `pat`: workspace ToolkitConfig credentials, `github_app`: installation ID, `github_app_platform`: System Settings-resolved platform App JWT with App-ID binding checks | ToolkitConfig `encrypted_credentials` plus the current effective Platform GitHub App Section |
@@ -603,17 +603,15 @@ credential injection path.
 - `[toolkit-type-unique-per-agent]` At most one AgentToolkit with same `toolkit_type` per Agent. Enforced by denormalized `agent_toolkits.toolkit_type` column + application-level validation (currently no DB-level constraint, UNIQUE only on `(agent_id, toolkit_id)`). ([`rdb/models/toolkit.py` L150-163](../../../../python/apps/azents/src/azents/rdb/models/toolkit.py))
 - `[toolkit-slug-unique-per-workspace]` `(workspace_id, slug)` is UNIQUE. Slug allows lowercase letters, numbers, and underscores only (`^[a-z0-9_]+$`); dashes are rejected because the slug becomes the outer model-visible tool namespace before the `__` tool separator. If slug omitted, default is `toolkit_type`. ([`services/toolkit/__init__.py` L124-125](../../../../python/apps/azents/src/azents/services/toolkit/__init__.py))
 - `[workspace-scope-access]` WORKSPACE scope toolkit can be attached by workspace members. Toolkit visibility is workspace-only.
-- `[shell-is-not-toolkit-config]` Request creating ToolkitConfig with `toolkit_type="shell"` returns 400. Shell is managed only through ShellEnvironment. ([`api/public/toolkit/v1/__init__.py` L82-87](../../../../python/apps/azents/src/azents/api/public/toolkit/v1/__init__.py))
+- `[shell-is-not-toolkit-config]` Request creating ToolkitConfig with `toolkit_type="shell"` returns 400. Runtime tool availability is managed through Agent Runtime settings and Runtime Profile authority, not a persisted ToolkitConfig. ([`api/public/toolkit/v1/__init__.py` L82-87](../../../../python/apps/azents/src/azents/api/public/toolkit/v1/__init__.py))
 - `[mcp-oauth-toolkit-level]` MCP OAuth connection is UNIQUE by `toolkit_id`. All runs mounting the same ToolkitConfig use the same OAuth connection.
 - `[mcp-oauth-no-per-user]` `oauth2_per_user`, `MCPAuthRequest`, and `MCPOAuth2Token` are removed current behavior. Runtime does not emit per-user authorization request events for MCP OAuth.
 - `[oauth-state-encrypted]` State passed through OAuth connect/exchange is AES-GCM encrypted with a key derived from the credential encryption key. State payload binds toolkit_id, workspace_id, manager user_id, redirect_uri, and PKCE verifier.
 - `[oauth-dcr-when-needed]` If no existing/client credentials are available and the OAuth server exposes `registration_endpoint`, connect performs Dynamic Client Registration and stores the returned client fields in `MCPOAuthConnection`.
 - `[credential-encryption-required]` If `ToolkitRepository` is instantiated without cipher, credential field read/write raises exception — plaintext storage in DB impossible.
 - `[credentials-not-in-response]` ToolkitConfigResponse does not include plaintext credentials and exposes only `has_credentials: bool`.
-- `[workspace-default-shell-env]` Workspace can have at most one ShellEnvironment with `is_default=True` (DB-enforced by partial unique index `ix_shell_environments_workspace_default`). ([`rdb/models/shell_environment.py` L64-69](../../../../python/apps/azents/src/azents/rdb/models/shell_environment.py))
-- `[default-shell-env-not-deletable]` Deleting default ShellEnvironment returns 400 (`DefaultCannotBeDeleted`).
-- `[shell-domain-whitelist]` If ShellEnvironment.allowed_domains is not empty, sandbox network proxy blocks domain requests outside whitelist. denied_domains are always blocked regardless of allow status.
-- `[shell-env-name-unique]` `(workspace_id, name)` is UNIQUE — duplicate ShellEnvironment name forbidden.
+- `[runtime-network-authority]` Outbound network authority comes from the exact current Workspace
+  Runtime Profile and Provider-owned infrastructure Profile.
 - `[agent-workspace-file-tool-boundary]` Shell file tools guide current Runner-reported Agent Workspace subpaths and `/tmp/**` paths. External Exchange files and internal Artifacts enter Runtime through `import_file`; `/tmp/**` import result includes transient warning and original file-location URI. User-downloadable file is exported by `present_file` only from an Agent Workspace subfile as `exchange://{object_key}` attachment. Runner-native operations otherwise rely on the Runtime operating-system user's ordinary filesystem permissions.
 - `[agents-md-project-boundary]` Project-scoped `AGENTS.md` auto-load works only inside registered Project. Agent Workspace root instruction is separate root scope, and Agent Workspace root itself is not treated as Project.
 - `[toolkit-hook-effects]` Toolkit tool-call hook may perform `on_before_tool_call` deny and `on_after_tool_call` text output replacement within [hook-260518/ADR](../../adr/hook-260518-hook.md) scope. Arbitrary input mutation, retry/continuation wrapper, credential trace storage are not allowed.
@@ -664,8 +662,6 @@ All endpoints first pass `WorkspaceMember` authentication; subsequent permission
 |---|---|---|
 | `TOOLKITS_WRITE` | Manager+ | Toolkit Config CRUD, Scope management, OAuth authorize, GitHub platform installations |
 | `TOOLKITS_READ` | Member+ | available toolkit query, attach/detach toolkit to Agent, test-connection |
-| `SHELL_ENVIRONMENTS_WRITE` | Manager+ | ShellEnvironment CRUD, scope management, set-default |
-| `SHELL_ENVIRONMENTS_READ` | Member+ | available ShellEnvironment query, detail query |
 
 Role mapping: Manager has READ + WRITE, Member has READ only ([`core/auth/roles.py` L26-39](../../../../python/apps/azents/src/azents/core/auth/roles.py)).
 
@@ -741,15 +737,6 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 **Catalog**
 - `GET /toolkits` — (unauthenticated) platform ToolkitProvider catalog + config schema
 
-### `/shell-environment/v1`
-
-- `POST /workspaces/{handle}/shell-environments` — create
-- `GET /workspaces/{handle}/shell-environments[/available|/{id}]` — query
-- `PATCH /workspaces/{handle}/shell-environments/{id}` — update
-- `POST /workspaces/{handle}/shell-environments/{id}/set-default` — set default
-- `DELETE /workspaces/{handle}/shell-environments/{id}` — delete (not default)
-- `POST|GET|DELETE /workspaces/{handle}/shell-environments/{id}/scopes[/{scope_id}]` — scope CRUD
-
 ## Glossary
 
 - **Toolkit** — tool bundle mounted by agent. Combination of platform provider + workspace `ToolkitConfig`.
@@ -762,7 +749,6 @@ OpenAPI spec is authoritative for all endpoints. Major operations:
 - **DCR** — Dynamic Client Registration. Automatic OAuth2 client registration. Stored as `McpSecretsOAuth2Dcr`.
 - **PKCE** — OAuth2 public client protection (S256 code_challenge/verifier).
 - **toolkit-level OAuth** — OAuth client/token state owned by one ToolkitConfig and stored in `mcp_oauth_connections`.
-- **ShellEnvironment** — workspace sandbox network profile. Lists allowed/denied domains.
 - **Fernet** — `cryptography` symmetric encryption. URL-safe base64 32 byte key from `AZ_CREDENTIAL_ENCRYPTION_KEY` environment variable.
 
 ## External Channel Action Tool
@@ -839,6 +825,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-08-18** (spec_version 94) — Aligned current Toolkit behavior with Workspace Runtime
+  Profile network authority, removed obsolete ShellEnvironment entities and API paths, repaired
+  implementation paths, and corrected root/subagent auto-binding wording.
 - **2026-08-16** (spec_version 93) — Added the root-only auto-bound Scheduled
   Toolkit, exact management and terminal tools, cycle Toolkit State, idle and
   compaction hooks, and release-bundled Scheduled Task Skill.
