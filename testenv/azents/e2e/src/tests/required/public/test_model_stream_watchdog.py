@@ -798,15 +798,29 @@ class TestModelStreamWatchdog:
         )
 
         assert not system_error_events(payload)
-        time.sleep(1)
-        response = requests.get(
-            f"{azents_public_server_url}/chat/v1/agents/{agent_id}"
-            f"/sessions/{result.session_id}",
-            headers=auth_headers(workspace.token),
-            timeout=10,
+        session: dict[str, object] | None = None
+
+        def initial_title_restored() -> bool:
+            nonlocal session
+            response = requests.get(
+                f"{azents_public_server_url}/chat/v1/agents/{agent_id}"
+                f"/sessions/{result.session_id}",
+                headers=auth_headers(workspace.token),
+                timeout=10,
+            )
+            response.raise_for_status()
+            session = json_object(response)
+            return (
+                session.get("title") == _TITLE_PROMPT
+                and session.get("title_source") == "auto_initial"
+            )
+
+        _wait_until(
+            initial_title_restored,
+            timeout=15,
+            message=lambda: f"Initial title was not restored: {session!r}",
         )
-        response.raise_for_status()
-        session = json_object(response)
+        assert session is not None
         assert session.get("title") == _TITLE_PROMPT
         assert session.get("title_source") == "auto_initial"
 

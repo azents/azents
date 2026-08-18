@@ -266,6 +266,7 @@ class _SessionLifecycle:
         self.order = order
         self.recoverable_run = recoverable_run
         self.heartbeat_session_ids: list[str] = []
+        self.second_heartbeat = asyncio.Event()
         self.retry_states: list[FailedRunRetryState | None] = []
         self.activities: list[tuple[str, str, object]] = []
         self.cleared_session_ids: list[str] = []
@@ -362,6 +363,8 @@ class _SessionLifecycle:
         """Record the session id passed to heartbeat."""
         del owner_generation
         self.heartbeat_session_ids.append(session_id)
+        if len(self.heartbeat_session_ids) == 2:
+            self.second_heartbeat.set()
 
     async def get_running_agent_run(
         self,
@@ -4659,8 +4662,7 @@ async def test_run_session_heartbeat_loop_refreshes_lifecycle(
         )
     )
     try:
-        while len(lifecycle.heartbeat_session_ids) < 2:
-            await asyncio.sleep(0.01)
+        await asyncio.wait_for(lifecycle.second_heartbeat.wait(), timeout=1)
     finally:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

@@ -288,6 +288,21 @@ async def test_provider_tolerates_transient_empty_projected_token(
 ) -> None:
     monkeypatch.setattr(provider_main, "_CREDENTIAL_POLL_INTERVAL_SECONDS", 0.01)
     provider_env.write_text("\n")
+    empty_token_observed = asyncio.Event()
+    read_token = provider_main.read_service_account_token
+
+    def observed_read_token(path: Path) -> str:
+        try:
+            return read_token(path)
+        except RuntimeError:
+            empty_token_observed.set()
+            raise
+
+    monkeypatch.setattr(
+        provider_main,
+        "read_service_account_token",
+        observed_read_token,
+    )
     watcher = asyncio.create_task(
         wait_for_provider_credential_change(
             provider_env,
@@ -296,7 +311,7 @@ async def test_provider_tolerates_transient_empty_projected_token(
         )
     )
 
-    await asyncio.sleep(0.02)
+    await asyncio.wait_for(empty_token_observed.wait(), timeout=1)
     assert not watcher.done()
     provider_env.write_text("rotated-provider-credential\n")
     await asyncio.wait_for(watcher, timeout=1)

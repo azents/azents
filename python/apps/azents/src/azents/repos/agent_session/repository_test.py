@@ -63,7 +63,7 @@ from azents.testing.model_selection import (
 )
 
 from . import AgentSessionRepository
-from .data import AgentSessionCreate
+from .data import AgentSessionCreate, AgentSessionEnsureTeamPrimaryResult
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -394,11 +394,14 @@ class TestAgentSessionRepository:
             )
             await setup_session.commit()
 
+        competing_started = asyncio.Event()
+
         async def lock_session() -> str:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
             ) as competing_session:
+                competing_started.set()
                 locked = await repository.lock_by_id(competing_session, created.id)
                 assert locked is not None
                 await competing_session.commit()
@@ -413,7 +416,12 @@ class TestAgentSessionRepository:
             )
             assert locked_agent_id == agent_id
             competing_lock = asyncio.create_task(lock_session())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(competing_started.wait(), timeout=5)
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.shield(competing_lock),
+                    timeout=0.1,
+                )
 
             locked = await asyncio.wait_for(
                 repository.lock_by_id(agent_holder, created.id),
@@ -697,11 +705,14 @@ class TestAgentSessionRepository:
             )
             await setup_session.commit()
 
+        claim_started = asyncio.Event()
+
         async def claim_child_owner() -> int:
             async with AsyncSession(
                 rdb_engine,
                 expire_on_commit=False,
             ) as claim_session:
+                claim_started.set()
                 generation = await repo.claim_owner_generation(
                     claim_session,
                     child.agent_session_id,
@@ -724,7 +735,12 @@ class TestAgentSessionRepository:
             )
             assert locked_session is not None
             claim_task = asyncio.create_task(claim_child_owner())
-            await asyncio.sleep(0.1)
+            await asyncio.wait_for(claim_started.wait(), timeout=5)
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.shield(claim_task),
+                    timeout=0.1,
+                )
 
             locked_root_agent = await asyncio.wait_for(
                 repo.lock_session_agent_by_id(
@@ -1269,12 +1285,23 @@ class TestAgentSessionRepository:
             async with AsyncSession(
                 rdb_engine, expire_on_commit=False
             ) as second_session:
-                second_task = asyncio.create_task(
-                    repo.ensure_team_primary_for_agent(
+                second_started = asyncio.Event()
+
+                async def ensure_second_primary() -> (
+                    AgentSessionEnsureTeamPrimaryResult
+                ):
+                    second_started.set()
+                    return await repo.ensure_team_primary_for_agent(
                         second_session, workspace_id=workspace_id, agent_id=agent_id
                     )
-                )
-                await asyncio.sleep(0.1)
+
+                second_task = asyncio.create_task(ensure_second_primary())
+                await asyncio.wait_for(second_started.wait(), timeout=5)
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(
+                        asyncio.shield(second_task),
+                        timeout=0.1,
+                    )
                 await first_session.commit()
                 second_result = await asyncio.wait_for(second_task, timeout=5)
                 second = second_result.session
@@ -1762,8 +1789,11 @@ class TestAgentSessionRepository:
                 rdb_engine,
                 expire_on_commit=False,
             ) as spawn_session:
-                spawn_task = asyncio.create_task(
-                    repo.create_child_session_agent(
+                spawn_started = asyncio.Event()
+
+                async def spawn_child() -> object:
+                    spawn_started.set()
+                    return await repo.create_child_session_agent(
                         spawn_session,
                         parent_session_agent_id=root_agent.id,
                         name="late-child",
@@ -1771,9 +1801,14 @@ class TestAgentSessionRepository:
                         title=None,
                         last_task_message=None,
                     )
-                )
-                await asyncio.sleep(0.1)
-                assert not spawn_task.done()
+
+                spawn_task = asyncio.create_task(spawn_child())
+                await asyncio.wait_for(spawn_started.wait(), timeout=5)
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(
+                        asyncio.shield(spawn_task),
+                        timeout=0.1,
+                    )
                 await stop_session.commit()
                 with pytest.raises(
                     ValueError,
@@ -1843,8 +1878,11 @@ class TestAgentSessionRepository:
                 rdb_engine,
                 expire_on_commit=False,
             ) as spawn_session:
-                spawn_task = asyncio.create_task(
-                    repo.create_child_session_agent(
+                spawn_started = asyncio.Event()
+
+                async def spawn_nested_child() -> object:
+                    spawn_started.set()
+                    return await repo.create_child_session_agent(
                         spawn_session,
                         parent_session_agent_id=parent.id,
                         name="late-grandchild",
@@ -1852,9 +1890,14 @@ class TestAgentSessionRepository:
                         title=None,
                         last_task_message=None,
                     )
-                )
-                await asyncio.sleep(0.1)
-                assert not spawn_task.done()
+
+                spawn_task = asyncio.create_task(spawn_nested_child())
+                await asyncio.wait_for(spawn_started.wait(), timeout=5)
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(
+                        asyncio.shield(spawn_task),
+                        timeout=0.1,
+                    )
                 await stop_session.commit()
                 with pytest.raises(
                     ValueError,

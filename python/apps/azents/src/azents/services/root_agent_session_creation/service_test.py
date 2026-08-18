@@ -36,7 +36,11 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import RootAgentSessionCreationService
-from .data import AgentDefaultRootWorkspaceIntent, ExplicitRootWorkspaceIntent
+from .data import (
+    AgentDefaultRootWorkspaceIntent,
+    ExplicitRootWorkspaceIntent,
+    RootAgentSessionCreationResult,
+)
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -542,14 +546,23 @@ class TestRootAgentSessionCreationService:
                 rdb_engine,
                 expire_on_commit=False,
             ) as second_session:
-                second_task = asyncio.create_task(
-                    service.ensure_team_primary(
+                second_started = asyncio.Event()
+
+                async def ensure_second_primary() -> RootAgentSessionCreationResult:
+                    second_started.set()
+                    return await service.ensure_team_primary(
                         second_session,
                         workspace_id=workspace_id,
                         agent_id=agent_id,
                     )
-                )
-                await asyncio.sleep(0.1)
+
+                second_task = asyncio.create_task(ensure_second_primary())
+                await asyncio.wait_for(second_started.wait(), timeout=5)
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(
+                        asyncio.shield(second_task),
+                        timeout=0.1,
+                    )
                 await first_session.commit()
                 second = await asyncio.wait_for(second_task, timeout=5)
                 await second_session.commit()

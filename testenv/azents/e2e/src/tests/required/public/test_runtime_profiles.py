@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any, cast
 
 import azentsadminclient
@@ -422,7 +421,6 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
     )
 
     _stop_runtime_provider(azents_runtime_provider_docker_container)
-    time.sleep(2)
     try:
         unavailable_profile: WorkspaceRuntimeProfileResponse | None = None
 

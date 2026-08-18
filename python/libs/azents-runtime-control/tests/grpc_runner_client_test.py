@@ -28,10 +28,32 @@ from azents_runtime_control.runner import (
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 
 
+class _ObservedRunnerMessages(
+    list[runtime_runner_control_pb2.RunnerMessage],
+):
+    """Record outbound messages and expose count-based synchronization."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.changed = asyncio.Event()
+
+    def append(self, message: runtime_runner_control_pb2.RunnerMessage) -> None:
+        super().append(message)
+        self.changed.set()
+
+    async def wait_for_count(self, expected: int) -> None:
+        """Wait until the stream has consumed the expected messages."""
+        while len(self) < expected:
+            self.changed.clear()
+            if len(self) >= expected:
+                return
+            await self.changed.wait()
+
+
 @pytest.mark.asyncio
 async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> None:
     """The client maps the gRPC stream onto the RunnerControlClient protocol."""
-    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    sent = _ObservedRunnerMessages()
     received: list[RunnerOperationEnvelope] = []
     operation_received = asyncio.Event()
 
@@ -156,10 +178,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
             final=True,
         )
     )
-    for _ in range(10):
-        if len(sent) >= 4:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(sent.wait_for_count(4), timeout=1)
 
     assert sent[0].WhichOneof("payload") == "register"
     assert sent[0].register.workspace_path == "/workspace/agent"
@@ -190,7 +209,7 @@ def test_runner_wire_evidence_rejects_noncanonical_sequence() -> None:
 @pytest.mark.asyncio
 async def test_grpc_client_maps_file_glob_payload_and_result() -> None:
     """File glob requests and final matches round-trip through protobuf."""
-    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    sent = _ObservedRunnerMessages()
     received: list[RunnerOperationEnvelope] = []
     operation_received = asyncio.Event()
 
@@ -266,10 +285,7 @@ async def test_grpc_client_maps_file_glob_payload_and_result() -> None:
             final=True,
         )
     )
-    for _ in range(10):
-        if sent:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(sent.wait_for_count(1), timeout=1)
 
     event = sent[0].operation_event
     assert event.final_success.WhichOneof("result") == "file_glob"
@@ -283,7 +299,7 @@ async def test_grpc_client_maps_file_glob_payload_and_result() -> None:
 @pytest.mark.asyncio
 async def test_grpc_client_preserves_git_repository_anchor() -> None:
     """Git ref final results preserve repository authority through protobuf."""
-    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    sent = _ObservedRunnerMessages()
 
     async def stream(
         requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
@@ -327,10 +343,7 @@ async def test_grpc_client_preserves_git_repository_anchor() -> None:
             final=True,
         )
     )
-    for _ in range(10):
-        if sent:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(sent.wait_for_count(1), timeout=1)
 
     event = sent[0].operation_event
     assert event.final_success.WhichOneof("result") == "git_list_refs"
@@ -493,8 +506,6 @@ async def test_grpc_client_close_suppresses_completed_stream_failure() -> None:
         registered_at=_now(),
     )
     await asyncio.wait_for(closed.wait(), timeout=1)
-    await asyncio.sleep(0)
-
     await client.close()
 
 
@@ -535,7 +546,7 @@ async def test_grpc_client_sends_runner_credential_metadata() -> None:
 @pytest.mark.asyncio
 async def test_grpc_client_maps_file_apply_patch_request_and_success() -> None:
     """Patch request metadata, body chunks, and success changes round-trip."""
-    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    sent = _ObservedRunnerMessages()
     received: list[RunnerOperationEnvelope] = []
     operation_received = asyncio.Event()
 
@@ -627,10 +638,7 @@ async def test_grpc_client_maps_file_apply_patch_request_and_success() -> None:
             final=True,
         )
     )
-    for _ in range(10):
-        if sent:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(sent.wait_for_count(1), timeout=1)
 
     event = sent[0].operation_event
     assert event.final_success.WhichOneof("result") == "file_apply_patch"
@@ -709,7 +717,7 @@ def test_grpc_client_maps_file_apply_patch_failure_detail() -> None:
 @pytest.mark.asyncio
 async def test_grpc_client_maps_file_edit_request_and_success() -> None:
     """Native edit request fields and replacement count round-trip through gRPC."""
-    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    sent = _ObservedRunnerMessages()
     received: list[RunnerOperationEnvelope] = []
     operation_received = asyncio.Event()
 
@@ -780,10 +788,7 @@ async def test_grpc_client_maps_file_edit_request_and_success() -> None:
             final=True,
         )
     )
-    for _ in range(10):
-        if sent:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(sent.wait_for_count(1), timeout=1)
 
     event = sent[0].operation_event
     assert event.final_success.WhichOneof("result") == "file_edit"
@@ -844,7 +849,7 @@ def _now() -> datetime:
 @pytest.mark.asyncio
 async def test_grpc_client_maps_git_operation_payloads_and_results() -> None:
     """Git operation payloads and final results round-trip through protobuf."""
-    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    sent = _ObservedRunnerMessages()
     received: list[RunnerOperationEnvelope] = []
     operation_received = asyncio.Event()
 
@@ -922,10 +927,7 @@ async def test_grpc_client_maps_git_operation_payloads_and_results() -> None:
             final=True,
         )
     )
-    for _ in range(10):
-        if sent:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(sent.wait_for_count(1), timeout=1)
 
     event = sent[0].operation_event
     assert event.final_success.WhichOneof("result") == "git_create_worktree"
@@ -942,7 +944,7 @@ async def test_grpc_client_round_trips_empty_managed_worktree_discovery_result()
     None
 ):
     """An empty managed-worktree discovery result remains a typed success."""
-    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    sent = _ObservedRunnerMessages()
 
     async def stream(
         requests: AsyncIterator[runtime_runner_control_pb2.RunnerMessage],
@@ -980,10 +982,7 @@ async def test_grpc_client_round_trips_empty_managed_worktree_discovery_result()
             final=True,
         )
     )
-    for _ in range(10):
-        if sent:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(sent.wait_for_count(1), timeout=1)
 
     message = sent[0].operation_event
     assert message.WhichOneof("payload") == "final_success"
@@ -1000,7 +999,7 @@ async def test_grpc_client_round_trips_empty_managed_worktree_discovery_result()
 @pytest.mark.asyncio
 async def test_grpc_client_maps_git_worktree_integrity_operations() -> None:
     """Inspection and guarded cleanup fields round-trip through protobuf."""
-    sent: list[runtime_runner_control_pb2.RunnerMessage] = []
+    sent = _ObservedRunnerMessages()
     received: list[RunnerOperationEnvelope] = []
     operation_received = asyncio.Event()
 
@@ -1164,10 +1163,7 @@ async def test_grpc_client_maps_git_worktree_integrity_operations() -> None:
             final=True,
         )
     )
-    for _ in range(10):
-        if len(sent) == 3:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(sent.wait_for_count(3), timeout=1)
 
     inspect = sent[0].operation_event.final_success.git_inspect_worktree
     assert inspect.worktree_path == "/workspace/agent/.azents/worktrees/session/repo"

@@ -71,6 +71,7 @@ from azents.testing.model_selection import make_test_model_selection_dict
 
 from .data import (
     ExternalChannelAgentRouteCreate,
+    ExternalChannelBinding,
     ExternalChannelBindingCreate,
     ExternalChannelChannelDefaultCreate,
     ExternalChannelConnectionCreate,
@@ -1287,15 +1288,23 @@ async def test_binding_creation_serializes_on_resource_lock(
                 rdb_engine,
                 expire_on_commit=False,
             ) as second_session:
-                second_task = asyncio.create_task(
-                    repo.create_binding_idempotent(
+                second_started = asyncio.Event()
+
+                async def create_second_binding() -> ExternalChannelBinding:
+                    second_started.set()
+                    return await repo.create_binding_idempotent(
                         second_session,
                         create,
                         expected_access_request_id=None,
                     )
-                )
-                await asyncio.sleep(0.1)
-                assert not second_task.done()
+
+                second_task = asyncio.create_task(create_second_binding())
+                await asyncio.wait_for(second_started.wait(), timeout=5)
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(
+                        asyncio.shield(second_task),
+                        timeout=0.1,
+                    )
                 await first_session.commit()
                 second = await asyncio.wait_for(second_task, timeout=5)
                 await second_session.commit()
@@ -1362,7 +1371,10 @@ async def test_route_selection_observes_concurrent_agent_decommission(
             )
             await decommission_session.flush()
 
+            selection_started = asyncio.Event()
+
             async def select_route() -> object:
+                selection_started.set()
                 async with AsyncSession(
                     rdb_engine,
                     expire_on_commit=False,
@@ -1380,8 +1392,12 @@ async def test_route_selection_observes_concurrent_agent_decommission(
                     return selected
 
             selection_task = asyncio.create_task(select_route())
-            await asyncio.sleep(0.1)
-            assert not selection_task.done()
+            await asyncio.wait_for(selection_started.wait(), timeout=5)
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.shield(selection_task),
+                    timeout=0.1,
+                )
             await decommission_session.commit()
             selected = await asyncio.wait_for(selection_task, timeout=5)
 

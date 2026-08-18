@@ -198,9 +198,11 @@ async def test_size_threshold_flushes_immediately() -> None:
 async def test_timer_flushes_pending_batch() -> None:
     """Flush pending batch when timer expires."""
     flushed: list[LivePartialFlush] = []
+    flushed_event = asyncio.Event()
 
     async def flush(batch: LivePartialFlush) -> None:
         flushed.append(batch)
+        flushed_event.set()
 
     batcher = LivePartialBatcher(flush, max_delay_seconds=0.01, max_chars=100)
 
@@ -211,7 +213,7 @@ async def test_timer_flushes_pending_batch() -> None:
         output_index=0,
         summary_index=0,
     )
-    await asyncio.sleep(0.05)
+    await asyncio.wait_for(flushed_event.wait(), timeout=1)
 
     assert flushed == [
         LivePartialFlush(
@@ -245,8 +247,10 @@ async def test_discard_drops_buffer_and_cancels_timer() -> None:
         delta="failed prefix",
         content_index=0,
     )
+    timer = batcher._timers["session-1"]
     await batcher.discard_session("session-1", discard)
-    await asyncio.sleep(0.05)
+    with pytest.raises(asyncio.CancelledError):
+        await timer
 
     assert discarded == ["session-1"]
     assert flushed == []

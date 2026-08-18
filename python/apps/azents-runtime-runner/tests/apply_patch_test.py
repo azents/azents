@@ -6,6 +6,7 @@ import os
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from azents_runtime_control.runner import (
@@ -763,6 +764,18 @@ async def test_runner_serializes_patch_operations_per_runtime(tmp_path: Path) ->
     second_entered = threading.Event()
     release = threading.Event()
 
+    class SignalingLock(asyncio.Lock):
+        def __init__(self) -> None:
+            super().__init__()
+            self.acquire_count = 0
+            self.second_acquire_started = asyncio.Event()
+
+        async def acquire(self) -> Literal[True]:
+            self.acquire_count += 1
+            if self.acquire_count == 2:
+                self.second_acquire_started.set()
+            return await super().acquire()
+
     def block_first_patch(point: str, index: int, operation: PatchOperation) -> None:
         if point != "stage" or index != 0:
             return
@@ -779,6 +792,8 @@ async def test_runner_serializes_patch_operations_per_runtime(tmp_path: Path) ->
         workspace=Workspace(str(tmp_path)),
         apply_patch_fault_injector=block_first_patch,
     )
+    signaling_lock = SignalingLock()
+    operations._apply_patch_lock = signaling_lock
     first_task = asyncio.create_task(
         operations.handle(_operation(tmp_path, first_patch))
     )
@@ -787,7 +802,7 @@ async def test_runner_serializes_patch_operations_per_runtime(tmp_path: Path) ->
     second_task = asyncio.create_task(
         operations.handle(_operation(tmp_path, second_patch))
     )
-    await asyncio.sleep(0.05)
+    await asyncio.wait_for(signaling_lock.second_acquire_started.wait(), timeout=1)
     assert not second_entered.is_set()
 
     release.set()

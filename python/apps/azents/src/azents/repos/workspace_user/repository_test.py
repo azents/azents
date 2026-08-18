@@ -4,6 +4,7 @@ import asyncio
 from contextlib import suppress
 from uuid import uuid4
 
+import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -118,16 +119,24 @@ class TestWorkspaceUserRepository:
                     rdb_engine,
                     expire_on_commit=False,
                 ) as admission_session:
-                    admission_task = asyncio.create_task(
-                        repo.lock_by_workspace_and_user(
+                    admission_started = asyncio.Event()
+
+                    async def lock_membership() -> object:
+                        admission_started.set()
+                        return await repo.lock_by_workspace_and_user(
                             admission_session,
                             workspace_id=workspace_id,
                             user_id=user_id,
                         )
-                    )
+
+                    admission_task = asyncio.create_task(lock_membership())
                     try:
-                        await asyncio.sleep(0.1)
-                        assert not admission_task.done()
+                        await asyncio.wait_for(admission_started.wait(), timeout=5)
+                        with pytest.raises(TimeoutError):
+                            await asyncio.wait_for(
+                                asyncio.shield(admission_task),
+                                timeout=0.1,
+                            )
                         await delete_session.commit()
                         admitted = await asyncio.wait_for(admission_task, timeout=5)
                         await admission_session.commit()
