@@ -65,6 +65,7 @@ class ToolkitRepository:
                 prompt=create.prompt,
                 encrypted_credentials=self._encrypt(create.credentials),
                 enabled=create.enabled,
+                always_expose_tools=create.always_expose_tools,
             )
             session.add(rdb_toolkit)
             await session.flush()
@@ -255,6 +256,7 @@ class ToolkitRepository:
             prompt=rdb.prompt,
             credentials=self._decrypt(rdb.encrypted_credentials),
             enabled=rdb.enabled,
+            always_expose_tools=rdb.always_expose_tools,
             revision=rdb.revision,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,

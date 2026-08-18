@@ -46,6 +46,7 @@ class ToolkitConfigResponse(BaseModel):
         description="Whether credentials exist",
     )
     enabled: bool
+    always_expose_tools: bool
     oauth_connection: MCPOAuthConnectionSummaryResponse | None = None
     authorization_state: GitHubPlatformAuthorizationStateResponse | None = None
     created_at: datetime.datetime
@@ -78,6 +79,10 @@ class ToolkitConfigCreateRequest(BaseModel):
         description="Credentials JSON object, such as MCP, encrypted on the server",
     )
     enabled: bool = Field(default=True, description="Enabled state")
+    always_expose_tools: bool = Field(
+        default=False,
+        description="Expose every toolkit tool directly instead of through Tool Search",
+    )
 
 
 class ToolkitConfigUpdateRequest(ToolkitUpdateInput):

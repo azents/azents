@@ -28741,6 +28741,12 @@
             "title": "Enabled",
             "description": "Enabled state",
             "default": true
+          },
+          "always_expose_tools": {
+            "type": "boolean",
+            "title": "Always Expose Tools",
+            "description": "Expose every toolkit tool directly instead of through Tool Search",
+            "default": false
           }
         },
         "type": "object",
@@ -28828,6 +28834,10 @@
             "type": "boolean",
             "title": "Enabled"
           },
+          "always_expose_tools": {
+            "type": "boolean",
+            "title": "Always Expose Tools"
+          },
           "oauth_connection": {
             "anyOf": [
               {
@@ -28870,6 +28880,7 @@
           "config",
           "prompt",
           "enabled",
+          "always_expose_tools",
           "created_at",
           "updated_at"
         ],
@@ -28938,6 +28949,11 @@
             "type": "boolean",
             "title": "Enabled",
             "description": "Enabled flag"
+          },
+          "always_expose_tools": {
+            "type": "boolean",
+            "title": "Always Expose Tools",
+            "description": "Whether every tool bypasses Tool Search and remains visible"
           }
         },
         "type": "object",

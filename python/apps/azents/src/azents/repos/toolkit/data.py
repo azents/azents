@@ -25,6 +25,9 @@ class ToolkitConfig(BaseModel):
         default=None, description="Decrypted credentials JSON (MCP, etc.)"
     )
     enabled: bool = Field(description="Enabled flag")
+    always_expose_tools: bool = Field(
+        description="Whether every tool bypasses Tool Search and remains visible"
+    )
     revision: int = Field(description="Persisted source revision")
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
@@ -64,6 +67,9 @@ class ToolkitCreate(BaseModel):
         default=None, description="Credentials JSON (plaintext, encrypted by repo)"
     )
     enabled: bool = Field(default=True, description="Enabled flag")
+    always_expose_tools: bool = Field(
+        description="Whether every tool bypasses Tool Search and remains visible",
+    )
 
 
 class ToolkitUpdate(TypedDict, total=False):
@@ -76,6 +82,12 @@ class ToolkitUpdate(TypedDict, total=False):
     prompt: Annotated[str | None, Field(description="Custom prompt")]
     credentials: Annotated[str | None, Field(description="Credentials JSON string")]
     enabled: Annotated[bool, Field(description="Enabled flag")]
+    always_expose_tools: Annotated[
+        bool,
+        Field(
+            description="Whether every tool bypasses Tool Search and remains visible"
+        ),
+    ]
 
 
 class ToolkitScopeCreate(BaseModel):

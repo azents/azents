@@ -47,6 +47,7 @@ class TestToolkitConfigListResponse(unittest.TestCase):
                         prompt = '', 
                         has_credentials = True, 
                         enabled = True, 
+                        always_expose_tools = True, 
                         oauth_connection = azentspublicclient.models.mcpo_auth_connection_summary_response.MCPOAuthConnectionSummaryResponse(
                             status = 'connected', 
                             issuer = '', 
@@ -75,6 +76,7 @@ class TestToolkitConfigListResponse(unittest.TestCase):
                         prompt = '', 
                         has_credentials = True, 
                         enabled = True, 
+                        always_expose_tools = True, 
                         oauth_connection = azentspublicclient.models.mcpo_auth_connection_summary_response.MCPOAuthConnectionSummaryResponse(
                             status = 'connected', 
                             issuer = '', 

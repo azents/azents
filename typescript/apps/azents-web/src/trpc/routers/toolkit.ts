@@ -138,6 +138,7 @@ export const toolkitRouter = router({
         config: z.record(z.string(), z.unknown()),
         credentials: z.record(z.string(), z.unknown()).optional(),
         enabled: z.boolean().optional(),
+        alwaysExposeTools: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -154,6 +155,7 @@ export const toolkitRouter = router({
             config: input.config,
             credentials: input.credentials,
             enabled: input.enabled ?? true,
+            always_expose_tools: input.alwaysExposeTools ?? false,
           },
           throwOnError: true,
         });
@@ -183,6 +185,7 @@ export const toolkitRouter = router({
         config: z.record(z.string(), z.unknown()).optional(),
         credentials: z.record(z.string(), z.unknown()).optional(),
         enabled: z.boolean().optional(),
+        alwaysExposeTools: z.boolean().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -201,6 +204,7 @@ export const toolkitRouter = router({
             config: input.config,
             credentials: input.credentials,
             enabled: input.enabled,
+            always_expose_tools: input.alwaysExposeTools,
           },
           throwOnError: true,
         });

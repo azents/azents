@@ -16,6 +16,7 @@ Name | Type | Description | Notes
 **prompt** | **str** |  | 
 **has_credentials** | **bool** | Whether credentials exist | [optional] [default to False]
 **enabled** | **bool** |  | 
+**always_expose_tools** | **bool** |  | 
 **oauth_connection** | [**MCPOAuthConnectionSummaryResponse**](MCPOAuthConnectionSummaryResponse.md) |  | [optional] 
 **authorization_state** | [**GitHubPlatformAuthorizationStateResponse**](GitHubPlatformAuthorizationStateResponse.md) |  | [optional] 
 **created_at** | **datetime** |  | 

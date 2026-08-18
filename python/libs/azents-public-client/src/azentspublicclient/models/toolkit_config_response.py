@@ -39,12 +39,13 @@ class ToolkitConfigResponse(BaseModel):
     prompt: Optional[StrictStr]
     has_credentials: Optional[StrictBool] = Field(default=False, description="Whether credentials exist")
     enabled: StrictBool
+    always_expose_tools: StrictBool
     oauth_connection: Optional[MCPOAuthConnectionSummaryResponse] = None
     authorization_state: Optional[GitHubPlatformAuthorizationStateResponse] = None
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "workspace_id", "toolkit_type", "slug", "name", "description", "config", "prompt", "has_credentials", "enabled", "oauth_connection", "authorization_state", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "workspace_id", "toolkit_type", "slug", "name", "description", "config", "prompt", "has_credentials", "enabled", "always_expose_tools", "oauth_connection", "authorization_state", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -140,6 +141,7 @@ class ToolkitConfigResponse(BaseModel):
             "prompt": obj.get("prompt"),
             "has_credentials": obj.get("has_credentials") if obj.get("has_credentials") is not None else False,
             "enabled": obj.get("enabled"),
+            "always_expose_tools": obj.get("always_expose_tools"),
             "oauth_connection": MCPOAuthConnectionSummaryResponse.from_dict(obj["oauth_connection"]) if obj.get("oauth_connection") is not None else None,
             "authorization_state": GitHubPlatformAuthorizationStateResponse.from_dict(obj["authorization_state"]) if obj.get("authorization_state") is not None else None,
             "created_at": obj.get("created_at"),

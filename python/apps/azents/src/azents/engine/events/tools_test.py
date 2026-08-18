@@ -271,6 +271,32 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
     assert catalog.entries["azents__echo"].source.toolkit_type == "github"
 
 
+async def test_build_tool_catalog_exposes_all_opted_in_toolkit_tools_directly() -> None:
+    """Bypass Tool Search for every tool from an opted-in ToolkitConfig."""
+    catalog = await build_tool_catalog(
+        toolkit_bindings=[
+            ToolkitBinding(
+                toolkit=_Toolkit(),
+                slug="critical",
+                use_prefix=True,
+                toolkit_type="mcp",
+                toolkit_config_id="toolkit-config-1",
+                always_expose_tools=True,
+            )
+        ],
+        context=TurnContext(
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id="run-1",
+            publish_event=_noop_publish,
+        ),
+    )
+
+    assert catalog.direct_tool_names == ["critical__echo"]
+    assert catalog.deferred_tool_names == []
+    assert catalog.entries["critical__echo"].source.always_expose_tools is True
+
+
 async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> None:
     """Use the selected catalog entry instead of parsing a tool name prefix."""
     toolkit = _Toolkit()

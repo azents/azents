@@ -30,6 +30,7 @@ def _toolkit_create() -> ToolkitCreate:
         slug="toolkit",
         name="Toolkit",
         config={},
+        always_expose_tools=False,
     )
 
 
@@ -44,6 +45,7 @@ async def test_create_initializes_revision_to_one() -> None:
     toolkit = session.add.call_args.args[0]
     assert isinstance(toolkit, RDBToolkitConfig)
     assert toolkit.revision == 1
+    assert toolkit.always_expose_tools is False
 
 
 async def test_update_increments_revision_once() -> None:
@@ -62,6 +64,24 @@ async def test_update_increments_revision_once() -> None:
     compiled = statement.compile()
     assert compiled.params["revision_1"] == 1
     assert compiled.params["config"] == {"url": "https://example.test"}
+
+
+async def test_update_persists_always_expose_tools() -> None:
+    """Persist the Toolkit-wide direct exposure policy."""
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.side_effect = _StopAfterWrite
+
+    with pytest.raises(_StopAfterWrite):
+        await ToolkitRepository().update_by_id(
+            session,
+            "toolkit-1",
+            ToolkitUpdate(always_expose_tools=True),
+        )
+
+    statement = session.execute.call_args.args[0]
+    compiled = statement.compile()
+    assert compiled.params["always_expose_tools"] is True
+    assert compiled.params["revision_1"] == 1
 
 
 async def test_update_credentials_increments_revision_once() -> None:

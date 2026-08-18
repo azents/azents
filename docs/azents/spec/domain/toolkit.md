@@ -15,6 +15,7 @@ code_paths:
   - python/apps/azents/src/azents/services/github_platform_system_setting/runtime.py
   - python/apps/azents/src/azents/services/github_platform_system_setting/binding.py
   - python/apps/azents/src/azents/api/public/toolkit/v1/**
+  - python/apps/azents/src/azents/rdb/models/toolkit.py
   - python/apps/azents/src/azents/rdb/models/github_user_installation.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/engine/hooks/**
@@ -55,7 +56,7 @@ code_paths:
 api_routes:
   - /toolkit/v1
 last_verified_at: 2026-08-18
-spec_version: 94
+spec_version: 95
 ---
 
 # Toolkit
@@ -293,6 +294,16 @@ When `tool_search_enabled` is enabled, the executable Tool Catalog retains every
 For each DB-attached catalog entry, the catalog source retains the ToolkitConfig ID, type, display name, and slug independently of the final model-visible name. When the model invokes that entry, the engine snapshots those source facts onto the durable `client_tool_call` and the matching active/live client-tool projection. UI consumers use this snapshot for product identity and must not infer Toolkit ownership from a tool-name prefix. Built-in and auto-bound entries have no ToolkitConfig source snapshot.
 
 Auto-bound core execution and session-control capabilities are direct and remain pinned in every prepared model call. DB-attached service Toolkit operations are deferred by default, including MCP, GitHub, GCP, AWS, Sentry, Notion, Kubernetes, and Google Analytics operations. A service control tool required to operate its integration may be explicitly direct; the current registered exception is GitHub `switch_installation`.
+
+Each ToolkitConfig also stores an `always_expose_tools` boolean that defaults to
+`false`. Workspace managers can change it through the common Toolkit create/edit API
+and UI. When Tool Search is enabled and the value is `true`, every executable tool
+from that attached ToolkitConfig is classified as direct, remains model-visible on
+every prepared call, and is excluded from the deferred search index. The policy
+applies to all Agents attached to that ToolkitConfig and to future tools produced by
+its current runtime snapshot. Directly exposed tools continue to count against the
+existing pinned declaration compatibility budget. When the value is `false`, the
+normal deferred classification and explicit platform exceptions apply.
 
 The auto-bound External Channel `channel_action` and `download_external_file`
 capabilities are deferred while Tool Search is enabled. The active External
@@ -825,6 +836,10 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-08-18** (spec_version 95) — Added the ToolkitConfig-level
+  `always_expose_tools` policy, false-by-default migration behavior, common API/UI
+  control, and direct catalog classification for every tool from an opted-in
+  ToolkitConfig.
 - **2026-08-18** (spec_version 94) — Aligned current Toolkit behavior with Workspace Runtime
   Profile network authority, removed obsolete ShellEnvironment entities and API paths, repaired
   implementation paths, and corrected root/subagent auto-binding wording.

@@ -35,8 +35,9 @@ class ToolkitConfigCreateRequest(BaseModel):
     prompt: Optional[StrictStr] = None
     credentials: Optional[Dict[str, Any]] = None
     enabled: Optional[StrictBool] = Field(default=True, description="Enabled state")
+    always_expose_tools: Optional[StrictBool] = Field(default=False, description="Expose every toolkit tool directly instead of through Tool Search")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["toolkit_type", "slug", "name", "description", "config", "prompt", "credentials", "enabled"]
+    __properties: ClassVar[List[str]] = ["toolkit_type", "slug", "name", "description", "config", "prompt", "credentials", "enabled", "always_expose_tools"]
 
     @field_validator('slug')
     def slug_validate_regular_expression(cls, value):
@@ -133,7 +134,8 @@ class ToolkitConfigCreateRequest(BaseModel):
             "config": obj.get("config"),
             "prompt": obj.get("prompt"),
             "credentials": obj.get("credentials"),
-            "enabled": obj.get("enabled") if obj.get("enabled") is not None else True
+            "enabled": obj.get("enabled") if obj.get("enabled") is not None else True,
+            "always_expose_tools": obj.get("always_expose_tools") if obj.get("always_expose_tools") is not None else False
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

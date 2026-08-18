@@ -169,6 +169,7 @@ export function ToolkitForm({
       config: { allowed_domains: [], denied_domains: [] },
       credentials: null,
       enabled: true,
+      alwaysExposeTools: false,
     },
     validate: (values) => {
       const result = toolkitFormSchema.safeParse(values);
@@ -337,6 +338,7 @@ export function ToolkitForm({
                 ? { values: {} }
                 : null,
         enabled: tkConfig.enabled,
+        alwaysExposeTools: tkConfig.always_expose_tools,
       });
       form.resetDirty();
     }
@@ -683,6 +685,15 @@ export function ToolkitForm({
                   </Stack>
                 </Card>
               )}
+
+            <Switch
+              label={t("alwaysExposeToolsLabel")}
+              description={t("alwaysExposeToolsDescription")}
+              key={form.key("alwaysExposeTools")}
+              {...form.getInputProps("alwaysExposeTools", {
+                type: "checkbox",
+              })}
+            />
 
             <Switch
               label={t("enabledLabel")}

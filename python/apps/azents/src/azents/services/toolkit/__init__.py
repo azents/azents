@@ -215,6 +215,7 @@ class ToolkitService:
             prompt=create.prompt,
             credentials=credentials_json,
             enabled=create.enabled,
+            always_expose_tools=create.always_expose_tools,
         )
         async with self.session_manager() as session:
             result = await self.toolkit_repo.create(session, repo_create)
@@ -375,6 +376,8 @@ class ToolkitService:
             )
         if "enabled" in update:
             repo_update["enabled"] = update["enabled"]
+        if "always_expose_tools" in update:
+            repo_update["always_expose_tools"] = update["always_expose_tools"]
 
         # Delete existing credentials when auth_type changes
         if "config" in update and "credentials" not in update:

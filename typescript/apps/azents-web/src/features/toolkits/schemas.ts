@@ -19,6 +19,7 @@ export const toolkitFormSchema = z.object({
   config: z.record(z.string(), z.unknown()),
   credentials: z.record(z.string(), z.unknown()).nullable().optional(),
   enabled: z.boolean(),
+  alwaysExposeTools: z.boolean(),
 });
 
 export type ToolkitFormValues = z.infer<typeof toolkitFormSchema>;

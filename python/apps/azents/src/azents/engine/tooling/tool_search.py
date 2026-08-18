@@ -59,6 +59,7 @@ class ToolCatalogSource:
     toolkit_class: str
     display_name: str
     use_prefix: bool
+    always_expose_tools: bool = False
     toolkit_config_id: str | None = None
     routing_metadata: tuple[tuple[str, str], ...] = ()
 
@@ -439,6 +440,8 @@ def classify_tool_exposure(
 ) -> ToolExposure:
     """Classify core tools as direct and attached service operations as deferred."""
     if source.toolkit_type is None:
+        return ToolExposure.DIRECT
+    if source.always_expose_tools:
         return ToolExposure.DIRECT
     if (source.toolkit_type, original_tool_name) in _DIRECT_REGISTERED_TOOLS:
         return ToolExposure.DIRECT

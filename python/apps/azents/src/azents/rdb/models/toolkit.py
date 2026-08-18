@@ -67,6 +67,12 @@ class RDBToolkitConfig(RDBModel):
         sa.Text, nullable=True, default=None
     )
     enabled: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    always_expose_tools: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
+    )
     revision: Mapped[int] = mapped_column(
         sa.BigInteger,
         nullable=False,

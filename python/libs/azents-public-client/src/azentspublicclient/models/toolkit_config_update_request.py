@@ -34,8 +34,9 @@ class ToolkitConfigUpdateRequest(BaseModel):
     prompt: Optional[StrictStr] = None
     credentials: Optional[Dict[str, Any]] = None
     enabled: Optional[StrictBool] = Field(default=None, description="Enabled flag")
+    always_expose_tools: Optional[StrictBool] = Field(default=None, description="Whether every tool bypasses Tool Search and remains visible")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["slug", "name", "description", "config", "prompt", "credentials", "enabled"]
+    __properties: ClassVar[List[str]] = ["slug", "name", "description", "config", "prompt", "credentials", "enabled", "always_expose_tools"]
 
     @field_validator('slug')
     def slug_validate_regular_expression(cls, value):
@@ -126,7 +127,8 @@ class ToolkitConfigUpdateRequest(BaseModel):
             "config": obj.get("config"),
             "prompt": obj.get("prompt"),
             "credentials": obj.get("credentials"),
-            "enabled": obj.get("enabled")
+            "enabled": obj.get("enabled"),
+            "always_expose_tools": obj.get("always_expose_tools")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

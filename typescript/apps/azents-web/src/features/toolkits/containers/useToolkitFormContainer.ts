@@ -210,6 +210,7 @@ export function useToolkitFormContainer(
           config: values.config,
           ...(credentials != null && { credentials }),
           enabled: values.enabled,
+          alwaysExposeTools: values.alwaysExposeTools,
         });
       } else {
         createMutation.mutate({
@@ -222,6 +223,7 @@ export function useToolkitFormContainer(
           config: values.config,
           ...(credentials != null && { credentials }),
           enabled: values.enabled,
+          alwaysExposeTools: values.alwaysExposeTools,
         });
       }
     },

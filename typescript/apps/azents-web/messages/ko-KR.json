@@ -1616,6 +1616,8 @@
       "deniedDomainsPlaceholder": "도메인 입력 후 Enter",
       "deniedDomainsDescription": "허용 도메인 설정과 무관하게 항상 차단",
       "enabledLabel": "활성 상태",
+      "alwaysExposeToolsLabel": "도구 항상 노출",
+      "alwaysExposeToolsDescription": "이 툴킷의 모든 도구를 Tool Search 없이 모델에 항상 노출합니다.",
       "scopesSection": "범위",
       "noScopes": "설정된 범위가 없습니다",
       "scopeWorkspace": "워크스페이스",
