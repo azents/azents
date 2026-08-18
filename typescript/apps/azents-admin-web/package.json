@@ -49,7 +49,7 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-perfectionist": "^5.0.0",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "postcss": "^8.5.24",
+    "postcss": "^8.5.25",
     "postcss-preset-mantine": "^1.17.0",
     "postcss-simple-vars": "^7.0.1",
     "typescript": "^6.0.0",
