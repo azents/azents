@@ -13,17 +13,17 @@ import {
 import type { VerificationDetailComponentProps } from "../containers/useVerificationDetailContainer";
 
 /**
- * 날짜/시간 포맷팅 헬퍼
+ * Date and time formatting helper
  */
 function formatDateTime(isoString: string): string {
   return new Date(isoString).toLocaleString();
 }
 
 /**
- * Verification 상세 뷰 컴포넌트
+ * Verification detail view component
  *
- * ADT 상태에 따라 적절한 UI를 렌더링합니다.
- * 읽기 전용 — 폼 없음.
+ * Renders the appropriate UI for the current ADT state.
+ * Read-only; no form is provided.
  */
 export function VerificationDetailView({
   state,
@@ -32,7 +32,7 @@ export function VerificationDetailView({
     case "EMPTY":
       return (
         <Center h="100%">
-          <Text c="dimmed">인증 레코드를 선택하세요.</Text>
+          <Text c="dimmed">Select a verification record.</Text>
         </Center>
       );
     case "LOADING":
@@ -44,7 +44,7 @@ export function VerificationDetailView({
     case "ERROR":
       return (
         <Center h="100%">
-          <Text c="red">에러: {state.message}</Text>
+          <Text c="red">Error: {state.message}</Text>
         </Center>
       );
     case "LOADED": {
@@ -52,7 +52,7 @@ export function VerificationDetailView({
       return (
         <Box p="md">
           <Stack gap="md">
-            <Title order={5}>인증 상세</Title>
+            <Title order={5}>Verification Details</Title>
             <Table>
               <Table.Tbody>
                 <Table.Tr>
@@ -64,11 +64,11 @@ export function VerificationDetailView({
                   </Table.Td>
                 </Table.Tr>
                 <Table.Tr>
-                  <Table.Th>이메일</Table.Th>
+                  <Table.Th>Email</Table.Th>
                   <Table.Td>{v.email}</Table.Td>
                 </Table.Tr>
                 <Table.Tr>
-                  <Table.Th>인증 코드</Table.Th>
+                  <Table.Th>Verification Code</Table.Th>
                   <Table.Td>
                     <Text ff="monospace" fw={600}>
                       {v.code}
@@ -76,7 +76,7 @@ export function VerificationDetailView({
                   </Table.Td>
                 </Table.Tr>
                 <Table.Tr>
-                  <Table.Th>CSRF 토큰</Table.Th>
+                  <Table.Th>CSRF Token</Table.Th>
                   <Table.Td>
                     <Text size="xs" ff="monospace" truncate>
                       {v.csrf_token}
@@ -84,31 +84,31 @@ export function VerificationDetailView({
                   </Table.Td>
                 </Table.Tr>
                 <Table.Tr>
-                  <Table.Th>상태</Table.Th>
+                  <Table.Th>Status</Table.Th>
                   <Table.Td>
                     {v.verified_at ? (
                       <Badge color="green" variant="light">
-                        인증됨
+                        Verified
                       </Badge>
                     ) : (
                       <Badge color="gray" variant="light">
-                        대기중
+                        Pending
                       </Badge>
                     )}
                   </Table.Td>
                 </Table.Tr>
                 <Table.Tr>
-                  <Table.Th>만료 시각</Table.Th>
+                  <Table.Th>Expires At</Table.Th>
                   <Table.Td>{formatDateTime(v.expires_at)}</Table.Td>
                 </Table.Tr>
                 {v.verified_at ? (
                   <Table.Tr>
-                    <Table.Th>인증 시각</Table.Th>
+                    <Table.Th>Verified At</Table.Th>
                     <Table.Td>{formatDateTime(v.verified_at)}</Table.Td>
                   </Table.Tr>
                 ) : null}
                 <Table.Tr>
-                  <Table.Th>생성 시각</Table.Th>
+                  <Table.Th>Created At</Table.Th>
                   <Table.Td>{formatDateTime(v.created_at)}</Table.Td>
                 </Table.Tr>
               </Table.Tbody>

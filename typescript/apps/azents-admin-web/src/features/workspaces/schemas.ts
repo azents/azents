@@ -1,12 +1,15 @@
 import { z } from "zod";
 
 /**
- * Workspace 폼 유효성 검사 스키마
+ * Workspace form validation schema
  */
 export const workspaceFormSchema = z.object({
-  name: z.string().min(1, "이름은 필수입니다"),
+  name: z.string().min(1, "Name is required"),
   handle: z
     .string()
-    .min(1, "핸들은 필수입니다")
-    .regex(/^[a-z0-9-]+$/, "핸들은 소문자, 숫자, 하이픈만 사용할 수 있습니다"),
+    .min(1, "Handle is required")
+    .regex(
+      /^[a-z0-9-]+$/,
+      "Handle can contain only lowercase letters, numbers, and hyphens",
+    ),
 });

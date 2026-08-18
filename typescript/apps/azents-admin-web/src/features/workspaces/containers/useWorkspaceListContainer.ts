@@ -17,9 +17,9 @@ export interface WorkspaceListComponentProps {
 }
 
 /**
- * Workspace 목록 컨테이너 훅
+ * Workspace list container hook
  *
- * tRPC를 사용하여 workspace 목록을 서버사이드에서 가져오고 ADT로 변환합니다.
+ * Fetches the workspace list server-side through tRPC and converts it to an ADT.
  */
 export function useWorkspaceListContainer(
   props: WorkspaceListContainerProps,

@@ -1,6 +1,6 @@
 /**
  * Root Router
- * - 모든 서브 라우터를 통합
+ * - Combines all subrouters
  */
 import { router } from "../init";
 import { bootstrapRouter } from "./bootstrap";
@@ -33,5 +33,5 @@ export const appRouter = router({
   systemSettings: systemSettingsRouter,
 });
 
-// 클라이언트용 타입 export
+// Export the client type
 export type AppRouter = typeof appRouter;

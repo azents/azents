@@ -23,7 +23,7 @@ function renderContent(
     case "NO_WORKSPACE":
       return (
         <Center p="xl">
-          <Text c="dimmed">Workspace를 선택하세요.</Text>
+          <Text c="dimmed">Select a workspace.</Text>
         </Center>
       );
     case "LOADING":
@@ -35,14 +35,14 @@ function renderContent(
     case "ERROR":
       return (
         <Center p="xl">
-          <Text c="red">에러: {state.message}</Text>
+          <Text c="red">Error: {state.message}</Text>
         </Center>
       );
     case "LOADED":
       if (state.members.length === 0) {
         return (
           <Center p="xl">
-            <Text c="dimmed">등록된 멤버가 없습니다.</Text>
+            <Text c="dimmed">No workspace members found.</Text>
           </Center>
         );
       }
@@ -50,9 +50,9 @@ function renderContent(
         <Table highlightOnHover>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>이름</Table.Th>
-              <Table.Th>역할</Table.Th>
-              <Table.Th>가입일</Table.Th>
+              <Table.Th>Name</Table.Th>
+              <Table.Th>Role</Table.Th>
+              <Table.Th>Joined At</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -87,9 +87,9 @@ function renderContent(
 }
 
 /**
- * WorkspaceMember 목록 뷰 컴포넌트
+ * Workspace member list view component
  *
- * ADT 상태에 따라 적절한 UI를 렌더링합니다.
+ * Renders the appropriate UI for the current ADT state.
  */
 export function WorkspaceMemberListView({
   state,

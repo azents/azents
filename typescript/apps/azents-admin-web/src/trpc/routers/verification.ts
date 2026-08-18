@@ -1,8 +1,8 @@
 /**
- * Verification tRPC 라우터
+ * Verification tRPC router
  *
- * azents admin API 서버와 서버사이드 통신하여 이메일 인증 레코드 조회 기능을 제공합니다.
- * Generated client (@azents/admin-client)를 사용합니다.
+ * Provides email verification queries by communicating with the Azents Admin API server-side.
+ * Uses the generated client (@azents/admin-client).
  */
 import {
   authV1GetEmailVerification,
@@ -14,7 +14,7 @@ import { protectedProcedure, router } from "../init";
 // --- Router ---
 export const verificationRouter = router({
   /**
-   * 이메일 인증 목록 조회
+   * List email verifications
    */
   list: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await authV1ListEmailVerifications({
@@ -28,7 +28,7 @@ export const verificationRouter = router({
   }),
 
   /**
-   * 이메일 인증 상세 조회
+   * Get email verification details
    */
   get: protectedProcedure
     .input(z.object({ id: z.string() }))

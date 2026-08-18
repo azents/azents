@@ -11,9 +11,9 @@ export interface VerificationsPageContentProps {
 }
 
 /**
- * Verifications 페이지 컨테이너 훅
+ * Verifications page container hook
  *
- * URL 쿼리 상태로 선택된 verification ID를 관리합니다.
+ * Manages the selected verification ID through URL query state.
  */
 export function useVerificationsPageContainer(): VerificationsPageContentProps {
   const [selectedVerificationId, setSelectedVerificationId] = useQueryState(

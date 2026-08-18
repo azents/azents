@@ -30,14 +30,14 @@ function renderContent(
     case "ERROR":
       return (
         <Center p="xl">
-          <Text c="red">에러: {state.message}</Text>
+          <Text c="red">Error: {state.message}</Text>
         </Center>
       );
     case "LOADED":
       if (state.workspaces.length === 0) {
         return (
           <Center p="xl">
-            <Text c="dimmed">등록된 Workspace가 없습니다.</Text>
+            <Text c="dimmed">No workspaces found.</Text>
           </Center>
         );
       }
@@ -46,7 +46,7 @@ function renderContent(
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Handle</Table.Th>
-              <Table.Th>이름</Table.Th>
+              <Table.Th>Name</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -74,9 +74,9 @@ function renderContent(
 }
 
 /**
- * Workspace 목록 뷰 컴포넌트
+ * Workspace list view component
  *
- * ADT 상태에 따라 적절한 UI를 렌더링합니다.
+ * Renders the appropriate UI for the current ADT state.
  */
 export function WorkspaceListView({
   state,
@@ -93,7 +93,7 @@ export function WorkspaceListView({
           leftSection={<IconPlus size={14} />}
           onClick={onCreateNew}
         >
-          Workspace 추가
+          Add Workspace
         </Button>
       </Group>
       <Box style={{ flex: 1, overflow: "auto" }}>

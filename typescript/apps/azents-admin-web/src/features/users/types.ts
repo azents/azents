@@ -1,15 +1,15 @@
 /**
- * Users Feature - ADT (Algebraic Data Types) 정의
+ * ADT definitions for the users feature
  */
 
-// --- API 응답 타입 (generated client에서 re-export) ---
+// --- API response types (re-exported from the generated client) ---
 export type { UserEmailResponse, UserResponse } from "@azents/admin-client";
 
 import type { UserResponse } from "@azents/admin-client";
 
-// --- ADT 상태 타입 ---
+// --- ADT state types ---
 
-/** User 목록 상태 */
+/** User list state */
 export type UserListState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }
@@ -18,7 +18,7 @@ export type UserListState =
       users: UserResponse[];
     };
 
-/** User 상세 상태 */
+/** System administrator role state */
 export type SystemAdminRoleState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }

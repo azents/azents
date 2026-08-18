@@ -6,9 +6,9 @@ import { UserListView } from "./UserListView";
 import type { UserListContainerProps } from "../containers/useUserListContainer";
 
 /**
- * User 목록 컨테이너 컴포넌트
+ * User list container component
  *
- * 컨테이너 훅과 뷰를 연결합니다.
+ * Connects the container hook to the view.
  */
 export const UserList = createReactContainer<
   UserListContainerProps,

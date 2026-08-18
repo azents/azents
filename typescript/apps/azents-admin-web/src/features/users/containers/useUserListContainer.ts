@@ -15,9 +15,9 @@ export interface UserListComponentProps {
 }
 
 /**
- * User 목록 컨테이너 훅
+ * User list container hook
  *
- * tRPC를 사용하여 user 목록을 서버사이드에서 가져오고 ADT로 변환합니다.
+ * Fetches the user list server-side through tRPC and converts it to an ADT.
  */
 export function useUserListContainer(
   props: UserListContainerProps,

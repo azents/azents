@@ -16,9 +16,9 @@ import dayjs from "dayjs";
 import type { WorkspaceMemberDetailComponentProps } from "../containers/useWorkspaceMemberDetailContainer";
 
 /**
- * WorkspaceMember 상세 뷰 컴포넌트
+ * Workspace member detail view component
  *
- * ADT 상태에 따라 멤버 정보 또는 플레이스홀더를 렌더링합니다.
+ * Renders workspace member information or a placeholder for the current ADT state.
  */
 export function WorkspaceMemberDetailView({
   state,
@@ -28,7 +28,7 @@ export function WorkspaceMemberDetailView({
     case "EMPTY":
       return (
         <Center h="100%">
-          <Text c="dimmed">멤버를 선택하세요.</Text>
+          <Text c="dimmed">Select a workspace member.</Text>
         </Center>
       );
 
@@ -42,7 +42,7 @@ export function WorkspaceMemberDetailView({
     case "ERROR":
       return (
         <Center h="100%">
-          <Text c="red">에러: {state.message}</Text>
+          <Text c="red">Error: {state.message}</Text>
         </Center>
       );
 
@@ -54,7 +54,7 @@ export function WorkspaceMemberDetailView({
       return (
         <Box h="100%" display="flex" style={{ flexDirection: "column" }}>
           <Group p="sm" justify="space-between">
-            <Title order={5}>멤버 상세</Title>
+            <Title order={5}>Workspace Member Details</Title>
           </Group>
 
           <Box style={{ flex: 1, overflow: "auto" }} p="md">
@@ -88,21 +88,21 @@ export function WorkspaceMemberDetailView({
 
               <Stack gap="xs">
                 <Text size="sm" fw={500} c="dimmed">
-                  이름
+                  Name
                 </Text>
                 <Text>{member.name}</Text>
               </Stack>
 
               <Stack gap="xs">
                 <Text size="sm" fw={500} c="dimmed">
-                  역할
+                  Role
                 </Text>
                 <Badge variant="light">{member.role}</Badge>
               </Stack>
 
               <Stack gap="xs">
                 <Text size="sm" fw={500} c="dimmed">
-                  가입일
+                  Joined At
                 </Text>
                 <Text size="sm">
                   {dayjs(member.created_at).format("YYYY-MM-DD HH:mm:ss")}
@@ -111,7 +111,7 @@ export function WorkspaceMemberDetailView({
 
               <Stack gap="xs">
                 <Text size="sm" fw={500} c="dimmed">
-                  수정일
+                  Updated At
                 </Text>
                 <Text size="sm">
                   {dayjs(member.updated_at).format("YYYY-MM-DD HH:mm:ss")}
@@ -127,7 +127,7 @@ export function WorkspaceMemberDetailView({
                   loading={isProcessing}
                   disabled={isProcessing}
                 >
-                  {isProcessing ? "제거 중..." : "멤버 제거"}
+                  {isProcessing ? "Removing..." : "Remove Workspace Member"}
                 </Button>
               </Box>
             </Stack>

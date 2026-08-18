@@ -1,15 +1,15 @@
 /**
- * Verifications Feature — ADT (Algebraic Data Types) 정의
+ * ADT definitions for the verifications feature
  */
 
-// --- API 응답 타입 (generated client에서 re-export) ---
+// --- API response types (re-exported from the generated client) ---
 export type { EmailVerificationResponse } from "@azents/admin-client";
 
 import type { EmailVerificationResponse } from "@azents/admin-client";
 
-// --- ADT 상태 타입 ---
+// --- ADT state types ---
 
-/** Verification 목록 상태 */
+/** Verification list state */
 export type VerificationListState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }
@@ -18,7 +18,7 @@ export type VerificationListState =
       verifications: EmailVerificationResponse[];
     };
 
-/** Verification 상세 상태 */
+/** Verification detail state */
 export type VerificationDetailState =
   | { type: "EMPTY" }
   | { type: "LOADING"; verificationId: string }

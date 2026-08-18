@@ -1,6 +1,6 @@
 /**
  * Client-side tRPC
- * - React Query를 사용한 클라이언트 훅
+ * - Client hooks using React Query
  */
 "use client";
 

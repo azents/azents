@@ -1,8 +1,8 @@
 /**
- * WorkspaceMember tRPC 라우터
+ * WorkspaceMember tRPC router
  *
- * azents admin API 서버와 서버사이드 통신하여 WorkspaceUser(멤버) 관리 기능을 제공합니다.
- * Generated client (@azents/admin-client)를 사용합니다.
+ * Provides WorkspaceUser (workspace member) management by communicating with the Azents Admin API server-side.
+ * Uses the generated client (@azents/admin-client).
  */
 import {
   workspaceuserV1CreateWorkspaceUser,
@@ -30,7 +30,7 @@ const WorkspaceMemberUpdateInput = z.object({
 // --- Router ---
 export const workspaceMemberRouter = router({
   /**
-   * Workspace별 멤버 목록 조회
+   * List members for a workspace
    */
   listByWorkspace: protectedProcedure
     .input(z.object({ workspace_handle: z.string() }))
@@ -48,7 +48,7 @@ export const workspaceMemberRouter = router({
     }),
 
   /**
-   * WorkspaceUser 상세 조회
+   * Get WorkspaceUser details
    */
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
@@ -62,7 +62,7 @@ export const workspaceMemberRouter = router({
     }),
 
   /**
-   * WorkspaceUser 생성
+   * Create a WorkspaceUser
    */
   create: protectedProcedure
     .input(WorkspaceMemberCreateInput)
@@ -76,7 +76,7 @@ export const workspaceMemberRouter = router({
     }),
 
   /**
-   * WorkspaceUser 수정
+   * Update a WorkspaceUser
    */
   update: protectedProcedure
     .input(WorkspaceMemberUpdateInput)
@@ -92,7 +92,7 @@ export const workspaceMemberRouter = router({
     }),
 
   /**
-   * WorkspaceUser 삭제
+   * Delete a WorkspaceUser
    */
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))

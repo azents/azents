@@ -14,9 +14,9 @@ export interface WorkspaceMembersPageContentProps {
 }
 
 /**
- * WorkspaceMembers 페이지 컨테이너 훅
+ * Workspace members page container hook
  *
- * URL 쿼리 상태로 선택된 workspace와 member를 관리합니다.
+ * Manages the selected workspace and member through URL query state.
  */
 export function useWorkspaceMembersPageContainer(): WorkspaceMembersPageContentProps {
   const [state, setState] = useQueryStates({

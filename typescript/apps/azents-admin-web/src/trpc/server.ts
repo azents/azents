@@ -1,7 +1,7 @@
 import { createServerContext } from "./context";
 /**
  * Server-side tRPC Caller
- * - Server Component에서 네트워크 없이 직접 호출
+ * - Called directly from Server Components without a network request
  */
 import { createCallerFactory } from "./init";
 import { appRouter } from "./routers/_app";
@@ -9,7 +9,7 @@ import { appRouter } from "./routers/_app";
 const createCaller = createCallerFactory(appRouter);
 
 /**
- * Server Component에서 사용할 tRPC caller
+ * tRPC caller for use in Server Components
  *
  * @example
  * ```tsx

@@ -12,9 +12,9 @@ export interface UsersPageContentProps {
 }
 
 /**
- * Users 페이지 컨테이너 훅
+ * Users page container hook
  *
- * URL 쿼리 상태로 선택된 user를 관리합니다.
+ * Manages the selected user through URL query state.
  */
 export function useUsersPageContainer(): UsersPageContentProps {
   const [selectedUserId, setSelectedUserId] = useQueryState("userId", {

@@ -1,8 +1,8 @@
 /**
- * User tRPC 라우터
+ * User tRPC router
  *
- * azents admin API 서버와 서버사이드 통신하여 User 관리 기능을 제공합니다.
- * Generated client (@azents/admin-client)를 사용합니다.
+ * Provides user management by communicating with the Azents Admin API server-side.
+ * Uses the generated client (@azents/admin-client).
  */
 import {
   userV1DeleteUser,
@@ -16,7 +16,7 @@ import { protectedProcedure, router } from "../init";
 // --- Router ---
 export const userRouter = router({
   /**
-   * User 목록 조회
+   * List users
    */
   list: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await userV1ListUsers({
@@ -31,7 +31,7 @@ export const userRouter = router({
   }),
 
   /**
-   * User 상세 조회
+   * Get user details
    */
   get: protectedProcedure
     .input(z.object({ id: z.string() }))
@@ -45,7 +45,7 @@ export const userRouter = router({
     }),
 
   /**
-   * User 삭제
+   * Delete a user
    */
   delete: protectedProcedure
     .input(z.object({ id: z.string() }))

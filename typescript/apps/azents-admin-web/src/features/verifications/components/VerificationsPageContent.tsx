@@ -6,9 +6,9 @@ import { VerificationList } from "./VerificationList";
 import type { VerificationsPageContentProps } from "../containers/useVerificationsPageContainer";
 
 /**
- * Verifications 페이지 콘텐츠 컴포넌트
+ * Verifications page content component
  *
- * MasterDetailLayout을 사용한 반응형 2패널 레이아웃
+ * Responsive two-panel layout using MasterDetailLayout
  */
 export function VerificationsPageContent({
   selectedVerificationId,

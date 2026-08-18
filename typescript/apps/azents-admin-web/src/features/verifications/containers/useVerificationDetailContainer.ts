@@ -12,10 +12,10 @@ export interface VerificationDetailComponentProps {
 }
 
 /**
- * Verification 상세 컨테이너 훅
+ * Verification detail container hook
  *
- * tRPC를 사용하여 verification 상세를 서버사이드에서 가져오고 ADT로 변환합니다.
- * 읽기 전용 (생성/수정/삭제 없음).
+ * Fetches verification details server-side through tRPC and converts them to an ADT.
+ * Read-only (no create, update, or delete operations).
  */
 export function useVerificationDetailContainer(
   props: VerificationDetailContainerProps,

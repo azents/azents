@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
 
 /**
- * 쿼리 파라미터 값을 위한 Serializer/Deserializer 인터페이스
+ * Serializer/deserializer interface for query parameter values
  */
 export interface QueryStateSerializer<T> {
   parse: (value: string | null) => T;
@@ -12,11 +12,11 @@ export interface QueryStateSerializer<T> {
 }
 
 /**
- * 일반적인 타입을 위한 내장 serializer
+ * Built-in serializers for common types
  */
 export const serializers = {
   /**
-   * String serializer (기본값)
+   * String serializer (default)
    */
   string: (defaultValue: string = ""): QueryStateSerializer<string> => ({
     parse: (value) => value ?? defaultValue,
@@ -60,7 +60,7 @@ export const serializers = {
   }),
 
   /**
-   * Literal union type serializer (탭, enum 등)
+   * Literal union type serializer (tabs, enums, and similar values)
    */
   literal: <T extends string>(
     values: readonly T[],
@@ -78,25 +78,25 @@ export const serializers = {
 
 export interface UseQueryStateOptions<T> {
   /**
-   * 문자열과 값 사이를 변환하는 데 사용할 serializer
+   * Serializer used to convert between strings and values
    */
   serializer: QueryStateSerializer<T>;
 
   /**
-   * push 대신 현재 history 항목을 replace할지 여부
+   * Whether to replace the current history entry instead of pushing a new one
    * @default false
    */
   replace?: boolean;
 
   /**
-   * 값이 변경될 때 상단으로 스크롤할지 여부
+   * Whether to scroll to the top when the value changes
    * @default false
    */
   scroll?: boolean;
 }
 
 /**
- * 단일 쿼리 파라미터 상태를 관리하는 Hook
+ * Hook that manages state for a single query parameter
  */
 export function useQueryState<T>(
   key: string,
@@ -144,26 +144,26 @@ export function useQueryState<T>(
 }
 
 /**
- * Serializer에서 값 타입을 추론하는 유틸리티 타입
+ * Utility type that infers the value type from a serializer
  */
 type InferSerializerType<S> =
   S extends QueryStateSerializer<infer T> ? T : never;
 
 /**
- * Schema에서 상태 타입을 추론하는 유틸리티 타입
+ * Utility type that infers the state type from a schema
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- 타입 추론을 위해 any 사용 필요
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- any is required for type inference
 type InferSchemaState<T extends Record<string, QueryStateSerializer<any>>> = {
   [K in keyof T]: InferSerializerType<T[K]>;
 };
 
 /**
- * 여러 쿼리 파라미터를 한번에 관리하는 Hook
+ * Hook that manages multiple query parameters at once
  *
- * 개별 useQueryState를 여러 번 사용하면 순차적 router.push 호출로
- * 이전 업데이트가 덮어씌워지는 문제가 발생합니다.
- * 이 Hook은 모든 파라미터를 하나의 URLSearchParams에 반영한 뒤
- * 단 한 번의 router.push/replace를 호출합니다.
+ * Using useQueryState multiple times triggers sequential router.push calls,
+ * which can overwrite earlier updates.
+ * This hook applies all parameters to one URLSearchParams instance
+ * and calls router.push or router.replace only once.
  *
  * @example
  * ```tsx
@@ -172,12 +172,12 @@ type InferSchemaState<T extends Record<string, QueryStateSerializer<any>>> = {
  *   teamId: serializers.stringOrNull(),
  * });
  *
- * // 여러 값을 동시에 업데이트
+ * // Update multiple values at once
  * setState({ workspaceId: "ws-123", teamId: null });
  * ```
  */
 export function useQueryStates<
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- 타입 추론을 위해 any 사용 필요
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- any is required for type inference
   T extends Record<string, QueryStateSerializer<any>>,
 >(
   schema: T,

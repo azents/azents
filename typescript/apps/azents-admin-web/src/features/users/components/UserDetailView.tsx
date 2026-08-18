@@ -28,7 +28,7 @@ import type { UserDetailComponentProps } from "../containers/useUserDetailContai
 import type { SystemAdminRoleState, UserEmailResponse } from "../types";
 
 /**
- * 이메일 목록 서브섹션
+ * Email list subsection
  */
 function EmailSection({
   emails,
@@ -60,14 +60,14 @@ function EmailSection({
         </Center>
       ) : emails.length === 0 ? (
         <Text size="sm" c="dimmed">
-          등록된 이메일이 없습니다.
+          No email addresses found.
         </Text>
       ) : (
         <Table>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>이메일</Table.Th>
-              <Table.Th>인증 상태</Table.Th>
+              <Table.Th>Email</Table.Th>
+              <Table.Th>Verification Status</Table.Th>
               <Table.Th w={60} />
             </Table.Tr>
           </Table.Thead>
@@ -80,11 +80,11 @@ function EmailSection({
                 <Table.Td>
                   {email.verified_at ? (
                     <Badge color="green" variant="light" size="sm">
-                      인증됨
+                      Verified
                     </Badge>
                   ) : (
                     <Badge color="gray" variant="light" size="sm">
-                      대기중
+                      Pending
                     </Badge>
                   )}
                 </Table.Td>
@@ -94,7 +94,7 @@ function EmailSection({
                     variant="subtle"
                     size="sm"
                     onClick={() => onDeleteEmail(email.id)}
-                    title="이메일 삭제"
+                    title="Delete Email Address"
                   >
                     <IconTrash size={14} />
                   </ActionIcon>
@@ -106,7 +106,7 @@ function EmailSection({
       )}
       <Group gap="xs">
         <TextInput
-          placeholder="새 이메일 주소"
+          placeholder="New email address"
           size="xs"
           value={newEmail}
           onChange={(e) => setNewEmail(e.currentTarget.value)}
@@ -125,7 +125,7 @@ function EmailSection({
           onClick={handleSubmit}
           disabled={!newEmail.trim()}
         >
-          추가
+          Add
         </Button>
       </Group>
     </Stack>
@@ -224,9 +224,9 @@ function SystemAdminSection({
 }
 
 /**
- * User 상세 뷰 컴포넌트
+ * User detail view component
  *
- * ADT 상태에 따라 유저 정보 또는 플레이스홀더를 렌더링합니다.
+ * Renders user information or a placeholder for the current ADT state.
  */
 export function UserDetailView({
   state,
@@ -243,7 +243,7 @@ export function UserDetailView({
     case "EMPTY":
       return (
         <Center h="100%">
-          <Text c="dimmed">User를 선택하세요.</Text>
+          <Text c="dimmed">Select a user.</Text>
         </Center>
       );
 
@@ -257,7 +257,7 @@ export function UserDetailView({
     case "ERROR":
       return (
         <Center h="100%">
-          <Text c="red">에러: {state.message}</Text>
+          <Text c="red">Error: {state.message}</Text>
         </Center>
       );
 
@@ -271,7 +271,7 @@ export function UserDetailView({
       return (
         <Box h="100%" display="flex" style={{ flexDirection: "column" }}>
           <Group p="sm" justify="space-between">
-            <Title order={5}>User 상세</Title>
+            <Title order={5}>User Details</Title>
           </Group>
 
           <Box style={{ flex: 1, overflow: "auto" }} p="md">
@@ -294,7 +294,7 @@ export function UserDetailView({
 
               <Stack gap="xs">
                 <Text size="sm" fw={500} c="dimmed">
-                  생성일
+                  Created At
                 </Text>
                 <Text size="sm">
                   {dayjs(user.created_at).format("YYYY-MM-DD HH:mm:ss")}
@@ -303,7 +303,7 @@ export function UserDetailView({
 
               <Stack gap="xs">
                 <Text size="sm" fw={500} c="dimmed">
-                  수정일
+                  Updated At
                 </Text>
                 <Text size="sm">
                   {dayjs(user.updated_at).format("YYYY-MM-DD HH:mm:ss")}
@@ -332,7 +332,7 @@ export function UserDetailView({
                   loading={isProcessing}
                   disabled={isProcessing || deleteBlockedByFinalAdmin}
                 >
-                  {isProcessing ? "삭제 처리 중..." : "삭제"}
+                  {isProcessing ? "Deleting..." : "Delete"}
                 </Button>
                 {deleteBlockedByFinalAdmin && (
                   <Text size="xs" c="orange">

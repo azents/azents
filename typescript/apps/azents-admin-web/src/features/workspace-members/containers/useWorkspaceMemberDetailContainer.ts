@@ -16,10 +16,10 @@ export interface WorkspaceMemberDetailComponentProps {
 }
 
 /**
- * WorkspaceMember 상세 컨테이너 훅
+ * Workspace member detail container hook
  *
- * tRPC를 사용하여 서버사이드에서 데이터를 가져오고,
- * 삭제 뮤테이션을 관리합니다.
+ * Fetches data server-side through tRPC and
+ * manages the delete mutation.
  */
 export function useWorkspaceMemberDetailContainer(
   props: WorkspaceMemberDetailContainerProps,
@@ -27,7 +27,7 @@ export function useWorkspaceMemberDetailContainer(
   const { memberId, onDeleted } = props;
   const utils = trpc.useUtils();
 
-  // --- 데이터 로딩 ---
+  // --- Data loading ---
   const {
     data: memberData,
     isLoading: isLoadingMember,
@@ -40,11 +40,11 @@ export function useWorkspaceMemberDetailContainer(
 
   const currentMember = memberData ?? null;
 
-  // --- 뮤테이션 ---
+  // --- Mutations ---
   const deleteMutation = trpc.workspaceMember.delete.useMutation();
   const isDeleting = deleteMutation.isPending;
 
-  // --- 상태 계산 ---
+  // --- State calculation ---
   const state: WorkspaceMemberDetailState = useMemo(() => {
     if (!memberId) {
       return { type: "EMPTY" };
@@ -75,16 +75,16 @@ export function useWorkspaceMemberDetailContainer(
     isDeleting,
   ]);
 
-  // --- 핸들러 ---
+  // --- Handlers ---
   const handleDelete = useCallback(() => {
     if (!memberId) {
       return;
     }
     modals.openConfirmModal({
-      title: "멤버 제거",
+      title: "Remove Workspace Member",
       children:
-        "정말 이 멤버를 제거하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
-      labels: { confirm: "제거", cancel: "취소" },
+        "Are you sure you want to remove this workspace member? This action cannot be undone.",
+      labels: { confirm: "Remove", cancel: "Cancel" },
       confirmProps: { color: "red" },
       onConfirm: () => {
         deleteMutation.mutate(
