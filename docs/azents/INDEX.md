@@ -25,7 +25,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-18 | 4 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-18 | 95 |
-| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
+| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 11 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-18 | 68 |
 
 ## Living Specs — Flow

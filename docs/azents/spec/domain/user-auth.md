@@ -82,7 +82,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-08-18
-spec_version: 12
+spec_version: 11
 ---
 
 # User & Authentication
@@ -441,16 +441,6 @@ All other Admin API operations, including `/auth/v1` token operations, `/system-
 - `/login` — existing login page. Existing users continue with password or email OTP. It exposes a signup-link request action only when registration policy and email delivery allow it.
 - `/signup?token=...` — previews a signup token, shows a masked email hint, and redeems it with user-entered email and password.
 - `/reset-password?token=...` — previews an admin-issued reset token and submits a new password. Success does not auto-login; user signs in separately.
-
-The already-authenticated `/login` Server Component accepts `next` only when it
-is a single-slash relative path and otherwise redirects to `/workspaces`.
-Interactive password and email-OTP success currently do not apply that validation:
-their client containers preserve the raw `next` query value and assign it to
-`window.location.href`. Absolute and scheme-relative values therefore cause
-cross-origin navigation after successful authentication. This is current
-implementation behavior and a suspected open-redirect defect, not an authorization
-mechanism.
-
 Main Web has no setup route. It shows the configured Admin Web URL only when the authenticated Public API self-role projection includes `system_admin`; it never imports or calls the Admin API client.
 
 Admin Web `/login` selects one of two modes from Admin bootstrap status. An empty instance shows first-administrator setup with email, password, and one-time setup token. After bootstrap is consumed, the same route shows normal password login. Protected Admin resource routes require Admin cookies and authoritative downstream role checks.
@@ -459,8 +449,6 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
-- **2026-08-18** (v12) — Documented the inconsistent Main Web `next`
-  validation and the resulting suspected post-authentication open redirect.
 - **2026-08-18** (v11) — Corrected the existing-install operator CLI contract to
   accept repeated exact-email options, process grants sequentially, and preserve
   earlier successful grants when a later email is missing.
