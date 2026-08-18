@@ -1,39 +1,39 @@
 {
   "change_checkpoint": {
-    "checked_at": null,
+    "checked_at": "2026-08-18T22:05:51Z",
     "checked_ruleset_revisions": [],
-    "checked_through_commit": null
+    "checked_through_commit": "2d390db792ccf53cf1af8597cd7a70690ab95d1e"
   },
   "ranges": {
     ".::bucket-1-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T22:05:51Z",
+      "checked_ruleset_revision": "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c",
+      "checked_through_commit": "2d390db792ccf53cf1af8597cd7a70690ab95d1e"
     },
     ".::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T22:05:51Z",
+      "checked_ruleset_revision": "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c",
+      "checked_through_commit": "2d390db792ccf53cf1af8597cd7a70690ab95d1e"
     },
     ".::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T22:05:51Z",
+      "checked_ruleset_revision": "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c",
+      "checked_through_commit": "2d390db792ccf53cf1af8597cd7a70690ab95d1e"
     },
     ".::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T22:05:51Z",
+      "checked_ruleset_revision": "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c",
+      "checked_through_commit": "2d390db792ccf53cf1af8597cd7a70690ab95d1e"
     },
     ".::bucket-5-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T22:05:51Z",
+      "checked_ruleset_revision": "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c",
+      "checked_through_commit": "2d390db792ccf53cf1af8597cd7a70690ab95d1e"
     },
     ".::bucket-6-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T22:05:51Z",
+      "checked_ruleset_revision": "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c",
+      "checked_through_commit": "2d390db792ccf53cf1af8597cd7a70690ab95d1e"
     },
     ".::bucket-7-of-8": {
       "checked_at": null,
@@ -857,11 +857,50 @@
     }
   },
   "rulesets": {
-    "47f62113771721211dd44b67f52e4f5a2b0915a69d2f87cf930df3fcd0782ca6": [
+    "22896c550d39b0714ef34724de25dfc9f581a4d72fa96b91588ce3298291577d": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
       ".claude/conventions/global/comments-and-docstrings-in-english.md",
       ".claude/conventions/global/decode-json-into-typed-payloads.md",
       ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
+      ".claude/conventions/global/diagrams-in-mermaid.md",
+      ".claude/conventions/global/patch-null-means-set-null.md",
+      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
+      ".claude/conventions/global/redis-optional-no-ha.md",
+      ".claude/conventions/global/runner-reported-agent-workspace.md",
+      ".claude/conventions/global/stacked-pr-rebase-script.md",
+      ".claude/conventions/global/user-facing-text-in-english.md",
+      ".claude/conventions/global/worktree-rebase-origin-main.md",
+      ".claude/conventions/infra/argocd-valuesobject-full-replacement.md",
+      ".claude/conventions/infra/fluentbit-explicit-kubernetes-filter.md",
+      ".claude/conventions/infra/iam-role-description-ascii-only.md",
+      ".claude/conventions/infra/kustomize-namespace-must-match.md",
+      ".claude/conventions/infra/module-separation-by-role.md",
+      ".claude/conventions/infra/resource-naming-prefix.md",
+      ".claude/conventions/infra/snake-case-vs-camel-case.md"
+    ],
+    "27f1cf2964ca58a1181ac08eb9f32d09ad2f5b50ac5fa84cbf571e6ec3585f42": [
+      ".claude/conventions/github-actions/pin-actions-to-commit-hash.md",
+      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
+      ".claude/conventions/global/comments-and-docstrings-in-english.md",
+      ".claude/conventions/global/decode-json-into-typed-payloads.md",
+      ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
+      ".claude/conventions/global/diagrams-in-mermaid.md",
+      ".claude/conventions/global/patch-null-means-set-null.md",
+      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
+      ".claude/conventions/global/redis-optional-no-ha.md",
+      ".claude/conventions/global/runner-reported-agent-workspace.md",
+      ".claude/conventions/global/stacked-pr-rebase-script.md",
+      ".claude/conventions/global/user-facing-text-in-english.md",
+      ".claude/conventions/global/worktree-rebase-origin-main.md"
+    ],
+    "91e6f323ff0749cc1baf04932f71fc810ceaa09f2b8d3723951d3175a185983e": [
+      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
+      ".claude/conventions/global/comments-and-docstrings-in-english.md",
+      ".claude/conventions/global/decode-json-into-typed-payloads.md",
+      ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
       ".claude/conventions/global/diagrams-in-mermaid.md",
       ".claude/conventions/global/patch-null-means-set-null.md",
       ".claude/conventions/global/prefer-supported-external-service-sdks.md",
@@ -875,11 +914,27 @@
       ".claude/conventions/testenv/qa-report-includes-slack-link.md",
       ".claude/conventions/testenv/slack-password-login-uses-hidden-url.md"
     ],
-    "5aab73d7500d7c47b89180638a8a2da5c6666fab2a6e2634942b4ecde9e6cf98": [
+    "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
       ".claude/conventions/global/comments-and-docstrings-in-english.md",
       ".claude/conventions/global/decode-json-into-typed-payloads.md",
       ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
+      ".claude/conventions/global/diagrams-in-mermaid.md",
+      ".claude/conventions/global/patch-null-means-set-null.md",
+      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
+      ".claude/conventions/global/redis-optional-no-ha.md",
+      ".claude/conventions/global/runner-reported-agent-workspace.md",
+      ".claude/conventions/global/stacked-pr-rebase-script.md",
+      ".claude/conventions/global/user-facing-text-in-english.md",
+      ".claude/conventions/global/worktree-rebase-origin-main.md"
+    ],
+    "c9bf0754039e7be7cf894b4350911b693543b2fbfb9cbcf849ac1058ef07b255": [
+      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
+      ".claude/conventions/global/comments-and-docstrings-in-english.md",
+      ".claude/conventions/global/decode-json-into-typed-payloads.md",
+      ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
       ".claude/conventions/global/diagrams-in-mermaid.md",
       ".claude/conventions/global/patch-null-means-set-null.md",
       ".claude/conventions/global/prefer-supported-external-service-sdks.md",
@@ -924,25 +979,12 @@
       ".claude/conventions/python/type-safety-order.md",
       ".claude/conventions/python/typeddict-for-update-apis.md"
     ],
-    "8481341eccd35af131254c4df29b7b3ff5cf4612c9cdc2986c578afbecedff23": [
+    "d785d15ff0888ecdca39802bb34d6821d0194ac1cf970e8105ef944fcb7feb66": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
       ".claude/conventions/global/comments-and-docstrings-in-english.md",
       ".claude/conventions/global/decode-json-into-typed-payloads.md",
       ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md"
-    ],
-    "b066ce13f5f70bf91354ffedadf9803c6bcfc29deea66bb780e82ffb4dc8ffbd": [
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
       ".claude/conventions/global/diagrams-in-mermaid.md",
       ".claude/conventions/global/patch-null-means-set-null.md",
       ".claude/conventions/global/prefer-supported-external-service-sdks.md",
@@ -970,42 +1012,6 @@
       ".claude/conventions/typescript/storybook-provider-structure.md",
       ".claude/conventions/typescript/trpc-cache-invalidation.md",
       ".claude/conventions/typescript/use-generated-public-client.md"
-    ],
-    "df5ed6b143f6035657b435674ed0fb8f04ca62f8d071dafc7f9403737db558a5": [
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md",
-      ".claude/conventions/infra/argocd-valuesobject-full-replacement.md",
-      ".claude/conventions/infra/fluentbit-explicit-kubernetes-filter.md",
-      ".claude/conventions/infra/iam-role-description-ascii-only.md",
-      ".claude/conventions/infra/kustomize-namespace-must-match.md",
-      ".claude/conventions/infra/module-separation-by-role.md",
-      ".claude/conventions/infra/resource-naming-prefix.md",
-      ".claude/conventions/infra/snake-case-vs-camel-case.md"
-    ],
-    "fb21380356d80acc1bd98032d442f5965de7297b84cf306adefda5b01409c101": [
-      ".claude/conventions/github-actions/pin-actions-to-commit-hash.md",
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md"
     ]
   },
   "schema_version": 2
