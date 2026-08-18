@@ -1,7 +1,7 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-08-18T15:36:40Z",
-    "checked_through_commit": "e7d01bdf9ad20cabc35bcf02c52ed641566e0672"
+    "checked_at": "2026-08-18T15:50:49Z",
+    "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
   },
   "ranges": {
     ".claude/**::bucket-14-of-32": {
@@ -365,94 +365,94 @@
       "checked_through_commit": "e7d01bdf9ad20cabc35bcf02c52ed641566e0672"
     },
     "python/apps/azents-runtime-runner/**::bucket-6-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "58aa51d9872a7ad456ff4ac30bb9f3135f9d0b692331100f8916d390271243fc",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents-runtime-runner/**::bucket-9-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "5330212a669674a05363b6e51aecbc269f8c7db6255a21d02ca6927cc7944433",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-1-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "e554c1d798bddf5c13c20fbabfee732552c845b9e12bbf3b703eb159fbd8a76d",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-10-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "3a28d6b03cb75042c48fdbc0935a22b719687e9fe30009567c58ab03933e659e",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-11-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "7913ef935f0340e7c5f36553069788a17c7b9491c1a1498ed1e803902a231152",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-12-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "afaa0c8fad468b3aa7a79d8618455032b1d732b1f9d7786b7f7060fc8a038add",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-13-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "14528f0db6f37b4ba26278165fc45671ca48e810f44bc4d30b830c60eb3fe3b1",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-14-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "d0f05419deae009388e5662f2e720f33b74bbd759dd90209c15b560ea6fee38e",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-15-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "ca1875073b165182c0e97e45a3b1c1171e3dd8c3254c116b7a39ccdd4a7e3407",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-16-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "59369c58338b9068188a42d2d672867e45b7dd0c2a1ca83e2394d97a3c504825",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-17-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "dabb6536e6b31c9b4a4f73f0029c635f357792cd7c652bcef812a95f5ecd6a99",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-18-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "c5b317e476a044268b1b815b82df5b75d3aab4087f0985ce002a295846deb5da",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-19-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "8d95b4245b8ead34f5dcab1a45019e64952461dae87cc13ffd313e752e889035",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-2-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "486d97ecb1c811ad15587cfbf1d1943b9ff86619add1c7043e385e14bd78f33b",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-20-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "7c7e4badc95ba08777e2d8d6c044d4863c7a322d2fa0a00ecef68a2c067cbce8",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-21-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "6996ca03bebfd188b987d6f07b2debf051df802ec47484e8a6ec71e8f7cab8fb",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-22-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "ead25c111afebecf6ef4b075e474470f1462ef57f4263789a773ca2a1772a123",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-23-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:50:49Z",
+      "checked_scope_revision": "446758bfb8e6c9bbbb3c5462bcecdc54757b1ab80a51f132fcc7edf3fe71f9a1",
+      "checked_through_commit": "72fe639da0b410292d7a5ce48ff38d25e8d20a5d"
     },
     "python/apps/azents/**::bucket-24-of-32": {
       "checked_at": null,
