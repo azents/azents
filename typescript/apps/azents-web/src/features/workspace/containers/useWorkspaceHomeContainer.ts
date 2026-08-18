@@ -21,9 +21,11 @@ import type { AgentResponse } from "@azents/public-client";
 
 const VIEW_PARAM = "view";
 const DEFAULT_VIEW: AgentTeamFilter = "agents";
-const VIEW_VALUES: ReadonlySet<AgentTeamFilter> = new Set(["agents", "all"]);
+const VIEW_VALUES: readonly AgentTeamFilter[] = ["agents", "all"];
 function isAgentTeamFilter(value: unknown): value is AgentTeamFilter {
-  return typeof value === "string" && VIEW_VALUES.has(value as AgentTeamFilter);
+  return (
+    typeof value === "string" && VIEW_VALUES.some((view) => view === value)
+  );
 }
 
 function enrich(agent: AgentResponse): EnrichedAgent {

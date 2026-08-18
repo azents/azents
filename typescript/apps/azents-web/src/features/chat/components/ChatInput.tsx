@@ -46,6 +46,7 @@ import {
   normalizeReasoningEffort,
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
+import { isRecord, isString } from "@/shared/lib/unknown-value";
 import { AttachmentPreviewBar } from "./AttachmentPreviewBar";
 import classes from "./ChatInput.module.css";
 import { TodoPreviewBar } from "./TodoPreviewBar";
@@ -230,27 +231,22 @@ interface DesktopProfileFocusTarget {
 }
 
 function normalizeStoredAction(value: unknown): ChatAction | null {
-  if (typeof value !== "object" || value === null || !("type" in value)) {
+  if (!isRecord(value)) {
     return null;
   }
-  const action = value as Record<string, unknown>;
-  if (action.type === "command" && typeof action.name === "string") {
-    return { type: "command", name: action.name };
+  if (value.type === "command" && isString(value.name)) {
+    return { type: "command", name: value.name };
   }
-  if (action.type === "goal") {
+  if (value.type === "goal") {
     return { type: "goal" };
   }
-  if (action.type === "skill" && typeof action.skill_path === "string") {
-    return { type: "skill", skill_path: action.skill_path };
+  if (value.type === "skill" && isString(value.skill_path)) {
+    return { type: "skill", skill_path: value.skill_path };
   }
-  if (action.type === "cleanup_orphan_git_worktrees") {
+  if (value.type === "cleanup_orphan_git_worktrees") {
     return { type: "cleanup_orphan_git_worktrees" };
   }
   return null;
-}
-
-function storedReasoningEffort(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
 }
 
 function knownReasoningEffort(
@@ -274,24 +270,20 @@ function normalizeStoredInferenceProfile(
   value: unknown,
 ): RequestedInferenceProfile | null {
   if (
-    typeof value !== "object" ||
-    value === null ||
-    !("model_target_label" in value) ||
-    typeof value.model_target_label !== "string" ||
+    !isRecord(value) ||
+    !isString(value.model_target_label) ||
     value.model_target_label.length === 0 ||
     !("reasoning_effort" in value)
   ) {
     return null;
   }
-  if (
-    value.reasoning_effort !== null &&
-    storedReasoningEffort(value.reasoning_effort) === null
-  ) {
+  const reasoningEffort = value.reasoning_effort;
+  if (reasoningEffort !== null && !isString(reasoningEffort)) {
     return null;
   }
   return {
     model_target_label: value.model_target_label,
-    reasoning_effort: storedReasoningEffort(value.reasoning_effort),
+    reasoning_effort: knownReasoningEffort(reasoningEffort),
   };
 }
 
@@ -301,13 +293,12 @@ function parseComposerDraft(raw: string): ComposerDraft {
   }
   try {
     const value: unknown = JSON.parse(raw);
-    if (typeof value === "object" && value !== null && "message" in value) {
-      const record = value as Record<string, unknown>;
+    if (isRecord(value) && "message" in value) {
       return {
-        message: typeof record.message === "string" ? record.message : "",
-        action: normalizeStoredAction(record.action),
+        message: isString(value.message) ? value.message : "",
+        action: normalizeStoredAction(value.action),
         inferenceProfile: normalizeStoredInferenceProfile(
-          record.inference_profile,
+          value.inference_profile,
         ),
       };
     }

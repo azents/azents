@@ -5,6 +5,7 @@ import * as Sentry from "@sentry/nextjs";
 import { initTRPC } from "@trpc/server";
 import superjson from "superjson";
 import { getServerConfig } from "@/config/server";
+import { isRecord } from "@/shared/lib/unknown-value";
 import { projectApiError } from "./api-error";
 import type { Context } from "./context";
 
@@ -42,12 +43,11 @@ const loggerMiddleware = t.middleware(async ({ path, type, next }) => {
       // Original response information on hey-api throwOnError
       ...(cause && {
         cause: cause instanceof Error ? cause.message : cause,
-        ...(typeof cause === "object" &&
+        ...(isRecord(cause) &&
           "status" in cause && {
-            status: (cause as { status: unknown }).status,
+            status: cause.status,
           }),
-        ...(typeof cause === "object" &&
-          "body" in cause && { body: (cause as { body: unknown }).body }),
+        ...(isRecord(cause) && "body" in cause && { body: cause.body }),
       }),
       durationMs,
     });

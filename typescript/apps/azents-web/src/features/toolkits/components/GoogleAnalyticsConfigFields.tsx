@@ -30,10 +30,23 @@ import {
   IconUpload,
 } from "@tabler/icons-react";
 import { useCallback, useMemo, useState } from "react";
+import {
+  getOptionalString,
+  isRecord,
+  parseJsonRecord,
+} from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 
 type GaConfig = Record<string, unknown>;
 type GaCredentials = Record<string, unknown> | null;
+
+function getServiceAccountKey(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value) || !getOptionalString(value.client_email)) {
+    return null;
+  }
+
+  return value;
+}
 
 interface GoogleAnalyticsConfigFieldsProps {
   config: GaConfig;
@@ -65,15 +78,12 @@ export function GoogleAnalyticsConfigFields({
     if (!credentials) {
       return null;
     }
-    const saKey = credentials.service_account_key;
-    if (
-      typeof saKey === "object" &&
-      saKey !== null &&
-      "client_email" in saKey
-    ) {
-      return (saKey as Record<string, unknown>).client_email as string;
-    }
-    return null;
+    const serviceAccountKey = getServiceAccountKey(
+      credentials.service_account_key,
+    );
+    return serviceAccountKey
+      ? (getOptionalString(serviceAccountKey.client_email) ?? null)
+      : null;
   }, [credentials]);
 
   const testConnectionMutation = trpc.toolkit.testConnection.useMutation();
@@ -94,11 +104,9 @@ export function GoogleAnalyticsConfigFields({
         onCredentialsChange(null);
         return;
       }
-      try {
-        const parsed = JSON.parse(value) as Record<string, unknown>;
-        onCredentialsChange({ service_account_key: parsed });
-      } catch {
-        // JSON parse failed
+      const serviceAccountKey = getServiceAccountKey(parseJsonRecord(value));
+      if (serviceAccountKey) {
+        onCredentialsChange({ service_account_key: serviceAccountKey });
       }
     },
     [onCredentialsChange],
@@ -110,14 +118,12 @@ export function GoogleAnalyticsConfigFields({
         return;
       }
       const reader = new FileReader();
-      reader.onload = (e): void => {
-        const text = e.target?.result;
+      reader.onload = (): void => {
+        const text = reader.result;
         if (typeof text === "string") {
-          try {
-            const parsed = JSON.parse(text) as Record<string, unknown>;
-            onCredentialsChange({ service_account_key: parsed });
-          } catch {
-            // Invalid JSON
+          const serviceAccountKey = getServiceAccountKey(parseJsonRecord(text));
+          if (serviceAccountKey) {
+            onCredentialsChange({ service_account_key: serviceAccountKey });
           }
         }
       };

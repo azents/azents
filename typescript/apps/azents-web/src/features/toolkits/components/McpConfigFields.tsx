@@ -28,12 +28,24 @@ import {
 import { IconPlugConnected } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { getString, getStringArray, isOneOf } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 
 type McpConfig = Record<string, unknown>;
 type McpCredentials = Record<string, unknown> | null;
+type McpAuthType = "none" | "header" | "bearer" | "oauth2";
 
 const AUTH_TYPE_OPTIONS = ["none", "header", "bearer", "oauth2"] as const;
+const MCP_AUTH_TYPES: readonly McpAuthType[] = [
+  "none",
+  "header",
+  "bearer",
+  "oauth2",
+];
+
+function getMcpAuthType(value: unknown): McpAuthType {
+  return isOneOf(value, MCP_AUTH_TYPES) ? value : "none";
+}
 
 interface McpConfigFieldsProps {
   config: McpConfig;
@@ -119,7 +131,7 @@ export function McpConfigFields({
     }
   };
 
-  const authType = (config.auth_type as string) || "none";
+  const authType = getMcpAuthType(config.auth_type);
 
   const setConfig = (key: string, value: unknown): void => {
     onConfigChange({ ...config, [key]: value });
@@ -145,7 +157,7 @@ export function McpConfigFields({
   };
 
   const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
-  const serverUrl = (config.server_url as string) || "";
+  const serverUrl = getString(config.server_url);
   const isOAuth = authType === "oauth2";
 
   return (
@@ -177,13 +189,13 @@ export function McpConfigFields({
             description={t("headerNameDescription")}
             placeholder="Authorization"
             required
-            value={(config.header_name as string) || ""}
+            value={getString(config.header_name)}
             onChange={(e) => setConfig("header_name", e.currentTarget.value)}
           />
           <PasswordInput
             label={t("headerValueLabel")}
             placeholder={hasCredentials ? t("credentialsEditPlaceholder") : ""}
-            value={(credentials?.value as string) || ""}
+            value={getString(credentials?.value)}
             onChange={(e) => setCred("value", e.currentTarget.value)}
           />
         </>
@@ -193,7 +205,7 @@ export function McpConfigFields({
         <PasswordInput
           label={t("bearerTokenLabel")}
           placeholder={hasCredentials ? t("credentialsEditPlaceholder") : ""}
-          value={(credentials?.token as string) || ""}
+          value={getString(credentials?.token)}
           onChange={(e) => setCred("token", e.currentTarget.value)}
         />
       )}
@@ -203,13 +215,13 @@ export function McpConfigFields({
           <PasswordInput
             label={t("clientIdLabel")}
             placeholder={hasCredentials ? t("credentialsEditPlaceholder") : ""}
-            value={(credentials?.client_id as string) || ""}
+            value={getString(credentials?.client_id)}
             onChange={(e) => setCred("client_id", e.currentTarget.value)}
           />
           <PasswordInput
             label={t("clientSecretLabel")}
             placeholder={hasCredentials ? t("credentialsEditPlaceholder") : ""}
-            value={(credentials?.client_secret as string) || ""}
+            value={getString(credentials?.client_secret)}
             onChange={(e) => setCred("client_secret", e.currentTarget.value)}
           />
         </>
@@ -227,9 +239,7 @@ export function McpConfigFields({
           label={t("scopesLabel")}
           placeholder={t("scopesPlaceholder")}
           splitChars={[",", " ", "\n"]}
-          value={
-            Array.isArray(config.scopes) ? (config.scopes as string[]) : []
-          }
+          value={getStringArray(config.scopes)}
           onChange={(v) => setConfig("scopes", v)}
         />
       )}
@@ -293,7 +303,7 @@ export function McpConfigFields({
                   <TextInput
                     label={t("tokenUrlLabel")}
                     placeholder="https://auth.example.com/token"
-                    value={(config.token_url as string) || ""}
+                    value={getString(config.token_url)}
                     onChange={(e) =>
                       setConfig("token_url", e.currentTarget.value)
                     }
@@ -301,7 +311,7 @@ export function McpConfigFields({
                   <TextInput
                     label={t("authUrlLabel")}
                     placeholder="https://auth.example.com/authorize"
-                    value={(config.auth_url as string) || ""}
+                    value={getString(config.auth_url)}
                     onChange={(e) =>
                       setConfig("auth_url", e.currentTarget.value)
                     }
@@ -310,7 +320,7 @@ export function McpConfigFields({
                     label={t("discoveryUrlLabel")}
                     description={t("discoveryUrlDescription")}
                     placeholder="https://auth.example.com/.well-known/oauth-authorization-server"
-                    value={(config.discovery_url as string) || ""}
+                    value={getString(config.discovery_url)}
                     onChange={(e) =>
                       setConfig("discovery_url", e.currentTarget.value)
                     }

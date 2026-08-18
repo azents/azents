@@ -19,7 +19,7 @@ export const LOCALE_COOKIE = "locale";
 
 /** Check whether value is a supported locale */
 export function isSupportedLocale(value: string): value is SupportedLocale {
-  return (SUPPORTED_LOCALES as readonly string[]).includes(value);
+  return SUPPORTED_LOCALES.some((locale) => locale === value);
 }
 
 /**
@@ -63,9 +63,11 @@ export function resolveLocaleFromHeader(
 
     // language prefix match (for example, "ko" → "ko-KR")
     const langPrefix = entry.lang.split("-")[0];
-    if (langPrefix != null && langPrefix in langToLocale) {
-      // The condition above guarantees langPrefix is one of langToLocale keys
-      return langToLocale[langPrefix] as SupportedLocale;
+    const matchingLocale = Object.entries(langToLocale).find(
+      ([language]) => language === langPrefix,
+    )?.[1];
+    if (matchingLocale) {
+      return matchingLocale;
     }
   }
 

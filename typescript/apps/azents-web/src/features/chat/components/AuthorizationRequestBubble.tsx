@@ -11,6 +11,7 @@ import { Alert, Button, Group, Text } from "@mantine/core";
 import { IconLock } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isRecord } from "@/shared/lib/unknown-value";
 
 interface AuthorizationRequestBubbleProps {
   toolkitName: string;
@@ -71,19 +72,11 @@ export function AuthorizationRequestBubble({
         return;
       }
       const data = event.data;
-      if (
-        typeof data !== "object" ||
-        data === null ||
-        !("type" in data) ||
-        (data as { type: string }).type !== "azents-oauth-callback"
-      ) {
+      if (!isRecord(data) || data.type !== "azents-oauth-callback") {
         return;
       }
 
-      if (
-        "success" in data &&
-        (data as { success: unknown }).success === true
-      ) {
+      if (data.success === true) {
         onAuthorized();
       }
     };

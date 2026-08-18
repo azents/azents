@@ -12,51 +12,61 @@ const systemCatalogProviderSchema = z.enum([
 
 type SystemCatalogProvider = z.infer<typeof systemCatalogProviderSchema>;
 
-interface SystemModelCatalogSyncAttemptResponse {
-  id: string;
-  status: string;
-  started_at: string;
-  finished_at: string | null;
-  failure_code: string | null;
-  failure_message: string | null;
-  action_hint: string | null;
-  fetched_count: number;
-  matched_count: number;
-  skipped_count: number;
-  hidden_count: number;
-}
+const systemModelCatalogSyncAttemptResponseSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  started_at: z.string(),
+  finished_at: z.string().nullable(),
+  failure_code: z.string().nullable(),
+  failure_message: z.string().nullable(),
+  action_hint: z.string().nullable(),
+  fetched_count: z.number(),
+  matched_count: z.number(),
+  skipped_count: z.number(),
+  hidden_count: z.number(),
+});
 
-interface SystemModelCatalogResponse {
-  provider: SystemCatalogProvider;
-  catalog_id: string | null;
-  snapshot_id: string | null;
-  visible_count: number;
-  hidden_count: number;
-  latest_attempt: SystemModelCatalogSyncAttemptResponse | null;
-}
+const systemModelCatalogResponseSchema = z.object({
+  provider: systemCatalogProviderSchema,
+  catalog_id: z.string().nullable(),
+  snapshot_id: z.string().nullable(),
+  visible_count: z.number(),
+  hidden_count: z.number(),
+  latest_attempt: systemModelCatalogSyncAttemptResponseSchema.nullable(),
+});
 
-interface SystemModelCatalogRefreshResponse {
-  provider: SystemCatalogProvider;
-  catalog_id: string;
-  snapshot_id: string | null;
-  visible_count: number;
-  hidden_count: number;
-  status: string;
-  failure_code: string | null;
-  failure_message: string | null;
-  action_hint: string | null;
-}
+const systemModelCatalogRefreshResponseSchema = z.object({
+  provider: systemCatalogProviderSchema,
+  catalog_id: z.string(),
+  snapshot_id: z.string().nullable(),
+  visible_count: z.number(),
+  hidden_count: z.number(),
+  status: z.string(),
+  failure_code: z.string().nullable(),
+  failure_message: z.string().nullable(),
+  action_hint: z.string().nullable(),
+});
 
-interface SystemModelCatalogListResponse {
-  items: SystemModelCatalogResponse[];
-}
+const systemModelCatalogListResponseSchema = z.object({
+  items: z.array(systemModelCatalogResponseSchema),
+});
 
-interface SystemModelCatalogRefreshListResponse {
-  items: SystemModelCatalogRefreshResponse[];
-}
+const systemModelCatalogRefreshListResponseSchema = z.object({
+  items: z.array(systemModelCatalogRefreshResponseSchema),
+});
 
-function getJson<T>(value: unknown): T {
-  return value as T;
+type SystemModelCatalogListResponse = z.infer<
+  typeof systemModelCatalogListResponseSchema
+>;
+type SystemModelCatalogRefreshResponse = z.infer<
+  typeof systemModelCatalogRefreshResponseSchema
+>;
+type SystemModelCatalogRefreshListResponse = z.infer<
+  typeof systemModelCatalogRefreshListResponseSchema
+>;
+
+function parseResponse<T>(schema: z.ZodType<T>, value: unknown): T {
+  return schema.parse(value);
 }
 
 async function listSystemModelCatalogs(
@@ -66,7 +76,7 @@ async function listSystemModelCatalogs(
     url: "/model-catalog/v1/system-catalogs",
     throwOnError: true,
   });
-  return getJson<SystemModelCatalogListResponse>(response.data);
+  return parseResponse(systemModelCatalogListResponseSchema, response.data);
 }
 
 async function refreshSystemModelCatalog(
@@ -78,7 +88,7 @@ async function refreshSystemModelCatalog(
     url: "/model-catalog/v1/system-catalogs/{provider}/refresh",
     throwOnError: true,
   });
-  return getJson<SystemModelCatalogRefreshResponse>(response.data);
+  return parseResponse(systemModelCatalogRefreshResponseSchema, response.data);
 }
 
 async function refreshSystemModelCatalogs(
@@ -88,7 +98,10 @@ async function refreshSystemModelCatalogs(
     url: "/model-catalog/v1/system-catalogs/refresh",
     throwOnError: true,
   });
-  return getJson<SystemModelCatalogRefreshListResponse>(response.data);
+  return parseResponse(
+    systemModelCatalogRefreshListResponseSchema,
+    response.data,
+  );
 }
 
 export const modelCatalogRouter = router({

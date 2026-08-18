@@ -7,8 +7,23 @@ import { useCallback, useMemo } from "react";
  * Serializer/deserializer interface for query parameter values
  */
 export interface QueryStateSerializer<T> {
-  parse: (value: string | null) => T;
-  stringify: (value: T) => string | null;
+  parse(value: string | null): T;
+  stringify(value: T): string | null;
+}
+
+type QueryStateSchema = Record<string, QueryStateSerializer<unknown>>;
+
+function isLiteralValue<T extends string>(
+  value: string,
+  values: readonly T[],
+): value is T {
+  return values.some((candidate) => candidate === value);
+}
+
+function isQueryStateUpdater<T>(
+  value: T | ((previousValue: T) => T),
+): value is (previousValue: T) => T {
+  return typeof value === "function";
 }
 
 /**
@@ -70,7 +85,7 @@ export const serializers = {
       if (value === null) {
         return defaultValue;
       }
-      return values.includes(value as T) ? (value as T) : defaultValue;
+      return isLiteralValue(value, values) ? value : defaultValue;
     },
     stringify: (value) => (value === defaultValue ? null : value),
   }),
@@ -114,10 +129,9 @@ export function useQueryState<T>(
 
   const setValue = useCallback(
     (valueOrUpdater: T | ((prev: T) => T)) => {
-      const newValue =
-        typeof valueOrUpdater === "function"
-          ? (valueOrUpdater as (prev: T) => T)(value)
-          : valueOrUpdater;
+      const newValue = isQueryStateUpdater(valueOrUpdater)
+        ? valueOrUpdater(value)
+        : valueOrUpdater;
 
       const params = new URLSearchParams(searchParams.toString());
       const stringValue = serializer.stringify(newValue);
@@ -152,10 +166,18 @@ type InferSerializerType<S> =
 /**
  * Utility type that infers the state type from a schema
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- any is required for type inference
-type InferSchemaState<T extends Record<string, QueryStateSerializer<any>>> = {
+type InferSchemaState<T extends QueryStateSchema> = {
   [K in keyof T]: InferSerializerType<T[K]>;
 };
+
+function hasParsedSchemaValues<T extends QueryStateSchema>(
+  value: Record<string, unknown>,
+  schema: T,
+): value is InferSchemaState<T> {
+  return Object.keys(schema).every((key) =>
+    Object.prototype.hasOwnProperty.call(value, key),
+  );
+}
 
 /**
  * Hook that manages multiple query parameters at once
@@ -176,10 +198,7 @@ type InferSchemaState<T extends Record<string, QueryStateSerializer<any>>> = {
  * setState({ workspaceId: "ws-123", teamId: null });
  * ```
  */
-export function useQueryStates<
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- any is required for type inference
-  T extends Record<string, QueryStateSerializer<any>>,
->(
+export function useQueryStates<T extends QueryStateSchema>(
   schema: T,
   options?: { replace?: boolean; scroll?: boolean },
 ): [InferSchemaState<T>, (updates: Partial<InferSchemaState<T>>) => void] {
@@ -189,15 +208,17 @@ export function useQueryStates<
   const pathname = usePathname();
 
   const state = useMemo(() => {
-    const result = {} as InferSchemaState<T>;
-    for (const key in schema) {
-      const serializer = schema[key];
-      if (!serializer) {
-        continue;
-      }
-      const rawValue = searchParams.get(key);
-      (result as Record<string, unknown>)[key] = serializer.parse(rawValue);
+    const result = Object.fromEntries(
+      Object.entries(schema).map(([key, serializer]) => [
+        key,
+        serializer.parse(searchParams.get(key)),
+      ]),
+    );
+
+    if (!hasParsedSchemaValues(result, schema)) {
+      throw new Error("Could not parse query state schema values.");
     }
+
     return result;
   }, [searchParams, schema]);
 
@@ -205,12 +226,11 @@ export function useQueryStates<
     (updates: Partial<InferSchemaState<T>>) => {
       const params = new URLSearchParams(searchParams.toString());
 
-      for (const key in updates) {
+      for (const [key, value] of Object.entries(updates)) {
         const serializer = schema[key];
         if (!serializer) {
           continue;
         }
-        const value = updates[key];
         const stringValue = serializer.stringify(value);
 
         if (stringValue === null) {

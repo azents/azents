@@ -34,15 +34,24 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useCallback, useMemo, useState } from "react";
+import {
+  getString,
+  getStringArray,
+  isOneOf,
+  isRecord,
+  isStringArray,
+  parseJsonRecord,
+} from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 
 type KubernetesConfig = Record<string, unknown>;
 type KubernetesCredentials = Record<string, unknown> | null;
+type ClusterAuthType = "kubeconfig" | "token" | "eks" | "gke";
 
 /** Cluster settings type */
 interface ClusterEntry {
   name: string;
-  auth_type: "kubeconfig" | "token" | "eks" | "gke";
+  auth_type: ClusterAuthType;
   default_namespace: string;
   context: string | null;
   api_server: string | null;
@@ -53,7 +62,7 @@ interface ClusterEntry {
 
 /** Credential type by cluster */
 interface ClusterCredentialEntry {
-  type: "kubeconfig" | "token" | "eks" | "gke";
+  type: ClusterAuthType;
   kubeconfig_yaml?: string;
   token?: string;
   ca_cert?: string;
@@ -84,6 +93,13 @@ const AUTH_TYPE_OPTIONS = [
   { value: "token", label: "Service Account Token" },
   { value: "eks", label: "AWS EKS (IAM)" },
   { value: "gke", label: "Google GKE (Service Account)" },
+];
+
+const CLUSTER_AUTH_TYPES: readonly ClusterAuthType[] = [
+  "kubeconfig",
+  "token",
+  "eks",
+  "gke",
 ];
 
 const AUTH_TYPE_LABELS: Record<string, string> = {
@@ -135,26 +151,109 @@ const GKE_LOCATIONS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Helper: extract clusters array from config
+// Helpers: decode persisted cluster settings and credentials
 // ---------------------------------------------------------------------------
 
+function getClusterAuthType(value: unknown): ClusterAuthType | null {
+  return isOneOf(value, CLUSTER_AUTH_TYPES) ? value : null;
+}
+
+function getNullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function decodeCluster(value: unknown): ClusterEntry | null {
+  if (!isRecord(value) || typeof value.name !== "string") {
+    return null;
+  }
+
+  return {
+    name: value.name,
+    auth_type: getClusterAuthType(value.auth_type) ?? "kubeconfig",
+    default_namespace:
+      getString(value.default_namespace, "default") || "default",
+    context: getNullableString(value.context),
+    api_server: getNullableString(value.api_server),
+    cluster_name: getNullableString(value.cluster_name),
+    region: getNullableString(value.region),
+    project_id: getNullableString(value.project_id),
+  };
+}
+
 function getClusters(config: KubernetesConfig): ClusterEntry[] {
-  return Array.isArray(config.clusters)
-    ? (config.clusters as ClusterEntry[])
-    : [];
+  if (!Array.isArray(config.clusters)) {
+    return [];
+  }
+
+  return config.clusters.flatMap((cluster) => {
+    const decoded = decodeCluster(cluster);
+    return decoded ? [decoded] : [];
+  });
+}
+
+function decodeClusterCredential(
+  value: unknown,
+): ClusterCredentialEntry | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const type = getClusterAuthType(value.type);
+  if (!type) {
+    return null;
+  }
+
+  const credential: ClusterCredentialEntry = { type };
+  const kubeconfigYaml = getNullableString(value.kubeconfig_yaml);
+  const token = getNullableString(value.token);
+  const caCert = getNullableString(value.ca_cert);
+  const awsAccessKeyId = getNullableString(value.aws_access_key_id);
+  const awsSecretAccessKey = getNullableString(value.aws_secret_access_key);
+  const roleArn = getNullableString(value.role_arn);
+
+  if (kubeconfigYaml !== null) {
+    credential.kubeconfig_yaml = kubeconfigYaml;
+  }
+  if (token !== null) {
+    credential.token = token;
+  }
+  if (caCert !== null) {
+    credential.ca_cert = caCert;
+  }
+  if (awsAccessKeyId !== null) {
+    credential.aws_access_key_id = awsAccessKeyId;
+  }
+  if (awsSecretAccessKey !== null) {
+    credential.aws_secret_access_key = awsSecretAccessKey;
+  }
+  if (roleArn !== null) {
+    credential.role_arn = roleArn;
+  }
+  if (
+    value.service_account_key === null ||
+    isRecord(value.service_account_key)
+  ) {
+    credential.service_account_key = value.service_account_key;
+  }
+
+  return credential;
 }
 
 function getClusterCredentials(
   credentials: KubernetesCredentials,
 ): Record<string, ClusterCredentialEntry> {
-  if (!credentials) {
+  if (!isRecord(credentials?.clusters)) {
     return {};
   }
-  const clusters = credentials.clusters;
-  if (typeof clusters === "object" && clusters !== null) {
-    return clusters as Record<string, ClusterCredentialEntry>;
+
+  const decoded: Record<string, ClusterCredentialEntry> = {};
+  for (const [name, value] of Object.entries(credentials.clusters)) {
+    const credential = decodeClusterCredential(value);
+    if (credential) {
+      decoded[name] = credential;
+    }
   }
-  return {};
+  return decoded;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,15 +283,13 @@ export function KubernetesConfigFields({
   const allowedNamespaces = useMemo(
     () =>
       Array.isArray(config.allowed_namespaces)
-        ? (config.allowed_namespaces as string[])
+        ? getStringArray(config.allowed_namespaces)
         : null,
     [config.allowed_namespaces],
   );
   const deniedKinds = useMemo(
     () =>
-      Array.isArray(config.denied_kinds)
-        ? (config.denied_kinds as string[])
-        : ["Secret"],
+      isStringArray(config.denied_kinds) ? config.denied_kinds : ["Secret"],
     [config.denied_kinds],
   );
   const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
@@ -303,7 +400,7 @@ export function KubernetesConfigFields({
       const existing =
         clusterName in clusterCredentials
           ? clusterCredentials[clusterName]
-          : { type: "kubeconfig" as const };
+          : { type: "kubeconfig" };
       const newCreds = {
         ...clusterCredentials,
         [clusterName]: { ...existing, ...updates },
@@ -366,13 +463,11 @@ export function KubernetesConfigFields({
         });
         return;
       }
-      try {
-        const parsed = JSON.parse(value) as Record<string, unknown>;
+      const parsed = parseJsonRecord(value);
+      if (parsed) {
         handleUpdateClusterCredential(clusterName, {
           service_account_key: parsed,
         });
-      } catch {
-        // JSON parse failed — ignore because still typing
       }
     },
     [handleUpdateClusterCredential],
@@ -448,11 +543,12 @@ export function KubernetesConfigFields({
                 data={AUTH_TYPE_OPTIONS}
                 value={cluster.auth_type}
                 onChange={(v) => {
-                  if (!v) {
+                  const authType = getClusterAuthType(v);
+                  if (!authType) {
                     return;
                   }
                   handleUpdateCluster(index, {
-                    auth_type: v as ClusterEntry["auth_type"],
+                    auth_type: authType,
                   });
                 }}
               />

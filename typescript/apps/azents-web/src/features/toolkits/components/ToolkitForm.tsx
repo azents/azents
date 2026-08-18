@@ -29,6 +29,13 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useCallback, useEffect } from "react";
+import {
+  getArray,
+  getString,
+  getStringArray,
+  isOneOf,
+  isRecord,
+} from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 import { toolkitFormSchema } from "../schemas";
 import { AwsConfigFields } from "./AwsConfigFields";
@@ -101,6 +108,17 @@ const DEFAULT_CREDENTIALS: Record<string, Record<string, unknown> | null> = {
   kubernetes: { clusters: {} },
   envvar: { values: {} },
 };
+
+const MCP_AUTH_TYPES = ["none", "header", "bearer", "oauth2"] as const;
+const GITHUB_AUTH_TYPES = ["pat", "github_app", "github_app_platform"] as const;
+
+function getMcpAuthType(value: unknown): (typeof MCP_AUTH_TYPES)[number] {
+  return isOneOf(value, MCP_AUTH_TYPES) ? value : "none";
+}
+
+function getGithubAuthType(value: unknown): (typeof GITHUB_AUTH_TYPES)[number] {
+  return isOneOf(value, GITHUB_AUTH_TYPES) ? value : "pat";
+}
 
 interface ToolkitFormProps {
   handle: string;
@@ -230,10 +248,10 @@ export function ToolkitForm({
         return;
       }
       const data = event.data;
-      if (typeof data !== "object" || data === null || !("type" in data)) {
+      if (!isRecord(data)) {
         return;
       }
-      if ((data as { type: string }).type === "azents-oauth-callback") {
+      if (data.type === "azents-oauth-callback") {
         void utils.toolkit.getConfig.invalidate({
           handle,
           toolkitId: formState.config.id,
@@ -255,34 +273,35 @@ export function ToolkitForm({
       if (toolSlug === "shell") {
         config = {
           allowed_domains: Array.isArray(rawConfig.allowed_domains)
-            ? (rawConfig.allowed_domains as string[])
+            ? getStringArray(rawConfig.allowed_domains)
             : [],
-          denied_domains: Array.isArray(rawConfig.denied_domains)
-            ? (rawConfig.denied_domains as string[])
-            : [],
+          denied_domains: getStringArray(rawConfig.denied_domains),
         };
       } else if (toolSlug === "mcp") {
+        const authType = getMcpAuthType(rawConfig.auth_type);
         config = {
-          server_url: rawConfig.server_url || "",
-          auth_type: rawConfig.auth_type || "none",
+          server_url: getString(rawConfig.server_url),
+          auth_type: authType,
           timeout:
             typeof rawConfig.timeout === "number" ? rawConfig.timeout : 30,
-          header_name: rawConfig.header_name || "",
-          token_url: rawConfig.token_url || "",
-          auth_url: rawConfig.auth_url || "",
-          scopes: Array.isArray(rawConfig.scopes)
-            ? (rawConfig.scopes as string[])
-            : [],
-          discovery_url: rawConfig.discovery_url || "",
+          header_name: getString(rawConfig.header_name),
+          token_url: getString(rawConfig.token_url),
+          auth_url: getString(rawConfig.auth_url),
+          scopes: getStringArray(rawConfig.scopes),
+          discovery_url: getString(rawConfig.discovery_url),
         };
       } else if (toolSlug === "github") {
+        const githubAuthType = getGithubAuthType(rawConfig.github_auth_type);
         config = {
-          server_url:
-            rawConfig.server_url || "https://api.githubcopilot.com/mcp/",
-          auth_type: rawConfig.auth_type || "bearer",
-          github_auth_type: rawConfig.github_auth_type || "pat",
+          server_url: getString(
+            rawConfig.server_url,
+            "https://api.githubcopilot.com/mcp/",
+          ),
+          auth_type:
+            rawConfig.auth_type === "bearer" ? rawConfig.auth_type : "bearer",
+          github_auth_type: githubAuthType,
           toolsets: Array.isArray(rawConfig.toolsets)
-            ? (rawConfig.toolsets as string[])
+            ? getStringArray(rawConfig.toolsets)
             : ["repos", "issues", "pull_requests", "users"],
           timeout:
             typeof rawConfig.timeout === "number" ? rawConfig.timeout : 30,
@@ -291,16 +310,10 @@ export function ToolkitForm({
           ),
         };
       } else if (toolSlug === "envvar") {
-        const rawEntries = Array.isArray(rawConfig.entries)
-          ? (rawConfig.entries as unknown[])
-          : [];
-        const entries = rawEntries.map((e) => {
-          const entry = e as Record<string, unknown>;
-          return {
-            name: typeof entry.name === "string" ? entry.name : "",
-            masked: typeof entry.masked === "boolean" ? entry.masked : true,
-          };
-        });
+        const entries = getArray(rawConfig.entries, isRecord).map((entry) => ({
+          name: getString(entry.name),
+          masked: typeof entry.masked === "boolean" ? entry.masked : true,
+        }));
         config = { entries };
       } else {
         config = rawConfig;
@@ -315,10 +328,10 @@ export function ToolkitForm({
         config,
         credentials:
           toolSlug === "mcp"
-            ? { type: (rawConfig.auth_type as string) || "none" }
+            ? { type: getMcpAuthType(rawConfig.auth_type) }
             : toolSlug === "github"
               ? {
-                  type: (rawConfig.github_auth_type as string) || "pat",
+                  type: getGithubAuthType(rawConfig.github_auth_type),
                 }
               : toolSlug === "envvar"
                 ? { values: {} }
@@ -423,16 +436,12 @@ export function ToolkitForm({
             {currentToolSlug === "shell" && (
               <ShellConfigFields
                 value={{
-                  allowed_domains: Array.isArray(
+                  allowed_domains: getStringArray(
                     form.getValues().config.allowed_domains,
-                  )
-                    ? (form.getValues().config.allowed_domains as string[])
-                    : [],
-                  denied_domains: Array.isArray(
+                  ),
+                  denied_domains: getStringArray(
                     form.getValues().config.denied_domains,
-                  )
-                    ? (form.getValues().config.denied_domains as string[])
-                    : [],
+                  ),
                 }}
                 onChange={(v) => form.setFieldValue("config", v)}
               />
@@ -612,8 +621,7 @@ export function ToolkitForm({
 
             {formState.type === "EDIT" &&
               ["mcp", "notion", "sentry"].includes(currentToolSlug) &&
-              ((form.getValues().config.auth_type as string | null) ===
-                "oauth2" ||
+              (getString(form.getValues().config.auth_type) === "oauth2" ||
                 currentToolSlug === "notion" ||
                 currentToolSlug === "sentry") && (
                 <Card withBorder>
