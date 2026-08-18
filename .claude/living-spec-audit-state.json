@@ -1,7 +1,7 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-08-18T08:53:36Z",
-    "checked_through_commit": "8a3f2d0139d5298cf67d676f85b3021c417b52fa"
+    "checked_at": "2026-08-18T15:20:19Z",
+    "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
   },
   "ranges": {
     ".claude/**::bucket-14-of-32": {
@@ -95,94 +95,94 @@
       "checked_through_commit": "8a3f2d0139d5298cf67d676f85b3021c417b52fa"
     },
     "infra/**::bucket-22-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "3e27ff0c0e14b059d213cf96c6d5b04780f816c89b9d75c3d4444947b3f0e722",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-23-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "b2cd0a58fc04734fa809b17fe0360fd8f3e6e8ac9665acbc1499808e5a404570",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-24-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "1c3fa0d7ea9d2644cf6dbd37799b3202d7c6969f26a581b089b280a7ac72d1be",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-25-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "db30555386de4231775aca6153d2cff12c73fe8b594381d4aef564bdc8f82662",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-28-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "21e199412d31491ff3449954d0527ef0e9d793a0d9e5053d4f1ee1a0b063e812",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-29-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "c8988c81b0b47486bfb6157fedbcd4fa1a25899079214105e4d91baa350d5ba8",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-3-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "a4f9394de15c66c3a9701103973b7c3c909396914120b7f1237bc542256ba8a5",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-30-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "73371786998f269a3df545820b98417882cf70d6f60597eab8926a6cb7777df8",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-31-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "46abba0560109571ab5cd927787078fca6bf032e12a3c0fb1e950140a0568ab5",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-32-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "ebd269468c882ca85c0708a66db2ea4dd8ac764a5e99f16dea66428b1b9ada97",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-5-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "85ab0cb38e8a18f064df5b09072bfac85ae8f85194cd09c1a89e33a29e6e98ca",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "infra/**::bucket-6-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "d1b792097e4efea88d5ba68a494778205ee1dec84190c08bccba03c11463feb3",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "proto/**::bucket-14-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "f5dbd41595cbe2fa48ac2bc0f4fdb51a6563d61c4824493936a221269c978ca9",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "proto/**::bucket-21-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "45f658c13ba30b41dde3528d0039d07a20afe3a6a45094a346c018161ea3b496",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "proto/**::bucket-29-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "031b360f220a4be1ededd6f7b84ea83b287ca2fcd9eca28c0192a850d2bffda1",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "proto/**::bucket-31-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "953de86159f795720071863b2224370fb5efe37f64ab72e335e9a0740cff3008",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "proto/**::bucket-7-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "127bf54a1e1c75ef98bf623c209469a79dfd2cb56fae99c00a140c324b6d2892",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "python/apps/azents-runtime-provider-docker/**::bucket-1-of-32": {
-      "checked_at": null,
-      "checked_scope_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-18T15:20:19Z",
+      "checked_scope_revision": "056bf83d5823a889ecf42910d4442fa4b166332850e8c3cf5a466034defbfbd6",
+      "checked_through_commit": "925a6f987fd7045014376f57aa0aff0fafe5837a"
     },
     "python/apps/azents-runtime-provider-docker/**::bucket-19-of-32": {
       "checked_at": null,
