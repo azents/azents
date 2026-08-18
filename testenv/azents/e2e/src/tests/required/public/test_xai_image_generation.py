@@ -9,8 +9,6 @@ from typing import cast
 import azentsadminclient
 import azentspublicclient
 import requests
-from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api
-from azentsadminclient.models.system_catalog_provider import SystemCatalogProvider
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
@@ -20,6 +18,9 @@ from azentspublicclient.models.create_workspace_request import CreateWorkspaceRe
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
+)
+from azentspublicclient.models.llm_provider_integration_update_request import (
+    LLMProviderIntegrationUpdateRequest,
 )
 from azentspublicclient.models.secrets import Secrets
 from pydantic import TypeAdapter
@@ -85,6 +86,36 @@ def _clear_journals(proxy_url: str) -> None:
         requests.delete(f"{proxy_url}{path}", timeout=10).raise_for_status()
 
 
+def _wait_for_catalog_attempt_completion(
+    *,
+    server_url: str,
+    token: str,
+    handle: str,
+    integration_id: str,
+) -> None:
+    """Wait until the automatic OAuth catalog attempt reaches a terminal state."""
+    entries_url = (
+        f"{server_url}/llm-provider-integration/v1/workspaces/{handle}/"
+        f"llm-provider-integrations/{integration_id}/catalog-entries"
+    )
+
+    def attempt_completed() -> bool:
+        response = requests.get(entries_url, headers=_headers(token), timeout=10)
+        if response.status_code == 404:
+            return False
+        latest_attempt = _response_object(response).get("latest_attempt")
+        if not isinstance(latest_attempt, dict):
+            return False
+        return latest_attempt.get("status") in {"failed", "succeeded"}
+
+    wait_until(
+        attempt_completed,
+        timeout=10,
+        interval=0.2,
+        message="Initial xAI OAuth catalog sync did not complete",
+    )
+
+
 def _setup_xai_agent(
     *,
     public_api_client: azentspublicclient.ApiClient,
@@ -112,11 +143,7 @@ def _setup_xai_agent(
         ),
         _headers=_headers(token),
     )
-    integration_name = (
-        "__testenv_model_listing:deterministic-model-settings"
-        if provider == LLMProvider.XAI
-        else "xAI OAuth Image Generation QA"
-    )
+    integration_name = "__testenv_model_listing:deterministic-model-settings"
     if provider == LLMProvider.XAI:
         integration = LLMProviderIntegrationV1Api(
             public_api_client
@@ -143,17 +170,30 @@ def _setup_xai_agent(
             access_token=access_token,
             refresh_token=refresh_token,
             name=integration_name,
-            enabled=True,
+            enabled=False,
         )
-        ModelCatalogV1Api(
-            admin_api_client
-        ).model_catalog_v1_refresh_system_model_catalog(SystemCatalogProvider.XAI_OAUTH)
+        _wait_for_catalog_attempt_completion(
+            server_url=server_url,
+            token=token,
+            handle=handle,
+            integration_id=integration_id,
+        )
+        LLMProviderIntegrationV1Api(
+            public_api_client
+        ).llm_provider_integration_v1_update_integration(
+            integration_id=integration_id,
+            handle=handle,
+            llm_provider_integration_update_request=LLMProviderIntegrationUpdateRequest(
+                enabled=True
+            ),
+            _headers=_headers(token),
+        )
     entries_url = (
         f"{server_url}/llm-provider-integration/v1/workspaces/{handle}/"
         f"llm-provider-integrations/{integration_id}/catalog-entries"
     )
     quality_identifier = "grok-4"
-    fast_identifier = "grok-4-fast" if provider == LLMProvider.XAI else "grok-4-1-fast"
+    fast_identifier = "grok-4-fast"
 
     def populated_entries() -> list[dict[str, object]] | None:
         response = requests.get(entries_url, headers=_headers(token), timeout=10)

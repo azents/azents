@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.crypto import CredentialCipher
 from azents.rdb.session import SessionManager
+from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -83,6 +84,7 @@ async def test_slow_down_increases_and_returns_poll_interval(
             cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
             XaiOAuthSessionRepository(cipher),
             LLMProviderIntegrationRepository(cipher),
+            LLMCatalogRepository(),
             XaiOAuthClient(http_client),
         )
         start = await service.start_device(
@@ -106,3 +108,79 @@ async def test_slow_down_increases_and_returns_poll_interval(
     assert first.value.interval_seconds == 10
     assert isinstance(second, Success)
     assert second.value.interval_seconds == 15
+
+
+async def test_connected_device_flow_creates_integration_catalog(
+    rdb_session: AsyncSession,
+) -> None:
+    """Create the catalog transactionally before queuing the initial sync."""
+    suffix = uuid.uuid4().hex[:12]
+    workspace_repo = WorkspaceRepository()
+    workspace_result = await workspace_repo.create(
+        rdb_session,
+        WorkspaceCreate(
+            name=f"xAI OAuth catalog {suffix}",
+            handle=f"xai-oauth-catalog-{suffix}",
+        ),
+    )
+    assert isinstance(workspace_result, Success)
+    workspace_id = await workspace_repo.resolve_id(
+        rdb_session,
+        f"xai-oauth-catalog-{suffix}",
+    )
+    assert workspace_id is not None
+    user = await UserRepository().create(
+        rdb_session,
+        UserCreate(email=f"xai-oauth-catalog-{suffix}@example.com"),
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/device/code":
+            return httpx.Response(
+                200,
+                json={
+                    "device_code": "device-code-123",
+                    "user_code": "ABCD-EFGH",
+                    "verification_uri": "https://auth.x.ai/activate",
+                    "interval": 5,
+                    "expires_in": 900,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "access-token",
+                "refresh_token": "refresh-token",
+                "expires_in": 3600,
+            },
+        )
+
+    cipher = CredentialCipher(_TEST_KEY)
+    catalog_repo = LLMCatalogRepository()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        service = XaiOAuthService(
+            cast(SessionManager[AsyncSession], _SessionManager(rdb_session)),
+            XaiOAuthSessionRepository(cipher),
+            LLMProviderIntegrationRepository(cipher),
+            catalog_repo,
+            XaiOAuthClient(http_client),
+        )
+        start = await service.start_device(
+            workspace_id=workspace_id,
+            user_id=user.id,
+        )
+        assert isinstance(start, Success)
+        connected = await service.poll_device(
+            workspace_id=workspace_id,
+            user_id=user.id,
+            session_id=start.value.session_id,
+        )
+
+    assert isinstance(connected, Success)
+    assert connected.value.integration is not None
+    catalog = await catalog_repo.get_by_integration(
+        rdb_session,
+        integration_id=connected.value.integration.id,
+        workspace_id=workspace_id,
+    )
+    assert catalog is not None

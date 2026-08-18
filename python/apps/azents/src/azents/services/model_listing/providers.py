@@ -27,7 +27,8 @@ from google.auth.exceptions import (
     TransportError as GoogleTransportError,
 )
 from google.oauth2 import service_account
-from pydantic import TypeAdapter, ValidationError
+from openai import APIStatusError, AsyncOpenAI, OpenAIError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from azents.core.chatgpt_oauth import (
     CHATGPT_OAUTH_BACKEND_BASE_URL,
@@ -44,6 +45,8 @@ from azents.core.credentials import (
     GcpSecrets,
     KimiOAuthConfig,
     KimiOAuthSecrets,
+    XaiOAuthConfig,
+    XaiOAuthSecrets,
 )
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.kimi_oauth import (
@@ -63,6 +66,11 @@ from azents.core.llm_catalog import (
     ModelToolCallingCapabilities,
 )
 from azents.core.openrouter import OPENROUTER_API_BASE_URL
+from azents.core.xai import resolve_xai_api_base_url
+from azents.core.xai_oauth import (
+    XAI_MODELS_CLIENT_VERSION,
+    resolve_xai_usage_base_url,
+)
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
@@ -95,6 +103,42 @@ _OPENROUTER_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 _VERTEX_MODEL_ADAPTER = TypeAdapter[dict[str, object]](dict[str, object])
 
 
+class _XaiOAuthReasoningEffortPayload(BaseModel):
+    """Validated xAI OAuth reasoning-effort metadata."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str | None = None
+    value: str | None = None
+    default: bool | None = None
+
+
+class _XaiOAuthModelPayload(BaseModel):
+    """Validated xAI OAuth model-list entry."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    model: str | None = None
+    name: str | None = None
+    context_window: int | None = None
+    api_backend: str | None = None
+    supports_reasoning_effort: bool | None = None
+    reasoning_efforts: list[_XaiOAuthReasoningEffortPayload] | None = None
+    supports_backend_search: bool | None = None
+    auto_compact_threshold_percent: int | None = None
+    compaction_at_tokens: bool | None = None
+    show_model_fingerprint: bool | None = None
+
+
+class _XaiOAuthModelsPayload(BaseModel):
+    """Validated xAI OAuth model-list response."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    data: list[_XaiOAuthModelPayload]
+
+
 class ListingProviderError(Exception):
     """Provider listing adapter failure with automatic retry policy."""
 
@@ -105,6 +149,22 @@ class ListingProviderError(Exception):
 
 class InvalidProviderResponseError(ValueError):
     """Provider returned a response that cannot be projected."""
+
+
+class XaiListingProviderError(ListingProviderError):
+    """Sanitized xAI listing failure safe for persisted diagnostics."""
+
+    def __init__(
+        self,
+        *,
+        failure_code: str,
+        automatic_retry_blocked: bool,
+    ) -> None:
+        super().__init__(
+            "xAI model listing failed.",
+            automatic_retry_blocked=automatic_retry_blocked,
+        )
+        self.failure_code = failure_code
 
 
 async def list_bedrock_models_for_integration(
@@ -172,6 +232,27 @@ async def list_openrouter_models_for_integration(
         ) from exc
 
 
+async def list_xai_models_for_integration(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> ModelListingOutput:
+    """Fetch credential-visible models from the matching xAI product."""
+    try:
+        if integration.provider == LLMProvider.XAI:
+            return await _list_xai_api_key_models(integration)
+        if integration.provider == LLMProvider.XAI_OAUTH:
+            return await _list_xai_oauth_models(integration)
+        raise ValueError("xAI integration provider is required.")
+    except (
+        OpenAIError,
+        httpx.HTTPError,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        raise _xai_listing_provider_error(exc) from None
+
+
 def automatic_retry_blocked_for_listing_error(exc: Exception) -> bool:
     """Return whether a provider failure requires user configuration changes."""
     if isinstance(exc, (NoCredentialsError, PartialCredentialsError)):
@@ -196,6 +277,8 @@ def automatic_retry_blocked_for_listing_error(exc: Exception) -> bool:
     if isinstance(exc, httpx.HTTPStatusError):
         status_code = exc.response.status_code
         return status_code not in {408, 409, 425, 429} and status_code < 500
+    if isinstance(exc, APIStatusError):
+        return exc.status_code not in {408, 409, 425, 429} and exc.status_code < 500
     if isinstance(exc, (BotoConnectionError, HTTPClientError)):
         return False
     if isinstance(
@@ -203,6 +286,7 @@ def automatic_retry_blocked_for_listing_error(exc: Exception) -> bool:
         (
             httpx.TransportError,
             json.JSONDecodeError,
+            UnicodeDecodeError,
             ValidationError,
             InvalidProviderResponseError,
         ),
@@ -211,6 +295,46 @@ def automatic_retry_blocked_for_listing_error(exc: Exception) -> bool:
     if isinstance(exc, (GoogleAuthError, BotoCoreError)):
         return True
     return isinstance(exc, ValueError)
+
+
+def _xai_listing_provider_error(exc: Exception) -> XaiListingProviderError:
+    """Convert one xAI SDK or HTTP failure to a credential-safe category."""
+    status_code: int | None = None
+    if isinstance(exc, httpx.HTTPStatusError):
+        status_code = exc.response.status_code
+    elif isinstance(exc, APIStatusError):
+        status_code = exc.status_code
+
+    if status_code == 401:
+        failure_code = "XaiCredentialRejected"
+    elif status_code == 403:
+        failure_code = "XaiEntitlementDenied"
+    elif status_code == 429:
+        failure_code = "XaiRateLimited"
+    elif status_code in {408, 409, 425} or (
+        status_code is not None and status_code >= 500
+    ):
+        failure_code = "XaiProviderUnavailable"
+    elif status_code is not None:
+        failure_code = "XaiRequestRejected"
+    elif isinstance(
+        exc,
+        (
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            ValidationError,
+            InvalidProviderResponseError,
+        ),
+    ):
+        failure_code = "XaiInvalidProviderResponse"
+    elif isinstance(exc, (httpx.TransportError, OpenAIError)):
+        failure_code = "XaiTransportUnavailable"
+    else:
+        failure_code = "XaiInvalidConfiguration"
+    return XaiListingProviderError(
+        failure_code=failure_code,
+        automatic_retry_blocked=automatic_retry_blocked_for_listing_error(exc),
+    )
 
 
 async def _list_bedrock_models(
@@ -571,6 +695,192 @@ def _kimi_family(model_id: str) -> str:
     return parts[0]
 
 
+async def _list_xai_api_key_models(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> ModelListingOutput:
+    """Fetch xAI developer models through the OpenAI-compatible SDK."""
+    secrets = _require_api_key_secrets(integration.secrets)
+    fetched_at = datetime.now(timezone.utc)
+    async with AsyncOpenAI(
+        api_key=secrets.api_key,
+        base_url=resolve_xai_api_base_url(),
+        timeout=20.0,
+    ) as client:
+        page = await client.models.list()
+    models = [
+        _candidate_from_xai_api_key_model(
+            model_id=model.id,
+            created=model.created,
+            fetched_at=fetched_at,
+        )
+        for model in page.data
+        if model.id
+    ]
+    return _output(
+        source="xai:developer_models",
+        fetched_at=fetched_at,
+        models=models,
+        skips=[],
+    )
+
+
+def _candidate_from_xai_api_key_model(
+    *,
+    model_id: str,
+    created: int,
+    fetched_at: datetime,
+) -> NormalizedModelCandidate:
+    """Normalize one xAI developer API model."""
+    return NormalizedModelCandidate(
+        provider=LLMProvider.XAI,
+        model_identifier=model_id,
+        model_display_name=model_id,
+        model_developer=LLMModelDeveloper.XAI,
+        model_family=_xai_family(model_id),
+        normalized_capabilities=_conservative_xai_capabilities(),
+        model_snapshot={
+            "source": "xai:developer_models",
+            "provider": LLMProvider.XAI.value,
+            "model_identifier": model_id,
+            "model_display_name": model_id,
+            "model_developer": LLMModelDeveloper.XAI.value,
+        },
+        source_metadata={"created": created},
+        last_refreshed_at=fetched_at,
+    )
+
+
+async def _list_xai_oauth_models(
+    integration: LLMProviderIntegrationWithSecrets,
+) -> ModelListingOutput:
+    """Fetch Grok OAuth account models from the CLI proxy."""
+    config = _require_xai_oauth_config(integration.config)
+    secrets = _require_xai_oauth_secrets(integration.secrets)
+    account_id = config.account_id
+    if account_id is None or not account_id.strip():
+        raise ValueError("xAI OAuth account metadata is required.")
+    fetched_at = datetime.now(timezone.utc)
+    headers = {
+        "Authorization": f"Bearer {secrets.access_token}",
+        "X-XAI-Token-Auth": "xai-grok-cli",
+        "x-userid": account_id.strip(),
+        "x-grok-client-version": XAI_MODELS_CLIENT_VERSION,
+        "x-grok-client-identifier": "grok-shell",
+        "x-grok-client-mode": "interactive",
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.get(
+            f"{resolve_xai_usage_base_url()}/models",
+            headers=headers,
+        )
+        response.raise_for_status()
+        payload = _XaiOAuthModelsPayload.model_validate(response.json())
+    models = [
+        _candidate_from_xai_oauth_model(model, fetched_at=fetched_at)
+        for model in payload.data
+    ]
+    return _output(
+        source="xai_oauth:grok_models",
+        fetched_at=fetched_at,
+        models=models,
+        skips=[],
+    )
+
+
+def _candidate_from_xai_oauth_model(
+    model: _XaiOAuthModelPayload,
+    *,
+    fetched_at: datetime,
+) -> NormalizedModelCandidate:
+    """Normalize one account-visible Grok model."""
+    efforts = _xai_reasoning_efforts(model.reasoning_efforts)
+    built_in_tools = ["web_search"] if model.supports_backend_search is True else []
+    responses_api = (
+        model.api_backend == "responses" if model.api_backend is not None else None
+    )
+    capabilities = ModelCapabilities(
+        context_window=ModelContextWindow(
+            max_input_tokens=_positive_int(model.context_window)
+        ),
+        modalities=ModelModalities(
+            input=[ModelModality.TEXT],
+            output=[ModelModality.TEXT],
+        ),
+        reasoning=ModelReasoningCapabilities(
+            supported=model.supports_reasoning_effort is True,
+            effort_levels=efforts,
+        ),
+        built_in_tools=ModelBuiltInToolCapabilities(supported=built_in_tools),
+        compatibility=ModelCompatibilityCapabilities(
+            provider_family="xai",
+            responses_api=responses_api,
+        ),
+    )
+    source_metadata = model.model_dump(
+        mode="json",
+        exclude_none=True,
+        exclude={"id", "model", "name"},
+    )
+    display_name = model.name or model.model or model.id
+    return NormalizedModelCandidate(
+        provider=LLMProvider.XAI_OAUTH,
+        model_identifier=model.id,
+        model_display_name=display_name,
+        model_developer=LLMModelDeveloper.XAI,
+        model_family=_xai_family(model.id),
+        normalized_capabilities=capabilities,
+        model_snapshot={
+            "source": "xai_oauth:grok_models",
+            "provider": LLMProvider.XAI_OAUTH.value,
+            "model_identifier": model.id,
+            "model_display_name": display_name,
+            "model_developer": LLMModelDeveloper.XAI.value,
+        },
+        source_metadata=source_metadata,
+        last_refreshed_at=fetched_at,
+    )
+
+
+def _conservative_xai_capabilities() -> ModelCapabilities:
+    """Return capabilities safe when xAI omits model metadata."""
+    return ModelCapabilities(
+        modalities=ModelModalities(
+            input=[ModelModality.TEXT],
+            output=[ModelModality.TEXT],
+        ),
+        compatibility=ModelCompatibilityCapabilities(
+            provider_family="xai",
+            responses_api=None,
+        ),
+    )
+
+
+def _xai_reasoning_efforts(
+    payloads: list[_XaiOAuthReasoningEffortPayload] | None,
+) -> list[ModelReasoningEffort]:
+    """Normalize xAI reasoning levels into canonical order."""
+    if payloads is None:
+        return []
+    available: set[ModelReasoningEffort] = set()
+    for payload in payloads:
+        raw = payload.value or payload.id
+        if raw is None:
+            continue
+        try:
+            available.add(ModelReasoningEffort(raw))
+        except ValueError:
+            continue
+    return [effort for effort in ModelReasoningEffort if effort in available]
+
+
+def _xai_family(model_id: str) -> str:
+    """Extract the stable Grok model family prefix."""
+    parts = model_id.split("-")
+    if len(parts) >= 2 and parts[0].lower() == "grok":
+        return "-".join(parts[:2])
+    return parts[0]
+
+
 async def _list_openrouter_models(
     integration: LLMProviderIntegrationWithSecrets,
 ) -> ModelListingOutput:
@@ -923,6 +1233,20 @@ def _require_kimi_secrets(secrets: object) -> KimiOAuthSecrets:
     """Validate Kimi OAuth secrets type."""
     if not isinstance(secrets, KimiOAuthSecrets):
         raise ValueError("Kimi OAuth integration secrets are required.")
+    return secrets
+
+
+def _require_xai_oauth_config(config: object) -> XaiOAuthConfig:
+    """Validate xAI OAuth integration config."""
+    if not isinstance(config, XaiOAuthConfig):
+        raise ValueError("xAI OAuth integration config is required.")
+    return config
+
+
+def _require_xai_oauth_secrets(secrets: object) -> XaiOAuthSecrets:
+    """Validate xAI OAuth integration secrets."""
+    if not isinstance(secrets, XaiOAuthSecrets):
+        raise ValueError("xAI OAuth integration secrets are required.")
     return secrets
 
 

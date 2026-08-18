@@ -20,7 +20,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-16 | 62 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-18 | 19 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-18 | 20 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-13 | 26 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-18 | 4 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
@@ -50,8 +50,8 @@ Design documents are accumulated records and are not listed individually in this
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-18 | 28 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-17 | 30 |
-| [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-13 | 3 |
-| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-01 | 6 |
+| [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
+| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-18 | 7 |
 
 ## Requirements Snapshots
 
@@ -446,6 +446,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent-Managed Dynamic Worktrees Requirements](requirements/worktree-260812-agent-managed-dynamic-worktrees.md) | worktree-260812 | 2026-08-12 | 2026-08-12 |
 | [Explicit AgentSession Write Target Historical Requirements Reconstruction](requirements/write-260625-write-target.md) | write-260625 | 2026-06-25 | - |
 | [xAI API Key Provider Historical Requirements Reconstruction](requirements/xai-260710-xai-api-key.md) | xai-260710 | 2026-07-10 | 2026-07-10 |
+| [xAI Integration Model Discovery Requirements](requirements/xai-260818-integration-model-discovery.md) | xai-260818 | 2026-08-18 | 2026-08-18 |
 
 ## Architecture Decision Records (ADR)
 
@@ -838,6 +839,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Agent-Managed Dynamic Worktrees](adr/worktree-260812-agent-managed-dynamic-worktrees.md)
 - [Explicit AgentSession Write Target Historical Decision Reconstruction](adr/write-260625-write-target.md)
 - [xAI API Key Provider Historical Decision Reconstruction](adr/xai-260710-xai-api-key.md)
+- [xAI Integration Model Discovery](adr/xai-260818-integration-model-discovery.md)
 
 ## Issues (Bug Tracking)
 

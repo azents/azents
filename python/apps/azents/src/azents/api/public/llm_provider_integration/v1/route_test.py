@@ -3,6 +3,7 @@
 import datetime
 from unittest.mock import AsyncMock
 
+import pytest
 import pytz
 from azcommon.result import Failure
 from fastapi import BackgroundTasks, HTTPException
@@ -71,7 +72,13 @@ def test_fresh_or_system_catalog_read_does_not_queue_lazy_refresh() -> None:
     assert system_tasks.tasks == []
 
 
-def test_create_queues_supported_integration_catalog_sync() -> None:
+@pytest.mark.parametrize(
+    "provider",
+    [LLMProvider.AWS_BEDROCK, LLMProvider.XAI, LLMProvider.XAI_OAUTH],
+)
+def test_create_queues_supported_integration_catalog_sync(
+    provider: LLMProvider,
+) -> None:
     background_tasks = BackgroundTasks()
 
     enqueue_initial_catalog_sync(
@@ -79,8 +86,8 @@ def test_create_queues_supported_integration_catalog_sync() -> None:
         service=_service(),
         integration_id="integration",
         workspace_id="workspace",
-        provider=LLMProvider.AWS_BEDROCK,
-        name="Bedrock",
+        provider=provider,
+        name=provider.value,
         enabled=True,
         trigger=IntegrationCatalogSyncTrigger.CREATE,
     )

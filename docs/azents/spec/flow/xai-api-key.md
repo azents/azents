@@ -7,6 +7,7 @@ owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/25a661df4ff6_add_xai_api_key_provider.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/5c044388362c_move_xai_catalogs_to_integrations.py
   - python/apps/azents/src/azents/core/credentials.py
   - python/apps/azents/src/azents/core/enums.py
   - python/apps/azents/src/azents/core/llm_mapping.py
@@ -16,13 +17,14 @@ code_paths:
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/llm_catalog/**
+  - python/apps/azents/src/azents/services/model_listing/providers.py
   - python/apps/azents/src/azents/engine/events/litellm_responses.py
   - python/apps/azents/src/azents/engine/responses.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/llm-settings/**
   - testenv/azents/e2e/src/tests/required/public/test_llm_provider_integration.py
-last_verified_at: 2026-08-13
-spec_version: 3
+last_verified_at: 2026-08-18
+spec_version: 4
 ---
 
 # xAI API Key Provider Flow
@@ -57,15 +59,15 @@ Rules:
 - Create and update do not call xAI to validate the key.
 - Alias or enabled-state updates may omit `secrets`; the stored encrypted key remains unchanged.
 - The existing workspace LLM integration read/write permissions govern the CRUD routes.
-- The key is sent to xAI only for an inference call. Internal secret-bearing repository paths may decrypt it for credential resolution but do not validate it against xAI.
+- The key is sent to xAI only for model-catalog synchronization and inference. Internal secret-bearing repository paths may decrypt it for those provider calls but do not otherwise validate it against xAI.
 
 The PostgreSQL `llm_provider` enum includes the additive `xai` value. Deployments apply revision `25a661df4ff6` before application instances accept `provider=xai` writes. Rollback may hide or disable the provider but does not remove the PostgreSQL enum value.
 
 ## Model Catalog
 
-`xai` has its own system catalog projected from the LiteLLM provider family `xai`. It does not fetch xAI `/v1/models` during integration CRUD or normal picker reads.
+Each `xai` integration has its own stored integration catalog. Enabled creation, API-key replacement, re-enable, stale picker reads, and explicit sync use the shared integration-catalog lifecycle. Synchronization calls xAI's configured developer model endpoint through the installed OpenAI-compatible SDK using that integration's decrypted key.
 
-The `xai` and `xai_oauth` catalogs are separate stored system catalogs even though they share the same source family. Provider-facing model identifiers omit the LiteLLM `xai/` prefix. Runtime mapping restores that prefix before invocation.
+xAI's response is authoritative for model existence. An exact or expanded-alias LiteLLM `xai/<model>` entry may fill capabilities and bounded pricing metadata omitted by xAI, but a missing entry never hides the model. Unknown capabilities remain disabled. Normal picker reads use only the stored integration snapshot and do not call xAI. Provider-facing model identifiers omit the LiteLLM `xai/` prefix, while runtime mapping restores it before invocation.
 
 ## Runtime Resolution and Request Lowering
 
@@ -109,6 +111,7 @@ LiteLLM HTTP, transport, and typed terminal failures are normalized into the com
 
 | Date | Version | Change | Rationale |
 |---|---:|---|---|
+| 2026-08-18 | 4 | Moved API-key model visibility to credential-specific integration catalogs with provider-authoritative discovery | [xai-260818/ADR](../../adr/xai-260818-integration-model-discovery.md) |
 | 2026-07-18 | 3 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
 | 2026-07-18 | 2 | Applied the bounded common provider-failure contract and complete Run retry budget | [failures-260718/ADR](../../adr/failures-260718-failures-transparent.md) coordinated provider-failure cutover |
 | 2026-07-10 | 1 | Documented the stable xAI API-key integration, catalog, runtime, UI, and security behavior | `docs/azents/design/xai-260710-xai-api-key.md` |

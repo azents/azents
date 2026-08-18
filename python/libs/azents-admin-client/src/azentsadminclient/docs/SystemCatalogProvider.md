@@ -6,10 +6,6 @@ Provider with a system-owned model catalog.
 
 * `OPENAI` (value: `'openai'`)
 
-* `XAI` (value: `'xai'`)
-
-* `XAI_OAUTH` (value: `'xai_oauth'`)
-
 * `ANTHROPIC` (value: `'anthropic'`)
 
 * `GOOGLE_GEMINI` (value: `'google_gemini'`)

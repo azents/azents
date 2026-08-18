@@ -18,7 +18,7 @@ from azents.services.llm_catalog import (
 )
 
 
-async def test_system_catalogs_exclude_chatgpt_oauth(
+async def test_system_catalogs_exclude_integration_scoped_providers(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
     """Expose only providers with system-owned model visibility."""
@@ -41,8 +41,6 @@ async def test_system_catalogs_exclude_chatgpt_oauth(
 
     assert [item.provider for item in items] == [
         LLMProvider.OPENAI,
-        LLMProvider.XAI,
-        LLMProvider.XAI_OAUTH,
         LLMProvider.ANTHROPIC,
         LLMProvider.GOOGLE_GEMINI,
     ]

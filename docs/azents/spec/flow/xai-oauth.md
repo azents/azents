@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, model-catalog]
 code_paths:
+  - python/apps/azents/db-schemas/rdb/migrations/versions/5c044388362c_move_xai_catalogs_to_integrations.py
   - python/apps/azents/src/azents/core/xai.py
   - python/apps/azents/src/azents/core/xai_oauth.py
   - python/apps/azents/src/azents/core/config.py
@@ -14,6 +15,8 @@ code_paths:
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/__init__.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/v1/data.py
   - python/apps/azents/src/azents/services/xai_oauth/**
+  - python/apps/azents/src/azents/services/llm_catalog/**
+  - python/apps/azents/src/azents/services/model_listing/providers.py
   - python/apps/azents/src/azents/services/subscription_usage/**
   - python/apps/azents/src/azents/repos/xai_oauth_session/**
   - python/apps/azents/src/azents/rdb/models/xai_oauth_session.py
@@ -22,8 +25,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/**
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-08-01
-spec_version: 6
+last_verified_at: 2026-08-18
+spec_version: 7
 ---
 
 # xAI OAuth Flow
@@ -45,6 +48,8 @@ The provider is experimental but available without operator OAuth configuration.
 | token | `https://auth.x.ai/oauth2/token` |
 | scope | `openid profile email offline_access api:access grok-cli:access` |
 | runtime base URL | `https://api.x.ai/v1` |
+| OAuth model-list base URL | `https://cli-chat-proxy.grok.com/v1` |
+| OAuth model-list client version | `1.0.5` |
 
 The OAuth client id is a public native-app identifier, not a secret. Device authorization sends it with the requested scope, and device polling and refresh send the same identifier to the token endpoint. The RFC 8628 device grant does not use a PKCE verifier; PKCE applies to the separate authorization-code flow.
 
@@ -244,7 +249,9 @@ Unexpected presentation failures remain inside a card-local error boundary.
 
 ## Model Catalog
 
-`xai_oauth` uses its own system model catalog projected from LiteLLM source metadata with LiteLLM provider family `xai`. The stable `xai` provider has a separate stored system catalog projected from the same source family. Provider-facing model identifiers remove the `xai/` prefix for selection snapshots, and runtime model identifiers are reconstructed with the `xai/` prefix when invoking LiteLLM.
+Each `xai_oauth` integration owns a stored account-specific catalog. Before synchronization, Azents reuses the runtime token-freshness service and persists any rotated token set. It then calls the Grok CLI proxy `/models` endpoint with the bearer token, account id, token-auth marker, pinned model-list client version, Grok shell identifier, and interactive client mode.
+
+The returned account-visible models are authoritative for existence and may differ from API-key integrations. Provider context-window, reasoning-effort, backend-search, and API-backend fields override optional LiteLLM enrichment. An exact or expanded-alias LiteLLM `xai/<model>` entry may fill absent capabilities and bounded pricing metadata, but a missing entry does not hide the model. Picker reads use only the stored snapshot. Provider-facing identifiers omit the `xai/` prefix, and runtime identifiers restore it before invocation.
 
 ## Frontend UX Rules
 
@@ -266,6 +273,7 @@ Unexpected presentation failures remain inside a card-local error boundary.
 
 | Date | Version | Change | Rationale |
 |---|---|---|---|
+| 2026-08-18 | 7 | Replaced global OAuth model visibility with refreshed account-specific integration discovery | [xai-260818/ADR](../../adr/xai-260818-integration-model-discovery.md) |
 | 2026-07-19 | 6 | Added integration-scoped CLI-proxy subscription usage, trusted redirects, permission-projected financial details, and card-local presentation | [ambiguous historical ADR reference](../../notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md#ambiguity-ref-291) and validated subscription usage implementation |
 | 2026-07-18 | 5 | Routed unclassified provider outcomes to internal-error handling without provider retry state | Preserve actionable incident tracebacks instead of generic unknown-provider logs |
 | 2026-07-18 | 4 | Applied the bounded common provider-failure contract and complete Run retry budget | [failures-260718/ADR](../../adr/failures-260718-failures-transparent.md) coordinated provider-failure cutover |
