@@ -17,7 +17,7 @@
 
 ### Python ###
 
-# virtual environments (각 앱의 .venv 폴더)
+# Virtual environments (per-app .venv directories)
 .venv
 **/.venv
 **/__pycache__
