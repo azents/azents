@@ -2138,35 +2138,6 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Provider tool live activity handoff",
-        "hasToolResult": false
-      },
-      "response": {
-        "content": "PROVIDER_TOOL_LIVE_ACTIVITY_COMPLETED",
-        "webSearches": [
-          "provider-neutral live activity"
-        ]
-      },
-      "recordedTimings": {
-        "ttftMs": 0,
-        "interChunkDelaysMs": [
-          0,
-          0,
-          450,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0,
-          0
-        ],
-        "totalDurationMs": 450
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
         "userMessage": "xAI API-key image generation",
         "hasToolResult": false
       },

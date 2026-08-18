@@ -28,6 +28,13 @@ _SEMANTIC_SAME_NATIVE_RESPONSE = "PROVIDER_SEMANTIC_SAME_NATIVE_COMPLETED"
 _SEMANTIC_CROSS_NATIVE_RESPONSE = "PROVIDER_SEMANTIC_CROSS_NATIVE_COMPLETED"
 _SEMANTIC_POST_COMPACTION_RESPONSE = "PROVIDER_SEMANTIC_POST_COMPACTION_COMPLETED"
 _SEMANTIC_ITEM_ID = "search_provider_semantic"
+_PROVIDER_TOOL_LIVE_PROMPT = "Provider tool live activity handoff"
+_PROVIDER_TOOL_LIVE_QUERY = "provider-neutral live activity"
+_PROVIDER_TOOL_LIVE_RESPONSE = "PROVIDER_TOOL_LIVE_ACTIVITY_COMPLETED"
+_PROVIDER_TOOL_LIVE_ITEM_ID = "search_provider_tool_live"
+_PROVIDER_TOOL_LIVE_BARRIER_PATH = "/v1/_provider_tool_live_barrier"
+_PROVIDER_TOOL_LIVE_BARRIER_RELEASE_PATH = f"{_PROVIDER_TOOL_LIVE_BARRIER_PATH}/release"
+_PROVIDER_TOOL_LIVE_BARRIER_TIMEOUT_SECONDS = 60.0
 _COMPACTION_SYSTEM_PREFIX = (
     "You are a context compaction engine for a long-running agent."
 )
@@ -690,6 +697,52 @@ def _is_semantic_compaction_request(request: dict[str, object]) -> bool:
     )
 
 
+class _ProviderToolLiveBarrier:
+    """Coordinate the provider-tool live stream with its E2E assertion."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._armed = False
+        self._reached = threading.Event()
+        self._released = threading.Event()
+
+    def arm(self) -> None:
+        """Reset and arm the barrier for one provider-tool live response."""
+        with self._lock:
+            self._armed = True
+            self._reached.clear()
+            self._released.clear()
+
+    def evidence(self) -> dict[str, bool]:
+        """Return safe barrier state for test diagnostics."""
+        with self._lock:
+            armed = self._armed
+        return {
+            "armed": armed,
+            "reached": self._reached.is_set(),
+            "released": self._released.is_set(),
+        }
+
+    def release(self) -> None:
+        """Release the current provider-tool live response."""
+        self._released.set()
+
+    def wait_until_reached(self, timeout: float) -> bool:
+        """Wait until the provider stream reaches the held running boundary."""
+        return self._reached.wait(timeout=timeout)
+
+    def wait_for_release(self) -> bool:
+        """Mark the running boundary reached and wait for explicit release."""
+        with self._lock:
+            if not self._armed:
+                return False
+        self._reached.set()
+        return self._released.wait(timeout=_PROVIDER_TOOL_LIVE_BARRIER_TIMEOUT_SECONDS)
+
+
+_PROVIDER_TOOL_LIVE_BARRIER = _ProviderToolLiveBarrier()
+
+
 class _State:
     requests: ClassVar[list[dict[str, object]]] = []
     dynamic_worktree_requests: ClassVar[list[dict[str, object]]] = []
@@ -713,6 +766,9 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         """Return a local journal, deterministic usage, or proxied response."""
+        if self.path == _PROVIDER_TOOL_LIVE_BARRIER_PATH:
+            self._write_json(200, _PROVIDER_TOOL_LIVE_BARRIER.evidence())
+            return
         journal = self._journal_for_path()
         if journal is not None:
             with _State.lock:
@@ -737,6 +793,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """Handle deterministic image, hosted-tool, and OAuth boundaries."""
+        if self.path == _PROVIDER_TOOL_LIVE_BARRIER_PATH:
+            _PROVIDER_TOOL_LIVE_BARRIER.arm()
+            self._write_json(201, _PROVIDER_TOOL_LIVE_BARRIER.evidence())
+            return
+        if self.path == _PROVIDER_TOOL_LIVE_BARRIER_RELEASE_PATH:
+            _PROVIDER_TOOL_LIVE_BARRIER.release()
+            self._write_json(200, _PROVIDER_TOOL_LIVE_BARRIER.evidence())
+            return
         body = self._read_body()
         if self.path == _OAUTH_CONNECTION_SCENARIO_PATH:
             self._queue_oauth_connection_scenario(body)
@@ -1469,6 +1533,9 @@ class _Handler(BaseHTTPRequestHandler):
                 return
         if user_text == _SEMANTIC_PROMPT:
             self._write_semantic_web_search_response(request)
+            return
+        if user_text == _PROVIDER_TOOL_LIVE_PROMPT:
+            self._write_provider_tool_live_response(request)
             return
         if user_text in _SEMANTIC_FOLLOW_UP_RESPONSES:
             self._write_text_response(
@@ -2216,6 +2283,116 @@ class _Handler(BaseHTTPRequestHandler):
             ]
         )
 
+    def _write_provider_tool_live_response(
+        self,
+        request: dict[str, object],
+    ) -> None:
+        """Hold one running Web-search event until the E2E snapshot is verified."""
+        model_value = request.get("model")
+        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        search_item: dict[str, object] = {
+            "id": _PROVIDER_TOOL_LIVE_ITEM_ID,
+            "type": "web_search_call",
+            "status": "completed",
+            "action": {
+                "type": "search",
+                "query": _PROVIDER_TOOL_LIVE_QUERY,
+                "sources": [],
+            },
+        }
+        message_item: dict[str, object] = {
+            "id": "msg_provider_tool_live",
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": _PROVIDER_TOOL_LIVE_RESPONSE,
+                    "annotations": [],
+                }
+            ],
+        }
+        response = self._response(
+            request=request,
+            response_id="resp_provider_tool_live",
+            model=model,
+            output=[search_item, message_item],
+        )
+        if request.get("stream") is not True:
+            self._write_json(200, response)
+            return
+
+        self._start_sse()
+        self._write_sse_events(
+            [
+                {
+                    "type": "response.created",
+                    "sequence_number": 0,
+                    "response": {**response, "status": "in_progress", "output": []},
+                },
+                {
+                    "type": "response.output_item.added",
+                    "sequence_number": 1,
+                    "output_index": 0,
+                    "item": {**search_item, "status": "in_progress"},
+                },
+                {
+                    "type": "response.web_search_call.in_progress",
+                    "sequence_number": 2,
+                    "output_index": 0,
+                    "item_id": _PROVIDER_TOOL_LIVE_ITEM_ID,
+                },
+                {
+                    "type": "response.web_search_call.searching",
+                    "sequence_number": 3,
+                    "output_index": 0,
+                    "item_id": _PROVIDER_TOOL_LIVE_ITEM_ID,
+                },
+            ]
+        )
+        if not _PROVIDER_TOOL_LIVE_BARRIER.wait_for_release():
+            self.close_connection = True
+            return
+        self._write_sse_events(
+            [
+                {
+                    "type": "response.web_search_call.completed",
+                    "sequence_number": 4,
+                    "output_index": 0,
+                    "item_id": _PROVIDER_TOOL_LIVE_ITEM_ID,
+                },
+                {
+                    "type": "response.output_item.done",
+                    "sequence_number": 5,
+                    "output_index": 0,
+                    "item": search_item,
+                },
+                {
+                    "type": "response.output_item.added",
+                    "sequence_number": 6,
+                    "output_index": 1,
+                    "item": {
+                        **message_item,
+                        "status": "in_progress",
+                        "content": [],
+                    },
+                },
+                {
+                    "type": "response.output_item.done",
+                    "sequence_number": 7,
+                    "output_index": 1,
+                    "item": message_item,
+                },
+                {
+                    "type": "response.completed",
+                    "sequence_number": 8,
+                    "response": response,
+                },
+            ]
+        )
+        self._finish_sse()
+
     def _write_function_call_response(
         self,
         request: dict[str, object],
@@ -2393,11 +2570,20 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _write_sse(self, events: list[dict[str, object]]) -> None:
         """Write deterministic Responses server-sent events."""
+        self._start_sse()
+        self._write_sse_events(events)
+        self._finish_sse()
+
+    def _start_sse(self) -> None:
+        """Start one Responses server-sent event stream."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
         self.end_headers()
+
+    def _write_sse_events(self, events: list[dict[str, object]]) -> None:
+        """Write and flush one ordered batch of Responses stream events."""
         for event in events:
             event_type = event.get("type")
             if not isinstance(event_type, str):
@@ -2406,6 +2592,9 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"event: " + event_type.encode() + b"\n")
             self.wfile.write(b"data: " + encoded + b"\n\n")
             self.wfile.flush()
+
+    def _finish_sse(self) -> None:
+        """Finish one Responses server-sent event stream."""
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
         self.close_connection = True
