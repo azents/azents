@@ -13,7 +13,6 @@ code_paths:
   - python/apps/azents/src/azents/api/public/agent/v1/data.py
   - python/apps/azents/src/azents/engine/tools/memory.py
   - python/apps/azents/src/azents/engine/tools/builtin.py
-  - python/apps/azents/src/azents/engine/tools/shell.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - typescript/apps/azents-web/src/features/agents/AgentMemorySettingsPage.tsx
   - typescript/apps/azents-web/src/features/agents/components/AgentMemorySettings.tsx
@@ -22,7 +21,7 @@ code_paths:
 api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
-last_verified_at: 2026-08-06
+last_verified_at: 2026-08-18
 spec_version: 7
 ---
 

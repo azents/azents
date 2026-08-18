@@ -59,7 +59,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
-  - typescript/apps/azents-web/src/app/(app)/join/[handle]/page.tsx
+  - typescript/apps/azents-web/src/app/(app)/join/[handle]/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
@@ -97,15 +97,15 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-13
-spec_version: 67
+last_verified_at: 2026-08-18
+spec_version: 68
 ---
 
 # Workspace & Membership
 
 ## Overview
 
-Workspace is the top-level product collaboration unit in Azents. It is the permission boundary that shares agents, sessions, toolkits, shell environments, and other workspace-scoped resources. It is used in URLs and external references through a globally unique handle. Users belonging to Workspace are represented as `WorkspaceUser` and have one of three roles: OWNER/MANAGER/MEMBER.
+Workspace is the top-level product collaboration unit in Azents. It is the permission boundary that shares agents, sessions, toolkits, Runtime Profiles, and other workspace-scoped resources. It is used in URLs and external references through a globally unique handle. Users belonging to Workspace are represented as `WorkspaceUser` and have one of three roles: OWNER/MANAGER/MEMBER.
 
 Workspace roles are unrelated to the instance-wide `system_admin` role. OWNER or MANAGER membership grants no Admin Web or Admin API access, and system-administrator assignment grants no implicit Workspace membership. Fresh Admin bootstrap creates no Workspace; a bootstrapped administrator creates or joins Workspaces later through ordinary Public API product flows.
 
@@ -462,7 +462,7 @@ authority across navigation.
 
 Membership is created through three paths.
 
-1. **Explicit Workspace creation (automatic OWNER)** — `WorkspaceService.create_with_owner()` creates Workspace + OWNER role WorkspaceUser + default ShellEnvironment ("Default", WORKSPACE scope) in one transaction. Creator automatically becomes OWNER and this is not selectable in UI. Account or Admin bootstrap does not call this path.
+1. **Explicit Workspace creation (automatic OWNER)** — `WorkspaceService.create_with_owner()` creates the Workspace and OWNER-role WorkspaceUser in one transaction. Runtime Profiles and execution policy are configured separately. Creator automatically becomes OWNER and this is not selectable in UI. Account or Admin bootstrap does not call this path.
 2. **Invitation acceptance** — existing member (manager or higher) invites by email. When invited user accepts, WorkspaceUser is created with that role (except OWNER). Display name is automatically set to prefix before `@` of invitation email.
 3. **JoinRequest approval** — user requests to join by handle. When existing member approves, WorkspaceUser is created with role=MEMBER. Display name is automatically set to first 8 chars of `user_id[:8]` (drift candidate — needs better default).
 
@@ -748,6 +748,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-18 (spec_version=68)** — Removed the deleted ShellEnvironment creation contract,
+  clarified that Workspace creation adds only the Workspace and OWNER membership, and repaired the
+  dynamic join-page `code_paths` declaration.
 - **2026-08-13 (spec_version=67)** — Added Kubernetes Profile v3 and Workspace Policy v2
   hierarchical network editing, parent-authority-constrained forms, effective strict-mode status,
   bounded warnings, and mode-aware recreation/in-place convergence while retaining Docker
