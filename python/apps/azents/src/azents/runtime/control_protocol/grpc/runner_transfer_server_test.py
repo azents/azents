@@ -4,6 +4,7 @@
 
 import asyncio
 import hashlib
+import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -42,6 +43,7 @@ from azents.runtime.transfer.coordinator import RuntimeTransferCoordinator
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
+    RuntimeTransferCleanupArtifact,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
@@ -59,6 +61,9 @@ from azents.testing.grpc import (
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 _DIGEST = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+_UNTRUSTED_CLEANUP_MESSAGE = (
+    "provider=sentinel endpoint=https://storage.example/private-key"
+)
 
 
 class _Clock:
@@ -172,6 +177,7 @@ class _ObjectStore:
         self.delete_calls = 0
         self.empty_creates = 0
         self.abort_error = False
+        self.abort_error_message = "abort failed"
         self.complete_error = False
         self.verify_error = False
 
@@ -294,7 +300,7 @@ class _ObjectStore:
         del upload
         self.abort_calls += 1
         if self.abort_error:
-            raise RuntimeError("abort failed")
+            raise RuntimeError(self.abort_error_message)
 
     async def create_empty_immutable(
         self,
@@ -645,7 +651,9 @@ async def test_upload_offset_failure_aborts_and_records_cleanup() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upload_complete_and_abort_failures_preserve_cleanup_evidence() -> None:
+async def test_upload_complete_and_abort_failures_preserve_cleanup_evidence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     complete_failure = await _harness(
         chunks=[],
         direction=RuntimeTransferDirection.UPLOAD,
@@ -667,19 +675,29 @@ async def test_upload_complete_and_abort_failures_preserve_cleanup_evidence() ->
         direction=RuntimeTransferDirection.UPLOAD,
     )
     abort_failure.object_store.abort_error = True
-    with pytest.raises(_Abort) as error:
-        await abort_failure.servicer.UploadTransfer(
-            _frames(
-                pb.UploadTransferFrame(
-                    open=pb.UploadTransferOpen(identity=_upload_identity())
+    abort_failure.object_store.abort_error_message = _UNTRUSTED_CLEANUP_MESSAGE
+    with caplog.at_level(
+        logging.WARNING,
+        logger="azents.runtime.control_protocol.grpc.runner_transfer_server",
+    ):
+        with pytest.raises(_Abort) as error:
+            await abort_failure.servicer.UploadTransfer(
+                _frames(
+                    pb.UploadTransferFrame(
+                        open=pb.UploadTransferOpen(identity=_upload_identity())
+                    ),
+                    pb.UploadTransferFrame(
+                        chunk=pb.TransferChunk(offset=0, data=b"abc")
+                    ),
+                    pb.UploadTransferFrame(
+                        complete=pb.UploadTransferComplete(
+                            actual_size=3,
+                            sha256="0" * 64,
+                        )
+                    ),
                 ),
-                pb.UploadTransferFrame(chunk=pb.TransferChunk(offset=0, data=b"abc")),
-                pb.UploadTransferFrame(
-                    complete=pb.UploadTransferComplete(actual_size=3, sha256="0" * 64)
-                ),
-            ),
-            _Context(),
-        )
+                _Context(),
+            )
     assert error.value.code is grpc.StatusCode.DATA_LOSS
     failed_record = await abort_failure.state.get("transfer-1")
     assert failed_record is not None
@@ -688,6 +706,23 @@ async def test_upload_complete_and_abort_failures_preserve_cleanup_evidence() ->
         failed_record.cleanup_status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
     )
     assert failed_record.multipart_cleanup_handle == "multipart-1"
+    assert failed_record.cleanup_failure is not None
+    assert (
+        failed_record.cleanup_failure.artifact
+        is RuntimeTransferCleanupArtifact.MULTIPART_ABORT
+    )
+    assert failed_record.cleanup_failure.attempts == 1
+    cleanup_logs = [
+        record
+        for record in caplog.records
+        if record.message == "Runtime transfer upload cleanup requires retry"
+    ]
+    assert len(cleanup_logs) == 1
+    assert cleanup_logs[0].exc_info is not None
+    assert isinstance(cleanup_logs[0].exc_info[1], RuntimeError)
+    formatted = logging.Formatter().format(cleanup_logs[0])
+    assert _UNTRUSTED_CLEANUP_MESSAGE not in formatted
+    assert "RuntimeError: Runtime transfer upload cleanup failed" in formatted
 
 
 @pytest.mark.asyncio

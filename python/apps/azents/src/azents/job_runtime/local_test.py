@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import logging
 from collections.abc import Callable
 from typing import cast
 
@@ -198,7 +199,9 @@ async def test_deadline_expires_while_waiting_for_concurrency_slot() -> None:
 
 
 @pytest.mark.asyncio
-async def test_deadline_cancels_cooperative_handler() -> None:
+async def test_deadline_cancels_cooperative_handler(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """An absolute deadline returns a safe timeout after handler cancellation."""
     cancelled = asyncio.Event()
 
@@ -209,6 +212,7 @@ async def test_deadline_cancels_cooperative_handler() -> None:
             cancelled.set()
             raise
 
+    caplog.set_level(logging.WARNING, logger="azents.job_runtime.local")
     runtime = _runtime(handler)
     handle = await runtime.submit(_request("deadline", timeout=0.01))
 
@@ -218,6 +222,57 @@ async def test_deadline_cancels_cooperative_handler() -> None:
     assert outcome.error_code == "TimeoutError"
     assert cancelled.is_set()
     assert runtime.active_count == 0
+    assert not [
+        record
+        for record in caplog.records
+        if record.getMessage()
+        == "Registered job handler failed during cancellation grace"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_deadline_logs_handler_failure_during_cancellation_grace(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    started = asyncio.Event()
+    untrusted = "s3://private-bucket/job-key?endpoint=internal.example"
+
+    async def handler(_context: JobExecutionContext) -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise RuntimeError(untrusted) from None
+
+    caplog.set_level(logging.WARNING, logger="azents.job_runtime.local")
+    runtime = _runtime(handler)
+    handle = await runtime.submit(_request("grace-failure", timeout=0.1))
+    await started.wait()
+
+    outcome = await handle.wait()
+
+    assert outcome.status is JobOutcomeStatus.TIMED_OUT
+    assert outcome.error_code == "TimeoutError"
+    assert runtime.active_count == 0
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage()
+        == "Registered job handler failed during cancellation grace"
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.exc_info is not None
+    log_fields = vars(record)
+    assert log_fields["job_handler_key"] == "test.handler"
+    assert log_fields["job_execution_key"] == "grace-failure"
+    assert log_fields["failure_kind"] == "RuntimeError"
+    formatted = logging.Formatter().format(record)
+    assert (
+        "RuntimeError: Registered job handler failed during cancellation grace"
+        in formatted
+    )
+    assert untrusted not in formatted
 
 
 class _TrackedContainer:

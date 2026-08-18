@@ -5,6 +5,7 @@
 
 import asyncio
 import hashlib
+import logging
 import secrets
 from collections import deque
 from collections.abc import AsyncIterator, Callable
@@ -41,6 +42,7 @@ from azents.runtime.coordination.data import RuntimeConnectionKind
 from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.transfer.data import (
     RuntimeTransferCancellationReason,
+    RuntimeTransferCleanupArtifact,
     RuntimeTransferCleanupStatus,
     RuntimeTransferDirection,
     RuntimeTransferDispatchStatus,
@@ -52,12 +54,14 @@ from azents.runtime.transfer.data import (
 )
 from azents.runtime.transfer.object_store import runtime_transfer_object_identity
 from azents.runtime.transfer.store import RuntimeTransferStateStore
+from azents.utils.logging import sanitized_exception_info
 
 _DEFAULT_MAX_CONCURRENT_DOWNLOADS = 4
 _DEFAULT_MAX_CONCURRENT_UPLOADS = 4
 _MAX_MULTIPART_PARTS = 10_000
 _PROGRESS_INTERVAL_SECONDS = 1
 _PROGRESS_MINIMUM_BYTES = 1024 * 1024
+_LOGGER = logging.getLogger(__name__)
 
 
 class _TransferCancelled(RuntimeError):
@@ -786,6 +790,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                             attempt_id=latest.admission.attempt_id,
                             expected_revision=latest.revision,
                             status=RuntimeTransferCleanupStatus.PENDING,
+                            cleanup_failure=None,
                         )
                         if pending is None:
                             await self._abort_upload(latest, upload)
@@ -1352,7 +1357,8 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             latest.admission.transfer_id,
             attempt_id=latest.admission.attempt_id,
             expected_revision=latest.revision,
-            status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+            status=RuntimeTransferCleanupStatus.PENDING,
+            cleanup_failure=None,
             multipart_cleanup_required=upload is not None,
             completed_object_cleanup_required=True,
         )
@@ -1406,7 +1412,8 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 latest.admission.transfer_id,
                 attempt_id=latest.admission.attempt_id,
                 expected_revision=latest.revision,
-                status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                status=RuntimeTransferCleanupStatus.PENDING,
+                cleanup_failure=None,
                 multipart_cleanup_required=exc.multipart_cleanup_required,
                 completed_object_cleanup_required=(
                     exc.completed_object_cleanup_required
@@ -1420,7 +1427,8 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 latest.admission.transfer_id,
                 attempt_id=latest.admission.attempt_id,
                 expected_revision=latest.revision,
-                status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                status=RuntimeTransferCleanupStatus.PENDING,
+                cleanup_failure=None,
                 multipart_cleanup_required=False,
                 completed_object_cleanup_required=True,
             )
@@ -1576,8 +1584,22 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         status = RuntimeTransferCleanupStatus.COMPLETE
         try:
             await self._object_store.abort_multipart_upload(upload=upload)
-        except Exception:
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
             status = RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+            _LOGGER.warning(
+                "Runtime transfer multipart cleanup requires retry",
+                exc_info=sanitized_exception_info(
+                    exc,
+                    message="Runtime transfer multipart cleanup failed",
+                ),
+                extra={
+                    "transfer_id": record.admission.transfer_id,
+                    "attempt_id": record.admission.attempt_id,
+                    "cleanup_artifact": RuntimeTransferCleanupArtifact.MULTIPART_ABORT.value,
+                },
+            )
         current = await self._state_store.get(record.admission.transfer_id)
         if (
             current is None
@@ -1589,6 +1611,11 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             attempt_id=current.admission.attempt_id,
             expected_revision=current.revision,
             status=status,
+            cleanup_failure=(
+                RuntimeTransferCleanupArtifact.MULTIPART_ABORT
+                if status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+                else None
+            ),
         )
         return updated or current
 
@@ -1616,11 +1643,17 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             )
         multipart_remaining = multipart_cleanup_required
         completed_remaining = completed_object_cleanup_required
+        multipart_failed = False
+        completed_failed = False
+        cleanup_exception: Exception | None = None
         if multipart_cleanup_required and upload is not None:
             try:
                 await self._object_store.abort_multipart_upload(upload=upload)
-            except Exception:
-                pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                multipart_failed = True
+                cleanup_exception = exc
             else:
                 multipart_remaining = False
         if completed_object_cleanup_required:
@@ -1638,10 +1671,32 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                         expected_size=record.object.size,
                         expected_sha256=record.object.sha256,
                     )
-            except Exception:
-                pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                completed_failed = True
+                if cleanup_exception is None:
+                    cleanup_exception = exc
             else:
                 completed_remaining = False
+        cleanup_failure = _cleanup_failure_artifact(
+            multipart_failed=multipart_failed,
+            completed_failed=completed_failed,
+        )
+        if cleanup_failure is not None:
+            assert cleanup_exception is not None
+            _LOGGER.warning(
+                "Runtime transfer upload cleanup requires retry",
+                exc_info=sanitized_exception_info(
+                    cleanup_exception,
+                    message="Runtime transfer upload cleanup failed",
+                ),
+                extra={
+                    "transfer_id": record.admission.transfer_id,
+                    "attempt_id": record.admission.attempt_id,
+                    "cleanup_artifact": cleanup_failure.value,
+                },
+            )
         current = await self._state_store.get(record.admission.transfer_id)
         if (
             current is None
@@ -1655,22 +1710,22 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 current.admission.transfer_id,
                 attempt_id=current.admission.attempt_id,
                 expected_revision=current.revision,
-                status=(
-                    RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
-                    if multipart_remaining
-                    else RuntimeTransferCleanupStatus.COMPLETE
+                status=_cleanup_status(
+                    cleanup_failure=cleanup_failure,
+                    cleanup_remaining=multipart_remaining,
                 ),
+                cleanup_failure=cleanup_failure,
             )
             return updated or current
         updated = await self._state_store.record_completed_object_cleanup(
             current.admission.transfer_id,
             attempt_id=current.admission.attempt_id,
             expected_revision=current.revision,
-            status=(
-                RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
-                if multipart_remaining or completed_remaining
-                else RuntimeTransferCleanupStatus.COMPLETE
+            status=_cleanup_status(
+                cleanup_failure=cleanup_failure,
+                cleanup_remaining=multipart_remaining or completed_remaining,
             ),
+            cleanup_failure=cleanup_failure,
             multipart_cleanup_required=multipart_remaining,
             completed_object_cleanup_required=completed_remaining,
         )
@@ -1831,6 +1886,34 @@ def _multipart_part_count(size: int, multipart_part_bytes: int) -> int:
 def _verified_upload_object_handle(staging_handle: str) -> str:
     """Return the state-owned immutable handle for one unknown-digest upload."""
     return f"{staging_handle}:verified"
+
+
+def _cleanup_failure_artifact(
+    *,
+    multipart_failed: bool,
+    completed_failed: bool,
+) -> RuntimeTransferCleanupArtifact | None:
+    """Classify failed cleanup operations without object-store identifiers."""
+    if multipart_failed and completed_failed:
+        return RuntimeTransferCleanupArtifact.MULTIPART_AND_COMPLETED_OBJECT
+    if multipart_failed:
+        return RuntimeTransferCleanupArtifact.MULTIPART_ABORT
+    if completed_failed:
+        return RuntimeTransferCleanupArtifact.COMPLETED_OBJECT_DELETE
+    return None
+
+
+def _cleanup_status(
+    *,
+    cleanup_failure: RuntimeTransferCleanupArtifact | None,
+    cleanup_remaining: bool,
+) -> RuntimeTransferCleanupStatus:
+    """Return cleanup state without claiming a failure before an attempt fails."""
+    if cleanup_failure is not None:
+        return RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+    if cleanup_remaining:
+        return RuntimeTransferCleanupStatus.PENDING
+    return RuntimeTransferCleanupStatus.COMPLETE
 
 
 def _is_abort_exception(exc: Exception) -> bool:

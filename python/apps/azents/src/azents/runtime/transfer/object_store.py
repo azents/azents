@@ -18,6 +18,7 @@ from azents.runtime.transfer.data import (
     RuntimeTransferPreparationCleanupState,
     RuntimeTransferRecord,
 )
+from azents.utils.logging import sanitized_exception_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -264,10 +265,14 @@ class RuntimeTransferS3Cleanup:
                 deleted_objects += 1
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 failed_cleanups += 1
-                _LOGGER.exception(
+                _LOGGER.warning(
                     "Runtime transfer orphan object cleanup failed",
+                    exc_info=sanitized_exception_info(
+                        exc,
+                        message="Runtime transfer orphan object cleanup failed",
+                    ),
                     extra={"artifact_kind": "object"},
                 )
         self._object_continuation_token = object_page.next_continuation_token
@@ -296,10 +301,14 @@ class RuntimeTransferS3Cleanup:
                 aborted_multipart_uploads += 1
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 failed_cleanups += 1
-                _LOGGER.exception(
+                _LOGGER.warning(
                     "Runtime transfer orphan multipart cleanup failed",
+                    exc_info=sanitized_exception_info(
+                        exc,
+                        message="Runtime transfer orphan multipart cleanup failed",
+                    ),
                     extra={"artifact_kind": "multipart_upload"},
                 )
         self._multipart_key_marker = multipart_page.next_key_marker

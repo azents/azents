@@ -1,6 +1,7 @@
 """Tests for the application-owned model stream watchdog."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
 
@@ -19,6 +20,7 @@ from azents.engine.model_stream import (
     ModelStreamTimeoutPolicy,
     ModelStreamTimeoutPolicyResolver,
     ModelStreamWatchdog,
+    _consume_task,
     close_stream_response,
     connect_only_http_timeout,
     model_stream_timeout_policy_resolver,
@@ -509,6 +511,87 @@ async def test_timeout_adopts_non_cooperative_cleanup_and_closes_late_handle() -
     release.set()
     await _wait_until(lambda: response.closed)
     await _wait_until(lambda: watchdog.cleanup_registry.active_count == 0)
+
+
+async def test_timeout_logs_late_operation_failure_without_changing_outcome(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock = ControlledClock()
+    policy = _policy(connect=5, idle=30, absolute=60)
+    watchdog = _watchdog(clock, policy=policy, close_grace=2)
+    release = asyncio.Event()
+    untrusted = "s3://private-bucket/model-stream-key?endpoint=internal.example"
+
+    async def fail_late() -> object:
+        while True:
+            try:
+                await release.wait()
+                raise RuntimeError(untrusted)
+            except asyncio.CancelledError:
+                continue
+
+    caplog.set_level(logging.WARNING, logger="azents.engine.model_stream")
+    task = asyncio.create_task(
+        watchdog.open_response(
+            fail_late,
+            policy=policy,
+            context=_context(),
+        )
+    )
+    await _wait_until(lambda: clock.sleeper_count == 2)
+    clock.advance(5)
+    await _wait_until(lambda: clock.sleeper_deadlines == (7.0,))
+    clock.advance(2)
+
+    with pytest.raises(ModelStreamTimeoutError) as captured:
+        await task
+
+    assert captured.value.timeout_kind == "connect"
+    assert watchdog.cleanup_registry.active_count == 1
+    release.set()
+    await _wait_until(lambda: watchdog.cleanup_registry.active_count == 0)
+
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Model stream operation failed after terminal outcome"
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.exc_info is not None
+    log_fields = vars(record)
+    assert log_fields["session_id"] == "session-1"
+    assert log_fields["run_id"] == "run-1"
+    assert log_fields["model_stream_cleanup_stage"] == "late_operation"
+    assert log_fields["cleanup_reason"] == "timeout"
+    assert log_fields["failure_kind"] == "RuntimeError"
+    formatted = logging.Formatter().format(record)
+    assert "RuntimeError: Model stream late operation failed" in formatted
+    assert untrusted not in formatted
+
+
+async def test_owned_support_task_failure_is_logged_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def fail_support_task() -> None:
+        raise RuntimeError("support task failure")
+
+    caplog.set_level(logging.WARNING, logger="azents.engine.model_stream")
+    task = asyncio.create_task(fail_support_task())
+
+    await _consume_task(task, task_kind="shutdown_drain")
+
+    records = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "Model stream support task failed"
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.exc_info is not None
+    log_fields = vars(record)
+    assert log_fields["model_stream_support_task"] == "shutdown_drain"
+    assert log_fields["failure_kind"] == "RuntimeError"
 
 
 async def test_cleanup_registry_drain_returns_after_grace_for_stubborn_task() -> None:

@@ -9,8 +9,11 @@ from collections.abc import Callable
 from datetime import datetime
 
 from azents.runtime.transfer.data import (
+    RUNTIME_TRANSFER_MAXIMUM_CLEANUP_FAILURE_ATTEMPTS,
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
+    RuntimeTransferCleanupArtifact,
+    RuntimeTransferCleanupFailureEvidence,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
@@ -107,6 +110,7 @@ class InMemoryRuntimeTransferStateStore:
                 terminal_outcome=None,
                 terminal_expires_at=None,
                 cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
+                cleanup_failure=None,
                 failure=None,
             )
             self.records[key] = record
@@ -929,8 +933,7 @@ class InMemoryRuntimeTransferStateStore:
                 or record.actual_sha256 != actual_sha256
                 or record.multipart_cleanup_handle is not None
                 or not record.completed_object_cleanup_required
-                or record.cleanup_status
-                is not RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+                or record.cleanup_status is not RuntimeTransferCleanupStatus.PENDING
             ):
                 return None
             return self._put(
@@ -940,6 +943,7 @@ class InMemoryRuntimeTransferStateStore:
                     updated_at=now,
                     upload_response_committed_at=now,
                     cleanup_status=RuntimeTransferCleanupStatus.COMPLETE,
+                    cleanup_failure=None,
                     completed_object_cleanup_required=False,
                 )
             )
@@ -1229,6 +1233,7 @@ class InMemoryRuntimeTransferStateStore:
         attempt_id: str,
         expected_revision: int,
         status: RuntimeTransferCleanupStatus,
+        cleanup_failure: RuntimeTransferCleanupArtifact | None,
     ) -> RuntimeTransferRecord | None:
         now = self._now()
         async with self.lock:
@@ -1236,7 +1241,11 @@ class InMemoryRuntimeTransferStateStore:
             record = self._exact(transfer_id, attempt_id)
             if record is None or record.completed_object_cleanup_required:
                 return None
-            if record.cleanup_status is status:
+            _validate_cleanup_failure(status, cleanup_failure)
+            if (
+                record.cleanup_status is status
+                and status is not RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+            ):
                 return record if expected_revision <= record.revision else None
             if record.revision != expected_revision:
                 return None
@@ -1246,6 +1255,11 @@ class InMemoryRuntimeTransferStateStore:
                     revision=record.revision + 1,
                     updated_at=now,
                     cleanup_status=status,
+                    cleanup_failure=_cleanup_failure_evidence(
+                        record.cleanup_failure,
+                        artifact=cleanup_failure,
+                        observed_at=now,
+                    ),
                     multipart_cleanup_handle=(
                         None
                         if status is RuntimeTransferCleanupStatus.COMPLETE
@@ -1261,12 +1275,14 @@ class InMemoryRuntimeTransferStateStore:
         attempt_id: str,
         expected_revision: int,
         status: RuntimeTransferCleanupStatus,
+        cleanup_failure: RuntimeTransferCleanupArtifact | None,
         multipart_cleanup_required: bool,
         completed_object_cleanup_required: bool,
     ) -> RuntimeTransferRecord | None:
         """Record exact completed-object deletion retry evidence."""
         if status not in {
             RuntimeTransferCleanupStatus.COMPLETE,
+            RuntimeTransferCleanupStatus.PENDING,
             RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
         }:
             raise ValueError("completed object cleanup status is invalid")
@@ -1274,10 +1290,15 @@ class InMemoryRuntimeTransferStateStore:
             status is RuntimeTransferCleanupStatus.COMPLETE
             and (multipart_cleanup_required or completed_object_cleanup_required)
         ) or (
-            status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+            status
+            in {
+                RuntimeTransferCleanupStatus.PENDING,
+                RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+            }
             and not (multipart_cleanup_required or completed_object_cleanup_required)
         ):
             raise ValueError("cleanup status does not match required artifacts")
+        _validate_cleanup_failure(status, cleanup_failure)
         now = self._now()
         async with self.lock:
             self._expire(now)
@@ -1291,6 +1312,7 @@ class InMemoryRuntimeTransferStateStore:
                 return None
             if (
                 record.cleanup_status is status
+                and status is not RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
                 and record.completed_object_cleanup_required
                 is completed_object_cleanup_required
                 and record.multipart_cleanup_handle == target_handle
@@ -1304,6 +1326,11 @@ class InMemoryRuntimeTransferStateStore:
                     revision=record.revision + 1,
                     updated_at=now,
                     cleanup_status=status,
+                    cleanup_failure=_cleanup_failure_evidence(
+                        record.cleanup_failure,
+                        artifact=cleanup_failure,
+                        observed_at=now,
+                    ),
                     multipart_cleanup_handle=target_handle,
                     completed_object_cleanup_required=(
                         completed_object_cleanup_required
@@ -1693,6 +1720,43 @@ class InMemoryRuntimeTransferStateStore:
             record
         )
         return record
+
+
+def _validate_cleanup_failure(
+    status: RuntimeTransferCleanupStatus,
+    cleanup_failure: RuntimeTransferCleanupArtifact | None,
+) -> None:
+    """Require bounded failure evidence only for a retryable cleanup status."""
+    if status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE:
+        if cleanup_failure is None:
+            raise ValueError("retryable cleanup requires failure evidence")
+        return
+    if cleanup_failure is not None:
+        raise ValueError("cleanup failure evidence requires retryable cleanup")
+
+
+def _cleanup_failure_evidence(
+    previous: RuntimeTransferCleanupFailureEvidence | None,
+    *,
+    artifact: RuntimeTransferCleanupArtifact | None,
+    observed_at: datetime,
+) -> RuntimeTransferCleanupFailureEvidence | None:
+    """Return the next bounded latest cleanup failure observation."""
+    if artifact is None:
+        return None
+    attempts = (
+        1
+        if previous is None
+        else min(
+            previous.attempts + 1,
+            RUNTIME_TRANSFER_MAXIMUM_CLEANUP_FAILURE_ATTEMPTS,
+        )
+    )
+    return RuntimeTransferCleanupFailureEvidence(
+        artifact=artifact,
+        observed_at=observed_at,
+        attempts=attempts,
+    )
 
 
 def _encode_memory_stale_cursor(key: tuple[str, str]) -> str:

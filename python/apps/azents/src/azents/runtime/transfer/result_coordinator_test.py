@@ -134,7 +134,8 @@ async def test_upload_success_requires_authoritative_available_manifest() -> Non
         "transfer-1",
         attempt_id="attempt-1",
         expected_revision=available.revision,
-        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
         multipart_cleanup_required=False,
         completed_object_cleanup_required=True,
     )
@@ -599,7 +600,8 @@ async def _publish_upload_available(
         "transfer-1",
         attempt_id="attempt-1",
         expected_revision=available.revision,
-        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
         multipart_cleanup_required=False,
         completed_object_cleanup_required=True,
     )

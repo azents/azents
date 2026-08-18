@@ -6,6 +6,8 @@ import pytest
 
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
+    RuntimeTransferCleanupArtifact,
+    RuntimeTransferCleanupFailureEvidence,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
@@ -122,6 +124,7 @@ def test_record_enforces_authoritative_expiry_and_terminal_ceiling() -> None:
             terminal_outcome=None,
             terminal_expires_at=None,
             cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
+            cleanup_failure=None,
             failure=None,
         )
 
@@ -168,7 +171,30 @@ def test_progress_is_timezone_aware_and_bounded_by_expected_size() -> None:
             terminal_outcome=None,
             terminal_expires_at=None,
             cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
+            cleanup_failure=None,
             failure=None,
+        )
+
+
+def test_cleanup_failure_evidence_requires_positive_bounded_attempts() -> None:
+    """Failure evidence remains a bounded metadata-only diagnostic."""
+    evidence = RuntimeTransferCleanupFailureEvidence(
+        artifact=RuntimeTransferCleanupArtifact.COMPLETED_OBJECT_DELETE,
+        observed_at=_NOW,
+        attempts=1,
+    )
+    assert evidence.attempts == 1
+    with pytest.raises(ValueError, match="positive and bounded"):
+        RuntimeTransferCleanupFailureEvidence(
+            artifact=RuntimeTransferCleanupArtifact.MULTIPART_ABORT,
+            observed_at=_NOW,
+            attempts=0,
+        )
+    with pytest.raises(ValueError, match="positive and bounded"):
+        RuntimeTransferCleanupFailureEvidence(
+            artifact=RuntimeTransferCleanupArtifact.MULTIPART_ABORT,
+            observed_at=_NOW,
+            attempts=101,
         )
 
 

@@ -28,6 +28,7 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_provider_control/**
   - python/apps/azents/src/azents/services/runtime_runner_auth/**
   - python/apps/azents/src/azents/runtime/**
+  - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/runtime/control_server.py
@@ -36,8 +37,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-13
-spec_version: 61
+last_verified_at: 2026-08-18
+spec_version: 62
 ---
 
 # Agent Runtime Control
@@ -84,10 +85,15 @@ Control keeps the existing gRPC message limits.
 directional attempt, owns its bounded state record, issues opaque object handles, and
 serializes revision-fenced state transitions. The record contains identity, Runtime and
 Runner generations, bounded manifests, destination policy, deadline, lease state,
-phase, terminal outcome, cleanup state, and consumer claims. Redis stores that bounded
-coordination data for multi-replica deployments; the in-memory implementation is
-single-process development and test support only. Neither implementation stores byte
-chunks, provider URLs, S3 credentials, object keys, or product file metadata.
+phase, terminal outcome, cleanup state, bounded latest cleanup-failure evidence,
+and consumer claims. Cleanup-failure evidence contains only a stable artifact
+classification, latest observation time, and a saturating attempt count. Redis
+stores that bounded coordination data for multi-replica deployments; the
+in-memory implementation is single-process development and test support only.
+Neither implementation stores byte chunks, provider URLs, S3 credentials, raw
+storage object keys, raw provider upload IDs, raw provider errors, or product
+file metadata. Existing object and multipart cleanup responsibilities use opaque
+internal handles that are not exposed as storage authority.
 
 `RuntimeRunnerTransfer` is a distinct authenticated Runner gRPC service terminated by
 Runtime Control. `DownloadTransfer` streams ordered bounded raw frames from the
@@ -139,6 +145,28 @@ This lets an empty restarted in-memory or Redis store fail previous attempts clo
 resume new transfers, and converge orphan cleanup without Redis retention or leadership.
 Backend lifecycle policy remains a later infrastructure-owned defense and is not a
 Runtime Transfer authorization or startup input.
+
+Cleanup responsibility is `pending` before the first exact external cleanup
+attempt. A handled multipart-abort, completed-object-delete, combined, or
+preparation cleanup failure changes it to `retryable_failure` with bounded latest
+evidence. Each later failed repair updates the observation and saturating attempt
+count; successful cleanup clears the evidence and marks cleanup complete. The
+Memory and Redis stores enforce the same invariant. Redis transfer record schema
+changes use the existing coordinated cutover and do not add a compatibility
+reader or relational transfer entity.
+
+The handling boundary for each failed cleanup attempt emits one structured
+warning with origin traceback frames, a static replacement exception message,
+and safe transfer/attempt or aggregate artifact fields. It never logs storage
+keys, raw provider upload IDs, raw exception text, hashes, credentials,
+endpoints, or bytes. State-independent orphan repair additionally reports
+bounded listed/deleted/aborted/failed/skipped counters.
+
+Runtime-to-Server transfer cleanup uses bounded abandon, status-recovery, and
+cancellation-confirmation attempts after the transfer result is fixed. A
+confirmed terminal status ends cleanup silently. If those paths cannot establish
+terminal cleanup, the final observer records the last handled failure once with
+the same sanitized traceback policy and does not change the transfer result.
 
 ## Durable State
 
@@ -626,6 +654,10 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-18** (spec_version 62) — Added bounded latest cleanup-failure
+  evidence to volatile Runtime Transfer state, distinguished pending cleanup
+  responsibility from actual retryable failure, and exposed safe traceback and
+  aggregate repair diagnostics.
 - **2026-08-13** (spec_version 61) — Added hierarchical Runtime network configuration,
   Kubernetes Provider protocol v3 aggregate enforcement evidence, strict-mode resources and
   trust/hosts boundaries, mode-aware in-place versus recreation impact, bounded diagnostics, and

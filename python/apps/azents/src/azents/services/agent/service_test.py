@@ -23,6 +23,11 @@ from azents.core.enums import (
     WorkspaceUserRole,
 )
 from azents.repos.agent.data import Agent
+from azents.services.uploads.schema import (
+    StoredImage,
+    StoredImageFile,
+    StoredImageThumbnails,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -81,6 +86,24 @@ def _make_agent(
     )
 
 
+def _avatar(key: str) -> StoredImage:
+    """Create one internal avatar snapshot."""
+    file = StoredImageFile(
+        key=key,
+        content_type="image/webp",
+        size_bytes=1,
+        width=512,
+        height=512,
+    )
+    return StoredImage(
+        filename="avatar.webp",
+        default=file,
+        thumbnails=StoredImageThumbnails(large=file),
+        original=None,
+        uploaded_at=_NOW,
+    )
+
+
 def _make_service() -> AgentService:
     """Create AgentService with mock dependencies."""
     repository = AsyncMock()
@@ -93,7 +116,6 @@ def _make_service() -> AgentService:
     runtime_profile_repository = AsyncMock()
     runtime_profile_service = AsyncMock()
     upload_service = AsyncMock()
-    avatar_handler = AsyncMock()
     s3_service = AsyncMock()
 
     @asynccontextmanager
@@ -111,7 +133,6 @@ def _make_service() -> AgentService:
         runtime_profile_repository=runtime_profile_repository,
         runtime_profile_service=runtime_profile_service,
         upload_service=upload_service,
-        avatar_handler=avatar_handler,
         s3_service=s3_service,
         workspace_s3_bucket="bucket",
         avatar_cdn_base_url=None,
@@ -405,3 +426,62 @@ class TestAgentServiceModelSelection:
         repository.lock_by_id.assert_awaited_once()
         repository.replace_runtime_profile_selection.assert_not_awaited()
         repository.update_by_id.assert_not_awaited()
+
+
+class TestAgentServiceAvatarMutation:
+    """Agent avatar mutation ownership tests."""
+
+    async def test_finalize_avatar_leaves_old_blob_deletion_to_durable_cleanup(
+        self,
+    ) -> None:
+        """Finalization persists the replacement without direct blob deletion."""
+        service = _make_service()
+        service.avatar_cdn_base_url = "https://cdn.example.test"
+        repository = cast(Any, service.repository)
+        old_avatar = _avatar("public/avatar/agent-1/large/old.webp")
+        new_avatar = _avatar("public/avatar/agent-1/large/new.webp")
+        repository.get_by_id.return_value = _make_agent().model_copy(
+            update={"avatar": old_avatar}
+        )
+        repository.update_avatar.return_value = Success(
+            _make_agent().model_copy(update={"avatar": new_avatar})
+        )
+        upload_service = cast(Any, service.upload_service)
+        upload_service.finalize.return_value = new_avatar
+
+        result = await service.finalize_avatar(
+            "agent-1",
+            workspace_id="ws-1",
+            workspace_user_id="wu-1",
+            role=WorkspaceUserRole.OWNER,
+            upload_key="uploads/avatar-1",
+            filename="avatar.webp",
+        )
+
+        assert isinstance(result, Success)
+        repository.update_avatar.assert_awaited_once()
+        s3_service = cast(Any, service.s3_service)
+        s3_service.delete.assert_not_awaited()
+
+    async def test_remove_avatar_leaves_old_blob_deletion_to_durable_cleanup(
+        self,
+    ) -> None:
+        """Removal persists null avatar without direct blob deletion."""
+        service = _make_service()
+        repository = cast(Any, service.repository)
+        repository.get_by_id.return_value = _make_agent().model_copy(
+            update={"avatar": _avatar("public/avatar/agent-1/large/old.webp")}
+        )
+        repository.update_avatar.return_value = Success(_make_agent())
+
+        result = await service.remove_avatar(
+            "agent-1",
+            workspace_id="ws-1",
+            workspace_user_id="wu-1",
+            role=WorkspaceUserRole.OWNER,
+        )
+
+        assert isinstance(result, Success)
+        repository.update_avatar.assert_awaited_once()
+        s3_service = cast(Any, service.s3_service)
+        s3_service.delete.assert_not_awaited()

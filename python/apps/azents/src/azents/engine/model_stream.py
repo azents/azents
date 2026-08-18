@@ -22,6 +22,7 @@ from azents.engine.run.errors import (
 )
 from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
 from azents.utils.appctx import AppContext
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,11 @@ ModelStreamCleanupReason = Literal[
     "timeout",
     "caller_cancelled",
     "shutdown",
+]
+ModelStreamSupportTaskKind = Literal[
+    "shutdown_grace",
+    "shutdown_drain",
+    "timeout_grace",
 ]
 
 T = TypeVar("T")
@@ -256,11 +262,11 @@ class ModelStreamCleanupRegistry:
         )
         if drain_task in done:
             grace_task.cancel()
-            await _consume_task(grace_task)
-            await _consume_task(drain_task)
+            await _consume_task(grace_task, task_kind="shutdown_grace")
+            await _consume_task(drain_task, task_kind="shutdown_drain")
         else:
             drain_task.cancel()
-            await _consume_task(drain_task)
+            await _consume_task(drain_task, task_kind="shutdown_drain")
         pending_count = sum(not task.done() for task in tasks)
         if pending_count:
             logger.warning(
@@ -581,7 +587,14 @@ class ModelStreamWatchdog:
         resource: object | None,
         context: ModelStreamCallContext,
     ) -> None:
-        cleanup = asyncio.create_task(_cleanup_stream_operation(operation, resource))
+        cleanup = asyncio.create_task(
+            _cleanup_stream_operation(
+                operation,
+                resource,
+                context=context,
+                reason="timeout",
+            )
+        )
         grace = asyncio.create_task(self.clock.sleep(self.close_grace_seconds))
         try:
             done, _ = await asyncio.wait(
@@ -590,7 +603,11 @@ class ModelStreamWatchdog:
             )
         except asyncio.CancelledError as exc:
             grace.cancel()
-            await _consume_task(grace)
+            await _consume_task(
+                grace,
+                context=context,
+                task_kind="timeout_grace",
+            )
             if not cleanup.done():
                 self.cleanup_registry.adopt(
                     cleanup,
@@ -605,7 +622,11 @@ class ModelStreamWatchdog:
             raise
         if cleanup in done:
             grace.cancel()
-            await _consume_task(grace)
+            await _consume_task(
+                grace,
+                context=context,
+                task_kind="timeout_grace",
+            )
             await self._consume_cleanup_task(
                 cleanup,
                 context=context,
@@ -625,7 +646,14 @@ class ModelStreamWatchdog:
         resource: object | None,
         context: ModelStreamCallContext,
     ) -> None:
-        cleanup = asyncio.create_task(_cleanup_stream_operation(operation, resource))
+        cleanup = asyncio.create_task(
+            _cleanup_stream_operation(
+                operation,
+                resource,
+                context=context,
+                reason="caller_cancelled",
+            )
+        )
         await asyncio.sleep(0)
         if cleanup.done():
             await self._consume_cleanup_task(
@@ -753,8 +781,11 @@ async def _next_item(iterator: AsyncIterator[T]) -> T:
 async def _cleanup_stream_operation(
     operation: asyncio.Task[object] | None,
     resource: object | None,
+    *,
+    context: ModelStreamCallContext,
+    reason: ModelStreamCleanupReason,
 ) -> None:
-    """Cancel an active wait, discard its late result, then close its resource."""
+    """Cancel an active wait, consume its late result, then close its resource."""
     late_result: object | None = None
     if operation is not None:
         operation.cancel()
@@ -762,8 +793,20 @@ async def _cleanup_stream_operation(
             late_result = await operation
         except asyncio.CancelledError:
             pass
-        except Exception:
-            pass
+        except Exception as error:
+            logger.warning(
+                "Model stream operation failed after terminal outcome",
+                extra={
+                    **_context_log_fields(context),
+                    "cleanup_reason": reason,
+                    "model_stream_cleanup_stage": "late_operation",
+                    "failure_kind": type(error).__name__[:120],
+                },
+                exc_info=sanitized_exception_info(
+                    error,
+                    message="Model stream late operation failed",
+                ),
+            )
     resource_to_close = resource if resource is not None else late_result
     await close_stream_response(resource_to_close)
 
@@ -773,14 +816,32 @@ async def _wait_for_tasks(tasks: list[asyncio.Task[None]]) -> None:
     await asyncio.wait(tasks)
 
 
-async def _consume_task(task: asyncio.Task[object]) -> None:
+async def _consume_task(
+    task: asyncio.Task[object],
+    *,
+    task_kind: ModelStreamSupportTaskKind,
+    context: ModelStreamCallContext | None = None,
+) -> None:
     """Consume success, cancellation, or failure from an owned task."""
     try:
         await task
     except asyncio.CancelledError:
         return
-    except Exception:
-        return
+    except Exception as error:
+        extra: dict[str, object] = {
+            "model_stream_support_task": task_kind,
+            "failure_kind": type(error).__name__[:120],
+        }
+        if context is not None:
+            extra.update(_context_log_fields(context))
+        logger.warning(
+            "Model stream support task failed",
+            extra=extra,
+            exc_info=sanitized_exception_info(
+                error,
+                message="Model stream support task failed",
+            ),
+        )
 
 
 async def close_stream_response(response: object | None) -> None:

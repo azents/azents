@@ -212,7 +212,8 @@ class RuntimeRunnerTransferResultCoordinator:
                 current.admission.transfer_id,
                 attempt_id=current.admission.attempt_id,
                 expected_revision=current.revision,
-                status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                status=RuntimeTransferCleanupStatus.PENDING,
+                cleanup_failure=None,
                 multipart_cleanup_required=False,
                 completed_object_cleanup_required=True,
             )
@@ -300,7 +301,8 @@ class RuntimeRunnerTransferResultCoordinator:
                 current.admission.transfer_id,
                 attempt_id=current.admission.attempt_id,
                 expected_revision=current.revision,
-                status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                status=RuntimeTransferCleanupStatus.PENDING,
+                cleanup_failure=None,
                 multipart_cleanup_required=False,
                 completed_object_cleanup_required=True,
             )

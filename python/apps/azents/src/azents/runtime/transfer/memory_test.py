@@ -489,6 +489,7 @@ async def test_upload_consumer_cancellation_terminal_and_historical_safety() -> 
                 "azents.runtime.transfer.data",
                 fromlist=["RuntimeTransferCleanupStatus"],
             ).RuntimeTransferCleanupStatus.PENDING,
+            cleanup_failure=None,
         )
         is not None
     )

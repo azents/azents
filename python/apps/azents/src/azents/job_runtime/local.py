@@ -19,6 +19,7 @@ from azents.job_runtime.types import (
     JobRequest,
     validate_job_payload,
 )
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -278,8 +279,19 @@ class LocalJobRuntime:
             await task
         except asyncio.CancelledError:
             pass
-        except Exception:
-            pass
+        except Exception as error:
+            logger.warning(
+                "Registered job handler failed during cancellation grace",
+                extra={
+                    "job_handler_key": request.handler_key,
+                    "job_execution_key": request.execution_key,
+                    "failure_kind": type(error).__name__[:120],
+                },
+                exc_info=sanitized_exception_info(
+                    error,
+                    message="Registered job handler failed during cancellation grace",
+                ),
+            )
         return True
 
     async def _adopt_detached_cleanup(

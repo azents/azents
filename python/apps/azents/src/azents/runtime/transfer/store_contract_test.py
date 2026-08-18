@@ -13,6 +13,7 @@ from azents.core.redis import create_redis_client
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
+    RuntimeTransferCleanupArtifact,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
@@ -368,7 +369,8 @@ async def test_dispatch_indexes_stream_lease_and_cleanup_handle(
         "dispatch",
         attempt_id="attempt",
         expected_revision=handled.revision,
-        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
         multipart_cleanup_required=True,
         completed_object_cleanup_required=True,
     )
@@ -379,7 +381,8 @@ async def test_dispatch_indexes_stream_lease_and_cleanup_handle(
         "dispatch",
         attempt_id="attempt",
         expected_revision=completed_cleanup.revision,
-        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
         multipart_cleanup_required=True,
         completed_object_cleanup_required=False,
     )
@@ -391,10 +394,69 @@ async def test_dispatch_indexes_stream_lease_and_cleanup_handle(
         attempt_id="attempt",
         expected_revision=multipart_only.revision,
         status=RuntimeTransferCleanupStatus.COMPLETE,
+        cleanup_failure=None,
     )
     assert cleared is not None
     assert cleared.multipart_cleanup_handle is None
     assert cleared.completed_object_cleanup_required is False
+
+
+@pytest.mark.asyncio
+async def test_retryable_cleanup_retains_latest_bounded_evidence_and_clears_on_success(
+    store_harness: _StoreHarness,
+) -> None:
+    """Memory and Redis retain the same safe retry failure evidence."""
+    admitted = await store_harness.store.admit(
+        replace(_admission(), transfer_id="cleanup-evidence"),
+        lease_id="cleanup-evidence-lease",
+    )
+    assert admitted is not None
+    pending = await store_harness.store.record_cleanup(
+        "cleanup-evidence",
+        attempt_id="attempt",
+        expected_revision=admitted.revision,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
+    )
+    assert pending is not None
+    failed = await store_harness.store.record_cleanup(
+        "cleanup-evidence",
+        attempt_id="attempt",
+        expected_revision=pending.revision,
+        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        cleanup_failure=RuntimeTransferCleanupArtifact.MULTIPART_ABORT,
+    )
+    assert failed is not None
+    assert failed.cleanup_failure is not None
+    assert (
+        failed.cleanup_failure.artifact
+        is RuntimeTransferCleanupArtifact.MULTIPART_ABORT
+    )
+    assert failed.cleanup_failure.observed_at == store_harness.clock.now
+    assert failed.cleanup_failure.attempts == 1
+
+    store_harness.clock.now += timedelta(seconds=1)
+    retried = await store_harness.store.record_cleanup(
+        "cleanup-evidence",
+        attempt_id="attempt",
+        expected_revision=failed.revision,
+        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        cleanup_failure=RuntimeTransferCleanupArtifact.MULTIPART_ABORT,
+    )
+    assert retried is not None
+    assert retried.cleanup_failure is not None
+    assert retried.cleanup_failure.observed_at == store_harness.clock.now
+    assert retried.cleanup_failure.attempts == 2
+
+    completed = await store_harness.store.record_cleanup(
+        "cleanup-evidence",
+        attempt_id="attempt",
+        expected_revision=retried.revision,
+        status=RuntimeTransferCleanupStatus.COMPLETE,
+        cleanup_failure=None,
+    )
+    assert completed is not None
+    assert completed.cleanup_failure is None
 
 
 @pytest.mark.asyncio
@@ -567,7 +629,8 @@ async def test_upload_completion_cleanup_responsibility_precedes_external_write(
         transfer_id,
         attempt_id="attempt",
         expected_revision=current.revision,
-        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
         multipart_cleanup_required=multipart,
         completed_object_cleanup_required=True,
     )
@@ -616,7 +679,8 @@ async def test_upload_response_commit_is_atomic_with_cancellation(
             transfer_id,
             attempt_id="attempt",
             expected_revision=stream.revision,
-            status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+            status=RuntimeTransferCleanupStatus.PENDING,
+            cleanup_failure=None,
             multipart_cleanup_required=False,
             completed_object_cleanup_required=True,
         )
@@ -730,7 +794,8 @@ async def test_upload_response_commit_rejects_elapsed_deadline(
         "deadline-wins",
         attempt_id="attempt",
         expected_revision=stream.revision,
-        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
         multipart_cleanup_required=False,
         completed_object_cleanup_required=True,
     )
@@ -858,6 +923,7 @@ async def test_duplicate_capacity_expiry_retry_pagination_and_purge(
             attempt_id="attempt",
             expected_revision=expired.revision,
             status=RuntimeTransferCleanupStatus.PENDING,
+            cleanup_failure=None,
         )
         is not None
     )
@@ -1219,7 +1285,8 @@ async def test_upload_lifecycle_consumer_claim_abandon_expiry_and_acknowledgemen
         "upload",
         attempt_id="attempt",
         expected_revision=available.revision,
-        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
         multipart_cleanup_required=False,
         completed_object_cleanup_required=True,
     )
@@ -1887,6 +1954,7 @@ async def test_stale_pagination_remains_stable_when_prior_page_mutates(
         attempt_id=first.admission.attempt_id,
         expected_revision=first.revision,
         status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
     )
     assert mutated is not None
 
@@ -2281,6 +2349,7 @@ async def test_terminal_metadata_expires_on_access(
             attempt_id="attempt",
             expected_revision=terminal.revision,
             status=RuntimeTransferCleanupStatus.PENDING,
+            cleanup_failure=None,
         )
         is None
     )
@@ -2302,6 +2371,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
         attempt_id="attempt",
         expected_revision=admitted.revision,
         status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
     )
     assert pending_cleanup is not None
     assert (
@@ -2310,6 +2380,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
             attempt_id="attempt",
             expected_revision=admitted.revision,
             status=RuntimeTransferCleanupStatus.PENDING,
+            cleanup_failure=None,
         )
         == pending_cleanup
     )
@@ -2350,6 +2421,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
         attempt_id="attempt",
         expected_revision=terminal.revision,
         status=RuntimeTransferCleanupStatus.COMPLETE,
+        cleanup_failure=None,
     )
     assert complete_cleanup is not None
     assert (
@@ -2358,6 +2430,7 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
             attempt_id="attempt",
             expected_revision=terminal.revision,
             status=RuntimeTransferCleanupStatus.COMPLETE,
+            cleanup_failure=None,
         )
         == complete_cleanup
     )
@@ -2370,7 +2443,8 @@ async def test_terminal_release_cleanup_and_historical_attempt_authority(
         "historical",
         attempt_id="attempt",
         expected_revision=complete_cleanup.revision,
-        status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
     )
     assert old_cleanup is not None
     current = await store_harness.store.get("historical")

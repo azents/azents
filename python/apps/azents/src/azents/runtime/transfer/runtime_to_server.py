@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -32,6 +33,9 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
+from azents.utils.logging import sanitized_exception_info
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class RuntimeToServerTransferError(RuntimeError):
@@ -486,6 +490,8 @@ class RuntimeToServerTransferService:
     ) -> None:
         if revision is None:
             return
+        last_cleanup_error: Exception | None = None
+        cleanup_stage: str | None = None
         try:
             status = await self.coordinator.get_transfer_status(
                 CoordinatorGetTransferStatusRequest(identity=identity)
@@ -495,8 +501,9 @@ class RuntimeToServerTransferService:
                 return
         except asyncio.CancelledError:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            last_cleanup_error = exc
+            cleanup_stage = "initial_status_lookup"
         if claim_id is not None:
             try:
                 status = await self.coordinator.abandon_consumer(
@@ -507,18 +514,25 @@ class RuntimeToServerTransferService:
                     )
                 )
                 revision = status.revision
+                if status.phase is CoordinatorTransferPhase.TERMINAL:
+                    return
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                last_cleanup_error = exc
+                cleanup_stage = "abandon_consumer"
                 try:
                     status = await self.coordinator.get_transfer_status(
                         CoordinatorGetTransferStatusRequest(identity=identity)
                     )
                     revision = status.revision
+                    if status.phase is CoordinatorTransferPhase.TERMINAL:
+                        return
                 except asyncio.CancelledError:
                     raise
-                except Exception:
-                    pass
+                except Exception as exc:
+                    last_cleanup_error = exc
+                    cleanup_stage = "abandon_status_lookup"
         while self.clock() < deadline_at:
             try:
                 status = await self.coordinator.cancel_transfer(
@@ -530,19 +544,37 @@ class RuntimeToServerTransferService:
                 )
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
+                last_cleanup_error = exc
+                cleanup_stage = "cancel_transfer"
                 try:
                     status = await self.coordinator.get_transfer_status(
                         CoordinatorGetTransferStatusRequest(identity=identity)
                     )
                 except asyncio.CancelledError:
                     raise
-                except Exception:
-                    return
+                except Exception as exc:
+                    last_cleanup_error = exc
+                    cleanup_stage = "cancel_status_lookup"
+                    break
             if status.phase is CoordinatorTransferPhase.TERMINAL:
                 return
             revision = status.revision
             await asyncio.sleep(self.status_poll_interval.total_seconds())
+        if last_cleanup_error is not None and cleanup_stage is not None:
+            _LOGGER.warning(
+                "Runtime upload cleanup could not be confirmed",
+                exc_info=sanitized_exception_info(
+                    last_cleanup_error,
+                    message="Runtime upload cleanup failed",
+                ),
+                extra={
+                    "transfer_id": identity.transfer_id,
+                    "attempt_id": identity.attempt_id,
+                    "runtime_id": identity.runtime_id,
+                    "cleanup_stage": cleanup_stage,
+                },
+            )
 
     def _validate(self, request: RuntimeToServerTransferRequest) -> None:
         if not request.runtime_path.startswith("/"):

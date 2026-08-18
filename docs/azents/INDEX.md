@@ -15,7 +15,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-11 | 65 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-18 | 66 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-18 | 150 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-16 | 62 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
@@ -32,8 +32,8 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-18 | 156 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-13 | 61 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-18 | 157 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-18 | 62 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-13 | 26 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
@@ -46,7 +46,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-17 | 15 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-18 | 16 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-18 | 28 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-17 | 30 |
@@ -107,6 +107,7 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT Responses Lite Catalog Integration Historical Requirements Reconstruction](requirements/chatgpt-260712-chatgpt-responses-lite-catalog.md) | chatgpt-260712 | 2026-07-12 | 2026-07-12 |
 | [Include ChatGPT OAuth in the OpenAI-Native HTTP Migration Historical Requirements Reconstruction](requirements/chatgpt-260716-chatgpt-oauth-in-openai-http-migration.md) | chatgpt-260716 | 2026-07-16 | - |
 | [Adopt Claude Rules Loader as a Separate Runtime Toolkit Historical Requirements Reconstruction](requirements/claude-260702-claude-rules-loader.md) | claude-260702 | 2026-07-02 | - |
+| [Suppressed Failure Observation and Recovery Requirements](requirements/cleanup-260818-suppressed-failure-recovery.md) | cleanup-260818 | 2026-08-18 | 2026-08-18 |
 | [Generalize Client Tool Wire Variant Selection Historical Requirements Reconstruction](requirements/client-260721-client-tool-wire-variants.md) | client-260721 | 2026-07-21 | 2026-07-21 |
 | [Scope OpenAI SDK Clients to Logical Model Operations Historical Requirements Reconstruction](requirements/clients-260716-openai-sdk-clients-to-logical-operations.md) | clients-260716 | 2026-07-16 | - |
 | [Generate Compaction Summary as Codex-like Handoff Checkpoint Historical Requirements Reconstruction](requirements/codex-260530-codex-compaction-checkpoints.md) | codex-260530 | 2026-05-30 | - |
@@ -498,6 +499,7 @@ Design documents are accumulated records and are not listed individually in this
 - [ChatGPT Responses Lite Catalog Integration Historical Decision Reconstruction](adr/chatgpt-260712-chatgpt-responses-lite-catalog.md)
 - [Include ChatGPT OAuth in the OpenAI-Native HTTP Migration](adr/chatgpt-260716-chatgpt-oauth-in-openai-http-migration.md)
 - [Adopt Claude Rules Loader as a Separate Runtime Toolkit](adr/claude-260702-claude-rules-loader.md)
+- [Suppressed Failure Observation and Recovery](adr/cleanup-260818-suppressed-failure-recovery.md)
 - [Generalize Client Tool Wire Variant Selection Historical Decision Reconstruction](adr/client-260721-client-tool-wire-variants.md)
 - [Scope OpenAI SDK Clients to Logical Model Operations](adr/clients-260716-openai-sdk-clients-to-logical-operations.md)
 - [Generate Compaction Summary as Codex-like Handoff Checkpoint](adr/codex-260530-codex-compaction-checkpoints.md)

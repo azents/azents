@@ -5,6 +5,7 @@ from typing import Protocol
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
+    RuntimeTransferCleanupArtifact,
     RuntimeTransferCleanupStatus,
     RuntimeTransferFailure,
     RuntimeTransferObject,
@@ -328,6 +329,7 @@ class RuntimeTransferStateStore(Protocol):
         attempt_id: str,
         expected_revision: int,
         status: RuntimeTransferCleanupStatus,
+        cleanup_failure: RuntimeTransferCleanupArtifact | None,
     ) -> RuntimeTransferRecord | None: ...
 
     async def record_completed_object_cleanup(
@@ -337,6 +339,7 @@ class RuntimeTransferStateStore(Protocol):
         attempt_id: str,
         expected_revision: int,
         status: RuntimeTransferCleanupStatus,
+        cleanup_failure: RuntimeTransferCleanupArtifact | None,
         multipart_cleanup_required: bool,
         completed_object_cleanup_required: bool,
     ) -> RuntimeTransferRecord | None: ...

@@ -169,7 +169,7 @@ class AvatarUploadHandler:
             keys.add(avatar.original.key)
         logger.info(
             "Avatar delete_files started",
-            extra={"key_count": len(keys), "default_key": avatar.default.key},
+            extra={"key_count": len(keys)},
         )
         for key in keys:
             await s3.delete(bucket=bucket, key=key)

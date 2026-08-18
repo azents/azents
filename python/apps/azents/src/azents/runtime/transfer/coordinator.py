@@ -1,5 +1,6 @@
 """Trusted Runtime transfer coordination, dispatch, and bounded repair."""
 
+import asyncio
 import hashlib
 import logging
 from collections.abc import Callable
@@ -22,6 +23,7 @@ from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
+    RuntimeTransferCleanupArtifact,
     RuntimeTransferCleanupStatus,
     RuntimeTransferDirection,
     RuntimeTransferFailure,
@@ -32,6 +34,7 @@ from azents.runtime.transfer.data import (
     cancellation_settlement,
 )
 from azents.runtime.transfer.store import RuntimeTransferStateStore
+from azents.utils.logging import sanitized_exception_info
 
 _TRANSFER_OPERATION_TYPE = "file.transfer.v1"
 _TRANSFER_CANCEL_OPERATION_TYPE = "file.transfer.cancel.v1"
@@ -398,12 +401,15 @@ class RuntimeTransferCoordinator:
             and not completed_required
         ):
             return record
-        if completed_required:
+        if record.cleanup_status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE:
+            marked = record
+        elif completed_required:
             marked = await self._state_store.record_completed_object_cleanup(
                 record.admission.transfer_id,
                 attempt_id=record.admission.attempt_id,
                 expected_revision=record.revision,
-                status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                status=RuntimeTransferCleanupStatus.PENDING,
+                cleanup_failure=None,
                 multipart_cleanup_required=multipart_required,
                 completed_object_cleanup_required=True,
             )
@@ -412,7 +418,8 @@ class RuntimeTransferCoordinator:
                 record.admission.transfer_id,
                 attempt_id=record.admission.attempt_id,
                 expected_revision=record.revision,
-                status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                status=RuntimeTransferCleanupStatus.PENDING,
+                cleanup_failure=None,
             )
         if marked is None:
             current = await self._state_store.get(record.admission.transfer_id)
@@ -421,16 +428,41 @@ class RuntimeTransferCoordinator:
             return marked
         try:
             await self._cleanup.cleanup(marked)
-        except Exception:
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            cleanup_failure = _cleanup_failure_artifact(marked)
+            if completed_required:
+                retained = await self._state_store.record_completed_object_cleanup(
+                    marked.admission.transfer_id,
+                    attempt_id=marked.admission.attempt_id,
+                    expected_revision=marked.revision,
+                    status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                    cleanup_failure=cleanup_failure,
+                    multipart_cleanup_required=multipart_required,
+                    completed_object_cleanup_required=True,
+                )
+            else:
+                retained = await self._state_store.record_cleanup(
+                    marked.admission.transfer_id,
+                    attempt_id=marked.admission.attempt_id,
+                    expected_revision=marked.revision,
+                    status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                    cleanup_failure=cleanup_failure,
+                )
             _LOGGER.warning(
                 "Runtime transfer terminal cleanup requires retry",
-                exc_info=True,
+                exc_info=sanitized_exception_info(
+                    exc,
+                    message="Runtime transfer terminal cleanup failed",
+                ),
                 extra={
                     "transfer_id": marked.admission.transfer_id,
                     "attempt_id": marked.admission.attempt_id,
+                    "cleanup_artifact": cleanup_failure.value,
                 },
             )
-            return marked
+            return retained or marked
         if preparation_required or pre_ready_object_required:
             cleared = await self._state_store.clear_preparation_cleanup(
                 marked.admission.transfer_id,
@@ -447,6 +479,7 @@ class RuntimeTransferCoordinator:
                 attempt_id=marked.admission.attempt_id,
                 expected_revision=marked.revision,
                 status=RuntimeTransferCleanupStatus.COMPLETE,
+                cleanup_failure=None,
                 multipart_cleanup_required=False,
                 completed_object_cleanup_required=False,
             )
@@ -456,6 +489,7 @@ class RuntimeTransferCoordinator:
                 attempt_id=marked.admission.attempt_id,
                 expected_revision=marked.revision,
                 status=RuntimeTransferCleanupStatus.COMPLETE,
+                cleanup_failure=None,
             )
         return cleaned or marked
 
@@ -617,7 +651,10 @@ class RuntimeTransferCoordinator:
                 ):
                     try:
                         await cleanup.cleanup(current)
-                    except Exception:
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        cleanup_failure = _cleanup_failure_artifact(current)
                         if current.completed_object_cleanup_required:
                             record_cleanup = (
                                 self._state_store.record_completed_object_cleanup
@@ -627,6 +664,7 @@ class RuntimeTransferCoordinator:
                                 attempt_id=current.admission.attempt_id,
                                 expected_revision=current.revision,
                                 status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                                cleanup_failure=cleanup_failure,
                                 multipart_cleanup_required=(
                                     current.multipart_cleanup_handle is not None
                                 ),
@@ -638,7 +676,20 @@ class RuntimeTransferCoordinator:
                                 attempt_id=current.admission.attempt_id,
                                 expected_revision=current.revision,
                                 status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+                                cleanup_failure=cleanup_failure,
                             )
+                        _LOGGER.warning(
+                            "Runtime transfer stale cleanup requires retry",
+                            exc_info=sanitized_exception_info(
+                                exc,
+                                message="Runtime transfer stale cleanup failed",
+                            ),
+                            extra={
+                                "transfer_id": current.admission.transfer_id,
+                                "attempt_id": current.admission.attempt_id,
+                                "cleanup_artifact": cleanup_failure.value,
+                            },
+                        )
                     else:
                         if current.completed_object_cleanup_required:
                             updated = (
@@ -647,6 +698,7 @@ class RuntimeTransferCoordinator:
                                     attempt_id=current.admission.attempt_id,
                                     expected_revision=current.revision,
                                     status=RuntimeTransferCleanupStatus.COMPLETE,
+                                    cleanup_failure=None,
                                     multipart_cleanup_required=False,
                                     completed_object_cleanup_required=False,
                                 )
@@ -657,6 +709,7 @@ class RuntimeTransferCoordinator:
                                 attempt_id=current.admission.attempt_id,
                                 expected_revision=current.revision,
                                 status=RuntimeTransferCleanupStatus.COMPLETE,
+                                cleanup_failure=None,
                             )
                     if updated is not None:
                         current = updated
@@ -1116,3 +1169,20 @@ def _record_expired(record: RuntimeTransferRecord, now: datetime) -> bool:
             and record.terminal_outcome is RuntimeTransferOutcome.EXPIRED
         )
     )
+
+
+def _cleanup_failure_artifact(
+    record: RuntimeTransferRecord,
+) -> RuntimeTransferCleanupArtifact:
+    """Classify retained cleanup responsibility without storage identifiers."""
+    if (
+        record.preparation_cleanup_state
+        is not RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+        or record.pre_ready_object_handle is not None
+    ):
+        return RuntimeTransferCleanupArtifact.PREPARATION_CLEANUP
+    if record.multipart_cleanup_handle is not None:
+        if record.completed_object_cleanup_required:
+            return RuntimeTransferCleanupArtifact.MULTIPART_AND_COMPLETED_OBJECT
+        return RuntimeTransferCleanupArtifact.MULTIPART_ABORT
+    return RuntimeTransferCleanupArtifact.COMPLETED_OBJECT_DELETE

@@ -16,8 +16,11 @@ from redis.asyncio import Redis
 from redis.exceptions import WatchError
 
 from azents.runtime.transfer.data import (
+    RUNTIME_TRANSFER_MAXIMUM_CLEANUP_FAILURE_ATTEMPTS,
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
+    RuntimeTransferCleanupArtifact,
+    RuntimeTransferCleanupFailureEvidence,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
@@ -39,7 +42,7 @@ from azents.runtime.transfer.data import (
 from azents.runtime.transfer.policy import phase_transition_allowed
 
 _DEFAULT_NAMESPACE = "azents:runtime:transfer"
-_RECORD_SCHEMA_VERSION = 7
+_RECORD_SCHEMA_VERSION = 8
 _MAX_SERIALIZED_RECORD_BYTES = 16 * 1024
 _LOCK_TTL_MILLISECONDS = 5_000
 _LOCK_ACQUIRE_TIMEOUT_SECONDS = 5.0
@@ -160,6 +163,7 @@ _RECORD_FIELDS = frozenset(
         "terminal_outcome",
         "terminal_expires_at",
         "cleanup_status",
+        "cleanup_failure",
         "failure",
         "preparation_object_handle",
         "preparation_multipart_cleanup_handle",
@@ -190,6 +194,7 @@ _ADMISSION_FIELDS = frozenset(
 )
 _OBJECT_FIELDS = frozenset({"key", "size", "sha256"})
 _PROGRESS_FIELDS = frozenset({"bytes_transferred", "observed_at"})
+_CLEANUP_FAILURE_FIELDS = frozenset({"artifact", "observed_at", "attempts"})
 
 
 @dataclass(frozen=True)
@@ -411,6 +416,11 @@ def _record_to_value(record: RuntimeTransferRecord) -> dict[str, object]:
         else record.terminal_outcome.value,
         "terminal_expires_at": _optional_datetime_to_value(record.terminal_expires_at),
         "cleanup_status": record.cleanup_status.value,
+        "cleanup_failure": (
+            None
+            if record.cleanup_failure is None
+            else _cleanup_failure_to_value(record.cleanup_failure)
+        ),
         "failure": None if record.failure is None else record.failure.value,
         "preparation_object_handle": record.preparation_object_handle,
         "preparation_multipart_cleanup_handle": (
@@ -524,6 +534,7 @@ def _record_from_value(value: object) -> RuntimeTransferRecord:
         cleanup_status=RuntimeTransferCleanupStatus(
             _require_string(record["cleanup_status"], "cleanup_status")
         ),
+        cleanup_failure=_optional_cleanup_failure_from_value(record["cleanup_failure"]),
         failure=None
         if failure is None
         else RuntimeTransferFailure(_require_string(failure, "failure")),
@@ -545,6 +556,36 @@ def _record_from_value(value: object) -> RuntimeTransferRecord:
             record["pre_ready_object_handle"],
             "pre_ready_object_handle",
         ),
+    )
+
+
+def _cleanup_failure_to_value(
+    value: RuntimeTransferCleanupFailureEvidence,
+) -> dict[str, object]:
+    """Return one bounded cleanup failure JSON object."""
+    return {
+        "artifact": value.artifact.value,
+        "observed_at": _datetime_to_value(value.observed_at),
+        "attempts": value.attempts,
+    }
+
+
+def _optional_cleanup_failure_from_value(
+    value: object,
+) -> RuntimeTransferCleanupFailureEvidence | None:
+    """Decode an optional exact cleanup failure JSON object."""
+    if value is None:
+        return None
+    failure = _require_object(value, "cleanup_failure", _CLEANUP_FAILURE_FIELDS)
+    return RuntimeTransferCleanupFailureEvidence(
+        artifact=RuntimeTransferCleanupArtifact(
+            _require_string(failure["artifact"], "cleanup_failure.artifact")
+        ),
+        observed_at=_datetime_from_value(
+            failure["observed_at"],
+            "cleanup_failure.observed_at",
+        ),
+        attempts=_require_int(failure["attempts"], "cleanup_failure.attempts"),
     )
 
 
@@ -824,6 +865,7 @@ class RedisRuntimeTransferStateStore:
                 terminal_outcome=None,
                 terminal_expires_at=None,
                 cleanup_status=RuntimeTransferCleanupStatus.NOT_REQUIRED,
+                cleanup_failure=None,
                 failure=None,
             )
             entries[record_key] = _RedisTransferRecordEnvelope(
@@ -1835,7 +1877,7 @@ class RedisRuntimeTransferStateStore:
                     or envelope.record.multipart_cleanup_handle is not None
                     or not envelope.record.completed_object_cleanup_required
                     or envelope.record.cleanup_status
-                    is not RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+                    is not RuntimeTransferCleanupStatus.PENDING
                 )
             ):
                 await self._commit(token, entries, now)
@@ -1847,6 +1889,7 @@ class RedisRuntimeTransferStateStore:
                 updated_at=now,
                 upload_response_committed_at=now,
                 cleanup_status=RuntimeTransferCleanupStatus.COMPLETE,
+                cleanup_failure=None,
                 completed_object_cleanup_required=False,
             )
             entries[key] = dataclasses.replace(envelope, record=record)
@@ -2166,8 +2209,10 @@ class RedisRuntimeTransferStateStore:
         attempt_id: str,
         expected_revision: int,
         status: RuntimeTransferCleanupStatus,
+        cleanup_failure: RuntimeTransferCleanupArtifact | None,
     ) -> RuntimeTransferRecord | None:
         """Record cleanup evidence independently from transfer terminal state."""
+        _validate_cleanup_failure(status, cleanup_failure)
         now = self._now()
         async with self._locked() as token:
             entries = await self._load_reclaimed_entries(now)
@@ -2180,7 +2225,10 @@ class RedisRuntimeTransferStateStore:
             if envelope is None or envelope.record.completed_object_cleanup_required:
                 await self._commit(token, entries, now)
                 return None
-            if envelope.record.cleanup_status is status:
+            if (
+                envelope.record.cleanup_status is status
+                and status is not RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+            ):
                 await self._commit(token, entries, now)
                 return (
                     envelope.record
@@ -2196,6 +2244,11 @@ class RedisRuntimeTransferStateStore:
                 revision=envelope.record.revision + 1,
                 updated_at=now,
                 cleanup_status=status,
+                cleanup_failure=_cleanup_failure_evidence(
+                    envelope.record.cleanup_failure,
+                    artifact=cleanup_failure,
+                    observed_at=now,
+                ),
                 multipart_cleanup_handle=(
                     None
                     if status is RuntimeTransferCleanupStatus.COMPLETE
@@ -2213,12 +2266,14 @@ class RedisRuntimeTransferStateStore:
         attempt_id: str,
         expected_revision: int,
         status: RuntimeTransferCleanupStatus,
+        cleanup_failure: RuntimeTransferCleanupArtifact | None,
         multipart_cleanup_required: bool,
         completed_object_cleanup_required: bool,
     ) -> RuntimeTransferRecord | None:
         """Record exact completed-object deletion retry evidence."""
         if status not in {
             RuntimeTransferCleanupStatus.COMPLETE,
+            RuntimeTransferCleanupStatus.PENDING,
             RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
         }:
             raise ValueError("completed object cleanup status is invalid")
@@ -2226,10 +2281,15 @@ class RedisRuntimeTransferStateStore:
             status is RuntimeTransferCleanupStatus.COMPLETE
             and (multipart_cleanup_required or completed_object_cleanup_required)
         ) or (
-            status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+            status
+            in {
+                RuntimeTransferCleanupStatus.PENDING,
+                RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+            }
             and not (multipart_cleanup_required or completed_object_cleanup_required)
         ):
             raise ValueError("cleanup status does not match required artifacts")
+        _validate_cleanup_failure(status, cleanup_failure)
         now = self._now()
         async with self._locked() as token:
             entries = await self._load_reclaimed_entries(now)
@@ -2252,6 +2312,7 @@ class RedisRuntimeTransferStateStore:
                 return None
             if (
                 envelope.record.cleanup_status is status
+                and status is not RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
                 and envelope.record.completed_object_cleanup_required
                 is completed_object_cleanup_required
                 and envelope.record.multipart_cleanup_handle == target_handle
@@ -2271,6 +2332,11 @@ class RedisRuntimeTransferStateStore:
                 revision=envelope.record.revision + 1,
                 updated_at=now,
                 cleanup_status=status,
+                cleanup_failure=_cleanup_failure_evidence(
+                    envelope.record.cleanup_failure,
+                    artifact=cleanup_failure,
+                    observed_at=now,
+                ),
                 multipart_cleanup_handle=target_handle,
                 completed_object_cleanup_required=(completed_object_cleanup_required),
             )
@@ -3495,3 +3561,40 @@ def _decode_dispatch_cursor(cursor: str) -> str:
         ).decode("utf-8")
     except (UnicodeDecodeError, ValueError) as exc:
         raise ValueError("invalid dispatch page cursor") from exc
+
+
+def _validate_cleanup_failure(
+    status: RuntimeTransferCleanupStatus,
+    cleanup_failure: RuntimeTransferCleanupArtifact | None,
+) -> None:
+    """Require bounded failure evidence only for a retryable cleanup status."""
+    if status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE:
+        if cleanup_failure is None:
+            raise ValueError("retryable cleanup requires failure evidence")
+        return
+    if cleanup_failure is not None:
+        raise ValueError("cleanup failure evidence requires retryable cleanup")
+
+
+def _cleanup_failure_evidence(
+    previous: RuntimeTransferCleanupFailureEvidence | None,
+    *,
+    artifact: RuntimeTransferCleanupArtifact | None,
+    observed_at: datetime,
+) -> RuntimeTransferCleanupFailureEvidence | None:
+    """Return the next bounded latest cleanup failure observation."""
+    if artifact is None:
+        return None
+    attempts = (
+        1
+        if previous is None
+        else min(
+            previous.attempts + 1,
+            RUNTIME_TRANSFER_MAXIMUM_CLEANUP_FAILURE_ATTEMPTS,
+        )
+    )
+    return RuntimeTransferCleanupFailureEvidence(
+        artifact=artifact,
+        observed_at=observed_at,
+        attempts=attempts,
+    )
