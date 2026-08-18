@@ -28,8 +28,7 @@ workspace_user_role_enum = ENUM(
 class RDBWorkspaceUser(RDBModel):
     """WorkspaceUser table.
 
-    Workspacet t user profilet.
-    Usert connectiont workspacet rolet managet.
+    Stores a user's profile and role within a workspace.
     """
 
     __tablename__ = "workspace_users"

@@ -11,19 +11,19 @@ const nextConfig: NextConfig = {
 };
 
 export default withSentryConfig(withNextIntl(nextConfig), {
-  // t t SENTRY_AUTH_TOKENt t sourcemap upload
+  // Upload source maps only when SENTRY_AUTH_TOKEN is available.
   org: process.env.SENTRY_ORG,
   project: process.env.SENTRY_PROJECT,
   authToken: process.env.SENTRY_AUTH_TOKEN,
 
-  // client bundlet sourcemap remove (Sentryt upload)
+  // Remove client source maps after Sentry uploads them.
   sourcemaps: {
     deleteSourcemapsAfterUpload: true,
   },
 
-  // local development t Sentry warning hide
+  // Hide Sentry configuration warnings during local development.
   silent: !process.env.CI,
 
-  // Telemetry disable
+  // Disable Sentry telemetry.
   telemetry: false,
 });

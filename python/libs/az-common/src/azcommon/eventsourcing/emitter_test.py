@@ -8,11 +8,11 @@ from .event import Event
 
 
 class TestEventEmitter:
-    """EventEmitter 테스트."""
+    """Tests for EventEmitter."""
 
     @pytest.mark.asyncio
     async def test_basic_emit_and_listen(self) -> None:
-        """기본 emit과 listen 기능 테스트."""
+        """Emit an event to one registered listener."""
         test_event = Event[dict[str, str]]("test_namespace", "test_event")
         mock_listener = AsyncMock()
 
@@ -25,7 +25,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_multiple_listeners(self) -> None:
-        """동일 이벤트에 여러 리스너 등록 테스트."""
+        """Emit an event to multiple registered listeners."""
         test_event = Event[dict[str, str]]("test_namespace", "test_event")
 
         mock_listener1 = AsyncMock()
@@ -49,7 +49,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_multiple_events(self) -> None:
-        """서로 다른 이벤트와 리스너 테스트."""
+        """Emit distinct events to their respective listeners."""
         event1 = Event[dict[str, str]]("namespace1", "event1")
         event2 = Event[dict[str, str]]("namespace2", "event2")
 
@@ -76,7 +76,7 @@ class TestEventEmitter:
     async def test_listener_exception_handling(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """리스너 예외가 안전하게 처리되는지 테스트."""
+        """Continue emitting after a listener raises an exception."""
         test_event = Event[dict[str, str]]("test_namespace", "test_event")
 
         async def failing_listener(payload: dict[str, str]) -> None:
@@ -101,7 +101,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_duplicate_event_registration(self) -> None:
-        """동일 이벤트 중복 등록 테스트."""
+        """Register multiple listeners for the same event."""
         test_event = Event[dict[str, str]]("test_namespace", "test_event")
 
         listener1 = AsyncMock()
@@ -122,7 +122,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_different_events_same_key(self) -> None:
-        """동일 키를 가진 다른 이벤트 객체 등록 시 ValueError 발생 테스트."""
+        """Reject different event objects that share the same key."""
         event1 = Event[dict[str, str]]("test_namespace", "test_event")
         event2 = Event[dict[str, str]]("test_namespace", "test_event")
 
@@ -140,7 +140,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_concurrent_emits(self) -> None:
-        """동일 이벤트에 대한 동시 emit 테스트."""
+        """Serialize concurrent emissions of the same event."""
         test_event = Event[dict[str, str]]("test_namespace", "test_event")
 
         mock_listener = AsyncMock()
@@ -159,7 +159,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_empty_listeners(self) -> None:
-        """리스너가 없는 이벤트에 emit 테스트."""
+        """Ignore events that have no registered listeners."""
         test_event = Event[dict[str, str]]("test_namespace", "test_event")
 
         emitter = EventEmitter.builder().build()
@@ -169,7 +169,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_builder_pattern(self) -> None:
-        """빌더 패턴 기능 테스트."""
+        """Build an emitter through the fluent builder API."""
         event1 = Event[dict[str, str]]("namespace1", "event1")
         event2 = Event[dict[str, str]]("namespace2", "event2")
 
@@ -196,7 +196,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_event_key_property(self) -> None:
-        """event.key 프로퍼티 테스트."""
+        """Compose an event key from its namespace and name."""
         test_event = Event[dict[str, str]]("test_namespace", "test_event")
 
         assert test_event.key == "test_namespace:test_event"
@@ -214,7 +214,7 @@ class TestEventEmitter:
     async def test_circular_event_emission_detection(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """순환 이벤트 발행 감지 및 로깅 테스트."""
+        """Detect and log circular event emission."""
         test_event = Event[dict[str, str]]("test_namespace", "test_event")
 
         async def circular_listener(payload: dict[str, str]) -> None:
@@ -238,7 +238,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_builder_update(self) -> None:
-        """두 EventEmitterBuilder 병합 테스트."""
+        """Merge two compatible EventEmitterBuilder instances."""
         event1 = Event[dict[str, str]]("namespace1", "event1")
         event2 = Event[dict[str, str]]("namespace2", "event2")
         event3 = Event[dict[str, str]]("namespace3", "event3")
@@ -275,7 +275,7 @@ class TestEventEmitter:
 
     @pytest.mark.asyncio
     async def test_builder_update_conflict(self) -> None:
-        """충돌하는 이벤트로 빌더 병합 시 ValueError 발생 테스트."""
+        """Reject merging builders with conflicting event definitions."""
         event1 = Event[dict[str, str]]("test_namespace", "test_event")
         event2 = Event[dict[str, str]]("test_namespace", "test_event")
 

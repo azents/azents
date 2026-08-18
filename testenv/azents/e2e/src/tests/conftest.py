@@ -147,12 +147,10 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 def random_secret(length: int = 32) -> str:
-    """testt t t create."""
     return secrets.token_hex(length)
 
 
 def random_fernet_key() -> str:
-    """testt t Fernet key create (URL-safe base64 t 32t)."""
     return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
 
 
@@ -224,7 +222,6 @@ def runtime_workspace_path() -> str:
 
 @pytest.fixture(scope="session")
 def container_network() -> Generator[Network, None, None]:
-    """t containert t Docker t."""
     with Network() as network:
         yield network
 
@@ -255,7 +252,6 @@ def postgres_container(
 
 @pytest.fixture(scope="session")
 def s3_credentials() -> tuple[str, str]:
-    """testt S3 t t create."""
     return random_secret(16), random_secret(32)
 
 
@@ -263,7 +259,7 @@ def s3_credentials() -> tuple[str, str]:
 def valkey_container(
     container_network: Network,
 ) -> Generator[DockerContainer, None, None]:
-    """Valkey (Redis t) container."""
+    """Start a Valkey container that provides Redis-compatible storage."""
     valkey_image = "valkey/valkey:9-alpine"
     with (
         DockerContainer(
@@ -282,7 +278,7 @@ def rustfs_container(
     s3_credentials: tuple[str, str],
     container_network: Network,
 ) -> Generator[DockerContainer, None, None]:
-    """RustFS (S3 t) container."""
+    """Start a RustFS container that provides S3-compatible storage."""
     access_key, secret_key = s3_credentials
     rustfs_image = "rustfs/rustfs:1.0.0-alpha.90"
     with (
@@ -304,7 +300,7 @@ def rustfs_container(
 def mock_openai_container(
     container_network: Network,
 ) -> Generator[DockerContainer, None, None]:
-    """AIMock t OpenAI Responses API mock container."""
+    """Start the AIMock container for the OpenAI Responses API."""
     with (
         DockerContainer(
             "ghcr.io/copilotkit/aimock:1.36.1",
@@ -534,13 +530,13 @@ def s3_bucket_name(
     rustfs_access_key: str,
     rustfs_secret_key: str,
 ) -> Generator[str, None, None]:
-    """S3 t create."""
+    """Create the S3 bucket used by the E2E environment."""
     bucket_name = f"azents-dev-{random_secret(8)}"
 
     rustfs_host = rustfs_container.get_container_host_ip()
     rustfs_port = rustfs_container.get_exposed_port(9000)
 
-    s3_client: S3Client = boto3.client(  # boto3.clientt overload return t t Unknown
+    s3_client: S3Client = boto3.client(
         "s3",
         endpoint_url=f"http://{rustfs_host}:{rustfs_port}",
         aws_access_key_id=rustfs_access_key,
@@ -558,7 +554,6 @@ def s3_bucket_name(
 
 @pytest.fixture(scope="session")
 def azents_server_image() -> str:
-    """azents server Docker t t."""
     if image := os.environ.get("AZENTS_E2E_SERVER_IMAGE"):
         return image
 
@@ -620,7 +615,6 @@ def azents_admin_web_image() -> str:
 
 @pytest.fixture(scope="session")
 def azents_runtime_runner_image() -> str:
-    """azents Runtime Runner Docker t t."""
     if image := os.environ.get("AZENTS_E2E_RUNTIME_RUNNER_IMAGE"):
         return image
 
@@ -635,7 +629,6 @@ def azents_runtime_runner_image() -> str:
 
 @pytest.fixture(scope="session")
 def azents_runtime_provider_docker_image() -> str:
-    """azents Docker Runtime Provider Docker t t."""
     if image := os.environ.get("AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE"):
         return image
 
@@ -773,7 +766,6 @@ def _write_e2e_image_build_observability(
 
 @pytest.fixture(scope="session")
 def credential_encryption_key() -> str:
-    """testt LLM t t t key (Fernet key)."""
     return random_fernet_key()
 
 
@@ -788,7 +780,7 @@ def _configure_azents_server_container(
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
 ) -> DockerContainer:
-    """azents server container t settings."""
+    """Build environment settings for an Azents server container."""
     return (
         container.with_network(network)
         .with_env("AZ_RUNTIME_ENV", "deployed")
@@ -872,7 +864,6 @@ def _wait_for_tcp_ready(
     port: int,
     server_name: str,
 ) -> None:
-    """TCP t t t pendingt."""
     host = container.get_container_host_ip()
     exposed_port = container.get_exposed_port(port)
 
@@ -1020,17 +1011,19 @@ def _runtime_container_diagnostics() -> tuple[str, ...]:
 
 
 def _log_server_output(container: DockerContainer, server_name: str) -> None:
-    """server t output."""
+    """Write one server container's stdout and stderr to the test output."""
     try:
         stdout, stderr = container.get_logs()
         sys.stdout.write(f"\n\n=== {server_name} stdout ===\n{stdout.decode()}\n")
         sys.stdout.write(f"\n=== {server_name} stderr ===\n{stderr.decode()}\n")
-    except Exception:
-        pass  # containert t t t t
+    except (DockerException, UnicodeDecodeError) as exc:
+        sys.stderr.write(
+            f"\nFailed to capture {server_name} container output: "
+            f"{type(exc).__name__}: {exc}\n"
+        )
 
 
 def _remove_agent_runtime_containers(network_name: str) -> None:
-    """E2E t engine worker t t agent-runtime containert cleanupt."""
     client = docker_py.from_env()
     try:
         containers: list[Container] = client.containers.list(
@@ -1116,7 +1109,7 @@ def azents_admin_server_container(
     rustfs_secret_key: str,
     s3_bucket_name: str,
     azents_server_image: str,
-    azents_public_server_container: DockerContainer,  # public server t t
+    azents_public_server_container: DockerContainer,
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
@@ -1494,7 +1487,6 @@ def _wait_for_runtime_provider_registered(
     *,
     provider_id: str,
 ) -> None:
-    """Runtime Provider register t t t pendingt."""
     deadline = time.monotonic() + 60
     last_logs = ""
     while time.monotonic() < deadline:
@@ -1796,7 +1788,6 @@ def _create_e2e_strict_network_infrastructure_profile(
 
 @pytest.fixture(scope="session")
 def mock_openai_url(mock_openai_container: DockerContainer) -> str:
-    """test runner t t t mock OpenAI URL."""
     host = mock_openai_container.get_container_host_ip()
     port = mock_openai_container.get_exposed_port(8080)
     return f"http://{host}:{port}"

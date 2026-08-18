@@ -13,7 +13,7 @@ from azents.rdb.types.datetime import TimeZoneDateTime
 class RDBSession(RDBModel):
     """Session table.
 
-    user auth sessiont managet.
+    Stores user authentication sessions.
     """
 
     __tablename__ = "sessions"

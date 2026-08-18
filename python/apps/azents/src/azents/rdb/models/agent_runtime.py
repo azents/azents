@@ -74,7 +74,7 @@ runtime_terminal_delete_acknowledgement_kind_enum = ENUM(
 class RDBAgentRuntime(RDBModel):
     """AgentRuntime table.
 
-    Agentt t runtime identityt worker/runtime durable statet t.
+    Stores the Agent's runtime identity and durable worker/runtime state.
     """
 
     __tablename__ = "agent_runtimes"

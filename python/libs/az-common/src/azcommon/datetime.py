@@ -5,7 +5,7 @@ import pytz
 
 def localize(tz: datetime.tzinfo, dt: datetime.datetime) -> datetime.datetime:
     """
-    pytz, zoneinfo 모두를 기준으로 isomorphic한 localize를 수행합니다.
+    Localize a datetime consistently for both pytz and zoneinfo timezones.
     """
     if isinstance(tz, pytz.BaseTzInfo):
         return tz.localize(dt)
@@ -15,7 +15,7 @@ def localize(tz: datetime.tzinfo, dt: datetime.datetime) -> datetime.datetime:
 
 def tznow(tz: datetime.tzinfo | None = None) -> datetime.datetime:
     """
-    timezone을 기준으로 현재 시간을 반환합니다.
-    timezone이 None이면 시스템의 local timezone을 사용합니다.
+    Return the current time in the requested timezone.
+    Use the system local timezone when timezone is None.
     """
-    return datetime.datetime.now().astimezone(tz)
+    return datetime.datetime.now(datetime.UTC).astimezone(tz)

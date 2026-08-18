@@ -9,7 +9,7 @@ T = TypeVar("T", default=Never)
 @dataclasses.dataclass(frozen=True, eq=False)
 class Event(Generic[T]):
     """
-    이벤트 소싱을 위한 이벤트 클래스.
+    Event type used by the event-sourcing helpers.
     """
 
     namespace: str

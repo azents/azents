@@ -18,10 +18,10 @@ EventListener = Callable[[T], Coroutine[Any, Any, None]]
 
 class EventEmitter(object):
     """
-    로컬 이벤트 에미터.
+    Local event emitter.
 
-    로컬 리스너에게 이벤트를 발행하는 이벤트 에미터입니다.
-    분산 시스템에는 적합하지 않습니다.
+    Emits events to in-process listeners. This emitter is not suitable for
+    distributed systems.
 
     """
 
@@ -34,7 +34,7 @@ class EventEmitter(object):
         listeners: Mapping[str, Collection[EventListener[Any]]],
     ) -> None:
         """
-        직접 호출하지 마세요. EventEmitter.builder()를 사용하세요.
+        Use EventEmitter.builder() instead of calling this directly.
 
         """
         super().__init__()
@@ -49,10 +49,10 @@ class EventEmitter(object):
 
     async def emit(self, event: Event[T], payload: T) -> None:
         """
-        등록된 모든 리스너에게 페이로드와 함께 이벤트를 발행합니다.
+        Emit an event and payload to every registered listener.
 
-        :param event: 발행할 이벤트
-        :param payload: 이벤트와 함께 전송할 페이로드
+        :param event: Event to emit.
+        :param payload: Payload sent with the event.
         """
         if event.key not in self._listeners:
             return
@@ -73,7 +73,7 @@ class EventEmitter(object):
         self, event_key: str, listener: EventListener[T], payload: T
     ) -> None:
         """
-        리스너를 실행하고 발생하는 예외를 억제합니다.
+        Run a listener and log any exception it raises.
         """
         try:
             await listener(payload)
@@ -93,11 +93,11 @@ class EventEmitterBuilder(object):
 
     def listen(self, event: Event[T], listener: EventListener[T]) -> Self:
         """
-        이벤트에 리스너를 등록합니다.
+        Register a listener for an event.
 
-        :param event: 수신할 이벤트
-        :param listener: 등록할 리스너
-        :raises ValueError: 이벤트 키가 고유하지 않은 경우
+        :param event: Event to receive.
+        :param listener: Listener to register.
+        :raises ValueError: If the event key conflicts with another event.
 
         """
         if event.key not in self.events:
@@ -112,7 +112,7 @@ class EventEmitterBuilder(object):
 
     def update(self, other: "EventEmitterBuilder") -> Self:
         """
-        다른 빌더의 리스너들을 이 빌더에 병합합니다.
+        Merge another builder's listeners into this builder.
         """
         for event_key in self.events.keys() & other.events.keys():
             if self.events[event_key] != other.events[event_key]:

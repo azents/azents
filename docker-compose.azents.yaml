@@ -57,7 +57,7 @@ volumes:
   rustfs:
 
 networks:
-  # Agent Home 컨테이너 전용 브리지 네트워크
-  # DockerAgentHomeClient가 이 네트워크에 컨테이너를 연결합니다
+  # Dedicated bridge network for Agent Home containers
+  # DockerAgentHomeClient connects containers to this network
   sandbox-restricted:
     driver: bridge

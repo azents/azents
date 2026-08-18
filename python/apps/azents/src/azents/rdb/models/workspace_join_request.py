@@ -30,8 +30,8 @@ join_request_status_enum = ENUM(
 class RDBWorkspaceJoinRequest(RDBModel):
     """WorkspaceJoinRequest table.
 
-    t workspace joint requestt t managet.
-    manager/ownert approve/reject/mute processt.
+    Stores requests from users who want to join a workspace.
+    Workspace managers and owners may approve, reject, or mute requests.
     """
 
     __tablename__ = "workspace_join_requests"

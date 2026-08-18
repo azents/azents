@@ -32,60 +32,30 @@ created: 2026-04-11
 
 # setup: test-user-workspace
 
-## translated
-
-translated azents user translated workspace translated translated, resulttranslated `state.json` translated
-`user.*` / `ws.*` translated translated. translated test/setup translated base prerequisite.
+Create a new Azents user and workspace and record their identifiers and authentication values in the fixture state. This setup is the base dependency for the `agent-basic` fixture.
 
 ## Provides / Requires
 
-- `requires`: —
-- `provides`:
-  - `user.email`, `user.access_token`, `user.refresh_token`
-  - `ws.handle`, `ws.name`
-- `idempotent: false` — translatedrun translated translated user/ws translated translated state translated translated
+- `requires`: none
+- `provides`: `user.email`, `user.access_token`, `user.refresh_token`, `ws.handle`, `ws.name`
+- `idempotent: false`
 
-## run
+## Run
 
-`testenv/azents` translated cwd translated translated:
+Run the setup through its owning fixture command:
 
 ```bash
-uv run python - <<'PYEOF'
-import json, os
-from testenv.client import build_client_from_env
-
-client = build_client_from_env()
-user = client.auth.create_user()
-ws = client.workspace.create(user)
-
-state_file = os.environ["STATE_FILE"]
-state = json.loads(open(state_file).read())
-state.setdefault("user", {}).update({
-    "email": user.email,
-    "access_token": user.access_token,
-    "refresh_token": user.refresh_token,
-})
-state.setdefault("ws", {}).update({
-    "handle": ws.handle,
-    "name": ws.name,
-})
-open(state_file, "w").write(json.dumps(state, indent=2))
-print(f"SEEDED user={user.email} ws={ws.handle}")
-PYEOF
+cd testenv/azents
+uv run testenv fixture up agent-basic --json
 ```
+
+The handler creates the user and workspace through the testenv client and stores the resulting values in `state.json`.
 
 ## Verify
 
-state.json translated `ws.handle` translated translated translated workspace translated DB translated existstranslated check.
-frontmatter translated `verify` translated translated. Verify failure + idempotent: false translated
-translated translatedruntranslated translated translated. current fixture state translated translated translated seed translated translated
-`uv run testenv fixture reset agent-basic --json` translated
-`uv run testenv fixture up agent-basic --json` translated runtranslated.
+The verification probe reads `ws.handle` from `state.json` and checks that the workspace exists. If verification fails, reset and recreate the fixture:
 
-## translated
-
-- `seed.auth.Auth.create_user` translated email translated `test-{unique()}@example.com` translated
-  translated create. translated translated translated translated setup translated translated translated.
-- Workspace handle translated `ws-{unique()}` translated translated create.
-- tokentranslated translated API bearer auth translated translated, refresh_token translated translated refresh translated
-  translated. translated token translated state translated save.
+```bash
+uv run testenv fixture reset agent-basic --json
+uv run testenv fixture up agent-basic --json
+```

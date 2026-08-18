@@ -21,69 +21,25 @@ created: 2026-04-11
 
 # setup: agent-dummy-key
 
-## translated
-
-Dummy key OpenAI integration translated default runtime setting translated usetranslated
-agent translated createtranslated. LLM translated path (TC-CHAT-001) translated MCP toolkit path
-(TC-MCP-001/002) translated translated verifytranslated translated.
+Create an agent that uses the dummy-key OpenAI integration and the workspace's default Runtime settings. The setup stores the agent identifier and model slug in the fixture state.
 
 ## Provides / Requires
 
-- `requires`: `llm-provider-dummy`, ``
+- `requires`: `llm-provider-dummy`
 - `provides`: `agent.id`, `agent.model_slug`
-- `idempotent: false`
+- `idempotent: true`
 
-## run
+## Run
 
-`testenv/azents` translated cwd translated translated:
+Run the setup through its owning fixture command:
 
 ```bash
-uv run python - <<'PYEOF'
-import json, os
-from testenv.client import build_client_from_env
-from testenv.seed.types import User, Workspace, Integration
-
-client = build_client_from_env()
-state_file = os.environ["STATE_FILE"]
-state = json.loads(open(state_file).read())
-
-user = User(
-    email=state["user"]["email"],
-    access_token=state["user"]["access_token"],
-    refresh_token=state["user"]["refresh_token"],
-)
-ws = Workspace(
-    handle=state["ws"]["handle"],
-    name=state["ws"]["name"],
-    owner=user,
-)
-integration = Integration(
-    id=state["integration"]["id"],
-    workspace=ws,
-    provider=state["integration"]["provider"],
-    name=state["integration"]["name"],
-)
-
-SLUG = "gpt-4o-mini"
-agent = client.agent.create(user, ws, integration, SLUG)
-
-state.setdefault("agent", {}).update({
-    "id": agent.id,
-    "model_slug": SLUG,
-})
-open(state_file, "w").write(json.dumps(state, indent=2))
-print(f"SEEDED agent.id={agent.id}")
-PYEOF
+cd testenv/azents
+uv run testenv fixture up agent-basic --json
 ```
+
+The handler reconstructs the user, workspace, and integration from the fixture state, creates an agent with the `gpt-4o-mini` model slug, and records the identifiers under `agent` in `state.json`.
 
 ## Verify
 
-state.json translated `agent.id` exists check.
-
-## translated
-
-- `client.agent.create` translated default `shell_enabled=True` translated translated, workspace
-  translated default runtime setting translated translated connectiontranslated. translated `` setup translated
-  translated translated.
-- Model slug translated `gpt-4o-mini` translated translated. translated modeltranslated agent translated translated translated
-  setup translated.
+The verification probe succeeds when `state.json` contains `agent.id`. The fixture provider owns cleanup and recreation when the probe fails.

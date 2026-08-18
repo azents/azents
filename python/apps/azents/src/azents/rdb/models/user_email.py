@@ -13,8 +13,8 @@ from azents.rdb.types.datetime import TimeZoneDateTime
 class RDBUserEmail(RDBModel):
     """UserEmail table.
 
-    usert email addresst managet.
-    onet usert multiple emailt can have..
+    Stores email addresses associated with users.
+    A user may have multiple email addresses.
     """
 
     __tablename__ = "user_emails"

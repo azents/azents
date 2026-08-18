@@ -35,9 +35,10 @@ dependencies = [
     "types-pytz==2026.2.0.20260506",
     "types-aioboto3[aioboto3,s3,ses]==15.5.0",
     "boto3-stubs[rds]==1.43.0",
-    # aiodocker: type t t
+    # Docker API client
     "aiodocker==0.26.0",
-    # K8s: lightkube (main) + kubernetes_asyncio (exec WebSocket t)
+    # Kubernetes clients: lightkube for standard operations and
+    # kubernetes_asyncio for exec WebSocket support
     "kubernetes-asyncio==35.0.1",
     "lightkube==0.19.1",
     # Local dependencies
@@ -99,7 +100,7 @@ target-version = "py314"
 select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003"]
 
 [tool.ruff.lint.per-file-ignores]
-"typings/**/*.pyi" = ["ANN401"]  # stub filet Any use t
+"typings/**/*.pyi" = ["ANN401"]  # Stubs may use Any when external types are unavailable.
 
 [tool.ty.environment]
 python-version = "3.14"

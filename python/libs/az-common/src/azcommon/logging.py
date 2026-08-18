@@ -51,7 +51,7 @@ L = TypeVar("L", bound=LoggerType)
 
 class ContextualLoggerAdapter(logging.LoggerAdapter[L]):
     """
-    Log record에 context 정보를 추가하는 logger adapter.
+    Logger adapter that adds context to log records.
     """
 
     def process(
@@ -66,14 +66,14 @@ class ContextualLoggerAdapter(logging.LoggerAdapter[L]):
 
 def bind_extra(logger: L, extra: MutableMapping[str, Any]) -> logging.LoggerAdapter[L]:
     """
-    Logger에 extra field를 바인딩한다.
+    Bind extra fields to a logger.
     """
     return ContextualLoggerAdapter(logger, extra)
 
 
 class LoggingFormat(enum.Enum):
     """
-    Logging 출력 format.
+    Logging output format.
     """
 
     CONSOLE = "console"
@@ -82,10 +82,11 @@ class LoggingFormat(enum.Enum):
 
 class RuntimeEnvironment(enum.Enum):
     """
-    Application이 실행되는 환경.
+    Environment in which the application runs.
 
-    Stage(production, dev 등)와는 다르게, 이 값은 software가 실제로 어디서 실행되는지를
-    나타낸다. 예를 들어, production stage를 local에서 테스트할 수도 있다.
+    Unlike a stage such as production or development, this value describes
+    where the software actually runs. For example, a production stage may be
+    tested locally.
     """
 
     LOCAL = "local"
@@ -93,14 +94,14 @@ class RuntimeEnvironment(enum.Enum):
 
 
 class HealthCheckFilter(logging.Filter):
-    """헬스체크 요청을 access log에서 제외하는 필터.
+    """Filter that excludes health check requests from access logs.
 
-    Kubernetes, 로드밸런서 등에서 주기적으로 호출되는 헬스체크 요청이
-    로그를 과도하게 생성하는 것을 방지한다.
+    Prevents health checks periodically sent by Kubernetes, load balancers,
+    and similar systems from generating excessive logs.
 
-    정확한 경로만 매칭한다 (prefix 매칭 아님).
-    uvicorn access log 형식: ``"GET /health/v1/readiness HTTP/1.1" 200``
-    경로 앞에 공백이 있으므로 ``" /path "`` 또는 ``" /path?``로 매칭한다.
+    Matches exact paths rather than prefixes.
+    Uvicorn access log format: ``"GET /health/v1/readiness HTTP/1.1" 200``
+    Because the path is preceded by a space, match ``" /path "`` or ``" /path?``.
     """
 
     HEALTHCHECK_PATHS = frozenset(
@@ -114,11 +115,11 @@ class HealthCheckFilter(logging.Filter):
     )
 
     def filter(self, record: logging.LogRecord) -> bool:
-        """헬스체크 요청이면 False를 반환하여 로그를 제외한다."""
+        """Return False for a health check request to exclude its log entry."""
         message = record.getMessage()
         for path in self.HEALTHCHECK_PATHS:
             # uvicorn access log: "GET /path HTTP/1.1" 200
-            # 경로 뒤에 공백 또는 ?가 오는지 확인하여 정확 매칭
+            # Require a space or question mark after the path for an exact match
             marker = f" {path} "
             marker_query = f" {path}?"
             if marker in message or marker_query in message:
@@ -165,9 +166,9 @@ def _redact_sensitive_query_parameters(value: str) -> str:
 
 class ConsoleFormatter(DefaultFormatter):
     """
-    Log record를 console 친화적인 문자열로 format하는 formatter.
+    Formatter that renders log records as console-friendly strings.
 
-    Extra field는 key=value 쌍의 문자열로 log record에 추가된다.
+    Extra fields are appended to the log record as key=value pairs.
 
     .. code-block:: python
 
@@ -220,7 +221,7 @@ def configure_logging(
     levels: dict[str, int | str],
 ) -> None:
     """
-    Logging system을 설정한다.
+    Configure the logging system.
     """
     root_logger = logging.getLogger()
 
@@ -303,15 +304,15 @@ def configure_logging_for_runtime(
     sentry_dsn: str | None = None,
 ) -> None:
     """
-    RuntimeEnvironment에 따라 logging을 설정한다.
+    Configure logging for the RuntimeEnvironment.
 
-    - LOCAL: console format, 기본 INFO level, inhouse DEBUG level
-    - DEPLOYED: json format, 기본 WARNING level, inhouse INFO level
+    - LOCAL: console format, default INFO level, in-house DEBUG level
+    - DEPLOYED: JSON format, default WARNING level, in-house INFO level
 
-    :param runtime_env: 실행 환경
-    :param inhouse_name: Inhouse 로거 이름
-    :param configure_uvicorn: uvicorn 로깅 설정 여부
-    :param sentry_dsn: Sentry DSN (DEPLOYED 환경에서만 초기화됨)
+    :param runtime_env: Runtime environment.
+    :param inhouse_name: In-house logger name.
+    :param configure_uvicorn: Whether to configure Uvicorn logging.
+    :param sentry_dsn: Sentry DSN, initialized only in DEPLOYED environments.
     """
     # Initialize Sentry only in deployed environment
     if runtime_env == RuntimeEnvironment.DEPLOYED and sentry_dsn:
@@ -367,7 +368,7 @@ def configure_logging_for_runtime(
         logging.getLogger("uvicorn.access").propagate = True
         logging.getLogger("uvicorn.error").propagate = True
 
-        # 헬스체크 요청을 access log에서 제외
+        # Exclude health check requests from access logs
         logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
 
         sensitive_query_filter = SensitiveQueryParameterFilter()

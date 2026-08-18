@@ -1,32 +1,35 @@
 # Azents Database Migrations
 
-Alembict uset PostgreSQL t manage.
+Alembic manages the Azents PostgreSQL schema.
 
-## uset
+## Usage
 
-### t run
+### Apply migrations
 
 ```bash
 cd python/apps/azents/db-schemas/rdb
 uv run alembic upgrade head
 ```
 
-### new t create
+### Create a migration
 
 ```bash
 cd python/apps/azents/db-schemas/rdb
 uv run alembic revision --autogenerate -m "description"
 ```
 
-### t t t
+Always generate migration files with `alembic revision`; do not create migration
+files manually.
+
+### Inspect history
 
 ```bash
 uv run alembic history
 ```
 
-### t t t
+### Downgrade
 
 ```bash
-uv run alembic downgrade -1  # t level t
-uv run alembic downgrade <revision>  # t t
+uv run alembic downgrade -1
+uv run alembic downgrade <revision>
 ```

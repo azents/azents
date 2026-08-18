@@ -1,6 +1,6 @@
-"""UUID 유틸리티 모듈.
+"""UUID utilities.
 
-uuid6 패키지를 사용하여 uuid7을 제공합니다.
+Provides UUIDv7 through the uuid6 package.
 """
 
 from uuid6 import uuid7

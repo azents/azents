@@ -1,21 +1,9 @@
 # ruff: noqa: E501
-"""Setup INDEX translated createtranslated.
+"""Generate setup catalogs from frontmatter metadata.
 
-`testenv/azents/setup/*.md` translated frontmatter translated translated translated filetranslated
-translated translated translated translated:
-
-1. `testenv/azents/setup/INDEX.md` translated `<!-- AUTO-GENERATED:START/END -->`
-2. `testenv/azents/AGENTS.md` translated `<!-- SETUP-LIST:START/END -->`
-
-use:
-
-    cd testenv/azents
-    uv run python scripts/gen-setup-index.py
-
-translated translated exit 0, translated translated filetranslated updatetranslated exit 0.
-translated translated setup filetranslated translated stderr translated translated + exit 1.
-
-CI translated translated translated runtranslated translated `git diff --exit-code` translated drift translated translated.
+The script updates the generated sections in ``setup/INDEX.md`` and
+``AGENTS.md``. It exits successfully when the files are unchanged or updated,
+and reports missing markers or setup files as errors.
 """
 
 import re
@@ -36,14 +24,14 @@ LIST_MARKER_END = "<!-- SETUP-LIST:END -->"
 
 
 def _load_meta(path: Path) -> dict[str, object]:
-    """frontmatter.parse() translated metadata translated return (``handler`` field translated translated)."""
+    """Load frontmatter metadata from one setup document."""
     raw = path.read_text(encoding="utf-8")
     metadata, _body = frontmatter.parse(raw)
     return dict(metadata)
 
 
 def collect_setups() -> list[dict[str, object]]:
-    """setup/ translated translated .md (INDEX translated) translated frontmatter translated translated."""
+    """Collect setup metadata, excluding the generated index."""
     rows: list[dict[str, object]] = []
     for md in sorted(SETUP_DIR.glob("*.md")):
         if md.name == "INDEX.md":
@@ -62,9 +50,9 @@ def collect_setups() -> list[dict[str, object]]:
 
 
 def render_table(rows: list[dict[str, object]]) -> str:
-    """translated translated string create."""
+    """Render the setup catalog table."""
     lines = [
-        "| id | provides | requires | idempotent | translated |",
+        "| id | provides | requires | idempotent | summary |",
         "|---|---|---|---|---|",
     ]
     for r in rows:
@@ -80,12 +68,12 @@ def render_table(rows: list[dict[str, object]]) -> str:
 
 
 def render_list(rows: list[dict[str, object]]) -> str:
-    """AGENTS.md translated translated id translated create."""
+    """Render the setup list embedded in AGENTS.md."""
     return "\n".join(f"- `{r['id']}` — {r['summary']}" for r in rows)
 
 
 def replace_between(text: str, start: str, end: str, body: str) -> str:
-    """`start` translated `end` translated translated `body` translated translated."""
+    """Replace the content between two generated-section markers."""
     pattern = re.compile(
         re.escape(start) + r".*?" + re.escape(end),
         flags=re.DOTALL,
@@ -97,7 +85,7 @@ def replace_between(text: str, start: str, end: str, body: str) -> str:
 
 
 def update_file(path: Path, marker_start: str, marker_end: str, body: str) -> bool:
-    """filetranslated translated translated body translated translated. translated translated True."""
+    """Update one generated section and report whether the file changed."""
     current = path.read_text(encoding="utf-8")
     new = replace_between(current, marker_start, marker_end, body)
     if new == current:

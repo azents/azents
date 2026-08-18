@@ -1,7 +1,7 @@
-# testenv/azents local test environmenttranslated docker compose.
+# Docker Compose stack for the local Azents test environment.
 #
-# preflighttranslated devservertranslated translated filetranslated translated. translated `docker-compose.azents.yaml`
-# translated translated translated — translated filetranslated testenv translated "translated translated"translated.
+# Preflight and devserver commands use this file rather than the repository-level
+# development stack. The services intentionally use disposable state.
 #
 # Usage:
 #   docker compose -f testenv/azents/docker-compose.yaml up -d
@@ -10,9 +10,7 @@
 name: azents-testenv
 
 services:
-  # testenvtranslated translated translated statetranslated translated — volume none.
-  # previous runtranslated translated translated translated translated translated translated translated translated.
-  # datatranslated Stage 1c translated translated translated translated translated translated translated.
+  # No persistent volumes are declared so each recreated stack starts clean.
 
   db:
     image: postgres:18-alpine
