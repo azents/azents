@@ -25,6 +25,7 @@ from tests.required.public.test_per_prompt_inference_profile import (
 
 _PROMPT = "Provider tool live activity handoff"
 _RESPONSE = "PROVIDER_TOOL_LIVE_ACTIVITY_COMPLETED"
+_BARRIER_PATH = "/v1/_provider_tool_live_barrier"
 
 
 def _provider_call_event(
@@ -149,6 +150,24 @@ def _submit_quality_prompt(
     response.raise_for_status()
 
 
+def _arm_provider_tool_live_barrier(openai_proxy_url: str) -> None:
+    """Hold provider completion until the running live snapshot is verified."""
+    response = requests.post(
+        f"{openai_proxy_url}{_BARRIER_PATH}",
+        timeout=10,
+    )
+    response.raise_for_status()
+
+
+def _release_provider_tool_live_barrier(openai_proxy_url: str) -> None:
+    """Allow the deterministic provider stream to complete."""
+    response = requests.post(
+        f"{openai_proxy_url}{_BARRIER_PATH}/release",
+        timeout=10,
+    )
+    response.raise_for_status()
+
+
 class TestProviderToolLiveActivity:
     """Validate live projection, resync, and durable semantic handoff."""
 
@@ -158,6 +177,7 @@ class TestProviderToolLiveActivity:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
         azents_engine_worker_container: object,
+        openai_proxy_url: str,
     ) -> None:
         """One running web-search card becomes one durable completed call."""
         del azents_engine_worker_container
@@ -167,82 +187,88 @@ class TestProviderToolLiveActivity:
             azents_public_server_url,
         )
 
-        with connect_chat(
-            public_api_client=public_api_client,
-            server_url=azents_public_server_url,
-            token=token,
-            session_id=session_id,
-        ) as websocket:
-            _wait_for_action(
-                websocket,
-                lambda action: action.get("type") == "subscribed",
-            )
-            _submit_quality_prompt(
-                server_url=azents_public_server_url,
-                token=token,
-                agent_id=agent_id,
-                session_id=session_id,
-            )
-
-            running_action = _wait_for_action(
-                websocket,
-                _provider_upsert_with_status("running"),
-            )
-            running_event = json_object_payload(
-                running_action.get("event"),
-                label="running provider-tool event",
-            )
-
-            restored_event = _wait_for_live_provider_call(
+        _arm_provider_tool_live_barrier(openai_proxy_url)
+        try:
+            with connect_chat(
+                public_api_client=public_api_client,
                 server_url=azents_public_server_url,
                 token=token,
                 session_id=session_id,
-                status="running",
-            )
-            restored_payload = json_object_payload(
-                restored_event.get("payload"),
-                label="restored provider-tool payload",
-            )
-            call_id = restored_payload.get("call_id")
-            live_event_id = restored_event.get("id")
-            assert isinstance(call_id, str) and call_id
-            assert isinstance(live_event_id, str) and live_event_id
-            assert restored_event.get("adapter") == "azents-live"
-            assert restored_event.get("external_id") == call_id
-            assert running_event.get("id") == live_event_id
+            ) as websocket:
+                _wait_for_action(
+                    websocket,
+                    lambda action: action.get("type") == "subscribed",
+                )
+                _submit_quality_prompt(
+                    server_url=azents_public_server_url,
+                    token=token,
+                    agent_id=agent_id,
+                    session_id=session_id,
+                )
 
-            completed_action = _wait_for_action(
-                websocket,
-                _provider_upsert_with_status("completed"),
-            )
-            completed_event = json_object_payload(
-                completed_action.get("event"),
-                label="completed provider-tool live event",
-            )
-            assert completed_event.get("id") == live_event_id
+                running_action = _wait_for_action(
+                    websocket,
+                    _provider_upsert_with_status("running"),
+                )
+                running_event = json_object_payload(
+                    running_action.get("event"),
+                    label="running provider-tool event",
+                )
 
-            durable_action = _wait_for_action(
-                websocket,
-                _provider_history_appended,
-            )
-            durable_event = json_object_payload(
-                durable_action.get("event"),
-                label="durable provider-tool event",
-            )
-            durable_payload = json_object_payload(
-                durable_event.get("payload"),
-                label="durable provider-tool payload",
-            )
-            assert durable_payload.get("call_id") == call_id
+                restored_event = _wait_for_live_provider_call(
+                    server_url=azents_public_server_url,
+                    token=token,
+                    session_id=session_id,
+                    status="running",
+                )
+                restored_payload = json_object_payload(
+                    restored_event.get("payload"),
+                    label="restored provider-tool payload",
+                )
+                call_id = restored_payload.get("call_id")
+                live_event_id = restored_event.get("id")
+                assert isinstance(call_id, str) and call_id
+                assert isinstance(live_event_id, str) and live_event_id
+                assert restored_event.get("adapter") == "azents-live"
+                assert restored_event.get("external_id") == call_id
+                assert running_event.get("id") == live_event_id
 
-            removed_action = _wait_for_action(
-                websocket,
-                lambda action: (
-                    action.get("type") == "live_event_removed"
-                    and action.get("event_id") == live_event_id
-                ),
-            )
-            assert removed_action.get("session_id") == session_id
+                _release_provider_tool_live_barrier(openai_proxy_url)
+
+                completed_action = _wait_for_action(
+                    websocket,
+                    _provider_upsert_with_status("completed"),
+                )
+                completed_event = json_object_payload(
+                    completed_action.get("event"),
+                    label="completed provider-tool live event",
+                )
+                assert completed_event.get("id") == live_event_id
+
+                durable_action = _wait_for_action(
+                    websocket,
+                    _provider_history_appended,
+                )
+                durable_event = json_object_payload(
+                    durable_action.get("event"),
+                    label="durable provider-tool event",
+                )
+                durable_payload = json_object_payload(
+                    durable_event.get("payload"),
+                    label="durable provider-tool payload",
+                )
+                assert durable_payload.get("call_id") == call_id
+
+                removed_action = _wait_for_action(
+                    websocket,
+                    lambda action: (
+                        action.get("type") == "live_event_removed"
+                        and action.get("event_id") == live_event_id
+                    ),
+                )
+                assert removed_action.get("session_id") == session_id
+        finally:
+            _release_provider_tool_live_barrier(openai_proxy_url)
 
         deadline = time.monotonic() + 15
         final_history: dict[str, object] | None = None
