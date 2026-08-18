@@ -8,6 +8,10 @@
  */
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback } from "react";
+import {
+  getPostLoginRedirect,
+  getSafeLoginNext,
+} from "@/shared/lib/login-redirect";
 import { trpc } from "@/trpc/client";
 import type { PasswordLoginState } from "../types";
 
@@ -21,12 +25,13 @@ export function usePasswordLoginStep(): PasswordLoginStepContainerProps {
   const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams.get("email") ?? "";
-  const next = searchParams.get("next");
+  const next = getSafeLoginNext(searchParams.get("next"));
+  const redirectUrl = getPostLoginRedirect(next);
 
   const passwordLoginMutation = trpc.auth.passwordLogin.useMutation({
     onSuccess: () => {
       // hard navigation re-renders server layout (refresh authStatus)
-      window.location.href = next ?? "/workspaces";
+      window.location.href = redirectUrl;
     },
   });
 

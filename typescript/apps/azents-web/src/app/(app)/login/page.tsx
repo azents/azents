@@ -13,6 +13,7 @@ import { TRPCError } from "@trpc/server";
 import { redirect, RedirectType } from "next/navigation";
 import { LoginPage } from "@/features/auth/pages/LoginPage";
 import { getInitialAuthState } from "@/shared/lib/getInitialAuthState";
+import { getPostLoginRedirect } from "@/shared/lib/login-redirect";
 import { trpc } from "@/trpc/server";
 
 export default async function Page({
@@ -37,12 +38,9 @@ export default async function Page({
 
     if (sessionValid) {
       const params = await searchParams;
-      const next =
-        typeof params.next === "string" &&
-        params.next.startsWith("/") &&
-        !params.next.startsWith("//")
-          ? params.next
-          : "/workspaces";
+      const next = getPostLoginRedirect(
+        typeof params.next === "string" ? params.next : null,
+      );
       redirect(next, RedirectType.replace);
     }
   }

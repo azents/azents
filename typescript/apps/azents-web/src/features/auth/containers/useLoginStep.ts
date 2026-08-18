@@ -10,6 +10,7 @@
  */
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useRef, useState } from "react";
+import { getSafeLoginNext } from "@/shared/lib/login-redirect";
 import { trpc } from "@/trpc/client";
 import type { LoginState } from "../types";
 
@@ -24,7 +25,7 @@ export interface LoginStepContainerProps {
 export function useLoginStep(): LoginStepContainerProps {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get("next");
+  const next = getSafeLoginNext(searchParams.get("next"));
   const utils = trpc.useUtils();
   const signupStatusQuery = trpc.auth.getSignupStatus.useQuery();
 

@@ -13,6 +13,7 @@
  */
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect } from "react";
+import { getPostLoginRedirect } from "@/shared/lib/login-redirect";
 import { trpc } from "@/trpc/client";
 import type { VerifyState } from "../types";
 
@@ -31,10 +32,9 @@ export function useVerifyStep(): VerifyStepContainerProps {
   const email = searchParams.get("email") ?? "";
   const sentAt = parseInt(searchParams.get("sentAt") ?? "0", 10) || 0;
   const csrfToken = searchParams.get("state") ?? "";
-  const next = searchParams.get("next");
 
   /** Redirect target after authentication (default: /workspaces) */
-  const redirectUrl = next || "/workspaces";
+  const redirectUrl = getPostLoginRedirect(searchParams.get("next"));
 
   /** Redirect to first step when required data is missing */
   useEffect(() => {
