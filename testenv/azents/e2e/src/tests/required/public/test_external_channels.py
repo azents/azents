@@ -109,6 +109,7 @@ from support.utils import (
     unique,
     wait_until,
 )
+from tests.required.public.test_agent_execution_persistence import list_live
 
 _APP_ID = "A-E2E"
 _TEAM_ID = "T-E2E"
@@ -3396,7 +3397,21 @@ def test_provider_native_channel_work_progress_journey(
     outcome_counts = cast(dict[str, int], outcome_state["request_counts"])
     assert outcome_counts["chat.update"] == 3
     assert outcome_counts["chat.delete"] == 1
-    time.sleep(2)
+
+    def session_is_idle() -> bool:
+        live = list_live(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+        )
+        return live.get("run") is None and live.get("session_run_state") == "idle"
+
+    wait_until(
+        session_is_idle,
+        timeout=30,
+        interval=0.2,
+        message="Channel Work Session did not reach its terminal idle boundary",
+    )
     assert (
         cast(
             dict[str, int],

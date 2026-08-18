@@ -135,12 +135,14 @@ class TestAgentRuntimeRepository:
                     agent_id,
                 )
                 assert locked is not None
+                update_started = asyncio.Event()
 
                 async def update_selection() -> object:
                     async with AsyncSession(
                         rdb_engine,
                         expire_on_commit=False,
                     ) as update_session:
+                        update_started.set()
                         result = await update_session.execute(
                             sa.update(RDBAgent)
                             .where(RDBAgent.id == agent_id)
@@ -170,8 +172,12 @@ class TestAgentRuntimeRepository:
                         return updated
 
                 update_task = asyncio.create_task(update_selection())
-                await asyncio.sleep(0.1)
-                assert not update_task.done()
+                await asyncio.wait_for(update_started.wait(), timeout=5)
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(
+                        asyncio.shield(update_task),
+                        timeout=0.1,
+                    )
 
                 report_task = asyncio.create_task(record_state())
                 updated = await asyncio.wait_for(report_task, timeout=5)

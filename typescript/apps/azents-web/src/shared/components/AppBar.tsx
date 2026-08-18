@@ -40,13 +40,14 @@ export function AppBar({ authStatus }: AppBarProps): React.ReactElement {
   const pathname = usePathname();
   const { opened: sidebarOpened, toggle: toggleSidebar } = useSidebar();
   const isAuthenticated = authStatus === "authenticated";
-  const { data: adminAccess } = trpc.user.adminAccess.useQuery(
-    {},
-    {
-      enabled: isAuthenticated,
-      retry: false,
-    },
-  );
+  const { data: adminAccess, isPending: adminAccessPending } =
+    trpc.user.adminAccess.useQuery(
+      {},
+      {
+        enabled: isAuthenticated,
+        retry: false,
+      },
+    );
   const workspaceHandle = extractWorkspaceHandle(pathname);
   const isAgentDetailRoute = /^\/w\/[^/]+\/agents\/(?!new(?:\/|$))[^/]+/.test(
     pathname,
@@ -103,7 +104,7 @@ export function AppBar({ authStatus }: AppBarProps): React.ReactElement {
                 <IconUserCircle size={rem(24)} />
               </ActionIcon>
             </Menu.Target>
-            <Menu.Dropdown>
+            <Menu.Dropdown aria-busy={adminAccessPending}>
               <Menu.Item
                 leftSection={<IconUser size={rem(16)} />}
                 onClick={onAccount}

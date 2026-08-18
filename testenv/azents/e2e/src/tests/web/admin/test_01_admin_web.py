@@ -1,6 +1,5 @@
 """Real-browser E2E coverage for Main Web and Admin Web auth boundaries."""
 
-import time
 from typing import Any, cast
 
 import azentsadminclient
@@ -119,6 +118,14 @@ def _open_main_user_menu(driver: WebDriver) -> None:
     )
 
 
+def _wait_for_main_user_menu_access(driver: WebDriver) -> None:
+    _wait(driver).until(
+        ec.visibility_of_element_located(
+            (By.CSS_SELECTOR, "[role='menu'][aria-busy='false']")
+        )
+    )
+
+
 def _logout_main_web(driver: WebDriver) -> None:
     driver.find_element(By.XPATH, "//button[contains(., 'Log out')]").click()
     _wait_for_cookies_cleared(driver, names=_MAIN_COOKIE_NAMES)
@@ -202,7 +209,7 @@ def test_dual_web_auth_link_logout_self_revoke_and_path_routing(
         password=_SIGNUP_PASSWORD,
     )
     _open_main_user_menu(browser_driver)
-    time.sleep(1)
+    _wait_for_main_user_menu_access(browser_driver)
     if browser_driver.find_elements(By.LINK_TEXT, "System Administration"):
         raise AssertionError("ordinary user received the Admin Web link")
     _logout_main_web(browser_driver)

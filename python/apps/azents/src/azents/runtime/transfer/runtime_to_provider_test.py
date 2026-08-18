@@ -51,6 +51,7 @@ class _Coordinator:
     recovery_stale_revision: bool = False
     second_admit_started: asyncio.Event | None = None
     release_second_admit: asyncio.Event | None = None
+    renew_started: asyncio.Event | None = None
 
     def __post_init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
@@ -160,6 +161,8 @@ class _Coordinator:
         request: CoordinatorConsumerRequest,
     ) -> CoordinatorTransferStatus:
         self.calls.append(("renew", request.identity.transfer_id))
+        if self.renew_started is not None:
+            self.renew_started.set()
         return _status(
             6,
             request.identity,
@@ -369,9 +372,11 @@ async def test_first_claim_renews_while_later_source_prepares() -> None:
     """The first live claim renews before a delayed second source is admitted."""
     second_admit_started = asyncio.Event()
     release_second_admit = asyncio.Event()
+    renew_started = asyncio.Event()
     coordinator = _Coordinator(
         second_admit_started=second_admit_started,
         release_second_admit=release_second_admit,
+        renew_started=renew_started,
     )
     service = _service(
         coordinator,
@@ -388,7 +393,7 @@ async def test_first_claim_renews_while_later_source_prepares() -> None:
     )
 
     await second_admit_started.wait()
-    await asyncio.sleep(0.01)
+    await asyncio.wait_for(renew_started.wait(), timeout=1)
     release_second_admit.set()
     batch = await preparation
 

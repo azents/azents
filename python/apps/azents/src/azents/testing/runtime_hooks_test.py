@@ -23,16 +23,28 @@ class _RuntimeHookQAToolkitForTest(RuntimeHookQAToolkit):
 
 
 @pytest.mark.asyncio
-async def test_probe_waits_for_release_file(tmp_path: Path) -> None:
+async def test_probe_waits_for_release_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Keep the probe blocked until the configured release file exists."""
     release_file = tmp_path / "release"
+    release_file_checked = asyncio.Event()
+    path_exists = Path.exists
+
+    def observed_exists(path: Path) -> bool:
+        if path == release_file:
+            release_file_checked.set()
+        return path_exists(path)
+
+    monkeypatch.setattr(Path, "exists", observed_exists)
     toolkit = _RuntimeHookQAToolkitForTest(
         RuntimeHookQAConfig(release_file_path=str(release_file))
     )
     tool = toolkit.make_probe_tool()
 
     task = asyncio.ensure_future(tool.handler('{"marker":"blocked"}'))
-    await asyncio.sleep(0.2)
+    await asyncio.wait_for(release_file_checked.wait(), timeout=1)
     assert not task.done()
 
     release_file.touch()

@@ -39,10 +39,32 @@ from azents_runtime_control.runtime_configuration import (
 )
 
 
+class _ObservedProviderMessages(
+    list[runtime_provider_control_pb2.ProviderMessage],
+):
+    """Record outbound messages and expose count-based synchronization."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.changed = asyncio.Event()
+
+    def append(self, message: runtime_provider_control_pb2.ProviderMessage) -> None:
+        super().append(message)
+        self.changed.set()
+
+    async def wait_for_count(self, expected: int) -> None:
+        """Wait until the stream has consumed the expected messages."""
+        while len(self) < expected:
+            self.changed.clear()
+            if len(self) >= expected:
+                return
+            await self.changed.wait()
+
+
 @pytest.mark.asyncio
 async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
     """The client maps the gRPC stream onto the ProviderControlClient protocol."""
-    sent: list[runtime_provider_control_pb2.ProviderMessage] = []
+    sent = _ObservedProviderMessages()
 
     async def stream(
         requests: AsyncIterator[runtime_provider_control_pb2.ProviderMessage],
@@ -153,10 +175,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
             completed_at=_now(),
         )
     )
-    for _ in range(10):
-        if len(sent) >= 3:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(sent.wait_for_count(3), timeout=1)
 
     assert sent[0].WhichOneof("payload") == "register"
     assert sent[1].WhichOneof("payload") == "heartbeat"
@@ -203,8 +222,6 @@ async def test_grpc_client_close_suppresses_completed_stream_failure() -> None:
         registered_at=_now(),
     )
     await asyncio.wait_for(closed.wait(), timeout=1)
-    await asyncio.sleep(0)
-
     await client.close()
 
 

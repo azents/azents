@@ -420,9 +420,15 @@ async def test_exact_duplicate_intent_reuses_one_completed_result(
 
     await manager.handle_intent(intent)
     assert (await _result(control)).outcome is RunnerTransferOutcome.SUCCEEDED
-    await asyncio.sleep(0.01)
+    await asyncio.wait_for(
+        _wait_for_active_count(manager, expected=0),
+        timeout=1,
+    )
     await manager.handle_intent(intent)
-    await asyncio.sleep(0)
+    await asyncio.wait_for(
+        _wait_for_result_count(control, expected=2),
+        timeout=1,
+    )
 
     assert len(control.results) == 2
     assert control.results[0] == control.results[1]
@@ -822,9 +828,11 @@ async def test_bounded_result_queue_backpressures_without_dropping_terminal_resu
     await asyncio.wait_for(control.entered.wait(), timeout=1)
     await manager.handle_intent(second)
     third_admission = asyncio.create_task(manager.handle_intent(third))
-    await asyncio.sleep(0)
-
-    assert not third_admission.done()
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(
+            asyncio.shield(third_admission),
+            timeout=0.01,
+        )
     control.release.set()
     await asyncio.wait_for(third_admission, timeout=1)
     await asyncio.wait_for(
@@ -846,6 +854,18 @@ async def test_bounded_result_queue_backpressures_without_dropping_terminal_resu
 
 async def _wait_for_result_count(control: _Control, *, expected: int) -> None:
     while len(control.results) < expected:
+        control.result_ready.clear()
+        if len(control.results) >= expected:
+            return
+        await control.result_ready.wait()
+
+
+async def _wait_for_active_count(
+    manager: RunnerTransferManager,
+    *,
+    expected: int,
+) -> None:
+    while len(manager._active) != expected:
         await asyncio.sleep(0)
 
 
@@ -889,13 +909,16 @@ async def test_failed_result_sink_unblocks_queue_and_shutdown(
     await manager.handle_intent(second)
     third_admission = asyncio.create_task(manager.handle_intent(third))
     fourth_admission = asyncio.create_task(manager.handle_intent(fourth))
-    await asyncio.sleep(0)
-    assert not third_admission.done()
-    assert not fourth_admission.done()
+    pending_admissions = asyncio.gather(third_admission, fourth_admission)
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(
+            asyncio.shield(pending_admissions),
+            timeout=0.01,
+        )
 
     control.release.set()
     await asyncio.wait_for(
-        asyncio.gather(third_admission, fourth_admission),
+        pending_admissions,
         timeout=1,
     )
     await asyncio.wait_for(manager.close(), timeout=0.1)

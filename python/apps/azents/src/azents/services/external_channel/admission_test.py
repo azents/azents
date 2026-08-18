@@ -234,7 +234,7 @@ async def test_provider_mutation_timeout_terminalizes_without_replay() -> None:
         yield cast(AsyncSession, session)
 
     async def callback(_: ExternalChannelInteractionHandoff) -> None:
-        await asyncio.sleep(1)
+        await asyncio.Event().wait()
 
     await ExternalChannelAdmissionService(
         session_manager=cast(SessionManager[AsyncSession], session_manager),

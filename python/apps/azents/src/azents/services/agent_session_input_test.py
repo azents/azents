@@ -9,6 +9,7 @@ from typing import cast
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -1719,8 +1720,11 @@ class TestAgentSessionInputService:
                     agent_id,
                 )
                 assert decommissioned is not None
-                admission_task = asyncio.create_task(
-                    service.create_buffered_agent_input(
+                admission_started = asyncio.Event()
+
+                async def create_input() -> object:
+                    admission_started.set()
+                    return await service.create_buffered_agent_input(
                         agent_id=agent_id,
                         agent_session_id=agent_session.id,
                         message=InputMessage(
@@ -1734,10 +1738,15 @@ class TestAgentSessionInputService:
                         request_payload={"request": "agent-fence"},
                         client_request_id="agent-fence",
                     )
-                )
+
+                admission_task = asyncio.create_task(create_input())
                 try:
-                    await asyncio.sleep(0.1)
-                    assert not admission_task.done()
+                    await asyncio.wait_for(admission_started.wait(), timeout=5)
+                    with pytest.raises(TimeoutError):
+                        await asyncio.wait_for(
+                            asyncio.shield(admission_task),
+                            timeout=0.1,
+                        )
                     await decommission_session.commit()
                     result = await asyncio.wait_for(admission_task, timeout=5)
                 finally:

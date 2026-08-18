@@ -71,9 +71,10 @@ class _DelayedCallback:
     """Publication callback that holds the consumer lease across several ticks."""
 
     uploads: list[VerifiedRuntimeUpload]
+    release: asyncio.Event
 
     async def publish(self, upload: VerifiedRuntimeUpload) -> None:
-        await asyncio.sleep(0.01)
+        await self.release.wait()
         self.uploads.append(upload)
 
 
@@ -86,7 +87,7 @@ class _CancellableCallback:
 
     async def publish(self, upload: VerifiedRuntimeUpload) -> None:
         try:
-            await asyncio.sleep(0.05)
+            await asyncio.Event().wait()
         except asyncio.CancelledError:
             self.cancelled = True
             raise
@@ -98,6 +99,7 @@ class _Coordinator:
         self.calls: list[str] = []
         self.ack_fails = ack_fails
         self.ack_attempted = False
+        self.second_renewal = asyncio.Event()
 
     async def admit_transfer(
         self, request: CoordinatorAdmitTransferRequest
@@ -135,6 +137,8 @@ class _Coordinator:
         self, request: CoordinatorConsumerRequest
     ) -> CoordinatorTransferStatus:
         self.calls.append("renew")
+        if self.calls.count("renew") == 2:
+            self.second_renewal.set()
         return _status(6, request.identity, CoordinatorTransferPhase.CONSUMING)
 
     async def get_verified_object(
@@ -802,6 +806,7 @@ async def test_terminal_failed_settlement_is_not_reported_as_success() -> None:
 async def test_long_publication_renews_consumer_lease_until_callback_finishes() -> None:
     """The product callback retains its consumer fence beyond its first renewal."""
     coordinator = _Coordinator()
+    release = asyncio.Event()
     service = RuntimeToServerTransferService(
         coordinator=coordinator,
         clock=lambda: _NOW,
@@ -809,7 +814,12 @@ async def test_long_publication_renews_consumer_lease_until_callback_finishes() 
         consumer_lease_renew_interval=timedelta(milliseconds=1),
     )
 
-    await service.transfer(_request(_DelayedCallback([])))
+    transfer = asyncio.create_task(
+        service.transfer(_request(_DelayedCallback([], release)))
+    )
+    await asyncio.wait_for(coordinator.second_renewal.wait(), timeout=1)
+    release.set()
+    await asyncio.wait_for(transfer, timeout=1)
 
     assert coordinator.calls.count("renew") > 1
 
