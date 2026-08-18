@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/features/chat/workspace/components/RuntimeConfigurationStatus.tsx
-last_verified_at: 2026-08-13
-spec_version: 26
+last_verified_at: 2026-08-18
+spec_version: 27
 ---
 
 # Runtime Provider
@@ -301,9 +301,9 @@ The Kubernetes Provider remains disabled by default. When enabled, Helm renders 
 
 The long-running Provider receives a dedicated read-only projected ServiceAccount token at `AZ_RUNTIME_PROVIDER_SERVICE_ACCOUNT_TOKEN_FILE`. Its audience is exactly `azents-runtime-control`; the Provider selects `kubernetes_service_account` explicitly, reads the current token immediately before connecting, and reconnects after projected-token rotation without logging token content. The default auto-mounted Kubernetes API token is not the authentication contract.
 
-Runtime Control uses its server ServiceAccount to create Kubernetes TokenReview requests. It accepts workload identity only when TokenReview reports an authenticated result with the exact required audience and `system:serviceaccount:<namespace>:<name>` subject, and that subject resolves to exactly one active bootstrap-owned binding. The Provider ServiceAccount may manage its Runtime Pods/PVCs and leader Lease but cannot create TokenReviews or write Secrets.
+Runtime Control uses its server ServiceAccount to create Kubernetes TokenReview requests. It accepts workload identity only when TokenReview reports an authenticated result with the exact required audience and `system:serviceaccount:<namespace>:<name>` subject, and that subject resolves to exactly one active bootstrap-owned binding. The Provider ServiceAccount cannot create TokenReviews, SubjectAccessReviews, or impersonation requests. Its workload-namespace Role grants the resource access required for Runtime Pods, PVCs, Services, ConfigMaps, NetworkPolicies, and Provider-owned logical-Runtime CA Secrets, plus leader-Lease access. The Secret verbs are `get`, `create`, `update`, and `delete`; Provider code validates exact ownership metadata before reading, replacing, or deleting the strict-network CA resource. ClusterRole authority is limited to reading the configured workload Namespace and creating SelfSubjectAccessReviews. Separate namespaced Roles grant `get` for each explicitly named mandatory Service.
 
-The active chart has no Provider credential or shared Runtime Control authentication values, credential bootstrap Job, staging/final Provider credential Secret, credential volume, or bootstrap Secret RBAC. Runtime Control TLS remains mandatory and separate from Provider authentication. Admin Provider policy cannot mutate cluster RBAC, NetworkPolicy, RuntimeClass, Secret contents, or other deployment-owned security controls.
+The active chart has no Provider credential or shared Runtime Control authentication values, credential bootstrap Job, staging/final Provider credential Secret, credential volume, or authentication-bootstrap Secret RBAC. The logical-Runtime CA Secret is execution-policy material owned by strict proxy enforcement, not Provider or Runtime Control authentication state. Runtime Control TLS remains mandatory and separate from Provider authentication. Admin Provider policy cannot mutate cluster RBAC, chart-level NetworkPolicy, RuntimeClass, arbitrary Secret contents, or other deployment-owned security controls.
 
 Authentication rollout does not render, own, select, delete, rename, or recreate Runtime PersistentVolumeClaims or PersistentVolumes. Credential-driven Runtime Pod replacement reuses the existing PVC; only the established explicit Runtime reset or terminal-delete operations may invoke PVC deletion.
 
@@ -314,6 +314,9 @@ Admin Profile editing cannot mutate those deployment boundaries.
 
 ## Version history
 
+- **27 (2026-08-18):** Corrected Kubernetes Provider deployment authority to include
+  namespace-scoped strict-network Service, ConfigMap, NetworkPolicy, and logical-Runtime CA Secret
+  operations while preserving server-only TokenReview and credential-Secret-free authentication.
 - **26 (2026-08-13):** Added Kubernetes Profile v3 and Workspace Policy v2 hierarchical network
   authority, strict `proxy_required` and `no_network` enforcement bundles, Provider protocol v3
   aggregate `network_enforcement`, operator-attested capability diagnostics, mode-aware lifecycle
