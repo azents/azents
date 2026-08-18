@@ -96,9 +96,11 @@ from .data import (
 )
 
 
-def _get_avatar_handler() -> AvatarUploadHandler:
-    """AvatarUploadHandler DI (stateless singleton)."""
-    return AvatarUploadHandler()
+def _get_avatar_cdn_base_url(
+    config: Annotated[Config, Depends(get_config)],
+) -> str | None:
+    """Avatar CDN base URL DI (optional)."""
+    return config.avatar_cdn_base_url
 
 
 def _get_workspace_s3_bucket(
@@ -106,13 +108,6 @@ def _get_workspace_s3_bucket(
 ) -> str:
     """Workspace S3 bucket name DI."""
     return config.workspace_s3.bucket
-
-
-def _get_avatar_cdn_base_url(
-    config: Annotated[Config, Depends(get_config)],
-) -> str | None:
-    """Avatar CDN base URL DI (optional)."""
-    return config.avatar_cdn_base_url
 
 
 @dataclasses.dataclass
@@ -144,7 +139,6 @@ class AgentService:
         Depends(RuntimeProfileWorkspaceService),
     ]
     upload_service: Annotated[UploadService, Depends(get_upload_service)]
-    avatar_handler: Annotated[AvatarUploadHandler, Depends(_get_avatar_handler)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     workspace_s3_bucket: Annotated[str, Depends(_get_workspace_s3_bucket)]
     avatar_cdn_base_url: Annotated[str | None, Depends(_get_avatar_cdn_base_url)]
@@ -1035,15 +1029,6 @@ class AgentService:
                 pass
             case Failure(_):
                 return Failure(NotFound(agent_id=agent_id))
-        if existing.avatar is not None:
-            try:
-                await self.avatar_handler.delete_files(
-                    existing.avatar,
-                    self.s3_service,
-                    self.workspace_s3_bucket,
-                )
-            except Exception:  # noqa: BLE001 — best-effort cleanup
-                pass
         return Success(await self._build_output(updated_agent, can_manage=True))
 
     async def remove_avatar(
@@ -1054,7 +1039,7 @@ class AgentService:
         workspace_user_id: str,
         role: WorkspaceUserRole,
     ) -> Result[AgentOutput, NotFound | NotBelongToWorkspace | NotAdmin]:
-        """Remove Avatar and delete S3 files."""
+        """Remove the current Avatar."""
         async with self.session_manager() as session:
             existing = await self.repository.get_by_id(session, agent_id)
         if existing is None:
@@ -1073,15 +1058,6 @@ class AgentService:
                 pass
             case Failure(_):
                 return Failure(NotFound(agent_id=agent_id))
-        if existing.avatar is not None:
-            try:
-                await self.avatar_handler.delete_files(
-                    existing.avatar,
-                    self.s3_service,
-                    self.workspace_s3_bucket,
-                )
-            except Exception:  # noqa: BLE001
-                pass
         return Success(await self._build_output(updated_agent, can_manage=True))
 
     async def _build_output(

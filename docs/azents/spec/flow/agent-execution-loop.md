@@ -31,6 +31,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/context/compaction.py
   - python/apps/azents/src/azents/engine/context/window.py
   - python/apps/azents/src/azents/engine/model_stream.py
+  - python/apps/azents/src/azents/utils/logging.py
   - python/apps/azents/src/azents/engine/responses.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/hooks/**
@@ -78,8 +79,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-16
-spec_version: 156
+last_verified_at: 2026-08-18
+spec_version: 157
 ---
 
 # Agent Execution Loop
@@ -305,6 +306,14 @@ many non-cooperative tasks remain pending. Structured lifecycle logs carry only 
 such as call kind, provider, model, Session/Run identifiers, attempt number, deadline, elapsed time,
 failure code, and cleanup state;
 they do not include model content.
+
+When a cancelled response acquisition/iteration later raises instead of
+cooperatively cancelling, its final cleanup observer emits one warning with the
+origin traceback frames, a static replacement exception message, cleanup reason,
+fixed cleanup stage, and the same bounded call context. Owned grace or drain
+support tasks use the same final-observer rule. Expected task cancellation
+remains silent, untrusted exception text is not rendered, and the late failure
+never changes the already selected timeout or caller-cancellation outcome.
 
 User Stop has priority over a concurrent watchdog deadline. It cancels the model attempt
 preemptively, may promote the valid assistant prefix through the existing interruption path, and does
@@ -1290,6 +1299,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-18** (spec_version 157) — Added exact final-observer traceback
+  logging for late model-stream operations and owned cleanup support tasks while
+  preserving authoritative timeout and caller-cancellation outcomes.
 - **2026-08-16** (spec_version 156) — Added Scheduled Task start binding, typed
   multi-cycle idle continuation, and terminal-tool completion without another
   model turn.

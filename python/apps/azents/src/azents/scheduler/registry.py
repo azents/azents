@@ -162,7 +162,7 @@ async def owner_lifecycle_handler(context: TaskContext) -> TaskResult:
 async def file_lifecycle_cleanup_handler(context: TaskContext) -> TaskResult:
     """Run bounded scheduler-owned file lifecycle cleanup."""
     service = await context.container.solve(FileLifecycleCleanupService)
-    summary = await service.cleanup_once()
+    summary = await service.cleanup_once(lease_owner=context.lease_owner)
     logger.info(
         "File lifecycle cleanup completed",
         extra={

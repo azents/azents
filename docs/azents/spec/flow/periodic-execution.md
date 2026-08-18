@@ -14,6 +14,10 @@ code_paths:
   - python/apps/azents/src/azents/job_runtime/registry.py
   - python/apps/azents/src/azents/job_runtime/types.py
   - python/apps/azents/src/azents/services/file_lifecycle_cleanup.py
+  - python/apps/azents/src/azents/utils/logging.py
+  - python/apps/azents/src/azents/repos/agent_avatar_cleanup/**
+  - python/apps/azents/src/azents/rdb/models/agent_avatar_cleanup.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/30c55c0ef241_add_agent_avatar_cleanup_jobs.py
   - python/apps/azents/src/azents/services/archived_session_retention.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/chat/__init__.py
@@ -36,8 +40,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-08-17
-spec_version: 15
+last_verified_at: 2026-08-18
+spec_version: 16
 ---
 
 # Periodic Execution Flow Spec
@@ -104,6 +108,14 @@ one task-local DI container for each execution. The `scheduler.task` adapter res
 code-registered definition, reconstructs `TaskContext`, and invokes its async handler. The same Job
 Runtime also hosts External Channel ingress through a separate registered handler; Scheduler claims
 do not use ingress coalescing or rerun behavior.
+
+If a handler raises while settling inside cancellation grace, Local Job Runtime
+keeps the authoritative timeout outcome and records that otherwise-unobserved
+handler exception once with origin traceback frames, a static replacement
+exception message, and bounded handler/execution identity. Expected cooperative
+cancellation remains silent, untrusted exception text is not rendered, and a
+handler that outlives grace continues through the separate detached-cleanup
+observer.
 
 `job_runtime_backend=temporal` is a recognized configuration value but fails application composition
 because that backend is not implemented. Scheduler task handlers do not import Temporal APIs.
@@ -212,7 +224,8 @@ Each pass is bounded and may process:
 - due Artifact TTL rows, marking metadata expired and attempting blob deletion;
 - due ExchangeFile TTL rows, preserving existing ExchangeFile TTL behavior;
 - stale ModelFile pins for terminal runs;
-- AgentSession ModelFile GC cursor ranges where `model_file_gc_cursor_model_order` lags behind `model_input_head_model_order`.
+- AgentSession ModelFile GC cursor ranges where `model_file_gc_cursor_model_order` lags behind `model_input_head_model_order`; and
+- durable superseded-Agent-avatar cleanup jobs created atomically by committed avatar replacement or removal.
 
 ModelFile GC scans events in `(cursor_order, head_order]`, extracts FilePart `model_file_id`s,
 marks available unpinned ModelFiles deleted, attempts blob deletion, and advances the session GC cursor
@@ -230,9 +243,21 @@ The successful task result and completion log include these lifecycle counters:
 - `artifacts_expired`, `exchange_files_expired`, and `model_files_deleted` count metadata transitions in the current pass;
 - `artifact_blobs_deleted`, `exchange_file_blobs_deleted`, and `model_file_blobs_deleted` count successful object-store deletions by resource type;
 - `pending_blob_deletion_attempts` counts selected terminal rows that were already pending blob deletion before the pass began; and
-- `blob_delete_failed` counts failed object-store deletion attempts.
+- `blob_delete_failed` counts failed object-store deletion attempts; and
+- `avatar_cleanup_attempted`, `avatar_cleanup_completed`, and
+  `avatar_cleanup_failed` report the bounded superseded-avatar stage.
 
 The pending snapshot is used only for observability. The actual object-store batch remains bounded at 100 Artifact rows, 100 ExchangeFile rows, and 200 ModelFile rows, with terminal rows selected after the metadata work so existing retry ordering is preserved.
+
+The avatar stage derives one unique opaque claim token per cleanup pass and
+claims at most 100 due jobs with five-minute leases. Claiming increments the
+attempt count. The handler deletes the immutable snapshot through the avatar
+file handler, logs one safe-ID traceback and releases the row into bounded
+exponential retry after failure, and deletes the job after successful blob
+cleanup only when the exact token still owns it. An expired lease is reclaimable
+under a new token, including by a later attempt in the same scheduler process;
+the stale token cannot settle the new claim. Agent deletion clears only the
+optional diagnostic Agent ID and cannot remove the cleanup snapshot.
 
 ## Session automatic archive task
 
@@ -332,6 +357,9 @@ Model catalog source sync is a later consumer of this scheduler.
 
 ## Changelog
 
+- **2026-08-18** — v16. Added durable scheduler-owned cleanup for avatars
+  superseded by committed Agent replacement/removal, plus exact observation of
+  Local Job Runtime handler failures that settle during cancellation grace.
 - **2026-08-17** — v15. Removed the shared Job Runtime diagnostics introduced in
   v13 while preserving the current Scheduled Task dispatcher behavior.
 - **2026-08-17** — v14. Added the code-owned user Scheduled Task dispatcher to the

@@ -5,6 +5,7 @@ import dataclasses
 import datetime
 import logging
 from typing import Annotated
+from uuid import uuid4
 
 from azcommon.infra.s3.service import S3Service
 from fastapi import Depends
@@ -17,12 +18,16 @@ from azents.core.s3.deps import get_s3_service
 from azents.engine.events.model_file_refs import unique_model_file_ids
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.agent_avatar_cleanup import AgentAvatarCleanupRepository
+from azents.repos.agent_avatar_cleanup.data import AgentAvatarCleanupJob
 from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.artifact import ArtifactRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file_pin import ModelFilePinRepository
+from azents.services.uploads.handlers.avatar import AvatarUploadHandler
+from azents.utils.logging import sanitized_exception_info
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,11 @@ _EXCHANGE_FILE_EXPIRATION_LIMIT = 100
 _MODEL_FILE_SESSION_LIMIT = 20
 _MODEL_FILE_EVENT_LIMIT = 200
 _STALE_PIN_LIMIT = 200
+_AVATAR_CLEANUP_LIMIT = 100
+_AVATAR_CLEANUP_LEASE_DURATION = datetime.timedelta(minutes=5)
+_AVATAR_CLEANUP_MAX_RETRY_DELAY = datetime.timedelta(minutes=30)
+_AVATAR_CLEANUP_LEASE_TOKEN_MAX_LENGTH = 120
+_AVATAR_CLEANUP_LEASE_TOKEN_SEPARATOR = ":"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -62,6 +72,29 @@ class ModelFileCleanupResult:
     sessions_advanced: int
 
 
+def _new_avatar_cleanup_lease_token(scheduler_lease_owner: str) -> str:
+    """Build one bounded unique token for an avatar cleanup pass."""
+    suffix = uuid4().hex
+    owner_max_length = (
+        _AVATAR_CLEANUP_LEASE_TOKEN_MAX_LENGTH
+        - len(_AVATAR_CLEANUP_LEASE_TOKEN_SEPARATOR)
+        - len(suffix)
+    )
+    return (
+        f"{scheduler_lease_owner[:owner_max_length]}"
+        f"{_AVATAR_CLEANUP_LEASE_TOKEN_SEPARATOR}{suffix}"
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class AvatarCleanupResult:
+    """Result of one bounded superseded-avatar deletion pass."""
+
+    attempted: int
+    completed: int
+    failed: int
+
+
 @dataclasses.dataclass(frozen=True)
 class FileLifecycleCleanupSummary:
     """Summary of one file lifecycle cleanup pass."""
@@ -76,6 +109,9 @@ class FileLifecycleCleanupSummary:
     model_file_blobs_deleted: int
     pending_blob_deletion_attempts: int
     blob_delete_failed: int
+    avatar_cleanup_attempted: int
+    avatar_cleanup_completed: int
+    avatar_cleanup_failed: int
 
     def to_dict(self) -> dict[str, int]:
         """Return scheduler-result-compatible summary."""
@@ -103,10 +139,14 @@ class FileLifecycleCleanupService:
     transcript_repository: Annotated[
         EventTranscriptRepository, Depends(EventTranscriptRepository)
     ]
+    avatar_cleanup_repository: Annotated[
+        AgentAvatarCleanupRepository, Depends(AgentAvatarCleanupRepository)
+    ]
+    avatar_handler: Annotated[AvatarUploadHandler, Depends(AvatarUploadHandler)]
     s3_service: Annotated[S3Service, Depends(get_s3_service)]
     config: Annotated[Config, Depends(get_config)]
 
-    async def cleanup_once(self) -> FileLifecycleCleanupSummary:
+    async def cleanup_once(self, *, lease_owner: str) -> FileLifecycleCleanupSummary:
         """Run one bounded scheduler cleanup pass."""
         pending_blob_deletion_ids = await self._list_pending_blob_deletion_ids()
         artifacts_expired = await self._expire_artifacts()
@@ -114,6 +154,9 @@ class FileLifecycleCleanupService:
         stale_pins_released = await self._release_stale_pins()
         model_file_cleanup = await self._cleanup_model_files()
         blob_deletions = await self._retry_blob_deletions(pending_blob_deletion_ids)
+        avatar_cleanup = await self._cleanup_superseded_avatars(
+            lease_token=_new_avatar_cleanup_lease_token(lease_owner),
+        )
         return FileLifecycleCleanupSummary(
             artifacts_expired=artifacts_expired,
             exchange_files_expired=exchange_expired,
@@ -125,7 +168,96 @@ class FileLifecycleCleanupService:
             model_file_blobs_deleted=blob_deletions.model_file_blobs_deleted,
             pending_blob_deletion_attempts=blob_deletions.pending_attempts,
             blob_delete_failed=blob_deletions.failures,
+            avatar_cleanup_attempted=avatar_cleanup.attempted,
+            avatar_cleanup_completed=avatar_cleanup.completed,
+            avatar_cleanup_failed=avatar_cleanup.failed,
         )
+
+    async def _cleanup_superseded_avatars(
+        self,
+        *,
+        lease_token: str,
+    ) -> AvatarCleanupResult:
+        """Delete a bounded page of durably tracked superseded avatars."""
+        now = datetime.datetime.now(datetime.UTC)
+        async with self.session_manager() as session:
+            jobs = await self.avatar_cleanup_repository.claim_due(
+                session,
+                now=now,
+                lease_token=lease_token,
+                lease_until=now + _AVATAR_CLEANUP_LEASE_DURATION,
+                limit=_AVATAR_CLEANUP_LIMIT,
+            )
+        completed = 0
+        failed = 0
+        for job in jobs:
+            try:
+                await self.avatar_handler.delete_files(
+                    job.avatar,
+                    self.s3_service,
+                    self.config.workspace_s3.bucket,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                failed += 1
+                failed_at = datetime.datetime.now(datetime.UTC)
+                logger.error(
+                    "Failed to delete superseded Agent avatar",
+                    exc_info=sanitized_exception_info(
+                        error,
+                        message="Superseded Agent avatar cleanup failed",
+                    ),
+                    extra={
+                        "agent_avatar_cleanup_job_id": job.id,
+                        "agent_id": job.agent_id,
+                        "attempt_count": job.attempt_count,
+                        "failure_kind": type(error).__name__,
+                    },
+                )
+                await self._mark_avatar_cleanup_retry(
+                    job=job,
+                    lease_token=lease_token,
+                    failure_kind=type(error).__name__,
+                    now=failed_at,
+                )
+                continue
+            async with self.session_manager() as session:
+                deleted = await self.avatar_cleanup_repository.delete_completed(
+                    session,
+                    job_id=job.id,
+                    lease_token=lease_token,
+                )
+            completed += int(deleted)
+        return AvatarCleanupResult(
+            attempted=len(jobs),
+            completed=completed,
+            failed=failed,
+        )
+
+    async def _mark_avatar_cleanup_retry(
+        self,
+        *,
+        job: AgentAvatarCleanupJob,
+        lease_token: str,
+        failure_kind: str,
+        now: datetime.datetime,
+    ) -> None:
+        """Record a bounded retry delay for one failed avatar deletion."""
+        delay_minutes = min(2 ** max(0, job.attempt_count - 1), 30)
+        delay = min(
+            datetime.timedelta(minutes=delay_minutes),
+            _AVATAR_CLEANUP_MAX_RETRY_DELAY,
+        )
+        async with self.session_manager() as session:
+            await self.avatar_cleanup_repository.mark_retry(
+                session,
+                job_id=job.id,
+                lease_token=lease_token,
+                next_attempt_at=now + delay,
+                failure_kind=failure_kind,
+                now=now,
+            )
 
     async def _expire_artifacts(self) -> int:
         now = datetime.datetime.now(datetime.UTC)

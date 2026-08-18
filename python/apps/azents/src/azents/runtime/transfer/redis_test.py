@@ -9,6 +9,8 @@ import pytest
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
+    RuntimeTransferCleanupArtifact,
+    RuntimeTransferCleanupFailureEvidence,
     RuntimeTransferCleanupStatus,
     RuntimeTransferDirection,
     RuntimeTransferDispatchStatus,
@@ -88,6 +90,11 @@ def _record() -> RuntimeTransferRecord:
         terminal_outcome=RuntimeTransferOutcome.CANCELLED,
         terminal_expires_at=_NOW + timedelta(minutes=7),
         cleanup_status=RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+        cleanup_failure=RuntimeTransferCleanupFailureEvidence(
+            artifact=RuntimeTransferCleanupArtifact.MULTIPART_ABORT,
+            observed_at=_NOW + timedelta(minutes=2),
+            attempts=1,
+        ),
         failure=RuntimeTransferFailure.CANCELLED,
     )
 
@@ -216,7 +223,7 @@ def test_record_codec_rejects_schema_and_domain_failures() -> None:
         _decode_record_envelope(json.dumps(missing).encode())
 
     wrong_version = _json_payload(record)
-    wrong_version["version"] = 8
+    wrong_version["version"] = 7
     with pytest.raises(ValueError, match="version"):
         _decode_record_envelope(json.dumps(wrong_version).encode())
 

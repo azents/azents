@@ -17,6 +17,9 @@ from azcommon.infra.s3.service import (
 from azents.runtime.transfer.object_store import RuntimeTransferS3Cleanup
 
 _NOW = datetime(2026, 7, 28, 12, tzinfo=UTC)
+_UNTRUSTED_CLEANUP_MESSAGE = (
+    "provider=sentinel endpoint=https://storage.example/private-key"
+)
 
 
 class _ObjectStore:
@@ -86,6 +89,7 @@ class _ObjectStore:
         self.aborted: list[str] = []
         self.fail_delete = {"v1/runtime-transfer/retry"}
         self.fail_abort = {"upload-retry"}
+        self.failure_message = _UNTRUSTED_CLEANUP_MESSAGE
 
     async def list_object_summaries_page(
         self,
@@ -115,12 +119,12 @@ class _ObjectStore:
     async def delete(self, *, bucket: str, key: str) -> None:
         assert bucket == "bucket"
         if key in self.fail_delete:
-            raise RuntimeError("delete unavailable")
+            raise RuntimeError(self.failure_message)
         self.deleted.append(key)
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
         if upload.upload_id in self.fail_abort:
-            raise RuntimeError("abort unavailable")
+            raise RuntimeError(self.failure_message)
         self.aborted.append(upload.upload_id)
 
     async def delete_verified_transfer_object(
@@ -136,7 +140,9 @@ class _ObjectStore:
 
 
 @pytest.mark.asyncio
-async def test_orphan_repair_uses_one_hour_cutoff_and_bounded_cursors() -> None:
+async def test_orphan_repair_uses_one_hour_cutoff_and_bounded_cursors(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """Old artifacts are cleaned without state while young artifacts remain."""
     object_store = _ObjectStore()
     cleanup = RuntimeTransferS3Cleanup(
@@ -145,16 +151,20 @@ async def test_orphan_repair_uses_one_hour_cutoff_and_bounded_cursors() -> None:
         object_prefix="/v1/runtime-transfer/",
     )
 
-    first = await cleanup.repair_orphans(
-        now=_NOW,
-        maximum_age=timedelta(hours=1),
-        page_size=2,
-    )
-    second = await cleanup.repair_orphans(
-        now=_NOW,
-        maximum_age=timedelta(hours=1),
-        page_size=2,
-    )
+    with caplog.at_level(
+        logging.WARNING,
+        logger="azents.runtime.transfer.object_store",
+    ):
+        first = await cleanup.repair_orphans(
+            now=_NOW,
+            maximum_age=timedelta(hours=1),
+            page_size=2,
+        )
+        second = await cleanup.repair_orphans(
+            now=_NOW,
+            maximum_age=timedelta(hours=1),
+            page_size=2,
+        )
 
     assert first.listed_objects == 2
     assert first.deleted_objects == 1
@@ -184,6 +194,16 @@ async def test_orphan_repair_uses_one_hour_cutoff_and_bounded_cursors() -> None:
             "upload-next",
         ),
     ]
+    failed_logs = [
+        record
+        for record in caplog.records
+        if record.message.startswith("Runtime transfer orphan")
+        and record.message.endswith("cleanup failed")
+    ]
+    assert len(failed_logs) == 2
+    assert all(record.exc_info is not None for record in failed_logs)
+    formatted = [logging.Formatter().format(record) for record in failed_logs]
+    assert all(_UNTRUSTED_CLEANUP_MESSAGE not in entry for entry in formatted)
 
 
 @pytest.mark.asyncio

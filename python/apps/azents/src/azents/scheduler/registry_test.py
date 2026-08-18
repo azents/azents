@@ -163,6 +163,9 @@ async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
         model_file_blobs_deleted=8,
         pending_blob_deletion_attempts=9,
         blob_delete_failed=10,
+        avatar_cleanup_attempted=11,
+        avatar_cleanup_completed=12,
+        avatar_cleanup_failed=13,
     )
     service = cast(Any, Mock())
     service.cleanup_once = AsyncMock(return_value=summary)
@@ -195,3 +198,4 @@ async def test_file_lifecycle_cleanup_handler_logs_structured_summary(
             **summary.to_dict(),
         },
     )
+    service.cleanup_once.assert_awaited_once_with(lease_owner="scheduler-1")

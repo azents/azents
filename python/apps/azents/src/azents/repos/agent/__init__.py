@@ -22,6 +22,7 @@ from azents.rdb.models.agent_admin import RDBAgentAdmin
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
+from azents.rdb.models.agent_avatar_cleanup import RDBAgentAvatarCleanupJob
 from azents.services.uploads.schema import StoredImage
 
 from .data import (
@@ -409,19 +410,27 @@ class AgentRepository:
         agent_id: str,
         avatar: StoredImage | None,
     ) -> Result[Agent, NotFound]:
-        """Update only Agent avatar field."""
+        """Atomically replace one avatar and retain prior deletion responsibility."""
         avatar_dict = avatar.model_dump(mode="json") if avatar is not None else None
-        stmt = (
-            sa.update(RDBAgent)
-            .where(RDBAgent.id == agent_id)
-            .values(avatar=avatar_dict)
-            .returning(RDBAgent.id)
+        result = await session.execute(
+            sa.select(RDBAgent).where(RDBAgent.id == agent_id).with_for_update()
         )
-        result = await session.execute(stmt)
-        if result.scalar_one_or_none() is None:
-            return Failure(NotFound(agent_id=agent_id))
-
-        rdb_agent = await session.get(RDBAgent, agent_id)
+        rdb_agent = result.scalar_one_or_none()
         if rdb_agent is None:
             return Failure(NotFound(agent_id=agent_id))
+        previous_avatar = (
+            StoredImage.model_validate(rdb_agent.avatar)
+            if rdb_agent.avatar is not None
+            else None
+        )
+        rdb_agent.avatar = avatar_dict
+        if previous_avatar is not None and previous_avatar != avatar:
+            session.add(
+                RDBAgentAvatarCleanupJob(
+                    agent_id=rdb_agent.id,
+                    avatar=previous_avatar.model_dump(mode="json"),
+                )
+            )
+        await session.flush()
+        await session.refresh(rdb_agent)
         return Success(self._build_row(rdb_agent))

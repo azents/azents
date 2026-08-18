@@ -37,6 +37,7 @@ from azents.runtime.transfer.coordinator import (
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
+    RuntimeTransferCleanupArtifact,
     RuntimeTransferCleanupStatus,
     RuntimeTransferDirection,
     RuntimeTransferDispatchStatus,
@@ -381,6 +382,11 @@ class RuntimeTransferCoordinatorGrpcServicer(
             attempt_id=record.admission.attempt_id,
             expected_revision=request.expected_revision,
             status=status,
+            cleanup_failure=(
+                _cleanup_failure_artifact(record)
+                if status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+                else None
+            ),
         )
         return await _status_response_or_abort(context, updated)
 
@@ -825,6 +831,23 @@ def _cleanup_status_to_proto(
         RuntimeTransferCleanupStatus.COMPLETE: pb.COORDINATOR_CLEANUP_STATUS_COMPLETE,
         RuntimeTransferCleanupStatus.RETRYABLE_FAILURE: pb.COORDINATOR_CLEANUP_STATUS_RETRYABLE_FAILURE,
     }[value]
+
+
+def _cleanup_failure_artifact(
+    record: RuntimeTransferRecord,
+) -> RuntimeTransferCleanupArtifact:
+    """Classify existing cleanup responsibility without a protocol field."""
+    if (
+        record.preparation_cleanup_state
+        is not RuntimeTransferPreparationCleanupState.NOT_REQUIRED
+        or record.pre_ready_object_handle is not None
+    ):
+        return RuntimeTransferCleanupArtifact.PREPARATION_CLEANUP
+    if record.multipart_cleanup_handle is not None:
+        if record.completed_object_cleanup_required:
+            return RuntimeTransferCleanupArtifact.MULTIPART_AND_COMPLETED_OBJECT
+        return RuntimeTransferCleanupArtifact.MULTIPART_ABORT
+    return RuntimeTransferCleanupArtifact.COMPLETED_OBJECT_DELETE
 
 
 def _preparation_cleanup_state_to_proto(

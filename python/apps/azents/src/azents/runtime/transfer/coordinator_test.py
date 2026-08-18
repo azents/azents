@@ -1,5 +1,6 @@
 """Runtime transfer coordinator dispatch and repair tests."""
 
+import logging
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -18,6 +19,7 @@ from azents.runtime.transfer.coordinator import (
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
     RuntimeTransferCancellationReason,
+    RuntimeTransferCleanupArtifact,
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
@@ -29,6 +31,9 @@ from azents.runtime.transfer.data import (
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
+_UNTRUSTED_CLEANUP_MESSAGE = (
+    "provider=sentinel endpoint=https://storage.example/private-key"
+)
 
 
 class _Clock:
@@ -51,6 +56,14 @@ class _Cleanup:
             self.handles.append(record.multipart_cleanup_handle)
         if record.preparation_multipart_cleanup_handle is not None:
             self.preparation_handles.append(record.preparation_multipart_cleanup_handle)
+
+
+class _FailingCleanup(_Cleanup):
+    """Cleanup fake that preserves a failed external cleanup boundary."""
+
+    async def cleanup(self, record: RuntimeTransferRecord) -> None:
+        await super().cleanup(record)
+        raise RuntimeError(_UNTRUSTED_CLEANUP_MESSAGE)
 
 
 @pytest.mark.asyncio
@@ -285,6 +298,7 @@ async def test_generation_fence_retains_multipart_cleanup_until_repair() -> None
         attempt_id="attempt-1",
         expected_revision=handled.revision,
         status=RuntimeTransferCleanupStatus.PENDING,
+        cleanup_failure=None,
     )
     assert pending is not None
     await coordination.register_connection(
@@ -439,6 +453,111 @@ async def test_ready_download_cancellation_cleans_before_terminal_release() -> N
     assert cancelled.cleanup_status is RuntimeTransferCleanupStatus.COMPLETE
     assert len(cleanup.records) == 1
     assert cleanup.records[0].completed_object_cleanup_required is True
+
+
+@pytest.mark.asyncio
+async def test_terminal_cleanup_failure_records_one_traceback_and_retry_evidence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The terminal cleanup owner logs and retains one failed cleanup attempt."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    cleanup = _FailingCleanup()
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        cleanup=cleanup,
+        clock=lambda: _NOW,
+    )
+    admitted = await coordinator.admit(_admission(), lease_id="lease-1")
+    assert admitted is not None
+    ready = await coordinator.mark_ready(
+        admitted,
+        expected_revision=admitted.revision,
+        object_handle=object_handle_for(admitted),
+        size=3,
+        sha256="a" * 64,
+    )
+    assert ready is not None
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="azents.runtime.transfer.coordinator",
+    ):
+        cancelled = await coordinator.cancel(
+            ready,
+            expected_revision=ready.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
+        )
+
+    assert cancelled is not None
+    assert cancelled.cleanup_status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+    assert cancelled.cleanup_failure is not None
+    assert (
+        cancelled.cleanup_failure.artifact
+        is RuntimeTransferCleanupArtifact.COMPLETED_OBJECT_DELETE
+    )
+    cleanup_logs = [
+        record
+        for record in caplog.records
+        if record.message == "Runtime transfer terminal cleanup requires retry"
+    ]
+    assert len(cleanup_logs) == 1
+    assert cleanup_logs[0].exc_info is not None
+    formatted = logging.Formatter().format(cleanup_logs[0])
+    assert _UNTRUSTED_CLEANUP_MESSAGE not in formatted
+    assert "RuntimeError: Runtime transfer terminal cleanup failed" in formatted
+
+
+@pytest.mark.asyncio
+async def test_terminal_cleanup_retry_preserves_and_increments_failure_evidence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A later terminal cleanup attempt preserves prior retry evidence."""
+    state = InMemoryRuntimeTransferStateStore(config=_config(), clock=lambda: _NOW)
+    coordinator = RuntimeTransferCoordinator(
+        state_store=state,
+        coordination_store=InMemoryRuntimeCoordinationStore(),
+        cleanup=_FailingCleanup(),
+        clock=lambda: _NOW,
+    )
+    admitted = await coordinator.admit(_admission(), lease_id="lease-1")
+    assert admitted is not None
+    ready = await coordinator.mark_ready(
+        admitted,
+        expected_revision=admitted.revision,
+        object_handle=object_handle_for(admitted),
+        size=3,
+        sha256="a" * 64,
+    )
+    assert ready is not None
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="azents.runtime.transfer.coordinator",
+    ):
+        first = await coordinator.cancel(
+            ready,
+            expected_revision=ready.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
+        )
+        assert first is not None
+        second = await coordinator.cancel(
+            first,
+            expected_revision=first.revision,
+            reason=RuntimeTransferCancellationReason.CALLER,
+        )
+
+    assert second is not None
+    assert second.cleanup_status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+    assert second.cleanup_failure is not None
+    assert second.cleanup_failure.attempts == 2
+    retry_logs = [
+        record
+        for record in caplog.records
+        if record.message == "Runtime transfer terminal cleanup requires retry"
+    ]
+    assert len(retry_logs) == 2
+    assert all(record.exc_info is not None for record in retry_logs)
 
 
 @pytest.mark.asyncio

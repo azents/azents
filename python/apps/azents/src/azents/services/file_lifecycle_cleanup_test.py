@@ -1,6 +1,7 @@
 """FileLifecycleCleanupService tests."""
 
 import datetime
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -21,11 +22,17 @@ from azents.engine.events.types import (
     Event,
     FileOutputPart,
 )
+from azents.repos.agent_avatar_cleanup.data import AgentAvatarCleanupJob
 from azents.repos.agent_session import ModelFileGCLaggingSession
 from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.model_file.data import ModelFile
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
+from azents.services.uploads.schema import (
+    StoredImage,
+    StoredImageFile,
+    StoredImageThumbnails,
+)
 
 _NOW = datetime.datetime.now(datetime.UTC)
 
@@ -272,6 +279,57 @@ class _PinRepo:
         return self.released
 
 
+class _AvatarCleanupRepo:
+    """Durable superseded-avatar cleanup repository test double."""
+
+    def __init__(self, jobs: list[AgentAvatarCleanupJob]) -> None:
+        self.jobs = jobs
+        self.claimed: list[tuple[datetime.datetime, str, datetime.datetime, int]] = []
+        self.deleted: list[tuple[str, str]] = []
+        self.retries: list[tuple[str, str, datetime.datetime, str]] = []
+
+    async def claim_due(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime.datetime,
+        lease_token: str,
+        lease_until: datetime.datetime,
+        limit: int,
+    ) -> list[AgentAvatarCleanupJob]:
+        """Return the configured bounded due page."""
+        del session
+        self.claimed.append((now, lease_token, lease_until, limit))
+        return self.jobs[:limit]
+
+    async def delete_completed(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_token: str,
+    ) -> bool:
+        """Record successful cleanup row deletion."""
+        del session
+        self.deleted.append((job_id, lease_token))
+        return True
+
+    async def mark_retry(
+        self,
+        session: AsyncSession,
+        *,
+        job_id: str,
+        lease_token: str,
+        next_attempt_at: datetime.datetime,
+        failure_kind: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Record failed cleanup retry state."""
+        del session, now
+        self.retries.append((job_id, lease_token, next_attempt_at, failure_kind))
+        return True
+
+
 class _AgentSessionRepo:
     """AgentSession repository test double."""
 
@@ -347,6 +405,32 @@ class _FailingS3Service(_S3Service):
         del bucket, key
         msg = "storage deletion failed"
         raise RuntimeError(msg)
+
+
+class _AvatarHandler:
+    """Avatar deletion handler test double."""
+
+    def __init__(
+        self,
+        *,
+        failing_keys: frozenset[str] | None = None,
+        failure_message: str = "avatar deletion failed",
+    ) -> None:
+        self.failing_keys = frozenset() if failing_keys is None else failing_keys
+        self.failure_message = failure_message
+        self.deleted_keys: list[str] = []
+
+    async def delete_files(
+        self,
+        avatar: StoredImage,
+        s3: _S3Service,
+        bucket: str,
+    ) -> None:
+        """Record one durable-avatar deletion attempt."""
+        del s3, bucket
+        if avatar.default.key in self.failing_keys:
+            raise RuntimeError(self.failure_message)
+        self.deleted_keys.append(avatar.default.key)
 
 
 class _WorkspaceS3Config:
@@ -478,6 +562,56 @@ def _lagging_session() -> ModelFileGCLaggingSession:
     )
 
 
+def _avatar(
+    key: str = "public/avatar/agent-1/large/old.webp",
+) -> StoredImage:
+    """Create one immutable superseded-avatar snapshot."""
+    default = StoredImageFile(
+        key=key,
+        content_type="image/webp",
+        size_bytes=1,
+        width=512,
+        height=512,
+    )
+    return StoredImage(
+        filename="old.webp",
+        default=default,
+        thumbnails=StoredImageThumbnails(large=default),
+        original=None,
+        uploaded_at=_NOW,
+    )
+
+
+def _avatar_cleanup_job() -> AgentAvatarCleanupJob:
+    """Create one due durable cleanup job."""
+    return AgentAvatarCleanupJob(
+        id="j" * 32,
+        agent_id="agent-1",
+        avatar=_avatar(),
+        attempt_count=1,
+        next_attempt_at=_NOW,
+        lease_token=None,
+        lease_until=None,
+        last_failure_kind=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
+
+
+def _avatar_cleanup_job_for(
+    *,
+    job_id: str,
+    avatar: StoredImage,
+) -> AgentAvatarCleanupJob:
+    """Create one due cleanup job for an exact immutable snapshot."""
+    return _avatar_cleanup_job().model_copy(
+        update={
+            "id": job_id,
+            "avatar": avatar,
+        }
+    )
+
+
 def _service(
     *,
     artifacts: list[Artifact] | None = None,
@@ -486,6 +620,8 @@ def _service(
     agent_session_repo: _AgentSessionRepo | None = None,
     transcript_repo: _TranscriptRepo | None = None,
     s3_service: _S3Service | None = None,
+    avatar_cleanup_repo: _AvatarCleanupRepo | None = None,
+    avatar_handler: _AvatarHandler | None = None,
 ) -> FileLifecycleCleanupService:
     """Build service with fake dependencies."""
     return FileLifecycleCleanupService(
@@ -499,6 +635,11 @@ def _service(
             agent_session_repo or _AgentSessionRepo([]),
         ),
         transcript_repository=cast(Any, transcript_repo or _TranscriptRepo([])),
+        avatar_cleanup_repository=cast(
+            Any,
+            avatar_cleanup_repo or _AvatarCleanupRepo([]),
+        ),
+        avatar_handler=cast(Any, avatar_handler or _AvatarHandler()),
         s3_service=cast(Any, s3_service or _S3Service()),
         config=cast(Any, _Config()),
     )
@@ -518,11 +659,13 @@ async def test_cleanup_once_expires_ttl_resources_and_retries_blob_deletion() ->
         model_file_pin_repository=cast(Any, _PinRepo()),
         agent_session_repository=cast(Any, _AgentSessionRepo([])),
         transcript_repository=cast(Any, _TranscriptRepo([])),
+        avatar_cleanup_repository=cast(Any, _AvatarCleanupRepo([])),
+        avatar_handler=cast(Any, _AvatarHandler()),
         s3_service=cast(Any, s3),
         config=cast(Any, _Config()),
     )
 
-    summary = await service.cleanup_once()
+    summary = await service.cleanup_once(lease_owner="scheduler-1")
 
     assert summary.artifacts_expired == 1
     assert summary.exchange_files_expired == 1
@@ -550,7 +693,7 @@ async def test_model_file_gc_deletes_unpinned_model_file_and_advances_cursor() -
         transcript_repo=_TranscriptRepo([_file_event()]),
     )
 
-    summary = await service.cleanup_once()
+    summary = await service.cleanup_once(lease_owner="scheduler-1")
 
     assert summary.model_files_deleted == 1
     assert summary.model_file_blobs_deleted == 1
@@ -570,7 +713,7 @@ async def test_model_file_gc_does_not_advance_cursor_when_file_is_pinned() -> No
         transcript_repo=_TranscriptRepo([_file_event()]),
     )
 
-    summary = await service.cleanup_once()
+    summary = await service.cleanup_once(lease_owner="scheduler-1")
 
     assert summary.model_files_deleted == 0
     assert summary.sessions_advanced == 0
@@ -596,11 +739,13 @@ async def test_cleanup_once_counts_pending_blob_deletion_attempts() -> None:
         model_file_pin_repository=cast(Any, _PinRepo()),
         agent_session_repository=cast(Any, _AgentSessionRepo([])),
         transcript_repository=cast(Any, _TranscriptRepo([])),
+        avatar_cleanup_repository=cast(Any, _AvatarCleanupRepo([])),
+        avatar_handler=cast(Any, _AvatarHandler()),
         s3_service=cast(Any, _S3Service()),
         config=cast(Any, _Config()),
     )
 
-    summary = await service.cleanup_once()
+    summary = await service.cleanup_once(lease_owner="scheduler-1")
 
     assert summary.exchange_files_expired == 0
     assert summary.exchange_file_blobs_deleted == 1
@@ -621,11 +766,13 @@ async def test_cleanup_once_counts_blob_deletion_failures() -> None:
         model_file_pin_repository=cast(Any, _PinRepo()),
         agent_session_repository=cast(Any, _AgentSessionRepo([])),
         transcript_repository=cast(Any, _TranscriptRepo([])),
+        avatar_cleanup_repository=cast(Any, _AvatarCleanupRepo([])),
+        avatar_handler=cast(Any, _AvatarHandler()),
         s3_service=cast(Any, _FailingS3Service()),
         config=cast(Any, _Config()),
     )
 
-    summary = await service.cleanup_once()
+    summary = await service.cleanup_once(lease_owner="scheduler-1")
 
     assert summary.artifacts_expired == 1
     assert summary.artifact_blobs_deleted == 0
@@ -656,7 +803,7 @@ async def test_cleanup_once_keeps_model_blob_deletion_batch_bounded() -> None:
         s3_service=s3,
     )
 
-    summary = await service.cleanup_once()
+    summary = await service.cleanup_once(lease_owner="scheduler-1")
 
     assert summary.model_files_deleted == 1
     assert summary.model_file_blobs_deleted == 200
@@ -664,3 +811,119 @@ async def test_cleanup_once_keeps_model_blob_deletion_batch_bounded() -> None:
     assert len(s3.deleted_keys) == 200
     assert "model-files/workspace-1/session-1/m" not in s3.deleted_keys
     assert "m" * 32 not in model_repo.marked_blob_deleted
+
+
+@pytest.mark.asyncio
+async def test_cleanup_once_completes_claimed_superseded_avatar() -> None:
+    """Avatar cleanup succeeds independently of current Agent metadata."""
+    avatar_cleanup_repo = _AvatarCleanupRepo([_avatar_cleanup_job()])
+    avatar_handler = _AvatarHandler()
+    service = _service(
+        avatar_cleanup_repo=avatar_cleanup_repo,
+        avatar_handler=avatar_handler,
+    )
+
+    summary = await service.cleanup_once(lease_owner="scheduler-1")
+
+    assert summary.avatar_cleanup_attempted == 1
+    assert summary.avatar_cleanup_completed == 1
+    assert summary.avatar_cleanup_failed == 0
+    lease_token = avatar_cleanup_repo.claimed[0][1]
+    assert lease_token.startswith("scheduler-1:")
+    assert avatar_cleanup_repo.claimed[0][3] == 100
+    assert avatar_cleanup_repo.deleted == [("j" * 32, lease_token)]
+    assert avatar_handler.deleted_keys == ["public/avatar/agent-1/large/old.webp"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_once_retries_failed_superseded_avatar_with_safe_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Avatar cleanup failure logs only static text and safe diagnostic fields."""
+    sentinel_endpoint = "https://storage.internal.example.test"
+    sentinel_key = "public/avatar/agent-1/large/sentinel-private-key.webp"
+    avatar_cleanup_repo = _AvatarCleanupRepo([_avatar_cleanup_job()])
+    service = _service(
+        avatar_cleanup_repo=avatar_cleanup_repo,
+        avatar_handler=_AvatarHandler(
+            failing_keys=frozenset({"public/avatar/agent-1/large/old.webp"}),
+            failure_message=(
+                f"Avatar delete failed at {sentinel_endpoint} for {sentinel_key}"
+            ),
+        ),
+    )
+    caplog.set_level(
+        logging.ERROR,
+        logger="azents.services.file_lifecycle_cleanup",
+    )
+
+    summary = await service.cleanup_once(lease_owner="scheduler-1")
+
+    assert summary.avatar_cleanup_attempted == 1
+    assert summary.avatar_cleanup_completed == 0
+    assert summary.avatar_cleanup_failed == 1
+    assert len(avatar_cleanup_repo.retries) == 1
+    job_id, lease_token, next_attempt_at, failure_kind = avatar_cleanup_repo.retries[0]
+    assert job_id == "j" * 32
+    assert lease_token.startswith("scheduler-1:")
+    assert next_attempt_at > _NOW
+    assert failure_kind == "RuntimeError"
+    record = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Failed to delete superseded Agent avatar"
+    )
+    formatted = logging.Formatter().format(record)
+    assert "Failed to delete superseded Agent avatar" in formatted
+    assert "Superseded Agent avatar cleanup failed" in formatted
+    assert "in delete_files" in formatted
+    assert sentinel_endpoint not in formatted
+    assert sentinel_key not in formatted
+    assert record.__dict__["agent_avatar_cleanup_job_id"] == "j" * 32
+    assert record.__dict__["agent_id"] == "agent-1"
+    assert record.__dict__["attempt_count"] == 1
+    assert record.__dict__["failure_kind"] == "RuntimeError"
+    assert "lease_token" not in record.__dict__
+
+
+@pytest.mark.asyncio
+async def test_cleanup_once_continues_after_one_superseded_avatar_failure() -> None:
+    """One failed avatar schedules retry without blocking later claimed jobs."""
+    failed = _avatar_cleanup_job()
+    succeeding = _avatar_cleanup_job_for(
+        job_id="k" * 32,
+        avatar=_avatar("public/avatar/agent-1/large/new.webp"),
+    )
+    avatar_cleanup_repo = _AvatarCleanupRepo([failed, succeeding])
+    avatar_handler = _AvatarHandler(
+        failing_keys=frozenset({"public/avatar/agent-1/large/old.webp"})
+    )
+    service = _service(
+        avatar_cleanup_repo=avatar_cleanup_repo,
+        avatar_handler=avatar_handler,
+    )
+
+    summary = await service.cleanup_once(lease_owner="scheduler-1")
+
+    assert summary.avatar_cleanup_attempted == 2
+    assert summary.avatar_cleanup_failed == 1
+    assert summary.avatar_cleanup_completed == 1
+    assert avatar_cleanup_repo.deleted[0][0] == "k" * 32
+    assert avatar_cleanup_repo.deleted[0][1].startswith("scheduler-1:")
+    assert avatar_handler.deleted_keys == ["public/avatar/agent-1/large/new.webp"]
+
+
+@pytest.mark.asyncio
+async def test_cleanup_once_uses_fresh_avatar_cleanup_token_per_pass() -> None:
+    """Each cleanup pass creates an independent opaque avatar cleanup token."""
+    avatar_cleanup_repo = _AvatarCleanupRepo([])
+    service = _service(avatar_cleanup_repo=avatar_cleanup_repo)
+
+    await service.cleanup_once(lease_owner="scheduler-1")
+    await service.cleanup_once(lease_owner="scheduler-1")
+
+    first_token = avatar_cleanup_repo.claimed[0][1]
+    second_token = avatar_cleanup_repo.claimed[1][1]
+    assert first_token.startswith("scheduler-1:")
+    assert second_token.startswith("scheduler-1:")
+    assert first_token != second_token

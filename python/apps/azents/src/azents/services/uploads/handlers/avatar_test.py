@@ -1,5 +1,6 @@
 """AvatarUploadHandler unit tests (uses real Pillow)."""
 
+import logging
 from io import BytesIO
 from unittest.mock import AsyncMock
 
@@ -140,3 +141,36 @@ class TestDeleteFiles:
         # default and large share key — dedup and delete only unique keys
         # (small, medium, large = 3 unique; default duplicates large)
         assert s3_mock.delete.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_delete_start_log_omits_avatar_key(
+        self,
+        handler: AvatarUploadHandler,
+        s3_mock: AsyncMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Avatar deletion logging exposes aggregate count but never object keys."""
+        result = await handler.process_and_publish(
+            body=_make_png(256, 256),
+            owner_id="agent-1",
+            filename="a.png",
+            s3=s3_mock,
+            bucket="bucket",
+        )
+        s3_mock.reset_mock()
+        caplog.clear()
+        caplog.set_level(
+            logging.INFO,
+            logger="azents.services.uploads.handlers.avatar",
+        )
+
+        await handler.delete_files(result, s3_mock, "bucket")
+
+        record = next(
+            record
+            for record in caplog.records
+            if record.getMessage() == "Avatar delete_files started"
+        )
+        assert record.__dict__["key_count"] == 3
+        assert "default_key" not in record.__dict__
+        assert result.default.key not in caplog.text

@@ -608,6 +608,17 @@ async def repair_transfer_once(
         maximum_age=RUNTIME_TRANSFER_MAXIMUM_AGE,
         page_size=page_size,
     )
+    _LOGGER.info(
+        "Runtime transfer orphan repair completed",
+        extra={
+            "listed_objects": orphans.listed_objects,
+            "deleted_objects": orphans.deleted_objects,
+            "listed_multipart_uploads": orphans.listed_multipart_uploads,
+            "aborted_multipart_uploads": orphans.aborted_multipart_uploads,
+            "failed_cleanups": orphans.failed_cleanups,
+            "skipped_storage_entries": orphans.skipped_storage_entries,
+        },
+    )
     return terminals + pending + generations + stale + orphans.observed
 
 

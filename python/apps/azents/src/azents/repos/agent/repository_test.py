@@ -1,8 +1,10 @@
 """Agent repository tests."""
 
-from unittest.mock import AsyncMock
+import datetime
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.agent import (
@@ -13,6 +15,12 @@ from azents.core.enums import AgentRuntimeCapability, ExternalChannelResponseMod
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
+)
+from azents.rdb.models.agent_avatar_cleanup import RDBAgentAvatarCleanupJob
+from azents.services.uploads.schema import (
+    StoredImage,
+    StoredImageFile,
+    StoredImageThumbnails,
 )
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -49,6 +57,24 @@ def _agent_create(*, tool_search_enabled: bool = True) -> AgentCreate:
             ExternalChannelResponseMode.ALL_MESSAGES
         ),
         tool_search_enabled=tool_search_enabled,
+    )
+
+
+def _avatar(key: str) -> StoredImage:
+    """Build one stored avatar snapshot."""
+    file = StoredImageFile(
+        key=key,
+        content_type="image/webp",
+        size_bytes=1,
+        width=512,
+        height=512,
+    )
+    return StoredImage(
+        filename="avatar.webp",
+        default=file,
+        thumbnails=StoredImageThumbnails(large=file),
+        original=None,
+        uploaded_at=datetime.datetime.now(datetime.UTC),
     )
 
 
@@ -159,3 +185,32 @@ async def test_runtime_capability_compare_and_set_maps_version_fence() -> None:
     assert params["runtime_profile_selection_version_2"] == 7
     assert params["runtime_profile_id"] is None
     assert params["shell_enabled"] is False
+
+
+async def test_update_avatar_locks_agent_and_enqueues_prior_snapshot() -> None:
+    """Avatar mutation takes an exclusive row lock before snapshotting state."""
+    session = AsyncMock(spec=AsyncSession)
+    old_avatar = _avatar("public/avatar/agent-1/large/old.webp")
+    new_avatar = _avatar("public/avatar/agent-1/large/new.webp")
+    row = RDBAgent(
+        workspace_id="workspace-1",
+        name="Avatar Agent",
+        model_selection=make_test_model_selection().model_dump(mode="json"),
+        lightweight_model_selection=make_test_model_selection().model_dump(mode="json"),
+        avatar=old_avatar.model_dump(mode="json"),
+    )
+    result = Mock()
+    result.scalar_one_or_none.return_value = row
+    session.execute.return_value = result
+    session.flush.side_effect = _StopAfterWrite
+
+    with pytest.raises(_StopAfterWrite):
+        await AgentRepository().update_avatar(session, row.id, new_avatar)
+
+    statement = session.execute.call_args.args[0]
+    sql = str(statement.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE" in sql
+    cleanup_job = session.add.call_args.args[0]
+    assert isinstance(cleanup_job, RDBAgentAvatarCleanupJob)
+    assert cleanup_job.agent_id == row.id
+    assert cleanup_job.avatar == old_avatar.model_dump(mode="json")

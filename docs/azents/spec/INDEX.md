@@ -12,7 +12,7 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-08-11 | 65 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-08-18 | 66 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-08-18 | 150 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-08-16 | 62 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-31 | 14 |
@@ -29,8 +29,8 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-08-16 | 156 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-08-13 | 61 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-08-18 | 157 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-08-18 | 62 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-13 | 26 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
@@ -43,7 +43,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
-| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-08-17 | 15 |
+| [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-08-18 | 16 |
 | [Run Resume](flow/run-resume.md) | @Hardtack | 2026-08-16 | 28 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-17 | 30 |

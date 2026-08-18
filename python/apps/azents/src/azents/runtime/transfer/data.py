@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 RUNTIME_TRANSFER_MAXIMUM_AGE = timedelta(hours=1)
 RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE = 1000
+RUNTIME_TRANSFER_MAXIMUM_CLEANUP_FAILURE_ATTEMPTS = 100
 
 
 class RuntimeTransferDirection(enum.StrEnum):
@@ -46,6 +47,15 @@ class RuntimeTransferCleanupStatus(enum.StrEnum):
     PENDING = "pending"
     COMPLETE = "complete"
     RETRYABLE_FAILURE = "retryable_failure"
+
+
+class RuntimeTransferCleanupArtifact(enum.StrEnum):
+    """Stable artifact classification for a failed cleanup attempt."""
+
+    MULTIPART_ABORT = "multipart_abort"
+    COMPLETED_OBJECT_DELETE = "completed_object_delete"
+    MULTIPART_AND_COMPLETED_OBJECT = "multipart_and_completed_object"
+    PREPARATION_CLEANUP = "preparation_cleanup"
 
 
 class RuntimeTransferPreparationCleanupState(enum.StrEnum):
@@ -210,6 +220,20 @@ class RuntimeTransferProgress:
 
 
 @dataclass(frozen=True)
+class RuntimeTransferCleanupFailureEvidence:
+    """Bounded latest observation for one retryable cleanup failure."""
+
+    artifact: RuntimeTransferCleanupArtifact
+    observed_at: datetime
+    attempts: int
+
+    def __post_init__(self) -> None:
+        _aware(self.observed_at, "observed_at")
+        if not 0 < self.attempts <= RUNTIME_TRANSFER_MAXIMUM_CLEANUP_FAILURE_ATTEMPTS:
+            raise ValueError("cleanup failure attempts must be positive and bounded")
+
+
+@dataclass(frozen=True)
 class RuntimeTransferSettlement:
     """Canonical terminal outcome and failure pair."""
 
@@ -253,6 +277,7 @@ class RuntimeTransferRecord:
     terminal_outcome: RuntimeTransferOutcome | None
     terminal_expires_at: datetime | None
     cleanup_status: RuntimeTransferCleanupStatus
+    cleanup_failure: RuntimeTransferCleanupFailureEvidence | None
     failure: RuntimeTransferFailure | None
     preparation_object_handle: str | None = None
     preparation_multipart_cleanup_handle: str | None = None
@@ -350,10 +375,20 @@ class RuntimeTransferRecord:
             raise ValueError("preparation cleanup requires an object handle")
         if self.completed_object_cleanup_required and (
             self.object is None
-            or self.cleanup_status is not RuntimeTransferCleanupStatus.RETRYABLE_FAILURE
+            or self.cleanup_status
+            not in {
+                RuntimeTransferCleanupStatus.PENDING,
+                RuntimeTransferCleanupStatus.RETRYABLE_FAILURE,
+            }
         ):
             raise ValueError(
-                "completed object cleanup requires retryable object evidence"
+                "completed object cleanup requires pending or retryable object evidence"
+            )
+        if (self.cleanup_status is RuntimeTransferCleanupStatus.RETRYABLE_FAILURE) != (
+            self.cleanup_failure is not None
+        ):
+            raise ValueError(
+                "cleanup failure evidence must exist exactly for retryable cleanup"
             )
         if (
             self.admission.direction is RuntimeTransferDirection.DOWNLOAD

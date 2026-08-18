@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/995d915ed6d6_add_agent_automatic_project_policy.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/10d8111b556c_add_session_auto_archive_fields.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/d0a55d801644_add_external_channel_response_modes.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/30c55c0ef241_add_agent_avatar_cleanup_jobs.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/credentials.py
@@ -21,6 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_item.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_setting.py
   - python/apps/azents/src/azents/rdb/models/agent_decommission.py
+  - python/apps/azents/src/azents/rdb/models/agent_avatar_cleanup.py
   - python/apps/azents/src/azents/rdb/models/llm_provider_integration.py
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
@@ -28,6 +30,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_admin/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/repos/agent_decommission/**
+  - python/apps/azents/src/azents/repos/agent_avatar_cleanup/**
   - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
   - python/apps/azents/src/azents/repos/workspace_model_settings/**
@@ -86,8 +89,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-08-11
-spec_version: 65
+last_verified_at: 2026-08-18
+spec_version: 66
 ---
 
 # Agent Domain Spec
@@ -536,6 +539,17 @@ Prepared foreground turns use the prompt-selected option instead of the default 
 - Agent with `memory_enabled=false` does not expose memory prompt/tool.
 - Toolkit CRUD and runtime state follow `spec/domain/toolkit.md`.
 - Avatar is stored as stored image metadata through upload service image handler and resolved to public URL in Agent response.
+- Avatar replacement and removal lock the Agent row, update the current avatar,
+  and atomically enqueue an immutable cleanup snapshot for the previous avatar.
+  The public API result does not wait for old-blob deletion.
+- Superseded-avatar cleanup jobs keep an optional diagnostic Agent reference with
+  `ON DELETE SET NULL`, so Agent deletion cannot erase deletion responsibility.
+  Each scheduler cleanup pass uses a unique opaque claim token to lease bounded
+  due jobs, deletes the deduplicated avatar files, retries failures with bounded
+  backoff and stack-trace logging, and deletes the cleanup row only when the
+  exact claim token still owns it.
+- Publication failures before a newly processed avatar is adopted by the Agent
+  row are not recovered by the superseded-avatar cleanup lifecycle.
 
 ## 7. Removed Legacy
 
@@ -553,6 +567,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-08-18** (spec_version 66) — Made committed avatar replacement and
+  removal atomically retain durable superseded-blob cleanup responsibility, with
+  row-serialized mutations and scheduler-owned bounded retry.
 - **2026-08-11** (spec_version 65) — Added exact-version Owner-only Workspace Runtime Profile hard
   deletion, atomic default and Agent selection clearing with version advancement, managed-Agent
   `profile_required` recovery, and preservation of running Runtime, applied configuration, and
