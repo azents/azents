@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-10
-spec_version: 41
+last_verified_at: 2026-08-18
+spec_version: 42
 ---
 
 # File Exchange Storage
@@ -96,7 +96,9 @@ Session/Run authority.
 ### User upload to chat
 
 1. azents-web `useFileUpload` sends multipart upload to chat API.
-2. API verifies workspace/session access, file size, and media type.
+2. API verifies workspace/session access, file size, and media type. One upload is
+   limited to 20 MiB; the API returns `413` above that boundary, and Main Web
+   applies the same byte limit before upload while presenting it as a 20 MB limit.
 3. Successful upload creates only the user-facing Exchange attachment. The upload response does not expose a client-owned FilePart.
 4. Input acceptance stores and claims the attachment URI. Before the FIFO input is promoted, the worker resolves the claimed attachment outside the database lock, creates a ModelFile, and includes its FilePart in the promoted user message. Deferred action inputs skip this preparation, and a stale, failed, or cancelled promotion marks newly created ModelFiles deleted for lifecycle cleanup.
 5. Attachment and FilePart snapshots remain independent in the durable user event. The Attachment supports preview, download, and runtime import, while the FilePart supplies rich model input without requiring the Agent to call `import_file`.
@@ -262,6 +264,9 @@ later `import_file` must explicitly copy them into the new Runtime.
 
 ## UI Contract
 
+- One Composer draft retains at most five selected attachments. Selecting more
+  files adds only the remaining available slots. Every selected file is limited
+  to 20 MiB before upload, matching the Public API boundary.
 - Composer attachments and user-originated sent attachments, including images, render as fixed-width compact tiles in a non-wrapping horizontal strip. Input-buffer projections use the same compact presentation.
 - Attachment strips expose horizontal overflow with a dynamic 40px transparency mask: right edge at the start, both edges in the middle, left edge at the end, and no mask without overflow. Dragging a strip does not activate a tile.
 - Agent-originated image-only output renders as an adaptive gallery whenever the original images are available; generated thumbnail metadata is optional. A single image preserves its aspect ratio with a 480px maximum height. Multiple images use square two-column cells, and sets larger than four expose a `+N` count on the fourth visible cell.
@@ -284,6 +289,9 @@ later `import_file` must explicitly copy them into the new Runtime.
 - Tool execution follows [`agent-execution-loop.md`](agent-execution-loop.md).
 
 ## Changelog
+
+- **2026-08-18** — v42. Documented the Main Web five-attachment Composer
+  boundary and the shared 20 MiB per-upload client/API limit.
 
 - **2026-08-10** — v41. Separated Runtime-independent product file retention and model input from
   Runtime transfer/materialization authority, added capability/version fencing, and preserved
