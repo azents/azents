@@ -15,7 +15,6 @@ code_paths:
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/repos/action_execution/**
-  - python/apps/azents/src/azents/repos/agent_run/**
   - python/apps/azents/src/azents/repos/agent_execution/**
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/repos/session_execution/**
@@ -26,8 +25,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/**
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
-  - python/apps/azents/src/cli/team_session_cutover.py
-last_verified_at: 2026-08-16
+  - python/apps/azents/src/azents/cli/team_session_cutover.py
+last_verified_at: 2026-08-18
 spec_version: 28
 ---
 
