@@ -25,7 +25,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-18 | 4 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-18 | 95 |
-| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 11 |
+| [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-18 | 68 |
 
 ## Living Specs — Flow
@@ -42,7 +42,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-17 | 47 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-16 | 37 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-18 | 46 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-10 | 41 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
