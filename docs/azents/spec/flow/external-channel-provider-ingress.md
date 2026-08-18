@@ -61,8 +61,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-17
-spec_version: 45
+last_verified_at: 2026-08-18
+spec_version: 46
 ---
 
 # External Channel Provider Ingress
@@ -125,6 +125,10 @@ Slack sends HTTP callbacks to the single fixed endpoint
    eligible explicit mention in an existing Binding may additionally create one
    idempotent settings entry point; ordinary traffic, deployment, startup, and the
    drain worker do not create it.
+   Existing-Binding admission reads Session availability without taking a Session
+   row lock. The final canonical mailbox transaction conditionally transitions only
+   an active, non-stopping Session to its wake state; failure rolls back the prepared
+   mailbox input and leaves the ingress item recoverable.
 7. The callback acknowledges after the ingress transaction commits. It does not wait
    for Local Job Runtime submission, provider exact/history I/O, mailbox admission,
    conversation-position advancement, Session wake, or provider-control delivery.
@@ -487,6 +491,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-18** (spec_version 46) — Removed the read-only Session row lock from
+  existing-Binding trigger admission and made the final conditional mailbox wake
+  transition the authoritative lifecycle fence.
 - **2026-08-17** (spec_version 45) — Made exact-trigger-missing ingress explicitly
   warn, delete the item without retry or mailbox admission, and continue the batch.
 - **2026-08-17** (spec_version 44) — Removed the broad ingress-drain diagnostic

@@ -1502,7 +1502,7 @@ class MailboxService:
             if existing is not None:
                 continue
             inserted.append(
-                await repository.append_with_deferred_last_user_input_at(
+                await repository.append_with_deferred_session_projections(
                     session,
                     EventCreate(
                         session_id=session_id,
@@ -1518,23 +1518,11 @@ class MailboxService:
                     ),
                 )
             )
-        latest_user_input_at = max(
-            (
-                event.created_at
-                for event in inserted
-                if event.kind
-                in {
-                    EventKind.USER_MESSAGE,
-                    EventKind.EXTERNAL_CHANNEL_MESSAGE,
-                }
-            ),
-            default=None,
-        )
-        if latest_user_input_at is not None:
-            await repository.advance_session_last_user_input_at(
+        if inserted:
+            await repository.advance_session_projections(
                 session,
                 session_id=session_id,
-                created_at=latest_user_input_at,
+                events=inserted,
             )
         return inserted
 

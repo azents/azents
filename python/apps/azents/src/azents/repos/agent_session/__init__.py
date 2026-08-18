@@ -1137,7 +1137,12 @@ class AgentSessionRepository:
         session: AsyncSession,
         agent_session_id: str,
     ) -> AgentSession | None:
-        """Fetch one AgentSession while serializing non-key admission updates."""
+        """Lock one AgentSession after its referenced Agent in stable FK order."""
+        if not await self.lock_agent_parent_for_session(
+            session,
+            agent_session_id,
+        ):
+            return None
         result = await session.execute(
             sa.select(RDBAgentSession)
             .where(RDBAgentSession.id == agent_session_id)
@@ -1150,6 +1155,26 @@ class AgentSessionRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def lock_agent_parent_for_session(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> bool:
+        """Lock the Session's Agent parent in FK-compatible order."""
+        agent_id = await session.scalar(
+            sa.select(RDBAgentSession.agent_id).where(
+                RDBAgentSession.id == agent_session_id
+            )
+        )
+        if agent_id is None:
+            return False
+        locked_agent_id = await session.scalar(
+            sa.select(RDBAgent.id)
+            .where(RDBAgent.id == agent_id)
+            .with_for_update(read=True, key_share=True)
+        )
+        return locked_agent_id is not None
 
     async def set_pinned(
         self,
@@ -1810,6 +1835,8 @@ class AgentSessionRepository:
         session_id: str,
     ) -> None:
         """Transition AgentSession to RUNNING recovery target on buffered input."""
+        if not await self.lock_agent_parent_for_session(session, session_id):
+            return
         await session.execute(
             sa.update(RDBAgentSession)
             .where(
@@ -1830,6 +1857,8 @@ class AgentSessionRepository:
         session_id: str,
     ) -> AgentSession | None:
         """Atomically validate an input-eligible Session and request its wake."""
+        if not await self.lock_agent_parent_for_session(session, session_id):
+            return None
         result = await session.execute(
             sa.update(RDBAgentSession)
             .where(

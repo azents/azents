@@ -175,7 +175,7 @@ class ExternalChannelIngressAdmissionService:
             if grant is None and not target.route.open_access_enabled:
                 return None
             if target.binding is not None:
-                target_session = await self.agent_session_repository.lock_by_id(
+                target_session = await self.agent_session_repository.get_by_id(
                     session,
                     target.binding.agent_session_id,
                 )
