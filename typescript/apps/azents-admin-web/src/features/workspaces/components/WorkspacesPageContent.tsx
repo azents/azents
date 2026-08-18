@@ -6,9 +6,9 @@ import { WorkspaceList } from "./WorkspaceList";
 import type { WorkspacesPageContentProps } from "../containers/useWorkspacesPageContainer";
 
 /**
- * Workspaces 페이지 콘텐츠 컴포넌트
+ * Workspaces page content component
  *
- * MasterDetailLayout을 사용한 반응형 2패널 레이아웃
+ * Responsive two-panel layout using MasterDetailLayout
  */
 export function WorkspacesPageContent({
   selectedWorkspaceHandle,

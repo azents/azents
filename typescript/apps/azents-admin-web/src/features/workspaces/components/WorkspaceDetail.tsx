@@ -6,9 +6,9 @@ import { WorkspaceDetailView } from "./WorkspaceDetailView";
 import type { WorkspaceDetailContainerProps } from "../containers/useWorkspaceDetailContainer";
 
 /**
- * Workspace 상세 컨테이너 컴포넌트
+ * Workspace detail container component
  *
- * 컨테이너 훅과 뷰를 연결합니다.
+ * Connects the container hook to the view.
  */
 export const WorkspaceDetail = createReactContainer<
   WorkspaceDetailContainerProps,

@@ -1,8 +1,8 @@
 /**
- * Workspace tRPC 라우터
+ * Workspace tRPC router
  *
- * azents admin API 서버와 서버사이드 통신하여 워크스페이스 관리 기능을 제공합니다.
- * Generated client (@azents/admin-client)를 사용합니다.
+ * Provides workspace management by communicating with the Azents Admin API server-side.
+ * Uses the generated client (@azents/admin-client).
  */
 import {
   workspaceV1CreateWorkspace,
@@ -28,7 +28,7 @@ const WorkspaceUpdateInput = z.object({
 // --- Router ---
 export const workspaceRouter = router({
   /**
-   * 워크스페이스 목록 조회
+   * List workspaces
    */
   list: protectedProcedure.query(async ({ ctx }) => {
     const { data } = await workspaceV1ListWorkspaces({
@@ -42,7 +42,7 @@ export const workspaceRouter = router({
   }),
 
   /**
-   * 워크스페이스 상세 조회
+   * Get workspace details
    */
   get: protectedProcedure
     .input(z.object({ handle: z.string() }))
@@ -56,7 +56,7 @@ export const workspaceRouter = router({
     }),
 
   /**
-   * 워크스페이스 생성
+   * Create a workspace
    */
   create: protectedProcedure
     .input(WorkspaceCreateInput)
@@ -70,7 +70,7 @@ export const workspaceRouter = router({
     }),
 
   /**
-   * 워크스페이스 수정
+   * Update a workspace
    */
   update: protectedProcedure
     .input(WorkspaceUpdateInput)

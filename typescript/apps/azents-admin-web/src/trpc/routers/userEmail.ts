@@ -1,8 +1,8 @@
 /**
- * UserEmail tRPC 라우터
+ * UserEmail tRPC router
  *
- * azents admin API 서버와 서버사이드 통신하여 UserEmail 관리 기능을 제공합니다.
- * Generated client (@azents/admin-client)를 사용합니다.
+ * Provides UserEmail management by communicating with the Azents Admin API server-side.
+ * Uses the generated client (@azents/admin-client).
  */
 import {
   useremailV1CreateEmail,
@@ -15,7 +15,7 @@ import { protectedProcedure, router } from "../init";
 // --- Router ---
 export const userEmailRouter = router({
   /**
-   * User별 이메일 목록 조회
+   * List emails by user
    */
   listByUser: protectedProcedure
     .input(z.object({ user_id: z.string() }))
@@ -33,7 +33,7 @@ export const userEmailRouter = router({
     }),
 
   /**
-   * UserEmail 생성
+   * Create a UserEmail
    */
   create: protectedProcedure
     .input(
@@ -53,7 +53,7 @@ export const userEmailRouter = router({
     }),
 
   /**
-   * UserEmail 삭제
+   * Delete a UserEmail
    */
   delete: protectedProcedure
     .input(z.object({ email_id: z.string() }))

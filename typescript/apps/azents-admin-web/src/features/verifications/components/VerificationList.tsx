@@ -6,9 +6,9 @@ import { VerificationListView } from "./VerificationListView";
 import type { VerificationListContainerProps } from "../containers/useVerificationListContainer";
 
 /**
- * Verification 목록 컨테이너 컴포넌트
+ * Verification list container component
  *
- * 컨테이너 훅과 뷰를 연결합니다.
+ * Connects the container hook to the view.
  */
 export const VerificationList = createReactContainer<
   VerificationListContainerProps,

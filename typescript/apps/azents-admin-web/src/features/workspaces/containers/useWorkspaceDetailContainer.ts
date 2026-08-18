@@ -28,10 +28,10 @@ const EMPTY_FORM: WorkspaceFormData = {
 };
 
 /**
- * Workspace 상세 컨테이너 훅
+ * Workspace detail container hook
  *
- * tRPC를 사용하여 서버사이드에서 데이터를 가져오고,
- * 폼 로직, 뮤테이션, 복잡한 상태를 관리합니다.
+ * Fetches data server-side through tRPC and
+ * manages form logic, mutations, and complex state.
  */
 export function useWorkspaceDetailContainer(
   props: WorkspaceDetailContainerProps,
@@ -39,7 +39,7 @@ export function useWorkspaceDetailContainer(
   const { workspaceHandle, isCreateMode, onSaved, onCancel } = props;
   const utils = trpc.useUtils();
 
-  // --- 데이터 로딩 ---
+  // --- Data loading ---
   const {
     data: workspaceData,
     isLoading: isLoadingWorkspace,
@@ -52,7 +52,7 @@ export function useWorkspaceDetailContainer(
 
   const currentWorkspace = workspaceData ?? null;
 
-  // --- 폼 설정 ---
+  // --- Form setup ---
   const form = useForm<WorkspaceFormData>({
     mode: "uncontrolled",
     initialValues: EMPTY_FORM,
@@ -72,10 +72,10 @@ export function useWorkspaceDetailContainer(
     },
   });
 
-  // 초기 폼 데이터 추적 (dirty 상태 판단용)
+  // Track the initial form data to determine dirty state
   const initialFormDataRef = useRef<string>(JSON.stringify(EMPTY_FORM));
 
-  // Workspace 데이터가 로드되면 폼 초기화
+  // Initialize the form when workspace data loads
   useEffect(() => {
     if (isCreateMode) {
       form.setValues(EMPTY_FORM);
@@ -85,21 +85,21 @@ export function useWorkspaceDetailContainer(
       form.setValues(formData);
       initialFormDataRef.current = JSON.stringify(formData);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- form은 매 렌더마다 새로운 참조
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- form has a new reference on every render
   }, [currentWorkspace, isCreateMode]);
 
-  // Dirty 상태 추적
+  // Track dirty state
   const isDirty =
     JSON.stringify(form.getValues()) !== initialFormDataRef.current;
 
-  // --- 뮤테이션 ---
+  // --- Mutations ---
   const createMutation = trpc.workspace.create.useMutation();
   const updateMutation = trpc.workspace.update.useMutation();
 
   const isCreating = createMutation.isPending;
   const isUpdating = updateMutation.isPending;
 
-  // --- 상태 계산 ---
+  // --- State calculation ---
   const state: WorkspaceDetailState = useMemo(() => {
     if (!isCreateMode && !workspaceHandle) {
       return { type: "EMPTY" };
@@ -137,7 +137,7 @@ export function useWorkspaceDetailContainer(
     isUpdating,
   ]);
 
-  // --- 핸들러 ---
+  // --- Handlers ---
   const handleSubmit = useCallback(
     (data: WorkspaceFormData) => {
       if (isCreateMode) {

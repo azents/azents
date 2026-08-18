@@ -1,8 +1,8 @@
 /**
- * Workspace Members Feature - ADT (Algebraic Data Types) 정의
+ * ADT definitions for the workspace members feature
  */
 
-// --- API 응답 타입 (generated client에서 re-export) ---
+// --- API response types (re-exported from the generated client) ---
 export type {
   WorkspaceUserResponse,
   WorkspaceUserRole,
@@ -10,9 +10,9 @@ export type {
 
 import type { WorkspaceUserResponse } from "@azents/admin-client";
 
-// --- ADT 상태 타입 ---
+// --- ADT state types ---
 
-/** WorkspaceMember 목록 상태 */
+/** Workspace member list state */
 export type WorkspaceMemberListState =
   | { type: "NO_WORKSPACE" }
   | { type: "LOADING" }
@@ -22,7 +22,7 @@ export type WorkspaceMemberListState =
       members: WorkspaceUserResponse[];
     };
 
-/** WorkspaceMember 상세 상태 */
+/** Workspace member detail state */
 export type WorkspaceMemberDetailState =
   | { type: "EMPTY" }
   | { type: "LOADING"; memberId: string }

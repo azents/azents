@@ -30,10 +30,10 @@ export interface UserDetailComponentProps {
 }
 
 /**
- * User 상세 컨테이너 훅
+ * User detail container hook
  *
- * tRPC를 사용하여 서버사이드에서 데이터를 가져오고,
- * 삭제 뮤테이션을 관리합니다.
+ * Fetches data server-side through tRPC and
+ * manages the delete mutation.
  */
 export function useUserDetailContainer(
   props: UserDetailContainerProps,
@@ -42,7 +42,7 @@ export function useUserDetailContainer(
   const utils = trpc.useUtils();
   const { mutate: logout } = useLogout();
 
-  // --- 데이터 로딩 ---
+  // --- Data loading ---
   const {
     data: userData,
     isLoading: isLoadingUser,
@@ -71,7 +71,7 @@ export function useUserDetailContainer(
     },
   );
 
-  // --- 이메일 목록 로딩 ---
+  // --- Email list loading ---
   const { data: emailData, isLoading: isLoadingEmails } =
     trpc.userEmail.listByUser.useQuery(
       { user_id: userId ?? "" },
@@ -80,7 +80,7 @@ export function useUserDetailContainer(
 
   const emails = emailData?.items ?? [];
 
-  // --- 뮤테이션 ---
+  // --- Mutations ---
   const deleteMutation = trpc.user.delete.useMutation();
   const isDeleting = deleteMutation.isPending;
 
@@ -89,7 +89,7 @@ export function useUserDetailContainer(
   const grantAdminMutation = trpc.systemRole.grantAdmin.useMutation();
   const revokeAdminMutation = trpc.systemRole.revokeAdmin.useMutation();
 
-  // --- 상태 계산 ---
+  // --- State calculation ---
   const state: UserDetailState = useMemo(() => {
     if (!userId) {
       return { type: "EMPTY" };
@@ -158,16 +158,16 @@ export function useUserDetailContainer(
     userId,
   ]);
 
-  // --- 핸들러 ---
+  // --- Handlers ---
   const handleDelete = useCallback(() => {
     if (!userId) {
       return;
     }
     modals.openConfirmModal({
-      title: "유저 삭제",
+      title: "Delete User",
       children:
-        "정말 이 유저를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
-      labels: { confirm: "삭제", cancel: "취소" },
+        "Are you sure you want to delete this user? This action cannot be undone.",
+      labels: { confirm: "Delete", cancel: "Cancel" },
       confirmProps: { color: "red" },
       onConfirm: () => {
         deleteMutation.mutate(
@@ -296,9 +296,9 @@ export function useUserDetailContainer(
         return;
       }
       modals.openConfirmModal({
-        title: "이메일 삭제",
-        children: "정말 이 이메일을 삭제하시겠습니까?",
-        labels: { confirm: "삭제", cancel: "취소" },
+        title: "Delete Email Address",
+        children: "Are you sure you want to delete this email address?",
+        labels: { confirm: "Delete", cancel: "Cancel" },
         confirmProps: { color: "red" },
         onConfirm: () => {
           deleteEmailMutation.mutate(

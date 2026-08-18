@@ -1,16 +1,16 @@
 import type { ComponentType } from "react";
 
 /**
- * createReactContainer는 hook과 컴포넌트를 분리하여 컨테이너 패턴을 구현합니다.
+ * createReactContainer implements the container pattern by separating hooks from components.
  *
- * - 컨테이너는 상태 관리와 부수 효과에 집중합니다
- * - 컴포넌트는 순수 UI 렌더링에 집중합니다
- * - hook만 테스트하여 로직을 독립적으로 검증할 수 있습니다
+ * - Containers focus on state management and side effects
+ * - Components focus on pure UI rendering
+ * - Hooks can be tested independently to verify logic
  *
- * @param displayName - 컨테이너의 표시 이름
- * @param containerHook - 컨테이너 props를 반환하는 hook
- * @param defaultComponent - 기본 컴포넌트
- * @returns 컨테이너 React 컴포넌트
+ * @param displayName - Display name for the container
+ * @param containerHook - Hook that returns the container props
+ * @param defaultComponent - Default component
+ * @returns Container React component
  */
 export function createReactContainer<I, O extends object>(
   displayName: string,
@@ -19,11 +19,11 @@ export function createReactContainer<I, O extends object>(
 ): ComponentType<I & { component?: ComponentType<O> }>;
 
 /**
- * createReactContainer는 hook과 컴포넌트를 분리하여 컨테이너 패턴을 구현합니다.
+ * createReactContainer implements the container pattern by separating hooks from components.
  *
- * @param displayName - 컨테이너의 표시 이름
- * @param containerHook - 컨테이너 props를 반환하는 hook
- * @returns 컨테이너 React 컴포넌트 (component prop 필수)
+ * @param displayName - Display name for the container
+ * @param containerHook - Hook that returns the container props
+ * @returns Container React component (requires the component prop)
  */
 export function createReactContainer<I, O extends object>(
   displayName: string,
@@ -40,7 +40,7 @@ export function createReactContainer<I, O extends object>(
     const { component: Component = defaultComponent } = props;
     const output = useContainerHook(props);
     if (typeof Component === "undefined") {
-      // 오버로드된 함수 시그니처로 인해 이 분기는 도달 불가능
+      // This branch is unreachable because of the overloaded function signatures
       return null;
     }
     return <Component {...output} />;

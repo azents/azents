@@ -1,7 +1,7 @@
 /**
- * Debug tRPC 라우터
+ * Debug tRPC router
  *
- * Sentry/로깅 연동 검증을 위한 디버그 기능을 제공합니다.
+ * Provides debug operations for validating Sentry and logging integration.
  */
 import { debugV1FireException, debugV1FireLog } from "@azents/admin-client";
 import { z } from "zod/v4";
@@ -9,7 +9,7 @@ import { protectedProcedure, router } from "../init";
 
 export const debugRouter = router({
   /**
-   * 지정 레벨로 로그 발생
+   * Emit a log at the specified level
    */
   fireLog: protectedProcedure
     .input(
@@ -28,7 +28,7 @@ export const debugRouter = router({
     }),
 
   /**
-   * 미처리 예외 발생 (500 에러)
+   * Raise an unhandled exception (500 error)
    */
   fireException: protectedProcedure
     .input(z.object({ message: z.string() }))

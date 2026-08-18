@@ -5,9 +5,9 @@ import { UsersPageContent } from "./components/UsersPageContent";
 import { useUsersPageContainer } from "./containers/useUsersPageContainer";
 
 /**
- * UsersPage 엔트리 포인트
+ * Entry point for UsersPage
  *
- * 컨테이너 패턴을 사용하여 상태 관리와 UI를 분리합니다.
+ * Uses the container pattern to separate state management from UI.
  */
 export const UsersPage = createReactContainer(
   "UsersPage",

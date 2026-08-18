@@ -6,9 +6,9 @@ import { VerificationDetailView } from "./VerificationDetailView";
 import type { VerificationDetailContainerProps } from "../containers/useVerificationDetailContainer";
 
 /**
- * Verification 상세 컨테이너 컴포넌트
+ * Verification detail container component
  *
- * 컨테이너 훅과 뷰를 연결합니다.
+ * Connects the container hook to the view.
  */
 export const VerificationDetail = createReactContainer<
   VerificationDetailContainerProps,

@@ -5,9 +5,9 @@ import { WorkspacesPageContent } from "./components/WorkspacesPageContent";
 import { useWorkspacesPageContainer } from "./containers/useWorkspacesPageContainer";
 
 /**
- * WorkspacesPage 엔트리 포인트
+ * Entry point for WorkspacesPage
  *
- * 컨테이너 패턴을 사용하여 상태 관리와 UI를 분리합니다.
+ * Uses the container pattern to separate state management from UI.
  */
 export const WorkspacesPage = createReactContainer(
   "WorkspacesPage",

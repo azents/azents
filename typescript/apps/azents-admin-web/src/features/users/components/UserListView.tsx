@@ -20,14 +20,14 @@ function renderContent(
     case "ERROR":
       return (
         <Center p="xl">
-          <Text c="red">에러: {state.message}</Text>
+          <Text c="red">Error: {state.message}</Text>
         </Center>
       );
     case "LOADED":
       if (state.users.length === 0) {
         return (
           <Center p="xl">
-            <Text c="dimmed">등록된 User가 없습니다.</Text>
+            <Text c="dimmed">No users found.</Text>
           </Center>
         );
       }
@@ -37,7 +37,7 @@ function renderContent(
             <Table.Tr>
               <Table.Th>ID</Table.Th>
               <Table.Th>Primary Email</Table.Th>
-              <Table.Th>생성일</Table.Th>
+              <Table.Th>Created At</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -76,9 +76,9 @@ function renderContent(
 }
 
 /**
- * User 목록 뷰 컴포넌트
+ * User list view component
  *
- * ADT 상태에 따라 적절한 UI를 렌더링합니다.
+ * Renders the appropriate UI for the current ADT state.
  */
 export function UserListView({
   state,

@@ -15,9 +15,9 @@ import dayjs from "dayjs";
 import type { WorkspaceDetailComponentProps } from "../containers/useWorkspaceDetailContainer";
 
 /**
- * Workspace 상세 뷰 컴포넌트
+ * Workspace detail view component
  *
- * ADT 상태에 따라 폼 또는 플레이스홀더를 렌더링합니다.
+ * Renders a form or placeholder for the current ADT state.
  */
 export function WorkspaceDetailView({
   state,
@@ -30,7 +30,7 @@ export function WorkspaceDetailView({
     case "EMPTY":
       return (
         <Center h="100%">
-          <Text c="dimmed">Workspace를 선택하거나 새로 생성하세요.</Text>
+          <Text c="dimmed">Select a workspace or create a new one.</Text>
         </Center>
       );
 
@@ -44,7 +44,7 @@ export function WorkspaceDetailView({
     case "ERROR":
       return (
         <Center h="100%">
-          <Text c="red">에러: {state.message}</Text>
+          <Text c="red">Error: {state.message}</Text>
         </Center>
       );
 
@@ -63,7 +63,7 @@ export function WorkspaceDetailView({
           >
             <Group p="sm" justify="space-between">
               <Title order={5}>
-                {isNew ? "Workspace 추가" : "Workspace 편집"}
+                {isNew ? "Add Workspace" : "Edit Workspace"}
               </Title>
               <Group gap="xs">
                 <Button
@@ -72,7 +72,7 @@ export function WorkspaceDetailView({
                   onClick={onCancel}
                   disabled={isProcessing}
                 >
-                  취소
+                  Cancel
                 </Button>
                 <Button
                   type="submit"
@@ -80,7 +80,7 @@ export function WorkspaceDetailView({
                   disabled={isProcessing || (!isNew && !isDirty)}
                   loading={isSaving}
                 >
-                  {isSaving ? "저장 중..." : "저장"}
+                  {isSaving ? "Saving..." : "Save"}
                 </Button>
               </Group>
             </Group>
@@ -88,8 +88,8 @@ export function WorkspaceDetailView({
             <Box style={{ flex: 1, overflow: "auto" }} p="md">
               <Stack gap="md">
                 <TextInput
-                  label="이름"
-                  placeholder="Workspace 이름"
+                  label="Name"
+                  placeholder="Workspace name"
                   required
                   key={form.key("name")}
                   {...form.getInputProps("name")}
@@ -97,7 +97,7 @@ export function WorkspaceDetailView({
                 <TextInput
                   label="Handle"
                   placeholder="workspace-handle"
-                  description="소문자, 숫자, 하이픈만 사용 가능합니다."
+                  description="Use lowercase letters, numbers, and hyphens only."
                   required
                   key={form.key("handle")}
                   {...form.getInputProps("handle")}
@@ -105,13 +105,13 @@ export function WorkspaceDetailView({
                 {workspace && !isNew && (
                   <Stack gap="xs">
                     <Text size="sm" c="dimmed">
-                      생성일:{" "}
+                      Created At:{" "}
                       {dayjs(workspace.created_at).format(
                         "YYYY-MM-DD HH:mm:ss",
                       )}
                     </Text>
                     <Text size="sm" c="dimmed">
-                      수정일:{" "}
+                      Updated At:{" "}
                       {dayjs(workspace.updated_at).format(
                         "YYYY-MM-DD HH:mm:ss",
                       )}

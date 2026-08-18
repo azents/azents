@@ -8,9 +8,9 @@ import { WorkspaceMemberList } from "./WorkspaceMemberList";
 import type { WorkspaceMembersPageContentProps } from "../containers/useWorkspaceMembersPageContainer";
 
 /**
- * WorkspaceMembers 페이지 콘텐츠 컴포넌트
+ * Workspace members page content component
  *
- * Workspace 선택 드롭다운 + MasterDetailLayout 반응형 2패널 레이아웃
+ * Workspace selector and responsive two-panel MasterDetailLayout
  */
 export function WorkspaceMembersPageContent({
   selectedWorkspaceHandle,
@@ -38,7 +38,7 @@ export function WorkspaceMembersPageContent({
       >
         <Select
           label="Workspace"
-          placeholder="Workspace를 선택하세요"
+          placeholder="Select a workspace"
           data={workspaceOptions}
           value={selectedWorkspaceHandle}
           onChange={onWorkspaceChange}

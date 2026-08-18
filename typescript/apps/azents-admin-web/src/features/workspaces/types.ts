@@ -1,21 +1,21 @@
 /**
- * Workspaces Feature - ADT (Algebraic Data Types) 정의
+ * ADT definitions for the workspaces feature
  */
 
-// --- API 응답 타입 (generated client에서 re-export) ---
+// --- API response types (re-exported from the generated client) ---
 export type { WorkspaceResponse } from "@azents/admin-client";
 
 import type { WorkspaceResponse } from "@azents/admin-client";
 
-// --- 폼 데이터 타입 ---
+// --- Form data types ---
 export interface WorkspaceFormData {
   name: string;
   handle: string;
 }
 
-// --- 변환 함수 ---
+// --- Conversion functions ---
 
-/** API 응답 → 폼 데이터 변환 */
+/** Convert an API response to form data */
 export function workspaceToFormData(
   workspace: WorkspaceResponse,
 ): WorkspaceFormData {
@@ -25,7 +25,7 @@ export function workspaceToFormData(
   };
 }
 
-/** 폼 데이터 → API 요청 변환 (생성용) */
+/** Convert form data to a create API request */
 export function formDataToCreateRequest(data: WorkspaceFormData): {
   name: string;
   handle: string;
@@ -36,7 +36,7 @@ export function formDataToCreateRequest(data: WorkspaceFormData): {
   };
 }
 
-/** 폼 데이터 → API 요청 변환 (수정용) */
+/** Convert form data to an update API request */
 export function formDataToUpdateRequest(data: WorkspaceFormData): {
   name: string;
   handle: string;
@@ -47,15 +47,15 @@ export function formDataToUpdateRequest(data: WorkspaceFormData): {
   };
 }
 
-// --- ADT 상태 타입 ---
+// --- ADT state types ---
 
-/** Workspace 목록 상태 */
+/** Workspace list state */
 export type WorkspaceListState =
   | { type: "LOADING" }
   | { type: "ERROR"; message: string }
   | { type: "LOADED"; workspaces: WorkspaceResponse[] };
 
-/** Workspace 상세 상태 */
+/** Workspace detail state */
 export type WorkspaceDetailState =
   | { type: "EMPTY" }
   | { type: "LOADING"; handle: string }

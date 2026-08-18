@@ -1,15 +1,15 @@
 import { TRPCError } from "@trpc/server";
 /**
- * API 에러 유틸리티
+ * API error utilities
  *
- * hey-api 에러 인터셉터로 HTTP 상태코드를 보존하고,
- * tRPC 라우터에서 예상된 에러만 선택적으로 변환.
+ * Preserves HTTP status codes with a hey-api error interceptor and
+ * selectively converts expected errors in tRPC routers.
  */
 import type { Client } from "@azents/admin-client";
 
 type TRPCErrorCode = ConstructorParameters<typeof TRPCError>[0]["code"];
 
-/** API 서버 HTTP 에러 (상태코드 + 응답 body 포함) */
+/** API server HTTP error (including status code and response body) */
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -20,15 +20,15 @@ export class ApiError extends Error {
   }
 }
 
-/** API 에러 body에서 detail 메시지 추출 */
+/** Extract the detail message from an API error body */
 function extractDetail(error: unknown): string {
-  // FastAPI validation error (배열 body: [{code, message, ...}])
+  // FastAPI validation error (array body: [{code, message, ...}])
   if (Array.isArray(error)) {
     return (
       error
         .map((d: { message?: string }) => d.message)
         .filter(Boolean)
-        .join(", ") || "입력값이 올바르지 않습니다."
+        .join(", ") || "The input is invalid."
     );
   }
   if (typeof error === "object" && error !== null && "detail" in error) {
@@ -42,10 +42,10 @@ function extractDetail(error: unknown): string {
         detail
           .map((d: { msg?: string }) => d.msg)
           .filter(Boolean)
-          .join(", ") || "입력값이 올바르지 않습니다."
+          .join(", ") || "The input is invalid."
       );
     }
-    // detail이 구조화된 객체이면 JSON 직렬화 (downstream에서 파싱 가능)
+    // Serialize structured detail objects as JSON so downstream code can parse them
     if (typeof detail === "object" && detail !== null) {
       const msg = "message" in detail ? detail.message : null;
       if (typeof msg === "string") {
@@ -57,14 +57,14 @@ function extractDetail(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-  return "알 수 없는 오류가 발생했습니다.";
+  return "An unknown error occurred.";
 }
 
 /**
- * API 클라이언트에 에러 인터셉터 등록.
+ * Registers an error interceptor on the API client.
  *
- * HTTP 에러 응답을 ApiError로 래핑하여 상태코드 보존.
- * 네트워크 에러는 원본 그대로 통과.
+ * Wraps HTTP error responses in ApiError to preserve the status code.
+ * Passes network errors through unchanged.
  */
 export function withApiErrorInterceptor(client: Client): Client {
   client.interceptors.error.use((error, response) => {
@@ -77,10 +77,10 @@ export function withApiErrorInterceptor(client: Client): Client {
 }
 
 /**
- * 예상된 HTTP 에러를 TRPCError로 변환.
+ * Converts expected HTTP errors to TRPCError instances.
  *
- * expected에 포함된 상태코드 → 해당 tRPC 코드로 변환,
- * 그 외 → 원본 에러 그대로 반환 (tRPC가 INTERNAL_SERVER_ERROR로 처리).
+ * Status codes included in expected are converted to the corresponding tRPC code;
+ * all others return the original error for tRPC to handle as INTERNAL_SERVER_ERROR.
  */
 export function mapExpectedError(
   error: unknown,
