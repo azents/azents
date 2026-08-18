@@ -6,17 +6,19 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_STATE_PATH = ".claude/convention-audit-state.json"
+DEFAULT_ROTATION_DAYS = 30
 STATE_PATH_TO_EXCLUDE = PurePosixPath(DEFAULT_STATE_PATH)
 RANGE_BUCKET_COUNT = 8
 CONVENTION_LINK_PATTERN = re.compile(r"\]\((\.\./conventions/[^)]+\.md)\)")
@@ -73,9 +75,11 @@ def empty_state() -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "change_checkpoint": {
             "checked_at": None,
+            "checked_ruleset_revisions": [],
             "checked_through_commit": None,
         },
         "ranges": {},
+        "rulesets": {},
     }
 
 
@@ -97,6 +101,38 @@ def load_state(state_path: Path) -> dict[str, Any]:
         raise AuditStateError("Audit state is missing change_checkpoint")
     if not isinstance(state.get("ranges"), dict):
         raise AuditStateError("Audit state is missing ranges")
+    if not isinstance(state.get("rulesets"), dict):
+        raise AuditStateError("Audit state is missing rulesets")
+    checked_ruleset_revisions = state["change_checkpoint"].get(
+        "checked_ruleset_revisions"
+    )
+    if not isinstance(checked_ruleset_revisions, list) or any(
+        not isinstance(revision, str) for revision in checked_ruleset_revisions
+    ):
+        raise AuditStateError(
+            "Audit state change_checkpoint has invalid checked_ruleset_revisions"
+        )
+    for revision, conventions in state["rulesets"].items():
+        if (
+            not isinstance(revision, str)
+            or not isinstance(conventions, list)
+            or any(not isinstance(path, str) for path in conventions)
+            or conventions != sorted(set(conventions))
+        ):
+            raise AuditStateError(f"Audit state has an invalid ruleset: {revision!r}")
+    for range_name, checkpoint in state["ranges"].items():
+        if not isinstance(range_name, str) or not isinstance(checkpoint, dict):
+            raise AuditStateError("Audit state has an invalid range checkpoint")
+        checked_revision = checkpoint.get("checked_ruleset_revision")
+        if checked_revision is not None and checked_revision not in state["rulesets"]:
+            raise AuditStateError(
+                f"Range checkpoint references a missing ruleset: {range_name}"
+            )
+    for revision in checked_ruleset_revisions:
+        if revision not in state["rulesets"]:
+            raise AuditStateError(
+                f"Change checkpoint references a missing ruleset: {revision}"
+            )
     return state
 
 
@@ -314,6 +350,23 @@ def empty_range_checkpoint() -> dict[str, Any]:
     }
 
 
+def current_ruleset_manifests(
+    current_ranges: dict[str, dict[str, Any]],
+) -> dict[str, list[str]]:
+    """Return deduplicated current ruleset manifests."""
+    manifests: dict[str, list[str]] = {}
+    for current_range in current_ranges.values():
+        revision = current_range["ruleset_revision"]
+        conventions = current_range["conventions"]
+        existing = manifests.get(revision)
+        if existing is not None and existing != conventions:
+            raise AuditStateError(
+                f"Ruleset revision has inconsistent conventions: {revision}"
+            )
+        manifests[revision] = conventions
+    return dict(sorted(manifests.items()))
+
+
 def reconcile_state(
     state: dict[str, Any], current_ranges: dict[str, dict[str, Any]]
 ) -> dict[str, Any]:
@@ -323,15 +376,35 @@ def reconcile_state(
         range_name: existing_ranges.get(range_name, empty_range_checkpoint())
         for range_name in sorted(current_ranges)
     }
+    current_manifests = current_ruleset_manifests(current_ranges)
+    referenced_revisions = set(current_manifests)
+    referenced_revisions.update(
+        checkpoint["checked_ruleset_revision"]
+        for checkpoint in reconciled_ranges.values()
+        if checkpoint.get("checked_ruleset_revision") is not None
+    )
+    referenced_revisions.update(
+        state["change_checkpoint"].get("checked_ruleset_revisions", [])
+    )
+    rulesets = dict(current_manifests)
+    for revision in sorted(referenced_revisions - set(current_manifests)):
+        conventions = state["rulesets"].get(revision)
+        if conventions is None:
+            raise AuditStateError(f"Referenced ruleset manifest is missing: {revision}")
+        rulesets[revision] = conventions
     return {
         "schema_version": SCHEMA_VERSION,
         "change_checkpoint": {
             "checked_at": state["change_checkpoint"].get("checked_at"),
+            "checked_ruleset_revisions": list(
+                state["change_checkpoint"].get("checked_ruleset_revisions", [])
+            ),
             "checked_through_commit": state["change_checkpoint"].get(
                 "checked_through_commit"
             ),
         },
         "ranges": reconciled_ranges,
+        "rulesets": dict(sorted(rulesets.items())),
     }
 
 
@@ -408,18 +481,42 @@ def legacy_reason(
     """Return sort priority and reason for a full-range incremental check."""
     checked_at = checkpoint.get("checked_at")
     checked_revision = checkpoint.get("checked_ruleset_revision")
-    if checked_at is not None and checked_revision != current_range["ruleset_revision"]:
-        return 0, "ruleset_changed"
     if checked_at is None:
-        return 1, "never_checked"
+        return 0, "never_checked"
+    if checked_revision != current_range["ruleset_revision"]:
+        return 1, "ruleset_changed"
     return 2, "least_recently_checked"
+
+
+def resolve_incremental_range_limit(
+    range_count: int,
+    *,
+    range_limit: int | None,
+    rotation_days: int | None,
+) -> tuple[int, int | None]:
+    """Resolve a fixed limit or a target rotation period."""
+    if range_limit is not None and rotation_days is not None:
+        raise AuditStateError(
+            "--range-limit and --rotation-days are mutually exclusive"
+        )
+    if range_limit is not None:
+        if range_limit < 1:
+            raise AuditStateError("--range-limit must be at least 1")
+        return range_limit, None
+    effective_rotation_days = (
+        rotation_days if rotation_days is not None else DEFAULT_ROTATION_DAYS
+    )
+    if effective_rotation_days < 1:
+        raise AuditStateError("--rotation-days must be at least 1")
+    return math.ceil(range_count / effective_rotation_days), effective_rotation_days
 
 
 def build_plan(
     repo_root: Path,
     state_path: Path,
     mode: str,
-    range_limit: int,
+    range_limit: int | None,
+    rotation_days: int | None,
 ) -> dict[str, Any]:
     """Build a full or incremental audit plan."""
     ensure_tracked_tree_clean(repo_root)
@@ -441,6 +538,10 @@ def build_plan(
     }
 
     if mode == "full":
+        if range_limit is not None or rotation_days is not None:
+            raise AuditStateError(
+                "--range-limit and --rotation-days apply only to incremental mode"
+            )
         plan["changed_checks"] = []
         plan["legacy_ranges"] = []
         plan["full_ranges"] = [
@@ -449,15 +550,19 @@ def build_plan(
         ]
         return plan
 
+    resolved_range_limit, effective_rotation_days = resolve_incremental_range_limit(
+        len(current_ranges),
+        range_limit=range_limit,
+        rotation_days=rotation_days,
+    )
+    plan["range_limit"] = resolved_range_limit
+    plan["rotation_days"] = effective_rotation_days
     base_commit = reconciled["change_checkpoint"].get("checked_through_commit")
-    if not base_commit:
-        raise AuditStateError(
-            "Incremental mode requires a completed full audit checkpoint"
-        )
-
     changed_by_range: dict[str, list[str]] = {}
-    for path in changed_files_since(repo_root, base_commit, head_commit):
-        changed_by_range.setdefault(audit_range_for_path(path), []).append(path)
+    if base_commit:
+        for path in changed_files_since(repo_root, base_commit, head_commit):
+            changed_by_range.setdefault(audit_range_for_path(path), []).append(path)
+    plan["bootstrap"] = base_commit is None
     plan["changed_checks"] = [
         changed_range_plan(range_name, current_ranges[range_name], files)
         for range_name, files in sorted(changed_by_range.items())
@@ -480,7 +585,7 @@ def build_plan(
     candidates.sort(key=lambda item: (item[0], item[1], item[2]))
     plan["legacy_ranges"] = [
         range_plan(range_name, current_range, reason)
-        for _, _, range_name, reason, current_range in candidates[:range_limit]
+        for _, _, range_name, reason, current_range in candidates[:resolved_range_limit]
     ]
     return plan
 
@@ -556,6 +661,9 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
         if {item.get("name") for item in planned_ranges} != set(current_ranges):
             raise AuditStateError("Full audit plan does not cover every current range")
         ranges_to_complete = planned_ranges
+        changed_ruleset_revisions = sorted(
+            {item["ruleset_revision"] for item in planned_ranges}
+        )
     elif mode == "incremental":
         if plan.get("change_checkpoint_before") != reconciled["change_checkpoint"].get(
             "checked_through_commit"
@@ -570,6 +678,9 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
         for changed_check in changed_checks:
             verify_changed_check(changed_check, current_ranges)
         ranges_to_complete = legacy_ranges
+        changed_ruleset_revisions = sorted(
+            {item["ruleset_revision"] for item in changed_checks}
+        )
     else:
         raise AuditStateError(f"Unknown audit mode: {mode!r}")
 
@@ -587,8 +698,10 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
         }
     reconciled["change_checkpoint"] = {
         "checked_at": completed_at,
+        "checked_ruleset_revisions": changed_ruleset_revisions,
         "checked_through_commit": head_commit,
     }
+    reconciled = reconcile_state(reconciled, current_ranges)
     write_json_atomic(state_path, reconciled)
     emit_json(
         {
@@ -601,25 +714,68 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
 
 
 def status_summary(
-    state: dict[str, Any], current_ranges: dict[str, dict[str, Any]]
+    state: dict[str, Any],
+    current_ranges: dict[str, dict[str, Any]],
+    *,
+    rotation_days: int = DEFAULT_ROTATION_DAYS,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Return a concise state summary."""
+    if rotation_days < 1:
+        raise AuditStateError("--rotation-days must be at least 1")
     reconciled = reconcile_state(state, current_ranges)
+    current_time = now or datetime.now(UTC)
+    cutoff = current_time - timedelta(days=rotation_days)
+    checked_times: list[tuple[str, datetime]] = []
     never_checked = 0
+    overdue = 0
     stale = 0
     for range_name, current_range in current_ranges.items():
         checkpoint = reconciled["ranges"][range_name]
-        if checkpoint.get("checked_at") is None:
+        checked_at = checkpoint.get("checked_at")
+        if checked_at is None:
             never_checked += 1
-        elif (
+            overdue += 1
+            continue
+        try:
+            checked_time = datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+        except (AttributeError, ValueError) as exc:
+            raise AuditStateError(
+                f"Range checkpoint has an invalid checked_at: {range_name}"
+            ) from exc
+        checked_times.append((checked_at, checked_time))
+        ruleset_stale = (
             checkpoint.get("checked_ruleset_revision")
             != current_range["ruleset_revision"]
-        ):
+        )
+        if ruleset_stale:
             stale += 1
+        if ruleset_stale or checked_time < cutoff:
+            overdue += 1
+    oldest_checked_at = (
+        min(checked_times, key=lambda item: item[1])[0] if checked_times else None
+    )
+    max_range_age_days = (
+        round(
+            (
+                current_time - min(checked_times, key=lambda item: item[1])[1]
+            ).total_seconds()
+            / 86400,
+            2,
+        )
+        if checked_times
+        else None
+    )
     return {
         "change_checkpoint": reconciled["change_checkpoint"],
+        "checked_within_rotation_ranges": len(current_ranges) - overdue,
         "current_ranges": len(current_ranges),
+        "max_range_age_days": max_range_age_days,
         "never_checked_ranges": never_checked,
+        "oldest_checked_at": oldest_checked_at,
+        "overdue_ranges": overdue,
+        "rotation_range_limit": math.ceil(len(current_ranges) / rotation_days),
+        "rotation_target_days": rotation_days,
         "stale_ranges": stale,
     }
 
@@ -632,15 +788,34 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser(
         "sync", help="Reconcile current ranges without marking checks"
     )
-    subparsers.add_parser("status", help="Summarize current checkpoint coverage")
+    status_parser = subparsers.add_parser(
+        "status", help="Summarize current checkpoint coverage"
+    )
+    status_parser.add_argument(
+        "--rotation-days",
+        type=int,
+        default=DEFAULT_ROTATION_DAYS,
+        help=(
+            "Rotation target used for coverage status "
+            f"(default: {DEFAULT_ROTATION_DAYS})"
+        ),
+    )
 
     plan_parser = subparsers.add_parser("plan", help="Create a disposable audit plan")
     plan_parser.add_argument("--mode", choices=("full", "incremental"), required=True)
-    plan_parser.add_argument(
+    limit_group = plan_parser.add_mutually_exclusive_group()
+    limit_group.add_argument(
         "--range-limit",
         type=int,
-        default=1,
-        help="Full legacy ranges selected in incremental mode (default: 1)",
+        help="Fixed number of full ranges selected in incremental mode",
+    )
+    limit_group.add_argument(
+        "--rotation-days",
+        type=int,
+        help=(
+            "Target days for one full range rotation in incremental mode "
+            f"(default: {DEFAULT_ROTATION_DAYS})"
+        ),
     )
     plan_parser.add_argument("--output", type=Path, required=True)
 
@@ -666,16 +841,21 @@ def main() -> int:
             emit_json(status_summary(reconciled, current_ranges))
             return 0
         if args.command == "status":
-            emit_json(status_summary(state, current_ranges))
+            emit_json(
+                status_summary(
+                    state,
+                    current_ranges,
+                    rotation_days=args.rotation_days,
+                )
+            )
             return 0
         if args.command == "plan":
-            if args.range_limit < 1:
-                raise AuditStateError("--range-limit must be at least 1")
             plan = build_plan(
                 repo_root,
                 state_path,
                 mode=args.mode,
                 range_limit=args.range_limit,
+                rotation_days=args.rotation_days,
             )
             args.output.parent.mkdir(parents=True, exist_ok=True)
             write_json_atomic(args.output, plan)
@@ -687,6 +867,8 @@ def main() -> int:
                     "legacy_ranges": len(plan["legacy_ranges"]),
                     "mode": plan["mode"],
                     "output": str(args.output),
+                    "range_limit": plan.get("range_limit"),
+                    "rotation_days": plan.get("rotation_days"),
                 }
             )
             return 0

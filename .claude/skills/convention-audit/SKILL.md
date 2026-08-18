@@ -19,8 +19,8 @@ not move or dirty the audit checkout.
 
 ### Full audit
 
-Use full mode when the requester asks for a complete audit, when establishing the
-first baseline, or when the change checkpoint is absent.
+Use full mode only when the requester asks for one complete audit at a single
+commit. Recurring audits can bootstrap incrementally from an empty checkpoint.
 
 Full mode checks every current audit range at one target commit. Do not complete the
 plan unless every planned range was inspected.
@@ -38,18 +38,35 @@ Use incremental mode for recurring audits.
 Incremental mode checks:
 
 1. every tracked file changed since the last successful change checkpoint; and
-2. a bounded number of full ranges whose convention revision is stale, that have
-   never been checked, or that were checked least recently.
+2. enough full ranges to refresh all current ranges within the target rotation
+   period.
 
 ```bash
 python .agents/skills/convention-audit/scripts/audit_state.py plan \
   --mode incremental \
-  --range-limit 1 \
+  --rotation-days 30 \
   --output /tmp/convention-audit-plan.json
 ```
 
-Incremental mode requires a completed full audit checkpoint. Never invent or
-manually advance the starting commit.
+The planner computes `ceil(current ranges / rotation days)` and selects
+never-checked ranges first, then stale convention rulesets, then the
+least-recently checked ranges. Use `--range-limit N` only when a caller needs an
+explicit fixed limit.
+
+Incremental mode may start with no prior checkpoint. The first completed plan
+establishes the change checkpoint while leaving uninspected ranges visibly
+unchecked. Later runs check every changed file since that checkpoint in addition
+to the rotation ranges. Never invent or manually advance the starting commit.
+
+Inspect rotation health at any time:
+
+```bash
+python .agents/skills/convention-audit/scripts/audit_state.py status \
+  --rotation-days 30
+```
+
+Treat `never_checked_ranges`, `stale_ranges`, and `overdue_ranges` as outstanding
+coverage. `max_range_age_days` reports the oldest completed range checkpoint.
 
 ## Inspect the plan
 
@@ -175,10 +192,12 @@ planning.
 
 It stores only:
 
-- the latest successfully checked commit and time for changed files;
+- the latest successfully checked commit, time, and rulesets for changed files;
 - current repository ranges; and
-- each range's latest checked commit, time, and convention revision.
+- each range's latest checked commit, time, and convention revision; and
+- one deduplicated convention-path manifest per referenced ruleset revision.
 
-It replaces checkpoints in place and prunes ranges that no longer exist. Inspection
-content belongs in the current conversation, unresolved confirmed work belongs in
-repository issues, and code corrections belong in pull requests.
+Ranges reference ruleset revisions instead of repeating convention paths. State
+reconciliation prunes ranges and ruleset manifests that are no longer referenced.
+Inspection content belongs in the current conversation, unresolved confirmed work
+belongs in repository issues, and code corrections belong in pull requests.
