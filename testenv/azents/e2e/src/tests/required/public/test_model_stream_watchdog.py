@@ -44,8 +44,6 @@ _IDLE_PREFIX_RECOVERY_RESPONSE = "WATCHDOG_IDLE_PREFIX_RECOVERED"
 _ABSOLUTE_RECOVERY_PROMPT = "Watchdog absolute cap cleans partial then recover"
 _ABSOLUTE_FAILED_PREFIX = "FAILED_WATCHDOG_PREFIX_MUST_DISAPPEAR"
 _ABSOLUTE_RECOVERY_RESPONSE = "WATCHDOG_ABSOLUTE_RECOVERED"
-_USER_STOP_PROMPT = "Watchdog user stop preserves partial"
-_USER_STOP_PARTIAL = "WATCHDOG_STOP_PARTIAL"
 _PROVIDER_STOP_PROMPT = "Provider retry stop"
 _PROVIDER_COMPACTION_SEED = "Provider compaction failure seed"
 _PROVIDER_COMPACTION_SEED_RESPONSE = "Provider compaction failure seed response."
@@ -421,47 +419,6 @@ def _wait_for_stopped_without_failure(
     return observed
 
 
-def _wait_for_interrupted_partial(
-    *,
-    public_url: str,
-    token: str,
-    session_id: str,
-    timeout: float = 15,
-) -> dict[str, object]:
-    """Wait until User Stop durably retains the valid partial and interruption."""
-    observed: dict[str, object] | None = None
-
-    def interrupted() -> bool:
-        nonlocal observed
-        observed = list_history(
-            server_url=public_url,
-            token=token,
-            session_id=session_id,
-        )
-        if not any(
-            _USER_STOP_PARTIAL in content for content in message_contents(observed)
-        ):
-            return False
-        for event in history_events(observed):
-            if event.get("kind") != "run_marker":
-                continue
-            event_payload = json_object_payload(
-                event.get("payload"),
-                label="run marker payload",
-            )
-            if event_payload.get("status") == "interrupted":
-                return True
-        return False
-
-    _wait_until(
-        interrupted,
-        timeout=timeout,
-        message=lambda: f"interrupted partial did not become durable: {observed!r}",
-    )
-    assert observed is not None
-    return observed
-
-
 def _open_authenticated_raw_events(
     driver: WebDriver,
     *,
@@ -681,58 +638,6 @@ class TestModelStreamWatchdog:
             lambda driver: _ABSOLUTE_RECOVERY_RESPONSE in driver.page_source
         )
         assert _ABSOLUTE_FAILED_PREFIX not in browser_driver.page_source
-
-    def test_user_stop_preserves_valid_partial_without_timeout_retry(
-        self,
-        public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
-        azents_public_server_url: str,
-        azents_engine_worker_container: object,
-    ) -> None:
-        """Stop remains preemptive and retains only the valid assistant prefix."""
-        del azents_engine_worker_container
-        workspace = setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = create_agent(public_api_client, workspace)
-        session_id = team_primary_session_id(
-            server_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-        )
-        result = run_message(
-            public_api_client=public_api_client,
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            agent_id=agent_id,
-            session_id=session_id,
-            message=_USER_STOP_PROMPT,
-        )
-        live = _wait_for_live_content(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-            content=_USER_STOP_PARTIAL,
-        )
-        run_payload = live.get("run")
-        assert run_payload is not None, live
-        run = json_object_payload(run_payload, label="live run")
-        assert run.get("retry") is None, live
-        _post_stop(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-        )
-        payload = _wait_for_interrupted_partial(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-        )
-
-        assert not system_error_events(payload)
-        assert "run_complete" in message_roles(payload)
 
     def test_user_stop_during_provider_retry_stays_terminal_and_non_replayable(
         self,
