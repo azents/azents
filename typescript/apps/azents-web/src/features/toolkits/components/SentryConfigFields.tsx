@@ -23,6 +23,7 @@ import {
   IconSettings,
 } from "@tabler/icons-react";
 import { useCallback, useMemo } from "react";
+import { getArray, isOneOf } from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 
 /** Sentry skill group definition */
@@ -54,8 +55,16 @@ const SKILL_GROUPS = [
   },
 ] as const;
 
+const SKILL_VALUES = ["inspect", "seer", "docs", "triage", "manage"] as const;
+
+type SentrySkill = (typeof SKILL_VALUES)[number];
+
 type SentryConfig = Record<string, unknown>;
 type SentryCredentials = Record<string, unknown> | null;
+
+function isSentrySkill(value: unknown): value is SentrySkill {
+  return isOneOf(value, SKILL_VALUES);
+}
 
 interface SentryConfigFieldsProps {
   config: SentryConfig;
@@ -80,7 +89,7 @@ export function SentryConfigFields({
   const enabledSkills = useMemo(
     () =>
       Array.isArray(config.enabled_skills)
-        ? (config.enabled_skills as string[])
+        ? getArray(config.enabled_skills, isSentrySkill)
         : ["inspect", "seer"],
     [config.enabled_skills],
   );
@@ -88,7 +97,7 @@ export function SentryConfigFields({
   // Connection test
   const testConnectionMutation = trpc.toolkit.testConnection.useMutation();
 
-  const handleTestConnection = useCallback(() => {
+  const handleTestConnection = useCallback((): void => {
     testConnectionMutation.mutate({
       handle,
       toolkitType: "sentry",
@@ -99,7 +108,7 @@ export function SentryConfigFields({
   }, [handle, toolkitConfigId, config, credentials, testConnectionMutation]);
 
   const handleSkillToggle = useCallback(
-    (skill: string, checked: boolean) => {
+    (skill: SentrySkill, checked: boolean): void => {
       const current = new Set(enabledSkills);
       if (checked) {
         current.add(skill);

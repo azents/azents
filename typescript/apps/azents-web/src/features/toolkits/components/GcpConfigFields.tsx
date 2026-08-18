@@ -34,6 +34,12 @@ import {
   IconUpload,
 } from "@tabler/icons-react";
 import { useCallback, useMemo, useState } from "react";
+import {
+  getOptionalString,
+  getStringArray,
+  isRecord,
+  parseJsonRecord,
+} from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 
 type GcpConfig = Record<string, unknown>;
@@ -153,6 +159,29 @@ const TIER_LABELS: Record<string, string> = {
   data: "Data",
 };
 
+const DEFAULT_SERVICES = ["logging", "monitoring"];
+
+function getConfiguredServices(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+
+  const supportedServices = new Set(SERVICES.map((service) => service.value));
+  return [
+    ...new Set(
+      getStringArray(value).filter((service) => supportedServices.has(service)),
+    ),
+  ];
+}
+
+function getServiceAccountKey(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value) || !getOptionalString(value.client_email)) {
+    return null;
+  }
+
+  return value;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -169,17 +198,11 @@ export function GcpConfigFields({
   const projectId =
     typeof config.project_id === "string" ? config.project_id : "";
   const selectedServices = useMemo(
-    () =>
-      Array.isArray(config.services)
-        ? (config.services as string[])
-        : ["logging", "monitoring"],
+    () => getConfiguredServices(config.services, DEFAULT_SERVICES),
     [config.services],
   );
   const writableServices = useMemo(
-    () =>
-      Array.isArray(config.writable_services)
-        ? (config.writable_services as string[])
-        : [],
+    () => getConfiguredServices(config.writable_services, []),
     [config.writable_services],
   );
   const timeoutValue = typeof config.timeout === "number" ? config.timeout : 30;
@@ -190,15 +213,12 @@ export function GcpConfigFields({
     if (!credentials) {
       return null;
     }
-    const saKey = credentials.service_account_key;
-    if (
-      typeof saKey === "object" &&
-      saKey !== null &&
-      "client_email" in saKey
-    ) {
-      return (saKey as Record<string, unknown>).client_email as string;
-    }
-    return null;
+    const serviceAccountKey = getServiceAccountKey(
+      credentials.service_account_key,
+    );
+    return serviceAccountKey
+      ? (getOptionalString(serviceAccountKey.client_email) ?? null)
+      : null;
   }, [credentials]);
 
   // Connection test
@@ -251,11 +271,9 @@ export function GcpConfigFields({
         onCredentialsChange(null);
         return;
       }
-      try {
-        const parsed = JSON.parse(value) as Record<string, unknown>;
-        onCredentialsChange({ service_account_key: parsed });
-      } catch {
-        // JSON parse failed — ignore because still typing
+      const serviceAccountKey = getServiceAccountKey(parseJsonRecord(value));
+      if (serviceAccountKey) {
+        onCredentialsChange({ service_account_key: serviceAccountKey });
       }
     },
     [onCredentialsChange],
@@ -268,14 +286,12 @@ export function GcpConfigFields({
         return;
       }
       const reader = new FileReader();
-      reader.onload = (e): void => {
-        const text = e.target?.result;
+      reader.onload = (): void => {
+        const text = reader.result;
         if (typeof text === "string") {
-          try {
-            const parsed = JSON.parse(text) as Record<string, unknown>;
-            onCredentialsChange({ service_account_key: parsed });
-          } catch {
-            // Invalid JSON file
+          const serviceAccountKey = getServiceAccountKey(parseJsonRecord(text));
+          if (serviceAccountKey) {
+            onCredentialsChange({ service_account_key: serviceAccountKey });
           }
         }
       };

@@ -23,6 +23,7 @@ import {
 import { IconAlertTriangle, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useMemo, useState } from "react";
+import { getArray, isRecord } from "@/shared/lib/unknown-value";
 
 /** POSIX environment variable name regex (both cases allowed) */
 const ENV_NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -54,15 +55,10 @@ interface EnvVarConfigFieldsProps {
 
 /** Parse config type-safely (guard unknown) */
 function parseConfig(raw: Record<string, unknown>): EnvVarConfig {
-  const entries = Array.isArray(raw.entries)
-    ? (raw.entries as unknown[]).map((e) => {
-        const entry = e as Record<string, unknown>;
-        return {
-          name: typeof entry.name === "string" ? entry.name : "",
-          masked: typeof entry.masked === "boolean" ? entry.masked : true,
-        };
-      })
-    : [];
+  const entries = getArray(raw.entries, isRecord).map((entry) => ({
+    name: typeof entry.name === "string" ? entry.name : "",
+    masked: typeof entry.masked === "boolean" ? entry.masked : true,
+  }));
   return { entries };
 }
 
@@ -73,10 +69,7 @@ function parseCredentials(
   if (raw == null) {
     return { values: {} };
   }
-  const values =
-    raw.values != null && typeof raw.values === "object"
-      ? (raw.values as Record<string, unknown>)
-      : {};
+  const values = isRecord(raw.values) ? raw.values : {};
   const typedValues: Record<string, string> = {};
   for (const [key, val] of Object.entries(values)) {
     if (typeof val === "string") {
@@ -113,10 +106,9 @@ export function EnvVarConfigFields({
       }
 
       const prevName = prev.name;
-      const hasNewName = typeof patch.name === "string";
-      const newName = hasNewName ? (patch.name as string) : prevName;
+      const newName = typeof patch.name === "string" ? patch.name : prevName;
 
-      if (hasNewName && patch.name !== prevName) {
+      if (typeof patch.name === "string" && patch.name !== prevName) {
         // Remap value key too when name changes
         if (prevName && prevName in newValues) {
           const prevValue = newValues[prevName];
@@ -125,7 +117,7 @@ export function EnvVarConfigFields({
             newValues[newName] = prevValue;
           }
         }
-        newEntries[index] = { ...prev, name: patch.name as string };
+        newEntries[index] = { ...prev, name: newName };
       }
 
       if (typeof patch.value === "string" && newName) {

@@ -40,6 +40,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { isRecord } from "@/shared/lib/unknown-value";
 import {
   completedCompactionIds,
   isCompactionInProgressMarker,
@@ -144,17 +145,16 @@ function parseStoredChatScrollState(
   }
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) {
+    if (!isRecord(parsed)) {
       return null;
     }
-    const record = parsed as Record<string, unknown>;
     if (
-      typeof record.distanceFromBottom === "number" &&
-      typeof record.following === "boolean"
+      typeof parsed.distanceFromBottom === "number" &&
+      typeof parsed.following === "boolean"
     ) {
       return {
-        distanceFromBottom: record.distanceFromBottom,
-        following: record.following,
+        distanceFromBottom: parsed.distanceFromBottom,
+        following: parsed.following,
       };
     }
   } catch {

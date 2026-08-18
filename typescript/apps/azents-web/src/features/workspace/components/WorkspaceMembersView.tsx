@@ -39,6 +39,8 @@ import type {
   WorkspaceMember,
 } from "../types";
 
+type InvitationRole = "member" | "manager";
+
 /** Role display label */
 function useRoleLabel(role: string): string {
   const t = useTranslations("workspace.dashboard");
@@ -99,11 +101,11 @@ function InviteForm({
 }): React.ReactElement {
   const t = useTranslations("workspace.dashboard");
 
-  const form = useForm({
+  const form = useForm<{ email: string; role: InvitationRole }>({
     mode: "controlled",
     initialValues: {
       email: "",
-      role: "member" as "member" | "manager",
+      role: "member",
     },
     validate: {
       email: (value) => (value.trim() ? null : t("inviteEmailRequired")),
@@ -263,12 +265,12 @@ function MemberRow({
                   { value: "member", label: t("roleMember") },
                   { value: "manager", label: t("roleManager") },
                 ]}
-                onChange={(e) =>
-                  onUpdateRole(
-                    member.id,
-                    e.currentTarget.value as "manager" | "member",
-                  )
-                }
+                onChange={(e) => {
+                  const role = e.currentTarget.value;
+                  if (role === "manager" || role === "member") {
+                    onUpdateRole(member.id, role);
+                  }
+                }}
                 style={{ width: 120 }}
               />
               <Button

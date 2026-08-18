@@ -9,9 +9,35 @@ export const DEFAULT_LOCALE: SupportedLocale = "en-US";
 /** Cookie name */
 export const LOCALE_COOKIE = "locale";
 
+const LANG_TO_LOCALE: ReadonlyMap<string, SupportedLocale> = new Map([
+  ["en", "en-US"],
+  ["fr", "fr-FR"],
+  ["ja", "ja-JP"],
+  ["ko", "ko-KR"],
+]);
+
+interface LocalePreference {
+  lang: string;
+  q: number;
+}
+
+function parseLocalePreference(part: string): LocalePreference | null {
+  const [lang = "", ...params] = part.trim().split(";");
+  const qParam = params.find((param) => param.trim().startsWith("q="));
+  const normalizedLang = lang.trim();
+  const qValue = qParam?.trim().slice(2);
+  const q = qValue ? Number(qValue) : qParam ? Number.NaN : 1;
+
+  if (!normalizedLang || !Number.isFinite(q) || q < 0 || q > 1) {
+    return null;
+  }
+
+  return { lang: normalizedLang, q };
+}
+
 /** Check whether value is a supported locale */
 export function isSupportedLocale(value: string): value is SupportedLocale {
-  return (SUPPORTED_LOCALES as readonly string[]).includes(value);
+  return SUPPORTED_LOCALES.some((locale) => locale === value);
 }
 
 /**
@@ -26,20 +52,9 @@ export function resolveLocaleFromHeader(
 
   const entries = acceptLanguage
     .split(",")
-    .map((part) => {
-      const [lang = "", ...params] = part.trim().split(";");
-      const qParam = params.find((p) => p.trim().startsWith("q="));
-      const q = qParam ? parseFloat(qParam.trim().slice(2)) : 1;
-      return { lang: lang.trim(), q };
-    })
+    .map(parseLocalePreference)
+    .filter((entry): entry is LocalePreference => entry !== null)
     .sort((a, b) => b.q - a.q);
-
-  const langToLocale: Record<string, SupportedLocale> = {
-    en: "en-US",
-    fr: "fr-FR",
-    ja: "ja-JP",
-    ko: "ko-KR",
-  };
 
   for (const entry of entries) {
     if (isSupportedLocale(entry.lang)) {
@@ -47,8 +62,11 @@ export function resolveLocaleFromHeader(
     }
 
     const langPrefix = entry.lang.split("-")[0];
-    if (langPrefix != null && langPrefix in langToLocale) {
-      return langToLocale[langPrefix] as SupportedLocale;
+    if (langPrefix) {
+      const locale = LANG_TO_LOCALE.get(langPrefix);
+      if (locale) {
+        return locale;
+      }
     }
   }
 

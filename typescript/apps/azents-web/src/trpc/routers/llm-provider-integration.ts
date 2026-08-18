@@ -52,6 +52,21 @@ const providerSecretsSchema = z.discriminatedUnion("type", [
   gcpSecretsSchema,
 ]);
 
+const integrationProviderSchema = z
+  .string()
+  .min(1)
+  .pipe(
+    z.enum([
+      "openai",
+      "xai",
+      "openrouter",
+      "anthropic",
+      "google_gemini",
+      "aws_bedrock",
+      "google_vertex_ai",
+    ]),
+  );
+
 // Config schema (plain JSONB storage)
 const awsConfigSchema = z.object({
   type: z.literal("aws_credentials"),
@@ -249,7 +264,7 @@ export const llmProviderIntegrationRouter = router({
     .input(
       z.object({
         handle: z.string().min(1),
-        provider: z.string().min(1),
+        provider: integrationProviderSchema,
         name: z.string().optional(),
         secrets: providerSecretsSchema,
         config: providerConfigSchema.optional(),
@@ -262,7 +277,7 @@ export const llmProviderIntegrationRouter = router({
           client: ctx.apiClient,
           path: { handle: input.handle },
           body: {
-            provider: input.provider as "openai",
+            provider: input.provider,
             name: input.name ?? null,
             secrets: input.secrets,
             config: input.config ?? null,

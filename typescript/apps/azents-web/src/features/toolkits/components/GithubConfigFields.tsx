@@ -29,17 +29,30 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  getString,
+  getStringArray,
+  isOneOf,
+  isRecord,
+} from "@/shared/lib/unknown-value";
 import { trpc } from "@/trpc/client";
 import type { GitHubPlatformAuthorizationStateResponse } from "@azents/public-client";
 
 type GithubConfig = Record<string, unknown>;
 type GithubCredentials = Record<string, unknown> | null;
+type GithubAuthType = "pat" | "github_app" | "github_app_platform";
 
 const GITHUB_AUTH_TYPE_OPTIONS = [
   { value: "pat", labelKey: "authTypePat" },
   { value: "github_app", labelKey: "authTypeApp" },
   { value: "github_app_platform", labelKey: "authTypePlatform" },
 ] as const;
+
+const GITHUB_AUTH_TYPES: readonly GithubAuthType[] = [
+  "pat",
+  "github_app",
+  "github_app_platform",
+];
 
 const DEFAULT_TOOLSETS = ["repos", "issues", "pull_requests", "users"] as const;
 
@@ -100,29 +113,36 @@ function credentialInstallations(
     return [];
   }
   return raw.flatMap((item) => {
-    if (typeof item !== "object" || item === null) {
+    if (!isRecord(item)) {
       return [];
     }
-    const record = item as Record<string, unknown>;
     if (
-      typeof record.installation_id !== "string" ||
-      typeof record.account_login !== "string" ||
-      typeof record.account_type !== "string"
+      !isStringWithContent(item.installation_id) ||
+      !isStringWithContent(item.account_login) ||
+      !isStringWithContent(item.account_type)
     ) {
       return [];
     }
     return [
       {
-        installation_id: record.installation_id,
-        account_login: record.account_login,
-        account_type: record.account_type,
+        installation_id: item.installation_id,
+        account_login: item.account_login,
+        account_type: item.account_type,
         account_avatar_url:
-          typeof record.account_avatar_url === "string"
-            ? record.account_avatar_url
+          typeof item.account_avatar_url === "string"
+            ? item.account_avatar_url
             : null,
       },
     ];
   });
+}
+
+function isStringWithContent(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function getGithubAuthType(value: unknown): GithubAuthType {
+  return isOneOf(value, GITHUB_AUTH_TYPES) ? value : "pat";
 }
 
 function installationItemToTarget(item: InstallationItem): InstallationTarget {
@@ -271,21 +291,15 @@ export function GithubConfigFields({
       if (popupRef.current && event.source !== popupRef.current) {
         return;
       }
-      const data = event.data;
-      if (typeof data !== "object" || data === null || !("type" in data)) {
+      if (!isRecord(event.data)) {
         return;
       }
 
-      const msgType = (data as Record<string, unknown>).type;
+      const msgType = event.data.type;
       if (msgType === "azents-github-installations-code") {
-        const code = (data as Record<string, unknown>).code;
-        const state = (data as Record<string, unknown>).state;
-        if (
-          typeof code === "string" &&
-          code &&
-          typeof state === "string" &&
-          state
-        ) {
+        const code = event.data.code;
+        const state = event.data.state;
+        if (isStringWithContent(code) && isStringWithContent(state)) {
           void fetchInstallationsWithCode(code, state);
         }
         stopPollingPopup();
@@ -390,9 +404,9 @@ export function GithubConfigFields({
     setInstallationsCred([...byId.values()]);
   };
 
-  const githubAuthType = (config.github_auth_type as string) || "pat";
+  const githubAuthType = getGithubAuthType(config.github_auth_type);
   const toolsets = Array.isArray(config.toolsets)
-    ? (config.toolsets as string[])
+    ? getStringArray(config.toolsets)
     : [...DEFAULT_TOOLSETS];
   const canTest = TEST_SUPPORTED_AUTH_TYPES.has(githubAuthType);
 
@@ -422,7 +436,7 @@ export function GithubConfigFields({
               ? t("credentialsEditPlaceholder")
               : "Paste a GitHub token"
           }
-          value={(credentials?.token as string) || ""}
+          value={getString(credentials?.token)}
           onChange={(e) => setCred("token", e.currentTarget.value)}
         />
       )}
@@ -433,7 +447,7 @@ export function GithubConfigFields({
             label={t("appIdLabel")}
             placeholder="123456"
             required
-            value={(credentials?.app_id as string) || ""}
+            value={getString(credentials?.app_id)}
             onChange={(e) => setCred("app_id", e.currentTarget.value)}
           />
           <Textarea
@@ -447,7 +461,7 @@ export function GithubConfigFields({
             autosize
             minRows={3}
             maxRows={8}
-            value={(credentials?.private_key as string) || ""}
+            value={getString(credentials?.private_key)}
             onChange={(e) => setCred("private_key", e.currentTarget.value)}
             styles={{
               input: { fontFamily: "var(--font-geist-mono)" },

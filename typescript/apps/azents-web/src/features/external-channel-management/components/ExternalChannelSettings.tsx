@@ -41,6 +41,7 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { DiscordSetupGuide } from "@/shared/components/DiscordSetupGuide";
+import { isOneOf } from "@/shared/lib/unknown-value";
 import type { ExternalChannelSettingsContainerOutput } from "../containers/useExternalChannelSettingsContainer";
 import type {
   ConnectionDialogState,
@@ -91,9 +92,7 @@ type DiscordFailureCode = (typeof DISCORD_FAILURE_CODES)[number];
 function discordFailureCode(
   value: string | null,
 ): DiscordFailureCode | "unknown" {
-  return DISCORD_FAILURE_CODES.some((code) => code === value)
-    ? (value as DiscordFailureCode)
-    : "unknown";
+  return isOneOf(value, DISCORD_FAILURE_CODES) ? value : "unknown";
 }
 
 function capabilityEntries(
