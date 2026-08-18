@@ -60,12 +60,14 @@ code_paths:
   - typescript/apps/azents-admin-web/src/providers/auth-provider.ts
   - typescript/apps/azents-admin-web/src/shared/lib/auth-cookies.ts
   - typescript/apps/azents-admin-web/src/trpc/**
+  - typescript/apps/azents-web/src/app/(app)/login/**
   - typescript/apps/azents-web/src/features/auth/**
   - typescript/apps/azents-web/src/features/signup/**
   - typescript/apps/azents-web/src/features/password-reset/**
   - typescript/apps/azents-web/src/config/server.ts
   - typescript/apps/azents-web/src/shared/components/AppBar.tsx
   - typescript/apps/azents-web/src/shared/lib/admin-access.ts
+  - typescript/apps/azents-web/src/shared/lib/login-redirect.ts
   - typescript/apps/azents-web/src/trpc/routers/auth.ts
   - typescript/apps/azents-web/src/trpc/routers/user.ts
   - infra/charts/azents/templates/admin-web/**
@@ -82,7 +84,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-08-18
-spec_version: 11
+spec_version: 12
 ---
 
 # User & Authentication
@@ -245,6 +247,8 @@ Redeem transaction first validates token usability, email match, and existing re
 
 `GET /auth/v1/login/methods?email=` does not directly expose user existence and returns only password setting status as `has_password`. Unregistered email returns `has_password=false`.
 
+Main Web post-authentication redirects accept only same-origin path references that begin with exactly one `/`. The login flow filters `next` before forwarding it to password or email OTP steps and validates it again before the already-authenticated, password-success, and OTP-success redirects. Missing or rejected targets fall back to `/workspaces`.
+
 ### 3.5 Credential projection
 
 Credential providers produce an internal credential summary with `configured`, `valid`, `can_login`, `can_elevate`, `can_remove`, and optional `unavailable_reason`.
@@ -364,6 +368,7 @@ Sensitive operations require `elv=true` access token. Elevation is acquired by e
 - `[email-verification-single-use]` — email verification row cannot be reused after being verified once.
 - `[login-method-lookup-no-leak]` — unregistered email also responds `has_password=false`.
 - `[login-invalid-no-leak]` — password login failure does not distinguish existence.
+- `[login-next-same-origin-path]` — Main Web propagates and follows `next` only when it is a same-origin path reference beginning with exactly one slash; otherwise post-login navigation uses `/workspaces`.
 - `[admin-bootstrap-user-count-zero]` — Admin bootstrap is available only while total User count is zero and an active setup-token hash exists.
 - `[admin-bootstrap-no-workspace]` — successful bootstrap creates identity, password, system role, and Session state but no Workspace or Workspace membership.
 - `[admin-bootstrap-single-winner]` — concurrent attempts are serialized and exactly one successful transaction can consume the setup token.
@@ -449,6 +454,7 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-08-18** (v12) — Restricted Main Web post-login `next` propagation and redirects to same-origin path references, with `/workspaces` as the invalid or absent fallback.
 - **2026-08-18** (v11) — Corrected the existing-install operator CLI contract to
   accept repeated exact-email options, process grants sequentially, and preserve
   earlier successful grants when a later email is missing.
