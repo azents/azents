@@ -244,3 +244,86 @@ def test_complete_bootstrap_plan_records_only_completed_ranges(
     assert state["ranges"]["range-a"]["checked_at"] == "2026-08-18T00:00:00Z"
     assert state["ranges"]["range-b"] == audit_state.empty_range_checkpoint()
     assert state["rulesets"] == {"current": [".claude/conventions/global/example.md"]}
+
+
+def test_complete_incremental_plan_rejects_missing_changed_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    range_a = audit_state.audit_range_for_path("a.py")
+    range_b = audit_state.audit_range_for_path("b.py")
+    assert range_a != range_b
+    current_ranges = {
+        range_a: _range(file_path="a.py", revision="current"),
+        range_b: _range(file_path="b.py", revision="current"),
+    }
+    state = audit_state.empty_state()
+    state["change_checkpoint"] = {
+        "checked_at": "2026-08-17T00:00:00Z",
+        "checked_ruleset_revisions": ["current"],
+        "checked_through_commit": "base",
+    }
+    state["rulesets"] = {
+        "current": [".claude/conventions/global/example.md"],
+    }
+    state_path = tmp_path / "state.json"
+    plan_path = tmp_path / "plan.json"
+    state_path.write_text(audit_state.serialize_json(state))
+    monkeypatch.setattr(audit_state, "ensure_tracked_tree_clean", lambda _root: None)
+    monkeypatch.setattr(audit_state, "discover_ranges", lambda _root: current_ranges)
+    monkeypatch.setattr(audit_state, "current_head", lambda _root: "head")
+    monkeypatch.setattr(
+        audit_state,
+        "changed_files_since",
+        lambda _root, _base, _head: ("a.py",),
+    )
+
+    plan = audit_state.build_plan(
+        tmp_path,
+        state_path,
+        mode="incremental",
+        range_limit=1,
+        rotation_days=None,
+    )
+    assert len(plan["changed_checks"]) == 1
+    plan["changed_checks"] = []
+    plan_path.write_text(json.dumps(plan))
+
+    with pytest.raises(
+        audit_state.AuditStateError,
+        match="does not exactly cover changed files",
+    ):
+        audit_state.complete_plan(tmp_path, state_path, plan_path)
+
+
+def test_complete_incremental_plan_rejects_partial_rotation_ranges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_ranges = {
+        "range-a": _range(file_path="a.py", revision="current"),
+        "range-b": _range(file_path="b.py", revision="current"),
+    }
+    state_path = tmp_path / "state.json"
+    plan_path = tmp_path / "plan.json"
+    state_path.write_text(audit_state.serialize_json(audit_state.empty_state()))
+    monkeypatch.setattr(audit_state, "ensure_tracked_tree_clean", lambda _root: None)
+    monkeypatch.setattr(audit_state, "discover_ranges", lambda _root: current_ranges)
+    monkeypatch.setattr(audit_state, "current_head", lambda _root: "head")
+
+    plan = audit_state.build_plan(
+        tmp_path,
+        state_path,
+        mode="incremental",
+        range_limit=2,
+        rotation_days=None,
+    )
+    assert len(plan["legacy_ranges"]) == 2
+    plan["legacy_ranges"] = plan["legacy_ranges"][:1]
+    plan_path.write_text(json.dumps(plan))
+
+    with pytest.raises(
+        audit_state.AuditStateError,
+        match="does not exactly match rotation ranges",
+    ):
+        audit_state.complete_plan(tmp_path, state_path, plan_path)

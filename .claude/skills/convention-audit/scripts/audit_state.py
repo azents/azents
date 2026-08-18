@@ -511,6 +511,72 @@ def resolve_incremental_range_limit(
     return math.ceil(range_count / effective_rotation_days), effective_rotation_days
 
 
+def changed_check_plans(
+    repo_root: Path,
+    current_ranges: dict[str, dict[str, Any]],
+    base_commit: str | None,
+    head_commit: str,
+) -> list[dict[str, Any]]:
+    """Return the exact changed-file checks required for a checkpoint."""
+    changed_by_range: dict[str, list[str]] = {}
+    if base_commit:
+        for path in changed_files_since(repo_root, base_commit, head_commit):
+            changed_by_range.setdefault(audit_range_for_path(path), []).append(path)
+    return [
+        changed_range_plan(range_name, current_ranges[range_name], files)
+        for range_name, files in sorted(changed_by_range.items())
+    ]
+
+
+def rotation_range_plans(
+    reconciled: dict[str, Any],
+    current_ranges: dict[str, dict[str, Any]],
+    range_limit: int,
+) -> list[dict[str, Any]]:
+    """Return the exact prioritized full ranges for one rotation step."""
+    candidates = []
+    for range_name, current_range in current_ranges.items():
+        checkpoint = reconciled["ranges"][range_name]
+        priority, reason = legacy_reason(checkpoint, current_range)
+        candidates.append(
+            (
+                priority,
+                checkpoint.get("checked_at") or "",
+                range_name,
+                reason,
+                current_range,
+            )
+        )
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    return [
+        range_plan(range_name, current_range, reason)
+        for _, _, range_name, reason, current_range in candidates[:range_limit]
+    ]
+
+
+def validated_plan_range_limit(plan: dict[str, Any], range_count: int) -> int:
+    """Validate and return the rotation limit encoded in a plan."""
+    range_limit = plan.get("range_limit")
+    rotation_days = plan.get("rotation_days")
+    if (
+        not isinstance(range_limit, int)
+        or isinstance(range_limit, bool)
+        or not isinstance(rotation_days, (int, type(None)))
+        or isinstance(rotation_days, bool)
+    ):
+        raise AuditStateError("Incremental audit plan has invalid rotation settings")
+    if rotation_days is None:
+        if range_limit < 1:
+            raise AuditStateError("Incremental audit plan has invalid range_limit")
+        return range_limit
+    if rotation_days < 1:
+        raise AuditStateError("Incremental audit plan has invalid rotation_days")
+    expected_limit = math.ceil(range_count / rotation_days)
+    if range_limit != expected_limit:
+        raise AuditStateError("Incremental audit plan has inconsistent rotation limit")
+    return range_limit
+
+
 def build_plan(
     repo_root: Path,
     state_path: Path,
@@ -558,35 +624,19 @@ def build_plan(
     plan["range_limit"] = resolved_range_limit
     plan["rotation_days"] = effective_rotation_days
     base_commit = reconciled["change_checkpoint"].get("checked_through_commit")
-    changed_by_range: dict[str, list[str]] = {}
-    if base_commit:
-        for path in changed_files_since(repo_root, base_commit, head_commit):
-            changed_by_range.setdefault(audit_range_for_path(path), []).append(path)
     plan["bootstrap"] = base_commit is None
-    plan["changed_checks"] = [
-        changed_range_plan(range_name, current_ranges[range_name], files)
-        for range_name, files in sorted(changed_by_range.items())
-    ]
+    plan["changed_checks"] = changed_check_plans(
+        repo_root,
+        current_ranges,
+        base_commit,
+        head_commit,
+    )
     plan["full_ranges"] = []
-
-    candidates = []
-    for range_name, current_range in current_ranges.items():
-        checkpoint = reconciled["ranges"][range_name]
-        priority, reason = legacy_reason(checkpoint, current_range)
-        candidates.append(
-            (
-                priority,
-                checkpoint.get("checked_at") or "",
-                range_name,
-                reason,
-                current_range,
-            )
-        )
-    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
-    plan["legacy_ranges"] = [
-        range_plan(range_name, current_range, reason)
-        for _, _, range_name, reason, current_range in candidates[:resolved_range_limit]
-    ]
+    plan["legacy_ranges"] = rotation_range_plans(
+        reconciled,
+        current_ranges,
+        resolved_range_limit,
+    )
     return plan
 
 
@@ -658,16 +708,25 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
         planned_ranges = plan.get("full_ranges")
         if not isinstance(planned_ranges, list):
             raise AuditStateError("Full audit plan is missing full_ranges")
-        if {item.get("name") for item in planned_ranges} != set(current_ranges):
-            raise AuditStateError("Full audit plan does not cover every current range")
+        expected_ranges = [
+            range_plan(range_name, current_range, "full_audit")
+            for range_name, current_range in current_ranges.items()
+        ]
+        if (
+            planned_ranges != expected_ranges
+            or plan.get("changed_checks") != []
+            or plan.get("legacy_ranges") != []
+        ):
+            raise AuditStateError(
+                "Full audit plan does not exactly match current ranges"
+            )
         ranges_to_complete = planned_ranges
         changed_ruleset_revisions = sorted(
             {item["ruleset_revision"] for item in planned_ranges}
         )
     elif mode == "incremental":
-        if plan.get("change_checkpoint_before") != reconciled["change_checkpoint"].get(
-            "checked_through_commit"
-        ):
+        base_commit = reconciled["change_checkpoint"].get("checked_through_commit")
+        if plan.get("change_checkpoint_before") != base_commit:
             raise AuditStateError(
                 "Incremental change checkpoint changed after planning"
             )
@@ -675,8 +734,34 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
         legacy_ranges = plan.get("legacy_ranges")
         if not isinstance(changed_checks, list) or not isinstance(legacy_ranges, list):
             raise AuditStateError("Incremental audit plan is incomplete")
-        for changed_check in changed_checks:
-            verify_changed_check(changed_check, current_ranges)
+        expected_bootstrap = base_commit is None
+        if (
+            not isinstance(plan.get("bootstrap"), bool)
+            or plan["bootstrap"] != expected_bootstrap
+        ):
+            raise AuditStateError("Incremental audit plan has invalid bootstrap state")
+        expected_changed_checks = changed_check_plans(
+            repo_root,
+            current_ranges,
+            base_commit,
+            plan["head_commit"],
+        )
+        if changed_checks != expected_changed_checks:
+            raise AuditStateError(
+                "Incremental audit plan does not exactly cover changed files"
+            )
+        range_limit = validated_plan_range_limit(plan, len(current_ranges))
+        expected_legacy_ranges = rotation_range_plans(
+            reconciled,
+            current_ranges,
+            range_limit,
+        )
+        if legacy_ranges != expected_legacy_ranges:
+            raise AuditStateError(
+                "Incremental audit plan does not exactly match rotation ranges"
+            )
+        if plan.get("full_ranges") != []:
+            raise AuditStateError("Incremental audit plan has unexpected full_ranges")
         ranges_to_complete = legacy_ranges
         changed_ruleset_revisions = sorted(
             {item["ruleset_revision"] for item in changed_checks}
