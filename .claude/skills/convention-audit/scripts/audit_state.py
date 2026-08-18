@@ -167,6 +167,20 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def plan_sha256(plan: dict[str, Any]) -> str:
+    """Hash a plan payload without its embedded integrity field."""
+    payload = dict(plan)
+    payload.pop("plan_sha256", None)
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def seal_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """Attach a deterministic integrity hash to a completed plan."""
+    plan["plan_sha256"] = plan_sha256(plan)
+    return plan
+
+
 def parse_frontmatter_paths(index_text: str) -> tuple[str, ...]:
     """Parse the simple paths list from a convention index frontmatter."""
     lines = index_text.splitlines()
@@ -614,7 +628,7 @@ def build_plan(
             range_plan(range_name, current_range, "full_audit")
             for range_name, current_range in current_ranges.items()
         ]
-        return plan
+        return seal_plan(plan)
 
     resolved_range_limit, effective_rotation_days = resolve_incremental_range_limit(
         len(current_ranges),
@@ -637,7 +651,7 @@ def build_plan(
         current_ranges,
         resolved_range_limit,
     )
-    return plan
+    return seal_plan(plan)
 
 
 def verify_range_plan(
@@ -694,6 +708,8 @@ def complete_plan(repo_root: Path, state_path: Path, plan_path: Path) -> None:
         raise AuditStateError(f"Cannot read plan file: {exc}") from exc
     if not isinstance(plan, dict) or plan.get("schema_version") != SCHEMA_VERSION:
         raise AuditStateError("Unsupported or invalid audit plan")
+    if plan.get("plan_sha256") != plan_sha256(plan):
+        raise AuditStateError("Audit plan payload changed after planning")
     if plan.get("state_sha256") != file_sha256(state_path):
         raise AuditStateError("Audit state changed after this plan was created")
     if plan.get("head_commit") != current_head(repo_root):

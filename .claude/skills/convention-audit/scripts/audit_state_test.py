@@ -229,8 +229,6 @@ def test_complete_bootstrap_plan_records_only_completed_ranges(
         range_limit=1,
         rotation_days=None,
     )
-    state_path.write_text(audit_state.serialize_json(audit_state.empty_state()))
-    plan["state_sha256"] = audit_state.file_sha256(state_path)
     plan_path.write_text(json.dumps(plan))
 
     audit_state.complete_plan(tmp_path, state_path, plan_path)
@@ -287,6 +285,7 @@ def test_complete_incremental_plan_rejects_missing_changed_checks(
     )
     assert len(plan["changed_checks"]) == 1
     plan["changed_checks"] = []
+    plan["plan_sha256"] = audit_state.plan_sha256(plan)
     plan_path.write_text(json.dumps(plan))
 
     with pytest.raises(
@@ -320,10 +319,44 @@ def test_complete_incremental_plan_rejects_partial_rotation_ranges(
     )
     assert len(plan["legacy_ranges"]) == 2
     plan["legacy_ranges"] = plan["legacy_ranges"][:1]
+    plan["plan_sha256"] = audit_state.plan_sha256(plan)
     plan_path.write_text(json.dumps(plan))
 
     with pytest.raises(
         audit_state.AuditStateError,
         match="does not exactly match rotation ranges",
+    ):
+        audit_state.complete_plan(tmp_path, state_path, plan_path)
+
+
+def test_complete_plan_rejects_modified_rotation_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current_ranges = {
+        "range-a": _range(file_path="a.py", revision="current"),
+        "range-b": _range(file_path="b.py", revision="current"),
+    }
+    state_path = tmp_path / "state.json"
+    plan_path = tmp_path / "plan.json"
+    state_path.write_text(audit_state.serialize_json(audit_state.empty_state()))
+    monkeypatch.setattr(audit_state, "ensure_tracked_tree_clean", lambda _root: None)
+    monkeypatch.setattr(audit_state, "discover_ranges", lambda _root: current_ranges)
+    monkeypatch.setattr(audit_state, "current_head", lambda _root: "head")
+
+    plan = audit_state.build_plan(
+        tmp_path,
+        state_path,
+        mode="incremental",
+        range_limit=2,
+        rotation_days=None,
+    )
+    plan["range_limit"] = 1
+    plan["legacy_ranges"] = plan["legacy_ranges"][:1]
+    plan_path.write_text(json.dumps(plan))
+
+    with pytest.raises(
+        audit_state.AuditStateError,
+        match="payload changed after planning",
     ):
         audit_state.complete_plan(tmp_path, state_path, plan_path)

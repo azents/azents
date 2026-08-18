@@ -183,8 +183,8 @@ rm /tmp/convention-audit-plan.json
 ```
 
 Do not complete a partially executed or failed plan. The completion command rejects
-plans when the repository HEAD, convention revision, or state file changed after
-planning.
+plans when the plan payload, repository HEAD, convention revision, or state file
+changed after planning.
 
 ## State boundaries
 
