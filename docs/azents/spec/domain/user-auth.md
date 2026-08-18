@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-08-06
+updated: 2026-08-18
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -81,8 +81,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-08-06
-spec_version: 10
+last_verified_at: 2026-08-18
+spec_version: 11
 ---
 
 # User & Authentication
@@ -100,7 +100,7 @@ Core characteristics:
 - **Admin bootstrap** — A one-time setup token can create the first verified password user, `system_admin` assignment, and session only while the instance has zero users. It does not create a Workspace.
 - **Persisted system authorization** — Admin API operations authenticate the ordinary Azents user JWT and require a live database-backed `system_admin` assignment. Workspace roles never imply system access.
 - **Independent Admin Web session** — Admin Web signs in through the Public API but stores separately named HTTP-only cookies and forwards the current user access token to the Admin API.
-- **Explicit existing-install promotion** — Existing users gain initial or recovery access only through the exact-email operator CLI; startup and migrations never auto-promote a user.
+- **Explicit existing-install promotion** — Existing users gain initial or recovery access only through the exact-email operator CLI. One invocation may repeat `--email` to grant multiple existing users sequentially; startup and migrations never auto-promote a user.
 - **Credential provider projection** — email/password are summarized by credential provider abstraction and exposed differently for public login projection and authenticated security projection.
 - **SMTP-gated email credential** — email credential is valid login/elevation credential only when SMTP is configured, even if verified primary email exists. When SMTP disabled, other valid credential such as password is needed.
 - **Password is one login method** — password login is stored as bcrypt hash. Security setting changes require elevated access token.
@@ -287,7 +287,12 @@ removal waits until owned private User Session purge and private User Memory cle
 Sessions, Agent Memory, and Workspace-owned Toolkits are not purged by User Session owner cleanup.
 `GET /user/v1/me/system-roles` exposes only the authenticated user's current roles for Main Web navigation. UI visibility is not an authorization control.
 
-The operator CLI grants `system_admin` to one normalized exact email. It is the only initial-promotion and recovery path after users exist. It neither creates a user nor issues a session, and migrations, startup, Workspace ownership, and environment configuration do not auto-promote users.
+The operator CLI accepts one or more repeated `--email` options and grants `system_admin`
+sequentially to each normalized exact email. Every successful grant is committed and reported before
+the next email is processed. A missing User stops the invocation with an operator error without
+rolling back earlier successful grants. This is the only initial-promotion and recovery path after
+users exist. It neither creates a user nor issues a session, and migrations, startup, Workspace
+ownership, and environment configuration do not auto-promote users.
 
 ### 3.8 Admin bootstrap
 
@@ -444,6 +449,9 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-08-18** (v11) — Corrected the existing-install operator CLI contract to
+  accept repeated exact-email options, process grants sequentially, and preserve
+  earlier successful grants when a later email is missing.
 - **2026-08-06** — v10. Added owner-lifecycle persistence and integration paths to the spec authority inventory.
 - **2026-08-06** — v9. Documented User Session owner lifecycle on membership loss and account deletion.
 - **2026-07-20** (v8) — Confirmed that System Settings inventory, mutation, health, and audit operations reuse the live persisted `system_admin` boundary without changing bootstrap, promotion, or final-admin invariants.
