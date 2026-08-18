@@ -16,7 +16,7 @@ class KeyLock(object):
 
     async def acquire(self, key: str) -> None:
         """
-        Key에 대해서 lock을 획득합니다.
+        Acquire the lock for a key.
         """
         if key not in self._locks:
             self._locks[key] = asyncio.Lock()
@@ -25,7 +25,7 @@ class KeyLock(object):
 
     def release(self, key: str) -> None:
         """
-        Key에 대해서 lock을 해제합니다.
+        Release the lock for a key.
         """
         if key in self._locks:
             self._locks[key].release()
@@ -37,7 +37,7 @@ class KeyLock(object):
     @contextlib.asynccontextmanager
     async def __call__(self, key: str) -> AsyncGenerator[None, None]:
         """
-        Key에 대해서 critical section을 구현합니다.
+        Enter a critical section for a key.
         """
         await self.acquire(key)
         try:

@@ -40,8 +40,8 @@ workspace_user_role_enum = ENUM(
 class RDBWorkspaceInvitation(RDBModel):
     """WorkspaceInvitation table.
 
-    workspace member invitationt managet.
-    email t invite by, join t regardless invitation possiblet.
+    Stores workspace membership invitations.
+    Invitations target an email address and can be accepted after signup.
     """
 
     __tablename__ = "workspace_invitations"

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 
-# devserver 포그라운드 실행 진입점.
+# Entry point for running devserver in the foreground.
 #
-# 이 스크립트는 IDE 디버거 attach나 실시간 로그 관찰용으로 유지된다.
-# 에이전트/자동화용으로 백그라운드 기동·종료·상태 확인이 필요하면
-# testenv wrapper를 사용하자 (cwd: testenv/azents):
+# Keep this script for attaching an IDE debugger or observing live logs.
+# For agent or automation workflows that need background startup, shutdown, or status checks,
+# use the testenv wrapper (cwd: testenv/azents):
 #
 #   cd testenv/azents
 #   uv run devserver.py up
 #   uv run devserver.py status
 #   uv run devserver.py down
 #
-# 양쪽 모두 최종적으로 src/cli/devserver.py를 호출한다.
+# Both paths ultimately invoke src/cli/devserver.py.
 
 set -e
 

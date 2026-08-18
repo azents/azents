@@ -13,7 +13,7 @@ from azents.rdb.types.datetime import TimeZoneDateTime
 class RDBPasswordLogin(RDBModel):
     """PasswordLogin table.
 
-    t password auth t managet.
+    Stores password authentication credentials for a user.
     """
 
     __tablename__ = "password_logins"
@@ -46,7 +46,7 @@ class RDBPasswordLogin(RDBModel):
         onupdate=sa.func.now(),
     )
 
-    # Constraint condition. (t 1t password)
+    # Each user has at most one password login.
     UQ_USER_ID = sa.UniqueConstraint("user_id", name="uq_password_logins_user_id")
 
     __table_args__ = (UQ_USER_ID,)

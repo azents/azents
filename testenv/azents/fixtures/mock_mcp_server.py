@@ -1,36 +1,16 @@
 #!/usr/bin/env python3
 # ruff: noqa: E501
-"""Mock HTTP MCP server — Stage 3 MCP translated translated translated.
+"""Mock streamable-HTTP MCP server for local and E2E tests.
 
-MCP server translated testtranslated translated translated **translated translated translated HTTP MCP servertranslated
-translated connectiontranslated tool translated calltranslated translated translated** translated verifytranslated translated translated server.
-`mcp` SDK translated FastMCP + streamable HTTP transport translated usetranslated prod translated translated
-path (public toolkit_type="mcp", auth_type="none") translated translated translated translated.
+The server exposes three tools:
 
-3 translated tool translated:
+- ``echo`` returns its input unchanged.
+- ``info`` returns one environment variable from the server process.
+- ``error`` raises an intentional exception for failure-path tests.
 
-- ``echo(text: str) -> str`` — translated text translated translated translated.
-- ``info(key: str) -> str`` — server translated environment translated `key` translated valuetranslated translated.
-  credential / config translated path verifytranslated.
-- ``error() -> None`` — translated exceptiontranslated raise. failure path translated.
-
-### run
-
-::
-
-    uv run python fixtures/mock_mcp_server.py
-
-environment translated port / host translated translated: ``MOCK_MCP_PORT=9100``,
-``MOCK_MCP_HOST=0.0.0.0``. default translated pathtranslated ``/mcp``.
-
-### connection
-
-translated translated translated azents translated MCP toolkit config translated
-``server_url="http://host.docker.internal:9100/mcp"`` +
-``auth_type="none"`` translated registertranslated (translated ``http://localhost:9100/mcp`` —
-devserver translated host translated translated translated).
-
-translated document: ``docs/azents/design/llm-tool-execution.md``
+Run it with ``uv run python fixtures/mock_mcp_server.py``. Configure the bind
+address with ``MOCK_MCP_HOST`` and ``MOCK_MCP_PORT``; the MCP endpoint is
+available at ``/mcp``.
 """
 
 import os
@@ -80,5 +60,4 @@ def error() -> str:  # noqa: RET503
 
 
 if __name__ == "__main__":
-    # streamable HTTP transport — mcp==1.26.0 translated
     server.run(transport="streamable-http")

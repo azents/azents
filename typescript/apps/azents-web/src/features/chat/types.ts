@@ -827,7 +827,7 @@ export interface ChatMessage {
   attachments?: FileAttachment[];
   /** Reasoning/thinking summary text (collapsible for display) */
   reasoningSummary?: string;
-  /** textper token usage (turn_complete usage text toonly text) */
+  /** Per-message token usage, populated only from turn-complete usage data. */
   usage?: Record<string, unknown> | null;
   /** selected action for action-message user input */
   action?: ChatAction | null;

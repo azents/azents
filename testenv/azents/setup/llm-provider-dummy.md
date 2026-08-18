@@ -23,77 +23,25 @@ created: 2026-04-11
 
 # setup: llm-provider-dummy
 
-## translated
-
-agent-basic fixture translated translated probe translated usetranslated **dummy api key** translated OpenAI
-integration translated ModelConfig translated createtranslated. actual LLM call translated API/agent
-setup pathtranslated dummy key translated translated checktranslated translated.
+Create the dummy-key OpenAI integration and ModelConfig used by the `agent-basic` fixture. The deterministic testenv model-listing path makes this setup independent from live LLM credentials.
 
 ## Provides / Requires
 
 - `requires`: `test-user-workspace`
-- `provides`: `integration.id`, `integration.provider` (`"openai"`),
-  `integration.name`, `integration.model_config_id`
+- `provides`: `integration.id`, `integration.provider`, `integration.name`, `integration.model_config_id`
 - `idempotent: false`
 
-## run
+## Run
 
-`testenv/azents` translated cwd translated translated:
+Run the setup through its owning fixture command:
 
 ```bash
-uv run python - <<'PYEOF'
-import json, os
-from testenv.client import build_client_from_env
-from testenv.seed.types import User, Workspace
-
-client = build_client_from_env()
-state_file = os.environ["STATE_FILE"]
-state = json.loads(open(state_file).read())
-
-user = User(
-    email=state["user"]["email"],
-    access_token=state["user"]["access_token"],
-    refresh_token=state["user"]["refresh_token"],
-)
-ws = Workspace(
-    handle=state["ws"]["handle"],
-    name=state["ws"]["name"],
-    owner=user,
-)
-
-integration = client.llm.create_integration(
-    user,
-    ws,
-    name="__testenv_model_listing:deterministic-success",
-)  # api_key defaultvalue = dummy
-model_config_id = client.llm.create_model_config_from_first_candidate(
-    user,
-    ws,
-    integration,
-    label="Testenv default model",
-)
-
-state.setdefault("integration", {}).update({
-    "id": integration.id,
-    "provider": integration.provider,
-    "name": integration.name,
-    "model_config_id": model_config_id,
-})
-open(state_file, "w").write(json.dumps(state, indent=2))
-print(f"SEEDED integration.id={integration.id} model_config.id={model_config_id}")
-PYEOF
+cd testenv/azents
+uv run testenv fixture up agent-basic --json
 ```
+
+The handler reconstructs the user and workspace from fixture state, creates an OpenAI integration using the deterministic testenv name, creates a ModelConfig from the first available candidate, and stores the resulting identifiers under `integration` in `state.json`.
 
 ## Verify
 
-state.json translated `integration.id` translated `integration.model_config_id` exists check.
-DB reality translated none (API key translated dummy translated LLM call failuretranslated pipeline translated translated
-eventtranslated translated translated translated translated).
-
-## translated
-
-- `create_integration` translated `api_key` defaultvaluetranslated `testenv/seed/llm.py` translated `sk-test-dummy`.
-- deterministic listing fixture translated backend `AZ_TESTENV_API_ENABLED=true` translated
-  translated integration translated translated.
-- translated provider (anthropic, gemini translated) translated translated translated translated setup translated translated
-  translated — translated setup translated OpenAI translated.
+The verification probe succeeds when `state.json` contains `integration.id`. Because the setup is not idempotent, the fixture provider recreates the owning fixture when verification fails.

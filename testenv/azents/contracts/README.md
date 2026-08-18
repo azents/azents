@@ -1,19 +1,17 @@
 # Prerequisite Contracts
 
-`testenv/azents/contracts/` translated external credential translated external prerequisite translated translated
-translated YAML contract savetranslated.
+`testenv/azents/contracts/` contains YAML contracts for external credentials and external prerequisite state.
 
-translated translated roletranslated next translated translated translated translated.
+Contract kinds:
 
-- `credential`: secret source translated existstranslated
-- `prerequisite`: credential translated external state/local statetranslated translated actualtranslated run translated
+- `credential` checks whether a required secret source is available.
+- `prerequisite` performs a bounded external or local-state check that may depend on credentials.
 
-prepare phase translated translated contract translated translated snapshot translated createtranslated, pytest/testenv runtranslated
-snapshot translated translated. test run translated doctor translated translated calltranslated translated.
+The prerequisite prepare phase evaluates the selected contracts and writes a snapshot. Tests and fixture commands consume that snapshot instead of invoking prerequisite checks during test execution.
 
-current translated migration target translated next contract translated.
+Current contracts:
 
-- `bedrock-aws.yaml` — AWS shared credentials translated Bedrock profile/key exists translated
-- `browser-oauth.yaml` — Browser/OAuth storage state cache exists translated
+- `bedrock-aws.yaml` — verifies that usable AWS shared credentials are available for the Bedrock profile or key configuration.
+- `browser-oauth.yaml` — verifies that the browser/OAuth storage-state cache is available.
 
-Contract translated snapshot translated secret translated savetranslated translated safe metadata translated guidance translated translated.
+Snapshots must contain safe metadata and remediation guidance only. Never store raw access keys, secret keys, tokens, passwords, cookies, or browser credentials in a snapshot.

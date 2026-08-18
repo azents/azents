@@ -8,7 +8,7 @@ F = TypeVar("F")
 @dataclasses.dataclass(frozen=True)
 class Success(Generic[S]):
     """
-    타입 S의 값을 가진 성공 결과
+    Successful result containing a value of type S.
     """
 
     value: S
@@ -16,22 +16,23 @@ class Success(Generic[S]):
     @property
     def success(self) -> Literal[True]:
         """
-        결과가 성공인지 여부
+        Return whether the result is successful.
         """
         return True
 
     @property
     def failure(self) -> Literal[False]:
         """
-        결과가 실패인지 여부
+        Return whether the result is a failure.
         """
         return False
 
     @property
     def error(self) -> NoReturn:
         """
-        Success에는 error가 없으므로 접근 시 AttributeError 발생.
-        정적 타입 검사의 union 타입 narrowing 지원을 위해 정의됨.
+        Raise AttributeError because a successful result has no error.
+
+        This property supports static narrowing of the Result union.
         """
         raise AttributeError("Success has no error")
 
@@ -39,7 +40,7 @@ class Success(Generic[S]):
 @dataclasses.dataclass(frozen=True)
 class Failure(Generic[F]):
     """
-    타입 F의 에러를 가진 실패 결과
+    Failed result containing an error of type F.
     """
 
     error: F
@@ -47,22 +48,23 @@ class Failure(Generic[F]):
     @property
     def success(self) -> Literal[False]:
         """
-        결과가 성공인지 여부
+        Return whether the result is successful.
         """
         return False
 
     @property
     def failure(self) -> Literal[True]:
         """
-        결과가 실패인지 여부
+        Return whether the result is a failure.
         """
         return True
 
     @property
     def value(self) -> NoReturn:
         """
-        Failure에는 value가 없으므로 접근 시 AttributeError 발생.
-        정적 타입 검사의 union 타입 narrowing 지원을 위해 정의됨.
+        Raise AttributeError because a failed result has no value.
+
+        This property supports static narrowing of the Result union.
         """
         raise AttributeError("Failure has no value")
 

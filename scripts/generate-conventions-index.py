@@ -78,7 +78,7 @@ def load_body_entries(scope: str) -> list[tuple[str, str, Path]]:
 def validate_layout() -> None:
     """Validate `.claude/conventions/` directory layout."""
     if not CONVENTIONS_ROOT.exists():
-        return  # framework 가 막 만들어진 상태일 수 있음
+        return  # The framework may have just been created
 
     # Convention bodies are collected only from registered scope directories.
     # Root-level Markdown files may be operational docs like AGENTS.md.

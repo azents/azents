@@ -1,7 +1,7 @@
 """
 eventsourcing
 
-타입 안전한 이벤트 소싱의 간단한 구현.
+A minimal type-safe event-sourcing implementation.
 """
 
 from .binder import EventListenerComponent, ListenerBinder

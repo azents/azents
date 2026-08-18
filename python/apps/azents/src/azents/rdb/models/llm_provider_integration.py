@@ -29,8 +29,8 @@ llm_provider_enum = ENUM(
 class RDBLLMProviderIntegration(RDBModel):
     """LLMProviderIntegration table.
 
-    workspacet LLM provider t integration settingst managet.
-    onet workspacet same providert t multiple integrationt can create..
+    Stores workspace-scoped LLM provider integration settings.
+    A workspace may have multiple integrations for the same provider.
     """
 
     __tablename__ = "llm_provider_integrations"

@@ -13,7 +13,7 @@ from azents.rdb.types.datetime import TimeZoneDateTime
 class RDBWorkspace(RDBModel):
     """Workspace table.
 
-    company/organization unitt top-level containert.
+    Top-level container for a company or organization.
     """
 
     __tablename__ = "workspaces"

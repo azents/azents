@@ -163,15 +163,15 @@ export interface ChatSessionContainerOutput {
   onClearGoal: () => Promise<boolean>;
   /** Goal update */
   onUpdateGoal: (objective: string) => Promise<boolean>;
-  /** Goal textwhentext */
+  /** Pause the current goal. */
   onPauseGoal: () => Promise<boolean>;
-  /** Goal text */
+  /** Resume the current goal. */
   onResumeGoal: (hint?: string) => Promise<boolean>;
   /** load older events, optionally preserving latest-follow state */
   onLoadMore: (options?: { detachFromLatest?: boolean }) => void;
-  /** newer messages  withtext */
+  /** Load newer messages while browsing detached history. */
   onLoadNewer: () => void;
-  /** latest reset */
+  /** Return to the latest timeline state. */
   onResetToLatest: () => void;
   /** submit user message edit */
   onSubmitMessageEdit: (

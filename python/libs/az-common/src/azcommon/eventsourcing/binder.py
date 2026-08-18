@@ -1,6 +1,4 @@
-"""
-FastAPI 의존성 주입 기반 이벤트 리스너 컴포넌트.
-"""
+"""FastAPI dependency-injected event listener components."""
 
 import abc
 from typing import Annotated, Any, Callable, Generic, Self, TypeVar, overload
@@ -17,7 +15,7 @@ T = TypeVar("T")
 
 class EventListenerComponent(abc.ABC, Generic[T]):
     """
-    이벤트 리스너 컴포넌트의 추상 기반 클래스.
+    Abstract base class for event listener components.
     """
 
     @abc.abstractmethod
@@ -33,7 +31,7 @@ D = TypeVar("D", bound=EventListenerComponentDependency[Any])
 
 class ListenerBinder(object):
     """
-    이벤트 리스너 컴포넌트를 이벤트에 바인딩합니다.
+    Bind event listener components to events.
     """
 
     def __init__(self) -> None:
@@ -45,7 +43,7 @@ class ListenerBinder(object):
     @classmethod
     def concat(cls, *listeners: "ListenerBinder") -> "ListenerBinder":
         """
-        여러 ListenerBinder를 하나로 합칩니다.
+        Combine multiple ListenerBinder instances.
         """
         instance = cls()
         for listener in listeners:
@@ -71,9 +69,9 @@ class ListenerBinder(object):
         component_dependency: EventListenerComponentDependency[T] | None = None,
     ) -> Self | Callable[[D], D]:
         """
-        이벤트 리스너 컴포넌트를 등록합니다.
+        Register an event listener component.
 
-        메서드 호출 또는 데코레이터로 사용할 수 있습니다.
+        This method may be called directly or used as a decorator.
         """
         if component_dependency is not None:
             self.listen(event)(component_dependency)
@@ -87,7 +85,7 @@ class ListenerBinder(object):
 
     def extend(self, other: "ListenerBinder") -> Self:
         """
-        다른 바인더의 리스너들을 이 바인더에 추가합니다.
+        Add another binder's listeners to this binder.
         """
         self.listeners.extend(other.listeners)
         return self
@@ -96,7 +94,7 @@ class ListenerBinder(object):
         self, container: Annotated[di.Container, Depends(di.get_container)]
     ) -> EventEmitter:
         """
-        이 바인더를 EventEmitter로 변환합니다.
+        Convert this binder to an EventEmitter.
         """
         builder = EventEmitter.builder()
         for event, component_dependency in self.listeners:

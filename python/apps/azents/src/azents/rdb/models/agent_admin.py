@@ -13,7 +13,7 @@ from azents.rdb.types.datetime import TimeZoneDateTime
 class RDBAgentAdmin(RDBModel):
     """Agent admin table.
 
-    Agentt WorkspaceUser betweent manage permissiont represents..
+    Associates an Agent with a WorkspaceUser who may manage it.
     """
 
     __tablename__ = "agent_admins"

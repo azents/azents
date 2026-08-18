@@ -1,7 +1,10 @@
 """Container-log capture helpers for E2E diagnostics."""
 
+import logging
 from collections.abc import Callable
 from typing import Protocol
+
+logger = logging.getLogger(__name__)
 
 
 class ContainerLogs(Protocol):
@@ -30,5 +33,10 @@ def emit_container_logs(
         for line in logs.splitlines():
             write_line(line)
     except Exception:
-        # Diagnostic capture must never conceal the original test outcome.
-        return
+        # The container client and output callback may raise implementation-specific
+        # errors, but diagnostics must not replace the original test outcome.
+        logger.warning(
+            "Failed to capture E2E container logs",
+            exc_info=True,
+            extra={"server_name": server_name},
+        )
