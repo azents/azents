@@ -167,6 +167,8 @@ __all__ = [
     "ChatLiveRunRetryStateResponse",
     "ChatLiveRunStateResponse",
     "ChatSessionCreateMessageWriteRequest",
+    "ChatSessionModelProfileResponse",
+    "ChatSessionModelProfileUpdateRequest",
     "ChatStopResponse",
     "ChatWriteAcceptedResponse",
     "ChatWriteResponse",
@@ -660,6 +662,8 @@ from azentspublicclient.models.chat_live_run_retry_attempt_response import ChatL
 from azentspublicclient.models.chat_live_run_retry_state_response import ChatLiveRunRetryStateResponse as ChatLiveRunRetryStateResponse
 from azentspublicclient.models.chat_live_run_state_response import ChatLiveRunStateResponse as ChatLiveRunStateResponse
 from azentspublicclient.models.chat_session_create_message_write_request import ChatSessionCreateMessageWriteRequest as ChatSessionCreateMessageWriteRequest
+from azentspublicclient.models.chat_session_model_profile_response import ChatSessionModelProfileResponse as ChatSessionModelProfileResponse
+from azentspublicclient.models.chat_session_model_profile_update_request import ChatSessionModelProfileUpdateRequest as ChatSessionModelProfileUpdateRequest
 from azentspublicclient.models.chat_stop_response import ChatStopResponse as ChatStopResponse
 from azentspublicclient.models.chat_write_accepted_response import ChatWriteAcceptedResponse as ChatWriteAcceptedResponse
 from azentspublicclient.models.chat_write_response import ChatWriteResponse as ChatWriteResponse

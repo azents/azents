@@ -67,6 +67,20 @@ class AppliedInferenceProfile(BaseModel):
     )
 
 
+class SessionAppliedInferenceProfile(BaseModel):
+    """Agent-owned model intent applied to a Session."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model_target_label: str = Field(
+        min_length=1,
+        description="Agent-owned model target label applied to the Session",
+    )
+    reasoning_effort: PublicReasoningEffort = Field(
+        description="Applied explicit effort, or null for model Default",
+    )
+
+
 class SessionInferenceState(BaseModel):
     """Complete resolved inference configuration prepared for the next turn."""
 

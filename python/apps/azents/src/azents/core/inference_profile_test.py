@@ -10,6 +10,7 @@ from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
     RequestedInferenceProfile,
+    SessionAppliedInferenceProfile,
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelCapabilities, ModelReasoningEffort
@@ -41,6 +42,19 @@ def test_requested_profile_requires_explicit_nullable_effort() -> None:
     )
 
     assert profile.reasoning_effort is None
+
+
+def test_session_applied_profile_contains_only_agent_owned_intent() -> None:
+    """Applied Session intent excludes physical model configuration."""
+    profile = SessionAppliedInferenceProfile(
+        model_target_label="Quality",
+        reasoning_effort=ModelReasoningEffort.HIGH,
+    )
+
+    assert profile.model_dump(mode="json") == {
+        "model_target_label": "Quality",
+        "reasoning_effort": "high",
+    }
 
 
 @pytest.mark.parametrize(

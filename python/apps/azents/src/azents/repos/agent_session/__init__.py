@@ -32,7 +32,11 @@ from azents.core.enums import (
     SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
 )
-from azents.core.inference_profile import SessionInferenceState
+from azents.core.inference_profile import (
+    SessionAppliedInferenceProfile,
+    SessionInferenceState,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.session_handle import generate_session_handle
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -1811,6 +1815,30 @@ class AgentSessionRepository:
         await session.flush()
         return self._build(rdb)
 
+    async def set_applied_inference_profile(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        model_target_label: str,
+        reasoning_effort: ModelReasoningEffort | None,
+    ) -> AgentSession:
+        """Replace the Session-owned applied model intent."""
+        result = await session.execute(
+            sa.update(RDBAgentSession)
+            .where(RDBAgentSession.id == session_id)
+            .values(
+                applied_model_target_label=model_target_label,
+                applied_reasoning_effort=reasoning_effort,
+            )
+            .returning(RDBAgentSession)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            raise ValueError("AgentSession not found")
+        await session.flush()
+        return self._build(rdb)
+
     async def mark_running(self, session: AsyncSession, session_id: str) -> None:
         """Transition AgentSession run state to RUNNING."""
         updated_id = await session.scalar(
@@ -2292,6 +2320,12 @@ class AgentSessionRepository:
 
     def _build(self, rdb: RDBAgentSession) -> AgentSession:
         """Convert RDB model to domain model."""
+        applied_inference_profile = None
+        if rdb.applied_model_target_label is not None:
+            applied_inference_profile = SessionAppliedInferenceProfile(
+                model_target_label=rdb.applied_model_target_label,
+                reasoning_effort=rdb.applied_reasoning_effort,
+            )
         inference_state: SessionInferenceState | None = None
         if rdb.current_model_target_label is not None:
             if (
@@ -2325,6 +2359,7 @@ class AgentSessionRepository:
             agent_id=rdb.agent_id,
             handle=rdb.handle,
             inference_state=inference_state,
+            applied_inference_profile=applied_inference_profile,
             session_kind=rdb.session_kind,
             status=rdb.status,
             primary_kind=rdb.primary_kind,

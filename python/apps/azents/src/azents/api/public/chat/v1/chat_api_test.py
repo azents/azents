@@ -33,6 +33,7 @@ from azents.api.public.chat.v1 import (
     list_history_events,
     list_input_actions,
     list_live_events,
+    replace_session_model_profile,
     restore_agent_session,
     stop_session_run,
     update_agent_session_pin,
@@ -51,6 +52,7 @@ from azents.api.public.chat.v1.data import (
     ChatInputWriteRequest,
     ChatMessageWriteRequest,
     ChatSessionCreateMessageWriteRequest,
+    ChatSessionModelProfileUpdateRequest,
     CleanupSessionGitWorktreeRequest,
     GoalStatusUpdateRequest,
     PrepareSessionWorkingFolderRequest,
@@ -141,6 +143,7 @@ from azents.services.chat.live_events import (
 from azents.services.chat_write import (
     AcceptedChatWriteRequest,
     AcceptedEditInput,
+    AcceptedModelProfile,
     AcceptedPendingCommand,
     AcceptedStopRequest,
     ChatWriteService,
@@ -813,6 +816,51 @@ class _StopWriteService(ChatWriteService):
         )
 
 
+class _ModelProfileWriteService(ChatWriteService):
+    """Model-profile route write service double."""
+
+    def __init__(self, *, error: str | None = None) -> None:
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    async def replace_session_model_profile(
+        self,
+        **kwargs: object,
+    ) -> AcceptedModelProfile:
+        """Return a successful applied profile or raise a mapped error."""
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise ValueError(self.error)
+        session_id = str(kwargs["session_id"])
+        model_target_label = str(kwargs["model_target_label"])
+        reasoning_effort = cast(
+            ModelReasoningEffort | None,
+            kwargs["reasoning_effort"],
+        )
+        request = ChatWriteRequest(
+            id="write-request-1",
+            session_id=session_id,
+            requester_user_id="user-1",
+            creation_agent_id=None,
+            client_request_id=str(kwargs["client_request_id"]),
+            write_type=ChatWriteRequestType.MODEL_PROFILE,
+            accepted_type=ChatWriteRequestType.MODEL_PROFILE,
+            accepted_id=session_id,
+            history_reload_required=False,
+            payload=cast(dict[str, object], kwargs["payload"]),
+            created_at=datetime.datetime(2026, 8, 19, tzinfo=datetime.UTC),
+        )
+        return AcceptedModelProfile(
+            request=AcceptedChatWriteRequest(
+                session_id=session_id,
+                record=request,
+                created=True,
+            ),
+            model_target_label=model_target_label,
+            reasoning_effort=reasoning_effort,
+        )
+
+
 class _RestWriteIdempotencyService(ChatWriteService):
     """REST edit/command idempotency service double."""
 
@@ -1423,6 +1471,179 @@ class _RouteWorktreeCleanupService(SessionGitWorktreeService):
 
 class TestAgentSessionRoutes:
     """Agent session route behavior."""
+
+    async def test_replace_session_model_profile_accepts_team_and_user_roots(
+        self,
+    ) -> None:
+        """Model-profile replacement returns the applied projection for root modes."""
+        for product_mode, associated_user_id in (
+            (AgentSessionProductMode.TEAM, None),
+            (AgentSessionProductMode.USER, "user-1"),
+        ):
+            chat_service = _StopChatService()
+            chat_service.result = Success(
+                chat_service.result.value.model_copy(
+                    update={
+                        "product_mode": product_mode,
+                        "associated_user_id": associated_user_id,
+                    }
+                )
+            )
+            write_service = _ModelProfileWriteService()
+
+            response = await replace_session_model_profile(
+                session_id=chat_service.result.value.id,
+                request=ChatSessionModelProfileUpdateRequest(
+                    client_request_id=f"profile-{product_mode.value}",
+                    model_target_label="default",
+                    reasoning_effort=None,
+                ),
+                current_user=CurrentUser(
+                    user_id="user-1",
+                    session_id="auth-session",
+                ),
+                chat_service=chat_service,
+                chat_write_service=write_service,
+            )
+
+            assert response.session_id == chat_service.result.value.id
+            assert response.model_target_label == "default"
+            assert response.reasoning_effort is None
+            assert write_service.calls[-1]["agent_id"] == "agent-1"
+
+    async def test_replace_session_model_profile_maps_access_and_validation_errors(
+        self,
+    ) -> None:
+        """Model-profile route preserves safe 404/409/422 error boundaries."""
+        denied_chat_service = _StopChatService()
+        denied_chat_service.result = Failure(SessionAccessDenied())
+        try:
+            await replace_session_model_profile(
+                session_id="1123456789abcdef0123456789abcdef",
+                request=ChatSessionModelProfileUpdateRequest(
+                    client_request_id="profile-denied",
+                    model_target_label="default",
+                    reasoning_effort=None,
+                ),
+                current_user=CurrentUser(
+                    user_id="other-user",
+                    session_id="auth-session",
+                ),
+                chat_service=denied_chat_service,
+                chat_write_service=_ModelProfileWriteService(),
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("Expected HTTPException")
+
+        owner_chat_service = _StopChatService()
+        owner_chat_service.result = Success(
+            owner_chat_service.result.value.model_copy(
+                update={
+                    "product_mode": AgentSessionProductMode.USER,
+                    "associated_user_id": "owner-user",
+                }
+            )
+        )
+        try:
+            await replace_session_model_profile(
+                session_id=owner_chat_service.result.value.id,
+                request=ChatSessionModelProfileUpdateRequest(
+                    client_request_id="profile-owner-denied",
+                    model_target_label="default",
+                    reasoning_effort=None,
+                ),
+                current_user=CurrentUser(
+                    user_id="other-user",
+                    session_id="auth-session",
+                ),
+                chat_service=owner_chat_service,
+                chat_write_service=_ModelProfileWriteService(
+                    error="Requester does not have session access"
+                ),
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 404
+        else:
+            raise AssertionError("Expected HTTPException")
+
+        subagent_chat_service = _StopChatService()
+        subagent_chat_service.result = Success(
+            subagent_chat_service.result.value.model_copy(
+                update={
+                    "session_kind": AgentSessionKind.SUBAGENT,
+                    "product_mode": None,
+                }
+            )
+        )
+        try:
+            await replace_session_model_profile(
+                session_id=subagent_chat_service.result.value.id,
+                request=ChatSessionModelProfileUpdateRequest(
+                    client_request_id="profile-subagent",
+                    model_target_label="default",
+                    reasoning_effort=None,
+                ),
+                current_user=CurrentUser(
+                    user_id="user-1",
+                    session_id="auth-session",
+                ),
+                chat_service=subagent_chat_service,
+                chat_write_service=_ModelProfileWriteService(
+                    error="Subagent sessions are read-only"
+                ),
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError("Expected HTTPException")
+
+        for error in (
+            "Model target label is not available",
+            "Reasoning effort is not supported by model target",
+        ):
+            try:
+                await replace_session_model_profile(
+                    session_id="1123456789abcdef0123456789abcdef",
+                    request=ChatSessionModelProfileUpdateRequest(
+                        client_request_id=f"profile-invalid-{error[:5]}",
+                        model_target_label="default",
+                        reasoning_effort=None,
+                    ),
+                    current_user=CurrentUser(
+                        user_id="user-1",
+                        session_id="auth-session",
+                    ),
+                    chat_service=_StopChatService(),
+                    chat_write_service=_ModelProfileWriteService(error=error),
+                )
+            except HTTPException as exc:
+                assert exc.status_code == 422
+            else:
+                raise AssertionError("Expected HTTPException")
+
+        try:
+            await replace_session_model_profile(
+                session_id="1123456789abcdef0123456789abcdef",
+                request=ChatSessionModelProfileUpdateRequest(
+                    client_request_id="profile-conflict",
+                    model_target_label="default",
+                    reasoning_effort=None,
+                ),
+                current_user=CurrentUser(
+                    user_id="user-1",
+                    session_id="auth-session",
+                ),
+                chat_service=_StopChatService(),
+                chat_write_service=_ModelProfileWriteService(
+                    error="Client request ID already used for another payload"
+                ),
+            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+        else:
+            raise AssertionError("Expected HTTPException")
 
     async def test_get_team_primary_agent_session_returns_session(self) -> None:
         """Team primary session route exposes the session response."""

@@ -160,6 +160,10 @@ class RDBAgentSession(RDBModel):
         "OR current_effective_auto_compaction_threshold_tokens > 0",
         name="ck_agent_sessions_current_compaction_threshold",
     )
+    CK_APPLIED_INFERENCE_PROFILE = sa.CheckConstraint(
+        "applied_model_target_label IS NOT NULL OR applied_reasoning_effort IS NULL",
+        name="ck_agent_sessions_applied_inference_profile",
+    )
     UQ_HANDLE = sa.UniqueConstraint("handle", name="uq_agent_sessions_handle")
     IX_WORKSPACE_ID = sa.Index("ix_agent_sessions_workspace_id", "workspace_id")
     IX_AGENT_ID = sa.Index("ix_agent_sessions_agent_id", "agent_id")
@@ -274,6 +278,10 @@ class RDBAgentSession(RDBModel):
         sa.String(80),
         nullable=True,
     )
+    applied_model_target_label: Mapped[str | None] = mapped_column(
+        sa.String(80),
+        nullable=True,
+    )
     current_model_selection: Mapped[dict[str, object] | None] = mapped_column(
         JSONB,
         nullable=True,
@@ -283,6 +291,10 @@ class RDBAgentSession(RDBModel):
         nullable=True,
     )
     current_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
+        model_reasoning_effort_enum,
+        nullable=True,
+    )
+    applied_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
         model_reasoning_effort_enum,
         nullable=True,
     )
@@ -536,6 +548,7 @@ class RDBAgentSession(RDBModel):
         CK_CURRENT_INFERENCE_STATE,
         CK_CURRENT_CONTEXT_WINDOW,
         CK_CURRENT_COMPACTION_THRESHOLD,
+        CK_APPLIED_INFERENCE_PROFILE,
         CK_PRODUCT_MODE_OWNERSHIP,
         UQ_HANDLE,
         IX_WORKSPACE_ID,

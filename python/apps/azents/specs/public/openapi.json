@@ -2594,6 +2594,64 @@
         }
       }
     },
+    "/chat/v1/sessions/{session_id}/model-profile": {
+      "put": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Replace Session Model Profile",
+        "description": "Replace the applied model profile without creating execution work.",
+        "operationId": "chat_v1_replace_session_model_profile",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatSessionModelProfileUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatSessionModelProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/sessions/{session_id}/inputs": {
       "post": {
         "tags": [
@@ -18305,6 +18363,75 @@
         ],
         "title": "ChatSessionCreateMessageWriteRequest",
         "description": "REST first message write request for a draft AgentSession."
+      },
+      "ChatSessionModelProfileResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "AgentSession ID"
+          },
+          "model_target_label": {
+            "type": "string",
+            "title": "Model Target Label",
+            "description": "Agent-owned selectable model target label"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit reasoning effort, or null for model Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "model_target_label",
+          "reasoning_effort"
+        ],
+        "title": "ChatSessionModelProfileResponse",
+        "description": "REST Session model-profile replacement response."
+      },
+      "ChatSessionModelProfileUpdateRequest": {
+        "properties": {
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "description": "Client-generated idempotency key"
+          },
+          "model_target_label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Model Target Label",
+            "description": "Agent-owned selectable model target label"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelReasoningEffort"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit reasoning effort, or null for model Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "client_request_id",
+          "model_target_label",
+          "reasoning_effort"
+        ],
+        "title": "ChatSessionModelProfileUpdateRequest",
+        "description": "REST Session model-profile replacement request."
       },
       "ChatStopResponse": {
         "properties": {

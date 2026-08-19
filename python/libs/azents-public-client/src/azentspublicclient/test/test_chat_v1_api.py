@@ -306,6 +306,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_replace_session_model_profile(self) -> None:
+        """Test case for chat_v1_replace_session_model_profile
+
+        Replace Session Model Profile
+        """
+        pass
+
     def test_chat_v1_restore_agent_session(self) -> None:
         """Test case for chat_v1_restore_agent_session
 

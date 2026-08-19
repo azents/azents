@@ -220,6 +220,8 @@ from .data import (
     ChatLiveRunStateResponse,
     ChatMessageWriteRequest,
     ChatSessionCreateMessageWriteRequest,
+    ChatSessionModelProfileResponse,
+    ChatSessionModelProfileUpdateRequest,
     ChatStopResponse,
     ChatWriteAcceptedResponse,
     ChatWriteResponse,
@@ -1061,6 +1063,69 @@ async def stop_session_run(
                 raise HTTPException(status_code=404, detail="Session not found.")
             case _:
                 assert_never(error)
+
+
+@router.put("/sessions/{session_id}/model-profile")
+async def replace_session_model_profile(
+    session_id: str,
+    request: ChatSessionModelProfileUpdateRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+    chat_write_service: Annotated[ChatWriteService, Depends()],
+) -> ChatSessionModelProfileResponse:
+    """Replace the applied model profile without creating execution work."""
+    _validate_session_id(session_id)
+    session_result = await chat_service.get_session(
+        session_id,
+        user_id=current_user.user_id,
+    )
+    if not session_result.success:
+        error = session_result.error
+        match error:
+            case SessionNotFound() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
+    agent_session = session_result.value
+    payload: dict[str, object] = {
+        "model_target_label": request.model_target_label,
+        "reasoning_effort": (
+            request.reasoning_effort.value
+            if request.reasoning_effort is not None
+            else None
+        ),
+    }
+    try:
+        accepted = await chat_write_service.replace_session_model_profile(
+            agent_id=agent_session.agent_id,
+            session_id=agent_session.id,
+            user_id=current_user.user_id,
+            client_request_id=request.client_request_id,
+            model_target_label=request.model_target_label,
+            reasoning_effort=request.reasoning_effort,
+            payload=payload,
+        )
+    except ValueError as error:
+        message = str(error)
+        if (
+            "not found" in message.lower()
+            or "does not belong" in message
+            or "does not have session access" in message
+        ):
+            raise HTTPException(status_code=404, detail="Session not found.") from error
+        if "read-only" in message.lower():
+            raise HTTPException(
+                status_code=409,
+                detail="Subagent sessions are read-only.",
+            ) from error
+        if "Client request ID" in message:
+            raise HTTPException(status_code=409, detail=message) from error
+        raise HTTPException(status_code=422, detail=message) from error
+    return ChatSessionModelProfileResponse(
+        session_id=accepted.request.session_id,
+        model_target_label=accepted.model_target_label,
+        reasoning_effort=accepted.reasoning_effort,
+    )
 
 
 @router.post("/sessions/{session_id}/inputs")
