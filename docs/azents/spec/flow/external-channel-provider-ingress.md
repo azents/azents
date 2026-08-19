@@ -50,6 +50,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
   - python/apps/azents/src/azents/services/mailbox.py
+  - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
@@ -61,8 +62,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-18
-spec_version: 46
+last_verified_at: 2026-08-19
+spec_version: 47
 ---
 
 # External Channel Provider Ingress
@@ -370,7 +371,11 @@ Agent's current automatic Project policy through the shared root Session creatio
 boundary. Before selected setup or allowed-access replay creates a Discord per-thread
 Binding/Session, it uses the same provider conversation preparation service outside
 the creation transaction. The final transaction revalidates the exact target, records
-the prepared delivery thread, and only then creates Session state. Retry reconciles an
+the prepared delivery thread, and only then creates Session state. Shared root
+creation performs its preliminary Agent authority read without a row lock and uses
+one final capability/version conditional update after Runtime FK-dependent context
+persistence; stale authority rolls back the Binding, Session, and replay atomically.
+Retry reconciles an
 indeterminate provider create before repeating the idempotent transaction; an existing
 Binding keeps its prior snapshot and bypasses provider preparation.
 
@@ -491,6 +496,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-19** (spec_version 47) — Removed the preliminary Agent row lock
+  from External Channel root Session creation and retained removal/lifecycle
+  fencing through a final capability/version conditional update.
 - **2026-08-18** (spec_version 46) — Removed the read-only Session row lock from
   existing-Binding trigger admission and made the final conditional mailbox wake
   transition the authoritative lifecycle fence.

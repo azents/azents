@@ -119,6 +119,9 @@ _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID = "call_external_channel_failure_prog
 _EXTERNAL_CHANNEL_TURN_BINDING = re.compile(r"Binding: ([A-Za-z0-9_-]+)")
 _EXTERNAL_CHANNEL_COMPACTION_BINDING = re.compile(r"### Binding `([^`]+)`")
 _EXTERNAL_CHANNEL_DISCORD_TITLE_MARKER = "Private Discord Gateway invocation"
+_EXTERNAL_CHANNEL_SLACK_RESPONSE_MODE_TITLE_INPUT = (
+    "Create a title from this request:\nInitial response-mode invocation"
+)
 _SESSION_TITLE_SYSTEM_MARKER = "Create a brief title from the request"
 _DISCORD_PROVIDER_BARRIER_URL = os.environ.get(
     "DISCORD_PROVIDER_BARRIER_URL",
@@ -569,6 +572,18 @@ def is_external_channel_discord_title_request(
     )
 
 
+def is_external_channel_slack_response_mode_title_request(
+    request: dict[str, object],
+) -> bool:
+    """Recognize only the Slack response-mode automatic-title request."""
+    serialized = json.dumps(request, sort_keys=True)
+    return (
+        _SESSION_TITLE_SYSTEM_MARKER in serialized
+        and _last_user_text(request)
+        == _EXTERNAL_CHANNEL_SLACK_RESPONSE_MODE_TITLE_INPUT
+    )
+
+
 def wait_for_external_channel_discord_title_barrier() -> bool:
     """Wait until direct thread creation evidence is committed before title output."""
     deadline = time.monotonic() + _DISCORD_TITLE_BARRIER_TIMEOUT_SECONDS
@@ -833,6 +848,13 @@ class _Handler(BaseHTTPRequestHandler):
         request = cast(dict[str, object], request_value)
         user_text = _last_user_text(request)
         compaction_request = _is_semantic_compaction_request(request)
+        if is_external_channel_slack_response_mode_title_request(request):
+            self._write_text_response(
+                request,
+                '{"title":"Initial response mode"}',
+                response_id="resp_external_channel_slack_response_mode_title",
+            )
+            return
         if (
             is_external_channel_discord_title_request(request)
             and not wait_for_external_channel_discord_title_barrier()

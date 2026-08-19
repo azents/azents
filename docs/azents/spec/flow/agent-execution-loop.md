@@ -79,8 +79,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-18
-spec_version: 157
+last_verified_at: 2026-08-19
+spec_version: 158
 ---
 
 # Agent Execution Loop
@@ -379,9 +379,11 @@ applied provenance can differ at later turn boundaries. Resolution failure is a 
 failure: it consumes that head, appends a user-safe `system_error`, preserves the previous Session
 snapshot, completes the active run, and is not retried.
 
-Requested profile selection precedence for implicit execution is the Session current requested
-profile then Agent `main_model_label`; explicit human input wins over both. The complete Session
-snapshot contains requested label, resolved physical selection, the selected option's context/output/tool settings, resolved effort, effective limits, and resolution time. Inputs accepted during a model/tool turn are applied only at the next turn
+Requested profile selection precedence for implicit execution is the Session applied profile then
+Agent `main_model_label`; explicit human input wins over both. The applied profile contains only
+Agent-owned label and nullable effort. The complete prepared Session snapshot additionally contains
+the resolved physical selection, the selected option's context/output/tool settings, effective
+limits, and resolution time. Inputs accepted during a model/tool turn are applied only at the next turn
 boundary. If that input changes the profile, the same `AgentRun` rebuilds the next model request from
 the newly prepared Session snapshot. It does not restore an older run-owned model selection or cancel
 the run merely to change profiles. Commands use the implicit selection but have no client-submitted

@@ -39,6 +39,7 @@ from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.session_working_folder import build_session_working_folder_path
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
@@ -288,24 +289,25 @@ class TestAgentSessionRepository:
             is SessionWorkingFolderBindingState.PENDING
         )
 
-    async def test_root_context_creation_allows_runtime_fk_compatible_locks(
+    async def test_root_context_creation_uses_final_authority_cas_after_runtime_fk(
         self,
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """Root context creation remains compatible with Runtime FK locks."""
+        """Runtime-first work cannot deadlock with root creation authority fencing."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repository = AgentSessionRepository()
+        application_name = f"root-creation-cas-{suffix}"
         async with AsyncSession(rdb_engine, expire_on_commit=False) as setup_session:
             workspace_id = await _create_workspace(
                 setup_session,
-                f"root-context-runtime-locks-{suffix}",
+                f"root-context-runtime-cas-{suffix}",
             )
             agent_id = await _create_agent(
                 setup_session,
                 workspace_id,
-                f"root-context-runtime-locks-{suffix}",
+                f"root-context-runtime-cas-{suffix}",
                 workspace_path=None,
             )
             runtime = await AgentRuntimeRepository().get_by_agent_id(
@@ -320,48 +322,92 @@ class TestAgentSessionRepository:
                 rdb_engine,
                 expire_on_commit=False,
             ) as create_session:
-                created = await repository.create(
-                    create_session,
-                    AgentSessionCreate(
-                        workspace_id=workspace_id,
-                        product_mode=AgentSessionProductMode.TEAM,
-                        associated_user_id=None,
-                        agent_id=agent_id,
-                        title=None,
-                    ),
+                await create_session.execute(
+                    sa.text("SELECT set_config('application_name', :name, true)"),
+                    {"name": application_name},
                 )
+                try:
+                    created = await repository.create(
+                        create_session,
+                        AgentSessionCreate(
+                            workspace_id=workspace_id,
+                            product_mode=AgentSessionProductMode.TEAM,
+                            associated_user_id=None,
+                            agent_id=agent_id,
+                            title=None,
+                        ),
+                    )
+                except Exception:
+                    await create_session.rollback()
+                    raise
                 await create_session.commit()
                 return created.id
+
+        async def wait_for_runtime_fk() -> None:
+            deadline = asyncio.get_running_loop().time() + 5
+            while asyncio.get_running_loop().time() < deadline:
+                async with AsyncSession(rdb_engine) as observer:
+                    waiting = await observer.scalar(
+                        sa.text(
+                            """
+                            SELECT EXISTS (
+                                SELECT 1
+                                FROM pg_stat_activity
+                                WHERE application_name = :application_name
+                                  AND wait_event_type = 'Lock'
+                                  AND query LIKE 'INSERT INTO session_agent_contexts%'
+                            )
+                            """
+                        ),
+                        {"application_name": application_name},
+                    )
+                if waiting:
+                    return
+                await asyncio.sleep(0.01)
+            raise TimeoutError("Root creation did not reach the Runtime FK boundary")
 
         async with AsyncSession(
             rdb_engine,
             expire_on_commit=False,
         ) as runtime_session:
-            locked_agent_id = await runtime_session.scalar(
-                sa.select(RDBAgent.id)
-                .where(RDBAgent.id == agent_id)
-                .with_for_update(read=True, key_share=True)
+            locked_runtime_id = await runtime_session.scalar(
+                sa.select(RDBAgentRuntime.id)
+                .where(RDBAgentRuntime.agent_id == agent_id)
+                .with_for_update()
             )
-            locked_runtime = await AgentRuntimeRepository().get_by_agent_id_for_update(
-                runtime_session,
-                agent_id,
+            assert locked_runtime_id == runtime.id
+            creation_task = asyncio.create_task(create_root_context())
+            await wait_for_runtime_fk()
+            updated_agent_id = await runtime_session.scalar(
+                sa.update(RDBAgent)
+                .where(
+                    RDBAgent.id == agent_id,
+                    RDBAgent.runtime_capability == AgentRuntimeCapability.MANAGED,
+                )
+                .values(
+                    runtime_capability=AgentRuntimeCapability.REMOVING,
+                    runtime_capability_version=(
+                        RDBAgent.runtime_capability_version + 1
+                    ),
+                )
+                .returning(RDBAgent.id)
             )
-            assert locked_agent_id == agent_id
-            assert locked_runtime is not None
+            assert updated_agent_id == agent_id
+            await runtime_session.commit()
 
-            created_id = await asyncio.wait_for(
-                create_root_context(),
-                timeout=5,
-            )
+        with pytest.raises(
+            RuntimeError,
+            match="Agent Runtime authority changed during Session creation",
+        ):
+            await asyncio.wait_for(creation_task, timeout=5)
 
         async with AsyncSession(rdb_engine) as verification_session:
-            context = await repository.get_working_folder_context_by_session_id(
-                verification_session,
-                session_id=created_id,
+            created_count = await verification_session.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBAgentSession)
+                .where(RDBAgentSession.agent_id == agent_id)
             )
-            assert context is not None
-            assert context.agent_runtime_id == runtime.id
-            assert context.binding_state is SessionWorkingFolderBindingState.PENDING
+            assert created_count == 0
 
     async def test_lock_by_id_acquires_agent_parent_before_session(
         self,
