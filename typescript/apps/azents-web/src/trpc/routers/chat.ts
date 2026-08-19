@@ -45,6 +45,7 @@ import {
   chatV1PreviewProjectBrowserManifest,
   chatV1ReadAgentWorkspacePath,
   chatV1RegisterAgentProject,
+  chatV1ReplaceSessionModelProfile,
   chatV1RestoreAgentSession,
   chatV1RetryFailedRun,
   chatV1StatAgentWorkspacePath,
@@ -64,6 +65,16 @@ const inputActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("goal") }),
   z.object({ type: z.literal("skill"), skill_path: z.string().min(1) }),
   z.object({ type: z.literal("cleanup_orphan_git_worktrees") }),
+]);
+
+const reasoningEffortSchema = z.enum([
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
 ]);
 
 const inferenceProfileSchema = z.object({
@@ -801,6 +812,39 @@ export const chatRouter = router({
             action: input.action ?? null,
             inference_profile: input.inferenceProfile,
             attachments: input.attachments,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  replaceSessionModelProfile: publicProcedure
+    .input(
+      z.object({
+        sessionId: z.string().min(1),
+        clientRequestId: z.string().min(1).max(64),
+        modelTargetLabel: z.string().min(1),
+        reasoningEffort: reasoningEffortSchema.nullable(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1ReplaceSessionModelProfile({
+          client: ctx.apiClient,
+          path: { session_id: input.sessionId },
+          body: {
+            client_request_id: input.clientRequestId,
+            model_target_label: input.modelTargetLabel,
+            reasoning_effort: input.reasoningEffort,
           },
           throwOnError: true,
         });

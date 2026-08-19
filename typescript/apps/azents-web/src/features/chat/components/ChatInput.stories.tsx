@@ -102,48 +102,6 @@ const selectableModelOptions: AgentResponse["selectable_model_options"] = [
   },
 ];
 
-function draftStorageKey(sessionId: string): string {
-  return `azents.chat.inputDraft.story-agent-001.${sessionId}`;
-}
-
-function lastSelectedProfileStorageKey(sessionId: string): string {
-  return `azents.chat.lastSelectedInferenceProfile.story-agent-001.${sessionId}`;
-}
-
-function storeMantineString(key: string, value: string): void {
-  window.localStorage.setItem(key, JSON.stringify(value));
-}
-
-function seedLastSelectedProfile(
-  sessionId: string,
-  profile: RequestedInferenceProfile,
-): void {
-  storeMantineString(
-    lastSelectedProfileStorageKey(sessionId),
-    JSON.stringify(profile),
-  );
-}
-
-function seedDraftProfile(
-  sessionId: string,
-  message: string,
-  profile: RequestedInferenceProfile,
-): void {
-  storeMantineString(
-    draftStorageKey(sessionId),
-    JSON.stringify({
-      message,
-      action: null,
-      inference_profile: profile,
-    }),
-  );
-}
-
-function clearComposerStorage(sessionId: string): void {
-  window.localStorage.removeItem(draftStorageKey(sessionId));
-  window.localStorage.removeItem(lastSelectedProfileStorageKey(sessionId));
-}
-
 const uploadAll = (): Promise<UploadedFile[]> => Promise.resolve([]);
 const sendInput = (): Promise<boolean> => Promise.resolve(true);
 const clearFiles = (): void => {};
@@ -255,6 +213,7 @@ const baseArgs = {
   todo: null,
   uploadAll,
   onSendInput: sendInput,
+  onApplyInferenceProfile: () => Promise.resolve(true),
   clearFiles,
   resetDoneFiles,
   addFiles,
@@ -269,6 +228,108 @@ const baseArgs = {
 
 export const Ready = {
   args: baseArgs,
+} satisfies Story;
+
+const modelChangeReviewMessage =
+  "Summarize the latest deployment status and highlight any risks.";
+const appliedDefaultProfile: RequestedInferenceProfile = {
+  model_target_label: "Default",
+  reasoning_effort: null,
+};
+
+export const ModelChangeState1UnchangedWithText = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-model-change-state-1",
+    initialInputValue: modelChangeReviewMessage,
+    appliedInferenceProfile: appliedDefaultProfile,
+  },
+} satisfies Story;
+
+export const ModelChangeState2PendingWithText = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-model-change-state-2",
+    initialInputValue: modelChangeReviewMessage,
+    appliedInferenceProfile: appliedDefaultProfile,
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await userEvent.click(
+      page.getByRole("button", { name: /Fast gpt-5\.5-mini/ }),
+    );
+    await expect(page.getByRole("button", { name: "Model" })).toHaveTextContent(
+      "Fast",
+    );
+
+    await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await userEvent.click(
+      page.getByRole("button", { name: /Default gpt-5\.5/ }),
+    );
+    await expect(page.getByRole("button", { name: "Model" })).toHaveTextContent(
+      "Default",
+    );
+  },
+} satisfies Story;
+
+export const ModelChangeState3PendingWithoutText = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-model-change-state-3",
+    initialInputValue: "",
+    appliedInferenceProfile: appliedDefaultProfile,
+  },
+} satisfies Story;
+
+export const ModelChangeState4PendingWithStop = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-model-change-state-4",
+    initialInputValue: "",
+    appliedInferenceProfile: appliedDefaultProfile,
+    isStopAvailable: true,
+  },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    await userEvent.click(page.getByRole("button", { name: "Model" }));
+    await userEvent.click(
+      page.getByRole("button", { name: /Fast gpt-5\.5-mini/ }),
+    );
+    await expect(
+      page.getByRole("button", { name: "Apply model change" }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Stop run" })).toBeVisible();
+  },
+} satisfies Story;
+
+export const DeletedAppliedModelLabelIsPreserved = {
+  args: {
+    ...baseArgs,
+    sessionId: "story-session-deleted-applied-model",
+    onSendInput: fn(),
+    appliedInferenceProfile: {
+      model_target_label: "Retired",
+      reasoning_effort: "high",
+    },
+  },
+  play: async ({ canvasElement, args }) => {
+    const page = within(canvasElement.ownerDocument.body);
+    const input = page.getByRole("textbox");
+    await expect(page.getByRole("button", { name: "Model" })).toHaveTextContent(
+      "Retired",
+    );
+    await userEvent.type(input, "Use the retained Session model");
+    await userEvent.click(page.getByRole("button", { name: "Send" }));
+    await expect(args.onSendInput).toHaveBeenCalledWith(
+      "Use the retained Session model",
+      null,
+      {
+        model_target_label: "Retired",
+        reasoning_effort: "high",
+      },
+    );
+  },
 } satisfies Story;
 
 export const WithPendingFiles = {
@@ -474,158 +535,6 @@ export const TargetWithoutEffort = {
   },
 } satisfies Story;
 
-export const SuccessfulSendPreservesProfile = {
-  args: {
-    ...baseArgs,
-    sessionId: "story-session-preserve-profile",
-  },
-  decorators: [
-    (Story) => {
-      clearComposerStorage("story-session-preserve-profile");
-      seedDraftProfile("story-session-preserve-profile", "Keep this profile", {
-        model_target_label: "Fast",
-        reasoning_effort: null,
-      });
-      return <Story />;
-    },
-  ],
-  play: async ({ canvasElement }) => {
-    const page = within(canvasElement.ownerDocument.body);
-    await waitFor(async () => {
-      await expect(page.getByRole("textbox")).toHaveValue("Keep this profile");
-      await expect(
-        page.getByRole("button", { name: /^Model$/ }),
-      ).toHaveTextContent("Fast");
-    });
-    await userEvent.click(page.getByRole("button", { name: "Send" }));
-
-    await waitFor(async () => {
-      await expect(page.getByRole("textbox")).toHaveValue("");
-    });
-    await expect(
-      page.getByRole("button", { name: /^Model$/ }),
-    ).toHaveTextContent("Fast");
-    await expect(
-      window.localStorage.getItem(
-        lastSelectedProfileStorageKey("story-session-preserve-profile"),
-      ),
-    ).toContain("Fast");
-    await expect(
-      window.localStorage.getItem(
-        draftStorageKey("story-session-preserve-profile"),
-      ),
-    ).toBeNull();
-  },
-} satisfies Story;
-
-export const RestoresRawLastSelectedEffort = {
-  args: {
-    ...baseArgs,
-    sessionId: "story-session-restore-raw-profile",
-  },
-  decorators: [
-    (Story) => {
-      clearComposerStorage("story-session-restore-raw-profile");
-      seedLastSelectedProfile("story-session-restore-raw-profile", {
-        model_target_label: "Default",
-        reasoning_effort: "future-ultra",
-      });
-      return <Story />;
-    },
-  ],
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await waitFor(async () => {
-      await expect(
-        canvas.getByRole("button", { name: /^Model$/ }),
-      ).toHaveTextContent("Default · future-ultra");
-    });
-  },
-} satisfies Story;
-
-export const DraftProfileOutranksLastSelected = {
-  args: {
-    ...baseArgs,
-    sessionId: "story-session-draft-precedence",
-  },
-  decorators: [
-    (Story) => {
-      clearComposerStorage("story-session-draft-precedence");
-      seedLastSelectedProfile("story-session-draft-precedence", {
-        model_target_label: "Fast",
-        reasoning_effort: null,
-      });
-      seedDraftProfile(
-        "story-session-draft-precedence",
-        "Preserve the unsent draft",
-        {
-          model_target_label: "Default",
-          reasoning_effort: "future-draft-effort",
-        },
-      );
-      return <Story />;
-    },
-  ],
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await waitFor(async () => {
-      await expect(canvas.getByRole("textbox")).toHaveValue(
-        "Preserve the unsent draft",
-      );
-      await expect(
-        canvas.getByRole("button", { name: /^Model$/ }),
-      ).toHaveTextContent("Default · future-draft-effort");
-    });
-  },
-} satisfies Story;
-
-export const DeletedLastSelectedTargetFallsBack = {
-  args: {
-    ...baseArgs,
-    sessionId: "story-session-deleted-profile",
-  },
-  decorators: [
-    (Story) => {
-      clearComposerStorage("story-session-deleted-profile");
-      seedLastSelectedProfile("story-session-deleted-profile", {
-        model_target_label: "Removed",
-        reasoning_effort: "future-ultra",
-      });
-      seedDraftProfile(
-        "story-session-deleted-profile",
-        "Keep this draft after target deletion",
-        {
-          model_target_label: "Removed",
-          reasoning_effort: "future-ultra",
-        },
-      );
-      return <Story />;
-    },
-  ],
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await waitFor(async () => {
-      await expect(
-        canvas.getByRole("button", { name: /^Model$/ }),
-      ).toHaveTextContent("Default");
-      await expect(canvas.getByRole("textbox")).toHaveValue(
-        "Keep this draft after target deletion",
-      );
-      await expect(
-        window.localStorage.getItem(
-          lastSelectedProfileStorageKey("story-session-deleted-profile"),
-        ),
-      ).toBeNull();
-      await expect(
-        window.localStorage.getItem(
-          draftStorageKey("story-session-deleted-profile"),
-        ),
-      ).not.toContain("Removed");
-    });
-    await expect(canvas.queryByText(/future-ultra/)).not.toBeInTheDocument();
-  },
-} satisfies Story;
-
 export const EmptyEffortList = {
   args: {
     ...baseArgs,
@@ -823,34 +732,21 @@ export const SubagentContextUsage = {
     inputDisabled: true,
     disabledPlaceholder: "Messages can only be sent from the root agent.",
     inferenceProfileSelectionEnabled: false,
-    onInferenceProfileChange: fn(),
   },
   decorators: [
-    (Story) => {
-      clearComposerStorage("story-session-subagent-context-usage");
-      seedDraftProfile("story-session-subagent-context-usage", "", {
-        model_target_label: "Fast",
-        reasoning_effort: null,
-      });
-      return (
-        <StorybookCanvas maxWidth={rem(390)}>
-          <Story />
-        </StorybookCanvas>
-      );
-    },
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(390)}>
+        <Story />
+      </StorybookCanvas>
+    ),
   ],
-  play: async ({ canvasElement, args }) => {
+  play: async ({ canvasElement }) => {
     const page = within(canvasElement.ownerDocument.body);
     const scrollIntoView = spyOn(
       Element.prototype,
       "scrollIntoView",
     ).mockImplementation(() => null);
     try {
-      await waitFor(() =>
-        expect(args.onInferenceProfileChange).toHaveBeenCalledWith(
-          baseArgs.defaultInferenceProfile,
-        ),
-      );
       await expect(
         page.queryByRole("button", { name: /^Model$/ }),
       ).not.toBeInTheDocument();
