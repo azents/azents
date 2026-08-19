@@ -125,22 +125,34 @@ Report inspection details to the current conversation context. Use this structur
 If there are no findings, state that explicitly. Do not create placeholder issues or
 changes.
 
-Classify each finding before taking action:
+Classify each finding by whether the required correction is already authoritative:
 
-- **Clear and low-risk correction:** create a focused pull request.
-- **Confirmed and material, but not safely fixable in a focused pull request:** create
-  a repository issue for durable handoff.
-- **Ambiguous convention interpretation or likely false positive:** report it to the
-  current conversation and request clarification without creating an issue or editing
-  code.
+- **Actionable finding:** current conventions, requirements, specs, and ADRs establish
+  the expected behavior. Correct it during the audit workflow, validate it, and create
+  the required pull request or pull request stack.
+- **True blocker:** the correction requires a material product-behavior decision, the
+  applicable convention is incorrect or contradicts another authority, required
+  requester authority or information is unavailable, or an external prerequisite
+  prevents execution. Report the blocker and request the missing decision or
+  prerequisite.
+- **Likely false positive:** evidence shows the convention does not apply. Report the
+  reasoning without editing code or creating an issue.
+
+Work size, affected-file count, cross-module coordination, test burden, and ordinary
+regression risk do not turn an actionable finding into a blocker. Split large
+corrections into bounded focused or stacked pull requests and continue until the
+planned remediation is implemented and validated.
+
+Create a repository issue only for a true blocker that needs durable handoff. Do not
+use an issue to defer an actionable finding.
 
 For a handoff issue, include:
 
 - the exact convention path and requirement;
 - every confirmed code location;
 - severity and concrete impact;
-- why direct correction is unsafe or too broad;
-- decisions, ownership, or coordination required; and
+- the exact product decision, convention correction, authority, information, or
+  external prerequisite that is missing;
 - a suggested remediation direction and the audited commit.
 
 Write the issue body to a temporary Markdown file and pass it with `--body-file`.
@@ -163,13 +175,17 @@ Advance the checkpoint only after:
 
 - all work represented by the plan is complete;
 - the result has been successfully reported to the current conversation; and
-- every required handoff issue has been created successfully; and
-- any intended pull request has been created successfully.
+- every actionable finding has been corrected, validated, and submitted through the
+  required pull request or pull request stack;
+- every true blocker has been reported and any required handoff issue has been
+  created successfully; and
+- any other intended pull request has been created successfully.
 
 A completed checkpoint means that the range was inspected, not that it is free of
-violations. Advance the checkpoint for a confirmed unresolved finding after its
-required handoff succeeds. Otherwise the same inspected range would be selected
-repeatedly instead of remaining tracked by its durable issue.
+violations. Advance the checkpoint for a confirmed unresolved finding only when a
+true blocker prevents correction and its required handoff succeeds. Keep the plan
+incomplete while an actionable finding remains deferred, including when the
+remaining work is large or carries ordinary regression risk.
 
 The planner and completion command reject tracked working-tree or index changes.
 After completion writes the state file, submit that checkpoint change through the
@@ -199,5 +215,6 @@ It stores only:
 
 Ranges reference ruleset revisions instead of repeating convention paths. State
 reconciliation prunes ranges and ruleset manifests that are no longer referenced.
-Inspection content belongs in the current conversation, unresolved confirmed work
-belongs in repository issues, and code corrections belong in pull requests.
+Inspection content belongs in the current conversation, true blockers that require
+durable handoff belong in repository issues, and actionable corrections belong in
+pull requests.
