@@ -21,6 +21,16 @@ class Suite:
     cache_write_repositories: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class TestSelection:
+    """One independently schedulable pytest selection."""
+
+    selector: str
+    path: Path
+    source_line: int
+    sibling_count: int
+
+
 def load_suites(tests_root: Path) -> tuple[Suite, ...]:
     """Load every suite configuration and reject unowned E2E files."""
     suites: list[Suite] = []
@@ -62,8 +72,8 @@ def load_suites(tests_root: Path) -> tuple[Suite, ...]:
     return tuple(suites)
 
 
-def load_file_timings(path: Path | None) -> dict[str, float]:
-    """Aggregate prior successful call timings by test file."""
+def load_test_timings(path: Path | None) -> dict[str, float]:
+    """Aggregate prior successful call timings by selectable test node."""
     if path is None or not path.is_file():
         return {}
     totals: dict[str, float] = {}
@@ -77,8 +87,8 @@ def load_file_timings(path: Path | None) -> dict[str, float]:
         duration = payload.get("duration_seconds")
         if not isinstance(node_id, str) or not isinstance(duration, int | float):
             raise ValueError("invalid test timing record")
-        file_path = _current_suite_path(node_id.split("::", 1)[0])
-        totals[file_path] = totals.get(file_path, 0.0) + float(duration)
+        selector = _current_test_selector(node_id)
+        totals[selector] = totals.get(selector, 0.0) + float(duration)
     return totals
 
 
@@ -89,13 +99,13 @@ def plan_suites(
     timings_path: Path | None,
     output_dir: Path,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Create deterministic file-level lane plans for enabled suites."""
+    """Create deterministic test-level lane plans for enabled suites."""
     suites = load_suites(tests_root)
     unknown = enabled_suites - {suite.name for suite in suites}
     if unknown:
         raise ValueError(f"unknown enabled suites: {', '.join(sorted(unknown))}")
 
-    timings = load_file_timings(timings_path)
+    timings = load_test_timings(timings_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     matrix: list[dict[str, Any]] = []
     coverage: dict[str, list[str]] = {}
@@ -106,27 +116,39 @@ def plan_suites(
         files = sorted(suite.root.rglob("test_*.py"))
         if not files:
             raise ValueError(f"suite {suite.name!r} contains no tests")
-        lane_count = min(suite.lanes, len(files))
-        lanes: list[list[Path]] = [[] for _ in range(lane_count)]
+        selections = [
+            selection for path in files for selection in _test_selections(path)
+        ]
+        lane_count = min(suite.lanes, len(selections))
+        lanes: list[list[TestSelection]] = [[] for _ in range(lane_count)]
         lane_weights = [0.0] * lane_count
         weighted_files = sorted(
-            ((_file_weight(path, timings), path) for path in files),
-            key=lambda item: (-item[0], item[1].as_posix()),
+            (
+                (_selection_weight(selection, timings), selection)
+                for selection in selections
+            ),
+            key=lambda item: (-item[0], item[1].selector),
         )
-        for weight, path in weighted_files:
+        for weight, selection in weighted_files:
             lane_index = min(
                 range(lane_count),
                 key=lambda index: (lane_weights[index], index),
             )
-            lanes[lane_index].append(path)
+            lanes[lane_index].append(selection)
             lane_weights[lane_index] += weight
 
         coverage[suite.name] = [path.as_posix() for path in files]
-        for index, lane_files in enumerate(lanes, start=1):
+        for index, lane_selections in enumerate(lanes, start=1):
             lane_name = f"{suite.name}-{index}"
             plan_path = output_dir / f"{lane_name}.txt"
             plan_path.write_text(
-                "".join(f"{path.as_posix()}\n" for path in sorted(lane_files)),
+                "".join(
+                    f"{selection.selector}\n"
+                    for selection in sorted(
+                        lane_selections,
+                        key=lambda item: (item.path.as_posix(), item.source_line),
+                    )
+                ),
                 encoding="utf-8",
             )
             matrix.append(
@@ -148,24 +170,94 @@ def plan_suites(
     return {"include": matrix}
 
 
-def _file_weight(path: Path, timings: dict[str, float]) -> float:
-    exact = timings.get(path.as_posix())
+def _test_selections(path: Path) -> tuple[TestSelection, ...]:
+    """Return statically discoverable pytest nodes, with a file fallback."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    node_suffixes: list[tuple[str, int]] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name.startswith("test_"):
+                node_suffixes.append((node.name, node.lineno))
+            continue
+        if not isinstance(node, ast.ClassDef) or not node.name.startswith("Test"):
+            continue
+        node_suffixes.extend(
+            (f"{node.name}::{member.name}", member.lineno)
+            for member in node.body
+            if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and member.name.startswith("test_")
+        )
+
+    if not node_suffixes:
+        return (
+            TestSelection(
+                selector=path.as_posix(),
+                path=path,
+                source_line=0,
+                sibling_count=1,
+            ),
+        )
+
+    sibling_count = len(node_suffixes)
+    return tuple(
+        TestSelection(
+            selector=f"{path.as_posix()}::{suffix}",
+            path=path,
+            source_line=source_line,
+            sibling_count=sibling_count,
+        )
+        for suffix, source_line in node_suffixes
+    )
+
+
+def _selection_weight(
+    selection: TestSelection,
+    timings: dict[str, float],
+) -> float:
+    exact = timings.get(selection.selector)
     if exact is not None:
         return max(exact, 0.001)
+
+    selector_path, separator, selector_suffix = selection.selector.partition("::")
     suffix_matches = [
         duration
-        for prior_path, duration in timings.items()
-        if prior_path.endswith(f"/{path.name}") or prior_path == path.name
+        for prior_selector, duration in timings.items()
+        if _selectors_match_by_filename(
+            prior_selector=prior_selector,
+            selector_path=selector_path,
+            selector_suffix=selector_suffix if separator else None,
+        )
     ]
     if len(suffix_matches) == 1:
         return max(suffix_matches[0], 0.001)
-    source = path.read_text(encoding="utf-8")
-    test_count = sum(
-        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name.startswith("test_")
-        for node in ast.walk(ast.parse(source))
+    source_lines = selection.path.read_text(encoding="utf-8").splitlines()
+    return max(
+        len(source_lines) / 100.0 / selection.sibling_count,
+        1.0,
     )
-    return max(float(test_count), len(source.splitlines()) / 100.0, 1.0)
+
+
+def _selectors_match_by_filename(
+    *,
+    prior_selector: str,
+    selector_path: str,
+    selector_suffix: str | None,
+) -> bool:
+    prior_path, prior_separator, prior_suffix = prior_selector.partition("::")
+    return (
+        Path(prior_path).name == Path(selector_path).name
+        and (prior_suffix if prior_separator else None) == selector_suffix
+    )
+
+
+def _current_test_selector(node_id: str) -> str:
+    """Map one historical pytest node ID to its current base selector."""
+    file_path, separator, node_suffix = node_id.partition("::")
+    current_path = _current_suite_path(file_path)
+    if not separator:
+        return current_path
+    base_node_suffix = node_suffix.split("[", 1)[0]
+    return f"{current_path}::{base_node_suffix}"
 
 
 def _current_suite_path(path: str) -> str:
