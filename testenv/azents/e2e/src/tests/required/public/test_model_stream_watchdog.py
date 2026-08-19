@@ -1,5 +1,6 @@
 """Model stream watchdog E2E coverage through public product paths."""
 
+import json
 import time
 from collections.abc import Callable
 
@@ -246,6 +247,88 @@ def _wait_for_ws_removed_event(
             return removed
     raise TimeoutError(
         f"expected WebSocket live-event removal was not observed: {observed!r}"
+    )
+
+
+def _wait_for_ws_live_content(
+    websocket: Connection,
+    *,
+    session_id: str,
+    content: str,
+    timeout: float = 10,
+) -> set[str]:
+    """Wait for a subscribed live-event upsert containing one content marker."""
+    deadline = time.monotonic() + timeout
+    observed: list[object] = []
+    while time.monotonic() < deadline:
+        try:
+            raw = websocket.recv(timeout=max(0.1, deadline - time.monotonic()))
+        except TimeoutError:
+            continue
+        action = json_object_payload(json.loads(raw), label="WebSocket action")
+        observed.append(action.get("type"))
+        if action.get("type") != "live_event_upserted":
+            continue
+        assert action.get("session_id") == session_id
+        event = json_object_payload(action.get("event"), label="live upsert event")
+        payload = json_object_payload(
+            event.get("payload"),
+            label="live upsert payload",
+        )
+        event_content = payload.get("content")
+        event_id = event.get("id")
+        if (
+            isinstance(event_content, str)
+            and content in event_content
+            and isinstance(event_id, str)
+        ):
+            return {event_id}
+    raise TimeoutError(
+        f"live WebSocket content did not appear: {content!r}, {observed!r}"
+    )
+
+
+def _wait_for_ws_clean_retry(
+    websocket: Connection,
+    *,
+    session_id: str,
+    failed_event_ids: set[str],
+    failed_attempt_count: int,
+    timeout: float = 15,
+) -> dict[str, object]:
+    """Wait until failed live output is removed before the retry is published."""
+    deadline = time.monotonic() + timeout
+    removed_event_ids: set[str] = set()
+    observed: list[object] = []
+    while time.monotonic() < deadline:
+        try:
+            raw = websocket.recv(timeout=max(0.1, deadline - time.monotonic()))
+        except TimeoutError:
+            continue
+        action = json_object_payload(json.loads(raw), label="WebSocket action")
+        action_type = action.get("type")
+        observed.append(action_type)
+        if action_type == "live_event_removed":
+            assert action.get("session_id") == session_id
+            event_id = action.get("event_id")
+            if isinstance(event_id, str):
+                removed_event_ids.add(event_id)
+            continue
+        if action_type != "live_run_updated":
+            continue
+        assert action.get("session_id") == session_id
+        run = json_object_payload(action.get("run"), label="WebSocket live run")
+        retry = json_object_payload(
+            run.get("retry"),
+            label="WebSocket retry state",
+        )
+        if retry.get("failed_attempt_count") != failed_attempt_count:
+            continue
+        assert failed_event_ids <= removed_event_ids
+        return action
+    raise TimeoutError(
+        "clean WebSocket retry was not observed: "
+        f"removed={removed_event_ids!r}, actions={observed!r}"
     )
 
 
@@ -497,26 +580,40 @@ class TestModelStreamWatchdog:
             azents_public_server_url,
         )
         agent_id = create_agent(public_api_client, workspace)
-        result = run_message(
-            public_api_client=public_api_client,
-            public_url=azents_public_server_url,
+        session_id = team_primary_session_id(
+            server_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
-            message=_IDLE_PREFIX_PROMPT,
         )
-        _wait_for_live_content(
-            public_url=azents_public_server_url,
+        with connect_chat(
+            public_api_client=public_api_client,
+            server_url=azents_public_server_url,
             token=workspace.token,
-            session_id=result.session_id,
-            content=_IDLE_FAILED_PREFIX,
-        )
-        _wait_for_retry_without_content(
-            public_url=azents_public_server_url,
-            token=workspace.token,
-            session_id=result.session_id,
-            failed_attempt_count=1,
-            removed_content=_IDLE_FAILED_PREFIX,
-        )
+            session_id=session_id,
+        ) as websocket:
+            subscribed = wait_for_ws_action(websocket, action_type="subscribed")
+            assert subscribed.get("session_id") == session_id
+            result = run_message(
+                public_api_client=public_api_client,
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=session_id,
+                message=_IDLE_PREFIX_PROMPT,
+            )
+            failed_event_ids = _wait_for_ws_live_content(
+                websocket,
+                session_id=session_id,
+                content=_IDLE_FAILED_PREFIX,
+            )
+            retry_updated = _wait_for_ws_clean_retry(
+                websocket,
+                session_id=session_id,
+                failed_event_ids=failed_event_ids,
+                failed_attempt_count=1,
+            )
+            assert retry_updated.get("session_id") == session_id
+
         payload = wait_for_rest_contents(
             server_url=azents_public_server_url,
             token=workspace.token,
