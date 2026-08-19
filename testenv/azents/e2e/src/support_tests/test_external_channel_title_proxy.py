@@ -40,6 +40,41 @@ def test_discord_title_request_match_is_specific() -> None:
     )
 
 
+def test_slack_response_mode_title_request_match_is_specific() -> None:
+    """Only the response-mode title prompt uses the local deterministic response."""
+    request: dict[str, object] = {
+        "instructions": (
+            "<task>Create a brief title from the request so the user can "
+            "find it later.</task>"
+        ),
+        "input": [
+            {
+                "role": "user",
+                "content": (
+                    "Create a title from this request:\n"
+                    "Initial response-mode invocation"
+                ),
+            }
+        ],
+    }
+
+    assert proxy.is_external_channel_slack_response_mode_title_request(request)
+    assert not proxy.is_external_channel_slack_response_mode_title_request(
+        {
+            **request,
+            "input": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Create a title from this request:\n"
+                        "Another External Channel invocation"
+                    ),
+                }
+            ],
+        }
+    )
+
+
 def test_discord_title_barrier_requires_committed_direct_create_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

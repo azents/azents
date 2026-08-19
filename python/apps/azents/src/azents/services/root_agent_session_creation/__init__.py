@@ -61,7 +61,7 @@ class RootAgentSessionCreationService:
             raise ValueError("Root AgentSession creation requires a root Session")
         if create.primary_kind is not None:
             raise ValueError("Team-primary creation requires ensure_team_primary")
-        agent = await self.agent_repository.lock_by_id(session, create.agent_id)
+        agent = await self.agent_repository.get_by_id(session, create.agent_id)
         if agent is None:
             raise ValueError("Agent is unavailable")
         self._require_runtime_capability(
@@ -95,7 +95,7 @@ class RootAgentSessionCreationService:
         agent_id: str,
     ) -> RootAgentSessionCreationResult:
         """Ensure team primary without waiting for Runtime state."""
-        agent = await self.agent_repository.lock_by_id(session, agent_id)
+        agent = await self.agent_repository.get_by_id(session, agent_id)
         if agent is None:
             raise ValueError("Agent is unavailable")
         self._require_runtime_capability(

@@ -241,6 +241,12 @@ ordered automatic Project policy and snapshots it into the new
 context, and context Projects in the caller-owned transaction without Runtime I/O. A Runtime-free
 root with empty intent receives binding state `none`; a managed root receives `pending` until an
 authorized Runtime-dependent operation binds it.
+Root creation reads the Agent lifecycle, Runtime capability, and capability version
+without retaining a preliminary Agent row lock. After the Runtime FK-dependent
+context write, one final conditional Agent update revalidates the exact authority.
+A concurrent lifecycle or capability transition rejects and rolls back the entire
+root tree, while Runtime-first reconciliation can complete without a cross-row lock
+cycle.
 The creation result may report the source policy revision for transaction-local
 provenance; the durable authority is the context Project snapshot.
 
@@ -1193,6 +1199,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-08-19** — v151. Replaced preliminary Agent row locking during root
+  Session creation with a final capability/version conditional update after
+  Runtime FK-dependent persistence.
 - **2026-08-18** — v150. Batched mailbox recency projections into one monotonic
   Session update and established Agent-before-Session FK lock ordering for input
   admission and promotion.
