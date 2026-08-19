@@ -966,13 +966,7 @@ class RunExecutor:
                     active_run_id=run_id,
                     owner_generation=owner_generation,
                     tool_admission_barrier=tool_admission_barrier,
-                    initial_turn_eligible=(
-                        actionable_transcript_pending
-                        or (
-                            recoverable_run is not None
-                            and recoverable_run.status == AgentRunStatus.RUNNING
-                        )
-                    ),
+                    initial_turn_eligible=actionable_transcript_pending,
                     poll_fn=None,
                     process_actions=True,
                     dispatch_event=dispatch_event,

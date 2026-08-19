@@ -2285,22 +2285,25 @@ async def test_execute_recovers_activated_run_before_flushing_input(
             shell_enabled=True,
         ),
     )
-    poll_calls: list[dict[str, object]] = []
     recovered_snapshots: list[AgentModelSelection] = []
-
-    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
-        del args
-        order.append("input")
-        poll_calls.append(kwargs)
-        return RunInputPollResult(
-            context_invalidated=False,
-            complete_run=False,
-            suppress_parent_result=False,
+    pending_profile = RequestedInferenceProfile(
+        model_target_label="Fast",
+        reasoning_effort=None,
+    )
+    pending_inputs = [
+        PendingInputInferenceProfile(
+            mailbox_item_id="buffer-later-profile",
+            requires_inference=True,
+            exists=True,
+            requested_inference_profile=pending_profile,
+        ),
+        PendingInputInferenceProfile(
+            mailbox_item_id=None,
+            requires_inference=False,
+            exists=False,
             requested_inference_profile=None,
-            promoted_event_ids=[],
-            user_messages=[],
-            has_actionable_work=False,
-        )
+        ),
+    ]
 
     async def resolve_recovered(*args: object, **kwargs: object) -> object:
         del args
@@ -2346,21 +2349,61 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         session_id: str,
     ) -> PendingInputInferenceProfile:
         assert session_id == "session-001"
-        return PendingInputInferenceProfile(
-            mailbox_item_id="buffer-later-profile",
-            requires_inference=True,
-            exists=True,
-            requested_inference_profile=RequestedInferenceProfile(
-                model_target_label="Fast",
-                reasoning_effort=None,
-            ),
+        return pending_inputs.pop(0)
+
+    async def promote_pending_input(
+        *args: object,
+        **kwargs: object,
+    ) -> PromotedMailboxItems:
+        del args
+        pending = cast(PendingInputInferenceProfile, kwargs["pending"])
+        assert pending.requested_inference_profile == pending_profile
+        order.append("input")
+        return PromotedMailboxItems(
+            operation_action=None,
+            turn_effect=TurnEffect.ELIGIBLE,
+            requested_inference_profile=pending_profile,
+            promoted_event_ids=["event-later-profile"],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=["buffer-later-profile"],
+            changed_session_agent_ids=[],
+            claimed_count=1,
+            inserted_count=1,
+            deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
         )
 
-    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    async def has_actionable_model_input(session_id: str) -> bool:
+        assert session_id == "session-001"
+        return True
+
+    async def process_operation_actions(
+        *args: object,
+        **kwargs: object,
+    ) -> OperationActionProcessResult:
+        del args, kwargs
+        return OperationActionProcessResult(
+            context_invalidated=False,
+            complete_run=False,
+        )
+
     monkeypatch.setattr(
         executor.mailbox_item_service,
         "peek_pending_inference_profile",
         peek_pending_input,
+    )
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote_pending_input)
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+    monkeypatch.setattr(
+        executor,
+        "_process_operation_actions",
+        process_operation_actions,
     )
     monkeypatch.setattr(
         run_executor_module,
@@ -2400,11 +2443,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
     ]
     assert lifecycle.pending_run_create_calls == 0
     assert lifecycle.activation_calls == 0
-    assert poll_calls[0]["required_inference_profile"] == RequestedInferenceProfile(
-        model_target_label="Quality",
-        reasoning_effort=ModelReasoningEffort.HIGH,
-    )
-    assert poll_calls[0]["active_run_id"] == recoverable.id
+    assert pending_inputs == []
 
 
 @pytest.mark.asyncio
