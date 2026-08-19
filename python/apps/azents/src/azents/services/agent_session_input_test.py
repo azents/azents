@@ -31,7 +31,11 @@ from azents.core.enums import (
     SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
 )
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    RequestedInferenceProfile,
+    SessionAppliedInferenceProfile,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -103,7 +107,7 @@ from .mailbox import (
 )
 
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
-    model_target_label="Primary",
+    model_target_label="default",
     reasoning_effort=None,
 )
 
@@ -188,6 +192,8 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
     ) -> None:
         self.calls = calls
         self.session_kind = session_kind
+        self.applied_inference_profile: SessionAppliedInferenceProfile | None = None
+        self.applied_profile_calls: list[SessionAppliedInferenceProfile] = []
 
     async def lock_by_id(
         self,
@@ -197,10 +203,15 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         """Lock and fetch session."""
         del session
         self.calls.append("get_by_id")
+        return self._build_session(agent_session_id)
+
+    def _build_session(self, agent_session_id: str) -> AgentSession:
+        """Build the current in-memory Session projection."""
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
             owner_generation=0,
             inference_state=None,
+            applied_inference_profile=self.applied_inference_profile,
             id=agent_session_id,
             workspace_id="workspace-1",
             agent_id="agent-1",
@@ -221,6 +232,23 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
             created_at=now,
             updated_at=now,
         )
+
+    async def set_applied_inference_profile(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        model_target_label: str,
+        reasoning_effort: ModelReasoningEffort | None,
+    ) -> AgentSession:
+        """Persist applied profile in memory for input-admission tests."""
+        del session
+        self.applied_inference_profile = SessionAppliedInferenceProfile(
+            model_target_label=model_target_label,
+            reasoning_effort=reasoning_effort,
+        )
+        self.applied_profile_calls.append(self.applied_inference_profile)
+        return self._build_session(session_id)
 
     async def mark_running_for_input_wakeup(
         self,

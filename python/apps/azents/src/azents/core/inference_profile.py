@@ -6,7 +6,11 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, WithJsonSchema
 
-from azents.core.agent import AgentModelSelection, SelectableModelSettings
+from azents.core.agent import (
+    AgentModelSelection,
+    SelectableModelOption,
+    SelectableModelSettings,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 
 PublicReasoningEffort = Annotated[
@@ -79,6 +83,30 @@ class SessionAppliedInferenceProfile(BaseModel):
     reasoning_effort: PublicReasoningEffort = Field(
         description="Applied explicit effort, or null for model Default",
     )
+
+
+def validate_requested_profile_against_options(
+    options: list[SelectableModelOption],
+    profile: RequestedInferenceProfile,
+) -> SelectableModelOption:
+    """Validate one Agent-owned profile against a locked option snapshot."""
+    option = next(
+        (
+            candidate
+            for candidate in options
+            if candidate.label == profile.model_target_label
+        ),
+        None,
+    )
+    if option is None:
+        raise ValueError("Model target label is not available")
+    if (
+        profile.reasoning_effort is not None
+        and profile.reasoning_effort
+        not in option.model_selection.normalized_capabilities.reasoning.effort_levels
+    ):
+        raise ValueError("Reasoning effort is not supported by model target")
+    return option
 
 
 class SessionInferenceState(BaseModel):

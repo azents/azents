@@ -10,6 +10,7 @@ from typing import Annotated, Any, assert_never
 
 from azcommon.datetime import tznow
 from azcommon.logging import bind_extra
+from azcommon.result import Failure, Result, Success
 from fastapi import Depends
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +34,7 @@ from azents.core.inference_profile import (
     InferenceProfileSource,
     RequestedInferenceProfile,
     SessionInferenceState,
+    validate_requested_profile_against_options,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.runtime_capabilities import (
@@ -153,7 +155,7 @@ from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import PendingSessionCommand
+from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
@@ -282,18 +284,22 @@ class ProfileResolutionFailure:
     message: str
 
 
-def matching_session_inference_state(
-    current: SessionInferenceState | None,
-    requested: RequestedInferenceProfile,
-) -> SessionInferenceState | None:
-    """Return the prepared Session snapshot matching one requested profile."""
-    if (
-        current is not None
-        and current.model_target_label == requested.model_target_label
-        and current.reasoning_effort == requested.reasoning_effort
-    ):
-        return current
-    return None
+class ProfileResolutionRuntimeError(UserVisibleRuntimeError):
+    """Deterministic profile failure that must not enter automatic retry."""
+
+    def __init__(self, failure: ProfileResolutionFailure) -> None:
+        super().__init__(failure.message)
+        self.failure_code = failure.code.value
+
+
+@dataclasses.dataclass(frozen=True)
+class FreshTurnPreparation:
+    """Fresh main-model request and its committed prepared Session state."""
+
+    run_request: RunRequest
+    inference_state: SessionInferenceState
+    profile: RequestedInferenceProfile
+    source: InferenceProfileSource
 
 
 @dataclasses.dataclass(frozen=True)
@@ -869,14 +875,33 @@ class RunExecutor:
                     )
                 explicit_profile = pending_input.requested_inference_profile
 
-            if explicit_profile is None and session_state.inference_state is not None:
-                turn_inference_state = session_state.inference_state
+            retry_model_target_label = (
+                getattr(recoverable_run, "requested_model_target_label", None)
+                if recoverable_run is not None
+                else None
+            )
+            retry_reasoning_effort = (
+                getattr(recoverable_run, "requested_reasoning_effort", None)
+                if recoverable_run is not None
+                else None
+            )
+            if explicit_profile is None and retry_model_target_label is not None:
+                explicit_profile = RequestedInferenceProfile(
+                    model_target_label=retry_model_target_label,
+                    reasoning_effort=retry_reasoning_effort,
+                )
+
+            if (
+                retry_model_target_label is not None
+                and explicit_profile is not None
+                and (
+                    command is not None
+                    or pending_input.requested_inference_profile is None
+                )
+            ):
                 selected_profile = RequestedProfileSelection(
-                    profile=RequestedInferenceProfile(
-                        model_target_label=turn_inference_state.model_target_label,
-                        reasoning_effort=turn_inference_state.reasoning_effort,
-                    ),
-                    source=InferenceProfileSource.SESSION_LAST_USED,
+                    profile=explicit_profile,
+                    source=InferenceProfileSource.RETRY_ORIGINAL,
                 )
             else:
                 selected_profile = await self._select_requested_profile(
@@ -884,7 +909,7 @@ class RunExecutor:
                     session_id=snapshot.session_id,
                     explicit_profile=explicit_profile,
                 )
-                turn_inference_state = None
+            turn_inference_state = None
 
             scheduled_admission = None
             if command is None and recoverable_run is None:
@@ -1017,7 +1042,7 @@ class RunExecutor:
                         db_session,
                         snapshot.session_id,
                     )
-                if prepared_session is None or prepared_session.inference_state is None:
+                if prepared_session is None:
                     await self.session_lifecycle.send_session_wake_up(
                         SessionWakeUp(session_id=snapshot.session_id)
                     )
@@ -1027,7 +1052,7 @@ class RunExecutor:
                         no_actionable_work=True,
                         run_id=None if created_run else run_id,
                     )
-                turn_inference_state = prepared_session.inference_state
+                turn_inference_state = None
             if created_run and not initial_input.has_actionable_work:
                 return RunExecutionResult(
                     toolkits=[],
@@ -1053,17 +1078,15 @@ class RunExecutor:
 
         run_request: RunRequest | None = None
         if turn_inference_state is None:
-            resolved = await resolve_invoke_input_with_profile(
-                invoke_input,
-                requested_profile=selected_profile.profile,
-                agent_repository=self.agent_repository,
-                integration_repository=self.integration_repository,
-                session_manager=self.session_manager,
-                exchange_file_service=self.exchange_file_service,
-                model_file_service=self.model_file_service,
+            prepared = await self._prepare_fresh_main_model_turn(
+                agent_id=snapshot.agent_id,
+                session_id=snapshot.session_id,
+                owner_generation=owner_generation,
+                invoke_input=invoke_input,
+                override=selected_profile,
             )
-            if resolved.failure:
-                failure = _profile_resolution_failure(resolved.error)
+            if prepared.failure:
+                failure = _profile_resolution_failure(prepared.error)
                 if agent_run.status == AgentRunStatus.PENDING:
                     await self.session_lifecycle.cancel_pending_agent_run(
                         snapshot.session_id,
@@ -1092,25 +1115,12 @@ class RunExecutor:
                     run_id=run_id,
                     terminal_run_status=AgentRunStatus.CANCELLED,
                 )
-            resolved_profile = resolved.value
-            run_request = resolved_profile.run_request
-            turn_inference_state = SessionInferenceState(
-                model_target_label=selected_profile.profile.model_target_label,
-                model_selection=resolved_profile.model_selection,
-                model_settings=resolved_profile.model_settings,
-                reasoning_effort=resolved_profile.reasoning_effort,
-                effective_context_window_tokens=run_request.effective_max_input_tokens,
-                effective_auto_compaction_threshold_tokens=(
-                    compute_auto_compaction_threshold_tokens(
-                        run_request.effective_max_input_tokens
-                    )
-                ),
-                resolved_at=datetime.datetime.now(datetime.UTC),
-            )
-            await self.session_lifecycle.set_inference_state(
-                snapshot.session_id,
-                owner_generation=owner_generation,
-                inference_state=turn_inference_state,
+            prepared_value = prepared.value
+            run_request = prepared_value.run_request
+            turn_inference_state = prepared_value.inference_state
+            selected_profile = RequestedProfileSelection(
+                profile=prepared_value.profile,
+                source=prepared_value.source,
             )
         else:
             recovered = await resolve_invoke_input_with_resolved_profile(
@@ -1772,45 +1782,22 @@ class RunExecutor:
                     async for item in engine_iter:
                         await consume_emit(item)
                     if turn_boundary_context_invalidated:
-                        async with self.session_manager() as db_session:
-                            prepared_session = (
-                                await self.agent_session_repository.get_by_id(
-                                    db_session,
-                                    snapshot.session_id,
-                                )
-                            )
-                        if (
-                            prepared_session is None
-                            or prepared_session.inference_state is None
-                        ):
-                            raise RuntimeError(
-                                "Turn-boundary preparation has no prepared "
-                                "Session inference state"
-                            )
-                        next_inference_state = prepared_session.inference_state
-                        rebuilt = await resolve_invoke_input_with_resolved_profile(
-                            invoke_input,
-                            resolved_model_selection=(
-                                next_inference_state.model_selection
-                            ),
-                            resolved_model_settings=(
-                                next_inference_state.model_settings
-                            ),
-                            resolved_reasoning_effort=(
-                                next_inference_state.reasoning_effort
-                            ),
-                            agent_repository=self.agent_repository,
-                            integration_repository=self.integration_repository,
-                            session_manager=self.session_manager,
-                            exchange_file_service=self.exchange_file_service,
-                            model_file_service=self.model_file_service,
+                        prepared = await self._prepare_fresh_main_model_turn(
+                            agent_id=snapshot.agent_id,
+                            session_id=snapshot.session_id,
+                            owner_generation=owner_generation,
+                            invoke_input=invoke_input,
+                            override=selected_profile,
                         )
-                        if rebuilt.failure:
-                            raise UserVisibleRuntimeError(
-                                _profile_resolution_failure(rebuilt.error).message
+                        if prepared.failure:
+                            raise ProfileResolutionRuntimeError(
+                                _profile_resolution_failure(prepared.error)
                             )
+                        prepared_value = prepared.value
+                        next_inference_state = prepared_value.inference_state
+                        rebuilt = prepared_value.run_request
                         run_request = dataclasses.replace(
-                            rebuilt.value,
+                            rebuilt,
                             toolkits=run_request.toolkits,
                             agent_prompt=run_request.agent_prompt,
                             max_input_tokens=(
@@ -1830,13 +1817,13 @@ class RunExecutor:
                         selected_profile = RequestedProfileSelection(
                             profile=RequestedInferenceProfile(
                                 model_target_label=(
-                                    next_inference_state.model_target_label
+                                    prepared_value.profile.model_target_label
                                 ),
                                 reasoning_effort=(
-                                    next_inference_state.reasoning_effort
+                                    prepared_value.profile.reasoning_effort
                                 ),
                             ),
-                            source=InferenceProfileSource.EXPLICIT_INPUT,
+                            source=prepared_value.source,
                         )
                         inference_profile = next_inference_state.applied_profile
                         turn_boundary_context_invalidated = False
@@ -2104,7 +2091,10 @@ class RunExecutor:
         retryability: FailedRunRetryability = "unknown"
         failure_code: str | None = None
         provider_failure: FailedRunProviderFailure | None = None
-        if isinstance(exc, ModelProviderFailure):
+        if isinstance(exc, ProfileResolutionRuntimeError):
+            retryability = "non_retryable"
+            failure_code = exc.failure_code
+        elif isinstance(exc, ModelProviderFailure):
             retryability = _failed_run_retryability(exc.retryability)
             failure_code = exc.failure_code
             provider_failure = FailedRunProviderFailure.from_failure(exc)
@@ -2290,7 +2280,7 @@ class RunExecutor:
         session_id: str,
         explicit_profile: RequestedInferenceProfile | None,
     ) -> RequestedProfileSelection:
-        """Apply explicit, session-last, then Agent-default profile precedence."""
+        """Apply explicit, Session-applied, then Agent-default profile precedence."""
         if explicit_profile is not None:
             return RequestedProfileSelection(
                 profile=explicit_profile,
@@ -2301,31 +2291,191 @@ class RunExecutor:
                 session,
                 session_id,
             )
-            if agent_session is not None and agent_session.inference_state is not None:
+            if not isinstance(agent_session, AgentSession):
+                raise ValueError("AgentSession not found")
+            if agent_session.applied_inference_profile is not None:
                 return RequestedProfileSelection(
                     profile=RequestedInferenceProfile(
                         model_target_label=(
-                            agent_session.inference_state.model_target_label
+                            agent_session.applied_inference_profile.model_target_label
                         ),
                         reasoning_effort=(
-                            agent_session.inference_state.reasoning_effort
+                            agent_session.applied_inference_profile.reasoning_effort
                         ),
                     ),
                     source=InferenceProfileSource.SESSION_LAST_USED,
                 )
             agent = await self.agent_repository.get_by_id(session, agent_id)
-        return RequestedProfileSelection(
-            profile=RequestedInferenceProfile(
-                model_target_label=(agent.main_model_label if agent else "default"),
-                reasoning_effort=(
-                    ModelReasoningEffort(agent.model_parameters.reasoning_effort)
-                    if agent is not None
-                    and agent.model_parameters is not None
-                    and agent.model_parameters.reasoning_effort is not None
-                    else None
+            if not isinstance(agent, Agent):
+                raise ValueError("Agent not found")
+            return RequestedProfileSelection(
+                profile=RequestedInferenceProfile(
+                    model_target_label=agent.main_model_label,
+                    reasoning_effort=(
+                        ModelReasoningEffort(agent.model_parameters.reasoning_effort)
+                        if agent.model_parameters is not None
+                        and agent.model_parameters.reasoning_effort is not None
+                        else None
+                    ),
                 ),
-            ),
-            source=InferenceProfileSource.AGENT_DEFAULT,
+                source=InferenceProfileSource.AGENT_DEFAULT,
+            )
+
+    async def _prepare_fresh_main_model_turn(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        owner_generation: int,
+        invoke_input: InvokeInput,
+        override: RequestedProfileSelection | None,
+    ) -> Result[FreshTurnPreparation, object]:
+        """Resolve and commit one current main-model turn under final fences."""
+        override_sources = {
+            InferenceProfileSource.PARENT_RUN,
+            InferenceProfileSource.SPAWN_OVERRIDE,
+            InferenceProfileSource.RETRY_ORIGINAL,
+        }
+        for _attempt in range(3):
+            async with self.session_manager() as session:
+                session_state = await self.agent_session_repository.get_by_id(
+                    session,
+                    session_id,
+                )
+                agent = await self.agent_repository.get_by_id(session, agent_id)
+            if session_state is None or agent is None:
+                raise ValueError("AgentSession or Agent not found")
+            if not isinstance(session_state, AgentSession) or not isinstance(
+                agent, Agent
+            ):
+                raise ValueError("AgentSession or Agent has invalid persisted data")
+
+            if override is not None and override.source in override_sources:
+                selected = override
+            elif session_state.applied_inference_profile is not None:
+                applied = session_state.applied_inference_profile
+                selected = RequestedProfileSelection(
+                    profile=RequestedInferenceProfile(
+                        model_target_label=applied.model_target_label,
+                        reasoning_effort=applied.reasoning_effort,
+                    ),
+                    source=InferenceProfileSource.SESSION_LAST_USED,
+                )
+            else:
+                selected = RequestedProfileSelection(
+                    profile=RequestedInferenceProfile(
+                        model_target_label=agent.main_model_label,
+                        reasoning_effort=(
+                            ModelReasoningEffort(
+                                agent.model_parameters.reasoning_effort
+                            )
+                            if agent.model_parameters is not None
+                            and agent.model_parameters.reasoning_effort is not None
+                            else None
+                        ),
+                    ),
+                    source=InferenceProfileSource.AGENT_DEFAULT,
+                )
+
+            resolved = await resolve_invoke_input_with_profile(
+                invoke_input,
+                requested_profile=selected.profile,
+                agent_repository=self.agent_repository,
+                integration_repository=self.integration_repository,
+                session_manager=self.session_manager,
+                exchange_file_service=self.exchange_file_service,
+                model_file_service=self.model_file_service,
+            )
+            if resolved.failure:
+                return Failure(resolved.error)
+
+            resolved_profile = resolved.value
+            inference_state = SessionInferenceState(
+                model_target_label=selected.profile.model_target_label,
+                model_selection=resolved_profile.model_selection,
+                model_settings=resolved_profile.model_settings,
+                reasoning_effort=(
+                    selected.profile.reasoning_effort
+                    if selected.profile.reasoning_effort is not None
+                    else resolved_profile.reasoning_effort
+                ),
+                effective_context_window_tokens=(
+                    resolved_profile.run_request.effective_max_input_tokens
+                ),
+                effective_auto_compaction_threshold_tokens=(
+                    compute_auto_compaction_threshold_tokens(
+                        resolved_profile.run_request.effective_max_input_tokens
+                    )
+                ),
+                resolved_at=datetime.datetime.now(datetime.UTC),
+            )
+
+            async with self.session_manager() as session:
+                locked_agent = await self.agent_repository.lock_by_id(
+                    session,
+                    agent_id,
+                )
+                locked_session = await self.agent_session_repository.lock_by_id(
+                    session,
+                    session_id,
+                )
+                if locked_agent is None or locked_session is None:
+                    raise ValueError("AgentSession or Agent not found")
+                if locked_session.owner_generation != owner_generation:
+                    raise CanonicalExecutionOwnerGenerationStaleError(
+                        "Session owner generation is stale"
+                    )
+                if locked_session.agent_id != agent_id:
+                    raise ValueError("AgentSession does not belong to Agent")
+
+                if override is not None and override.source in override_sources:
+                    expected = override.profile
+                elif locked_session.applied_inference_profile is not None:
+                    applied = locked_session.applied_inference_profile
+                    expected = RequestedInferenceProfile(
+                        model_target_label=applied.model_target_label,
+                        reasoning_effort=applied.reasoning_effort,
+                    )
+                else:
+                    expected = RequestedInferenceProfile(
+                        model_target_label=locked_agent.main_model_label,
+                        reasoning_effort=(
+                            ModelReasoningEffort(
+                                locked_agent.model_parameters.reasoning_effort
+                            )
+                            if locked_agent.model_parameters is not None
+                            and locked_agent.model_parameters.reasoning_effort
+                            is not None
+                            else None
+                        ),
+                    )
+
+                if expected != selected.profile:
+                    continue
+                option = validate_requested_profile_against_options(
+                    locked_agent.selectable_model_options,
+                    expected,
+                )
+                if (
+                    option.model_selection != inference_state.model_selection
+                    or option.settings != inference_state.model_settings
+                ):
+                    continue
+                await self.agent_session_repository.set_inference_state(
+                    session,
+                    session_id=session_id,
+                    inference_state=inference_state,
+                )
+            return Success(
+                FreshTurnPreparation(
+                    run_request=resolved_profile.run_request,
+                    inference_state=inference_state,
+                    profile=selected.profile,
+                    source=selected.source,
+                )
+            )
+        raise CanonicalExecutionWorkDriftError(
+            "Agent or Session model state changed during fresh turn preparation"
         )
 
     async def _publish_session_agent_tree_changes(
@@ -2421,6 +2571,8 @@ class RunExecutor:
                     await self.session_lifecycle.send_session_wake_up(
                         SessionWakeUp(session_id=snapshot.session_id)
                     )
+            elif not result.complete_run:
+                mark_context_invalidated()
             return PollMessagesResult(
                 user_messages=result.user_messages,
                 context_invalidated=result.context_invalidated,
@@ -2853,60 +3005,7 @@ class RunExecutor:
             "Input buffer flush started before model boundary",
             extra={"session_id": session_id, "model": model},
         )
-        prepared_inference_state: SessionInferenceState | None = None
         profile_resolution_failure: str | None = None
-        if pending.requires_inference:
-            requested_profile = (
-                pending.requested_inference_profile or required_inference_profile
-            )
-            if requested_profile is None:
-                raise RuntimeError("Inference-producing input has no requested profile")
-            async with self.session_manager() as session:
-                session_state = await self.agent_session_repository.get_by_id(
-                    session,
-                    session_id,
-                )
-            current_inference_state = (
-                session_state.inference_state if session_state is not None else None
-            )
-            prepared_inference_state = matching_session_inference_state(
-                current_inference_state,
-                requested_profile,
-            )
-            if prepared_inference_state is None:
-                resolved = await resolve_invoke_input_with_profile(
-                    InvokeInput(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        messages=[],
-                    ),
-                    requested_profile=requested_profile,
-                    agent_repository=self.agent_repository,
-                    integration_repository=self.integration_repository,
-                    session_manager=self.session_manager,
-                    exchange_file_service=self.exchange_file_service,
-                    model_file_service=self.model_file_service,
-                )
-                if resolved.failure:
-                    profile_resolution_failure = _profile_resolution_failure(
-                        resolved.error
-                    ).message
-                else:
-                    resolved_profile = resolved.value
-                    effective_tokens = (
-                        resolved_profile.run_request.effective_max_input_tokens
-                    )
-                    prepared_inference_state = SessionInferenceState(
-                        model_target_label=requested_profile.model_target_label,
-                        model_selection=resolved_profile.model_selection,
-                        model_settings=resolved_profile.model_settings,
-                        reasoning_effort=resolved_profile.reasoning_effort,
-                        effective_context_window_tokens=effective_tokens,
-                        effective_auto_compaction_threshold_tokens=(
-                            compute_auto_compaction_threshold_tokens(effective_tokens)
-                        ),
-                        resolved_at=datetime.datetime.now(datetime.UTC),
-                    )
         try:
             promoted = await self.mailbox_item_service.flush_session_mailbox_items(
                 session_id=session_id,
@@ -2914,7 +3013,7 @@ class RunExecutor:
                 model=model,
                 required_inference_profile=required_inference_profile,
                 expected_buffer_id=pending.mailbox_item_id,
-                prepared_inference_state=prepared_inference_state,
+                prepared_inference_state=None,
                 profile_resolution_failure=profile_resolution_failure,
                 active_run_id=active_run_id,
                 include_action_messages=include_action_messages,

@@ -776,17 +776,6 @@ class MailboxService:
                 active_run_id=active_run_id,
             )
             promoted = outcome.promoted
-            if (
-                promoted
-                and prepared_inference_state is not None
-                and outcome.turn_effect is not TurnEffect.FAILED
-                and _buffer_requires_inference(claimed[0])
-            ):
-                await self.agent_session_repository.set_inference_state(
-                    session,
-                    session_id=session_id,
-                    inference_state=prepared_inference_state,
-                )
             operation_action = outcome.operation_action
             if operation_action is not None:
                 execution = await self.action_execution_repository.create(

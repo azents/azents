@@ -20,7 +20,10 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     SessionWorkingFolderBindingState,
 )
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    RequestedInferenceProfile,
+    validate_requested_profile_against_options,
+)
 from azents.engine.events.action_messages import (
     CreateGitWorktreeAction,
     CreateSessionWorkingFolderAction,
@@ -337,6 +340,11 @@ class AgentSessionInputService:
                         )
                     )
 
+            if isinstance(agent, Agent):
+                validate_requested_profile_against_options(
+                    agent.selectable_model_options,
+                    inference_profile,
+                )
             result = await self.mailbox_item_service.enqueue(
                 session,
                 MailboxEnqueue(
@@ -401,6 +409,12 @@ class AgentSessionInputService:
                         "Session-locked Human input admission lost "
                         "idempotency ownership"
                     )
+            await self.agent_session_repository.set_applied_inference_profile(
+                session,
+                session_id=agent_session.id,
+                model_target_label=inference_profile.model_target_label,
+                reasoning_effort=inference_profile.reasoning_effort,
+            )
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 agent_session.id,
@@ -526,6 +540,11 @@ class AgentSessionInputService:
                             created=False,
                         )
                     )
+            if isinstance(agent, Agent):
+                validate_requested_profile_against_options(
+                    agent.selectable_model_options,
+                    inference_profile,
+                )
             runtime_result = await self._resolve_runtime_for_input(
                 session,
                 agent=agent,
@@ -661,6 +680,12 @@ class AgentSessionInputService:
                         canonical_request_payload=canonical_request_payload,
                         expected_product_mode=AgentSessionProductMode.TEAM,
                     )
+            await self.agent_session_repository.set_applied_inference_profile(
+                session,
+                session_id=agent_session.id,
+                model_target_label=inference_profile.model_target_label,
+                reasoning_effort=inference_profile.reasoning_effort,
+            )
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 agent_session.id,
@@ -786,6 +811,11 @@ class AgentSessionInputService:
                             created=False,
                         )
                     )
+            if isinstance(agent, Agent):
+                validate_requested_profile_against_options(
+                    agent.selectable_model_options,
+                    inference_profile,
+                )
             runtime_result = await self._resolve_runtime_for_input(
                 session,
                 agent=agent,
@@ -921,6 +951,12 @@ class AgentSessionInputService:
                         canonical_request_payload=canonical_request_payload,
                         expected_product_mode=AgentSessionProductMode.USER,
                     )
+            await self.agent_session_repository.set_applied_inference_profile(
+                session,
+                session_id=agent_session.id,
+                model_target_label=inference_profile.model_target_label,
+                reasoning_effort=inference_profile.reasoning_effort,
+            )
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 agent_session.id,
