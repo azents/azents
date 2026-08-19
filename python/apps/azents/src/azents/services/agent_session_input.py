@@ -127,6 +127,13 @@ class AgentSessionInputIdempotencyConflict:
     reason: str
 
 
+@dataclasses.dataclass(frozen=True)
+class AgentSessionInputInvalidInferenceProfile:
+    """Requested inference profile is not selectable for the Agent."""
+
+    reason: str
+
+
 AgentSessionInputError = (
     AgentSessionInputSessionNotFound
     | AgentSessionInputWrongAgent
@@ -134,6 +141,7 @@ AgentSessionInputError = (
     | AgentSessionInputRuntimeRemoving
     | AgentSessionInputSubagentReadOnly
     | AgentSessionInputIdempotencyConflict
+    | AgentSessionInputInvalidInferenceProfile
     | ExchangeFileInputClaimError
     | InvalidProjectPath
 )
@@ -273,23 +281,6 @@ class AgentSessionInputService:
             ):
                 return Failure(AgentSessionInputSessionNotFound())
 
-            runtime_result = await self._resolve_runtime_for_input(
-                session,
-                agent=agent,
-                runtime_dependent=False,
-            )
-            match runtime_result:
-                case Success(runtime):
-                    pass
-                case Failure(error):
-                    return Failure(error)
-                case _:
-                    assert_never(runtime_result)
-            if runtime is not None:
-                await self._enqueue_working_folder_adoption_if_needed(
-                    session,
-                    agent_session=agent_session,
-                )
             canonical_request_payload = {
                 **request_payload,
                 "sender_user_id": requester_user_id,
@@ -328,6 +319,23 @@ class AgentSessionInputService:
                             "Human input idempotency record resolved outside "
                             "its Session"
                         )
+                    runtime_result = await self._resolve_runtime_for_input(
+                        session,
+                        agent=agent,
+                        runtime_dependent=False,
+                    )
+                    match runtime_result:
+                        case Success(runtime):
+                            pass
+                        case Failure(error):
+                            return Failure(error)
+                        case _:
+                            assert_never(runtime_result)
+                    if runtime is not None:
+                        await self._enqueue_working_folder_adoption_if_needed(
+                            session,
+                            agent_session=agent_session,
+                        )
                     return Success(
                         BufferedAgentSessionInputResult(
                             agent_runtime_id=(
@@ -341,9 +349,31 @@ class AgentSessionInputService:
                     )
 
             if isinstance(agent, Agent):
-                validate_requested_profile_against_options(
-                    agent.selectable_model_options,
-                    inference_profile,
+                try:
+                    validate_requested_profile_against_options(
+                        agent.selectable_model_options,
+                        inference_profile,
+                    )
+                except ValueError as error:
+                    return Failure(
+                        AgentSessionInputInvalidInferenceProfile(reason=str(error))
+                    )
+            runtime_result = await self._resolve_runtime_for_input(
+                session,
+                agent=agent,
+                runtime_dependent=False,
+            )
+            match runtime_result:
+                case Success(runtime):
+                    pass
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(runtime_result)
+            if runtime is not None:
+                await self._enqueue_working_folder_adoption_if_needed(
+                    session,
+                    agent_session=agent_session,
                 )
             result = await self.mailbox_item_service.enqueue(
                 session,
@@ -541,10 +571,15 @@ class AgentSessionInputService:
                         )
                     )
             if isinstance(agent, Agent):
-                validate_requested_profile_against_options(
-                    agent.selectable_model_options,
-                    inference_profile,
-                )
+                try:
+                    validate_requested_profile_against_options(
+                        agent.selectable_model_options,
+                        inference_profile,
+                    )
+                except ValueError as error:
+                    return Failure(
+                        AgentSessionInputInvalidInferenceProfile(reason=str(error))
+                    )
             runtime_result = await self._resolve_runtime_for_input(
                 session,
                 agent=agent,
@@ -812,10 +847,15 @@ class AgentSessionInputService:
                         )
                     )
             if isinstance(agent, Agent):
-                validate_requested_profile_against_options(
-                    agent.selectable_model_options,
-                    inference_profile,
-                )
+                try:
+                    validate_requested_profile_against_options(
+                        agent.selectable_model_options,
+                        inference_profile,
+                    )
+                except ValueError as error:
+                    return Failure(
+                        AgentSessionInputInvalidInferenceProfile(reason=str(error))
+                    )
             runtime_result = await self._resolve_runtime_for_input(
                 session,
                 agent=agent,

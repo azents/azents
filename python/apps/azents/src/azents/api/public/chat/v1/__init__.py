@@ -80,6 +80,7 @@ from azents.services.agent_session_input import (
     AgentSessionInputError,
     AgentSessionInputIdempotencyConflict,
     AgentSessionInputInactiveSession,
+    AgentSessionInputInvalidInferenceProfile,
     AgentSessionInputService,
     AgentSessionInputSessionNotFound,
     AgentSessionInputSubagentReadOnly,
@@ -811,6 +812,8 @@ def _handle_created_agent_session_input_result(
                 )
             case AgentSessionInputIdempotencyConflict(reason=reason):
                 raise HTTPException(status_code=409, detail=reason)
+            case AgentSessionInputInvalidInferenceProfile(reason=reason):
+                raise HTTPException(status_code=422, detail=reason)
             case FileNotFound():
                 raise HTTPException(
                     status_code=409,
@@ -868,6 +871,8 @@ def _handle_agent_session_input_result(
                 )
             case AgentSessionInputIdempotencyConflict(reason=reason):
                 raise HTTPException(status_code=409, detail=reason)
+            case AgentSessionInputInvalidInferenceProfile(reason=reason):
+                raise HTTPException(status_code=422, detail=reason)
             case FileNotFound():
                 raise HTTPException(
                     status_code=409,

@@ -31,7 +31,10 @@ from azents.core.enums import (
     MailboxSchedulingMode,
     SessionAgentKind,
 )
-from azents.core.inference_profile import SessionInferenceState
+from azents.core.inference_profile import (
+    SessionAppliedInferenceProfile,
+    SessionInferenceState,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
@@ -258,6 +261,7 @@ class _AgentSessionRepository:
         self.created_children: list[SessionAgent] = []
         self.locked_session_agents: list[str] = []
         self.marked_running: list[str] = []
+        self.applied_profiles: list[tuple[str, SessionAppliedInferenceProfile]] = []
         self.inference_states: list[tuple[str, SessionInferenceState]] = []
         self.last_task_updates: list[tuple[str, str | None]] = []
         self.message_sent_updates: list[str] = []
@@ -445,6 +449,27 @@ class _AgentSessionRepository:
         self.inference_states.append((session_id, inference_state))
         updated = self.sessions[session_id].model_copy(
             update={"inference_state": inference_state}
+        )
+        self.sessions[session_id] = updated
+        return updated
+
+    async def set_applied_inference_profile(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        model_target_label: str,
+        reasoning_effort: ModelReasoningEffort | None,
+    ) -> AgentSession:
+        """Record the durable child Session model intent."""
+        del session
+        profile = SessionAppliedInferenceProfile(
+            model_target_label=model_target_label,
+            reasoning_effort=reasoning_effort,
+        )
+        self.applied_profiles.append((session_id, profile))
+        updated = self.sessions[session_id].model_copy(
+            update={"applied_inference_profile": profile}
         )
         self.sessions[session_id] = updated
         return updated
@@ -1263,6 +1288,15 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
     assert repo.inference_states == [
         (child.agent_session_id, repo.sessions["root-session"].inference_state)
     ]
+    assert repo.applied_profiles == [
+        (
+            child.agent_session_id,
+            SessionAppliedInferenceProfile(
+                model_target_label="Quality",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+        )
+    ]
     assert (
         input_service.enqueued[0].scheduling_mode == MailboxSchedulingMode.WAKE_SESSION
     )
@@ -1327,6 +1361,15 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
     assert child_state[1].reasoning_effort == ModelReasoningEffort.MEDIUM
     assert child_state[1].effective_context_window_tokens == 32_000
     assert child_state[1].effective_auto_compaction_threshold_tokens == 28_800
+    assert repo.applied_profiles == [
+        (
+            "researcher-session",
+            SessionAppliedInferenceProfile(
+                model_target_label="Research",
+                reasoning_effort=ModelReasoningEffort.MEDIUM,
+            ),
+        )
+    ]
 
 
 async def test_spawn_agent_allows_effort_only_override_on_disabled_parent_target() -> (
@@ -1364,6 +1407,15 @@ async def test_spawn_agent_allows_effort_only_override_on_disabled_parent_target
     child_state = repo.inference_states[0][1]
     assert child_state.model_target_label == "Quality"
     assert child_state.reasoning_effort == ModelReasoningEffort.LOW
+    assert repo.applied_profiles == [
+        (
+            "reviewer-session",
+            SessionAppliedInferenceProfile(
+                model_target_label="Quality",
+                reasoning_effort=ModelReasoningEffort.LOW,
+            ),
+        )
+    ]
 
 
 async def test_spawn_agent_rejects_disabled_explicit_target_without_child_residue() -> (
@@ -1404,6 +1456,7 @@ async def test_spawn_agent_rejects_disabled_explicit_target_without_child_residu
 
     assert repo.created_children == []
     assert run_repo.pending_creates == []
+    assert repo.applied_profiles == []
     assert repo.inference_states == []
     assert input_service.enqueued == []
     assert broker.messages == []
@@ -1450,6 +1503,7 @@ async def test_spawn_agent_reloads_current_policy_before_explicit_override() -> 
 
     assert repo.created_children == []
     assert run_repo.pending_creates == []
+    assert repo.applied_profiles == []
     assert repo.inference_states == []
     assert input_service.enqueued == []
     assert broker.messages == []
@@ -1514,6 +1568,7 @@ async def test_spawn_agent_rejects_invalid_override_without_child_residue(
 
     assert repo.created_children == []
     assert run_repo.pending_creates == []
+    assert repo.applied_profiles == []
     assert repo.inference_states == []
     assert input_service.enqueued == []
     assert broker.messages == []
@@ -1567,6 +1622,7 @@ async def test_spawn_agent_rejects_invalid_parent_run(
 
     assert repo.created_children == []
     assert run_repo.pending_creates == []
+    assert repo.applied_profiles == []
     assert repo.inference_states == []
     assert input_service.enqueued == []
     assert broker.messages == []
