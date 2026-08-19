@@ -131,7 +131,7 @@ from azents.testing.model_selection import make_test_model_selection_dict
 from azents.testing.types import is_string_object_dict
 
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
-    model_target_label="Primary",
+    model_target_label="default",
     reasoning_effort=None,
 )
 

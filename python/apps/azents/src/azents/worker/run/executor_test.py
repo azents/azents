@@ -21,15 +21,21 @@ from azents.broker.types import PublishedEvent, SessionBroker, SessionWakeUp
 from azents.core.agent import AgentModelSelection
 from azents.core.enums import (
     ActionExecutionStatus,
+    AgentLifecycleStatus,
     AgentRunPhase,
     AgentRunStatus,
     AgentRuntimeCapability,
     AgentSessionKind,
+    AgentSessionProductMode,
+    AgentSessionStartReason,
+    AgentSessionStatus,
+    AgentType,
     EventKind,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
+    ExternalChannelResponseMode,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
@@ -38,6 +44,7 @@ from azents.core.inference_profile import (
     InferenceProfileFailureCode,
     InferenceProfileSource,
     RequestedInferenceProfile,
+    SessionAppliedInferenceProfile,
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
@@ -88,13 +95,17 @@ from azents.engine.run.errors import (
     UserVisibleRuntimeError,
 )
 from azents.engine.run.failure import FailedRunRetryState
-from azents.engine.run.input import AgentNotFound
+from azents.engine.run.input import AgentNotFound, InvokeInput
 from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     model_provider_failure,
 )
-from azents.engine.run.resolve import ResolvedInvokeInputProfile
+from azents.engine.run.resolve import (
+    ModelTargetNotFound,
+    ReasoningEffortUnsupported,
+    ResolvedInvokeInputProfile,
+)
 from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.engine.run.turn_action_bridge import TurnActionBridgeBoundary
 from azents.engine.run.types import (
@@ -121,7 +132,7 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import PendingSessionCommand
+from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
 from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.mailbox.data import MailboxItem
@@ -149,6 +160,7 @@ from azents.services.vfs import VfsProjectionService
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
+    make_test_selectable_model_options,
 )
 from azents.testing.types import is_string_object_dict
 from azents.transport.chat import chat_live_run_updated_dump
@@ -163,6 +175,7 @@ from azents.worker.run.executor import (
 from azents.worker.run.finalizer import FailedRunFinalizationInput
 from azents.worker.run.results import RunExecutionResult
 from azents.worker.session.execution_snapshot import (
+    CanonicalExecutionOwnerGenerationStaleError,
     CanonicalExecutionSnapshot,
     CanonicalExecutionWorkDriftError,
     PendingCommandSnapshot,
@@ -539,14 +552,99 @@ class _SessionLifecycle:
         return []
 
 
+def _default_agent() -> Agent:
+    """Create a typed Agent fixture for execution tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    selection = make_test_model_selection()
+    fast_selection = selection
+    planning_selection = selection
+    return Agent(
+        id="agent-001",
+        workspace_id="workspace-001",
+        name="Executor test Agent",
+        model_selection=selection,
+        lightweight_model_selection=selection,
+        selectable_model_options=[
+            *make_test_selectable_model_options(selection),
+            *make_test_selectable_model_options(fast_selection, label="fast"),
+            *make_test_selectable_model_options(
+                planning_selection,
+                label="planning",
+            ),
+        ],
+        main_model_label="default",
+        lightweight_model_label="default",
+        enabled=True,
+        external_channel_default_response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+        lifecycle_status=AgentLifecycleStatus.ACTIVE,
+        type=AgentType.PUBLIC,
+        runtime_profile_id=None,
+        runtime_profile_selection_version=1,
+        runtime_capability=AgentRuntimeCapability.NONE,
+        runtime_capability_version=1,
+        tool_search_enabled=True,
+        auto_archive_ttl_days=30,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _default_agent_session(
+    *,
+    inference_state: SessionInferenceState | None,
+    applied_inference_profile: SessionAppliedInferenceProfile | None = None,
+    owner_generation: int = 1,
+) -> AgentSession:
+    """Create a typed AgentSession fixture for execution tests."""
+    now = datetime.datetime.now(datetime.UTC)
+    return AgentSession(
+        id="session-001",
+        workspace_id="workspace-001",
+        agent_id="agent-001",
+        handle="executor-test-session",
+        inference_state=inference_state,
+        applied_inference_profile=applied_inference_profile,
+        session_kind=AgentSessionKind.ROOT,
+        status=AgentSessionStatus.ACTIVE,
+        product_mode=AgentSessionProductMode.TEAM,
+        associated_user_id=None,
+        start_reason=AgentSessionStartReason.INITIAL,
+        title=None,
+        title_source=None,
+        title_generated_at=None,
+        title_generation_event_id=None,
+        last_user_input_at=now,
+        last_activity_at=now,
+        pinned=False,
+        started_at=now,
+        owner_generation=owner_generation,
+        created_at=now,
+        updated_at=now,
+    )
+
+
 class _AgentRepository:
     """AgentRepository test double."""
 
-    def __init__(self, agent: object | None = None) -> None:
-        self.agent = agent
+    def __init__(
+        self,
+        agent: object | None = None,
+        *,
+        default_if_none: bool = True,
+    ) -> None:
+        self.agent = _default_agent() if agent is None and default_if_none else agent
 
     async def get_by_id(self, session: AsyncSession, agent_id: str) -> object | None:
         """Return the configured persisted Agent settings."""
+        del session, agent_id
+        return self.agent
+
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> object | None:
+        """Return the configured Agent under the final preparation fence."""
         del session, agent_id
         return self.agent
 
@@ -560,8 +658,11 @@ class _AgentSessionRepository:
         inference_state: SessionInferenceState | None = None,
         current_session_agent: object | None = None,
         tree_session_agents: list[object] | None = None,
+        owner_generation: int = 1,
     ) -> None:
         self.inference_state = inference_state
+        self.owner_generation = owner_generation
+        self.applied_inference_profile: SessionAppliedInferenceProfile | None = None
         self.cleared_commands: list[tuple[str, str]] = []
         self.current_session_agent = current_session_agent
         self.tree_session_agents = tree_session_agents or []
@@ -573,10 +674,23 @@ class _AgentSessionRepository:
     ) -> object | None:
         """Return the configured Session inference state."""
         del session, agent_session_id
-        return SimpleNamespace(
+        return _default_agent_session(
             inference_state=self.inference_state,
-            session_kind=AgentSessionKind.ROOT,
-            workspace_id="workspace-001",
+            applied_inference_profile=self.applied_inference_profile,
+            owner_generation=self.owner_generation,
+        )
+
+    async def lock_by_id(
+        self,
+        session: AsyncSession,
+        agent_session_id: str,
+    ) -> AgentSession:
+        """Return the configured Session under the final preparation fence."""
+        del session, agent_session_id
+        return _default_agent_session(
+            inference_state=self.inference_state,
+            applied_inference_profile=self.applied_inference_profile,
+            owner_generation=self.owner_generation,
         )
 
     async def set_inference_state(
@@ -1522,6 +1636,10 @@ async def test_runtime_capability_resolver_fails_closed() -> None:
     assert decision.actual_version == 4
 
     missing_executor = _executor()
+    missing_executor.agent_repository = cast(
+        AgentRepository,
+        _AgentRepository(default_if_none=False),
+    )
     missing_resolver = missing_executor._runtime_capability_resolver(
         agent_id="missing-agent",
         agent=None,
@@ -1567,31 +1685,6 @@ async def test_finalize_unhandled_active_run_uses_terminal_finalizer() -> None:
     assert failed_run_finalizer.inputs[0].reason == "non_retryable"
     assert live_event_projector.discarded_session_ids == ["session-001"]
     assert dispatched == []
-
-
-def test_matching_session_inference_state_preserves_resolved_model() -> None:
-    """A matching Session snapshot remains the durable message provenance."""
-    state = SessionInferenceState(
-        model_target_label="Quality",
-        model_selection=make_test_model_selection(model_identifier="gpt-5.5"),
-        model_settings=make_test_model_settings(),
-        reasoning_effort=ModelReasoningEffort.HIGH,
-        effective_context_window_tokens=64_000,
-        effective_auto_compaction_threshold_tokens=51_200,
-        resolved_at=datetime.datetime.now(datetime.UTC),
-    )
-
-    matched = run_executor_module.matching_session_inference_state(
-        state,
-        RequestedInferenceProfile(
-            model_target_label="Quality",
-            reasoning_effort=ModelReasoningEffort.HIGH,
-        ),
-    )
-
-    assert matched is not None
-    assert matched is state
-    assert matched.applied_profile.model_display_name == "gpt-5.5"
 
 
 def _message(
@@ -2167,7 +2260,7 @@ async def test_execute_reports_resolve_failure(
 async def test_execute_recovers_activated_run_before_flushing_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A running activation is reused with its exact profile and snapshot."""
+    """A running activation keeps its prepared profile before pending input."""
     selection = make_test_model_selection()
     recoverable = _PendingRun(
         status=AgentRunStatus.RUNNING,
@@ -2192,22 +2285,25 @@ async def test_execute_recovers_activated_run_before_flushing_input(
             shell_enabled=True,
         ),
     )
-    poll_calls: list[dict[str, object]] = []
     recovered_snapshots: list[AgentModelSelection] = []
-
-    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
-        del args
-        order.append("input")
-        poll_calls.append(kwargs)
-        return RunInputPollResult(
-            context_invalidated=False,
-            complete_run=False,
-            suppress_parent_result=False,
+    pending_profile = RequestedInferenceProfile(
+        model_target_label="Fast",
+        reasoning_effort=None,
+    )
+    pending_inputs = [
+        PendingInputInferenceProfile(
+            mailbox_item_id="buffer-later-profile",
+            requires_inference=True,
+            exists=True,
+            requested_inference_profile=pending_profile,
+        ),
+        PendingInputInferenceProfile(
+            mailbox_item_id=None,
+            requires_inference=False,
+            exists=False,
             requested_inference_profile=None,
-            promoted_event_ids=[],
-            user_messages=[],
-            has_actionable_work=False,
-        )
+        ),
+    ]
 
     async def resolve_recovered(*args: object, **kwargs: object) -> object:
         del args
@@ -2249,7 +2345,66 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         )
         return []
 
-    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    async def peek_pending_input(
+        session_id: str,
+    ) -> PendingInputInferenceProfile:
+        assert session_id == "session-001"
+        return pending_inputs.pop(0)
+
+    async def promote_pending_input(
+        *args: object,
+        **kwargs: object,
+    ) -> PromotedMailboxItems:
+        del args
+        pending = cast(PendingInputInferenceProfile, kwargs["pending"])
+        assert pending.requested_inference_profile == pending_profile
+        order.append("input")
+        return PromotedMailboxItems(
+            operation_action=None,
+            turn_effect=TurnEffect.ELIGIBLE,
+            requested_inference_profile=pending_profile,
+            promoted_event_ids=["event-later-profile"],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=["buffer-later-profile"],
+            changed_session_agent_ids=[],
+            claimed_count=1,
+            inserted_count=1,
+            deduped_count=0,
+            complete_run=False,
+            suppress_parent_result=False,
+        )
+
+    async def has_actionable_model_input(session_id: str) -> bool:
+        assert session_id == "session-001"
+        return True
+
+    async def process_operation_actions(
+        *args: object,
+        **kwargs: object,
+    ) -> OperationActionProcessResult:
+        del args, kwargs
+        return OperationActionProcessResult(
+            context_invalidated=False,
+            complete_run=False,
+        )
+
+    monkeypatch.setattr(
+        executor.mailbox_item_service,
+        "peek_pending_inference_profile",
+        peek_pending_input,
+    )
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote_pending_input)
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+    monkeypatch.setattr(
+        executor,
+        "_process_operation_actions",
+        process_operation_actions,
+    )
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_resolved_profile",
@@ -2288,11 +2443,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
     ]
     assert lifecycle.pending_run_create_calls == 0
     assert lifecycle.activation_calls == 0
-    assert poll_calls[0]["required_inference_profile"] == RequestedInferenceProfile(
-        model_target_label="Quality",
-        reasoning_effort=ModelReasoningEffort.HIGH,
-    )
-    assert poll_calls[0]["active_run_id"] == recoverable.id
+    assert pending_inputs == []
 
 
 @pytest.mark.asyncio
@@ -2537,16 +2688,16 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
 ) -> None:
     """A manual retry preserves requested intent and routes it again."""
     recoverable = _PendingRun(
-        requested_model_target_label="Fast",
-        requested_reasoning_effort=ModelReasoningEffort.LOW,
+        requested_model_target_label="fast",
+        requested_reasoning_effort=None,
         inference_profile_source=InferenceProfileSource.RETRY_ORIGINAL,
     )
     lifecycle = _SessionLifecycle(recoverable_run=recoverable)
     retry_state = SessionInferenceState(
-        model_target_label="Fast",
+        model_target_label="fast",
         model_selection=make_test_model_selection(),
         model_settings=make_test_model_settings(),
-        reasoning_effort=ModelReasoningEffort.LOW,
+        reasoning_effort=None,
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
         resolved_at=datetime.datetime.now(datetime.UTC),
@@ -2592,8 +2743,8 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
     assert lifecycle.pending_run_create_calls == 0
     assert lifecycle.activation_calls == 1
     assert poll_calls[0]["required_inference_profile"] == RequestedInferenceProfile(
-        model_target_label="Fast",
-        reasoning_effort=ModelReasoningEffort.LOW,
+        model_target_label="fast",
+        reasoning_effort=None,
     )
     assert poll_calls[0]["active_run_id"] == recoverable.id
 
@@ -2606,10 +2757,10 @@ async def test_execute_activates_pending_child_from_session_snapshot(
     selection = make_test_model_selection()
     recoverable = _PendingRun(parent_agent_run_id="parent-run-001")
     inference_state = SessionInferenceState(
-        model_target_label="Parent model",
+        model_target_label="default",
         model_selection=selection,
         model_settings=make_test_model_settings(),
-        reasoning_effort=ModelReasoningEffort.HIGH,
+        reasoning_effort=None,
         effective_context_window_tokens=64_000,
         effective_auto_compaction_threshold_tokens=51_200,
         resolved_at=datetime.datetime.now(datetime.UTC),
@@ -2638,24 +2789,12 @@ async def test_execute_activates_pending_child_from_session_snapshot(
             has_actionable_work=True,
         )
 
-    async def resolve_existing(*args: object, **kwargs: object) -> object:
-        del args
-        resolved_snapshots.append(
-            cast(AgentModelSelection, kwargs["resolved_model_selection"])
-        )
-        assert kwargs["resolved_reasoning_effort"] == ModelReasoningEffort.HIGH
-        return await _resolve_existing_success()
-
     async def resolve_target(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        raise AssertionError("Prepared Session state must not route its label again")
+        resolved_snapshots.append(selection)
+        return await _resolve_success()
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
-    monkeypatch.setattr(
-        run_executor_module,
-        "resolve_invoke_input_with_resolved_profile",
-        resolve_existing,
-    )
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_profile",
@@ -2683,11 +2822,219 @@ async def test_execute_activates_pending_child_from_session_snapshot(
     assert lifecycle.activation_calls == 1
     assert order[:2] == ["activate_pending", "provider"]
     request = engine.requests[0]
-    assert request.effective_max_input_tokens == 64_000
-    assert request.context_window_tokens == 64_000
-    assert request.compaction_max_input_tokens == 64_000
-    assert request.auto_compaction_threshold_tokens == 51_200
-    assert request.inference_state == inference_state
+    assert request.effective_max_input_tokens == 128_000
+    assert request.context_window_tokens == 128_000
+    assert request.compaction_max_input_tokens == 128_000
+    assert request.auto_compaction_threshold_tokens == 115_200
+    assert request.inference_state is not None
+    assert request.inference_state.model_target_label == "default"
+    assert request.inference_state.model_selection == selection
+
+
+@pytest.mark.asyncio
+async def test_prepare_fresh_turn_remaps_same_label_to_current_agent_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fresh preparation resolves the current Agent mapping for one stable label."""
+    old_state = SessionInferenceState(
+        model_target_label="default",
+        model_selection=make_test_model_selection(model_identifier="gpt-old"),
+        model_settings=make_test_model_settings(),
+        reasoning_effort=None,
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
+    session_repository = _AgentSessionRepository(inference_state=old_state)
+    session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
+        model_target_label="default",
+        reasoning_effort=None,
+    )
+    executor = _executor(agent_session_repository=session_repository)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        _resolve_success,
+    )
+
+    prepared = await executor._prepare_fresh_main_model_turn(
+        agent_id="agent-001",
+        session_id="session-001",
+        owner_generation=1,
+        invoke_input=InvokeInput(
+            agent_id="agent-001",
+            session_id="session-001",
+            messages=[],
+        ),
+        override=None,
+    )
+
+    assert isinstance(prepared, Success)
+    assert prepared.value.profile == RequestedInferenceProfile(
+        model_target_label="default",
+        reasoning_effort=None,
+    )
+    assert prepared.value.inference_state.model_selection.model_identifier == "gpt-4o"
+    assert session_repository.inference_state is prepared.value.inference_state
+
+
+@pytest.mark.asyncio
+async def test_execute_new_implicit_run_remaps_same_label_to_current_agent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A new implicit Run resolves current Agent mapping despite prepared state."""
+    old_state = SessionInferenceState(
+        model_target_label="default",
+        model_selection=make_test_model_selection(model_identifier="gpt-old"),
+        model_settings=make_test_model_settings(),
+        reasoning_effort=None,
+        effective_context_window_tokens=64_000,
+        effective_auto_compaction_threshold_tokens=51_200,
+        resolved_at=datetime.datetime.now(datetime.UTC),
+    )
+    session_repository = _AgentSessionRepository(inference_state=old_state)
+    session_repository.applied_inference_profile = SessionAppliedInferenceProfile(
+        model_target_label="default",
+        reasoning_effort=None,
+    )
+    engine = _RecordingEngine([])
+    executor = _executor(
+        engine=engine,
+        agent_session_repository=session_repository,
+    )
+    _patch_successful_resolution(monkeypatch)
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        del args, kwargs
+        return RunInputPollResult(
+            user_messages=[],
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            has_actionable_work=True,
+            context_invalidated=False,
+            complete_run=False,
+            suppress_parent_result=False,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+    )
+
+    assert result.terminal_run_status == AgentRunStatus.COMPLETED
+    assert len(engine.requests) == 1
+    assert engine.requests[0].inference_state is not None
+    assert engine.requests[0].inference_state.model_target_label == "default"
+    assert (
+        engine.requests[0].inference_state.model_selection.model_identifier == "gpt-4o"
+    )
+    assert session_repository.inference_state is not None
+    assert (
+        session_repository.inference_state.model_selection.model_identifier == "gpt-4o"
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepare_fresh_turn_fails_closed_when_session_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing canonical Session rows do not resolve, dispatch, or commit."""
+    session_repository = _AgentSessionRepository()
+    session_repository.get_by_id = AsyncMock(return_value=None)
+    executor = _executor(agent_session_repository=session_repository)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        AsyncMock(side_effect=AssertionError("missing Session must not resolve")),
+    )
+
+    with pytest.raises(ValueError, match="AgentSession or Agent not found"):
+        await executor._prepare_fresh_main_model_turn(
+            agent_id="agent-001",
+            session_id="session-001",
+            owner_generation=1,
+            invoke_input=InvokeInput(
+                agent_id="agent-001",
+                session_id="session-001",
+                messages=[],
+            ),
+            override=None,
+        )
+    assert session_repository.inference_state is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_fresh_turn_fails_closed_when_agent_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing canonical Agent rows do not resolve, dispatch, or commit."""
+    agent_repository = _AgentRepository(default_if_none=False)
+    session_repository = _AgentSessionRepository()
+    executor = _executor(
+        agent=cast(object, None),
+        agent_session_repository=session_repository,
+    )
+    executor.agent_repository = cast(AgentRepository, agent_repository)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        AsyncMock(side_effect=AssertionError("missing Agent must not resolve")),
+    )
+
+    with pytest.raises(ValueError, match="AgentSession or Agent not found"):
+        await executor._prepare_fresh_main_model_turn(
+            agent_id="agent-001",
+            session_id="session-001",
+            owner_generation=1,
+            invoke_input=InvokeInput(
+                agent_id="agent-001",
+                session_id="session-001",
+                messages=[],
+            ),
+            override=None,
+        )
+    assert session_repository.inference_state is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_fresh_turn_rejects_owner_generation_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A final owner fence prevents committing a candidate prepared by a stale owner."""
+    session_repository = _AgentSessionRepository(owner_generation=2)
+    executor = _executor(agent_session_repository=session_repository)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        _resolve_success,
+    )
+
+    with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
+        await executor._prepare_fresh_main_model_turn(
+            agent_id="agent-001",
+            session_id="session-001",
+            owner_generation=1,
+            invoke_input=InvokeInput(
+                agent_id="agent-001",
+                session_id="session-001",
+                messages=[],
+            ),
+            override=None,
+        )
+
+    assert session_repository.inference_state is None
 
 
 @pytest.mark.asyncio
@@ -2708,7 +3055,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
         model_target_label="planning",
         model_selection=make_test_model_selection(model_identifier="gpt-planning"),
         model_settings=make_test_model_settings(),
-        reasoning_effort=ModelReasoningEffort.XHIGH,
+        reasoning_effort=None,
         effective_context_window_tokens=128_000,
         effective_auto_compaction_threshold_tokens=102_400,
         resolved_at=datetime.datetime.now(datetime.UTC),
@@ -2727,13 +3074,17 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
         poll_count += 1
         if poll_count == 2:
             session_repo.inference_state = updated_state
+            session_repo.applied_inference_profile = SessionAppliedInferenceProfile(
+                model_target_label="planning",
+                reasoning_effort=None,
+            )
             return RunInputPollResult(
                 context_invalidated=True,
                 complete_run=False,
                 suppress_parent_result=False,
                 requested_inference_profile=RequestedInferenceProfile(
                     model_target_label="planning",
-                    reasoning_effort=ModelReasoningEffort.XHIGH,
+                    reasoning_effort=None,
                 ),
                 promoted_event_ids=["event-002"],
                 user_messages=[],
@@ -2768,19 +3119,120 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
     )
 
     assert result.terminal_run_status == AgentRunStatus.COMPLETED
-    assert [request.inference_state for request in engine.requests] == [
-        initial_state,
-        updated_state,
-    ]
+    assert engine.requests[0].inference_state is not None
+    assert engine.requests[0].inference_state.model_target_label == "default"
+    assert engine.requests[1].inference_state is not None
+    assert engine.requests[1].inference_state.model_target_label == "planning"
+    assert engine.requests[1].inference_state.reasoning_effort is None
     assert engine.requests[1].effective_max_input_tokens == 128_000
-    assert engine.requests[1].auto_compaction_threshold_tokens == 102_400
+    assert engine.requests[1].auto_compaction_threshold_tokens == 115_200
+
+
+@pytest.mark.parametrize(
+    ("resolve_error", "expected_failure_code"),
+    [
+        (
+            ModelTargetNotFound(model_target_label="planning"),
+            InferenceProfileFailureCode.MODEL_TARGET_NOT_FOUND,
+        ),
+        (
+            ReasoningEffortUnsupported(
+                model_target_label="planning",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+            ),
+            InferenceProfileFailureCode.REASONING_EFFORT_UNSUPPORTED,
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_execute_terminalizes_late_profile_failure_without_retry_or_overwrite(
+    monkeypatch: pytest.MonkeyPatch,
+    resolve_error: object,
+    expected_failure_code: InferenceProfileFailureCode,
+) -> None:
+    """Late deterministic profile drift terminalizes without overwriting state."""
+    session_repository = _AgentSessionRepository()
+    lifecycle = _SessionLifecycle()
+    engine = _BoundarySwitchEngine()
+    finalizer = _FailedRunFinalizer()
+    executor = _executor(
+        session_lifecycle=lifecycle,
+        engine=engine,
+        agent_session_repository=session_repository,
+        failed_run_finalizer=finalizer,
+    )
+    resolve_calls = 0
+    poll_calls = 0
+
+    async def resolve_profile(*args: object, **kwargs: object) -> object:
+        nonlocal resolve_calls
+        del args, kwargs
+        resolve_calls += 1
+        if resolve_calls == 1:
+            return await _resolve_success()
+        return Failure(resolve_error)
+
+    async def poll_run_inputs(*args: object, **kwargs: object) -> RunInputPollResult:
+        nonlocal poll_calls
+        del args, kwargs
+        poll_calls += 1
+        if poll_calls == 2:
+            session_repository.applied_inference_profile = (
+                SessionAppliedInferenceProfile(
+                    model_target_label="planning",
+                    reasoning_effort=None,
+                )
+            )
+        return RunInputPollResult(
+            context_invalidated=True,
+            complete_run=False,
+            suppress_parent_result=False,
+            requested_inference_profile=None,
+            promoted_event_ids=["event-boundary"],
+            user_messages=[],
+            has_actionable_work=True,
+        )
+
+    monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        run_executor_module,
+        "resolve_invoke_input_with_profile",
+        resolve_profile,
+    )
+    monkeypatch.setattr(run_executor_module, "resolve_agent_tools", _resolve_no_tools)
+
+    async def dispatch_event(session_id: str, event: PublishedEvent) -> None:
+        del session_id, event
+
+    result = await executor.execute(
+        _message(),
+        poll_fn=None,
+        check_stop=None,
+        prepare_toolkits=None,
+        shutdown_event=asyncio.Event(),
+        dispatch_event=dispatch_event,
+        owner_generation=1,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
+    )
+
+    assert result.terminal_run_status == AgentRunStatus.FAILED
+    assert len(finalizer.inputs) == 1
+    retry_state = finalizer.inputs[0].retry_state
+    assert retry_state.failed_attempt_count == 1
+    assert retry_state.retryability == "non_retryable"
+    assert retry_state.attempts[0].failure_code == expected_failure_code
+    assert len(engine.requests) == 1
+    assert resolve_calls == 2
+    assert session_repository.inference_state is not None
+    assert session_repository.inference_state.model_target_label == "default"
 
 
 @pytest.mark.asyncio
 async def test_execute_enqueues_follow_up_after_context_invalidating_action(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Project-mutating actions stop before model dispatch and wake fresh context."""
+    """Project-mutating actions stop before dispatch without stale wake fallback."""
     lifecycle = _SessionLifecycle()
     executor = _executor(session_lifecycle=lifecycle)
     message = _message()
@@ -2824,7 +3276,7 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
     )
 
     assert result.no_actionable_work is True
-    assert lifecycle.wake_ups == [SessionWakeUp(session_id=message.session_id)]
+    assert lifecycle.wake_ups == []
 
 
 def test_dynamic_worktree_binding_receives_current_run_boundary() -> None:

@@ -31,7 +31,11 @@ from azents.core.enums import (
     SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
 )
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    RequestedInferenceProfile,
+    SessionAppliedInferenceProfile,
+)
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.run.input import InputMessage
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -92,6 +96,7 @@ from .agent_session_input import (
     AgentSessionInputError,
     AgentSessionInputIdempotencyConflict,
     AgentSessionInputInactiveSession,
+    AgentSessionInputInvalidInferenceProfile,
     AgentSessionInputService,
     AgentSessionInputSubagentReadOnly,
     CreatedAgentSessionInputResult,
@@ -103,7 +108,7 @@ from .mailbox import (
 )
 
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
-    model_target_label="Primary",
+    model_target_label="default",
     reasoning_effort=None,
 )
 
@@ -188,6 +193,8 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
     ) -> None:
         self.calls = calls
         self.session_kind = session_kind
+        self.applied_inference_profile: SessionAppliedInferenceProfile | None = None
+        self.applied_profile_calls: list[SessionAppliedInferenceProfile] = []
 
     async def lock_by_id(
         self,
@@ -197,10 +204,15 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         """Lock and fetch session."""
         del session
         self.calls.append("get_by_id")
+        return self._build_session(agent_session_id)
+
+    def _build_session(self, agent_session_id: str) -> AgentSession:
+        """Build the current in-memory Session projection."""
         now = datetime.datetime.now(datetime.UTC)
         return AgentSession(
             owner_generation=0,
             inference_state=None,
+            applied_inference_profile=self.applied_inference_profile,
             id=agent_session_id,
             workspace_id="workspace-1",
             agent_id="agent-1",
@@ -221,6 +233,23 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
             created_at=now,
             updated_at=now,
         )
+
+    async def set_applied_inference_profile(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        model_target_label: str,
+        reasoning_effort: ModelReasoningEffort | None,
+    ) -> AgentSession:
+        """Persist applied profile in memory for input-admission tests."""
+        del session
+        self.applied_inference_profile = SessionAppliedInferenceProfile(
+            model_target_label=model_target_label,
+            reasoning_effort=reasoning_effort,
+        )
+        self.applied_profile_calls.append(self.applied_inference_profile)
+        return self._build_session(session_id)
 
     async def mark_running_for_input_wakeup(
         self,
@@ -582,6 +611,130 @@ class TestAgentSessionInputService:
             == MailboxSchedulingMode.WAKE_SESSION
         )
         assert mailbox_item_service.enqueued.content == "restore me"
+
+    async def test_invalid_profile_rejects_before_mailbox_and_applied_state(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Invalid Human profile admission leaves Session and mailbox unchanged."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(
+                session,
+                "invalid-profile-admission",
+            )
+            user_id = await _create_user(
+                session,
+                "invalid-profile-admission@example.com",
+            )
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            agent_id = await _create_agent(
+                session,
+                workspace_id,
+                "invalid-profile-admission",
+            )
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            ).session
+            initial_buffers = await MailboxRepository().list_by_session_id(
+                session,
+                agent_session.id,
+            )
+            initial_runtime_ids = list(
+                await session.scalars(
+                    sa.select(RDBAgentRuntime.id).where(
+                        RDBAgentRuntime.agent_id == agent_id
+                    )
+                )
+            )
+            initial_context = (
+                await AgentSessionRepository().get_working_folder_context_by_session_id(
+                    session,
+                    session_id=agent_session.id,
+                )
+            )
+        assert initial_context is not None
+        assert initial_context.binding_state is SessionWorkingFolderBindingState.PENDING
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            session_manager=rdb_session_manager,
+        )
+
+        result = await service.create_buffered_agent_input(
+            agent_id=agent_id,
+            agent_session_id=agent_session.id,
+            message=InputMessage(
+                text="must not be admitted",
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=[],
+            ),
+            inference_profile=RequestedInferenceProfile(
+                model_target_label="missing",
+                reasoning_effort=None,
+            ),
+            user_id=user_id,
+            request_payload={"request": "invalid-profile"},
+            client_request_id="invalid-profile-request",
+        )
+
+        assert isinstance(result, Failure)
+        assert result.error == AgentSessionInputInvalidInferenceProfile(
+            reason="Model target label is not available"
+        )
+        async with rdb_session_manager() as session:
+            updated = await AgentSessionRepository().get_by_id(
+                session,
+                agent_session.id,
+            )
+            buffers = await MailboxRepository().list_by_session_id(
+                session,
+                agent_session.id,
+            )
+            runtime_ids = list(
+                await session.scalars(
+                    sa.select(RDBAgentRuntime.id).where(
+                        RDBAgentRuntime.agent_id == agent_id
+                    )
+                )
+            )
+            write_request = await ChatWriteRequestRepository().get_by_client_request_id(
+                session,
+                session_id=agent_session.id,
+                requester_user_id=user_id,
+                client_request_id="invalid-profile-request",
+            )
+            updated_context = (
+                await AgentSessionRepository().get_working_folder_context_by_session_id(
+                    session,
+                    session_id=agent_session.id,
+                )
+            )
+        assert updated is not None
+        assert updated.applied_inference_profile is None
+        assert updated_context == initial_context
+        assert buffers == initial_buffers
+        assert runtime_ids == initial_runtime_ids
+        assert write_request is None
 
     async def test_attachment_claim_failure_rolls_back_buffer_acceptance(self) -> None:
         """A cross-root claim conflict cannot leave a pending input behind."""

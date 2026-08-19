@@ -247,6 +247,37 @@ def _write_profile(
     response.raise_for_status()
 
 
+def _write_invalid_profile(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    message: str,
+    target: str,
+    effort: str | None,
+) -> None:
+    """Assert deterministic admission rejection for one invalid profile."""
+    response = requests.post(
+        f"{server_url}/chat/v1/sessions/{session_id}/inputs",
+        headers={**_headers(token), "Content-Type": "application/json"},
+        json={
+            "agent_id": agent_id,
+            "client_request_id": f"per-prompt-profile-{unique()}",
+            "message": message,
+            "inference_profile": {
+                "model_target_label": target,
+                "reasoning_effort": effort,
+            },
+        },
+        timeout=10,
+    )
+    assert response.status_code == 422, response.text
+    assert _object(response.json(), label="invalid profile response") == {
+        "detail": "Reasoning effort is not supported by model target"
+    }
+
+
 def _wait_for_session_idle(
     *,
     server_url: str,
@@ -366,27 +397,6 @@ def _wait_for_input_event(
             return event
         time.sleep(0.5)
     raise TimeoutError(f"Input event was not observed: {message!r}")
-
-
-def _wait_for_system_error(
-    *,
-    server_url: str,
-    token: str,
-    session_id: str,
-    content: str,
-    timeout: float = 120,
-) -> dict[str, object]:
-    """Wait for a durable handled preparation failure."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        for event in _history(server_url, token, session_id):
-            if event.get("kind") != "system_error":
-                continue
-            payload = _object(event.get("payload"), label="system error payload")
-            if payload.get("content") == content:
-                return event
-        time.sleep(0.5)
-    raise TimeoutError(f"System error was not observed: {content!r}")
 
 
 def _wait_for_turn_provenance(
@@ -670,7 +680,7 @@ class TestPerPromptInferenceProfile:
         )
 
         unsupported_message = "Unsupported effort must fail safely"
-        _write_profile(
+        _write_invalid_profile(
             server_url=azents_public_server_url,
             token=token,
             agent_id=agent_id,
@@ -678,12 +688,6 @@ class TestPerPromptInferenceProfile:
             message=unsupported_message,
             target="Fast",
             effort="high",
-        )
-        _wait_for_system_error(
-            server_url=azents_public_server_url,
-            token=token,
-            session_id=session_id,
-            content="The selected reasoning effort is not supported by this model.",
         )
         assert (
             _input_event(

@@ -35,10 +35,7 @@ from azents.core.enums import (
     SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
 )
-from azents.core.inference_profile import (
-    SessionAppliedInferenceProfile,
-    SessionInferenceState,
-)
+from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.session_working_folder import build_session_working_folder_path
 from azents.rdb.models.agent import RDBAgent
@@ -851,12 +848,6 @@ class TestAgentSessionRepository:
             inference_state=default_state,
         )
         assert default_profile.inference_state == default_state
-        assert default_profile.applied_inference_profile == (
-            SessionAppliedInferenceProfile(
-                model_target_label="Quality",
-                reasoning_effort=None,
-            )
-        )
 
         explicit_state = default_state.model_copy(
             update={"reasoning_effort": ModelReasoningEffort.HIGH}
@@ -867,12 +858,6 @@ class TestAgentSessionRepository:
             inference_state=explicit_state,
         )
         assert explicit_profile.inference_state == explicit_state
-        assert explicit_profile.applied_inference_profile == (
-            SessionAppliedInferenceProfile(
-                model_target_label="Quality",
-                reasoning_effort=ModelReasoningEffort.HIGH,
-            )
-        )
 
     async def test_ensure_active_creates_one_active_session(
         self, rdb_session: AsyncSession

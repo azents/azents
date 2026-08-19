@@ -18,7 +18,10 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
 )
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    RequestedInferenceProfile,
+    validate_requested_profile_against_options,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import FileOutputPart, SystemErrorPayload
 from azents.rdb.deps import get_session_manager
@@ -179,6 +182,17 @@ class ChatWriteService:
                     ),
                     mailbox_item=None,
                 )
+            agent = await self.agent_repository.lock_by_id(session, agent_id)
+            if (
+                agent is None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+                or agent.workspace_id != locked.workspace_id
+            ):
+                raise ValueError("AgentSession is not active")
+            validate_requested_profile_against_options(
+                agent.selectable_model_options,
+                inference_profile,
+            )
             self._validate_idle_control_state(locked)
             record, created = await self._create_idempotent_record(
                 session,
@@ -251,6 +265,12 @@ class ChatWriteService:
                     _raise_attachment_claim_error(error)
                 case _:
                     assert_never(claim)
+            await self.agent_session_repository.set_applied_inference_profile(
+                session,
+                session_id=session_id,
+                model_target_label=inference_profile.model_target_label,
+                reasoning_effort=inference_profile.reasoning_effort,
+            )
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 session_id,

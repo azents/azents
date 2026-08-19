@@ -365,6 +365,12 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                     parent_agent_run_id=parent_run.id,
                     scheduled_task_cycle_id=None,
                 )
+                await self.agent_session_repository.set_applied_inference_profile(
+                    session,
+                    session_id=child.agent_session_id,
+                    model_target_label=profile.state.model_target_label,
+                    reasoning_effort=profile.state.reasoning_effort,
+                )
                 await self.agent_session_repository.set_inference_state(
                     session,
                     session_id=child.agent_session_id,
