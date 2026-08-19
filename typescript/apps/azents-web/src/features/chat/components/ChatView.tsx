@@ -367,6 +367,7 @@ interface ChatViewProps {
   /** typed durable mailbox pending entries */
   pendingMailboxEntries?: PendingMailboxEntry[];
   activeAgent: AgentResponse | null;
+  appliedInferenceProfile?: RequestedInferenceProfile | null;
   defaultInferenceProfile: RequestedInferenceProfile;
   sessionId?: string | null;
   isResponsePending: boolean;
@@ -376,12 +377,12 @@ interface ChatViewProps {
   lastEventReceivedAt: string | null;
   /** current live run snapshot with retry recovery state */
   liveRun: ChatLiveRunState | null;
+  /** applies a pending profile without creating a message or Run */
+  onApplyInferenceProfile?: (
+    profile: RequestedInferenceProfile,
+  ) => Promise<boolean>;
   /** latest context-window usage snapshot */
   tokenUsage?: TokenUsageSummary | null;
-  /** notifies the session header when the composer profile changes */
-  onComposerInferenceProfileChange?: (
-    profile: RequestedInferenceProfile,
-  ) => void;
   onSendInput: (
     message: string,
     action: ChatAction | null,
@@ -455,6 +456,7 @@ export function ChatView({
   pendingInputBuffers,
   pendingMailboxEntries = [],
   activeAgent,
+  appliedInferenceProfile = null,
   defaultInferenceProfile,
   sessionId = null,
   isResponsePending,
@@ -462,8 +464,8 @@ export function ChatView({
   isWritePending,
   lastEventReceivedAt,
   liveRun,
+  onApplyInferenceProfile,
   tokenUsage = null,
-  onComposerInferenceProfileChange,
   onSendInput,
   onDeletePendingInputBuffer,
   onClearGoal,
@@ -1645,6 +1647,7 @@ export function ChatView({
                 selectableModelOptions={
                   activeAgent?.selectable_model_options ?? []
                 }
+                appliedInferenceProfile={appliedInferenceProfile}
                 defaultInferenceProfile={defaultInferenceProfile}
                 editingInferenceProfile={
                   editingMessage?.inferenceProfile ?? null
@@ -1653,7 +1656,7 @@ export function ChatView({
                 contextUsageEnabled={sessionId !== null}
                 contextUsage={tokenUsage}
                 contextUsageActiveRun={liveRun}
-                onInferenceProfileChange={onComposerInferenceProfileChange}
+                onApplyInferenceProfile={onApplyInferenceProfile}
                 isUploading={isUploading || isWritePending}
                 pendingFiles={readOnlyNotice === null ? pendingFiles : []}
                 goal={
