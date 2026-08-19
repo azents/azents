@@ -827,22 +827,6 @@ class RunExecutor:
                 ),
                 source=InferenceProfileSource.SESSION_LAST_USED,
             )
-            if command is None:
-                pending_input = (
-                    await self.mailbox_item_service.peek_pending_inference_profile(
-                        snapshot.session_id
-                    )
-                )
-                if (
-                    pending_input.requested_inference_profile is not None
-                    and pending_input.requested_inference_profile
-                    != selected_profile.profile
-                ):
-                    selected_profile = RequestedProfileSelection(
-                        profile=pending_input.requested_inference_profile,
-                        source=InferenceProfileSource.EXPLICIT_INPUT,
-                    )
-                    turn_inference_state = None
             agent_run = recoverable_run
         else:
             explicit_profile: RequestedInferenceProfile | None = None

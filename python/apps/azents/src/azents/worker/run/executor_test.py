@@ -2260,7 +2260,7 @@ async def test_execute_reports_resolve_failure(
 async def test_execute_recovers_activated_run_before_flushing_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A running activation is reused with its exact profile and snapshot."""
+    """A running activation keeps its prepared profile before pending input."""
     selection = make_test_model_selection()
     recoverable = _PendingRun(
         status=AgentRunStatus.RUNNING,
@@ -2342,7 +2342,26 @@ async def test_execute_recovers_activated_run_before_flushing_input(
         )
         return []
 
+    async def peek_pending_input(
+        session_id: str,
+    ) -> PendingInputInferenceProfile:
+        assert session_id == "session-001"
+        return PendingInputInferenceProfile(
+            mailbox_item_id="buffer-later-profile",
+            requires_inference=True,
+            exists=True,
+            requested_inference_profile=RequestedInferenceProfile(
+                model_target_label="Fast",
+                reasoning_effort=None,
+            ),
+        )
+
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
+    monkeypatch.setattr(
+        executor.mailbox_item_service,
+        "peek_pending_inference_profile",
+        peek_pending_input,
+    )
     monkeypatch.setattr(
         run_executor_module,
         "resolve_invoke_input_with_resolved_profile",
