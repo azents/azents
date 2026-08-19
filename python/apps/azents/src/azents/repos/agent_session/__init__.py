@@ -1786,11 +1786,13 @@ class AgentSessionRepository:
         session_id: str,
         inference_state: SessionInferenceState,
     ) -> AgentSession:
-        """Persist the resolved inference configuration for the next turn."""
+        """Persist resolved inference state and the Phase 1 applied projection."""
         result = await session.execute(
             sa.update(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
             .values(
+                applied_model_target_label=inference_state.model_target_label,
+                applied_reasoning_effort=inference_state.reasoning_effort,
                 current_model_target_label=inference_state.model_target_label,
                 current_model_selection=inference_state.model_selection.model_dump(
                     mode="json"
