@@ -13,16 +13,17 @@ A module that creates ECS + RDS together forces you to redeploy the database to 
 
 ## Bad
 
-```
-terragrunt/_modules/payment-service/
-└── main.tf  (ECS + RDS + S3 in one module)
+```mermaid
+flowchart TD
+    PaymentService["terragrunt/_modules/payment-service/"] --> Main["main.tf<br/>ECS + RDS + S3 in one module"]
 ```
 
 ## Good
 
-```
-terragrunt/_modules/
-├── payment-compute/   # ECS task + service
-├── payment-data/      # RDS cluster
-└── payment-storage/   # S3 buckets
+```mermaid
+flowchart TD
+    Modules["terragrunt/_modules/"]
+    Modules --> Compute["payment-compute/<br/>ECS task + service"]
+    Modules --> Data["payment-data/<br/>RDS cluster"]
+    Modules --> Storage["payment-storage/<br/>S3 buckets"]
 ```

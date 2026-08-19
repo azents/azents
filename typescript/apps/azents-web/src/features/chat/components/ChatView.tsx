@@ -1,17 +1,17 @@
 "use client";
 
 /**
- * chat view component.
+ * Chat view component.
  *
- * message list, streaming indicator, input area includes..
+ * Renders the message list, streaming indicators, and composer.
  *
  * Scroll policy:
  * - initial load: useLayoutEffect with scroll to bottom before paint (prevent flicker/misfire)
  *   → enable pagination after scroll stabilizes (isReadyForPaginationRef)
  * - follow active: within the 48px bottom/iOS bounce boundary, new output stays pinned
  * - follow stop: explicit user scroll beyond that same boundary shows the new-message control
- * - when user sends message: always bottom with scroll
- * - scrolling up loads older messages (pagination), preserve scroll position.
+ * - user send: always scroll to the bottom
+ * - upward pagination: load older messages while preserving scroll position
  */
 
 import {
@@ -95,9 +95,9 @@ import type {
   RequestedInferenceProfile,
 } from "@azents/public-client";
 
-/** older messages load trigger scroll position (px) */
+/** Distance from the top that triggers older-message loading, in pixels. */
 const LOAD_MORE_THRESHOLD = 100;
-/** tail follow detection allowed distance (px). mobile viewport/sub-pixel/keyboard resize absorbs error.. */
+/** Bottom distance tolerated for follow mode across viewport and keyboard resizing. */
 const BOTTOM_FOLLOW_THRESHOLD = 48;
 const PROGRAMMATIC_SCROLL_GUARD_MS = 350;
 const LOAD_MORE_COOLDOWN_MS = 800;
@@ -109,7 +109,7 @@ const DEFAULT_CHAT_RATIO = 0.55;
 const MIN_CHAT_RATIO = 0.35;
 const MAX_CHAT_RATIO = 0.75;
 
-/** viewport bottom or iOS bounce area to existstext determines.. */
+/** Return the non-negative distance from the viewport bottom. */
 function scrollDistanceFromBottom(viewport: HTMLDivElement): number {
   const { scrollTop, scrollHeight, clientHeight } = viewport;
   return Math.max(0, scrollHeight - scrollTop - clientHeight);
@@ -169,12 +169,12 @@ interface EditingMessageState {
   inferenceProfile: RequestedInferenceProfile | null;
 }
 
-/** message row with directly not rendered as completion markerwhether checks.. */
+/** Return whether a message is a non-rendered completion boundary. */
 function isBoundaryMessage(message: ChatMessage): boolean {
   return message.role === "turn_complete" || message.role === "run_complete";
 }
 
-/** aftertext completion marker can attach actual display messagewhether checks.. */
+/** Return whether a message can anchor a completion marker in the visible timeline. */
 function isVisibleMessageAnchor(message: ChatMessage): boolean {
   return (
     !isBoundaryMessage(message) &&
@@ -238,7 +238,7 @@ function hasLiveOperation(
   );
 }
 
-/** latest compaction summary position returns.. */
+/** Return the position of the latest compaction summary. */
 function getLatestCompactionIndex(messages: ChatMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (messages[i]?.role === "compaction") {
@@ -362,7 +362,7 @@ interface ChatViewProps {
   messages: ChatMessage[];
   /** canonical durable and latest-following live event stream */
   timelineEvents: ChatEventResponse[];
-  /** not yet model turn  to not injected pending input buffers */
+  /** Pending input buffers not yet admitted to a model turn */
   pendingInputBuffers: PendingInputBuffer[];
   /** typed durable mailbox pending entries */
   pendingMailboxEntries?: PendingMailboxEntry[];
@@ -395,9 +395,9 @@ interface ChatViewProps {
   onClearGoal: () => Promise<boolean>;
   /** Goal update */
   onUpdateGoal: (objective: string) => Promise<boolean>;
-  /** Goal textwhentext */
+  /** Pause the current Goal */
   onPauseGoal: () => Promise<boolean>;
-  /** Goal text */
+  /** Resume the current Goal */
   onResumeGoal: (hint?: string) => Promise<boolean>;
   /** whether older messages exist */
   hasMore: boolean;
@@ -407,7 +407,7 @@ interface ChatViewProps {
   isLoadingNewer: boolean;
   /** load older events; automatic viewport filling keeps latest-follow state */
   onLoadMore: (options?: { detachFromLatest?: boolean }) => void;
-  /** newer messages  withtext */
+  /** Load newer messages while browsing detached history */
   onLoadNewer: () => void;
   /** latest reset */
   onResetToLatest: () => void;
@@ -422,7 +422,7 @@ interface ChatViewProps {
   onRetryFailedRun: (failedEventId: string) => Promise<boolean>;
   /** whether commands are blocked during Run */
   wasCommandBlocked: boolean;
-  /** Session run_state based on stop button exposed whether */
+  /** Whether the current Session state permits a Stop request */
   isStopAvailable: boolean;
   /** whether stop request is being sent */
   isStopPending: boolean;
@@ -432,7 +432,7 @@ interface ChatViewProps {
   inputActions: InputActionDefinition[];
   /** pending OAuth authorization request list */
   authorizationRequests: AuthorizationRequest[];
-  /** auth complete when remove corresponding request */
+  /** Remove the matching request after authorization completes */
   onAuthorizationComplete: (toolkitId: string) => void;
   /** current operation TurnAction execution projections */
   actionExecutions: ActionExecutionProjection[];
@@ -510,12 +510,12 @@ export function ChatView({
     isUploading,
   } = useFileUpload();
 
-  // new timeline item/streaming update bottom with according totext whether.
-  // bottom or iOS bottom bounce area inonly true text, textwhen immediately false text.
+  // Track whether new timeline items and streaming updates should follow the bottom.
+  // The bottom threshold includes the iOS overscroll bounce area.
   const isFollowingLatestRef = useRef(true);
-  // new message when arrives show chip whether
+  // Whether to show the new-message chip.
   const [showNewMessageChip, setShowNewMessageChip] = useState(false);
-  // previous message ID text (new message textfor)
+  // Previous message IDs used to detect newly appended messages.
   const prevMessageIdsRef = useRef<Set<string>>(new Set());
   // flag to enable pagination after initial scroll completes
   const isReadyForPaginationRef = useRef(false);
@@ -533,7 +533,7 @@ export function ChatView({
     null,
   );
 
-  // whether mobile determine (touch device)
+  // Treat touch-capable devices as mobile for composer behavior.
   const isMobile = useMemo(
     () =>
       typeof window !== "undefined" &&
@@ -698,7 +698,7 @@ export function ChatView({
     [editingMessage, isResponsePending, onSendInput, onSubmitMessageEdit],
   );
 
-  // older messages prepend when preserve scroll position
+  // Preserve the scroll position when older messages are prepended.
   const isLoadingMoreRef = useRef(false);
   const lastAutoLoadAttemptKeyRef = useRef<string | null>(null);
   const savedScrollRef = useRef<ChatScrollAnchor | null>(null);
@@ -803,7 +803,7 @@ export function ChatView({
   );
 
   useEffect(() => {
-    // isLoadingMore true with switchtext when current scroll position save
+    // Capture the current anchor when older-message loading begins.
     if (isLoadingMore && !isLoadingMoreRef.current) {
       const viewport = viewportRef.current;
       if (viewport) {
@@ -844,7 +844,7 @@ export function ChatView({
     }
   }, [sessionId]);
 
-  // older messages prepend after scroll position restore
+  // Restore the scroll position after older messages are prepended.
   useLayoutEffect(() => {
     const saved = savedScrollRef.current;
     const viewport = viewportRef.current;
@@ -934,9 +934,9 @@ export function ChatView({
     });
   }, [hasMore, isLoadingMore, onLoadMore]);
 
-  // initial load when paint before to bottom with scroll.
-  // useEffect(paint after) itext useLayoutEffect(paint before) in handledtext
-  // scrollTop=0 status in scroll event onLoadMore misfire text prevention.
+  // Scroll to the bottom before the first paint.
+  // useLayoutEffect prevents the initial scrollTop=0 event from triggering
+  // older-message loading before the initial position is established.
   useLayoutEffect(() => {
     if (
       !isInitialScrollRef.current ||
@@ -985,7 +985,7 @@ export function ChatView({
       ),
     );
 
-    // text after next frame pagination enable (sectext scroll insidetext waiting)
+    // Enable pagination on the next frame after the initial scroll settles.
     requestAnimationFrame(() => {
       isReadyForPaginationRef.current = true;
       loadOlderUntilViewportScrollable();
@@ -1055,11 +1055,11 @@ export function ChatView({
     }
   }, [chatViewState.type, hasTimelineItems]);
 
-  // message/pending buffer change when conditional scroll (initial load except — useLayoutEffect in handle)
+  // React to message or pending-buffer changes after initial-load positioning.
   // - new timeline item + follow active: smooth scroll
-  // - new timeline item + follow stop: show chip (scroll inside do)
-  // - streaming update (text ID): follow activewhenonly instant scroll
-  // - initial load / pagination during: text (eacheach useLayoutEffect in handle)
+  // - new timeline item + follow stopped: show the new-message chip
+  // - streaming update for an existing item: scroll immediately only while following
+  // - initial load and pagination: handled by their dedicated layout effects
   useEffect(() => {
     if (isInitialScrollRef.current || savedScrollRef.current) {
       return;
@@ -1074,10 +1074,10 @@ export function ChatView({
     );
     const hasNewMessage = timelineItemIds.some((id) => !prevIds.has(id));
 
-    // snapshot update
+    // Update the snapshot used to detect new timeline items.
     prevMessageIdsRef.current = new Set(timelineItemIds);
 
-    // streaming text update (existing message content change): bottomwhen follow
+    // Keep streaming updates pinned only while follow mode is active.
     if (!hasNewMessage) {
       if (isFollowingLatestRef.current) {
         schedulePinToBottom();
@@ -1085,7 +1085,7 @@ export function ChatView({
       return;
     }
 
-    // new message arrival
+    // Handle newly appended timeline items.
     if (isFollowingLatestRef.current) {
       schedulePinToBottom();
     } else {
@@ -1099,7 +1099,7 @@ export function ChatView({
     schedulePinToBottom,
   ]);
 
-  // integration scroll handler: bottom detection + new message chip release + older messages  withtext + mobile header hide/display
+  // Handle follow detection, new-message chip state, pagination, and mobile chrome.
   useEffect(() => {
     const viewport = viewportRef.current;
     const scrollArea = scrollAreaRef.current;
@@ -1138,8 +1138,8 @@ export function ChatView({
         persistScrollState(viewport, isFollowingLatestRef.current);
       }
 
-      // bottom or bottom bounce area to alsotextwhen new message chip hide.
-      // text bottom in text textonly with detached/buffering switchdoes not..
+      // Hide the new-message chip at the bottom, including the iOS bounce area.
+      // Detached history remains detached until the latest timeline is restored.
       if (atFollowBoundary && !isRestoringDetachedScroll) {
         setShowNewMessageChip(false);
         if (
@@ -1155,7 +1155,7 @@ export function ChatView({
         }
       }
 
-      // (2) older messages load trigger (sectext scroll insidetext after toonly enable)
+      // Trigger older-message loading only after initial scroll setup completes.
       if (
         scrollTop <= LOAD_MORE_THRESHOLD &&
         hasMore &&
@@ -1234,7 +1234,7 @@ export function ChatView({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [markUserScrollIntent]);
 
-  /** bottom with scroll + chip hide */
+  /** Scroll to the bottom and hide the new-message chip. */
   const scrollToBottom = useCallback(() => {
     setShowNewMessageChip(false);
     isFollowingLatestRef.current = true;
@@ -1265,7 +1265,7 @@ export function ChatView({
     window.setTimeout(scrollToBottomImmediately, KEYBOARD_RESIZE_SETTLE_MS);
   }, [isMobile, scrollToBottomImmediately]);
 
-  /** message send after scroll handle callback (ChatInput in call) */
+  /** Restore bottom-follow behavior after ChatInput sends a message. */
   const handleAfterSend = useCallback(() => {
     setShowNewMessageChip(false);
     isFollowingLatestRef.current = true;

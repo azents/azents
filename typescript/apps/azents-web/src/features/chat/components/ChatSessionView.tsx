@@ -3,10 +3,9 @@
 /**
  * Single-session rendering component.
  *
- * useChatSessionContainer  call sessionper status owns and ChatView  to passes it..
- * parent(ChatPageContent) in `key` prop  per session with by setting  component
- * remount when WebSocket/buffer/timer fully isolateis. — previous session of stale
- * status text session with leakdoes not..
+ * Owns the state for one Session through useChatSessionContainer and passes it
+ * to ChatView. The parent keys this component by Session so switching Sessions
+ * remounts it and isolates WebSocket, buffer, and timer state.
  */
 
 import {
@@ -51,11 +50,11 @@ interface ChatSessionViewProps {
   handle: string;
   /** URL-selected AgentSession ID */
   sessionId: string;
-  /** this session agent */
+  /** Agent that owns this Session */
   agent: AgentResponse;
   /** Loaded AgentSession metadata */
   session: AgentSessionResponse;
-  /** connection status parent to push (for sidebar badge) */
+  /** Publish connection status to the parent for the sidebar badge */
   onConnectionStatusChange: (status: ConnectionStatus) => void;
 }
 
