@@ -1576,7 +1576,7 @@ class TestAgentExecutionPersistence:
             agent_id=agent_id,
             message=_TOOL_PROMPT,
         )
-        payload = _wait_for_rest_contents(
+        payload = _wait_for_completed_rest_contents(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=result.session_id,

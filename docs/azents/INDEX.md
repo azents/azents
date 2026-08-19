@@ -261,6 +261,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Resolve User Message Profiles During Buffer Preparation Historical Requirements Reconstruction](requirements/message-260712-message-profile-during-buffer-preparation.md) | message-260712 | 2026-07-12 | - |
 | [Deliver the OpenAI HTTP Migration as One Revertible Change Historical Requirements Reconstruction](requirements/migration-260716-openai-http-migration-as-revertible-change.md) | migration-260716 | 2026-07-16 | - |
 | [Legacy Snapshot Identifier Migration Requirements](requirements/migration-260721-legacy-snapshot-identifier-migration.md) | migration-260721 | 2026-07-21 | 2026-07-21 |
+| [Session Model Change Requirements](requirements/model-260819-session-model-change.md) | model-260819 | 2026-08-19 | - |
 | [Multi-Active AgentSession Migration Overview Historical Requirements Reconstruction](requirements/multi-260625-multi-active-sessions-overview.md) | multi-260625 | 2026-06-25 | - |
 | [Multi-Worktree Registration Historical Requirements Reconstruction](requirements/multi-260704-multi-worktree-registration.md) | multi-260704 | 2026-07-04 | 2026-07-04 |
 | [Agent-Centric Navigation Redesign Discussion Historical Requirements Reconstruction](requirements/nav-260420-nav.md) | nav-260420 | 2026-04-20 | 2026-04-21 |
@@ -655,6 +656,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Resolve User Message Profiles During Buffer Preparation](adr/message-260712-message-profile-during-buffer-preparation.md)
 - [Deliver the OpenAI HTTP Migration as One Revertible Change](adr/migration-260716-openai-http-migration-as-revertible-change.md)
 - [Legacy Snapshot Identifier Migration](adr/migration-260721-legacy-snapshot-identifier-migration.md)
+- [Session Model Change](adr/model-260819-session-model-change.md)
 - [Multi-Active AgentSession Migration Overview Historical Decision Reconstruction](adr/multi-260625-multi-active-sessions-overview.md)
 - [Multi-Worktree Registration Historical Decision Reconstruction](adr/multi-260704-multi-worktree-registration.md)
 - [Agent-Centric Navigation Redesign Discussion](adr/nav-260420-nav.md)

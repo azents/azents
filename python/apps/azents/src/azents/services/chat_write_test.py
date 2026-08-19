@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
 import sqlalchemy as sa
 from azcommon.result import Result, Success
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +23,10 @@ from azents.core.enums import (
     LLMProvider,
     MailboxItemKind,
 )
-from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.inference_profile import (
+    RequestedInferenceProfile,
+    SessionInferenceState,
+)
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import (
     RunMarkerPayload,
@@ -72,7 +76,10 @@ from azents.services.exchange_file import (
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
 from azents.testing.model_selection import (
+    make_test_model_selection,
     make_test_model_selection_dict,
+    make_test_model_settings,
+    make_test_selectable_model_options,
 )
 
 
@@ -318,13 +325,18 @@ def _control_session(
     *,
     run_state: AgentSessionRunState = AgentSessionRunState.IDLE,
     pending_command_id: str | None = None,
+    session_kind: AgentSessionKind = AgentSessionKind.ROOT,
+    product_mode: AgentSessionProductMode | None = AgentSessionProductMode.TEAM,
+    associated_user_id: str | None = None,
 ) -> AgentSession:
     """Build a minimal active root Session for authorization-order tests."""
     return AgentSession.model_construct(
         id="session-1",
         workspace_id="workspace-1",
         agent_id="agent-1",
-        session_kind=AgentSessionKind.ROOT,
+        session_kind=session_kind,
+        product_mode=product_mode,
+        associated_user_id=associated_user_id,
         status=AgentSessionStatus.ACTIVE,
         run_state=run_state,
         pending_command_id=pending_command_id,
@@ -515,6 +527,260 @@ def _control_service(
 
 class TestChatWriteService:
     """REST chat write service behavior."""
+
+    async def test_model_profile_replacement_is_idempotent_and_side_effect_free(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Apply, replay, and conflict without creating execution work."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(session, "model-profile")
+            user_id = await _create_user(session, "model-profile@example.com")
+            agent_id = await _create_agent(session, workspace_id, "model-profile")
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            ).session
+            prepared = SessionInferenceState(
+                model_target_label="prepared",
+                model_selection=make_test_model_selection(),
+                model_settings=make_test_model_settings(),
+                reasoning_effort=None,
+                effective_context_window_tokens=1000,
+                effective_auto_compaction_threshold_tokens=500,
+                resolved_at=datetime.datetime(2026, 8, 19, tzinfo=datetime.UTC),
+            )
+            await AgentSessionRepository().set_inference_state(
+                session,
+                session_id=agent_session.id,
+                inference_state=prepared,
+            )
+
+        service = _service(
+            rdb_session_manager,
+            workspace_user_repository=cast(
+                WorkspaceUserRepository,
+                _WorkspaceUserRepository(),
+            ),
+        )
+        payload: dict[str, object] = {
+            "model_target_label": "default",
+            "reasoning_effort": None,
+        }
+        accepted = await service.replace_session_model_profile(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            user_id=user_id,
+            client_request_id="model-profile-request",
+            model_target_label="default",
+            reasoning_effort=None,
+            payload=payload,
+        )
+        assert accepted.request.created is True
+
+        async with rdb_session_manager() as session:
+            current = await AgentSessionRepository().get_by_id(
+                session,
+                agent_session.id,
+            )
+            assert current is not None
+            assert current.applied_inference_profile is not None
+            assert current.applied_inference_profile.model_target_label == "default"
+            assert current.applied_inference_profile.reasoning_effort is None
+            assert current.inference_state is not None
+            assert current.inference_state.model_dump() == prepared.model_dump()
+            agent = await AgentRepository().get_by_id(session, agent_id)
+            assert agent is not None
+            replacement_options = make_test_selectable_model_options(
+                agent.selectable_model_options[0].model_selection,
+                label="replacement",
+            )
+            update_result = await AgentRepository().update_by_id(
+                session,
+                agent_id,
+                {"selectable_model_options": replacement_options},
+            )
+            assert update_result.success
+            await AgentSessionRepository().set_applied_inference_profile(
+                session,
+                session_id=agent_session.id,
+                model_target_label="later-profile",
+                reasoning_effort=None,
+            )
+            mailbox_count = await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBMailboxItem)
+                .where(RDBMailboxItem.session_id == agent_session.id)
+            )
+
+        replay = await service.replace_session_model_profile(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            user_id=user_id,
+            client_request_id="model-profile-request",
+            model_target_label="default",
+            reasoning_effort=None,
+            payload=payload,
+        )
+        assert replay.request.created is False
+        assert replay.model_target_label == "default"
+
+        with pytest.raises(ValueError, match="another payload"):
+            await service.replace_session_model_profile(
+                agent_id=agent_id,
+                session_id=agent_session.id,
+                user_id=user_id,
+                client_request_id="model-profile-request",
+                model_target_label="different",
+                reasoning_effort=None,
+                payload={
+                    "model_target_label": "different",
+                    "reasoning_effort": None,
+                },
+            )
+
+        async with rdb_session_manager() as session:
+            current = await AgentSessionRepository().get_by_id(
+                session,
+                agent_session.id,
+            )
+            assert current is not None
+            assert current.applied_inference_profile is not None
+            assert (
+                current.applied_inference_profile.model_target_label == "later-profile"
+            )
+            assert (
+                await session.scalar(
+                    sa.select(sa.func.count())
+                    .select_from(RDBMailboxItem)
+                    .where(RDBMailboxItem.session_id == agent_session.id)
+                )
+                == mailbox_count
+            )
+
+    async def test_model_profile_user_root_requires_associated_owner(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """User Session writes are restricted to the durable associated owner."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(session, "model-profile-user")
+            owner_id = await _create_user(session, "model-profile-owner@example.com")
+            other_id = await _create_user(session, "model-profile-other@example.com")
+            agent_id = await _create_agent(session, workspace_id, "model-profile-user")
+            user_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                    product_mode=AgentSessionProductMode.USER,
+                    associated_user_id=owner_id,
+                ),
+            )
+
+        service = _service(
+            rdb_session_manager,
+            workspace_user_repository=cast(
+                WorkspaceUserRepository,
+                _WorkspaceUserRepository(),
+            ),
+        )
+        payload: dict[str, object] = {
+            "model_target_label": "default",
+            "reasoning_effort": None,
+        }
+        accepted = await service.replace_session_model_profile(
+            agent_id=agent_id,
+            session_id=user_session.id,
+            user_id=owner_id,
+            client_request_id="user-profile-owner",
+            model_target_label="default",
+            reasoning_effort=None,
+            payload=payload,
+        )
+        assert accepted.request.created is True
+
+        with pytest.raises(ValueError, match="session access"):
+            await service.replace_session_model_profile(
+                agent_id=agent_id,
+                session_id=user_session.id,
+                user_id=other_id,
+                client_request_id="user-profile-other",
+                model_target_label="default",
+                reasoning_effort=None,
+                payload=payload,
+            )
+
+    async def test_model_profile_rejects_invalid_profile_and_subagent(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Invalid labels/efforts and subagent Sessions fail without mutation."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(session, "model-profile-invalid")
+            user_id = await _create_user(session, "model-profile-invalid@example.com")
+            agent_id = await _create_agent(
+                session,
+                workspace_id,
+                "model-profile-invalid",
+            )
+            agent_session = (
+                await AgentSessionRepository().ensure_team_primary_for_agent(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                )
+            ).session
+
+        service = _service(
+            rdb_session_manager,
+            workspace_user_repository=cast(
+                WorkspaceUserRepository,
+                _WorkspaceUserRepository(),
+            ),
+        )
+        with pytest.raises(ValueError, match="not available"):
+            await service.replace_session_model_profile(
+                agent_id=agent_id,
+                session_id=agent_session.id,
+                user_id=user_id,
+                client_request_id="invalid-label",
+                model_target_label="missing",
+                reasoning_effort=None,
+                payload={"model_target_label": "missing", "reasoning_effort": None},
+            )
+        with pytest.raises(ValueError, match="not supported"):
+            await service.replace_session_model_profile(
+                agent_id=agent_id,
+                session_id=agent_session.id,
+                user_id=user_id,
+                client_request_id="invalid-effort",
+                model_target_label="default",
+                reasoning_effort=ModelReasoningEffort.HIGH,
+                payload={"model_target_label": "default", "reasoning_effort": "high"},
+            )
+
+        subagent_service, _, _, _ = _control_service(
+            membership_allowed=True,
+            control_session=_control_session(
+                session_kind=AgentSessionKind.SUBAGENT,
+                product_mode=None,
+            ),
+        )
+        with pytest.raises(ValueError, match="read-only"):
+            await subagent_service.replace_session_model_profile(
+                agent_id="agent-1",
+                session_id="session-1",
+                user_id="user-1",
+                client_request_id="subagent-profile",
+                model_target_label="default",
+                reasoning_effort=None,
+                payload={"model_target_label": "default", "reasoning_effort": None},
+            )
 
     async def test_edit_reauthorizes_before_idempotency_lookup(
         self,

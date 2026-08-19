@@ -156,6 +156,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_preview_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_preview_project_browser_manifest) | **POST** /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview | Preview Project Browser Manifest
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
 *ChatV1Api* | [**chat_v1_register_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_register_agent_project) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register | Register Agent Project
+*ChatV1Api* | [**chat_v1_replace_session_model_profile**](azentspublicclient/docs/ChatV1Api.md#chat_v1_replace_session_model_profile) | **PUT** /chat/v1/sessions/{session_id}/model-profile | Replace Session Model Profile
 *ChatV1Api* | [**chat_v1_restore_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_restore_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/restore | Restore Agent Session
 *ChatV1Api* | [**chat_v1_retry_failed_run**](azentspublicclient/docs/ChatV1Api.md#chat_v1_retry_failed_run) | **POST** /chat/v1/sessions/{session_id}/retry-failed-run | Retry Failed Run
 *ChatV1Api* | [**chat_v1_stat_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_stat_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/stat | Stat Agent Workspace Path
@@ -427,6 +428,8 @@ Class | Method | HTTP request | Description
  - [ChatLiveRunRetryStateResponse](azentspublicclient/docs/ChatLiveRunRetryStateResponse.md)
  - [ChatLiveRunStateResponse](azentspublicclient/docs/ChatLiveRunStateResponse.md)
  - [ChatSessionCreateMessageWriteRequest](azentspublicclient/docs/ChatSessionCreateMessageWriteRequest.md)
+ - [ChatSessionModelProfileResponse](azentspublicclient/docs/ChatSessionModelProfileResponse.md)
+ - [ChatSessionModelProfileUpdateRequest](azentspublicclient/docs/ChatSessionModelProfileUpdateRequest.md)
  - [ChatStopResponse](azentspublicclient/docs/ChatStopResponse.md)
  - [ChatWriteAcceptedResponse](azentspublicclient/docs/ChatWriteAcceptedResponse.md)
  - [ChatWriteResponse](azentspublicclient/docs/ChatWriteResponse.md)

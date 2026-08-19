@@ -18,7 +18,10 @@ from azents.core.enums import (
     SessionWorkingFolderBindingState,
     SessionWorkingFolderCleanupStatus,
 )
-from azents.core.inference_profile import SessionInferenceState
+from azents.core.inference_profile import (
+    SessionAppliedInferenceProfile,
+    SessionInferenceState,
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -70,7 +73,11 @@ class AgentSession(BaseModel):
     agent_id: str = Field(description="Agent ID")
     handle: str = Field(description="Human-readable session handle")
     inference_state: SessionInferenceState | None = Field(
-        description="Resolved inference configuration prepared for the next turn",
+        description="Resolved inference configuration prepared for the current turn",
+    )
+    applied_inference_profile: SessionAppliedInferenceProfile | None = Field(
+        default=None,
+        description="Agent-owned model intent applied to the Session",
     )
     session_kind: AgentSessionKind = Field(description="Session listing category")
     status: AgentSessionStatus = Field(description="AgentSession status")

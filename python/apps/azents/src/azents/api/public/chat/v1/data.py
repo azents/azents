@@ -622,6 +622,35 @@ class ChatStopResponse(BaseModel):
     session_id: str = Field(description="AgentSession ID")
 
 
+class ChatSessionModelProfileUpdateRequest(BaseModel):
+    """REST Session model-profile replacement request."""
+
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Client-generated idempotency key",
+    )
+    model_target_label: str = Field(
+        min_length=1,
+        description="Agent-owned selectable model target label",
+    )
+    reasoning_effort: ModelReasoningEffort | None = Field(
+        description="Explicit reasoning effort, or null for model Default",
+    )
+
+
+class ChatSessionModelProfileResponse(BaseModel):
+    """REST Session model-profile replacement response."""
+
+    session_id: str = Field(description="AgentSession ID")
+    model_target_label: str = Field(
+        description="Agent-owned selectable model target label",
+    )
+    reasoning_effort: ModelReasoningEffort | None = Field(
+        description="Explicit reasoning effort, or null for model Default",
+    )
+
+
 class SubagentTreeNodeResponse(BaseModel):
     """Subagent Tree node response."""
 
@@ -2034,13 +2063,13 @@ class AgentSessionResponse(BaseModel):
             id=session.id,
             agent_id=session.agent_id,
             current_model_target_label=(
-                session.inference_state.model_target_label
-                if session.inference_state is not None
+                session.applied_inference_profile.model_target_label
+                if session.applied_inference_profile is not None
                 else None
             ),
             current_reasoning_effort=(
-                session.inference_state.reasoning_effort
-                if session.inference_state is not None
+                session.applied_inference_profile.reasoning_effort
+                if session.applied_inference_profile is not None
                 else None
             ),
             title=session.title,
