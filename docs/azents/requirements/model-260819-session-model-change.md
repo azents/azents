@@ -2,6 +2,7 @@
 title: "Session Model Change Requirements"
 created: 2026-08-19
 updated: 2026-08-19
+implemented: 2026-08-19
 tags: [model, session, chat, frontend]
 document_role: primary
 document_type: requirements

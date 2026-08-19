@@ -89,8 +89,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-08-18
-spec_version: 66
+last_verified_at: 2026-08-19
+spec_version: 67
 ---
 
 # Agent Domain Spec
@@ -196,7 +196,12 @@ automatically.
 - `model_selection = selectable_model_options[main_model_label].model_selection`
 - `lightweight_model_selection = selectable_model_options[lightweight_model_label].model_selection`
 
-The denormalized snapshots remain the Agent defaults. Normal human inputs may instead request one label from the same Agent-owned option list for a single run. At run activation, the worker resolves that label against the current Agent snapshot without querying Workspace defaults or model catalogs. Clients never submit provider, integration, model, capability, or token-limit snapshots as run intent.
+The denormalized snapshots remain the Agent defaults. They are fallback inputs only when a Session
+has no applied model profile; an applied Session label takes precedence for future implicit turns.
+Normal human inputs may instead request one label from the same Agent-owned option list for a single
+run. At run activation, the worker resolves that label against the current Agent snapshot without
+querying Workspace defaults or model catalogs. Clients never submit provider, integration, model,
+capability, or token-limit snapshots as run intent.
 
 Required snapshot fields:
 

@@ -15,8 +15,8 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-18 | 66 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-18 | 150 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-19 | 67 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-19 | 151 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-16 | 62 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
@@ -32,7 +32,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-18 | 157 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-19 | 158 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-18 | 63 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-13 | 26 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
@@ -261,7 +261,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Resolve User Message Profiles During Buffer Preparation Historical Requirements Reconstruction](requirements/message-260712-message-profile-during-buffer-preparation.md) | message-260712 | 2026-07-12 | - |
 | [Deliver the OpenAI HTTP Migration as One Revertible Change Historical Requirements Reconstruction](requirements/migration-260716-openai-http-migration-as-revertible-change.md) | migration-260716 | 2026-07-16 | - |
 | [Legacy Snapshot Identifier Migration Requirements](requirements/migration-260721-legacy-snapshot-identifier-migration.md) | migration-260721 | 2026-07-21 | 2026-07-21 |
-| [Session Model Change Requirements](requirements/model-260819-session-model-change.md) | model-260819 | 2026-08-19 | - |
+| [Session Model Change Requirements](requirements/model-260819-session-model-change.md) | model-260819 | 2026-08-19 | 2026-08-19 |
 | [Multi-Active AgentSession Migration Overview Historical Requirements Reconstruction](requirements/multi-260625-multi-active-sessions-overview.md) | multi-260625 | 2026-06-25 | - |
 | [Multi-Worktree Registration Historical Requirements Reconstruction](requirements/multi-260704-multi-worktree-registration.md) | multi-260704 | 2026-07-04 | 2026-07-04 |
 | [Agent-Centric Navigation Redesign Discussion Historical Requirements Reconstruction](requirements/nav-260420-nav.md) | nav-260420 | 2026-04-20 | 2026-04-21 |

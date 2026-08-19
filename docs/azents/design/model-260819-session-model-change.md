@@ -2,6 +2,7 @@
 title: "Session Model Change Design"
 created: 2026-08-19
 updated: 2026-08-19
+implemented: 2026-08-19
 tags: [model, session, chat, frontend, backend, engine, api, migration, e2e]
 document_role: primary
 document_type: design

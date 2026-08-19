@@ -76,6 +76,7 @@ code_paths:
 api_routes:
   - /chat/v1
   - /chat/v1/sessions/{session_id}/inputs
+  - /chat/v1/sessions/{session_id}/model-profile
   - /chat/v1/sessions/{session_id}/mailbox-items/{mailbox_item_id}
   - /chat/v1/sessions/{session_id}/edit-message
   - /chat/v1/agents/{agent_id}/team-primary-session
@@ -101,8 +102,8 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-last_verified_at: 2026-08-18
-spec_version: 150
+last_verified_at: 2026-08-19
+spec_version: 151
 ---
 
 # Conversation & Events
@@ -184,10 +185,11 @@ Only `pending` may become `bound`, using current-generation Runner evidence. `no
 | `id`                                                                                             | `str(32)`             | UUID7 hex                                                                                                                         |
 | `handle`                                                                                         | string                | Human-readable, BIP-39-derived session handle used for user-facing allocation names such as owned Git worktree paths.             |
 | `workspace_id` / `agent_id`                                                                      | FK                    | Workspace and agent boundary                                                                                                      |
-| `current_model_target_label` / `current_reasoning_effort`                                        | string / enum \| null | Session-owned requested profile for the next turn; null effort represents model Default.                                          |
-| `current_model_selection`                                                                        | JSONB \| null         | Session-owned resolved physical model snapshot used by the next turn.                                                             |
-| `current_effective_context_window_tokens` / `current_effective_auto_compaction_threshold_tokens` | int \| null           | Effective limits resolved with the current model snapshot.                                                                        |
-| `current_inference_resolved_at`                                                                  | timestamptz \| null   | Resolution time for the complete current inference snapshot.                                                                      |
+| `applied_model_target_label` / `applied_reasoning_effort`                                        | string / enum \| null | Session-owned applied label and nullable effort used by future implicit main-model turns; null applied label means inherit the Agent main-model mapping. |
+| `current_model_target_label` / `current_reasoning_effort`                                        | string / enum \| null | Prepared-turn label and effort for the immutable current provider call or retry/recovery; this is not the public applied intent.                    |
+| `current_model_selection` / `current_model_settings`                                            | JSONB \| null         | Complete prepared physical model and model-scoped settings snapshot for the current call.                                                          |
+| `current_effective_context_window_tokens` / `current_effective_auto_compaction_threshold_tokens` | int \| null           | Effective limits stored with the prepared physical snapshot.                                                                                         |
+| `current_inference_resolved_at`                                                                  | timestamptz \| null   | Resolution time for the complete prepared-turn snapshot.                                                                                            |
 | `session_kind`                                                                                   | enum                  | `root` or `subagent`; ordinary session lists include only `root` sessions                                                         |
 | `status`                                                                                         | enum                  | `active` or `archived`                                                                                                            |
 | `primary_kind`                                                                                   | enum \| null          | `team_primary` marks the agent's default Team conversation. User Sessions always store `null` and never become Team primary.      |
@@ -1005,6 +1007,15 @@ Session. An input without an action appends a user message, a command action cre
 pending command, and other typed actions enter the turn-action flow. The route rejects
 `session_kind = subagent` before creating a chat write request, mailbox item, pending command, live
 projection, or broker wake-up.
+`PUT /chat/v1/sessions/{session_id}/model-profile` is the transcript-free full replacement for the
+applied Session profile. It validates the label and effort against the current Agent options while
+holding the Session write lock, records the required client idempotency key, and returns only the
+accepted `session_id`, label, and effort. A matching replay returns the original accepted result
+before revalidating mutable Agent options; reusing the key with a different payload is a conflict.
+Success changes only the durable applied Session intent: it creates no mailbox item, transcript
+event, pending command, Run, wake-up, provider call, or prepared-turn snapshot. The current
+prepared snapshot remains authoritative for an already-started provider call, while future implicit
+turn boundaries resolve the newly applied intent against the current Agent option mapping.
 `POST /chat/v1/sessions/{session_id}/edit-message`,
 `POST /chat/v1/sessions/{session_id}/retry-failed-run`, and command actions submitted through the
 input route are idle-only control boundaries. Message, edit, command, and failed-run retry write paths
