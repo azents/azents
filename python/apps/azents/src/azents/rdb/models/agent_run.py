@@ -105,12 +105,10 @@ class RDBAgentRun(RDBModel):
     requested_model_target_label: Mapped[str | None] = mapped_column(
         sa.String(80),
         nullable=True,
-        default=None,
     )
     requested_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
         model_reasoning_effort_enum,
         nullable=True,
-        default=None,
     )
     phase: Mapped[AgentRunPhase] = mapped_column(
         agent_run_phase_enum,

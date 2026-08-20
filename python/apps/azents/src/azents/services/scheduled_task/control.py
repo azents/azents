@@ -86,6 +86,14 @@ class ScheduledTaskProviderControlResult:
     task: ScheduledTask
 
 
+@dataclass(frozen=True)
+class ScheduledTaskProviderRender:
+    """Provider-neutral text and structured payload for one Task message."""
+
+    text: str
+    payload: list[dict[str, object]]
+
+
 def build_scheduled_task_control_locator(
     *,
     secret: str,
@@ -192,14 +200,14 @@ def render_scheduled_task_slack_registration(
     task: ScheduledTask,
     edit_locator: str,
     delete_locator: str,
-) -> tuple[str, list[dict[str, object]]]:
+) -> ScheduledTaskProviderRender:
     """Render one bounded Slack Block Kit Task registration with controls."""
     _validate_slack_render_locators(task, edit_locator, delete_locator)
     text = f"Scheduled Task registered: {task.title}"
     schedule = _schedule_presentation(task)
-    return (
-        text,
-        [
+    return ScheduledTaskProviderRender(
+        text=text,
+        payload=[
             {
                 "type": "header",
                 "text": {
@@ -273,12 +281,12 @@ def render_scheduled_task_slack_registration(
 def render_scheduled_task_discord_registration(
     *,
     task: ScheduledTask,
-) -> tuple[str, list[dict[str, object]]]:
+) -> ScheduledTaskProviderRender:
     """Render one Discord registration message before current Web URL resolution."""
     schedule = _schedule_presentation(task)
-    return (
-        "",
-        [
+    return ScheduledTaskProviderRender(
+        text="",
+        payload=[
             {
                 "title": task.title[:256],
                 "description": "Scheduled Task registered",
@@ -299,12 +307,12 @@ def render_scheduled_task_discord_registration(
 def render_scheduled_task_slack_deletion(
     *,
     task: ScheduledTask,
-) -> tuple[str, list[dict[str, object]]]:
+) -> ScheduledTaskProviderRender:
     """Render one bounded Slack Block Kit Task deletion notice."""
     text = f"Scheduled Task deleted: {task.title}"
-    return (
-        text,
-        [
+    return ScheduledTaskProviderRender(
+        text=text,
+        payload=[
             {
                 "type": "header",
                 "text": {
@@ -338,11 +346,11 @@ def render_scheduled_task_slack_deletion(
 def render_scheduled_task_discord_deletion(
     *,
     task: ScheduledTask,
-) -> tuple[str, list[dict[str, object]]]:
+) -> ScheduledTaskProviderRender:
     """Render one bounded Discord Task deletion notice."""
-    return (
-        "",
-        [
+    return ScheduledTaskProviderRender(
+        text="",
+        payload=[
             {
                 "title": task.title[:256],
                 "description": "Scheduled Task deleted",

@@ -114,6 +114,8 @@ async def _archive_with_scheduled_continuation(
         scheduled_task_cycle_id=cycle_id,
         run_index=1,
         parent_agent_run_id=None,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
         status=AgentRunStatus.COMPLETED,
     )
     session.add(run)
@@ -243,6 +245,8 @@ class TestSessionExecutionRepository:
             scheduled_task_cycle_id=None,
             run_index=1,
             parent_agent_run_id=None,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
             status=AgentRunStatus.RUNNING,
         )
         rdb_session.add(run)

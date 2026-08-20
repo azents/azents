@@ -1,6 +1,7 @@
 """SubagentCoordinationRepository PostgreSQL projection tests."""
 
 import datetime
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.result import Success
@@ -29,6 +30,14 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .repository import SubagentCoordinationRepository
+
+
+class _RootFixture(NamedTuple):
+    """Created root Session tree dependencies."""
+
+    repository: AgentSessionRepository
+    session_id: str
+    session_agent: SessionAgent
 
 
 async def _create_agent(
@@ -74,7 +83,7 @@ async def _create_root(
     session: AsyncSession,
     *,
     slug: str,
-) -> tuple[AgentSessionRepository, str, SessionAgent]:
+) -> _RootFixture:
     """Create one root AgentSession and SessionAgent tree."""
     workspace_result = await WorkspaceRepository().create(
         session,
@@ -103,7 +112,11 @@ async def _create_root(
         root_session.id,
     )
     assert root_agent is not None
-    return repository, root_session.id, root_agent
+    return _RootFixture(
+        repository=repository,
+        session_id=root_session.id,
+        session_agent=root_agent,
+    )
 
 
 async def _create_child(
@@ -138,6 +151,8 @@ def _add_run(
             scheduled_task_cycle_id=None,
             run_index=run_index,
             parent_agent_run_id=None,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
             phase=AgentRunPhase.IDLE,
             status=status,
         )
