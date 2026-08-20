@@ -338,14 +338,29 @@ class ScheduledToolkit(Toolkit[ScheduledToolkitConfig]):
             """Delete one exact Session-owned Scheduled Task."""
             try:
                 async with self.session_manager() as session:
-                    deleted = await self.service.delete(
+                    task = await self.service.delete_with_snapshot(
                         session,
                         session_id=self.session_id,
                         task_id=args.task_id,
                     )
             except ValueError as exc:
                 raise FunctionToolError(str(exc)) from None
-            return _json({"task_id": args.task_id, "deleted": deleted})
+            notification = (
+                None
+                if task is None
+                else await self.channel_service.execute_deletion(task)
+            )
+            return _json(
+                {
+                    "task_id": args.task_id,
+                    "deleted": task is not None,
+                    "notification": (
+                        None
+                        if notification is None
+                        else _provider_outcome_definition(notification)
+                    ),
+                }
+            )
 
         return make_tool(
             delete_scheduled_task,

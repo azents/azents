@@ -823,7 +823,7 @@ class ExternalChannelActionService:
                     )
                     if (
                         files
-                        or not isinstance(text, str)
+                        or text != ""
                         or embeds is None
                         or not isinstance(delete_locator, str)
                         or edit_url is None
@@ -839,6 +839,22 @@ class ExternalChannelActionService:
                             edit_url=edit_url,
                             delete_locator=delete_locator,
                         ),
+                        embeds=embeds,
+                    )
+                if (
+                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+                    and payload.get("control_kind") == "scheduled_task_deletion"
+                ):
+                    text = payload.get("text")
+                    embeds = _discord_embeds(payload.get("embeds"))
+                    if files or text != "" or embeds is None:
+                        return _discord_invalid_payload()
+                    return await discord_client.create_message(
+                        bot_token=bot_token,
+                        guild_id=guild_id,
+                        channel_id=delivery_channel_id,
+                        content=_discord_agent_content(target, text),
+                        operation_key=operation_key,
                         embeds=embeds,
                     )
                 text = payload.get("text")
@@ -1190,7 +1206,10 @@ class ExternalChannelActionService:
         if payload_tenant_id is not None and payload_tenant_id != tenant_id:
             return _invalid_payload()
         control_kind = payload.get("control_kind")
-        if control_kind == "scheduled_task_registration":
+        if control_kind in {
+            "scheduled_task_registration",
+            "scheduled_task_deletion",
+        }:
             text = payload.get("text")
             blocks = _blocks(payload.get("blocks"))
             if not isinstance(text, str) or blocks is None:

@@ -25,7 +25,9 @@ from azents.services.scheduled_task.control import (
     build_scheduled_task_control_locator,
     parse_scheduled_task_control_locator,
     render_scheduled_task_discord_controls,
+    render_scheduled_task_discord_deletion,
     render_scheduled_task_discord_registration,
+    render_scheduled_task_slack_deletion,
     render_scheduled_task_slack_registration,
 )
 from azents.services.scheduled_task.service import (
@@ -286,7 +288,8 @@ def test_registration_renderers_use_web_edit_and_cancel_controls() -> None:
         delete_locator=delete,
     )
 
-    assert slack_text == discord_text == "Scheduled Task registered: Daily report"
+    assert slack_text == "Scheduled Task registered: Daily report"
+    assert discord_text == ""
     slack_actions = slack_blocks[-1]["elements"]
     assert isinstance(slack_actions, list)
     edit_button, delete_button = slack_actions
@@ -321,6 +324,31 @@ def test_registration_renderers_use_web_edit_and_cancel_controls() -> None:
     assert "custom_id" not in edit_button
     assert cancel_button["label"] == "Cancel"
     assert cancel_button["custom_id"] == delete
+
+
+def test_deletion_renderers_notify_without_repeating_task_objective() -> None:
+    """Deletion notices identify the removed Task and preserve objective privacy."""
+    task = _task()
+
+    slack_text, slack_blocks = render_scheduled_task_slack_deletion(task=task)
+    discord_text, embeds = render_scheduled_task_discord_deletion(task=task)
+
+    assert slack_text == "Scheduled Task deleted: Daily report"
+    assert discord_text == ""
+    assert slack_blocks[0] == {
+        "type": "header",
+        "text": {
+            "type": "plain_text",
+            "text": "Scheduled Task deleted",
+        },
+    }
+    assert "Daily report" in str(slack_blocks)
+    assert "already started continues" in str(slack_blocks)
+    assert embeds[0]["title"] == task.title
+    assert embeds[0]["description"] == "Scheduled Task deleted"
+    assert "already started continues" in str(embeds)
+    assert task.objective not in str(slack_blocks)
+    assert task.objective not in str(embeds)
 
 
 def test_provider_context_matches_exact_parent_or_thread_binding_only() -> None:

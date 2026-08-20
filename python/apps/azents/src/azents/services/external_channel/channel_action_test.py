@@ -500,6 +500,56 @@ async def test_slack_tracker_delivery_includes_session_navigation(
 
 
 @pytest.mark.asyncio
+async def test_slack_scheduled_task_deletion_posts_bounded_notice() -> None:
+    """Scheduled deletion control payloads reach the exact Slack conversation."""
+    post_blocks = AsyncMock(
+        return_value=SlackControlMessageResult(
+            status="delivered",
+            provider_message_key="slack:C1:123.456",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    target = _target(
+        provider=ExternalChannelProvider.SLACK,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+    )
+    target.request_payload.update(
+        {
+            "control_kind": "scheduled_task_deletion",
+            "text": "Scheduled Task deleted: Daily report",
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "*Daily report*",
+                    },
+                }
+            ],
+        }
+    )
+    target.request_payload.pop("embeds")
+
+    result = await ExternalChannelActionService._deliver_slack_control(
+        _service(slack_client=SimpleNamespace(post_blocks=post_blocks)),
+        target,
+        bot_token="slack-secret",
+        tenant_id="T1",
+        channel_id="C1",
+        thread_ts=None,
+        presentation=None,
+    )
+
+    assert result.status == "delivered"
+    call = post_blocks.await_args
+    assert call is not None
+    assert call.kwargs["channel_id"] == "C1"
+    assert call.kwargs["text"] == "Scheduled Task deleted: Daily report"
+    assert "Daily report" in str(call.kwargs["blocks"])
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("operation", "method_name"),
     [
@@ -712,7 +762,7 @@ async def test_discord_registration_accepts_bounded_embed_fields() -> None:
     target.request_payload.update(
         {
             "control_kind": "scheduled_task_registration",
-            "text": "Scheduled Task registered: Daily report",
+            "text": "",
             "task_id": "task-1",
             "delete_locator": "st1:d:task:binding:signature",
             "embeds": [
@@ -739,6 +789,7 @@ async def test_discord_registration_accepts_bounded_embed_fields() -> None:
     assert result.status == "delivered"
     create_call = create_message.await_args
     assert create_call is not None
+    assert create_call.kwargs["content"] == ""
     assert create_call.kwargs["embeds"] == target.request_payload["embeds"]
     assert create_call.kwargs["components"] == [
         {
@@ -763,6 +814,56 @@ async def test_discord_registration_accepts_bounded_embed_fields() -> None:
             ],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_discord_deletion_keeps_only_multi_app_agent_content() -> None:
+    """Scheduled deletion removes status text while retaining Agent identity."""
+    create_message = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    target = replace(
+        _target(
+            provider=ExternalChannelProvider.DISCORD,
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        ),
+        app_mode=ExternalChannelAppMode.MULTI,
+    )
+    target.request_payload.update(
+        {
+            "control_kind": "scheduled_task_deletion",
+            "text": "",
+            "embeds": [
+                {
+                    "title": "Daily report",
+                    "description": "Scheduled Task deleted",
+                    "color": 0xED4245,
+                }
+            ],
+        }
+    )
+    target.request_payload.pop("blocks")
+
+    result = await ExternalChannelActionService._deliver_discord(
+        _service(discord_client=_DiscordClientDelegate(create_message=create_message)),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-deletion"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    assert result.status == "delivered"
+    create_call = create_message.await_args
+    assert create_call is not None
+    assert create_call.kwargs["content"] == "**Research Agent**"
+    assert create_call.kwargs["embeds"] == target.request_payload["embeds"]
 
 
 @pytest.mark.asyncio

@@ -421,7 +421,9 @@ class ScheduledTaskManagementService:
                 raise ScheduledTaskManagementUnavailable("invalid_schedule") from None
             if not deleted:
                 raise ScheduledTaskManagementUnavailable("not_found")
+            deleted_task = target.task
             await session.commit()
+        await self.channel_service.execute_deletion(deleted_task)
 
     async def get_current_cycle(
         self,

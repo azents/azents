@@ -137,6 +137,7 @@ def _toolkit(
     terminal_service = AsyncMock()
     channel_service = AsyncMock()
     channel_service.execute_registration.return_value = None
+    channel_service.execute_deletion.return_value = None
     channel_service.execute_terminal.return_value = ()
     transfer_service = file_transfer_service or AsyncMock()
     cycle_repository = AsyncMock()
@@ -228,12 +229,14 @@ async def test_toolkit_exposes_management_tools_and_valid_cycle_terminal_tool() 
 
 async def test_management_tools_derive_scope_and_project_execution_state() -> None:
     """Management actions use exact current Workspace, Agent, and Session scope."""
-    toolkit, service, _, _, _, cycle_repository, _ = _toolkit(active_cycle=None)
+    toolkit, service, _, channel_service, _, cycle_repository, _ = _toolkit(
+        active_cycle=None
+    )
     created = _task()
     running = _task(active_cycle_id=_CYCLE_ID)
     service.create.return_value = created
     service.list_tasks.return_value = [running]
-    service.delete.return_value = True
+    service.delete_with_snapshot.return_value = created
     cycle_repository.get.return_value = _cycle()
     state = await toolkit.update_context(_turn_context())
     tools = {tool.spec.name: tool for tool in state.tools}
@@ -270,13 +273,18 @@ async def test_management_tools_derive_scope_and_project_execution_state() -> No
     assert create_kwargs["session_id"] == "s" * 32
     assert listed["tasks"][0]["execution_state"] == "running"
     service.list_tasks.assert_awaited_once()
-    assert deleted == {"deleted": True, "task_id": "t" * 32}
-    service.delete.assert_awaited_once()
-    _, delete_kwargs = service.delete.await_args
+    assert deleted == {
+        "deleted": True,
+        "notification": None,
+        "task_id": "t" * 32,
+    }
+    service.delete_with_snapshot.assert_awaited_once()
+    _, delete_kwargs = service.delete_with_snapshot.await_args
     assert delete_kwargs == {
         "session_id": "s" * 32,
         "task_id": "t" * 32,
     }
+    channel_service.execute_deletion.assert_awaited_once_with(created)
 
 
 async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -> None:
