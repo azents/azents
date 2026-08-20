@@ -2,9 +2,9 @@
 
 from azents.utils.fastapi.route import RouteMounter
 
-from . import v1
+from .v1.routes import mount as mount_v1
 
 
 def mount(mounter: RouteMounter) -> None:
-    """Mounts Toolkit routes."""
-    v1.mount(mounter)
+    """Mount Toolkit routes."""
+    mount_v1(mounter)

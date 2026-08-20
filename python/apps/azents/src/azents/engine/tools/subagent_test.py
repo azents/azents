@@ -44,8 +44,8 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.mailbox import MailboxEnqueue, MailboxService
 from azents.testing.model_selection import (

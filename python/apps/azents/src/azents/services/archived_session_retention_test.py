@@ -25,8 +25,8 @@ from azents.rdb.models.archived_session_retention import (
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.archived_session_retention import (
     ArchivedSessionPurgeParticipantSnapshotInvalid,
     ArchivedSessionRetentionRepository,

@@ -51,8 +51,8 @@ from azents.engine.run.types import (
     PollMessages,
 )
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import PendingSessionCommand
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.session_execution.data import (
     CanonicalExecutionSnapshot,
     PendingCommandSnapshot,

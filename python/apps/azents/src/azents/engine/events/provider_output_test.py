@@ -40,8 +40,8 @@ from azents.engine.run.errors import ModelCallError
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.exchange_file.data import ExchangeFile, ExchangeFileCreate
 from azents.repos.model_file import ModelFileRepository

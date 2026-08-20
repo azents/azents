@@ -154,13 +154,14 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
 )
-from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
+from azents.repos.toolkit.agent_toolkit_repository import AgentToolkitRepository
+from azents.repos.toolkit.repository import ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.agent_wait import AgentWaitService
 from azents.services.chat.data import (

@@ -5,13 +5,13 @@ created: 2026-05-30
 spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation]
-last_verified_at: 2026-07-21
+last_verified_at: 2026-08-20
 spec_version: 18
 code_paths:
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/api/public/agent/**
   - python/apps/azents/src/azents/services/chat/context.py
-  - python/apps/azents/src/azents/api/public/chat/v1/__init__.py
+  - python/apps/azents/src/azents/api/public/chat/v1/routes.py
   - python/apps/azents/src/azents/api/public/chat/v1/data.py
   - python/apps/azents/src/azents/repos/agent_execution/__init__.py
   - python/apps/azents/src/azents/repos/agent_session_system_prompt_snapshot/__init__.py
@@ -140,7 +140,7 @@ breakdown.
 
 ```bash
 cd python/apps/azents && uv run ruff check src/azents/services/chat/context.py
-cd python/apps/azents && uv run pyright src/azents/services/chat/context.py src/azents/api/public/chat/v1/data.py src/azents/api/public/chat/v1/__init__.py src/azents/repos/agent_execution/__init__.py
+cd python/apps/azents && uv run pyright src/azents/services/chat/context.py src/azents/api/public/chat/v1/data.py src/azents/api/public/chat/v1/routes.py src/azents/repos/agent_execution/__init__.py
 cd typescript && corepack pnpm --filter @azents/web format:check
 cd typescript && corepack pnpm --filter @azents/web typecheck
 ```

@@ -15,8 +15,8 @@ from azents.core.enums import (
     SessionAgentKind,
 )
 from azents.engine.events.types import AgentRunState
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import SessionAgent
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.mailbox.data import MailboxItem
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.mailbox import (

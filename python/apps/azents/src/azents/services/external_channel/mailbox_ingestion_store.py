@@ -44,8 +44,8 @@ from azents.core.external_channel_session_presence import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAccessRequestCreate,
     ExternalChannelAgentRoute,
@@ -106,9 +106,11 @@ from azents.services.mailbox import (
     MailboxService,
     build_external_channel_mailbox_payload,
 )
-from azents.services.root_agent_session_creation import RootAgentSessionCreationService
 from azents.services.root_agent_session_creation.data import (
     AgentDefaultRootWorkspaceIntent,
+)
+from azents.services.root_agent_session_creation.service import (
+    RootAgentSessionCreationService,
 )
 
 _ACCESS_REQUEST_AGE = datetime.timedelta(days=7)

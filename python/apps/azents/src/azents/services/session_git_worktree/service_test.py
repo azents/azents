@@ -64,8 +64,8 @@ from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
@@ -114,7 +114,7 @@ from azents.services.agent_session_input import AgentSessionInputService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.mailbox import MailboxService, PromotedMailboxItems
 from azents.services.model_file import ModelFileService
-from azents.services.root_agent_session_creation import (
+from azents.services.root_agent_session_creation.service import (
     RootAgentSessionCreationService,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError

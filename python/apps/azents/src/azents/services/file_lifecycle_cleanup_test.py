@@ -23,7 +23,7 @@ from azents.engine.events.types import (
     FileOutputPart,
 )
 from azents.repos.agent_avatar_cleanup.data import AgentAvatarCleanupJob
-from azents.repos.agent_session import ModelFileGCLaggingSession
+from azents.repos.agent_session.repository import ModelFileGCLaggingSession
 from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.model_file.data import ModelFile

@@ -14,7 +14,7 @@ from azents.engine.tooling.toolkit_state import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.toolkit_state import (
     ToolkitStateConflictError,
     ToolkitStateRepository,

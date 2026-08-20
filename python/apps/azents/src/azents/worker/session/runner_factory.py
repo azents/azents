@@ -12,7 +12,7 @@ from azents.engine.run.contracts import AgentEngineProtocol
 from azents.engine.run.model_transport import InMemoryModelTransportState
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.services.mailbox import MailboxService
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.deps import get_worker_config

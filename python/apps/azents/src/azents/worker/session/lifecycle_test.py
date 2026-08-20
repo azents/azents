@@ -17,8 +17,8 @@ from azents.core.enums import (
 from azents.engine.events.types import AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_execution.data import PendingCommandSnapshot
 from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator

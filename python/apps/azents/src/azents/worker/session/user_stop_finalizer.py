@@ -25,7 +25,7 @@ from azents.engine.events.types import (
 from azents.rdb.deps import get_session_manager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.worker.deps import get_live_event_store
 from azents.worker.events.publisher import WorkerEventPublisher

@@ -19,8 +19,8 @@ from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.model_file_pin import RDBModelFilePin
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_execution.data import AgentRunCreate
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.model_file import ModelFileRepository
 from azents.repos.model_file.data import ModelFileCreate
 from azents.repos.model_file_pin import ModelFilePinRepository

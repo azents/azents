@@ -38,7 +38,7 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.agent_session_unread_run import RDBAgentSessionUnreadRun
 from azents.rdb.models.event import JSONValue, RDBEvent
 from azents.rdb.models.session_agent import RDBSessionAgent
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.repository import AgentSessionRepository
 
 from .data import (
     AgentRunCreate,

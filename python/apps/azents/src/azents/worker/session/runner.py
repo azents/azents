@@ -20,7 +20,7 @@ from azents.engine.run.errors import UserVisibleRuntimeError
 from azents.engine.run.model_transport import ModelTransportState
 from azents.engine.run.types import CheckStop, PollMessages, PollMessagesResult
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.services.mailbox import MailboxService
 from azents.worker.events.publisher import WorkerEventPublisher
 from azents.worker.run.executor import RunExecutor

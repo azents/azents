@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 from azcommon.result import Success
 
 from azents.repos.toolkit.data import ToolkitConfig
-from azents.services.toolkit import ToolkitService, merge_envvar_credentials
 from azents.services.toolkit.data import ToolkitUpdateInput
+from azents.services.toolkit.service import ToolkitService, merge_envvar_credentials
 
 
 class TestMergeEnvVarCredentials:

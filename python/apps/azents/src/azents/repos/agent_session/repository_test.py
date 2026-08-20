@@ -10,7 +10,7 @@ from azcommon.result import Success
 from pytest import MonkeyPatch
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-import azents.repos.agent_session as agent_session_repo
+import azents.repos.agent_session.repository as agent_session_repo
 from azents.core.enums import (
     AgentRuntimeCapability,
     AgentSessionKind,
@@ -63,8 +63,8 @@ from azents.testing.model_selection import (
     make_test_model_settings,
 )
 
-from . import AgentSessionRepository
 from .data import AgentSessionCreate, AgentSessionEnsureTeamPrimaryResult
+from .repository import AgentSessionRepository
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:

@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.worker.deps import get_worker_broker
 from azents.worker.session.lifecycle import SessionLifecycleService
 

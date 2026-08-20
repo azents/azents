@@ -72,7 +72,7 @@ from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.action_execution.data import ActionExecution, ActionExecutionCreate
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository

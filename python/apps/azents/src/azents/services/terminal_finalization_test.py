@@ -17,8 +17,8 @@ from azents.core.enums import (
 from azents.engine.events.types import AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import SessionAgent
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.terminal_finalization import (
     TerminalDeliveryDisposition,

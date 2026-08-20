@@ -22,8 +22,8 @@ from azents.core.enums import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAccessGrant,
     ExternalChannelAccessGrantCreate,
@@ -49,11 +49,11 @@ from azents.services.external_channel.ingestion_replay import (
     external_channel_replay_deadline,
 )
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
-from azents.services.root_agent_session_creation import (
-    RootAgentSessionCreationService,
-)
 from azents.services.root_agent_session_creation.data import (
     AgentDefaultRootWorkspaceIntent,
+)
+from azents.services.root_agent_session_creation.service import (
+    RootAgentSessionCreationService,
 )
 
 logger = logging.getLogger(__name__)

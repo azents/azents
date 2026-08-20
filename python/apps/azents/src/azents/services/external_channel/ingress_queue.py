@@ -35,7 +35,7 @@ from azents.job_runtime.types import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelConnection,
