@@ -378,6 +378,7 @@ jobs:
       - name: Run E2E lane
         env:
           CACHE_WRITE_REPOSITORIES: ${{ matrix.cache_write_repositories }}
+          AZENTS_E2E_IMAGE_BUILD_PROFILE: ${{ matrix.suite }}
         run: |
           set -o pipefail
           report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
