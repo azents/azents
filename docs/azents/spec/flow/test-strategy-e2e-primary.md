@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: []
 code_paths:
+  - .claude/skills/e2e-ci-optimization/**
   - .claude/skills/feature-design/SKILL.md
   - .claude/skills/ship-feature/SKILL.md
   - .github/actions/expose-github-runtime/**
@@ -25,7 +26,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-08-20
-spec_version: 31
+spec_version: 32
 ---
 
 # E2E Primary Test Strategy
@@ -158,6 +159,10 @@ Always-on required CI does not depend on external credentials.
   It balances files only within a suite using the latest successful `main` timing
   baseline, with a deterministic source-based fallback. Required uses three lanes;
   Web uses one lane. Lanes are parallel partitions, not additional profiles.
+- Each lane upgrades the shared database to the tested Server image revision through
+  one bounded migration container before product services start. Public API, Admin API,
+  and Engine Worker then start concurrently; their ordinary launchers retain the
+  current-revision check without competing to own an upgrade.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
@@ -292,6 +297,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-20** (spec_version 32) — Added one migration owner followed by concurrent
+  Public API, Admin API, and Engine Worker startup in each E2E lane, and linked the
+  recurring E2E CI optimization skill to the current test strategy.
 - **2026-08-17** (spec_version 30) — Added focused Scheduled Task
   generated-client creation/readback and due-now execution journeys, moved
   provider, lifecycle, recurrence, Web, and compaction combinations to focused

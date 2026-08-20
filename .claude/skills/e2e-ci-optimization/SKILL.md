@@ -5,8 +5,12 @@ description: Analyze and ship Azents E2E reliability and required-CI performance
 
 # E2E CI Optimization
 
-Own the complete improvement loop. Do not stop after ranking candidates unless the
-requester explicitly asks for analysis only.
+Own the complete improvement loop. For every recurring or scheduled improvement run,
+ship one feasible improvement whenever at least one actionable candidate exists. If the
+highest-impact candidate is blocked, continue down the ranked candidate list and select
+the best candidate that can be implemented and validated safely in the current run.
+Analysis-only completion is valid only when the requester explicitly asks for analysis or
+the investigation establishes that no feasible candidate exists.
 
 Reuse these skills instead of duplicating their procedures:
 
@@ -25,6 +29,10 @@ Determine the requested stopping point before execution:
 - **Implementation**: continue through focused validation and review.
 - **Ship or improve**: continue through PR creation, at least two successful same-SHA
   CI measurements, measured acceptance or rejection, and PR body update.
+- **Recurring or scheduled improvement**: exhaust the ranked candidate list until one
+  feasible improvement is selected, then complete the ship flow for that improvement.
+  Finish without an implementation only when every discovered candidate is infeasible,
+  and report the concrete blocker for each candidate.
 
 Treat requests such as "improve E2E", "optimize E2E CI", or "find and fix the next
 candidate" as ship requests unless the requester limits the scope.
