@@ -7,6 +7,7 @@ title: "Use Mermaid code blocks for all diagrams in markdown documents (architec
 ASCII boxes look fine in a terminal but rot the moment fonts shift, columns drift, or someone renders the doc in a non-monospace context. Mermaid renders the same everywhere.
 
 - ALWAYS use Mermaid code blocks for architecture diagrams, flowcharts, sequence diagrams, ERDs in `*.md` files
+- KEEP directory trees as fenced text using tree characters such as `├──` and `└──`
 - AVOID ASCII art for diagrams (boxes drawn with `|`, `+`, `-`, `→`)
 
 ## Bad
