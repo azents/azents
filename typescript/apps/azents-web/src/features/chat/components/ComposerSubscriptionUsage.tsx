@@ -22,7 +22,7 @@ import {
   IconRefresh,
 } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
-import { useState } from "react";
+import { Component, type ReactNode, useState } from "react";
 import { subscriptionUsageSummaryLimits } from "@/features/llm-settings/subscriptionUsage";
 import { projectComposerSubscriptionIndicator } from "../composerSubscriptionUsage";
 import type {
@@ -168,6 +168,12 @@ interface ComposerSubscriptionUsagePopoverProps {
   state: SubscriptionUsageState;
 }
 
+export interface ComposerSubscriptionUsagePresentationProps {
+  onRefresh: () => Promise<void> | void;
+  resetKey: string;
+  state: SubscriptionUsageState;
+}
+
 export function ComposerSubscriptionUsagePopover({
   compact,
   onRefresh,
@@ -203,6 +209,97 @@ export function ComposerSubscriptionUsagePopover({
         <ComposerSubscriptionUsageDetails onRefresh={onRefresh} state={state} />
       </Popover.Dropdown>
     </Popover>
+  );
+}
+
+interface ComposerUsageErrorBoundaryProps {
+  children: ReactNode;
+  fallback: (reset: () => void) => ReactNode;
+  resetKey: string;
+}
+
+interface ComposerUsageErrorBoundaryState {
+  failed: boolean;
+}
+
+class ComposerUsageErrorBoundary extends Component<
+  ComposerUsageErrorBoundaryProps,
+  ComposerUsageErrorBoundaryState
+> {
+  public state: ComposerUsageErrorBoundaryState = { failed: false };
+
+  public static getDerivedStateFromError(): ComposerUsageErrorBoundaryState {
+    return { failed: true };
+  }
+
+  public componentDidUpdate(
+    previousProps: ComposerUsageErrorBoundaryProps,
+  ): void {
+    if (this.state.failed && previousProps.resetKey !== this.props.resetKey) {
+      this.setState({ failed: false });
+    }
+  }
+
+  private readonly reset = (): void => {
+    this.setState({ failed: false });
+  };
+
+  public render(): ReactNode {
+    if (this.state.failed) {
+      return this.props.fallback(this.reset);
+    }
+    return this.props.children;
+  }
+}
+
+function composerUsageBoundaryResetKey(state: SubscriptionUsageState): string {
+  switch (state.type) {
+    case "AVAILABLE":
+    case "EXTERNAL":
+    case "STALE_ERROR":
+      return `${state.type}:${state.snapshot.fetched_at}`;
+    case "UNAVAILABLE":
+      return `${state.type}:${state.reason ?? "request_failed"}`;
+    case "IDLE":
+    case "DISABLED":
+    case "LOADING":
+      return state.type;
+  }
+}
+
+export function ComposerSubscriptionUsagePopoverWithBoundary({
+  compact,
+  onRefresh,
+  resetKey,
+  state,
+}: ComposerSubscriptionUsagePresentationProps & {
+  compact: boolean;
+}): React.ReactElement {
+  const fallbackState: SubscriptionUsageState = {
+    type: "UNAVAILABLE",
+    reason: null,
+    retryable: true,
+  };
+  return (
+    <ComposerUsageErrorBoundary
+      fallback={(reset) => (
+        <ComposerSubscriptionUsagePopover
+          compact={compact}
+          onRefresh={async () => {
+            reset();
+            await onRefresh();
+          }}
+          state={fallbackState}
+        />
+      )}
+      resetKey={`${resetKey}:${composerUsageBoundaryResetKey(state)}`}
+    >
+      <ComposerSubscriptionUsagePopover
+        compact={compact}
+        onRefresh={onRefresh}
+        state={state}
+      />
+    </ComposerUsageErrorBoundary>
   );
 }
 

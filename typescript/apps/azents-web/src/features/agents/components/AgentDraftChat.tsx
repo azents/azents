@@ -18,7 +18,7 @@ import { IconMessageCircle } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { ChatInput } from "@/features/chat/components/ChatInput";
-import { ComposerSubscriptionUsagePopoverContainer } from "@/features/chat/containers/ComposerSubscriptionUsageContainer";
+import { ComposerSubscriptionUsagePopoverWithBoundary } from "@/features/chat/components/ComposerSubscriptionUsage";
 import { WorkspaceDirectoryPickerModal } from "@/features/chat/workspace/components/WorkspaceDirectoryPickerModal";
 import styles from "./AgentChatTab.module.css";
 import { AgentSettingsHeader } from "./AgentSettingsHeader";
@@ -39,7 +39,7 @@ export function AgentDraftChat(
     canSendMessage,
     pendingFiles,
     defaultInferenceProfile,
-    subscriptionSelection,
+    subscriptionUsage,
     workspaceItems,
     activeWorktreeItemId,
     gitRefPreviewState,
@@ -87,12 +87,10 @@ export function AgentDraftChat(
               value={sessionScope}
               onChange={onSessionScopeChange}
             />
-            {subscriptionSelection === null ? null : (
-              <ComposerSubscriptionUsagePopoverContainer
+            {subscriptionUsage === null ? null : (
+              <ComposerSubscriptionUsagePopoverWithBoundary
                 compact
-                handle={handle}
-                integrationId={subscriptionSelection.integrationId}
-                provider={subscriptionSelection.provider}
+                {...subscriptionUsage}
               />
             )}
           </Group>

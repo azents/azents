@@ -8,6 +8,7 @@
  */
 
 import { useForm, type UseFormReturnType } from "@mantine/form";
+import { useWindowEvent } from "@mantine/hooks";
 import { useRouter } from "next/navigation";
 import {
   type FormEventHandler,
@@ -400,8 +401,8 @@ export function useToolkitFormContainer(
     });
   }, [disconnectOauthMutation, formState, handle]);
 
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent<unknown>): void => {
+  const handleOauthCallbackMessage = useCallback(
+    (event: MessageEvent<unknown>): void => {
       if (
         event.origin !== window.location.origin ||
         formState.type !== "EDIT" ||
@@ -414,10 +415,10 @@ export function useToolkitFormContainer(
         handle,
         toolkitId: formState.config.id,
       });
-    };
-    window.addEventListener("message", handleMessage);
-    return (): void => window.removeEventListener("message", handleMessage);
-  }, [formState, handle, utils.toolkit.getConfig]);
+    },
+    [formState, handle, utils.toolkit.getConfig],
+  );
+  useWindowEvent("message", handleOauthCallbackMessage);
 
   useEffect(() => {
     if (formState.type !== "EDIT") {

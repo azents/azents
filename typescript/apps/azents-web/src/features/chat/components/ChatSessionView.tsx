@@ -26,9 +26,9 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
-import { ComposerSubscriptionUsagePopoverContainer } from "../containers/ComposerSubscriptionUsageContainer";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
 import { ChatView } from "./ChatView";
+import { ComposerSubscriptionUsagePopoverWithBoundary } from "./ComposerSubscriptionUsage";
 import type { ChatSessionViewContainerOutput } from "../containers/useChatSessionViewContainer";
 
 function sessionHref(
@@ -46,7 +46,7 @@ export function ChatSessionView({
   headerSession,
   chatSession,
   currentWorkspaceProfile,
-  subscriptionSelection,
+  subscriptionUsage,
   workspacePanel,
   subagentNavigation,
   runtimeDrawerOpened,
@@ -67,12 +67,10 @@ export function ChatSessionView({
         onSessionTitleChange={onSessionTitleChange}
         onOpenRuntime={onOpenRuntime}
         chatControls={
-          subscriptionSelection === null ? null : (
-            <ComposerSubscriptionUsagePopoverContainer
+          subscriptionUsage === null ? null : (
+            <ComposerSubscriptionUsagePopoverWithBoundary
               compact
-              handle={handle}
-              integrationId={subscriptionSelection.integrationId}
-              provider={subscriptionSelection.provider}
+              {...subscriptionUsage}
             />
           )
         }

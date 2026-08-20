@@ -1,6 +1,10 @@
 "use client";
 
-import { useLocalStorage, useSessionStorage } from "@mantine/hooks";
+import {
+  useLocalStorage,
+  useSessionStorage,
+  useWindowEvent,
+} from "@mantine/hooks";
 import { useTranslations } from "next-intl";
 import {
   type PointerEvent as ReactPointerEvent,
@@ -1158,8 +1162,8 @@ export function useChatViewContainer({
     persistScrollState,
   ]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent): void => {
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent): void => {
       const target = event.target;
       if (
         target instanceof HTMLElement &&
@@ -1180,10 +1184,10 @@ export function useChatViewContainer({
       ) {
         markUserScrollIntent();
       }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [markUserScrollIntent]);
+    },
+    [markUserScrollIntent],
+  );
+  useWindowEvent("keydown", handleKeyDown);
   const scrollToBottom = useCallback(() => {
     setShowNewMessageChip(false);
     isFollowingLatestRef.current = true;

@@ -11,12 +11,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import { resolveComposerSubscriptionSelection } from "@/features/chat/composerSubscriptionUsage";
 import { useFileUpload } from "@/features/chat/hooks/useFileUpload";
+import { useSubscriptionUsageContainer } from "@/features/llm-settings/containers/useSubscriptionUsageContainer";
 import { trpc } from "@/trpc/client";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "@/features/agent-workspace/types";
-import type { ComposerSubscriptionSelection } from "@/features/chat/composerSubscriptionUsage";
+import type { ComposerSubscriptionUsagePresentationProps } from "@/features/chat/components/ComposerSubscriptionUsage";
 import type {
   PendingFile,
   UploadedFile,
@@ -71,7 +72,7 @@ export interface AgentDraftChatContainerOutput {
   canSendMessage: boolean;
   pendingFiles: PendingFile[];
   defaultInferenceProfile: RequestedInferenceProfile;
-  subscriptionSelection: ComposerSubscriptionSelection | null;
+  subscriptionUsage: ComposerSubscriptionUsagePresentationProps | null;
   selectedProjectPaths: string[];
   workspaceItems: NewSessionWorkspaceItemState[];
   activeWorktreeItemId: string | null;
@@ -628,6 +629,20 @@ export function useAgentDraftChatContainer(
       defaultInferenceProfile.model_target_label,
     ],
   );
+  const subscriptionUsageContainer = useSubscriptionUsageContainer({
+    enabled: subscriptionSelection !== null,
+    handle,
+    integrationId: subscriptionSelection?.integrationId ?? "",
+    provider: subscriptionSelection?.provider ?? "",
+  });
+  const subscriptionUsage =
+    subscriptionSelection === null
+      ? null
+      : {
+          onRefresh: subscriptionUsageContainer.onRefresh,
+          resetKey: subscriptionSelection.integrationId,
+          state: subscriptionUsageContainer.state,
+        };
 
   const projectPresetState = useMemo<ProjectPresetState>(() => {
     if (projectPresetsQuery.isLoading || projectDefaultsQuery.isLoading) {
@@ -692,7 +707,7 @@ export function useAgentDraftChatContainer(
     canSendMessage,
     pendingFiles,
     defaultInferenceProfile,
-    subscriptionSelection,
+    subscriptionUsage,
     selectedProjectPaths,
     workspaceItems,
     activeWorktreeItemId: activeWorktreeItem?.id ?? null,

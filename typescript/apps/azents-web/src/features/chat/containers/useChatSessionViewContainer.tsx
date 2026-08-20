@@ -11,6 +11,7 @@ import { useMantineTheme } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSubagentTreePanelContainer } from "@/features/agents/containers/useSubagentTreePanelContainer";
+import { useSubscriptionUsageContainer } from "@/features/llm-settings/containers/useSubscriptionUsageContainer";
 import { trpc } from "@/trpc/client";
 import { ChatSessionView } from "../components/ChatSessionView";
 import { resolveComposerSubscriptionSelection } from "../composerSubscriptionUsage";
@@ -20,6 +21,7 @@ import {
 } from "../subagentNavigation";
 import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspacePanelContainer";
 import { useChatSessionContainer } from "./useChatSessionContainer";
+import type { ComposerSubscriptionUsagePresentationProps } from "../components/ComposerSubscriptionUsage";
 import type { CurrentWorkspaceProfile } from "../senderPresentation";
 import type { ConnectionStatus } from "../types";
 import type { WorkspacePanelContainerOutput } from "../workspace/containers/useWorkspacePanelContainer";
@@ -47,9 +49,7 @@ export interface ChatSessionViewContainerOutput {
   headerSession: AgentSessionResponse;
   chatSession: ReturnType<typeof useChatSessionContainer>;
   currentWorkspaceProfile: CurrentWorkspaceProfile | null;
-  subscriptionSelection: ReturnType<
-    typeof resolveComposerSubscriptionSelection
-  >;
+  subscriptionUsage: ComposerSubscriptionUsagePresentationProps | null;
   workspacePanel: WorkspacePanelContainerOutput;
   subagentNavigation: SubagentNavigationLinks | null;
   runtimeDrawerOpened: boolean;
@@ -102,6 +102,20 @@ export function useChatSessionViewContainer(
       chatSession.defaultInferenceProfile.model_target_label,
     ],
   );
+  const subscriptionUsageContainer = useSubscriptionUsageContainer({
+    enabled: subscriptionSelection !== null,
+    handle,
+    integrationId: subscriptionSelection?.integrationId ?? "",
+    provider: subscriptionSelection?.provider ?? "",
+  });
+  const subscriptionUsage =
+    subscriptionSelection === null
+      ? null
+      : {
+          onRefresh: subscriptionUsageContainer.onRefresh,
+          resetKey: subscriptionSelection.integrationId,
+          state: subscriptionUsageContainer.state,
+        };
   const workspacePanel = useWorkspacePanelContainer({
     handle,
     agentId: agent.id,
@@ -140,7 +154,7 @@ export function useChatSessionViewContainer(
     headerSession,
     chatSession,
     currentWorkspaceProfile,
-    subscriptionSelection,
+    subscriptionUsage,
     workspacePanel,
     subagentNavigation,
     runtimeDrawerOpened,
