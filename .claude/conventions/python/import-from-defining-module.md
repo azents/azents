@@ -1,5 +1,5 @@
 ---
-title: "Import symbols from the module that defines them; avoid `__init__.py` re-exports, but allow symbols defined directly in `__init__.py`."
+title: "Do not re-export symbols from package `__init__.py` files."
 ---
 
 # Import From the Defining Module
