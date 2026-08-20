@@ -13,7 +13,9 @@ from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
 )
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.base import RDBModel
+from azents.rdb.models.inference_profile_types import model_reasoning_effort_enum
 from azents.rdb.types.datetime import TimeZoneDateTime
 
 type JSONScalar = str | int | float | bool | None
@@ -73,6 +75,11 @@ class RDBAgentRun(RDBModel):
         unique=True,
         postgresql_where=sa.text("status = 'pending'"),
     )
+    CK_REQUESTED_PROFILE = sa.CheckConstraint(
+        "requested_reasoning_effort IS NULL "
+        "OR requested_model_target_label IS NOT NULL",
+        name="ck_agent_runs_requested_profile",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -94,6 +101,16 @@ class RDBAgentRun(RDBModel):
         sa.String(32),
         sa.ForeignKey("agent_runs.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    requested_model_target_label: Mapped[str | None] = mapped_column(
+        sa.String(80),
+        nullable=True,
+        default=None,
+    )
+    requested_reasoning_effort: Mapped[ModelReasoningEffort | None] = mapped_column(
+        model_reasoning_effort_enum,
+        nullable=True,
+        default=None,
     )
     phase: Mapped[AgentRunPhase] = mapped_column(
         agent_run_phase_enum,
@@ -200,4 +217,5 @@ class RDBAgentRun(RDBModel):
         IX_STATUS,
         IX_PARENT_AGENT_RUN_ID,
         UQ_SESSION_PENDING,
+        CK_REQUESTED_PROFILE,
     )

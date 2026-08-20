@@ -1,11 +1,10 @@
 "use client";
 
 /**
- * Single-session rendering component.
+ * Single-session chat UI surface.
  *
- * Owns the state for one Session through useChatSessionContainer and passes it
- * to ChatView. The parent keys this component by Session so switching Sessions
- * remounts it and isolates WebSocket, buffer, and timer state.
+ * Session-scoped state, external lookups, and callbacks are owned by
+ * useChatSessionViewContainer.
  */
 
 import {
@@ -17,9 +16,7 @@ import {
   rem,
   Text,
   Tooltip,
-  useMantineTheme,
 } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
 import {
   IconArrowLeft,
   IconArrowUp,
@@ -28,61 +25,11 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
 import { AgentSessionHeader } from "@/features/agents/components/AgentSessionHeader";
-import { useSubagentTreePanelContainer } from "@/features/agents/containers/useSubagentTreePanelContainer";
-import { trpc } from "@/trpc/client";
-import { resolveComposerSubscriptionSelection } from "../composerSubscriptionUsage";
 import { ComposerSubscriptionUsagePopoverContainer } from "../containers/ComposerSubscriptionUsageContainer";
-import { useChatSessionContainer } from "../containers/useChatSessionContainer";
 import { WorkspacePanel } from "../workspace/components/WorkspacePanel";
-import { useWorkspacePanelContainer } from "../workspace/containers/useWorkspacePanelContainer";
 import { ChatView } from "./ChatView";
-import type { CurrentWorkspaceProfile } from "../senderPresentation";
-import type { ConnectionStatus } from "../types";
-import type {
-  AgentResponse,
-  AgentSessionResponse,
-  SubagentTreeNodeResponse,
-} from "@azents/public-client";
-
-interface ChatSessionViewProps {
-  handle: string;
-  /** URL-selected AgentSession ID */
-  sessionId: string;
-  /** Agent that owns this Session */
-  agent: AgentResponse;
-  /** Loaded AgentSession metadata */
-  session: AgentSessionResponse;
-  /** Publish connection status to the parent for the sidebar badge */
-  onConnectionStatusChange: (status: ConnectionStatus) => void;
-}
-
-interface SubagentNavigationLinks {
-  currentName: string;
-  currentPath: string;
-  parent: SubagentTreeNodeResponse;
-  root: SubagentTreeNodeResponse;
-}
-
-function flattenSubagentNodes(
-  nodes: SubagentTreeNodeResponse[],
-): SubagentTreeNodeResponse[] {
-  return nodes.flatMap((node) => [
-    node,
-    ...flattenSubagentNodes(node.children ?? []),
-  ]);
-}
-
-function findSubagentNode(
-  nodes: SubagentTreeNodeResponse[],
-  sessionAgentId?: string | null,
-): SubagentTreeNodeResponse | null {
-  if (!sessionAgentId) {
-    return null;
-  }
-  return nodes.find((node) => node.session_agent_id === sessionAgentId) ?? null;
-}
+import type { ChatSessionViewContainerOutput } from "../containers/useChatSessionViewContainer";
 
 function sessionHref(
   handle: string,
@@ -96,84 +43,20 @@ export function ChatSessionView({
   handle,
   sessionId,
   agent,
-  session,
-  onConnectionStatusChange,
-}: ChatSessionViewProps): React.ReactElement {
+  headerSession,
+  chatSession,
+  currentWorkspaceProfile,
+  subscriptionSelection,
+  workspacePanel,
+  subagentNavigation,
+  runtimeDrawerOpened,
+  onSessionTitleChange,
+  onOpenRuntime,
+  onCloseRuntime,
+}: ChatSessionViewContainerOutput): React.ReactElement {
   const t = useTranslations("chat");
   const tAgentDetail = useTranslations("workspace.agents.detail");
-  const theme = useMantineTheme();
-  const isWorkspacePanelDocked = useMediaQuery(
-    `(min-width: ${theme.breakpoints.lg})`,
-  );
-  const [runtimeDrawerOpened, setRuntimeDrawerOpened] = useState(false);
-  const [headerSession, setHeaderSession] =
-    useState<AgentSessionResponse>(session);
-  useEffect(() => {
-    setHeaderSession(session);
-  }, [session]);
-  const output = useChatSessionContainer({
-    sessionId,
-    agent,
-    onConnectionStatusChange,
-  });
-  const currentWorkspaceProfileQuery = trpc.memberProfile.getMyProfile.useQuery(
-    { handle },
-    { retry: false },
-  );
-  const currentWorkspaceProfile =
-    useMemo<CurrentWorkspaceProfile | null>(() => {
-      const profile = currentWorkspaceProfileQuery.data;
-      if (profile == null) {
-        return null;
-      }
-      return { userId: profile.user_id, name: profile.name };
-    }, [currentWorkspaceProfileQuery.data]);
-  const subscriptionSelection = useMemo(
-    () =>
-      resolveComposerSubscriptionSelection(
-        agent.selectable_model_options,
-        output.defaultInferenceProfile.model_target_label,
-      ),
-    [
-      agent.selectable_model_options,
-      output.defaultInferenceProfile.model_target_label,
-    ],
-  );
-  const workspacePanel = useWorkspacePanelContainer({
-    handle,
-    agentId: agent.id,
-    sessionId,
-    autoRefreshVisible: isWorkspacePanelDocked || runtimeDrawerOpened,
-  });
-  const subagentTreePanel = useSubagentTreePanelContainer({
-    agentId: agent.id,
-    sessionId,
-    pollingEnabled: false,
-  });
-  const subagentNavigation = useMemo((): SubagentNavigationLinks | null => {
-    if (subagentTreePanel.state.type !== "LOADED") {
-      return null;
-    }
-    const tree = subagentTreePanel.state.tree;
-    const nodes = flattenSubagentNodes(tree.nodes);
-    const current = findSubagentNode(nodes, tree.current_session_agent_id);
-    const root = findSubagentNode(nodes, tree.root_session_agent_id);
-    const parent = findSubagentNode(nodes, current?.parent_session_agent_id);
-    if (
-      current === null ||
-      root === null ||
-      parent === null ||
-      current.session_agent_id === root.session_agent_id
-    ) {
-      return null;
-    }
-    return {
-      currentName: current.name,
-      currentPath: current.path,
-      parent,
-      root,
-    };
-  }, [subagentTreePanel.state]);
+
   return (
     <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
       <AgentSessionHeader
@@ -181,8 +64,8 @@ export function ChatSessionView({
         agent={agent}
         sessionId={sessionId}
         session={headerSession}
-        onSessionTitleChange={setHeaderSession}
-        onOpenRuntime={() => setRuntimeDrawerOpened(true)}
+        onSessionTitleChange={onSessionTitleChange}
+        onOpenRuntime={onOpenRuntime}
         chatControls={
           subscriptionSelection === null ? null : (
             <ComposerSubscriptionUsagePopoverContainer
@@ -281,48 +164,48 @@ export function ChatSessionView({
       )}
       <Box flex={1} mih={0}>
         <ChatView
-          chatViewState={output.chatViewState}
-          chatTimelineState={output.chatTimelineState}
-          messages={output.messages}
-          timelineEvents={output.timelineEvents}
-          pendingInputBuffers={output.pendingInputBuffers}
-          pendingMailboxEntries={output.pendingMailboxEntries}
+          chatViewState={chatSession.chatViewState}
+          chatTimelineState={chatSession.chatTimelineState}
+          messages={chatSession.messages}
+          timelineEvents={chatSession.timelineEvents}
+          pendingInputBuffers={chatSession.pendingInputBuffers}
+          pendingMailboxEntries={chatSession.pendingMailboxEntries}
           activeAgent={agent}
-          appliedInferenceProfile={output.appliedInferenceProfile}
-          sessionId={output.sessionId}
-          isResponsePending={output.isResponsePending}
-          isModelResponsePending={output.isModelResponsePending}
-          isWritePending={output.isWritePending}
-          lastEventReceivedAt={output.lastEventReceivedAt}
-          liveRun={output.liveRun}
-          tokenUsage={output.tokenUsage}
-          onApplyInferenceProfile={output.onApplyInferenceProfile}
-          defaultInferenceProfile={output.defaultInferenceProfile}
-          onSendInput={output.onSendInput}
-          onDeletePendingInputBuffer={output.onDeletePendingInputBuffer}
-          onClearGoal={output.onClearGoal}
-          onUpdateGoal={output.onUpdateGoal}
-          onPauseGoal={output.onPauseGoal}
-          onResumeGoal={output.onResumeGoal}
-          hasMore={output.hasMore}
-          isLoadingMore={output.isLoadingMore}
-          isLoadingNewer={output.isLoadingNewer}
-          onLoadMore={output.onLoadMore}
-          onLoadNewer={output.onLoadNewer}
-          onResetToLatest={output.onResetToLatest}
-          onSubmitMessageEdit={output.onSubmitMessageEdit}
-          onRetryFailedRun={output.onRetryFailedRun}
-          wasCommandBlocked={output.wasCommandBlocked}
-          isStopAvailable={output.isStopAvailable}
-          isStopPending={output.isStopPending}
-          onStopRequest={output.onStopRequest}
-          inputActions={output.inputActions}
-          authorizationRequests={output.authorizationRequests}
-          onAuthorizationComplete={output.onAuthorizationComplete}
-          actionExecutions={output.actionExecutions}
+          appliedInferenceProfile={chatSession.appliedInferenceProfile}
+          sessionId={chatSession.sessionId}
+          isResponsePending={chatSession.isResponsePending}
+          isModelResponsePending={chatSession.isModelResponsePending}
+          isWritePending={chatSession.isWritePending}
+          lastEventReceivedAt={chatSession.lastEventReceivedAt}
+          liveRun={chatSession.liveRun}
+          tokenUsage={chatSession.tokenUsage}
+          onApplyInferenceProfile={chatSession.onApplyInferenceProfile}
+          defaultInferenceProfile={chatSession.defaultInferenceProfile}
+          onSendInput={chatSession.onSendInput}
+          onDeletePendingInputBuffer={chatSession.onDeletePendingInputBuffer}
+          onClearGoal={chatSession.onClearGoal}
+          onUpdateGoal={chatSession.onUpdateGoal}
+          onPauseGoal={chatSession.onPauseGoal}
+          onResumeGoal={chatSession.onResumeGoal}
+          hasMore={chatSession.hasMore}
+          isLoadingMore={chatSession.isLoadingMore}
+          isLoadingNewer={chatSession.isLoadingNewer}
+          onLoadMore={chatSession.onLoadMore}
+          onLoadNewer={chatSession.onLoadNewer}
+          onResetToLatest={chatSession.onResetToLatest}
+          onSubmitMessageEdit={chatSession.onSubmitMessageEdit}
+          onRetryFailedRun={chatSession.onRetryFailedRun}
+          wasCommandBlocked={chatSession.wasCommandBlocked}
+          isStopAvailable={chatSession.isStopAvailable}
+          isStopPending={chatSession.isStopPending}
+          onStopRequest={chatSession.onStopRequest}
+          inputActions={chatSession.inputActions}
+          authorizationRequests={chatSession.authorizationRequests}
+          onAuthorizationComplete={chatSession.onAuthorizationComplete}
+          actionExecutions={chatSession.actionExecutions}
           workspacePanel={workspacePanel}
-          goal={output.goal}
-          todo={output.todo}
+          goal={chatSession.goal}
+          todo={chatSession.todo}
           currentWorkspaceProfile={currentWorkspaceProfile}
           readOnlyNotice={
             subagentNavigation === null
@@ -334,7 +217,7 @@ export function ChatSessionView({
       <Drawer
         hiddenFrom="lg"
         opened={runtimeDrawerOpened}
-        onClose={() => setRuntimeDrawerOpened(false)}
+        onClose={onCloseRuntime}
         title={t("workspacePanel.title")}
         position="right"
         size="lg"

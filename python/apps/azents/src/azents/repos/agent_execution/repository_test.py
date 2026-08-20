@@ -930,13 +930,81 @@ class TestEventExecutionRepositories:
             rdb_session,
             run_id=pending.id,
             activated_at=activated_at,
+            requested_model_target_label="Quality",
+            requested_reasoning_effort=ModelReasoningEffort.HIGH,
         )
 
         assert activated.status == AgentRunStatus.RUNNING
         assert activated.started_at == activated_at
+        assert activated.requested_model_target_label == "Quality"
+        assert activated.requested_reasoning_effort is ModelReasoningEffort.HIGH
         assert await repo.list_input_event_ids(rdb_session, run_id=pending.id) == [
             event.id
         ]
+
+    async def test_retry_profile_copy_survives_repository_reload(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Copy one failed run's selected profile into its retry run."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
+            rdb_session,
+            "event-runtime-retry-profile",
+        )
+        session_repo = _agent_session_repository()
+        event_session = await session_repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        original = await repo.create_pending(
+            rdb_session,
+            session_id=event_session.id,
+            parent_agent_run_id=None,
+            scheduled_task_cycle_id=None,
+        )
+        await repo.activate_pending(
+            rdb_session,
+            run_id=original.id,
+            activated_at=datetime.datetime.now(datetime.UTC),
+            requested_model_target_label="Quality",
+            requested_reasoning_effort=ModelReasoningEffort.HIGH,
+        )
+        await repo.mark_terminal(
+            rdb_session,
+            original.id,
+            AgentRunStatus.FAILED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+        retry = await repo.create_pending(
+            rdb_session,
+            session_id=event_session.id,
+            parent_agent_run_id=None,
+            scheduled_task_cycle_id=None,
+        )
+        copied = await repo.copy_requested_inference_profile(
+            rdb_session,
+            source_run_id=original.id,
+            target_run_id=retry.id,
+        )
+
+        await rdb_session.commit()
+        rdb_session.expunge_all()
+        reloaded = await AgentRunRepository().get_by_id(
+            rdb_session,
+            copied.id,
+        )
+
+        assert reloaded is not None
+        assert reloaded.status is AgentRunStatus.PENDING
+        assert reloaded.requested_model_target_label == "Quality"
+        assert reloaded.requested_reasoning_effort is ModelReasoningEffort.HIGH
 
     async def test_child_run_parentage_is_independent_of_session_inference_state(
         self,
@@ -1001,6 +1069,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             run_id=child.id,
             activated_at=datetime.datetime.now(datetime.UTC),
+            requested_model_target_label="Quality",
+            requested_reasoning_effort=ModelReasoningEffort.HIGH,
         )
         refreshed_session = await session_repo.get_by_id(
             rdb_session,
@@ -1482,6 +1552,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             run_id=pending.id,
             activated_at=datetime.datetime.now(datetime.UTC),
+            requested_model_target_label="default",
+            requested_reasoning_effort=None,
         )
 
         await rdb_session.refresh(rdb_agent_session)
