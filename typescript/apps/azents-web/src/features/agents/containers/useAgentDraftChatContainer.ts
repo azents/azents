@@ -9,12 +9,19 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
+import { resolveComposerSubscriptionSelection } from "@/features/chat/composerSubscriptionUsage";
+import { useFileUpload } from "@/features/chat/hooks/useFileUpload";
 import { trpc } from "@/trpc/client";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "@/features/agent-workspace/types";
-import type { UploadedFile } from "@/features/chat/hooks/useFileUpload";
+import type { ComposerSubscriptionSelection } from "@/features/chat/composerSubscriptionUsage";
+import type {
+  PendingFile,
+  UploadedFile,
+} from "@/features/chat/hooks/useFileUpload";
+import type { ChatAction } from "@/features/chat/types";
 import type {
   AgentProjectPresetResponse,
   AgentResponse,
@@ -59,7 +66,12 @@ export interface AgentDraftChatContainerOutput {
   agent: AgentResponse;
   sessionScope: AgentDraftSessionScope;
   isWritePending: boolean;
+  isInputUploading: boolean;
+  isMobile: boolean;
   canSendMessage: boolean;
+  pendingFiles: PendingFile[];
+  defaultInferenceProfile: RequestedInferenceProfile;
+  subscriptionSelection: ComposerSubscriptionSelection | null;
   selectedProjectPaths: string[];
   workspaceItems: NewSessionWorkspaceItemState[];
   activeWorktreeItemId: string | null;
@@ -83,11 +95,24 @@ export interface AgentDraftChatContainerOutput {
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
   onSessionScopeChange: (scope: AgentDraftSessionScope) => void;
+  onSendInput: (
+    message: string,
+    action: ChatAction | null,
+    inferenceProfile: RequestedInferenceProfile,
+    attachments?: UploadedFile[],
+  ) => Promise<boolean>;
   onSendMessage: (
     message: string,
     inferenceProfile: RequestedInferenceProfile,
     attachments?: UploadedFile[],
   ) => Promise<boolean>;
+  addFiles: (files: FileList | File[]) => void;
+  removeFile: (id: string) => void;
+  clearFiles: () => void;
+  resetDoneFiles: () => void;
+  uploadAll: (agentId: string) => Promise<UploadedFile[]>;
+  onAfterSend: () => void;
+  onStopRequest: () => void;
 }
 
 type DefaultWorkspaceItemResponse =
@@ -271,6 +296,42 @@ export function useAgentDraftChatContainer(
   const [projectPickerPurpose, setProjectPickerPurpose] =
     useState<ProjectPickerPurpose>("existing_project");
   const defaultsAppliedRef = useRef(false);
+  const {
+    pendingFiles,
+    addFiles,
+    removeFile,
+    clearFiles,
+    resetDoneFiles,
+    uploadAll,
+    isUploading,
+  } = useFileUpload();
+  const isMobile = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      ("ontouchstart" in window || navigator.maxTouchPoints > 0),
+    [],
+  );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const body = document.body;
+    const previousRootOverflow = root.style.overflow;
+    const previousRootOverscrollBehavior = root.style.overscrollBehavior;
+    const previousBodyOverflow = body.style.overflow;
+    const previousBodyOverscrollBehavior = body.style.overscrollBehavior;
+
+    root.style.overflow = "hidden";
+    root.style.overscrollBehavior = "none";
+    body.style.overflow = "hidden";
+    body.style.overscrollBehavior = "none";
+
+    return () => {
+      root.style.overflow = previousRootOverflow;
+      root.style.overscrollBehavior = previousRootOverscrollBehavior;
+      body.style.overflow = previousBodyOverflow;
+      body.style.overscrollBehavior = previousBodyOverscrollBehavior;
+    };
+  }, []);
 
   useEffect(() => {
     setSessionScope(initialSessionScope);
@@ -533,6 +594,40 @@ export function useAgentDraftChatContainer(
       writeInFlight,
     ],
   );
+  const onSendInput = useCallback(
+    async (
+      message: string,
+      action: ChatAction | null,
+      inferenceProfile: RequestedInferenceProfile,
+      attachments?: UploadedFile[],
+    ): Promise<boolean> => {
+      if (action !== null) {
+        return false;
+      }
+      return onSendMessage(message, inferenceProfile, attachments);
+    },
+    [onSendMessage],
+  );
+  const onAfterSend = useCallback((): void => {}, []);
+  const onStopRequest = useCallback((): void => {}, []);
+  const defaultInferenceProfile = useMemo<RequestedInferenceProfile>(
+    () => ({
+      model_target_label: agent.main_model_label,
+      reasoning_effort: agent.model_parameters?.reasoning_effort ?? null,
+    }),
+    [agent.main_model_label, agent.model_parameters?.reasoning_effort],
+  );
+  const subscriptionSelection = useMemo(
+    () =>
+      resolveComposerSubscriptionSelection(
+        agent.selectable_model_options,
+        defaultInferenceProfile.model_target_label,
+      ),
+    [
+      agent.selectable_model_options,
+      defaultInferenceProfile.model_target_label,
+    ],
+  );
 
   const projectPresetState = useMemo<ProjectPresetState>(() => {
     if (projectPresetsQuery.isLoading || projectDefaultsQuery.isLoading) {
@@ -582,16 +677,22 @@ export function useAgentDraftChatContainer(
     gitRefsQuery.isError,
     gitRefsQuery.isFetching,
   ]);
+  const isWritePending =
+    createTeamMessageMutation.isPending ||
+    createUserMessageMutation.isPending ||
+    writeInFlight;
 
   return {
     handle,
     agent,
     sessionScope,
-    isWritePending:
-      createTeamMessageMutation.isPending ||
-      createUserMessageMutation.isPending ||
-      writeInFlight,
+    isWritePending,
+    isInputUploading: isUploading || isWritePending,
+    isMobile,
     canSendMessage,
+    pendingFiles,
+    defaultInferenceProfile,
+    subscriptionSelection,
     selectedProjectPaths,
     workspaceItems,
     activeWorktreeItemId: activeWorktreeItem?.id ?? null,
@@ -615,6 +716,14 @@ export function useAgentDraftChatContainer(
     onRefreshProjectPicker: projectPicker.refresh,
     onStartRuntimeForProjectPicker: projectPicker.startRuntime,
     onSessionScopeChange,
+    onSendInput,
     onSendMessage,
+    addFiles,
+    removeFile,
+    clearFiles,
+    resetDoneFiles,
+    uploadAll,
+    onAfterSend,
+    onStopRequest,
   };
 }
