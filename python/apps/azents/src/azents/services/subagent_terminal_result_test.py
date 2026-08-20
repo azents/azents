@@ -81,6 +81,8 @@ def _run(
         phase=AgentRunPhase.IDLE,
         status=status,
         parent_agent_run_id="parent-run",
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
         active_tool_calls=[],
         retry_state=None,
         last_completed_event_id="event-1",

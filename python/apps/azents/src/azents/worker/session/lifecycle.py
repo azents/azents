@@ -16,7 +16,10 @@ from azents.core.enums import (
     AgentRunStatus,
     MailboxSchedulingMode,
 )
-from azents.core.inference_profile import SessionInferenceState
+from azents.core.inference_profile import (
+    RequestedInferenceProfile,
+    SessionInferenceState,
+)
 from azents.engine.events.types import AgentRunState
 from azents.engine.run.failure import FailedRunRetryState
 from azents.rdb.deps import get_session_manager
@@ -581,8 +584,9 @@ class SessionLifecycleService:
         owner_generation: int,
         run_id: str,
         initial_phase: AgentRunPhase,
+        requested_profile: RequestedInferenceProfile,
     ) -> AgentRunState:
-        """Activate a pending AgentRun with its reconnect-safe initial phase."""
+        """Persist selected profile and activate a reconnect-safe pending run."""
         async with self.session_manager() as db_session:
             await self._lock_owned_session(
                 db_session,
@@ -593,6 +597,8 @@ class SessionLifecycleService:
                 db_session,
                 run_id=run_id,
                 activated_at=datetime.datetime.now(datetime.UTC),
+                requested_model_target_label=requested_profile.model_target_label,
+                requested_reasoning_effort=requested_profile.reasoning_effort,
             )
             if run.session_id != session_id:
                 raise ValueError("AgentRun session mismatch")
