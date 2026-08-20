@@ -141,6 +141,7 @@ def _plan(
             encrypted_credentials="encrypted",
             provider_tenant_id="tenant",
             capabilities=None,
+            provider_configuration=None,
             workspace_handle="workspace",
             agent_id=_AGENT_ID,
             agent_session_id=_SESSION_ID,

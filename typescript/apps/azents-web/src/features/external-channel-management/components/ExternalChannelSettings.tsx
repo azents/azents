@@ -19,6 +19,7 @@ import {
   Radio,
   rem,
   SegmentedControl,
+  Select,
   SimpleGrid,
   Stack,
   Switch,
@@ -41,6 +42,10 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { DiscordSetupGuide } from "@/shared/components/DiscordSetupGuide";
+import {
+  discordThreadAutoArchiveDurationFromConfiguration,
+  discordThreadAutoArchiveDurationFromSelectValue,
+} from "@/shared/lib/discord-thread-auto-archive-duration";
 import { isOneOf } from "@/shared/lib/unknown-value";
 import type { ExternalChannelSettingsContainerOutput } from "../containers/useExternalChannelSettingsContainer";
 import type {
@@ -49,6 +54,7 @@ import type {
   ManifestGuidanceState,
 } from "../types";
 import type {
+  DiscordThreadAutoArchiveDurationMinutes,
   ExternalChannelConnectionStatus,
   ManagedBlock,
   ManagedConnection,
@@ -106,18 +112,69 @@ function capabilityEntries(
   );
 }
 
+function DiscordThreadAutoArchiveDurationSelect({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: DiscordThreadAutoArchiveDurationMinutes;
+  disabled: boolean;
+  onChange: (value: DiscordThreadAutoArchiveDurationMinutes) => void;
+}): React.ReactElement {
+  const t = useTranslations("workspace.agents.externalChannels");
+
+  return (
+    <Select
+      label={t("discordThreadAutoArchiveDuration")}
+      value={String(value)}
+      disabled={disabled}
+      data={[
+        {
+          value: "60",
+          label: t("discordThreadAutoArchiveDurationOptions.oneHour"),
+        },
+        {
+          value: "1440",
+          label: t("discordThreadAutoArchiveDurationOptions.oneDay"),
+        },
+        {
+          value: "4320",
+          label: t("discordThreadAutoArchiveDurationOptions.threeDays"),
+        },
+        {
+          value: "10080",
+          label: t("discordThreadAutoArchiveDurationOptions.sevenDays"),
+        },
+      ]}
+      onChange={(selected) => {
+        const duration =
+          discordThreadAutoArchiveDurationFromSelectValue(selected);
+        if (duration !== null) {
+          onChange(duration);
+        }
+      }}
+    />
+  );
+}
+
 function ConnectionRow({
   connection,
   busy,
   actionsBusy,
+  discordThreadDurationDraft,
+  discordThreadDurationSaved,
   onValidate,
   onEdit,
   onDisconnect,
   onUpdateAccessPolicy,
+  onDiscordThreadDurationChange,
+  onSaveDiscordThreadDuration,
 }: {
   connection: ManagedConnection;
   busy: boolean;
   actionsBusy: boolean;
+  discordThreadDurationDraft: DiscordThreadAutoArchiveDurationMinutes;
+  discordThreadDurationSaved: boolean;
   onValidate: (connection: ManagedConnection) => void;
   onEdit: (connection: ManagedConnection) => void;
   onDisconnect: (connection: ManagedConnection) => void;
@@ -125,9 +182,17 @@ function ConnectionRow({
     connection: ManagedConnection,
     openAccessEnabled: boolean,
   ) => void;
+  onDiscordThreadDurationChange: (
+    duration: DiscordThreadAutoArchiveDurationMinutes,
+  ) => void;
+  onSaveDiscordThreadDuration: () => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents.externalChannels");
   const capabilities = capabilityEntries(connection.capabilities);
+  const currentDiscordThreadDuration =
+    discordThreadAutoArchiveDurationFromConfiguration(
+      connection.provider_config,
+    );
 
   return (
     <Paper
@@ -248,6 +313,37 @@ function ConnectionRow({
             }
           />
         </Stack>
+
+        {connection.provider === "discord" &&
+          connection.status !== "disconnected" && (
+            <Stack gap="xs">
+              <DiscordThreadAutoArchiveDurationSelect
+                value={discordThreadDurationDraft}
+                disabled={actionsBusy}
+                onChange={onDiscordThreadDurationChange}
+              />
+              <Group justify="flex-end" gap="xs">
+                {discordThreadDurationSaved &&
+                  discordThreadDurationDraft ===
+                    currentDiscordThreadDuration && (
+                    <Text size="sm" c="teal">
+                      {t("discordThreadAutoArchiveDurationSaved")}
+                    </Text>
+                  )}
+                <Button
+                  size="xs"
+                  loading={busy}
+                  disabled={
+                    actionsBusy ||
+                    discordThreadDurationDraft === currentDiscordThreadDuration
+                  }
+                  onClick={onSaveDiscordThreadDuration}
+                >
+                  {t("saveChanges")}
+                </Button>
+              </Group>
+            </Stack>
+          )}
 
         <Group justify="flex-end" gap="xs">
           <Button
@@ -806,6 +902,15 @@ function DiscordConnectionDialog({
               onChange({ ...state, targetGuildId: event.currentTarget.value })
             }
           />
+          {state.type === "SETUP" && (
+            <DiscordThreadAutoArchiveDurationSelect
+              value={state.threadAutoArchiveDurationMinutes}
+              disabled={saving}
+              onChange={(threadAutoArchiveDurationMinutes) =>
+                onChange({ ...state, threadAutoArchiveDurationMinutes })
+              }
+            />
+          )}
           <PasswordInput
             label={t("discordBotToken")}
             value={state.botToken}
@@ -839,6 +944,8 @@ export function ExternalChannelSettings({
   actionError,
   actionTarget,
   actionsBusy,
+  discordThreadDurationDrafts,
+  discordThreadDurationSavedConnectionId,
   defaultResponseMode,
   defaultResponseModeDraft,
   defaultResponseModeSaving,
@@ -859,6 +966,8 @@ export function ExternalChannelSettings({
   onValidate,
   onDisconnect,
   onUpdateAccessPolicy,
+  onDiscordThreadDurationChange,
+  onSaveDiscordThreadDuration,
   onRevokeGrant,
   onRemoveBlock,
 }: ExternalChannelSettingsContainerOutput): React.ReactElement {
@@ -1026,9 +1135,24 @@ export function ExternalChannelSettings({
                     connection={connection}
                     busy={actionTarget === connection.id}
                     actionsBusy={actionsBusy}
+                    discordThreadDurationDraft={
+                      discordThreadDurationDrafts[connection.id] ??
+                      discordThreadAutoArchiveDurationFromConfiguration(
+                        connection.provider_config,
+                      )
+                    }
+                    discordThreadDurationSaved={
+                      discordThreadDurationSavedConnectionId === connection.id
+                    }
                     onValidate={onValidate}
                     onEdit={onOpenEdit}
                     onUpdateAccessPolicy={onUpdateAccessPolicy}
+                    onDiscordThreadDurationChange={(duration) =>
+                      onDiscordThreadDurationChange(connection.id, duration)
+                    }
+                    onSaveDiscordThreadDuration={() =>
+                      onSaveDiscordThreadDuration(connection)
+                    }
                     onDisconnect={(selected) =>
                       openConfirm({
                         title: t("disconnect"),

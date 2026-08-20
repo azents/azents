@@ -40,6 +40,8 @@ Method | HTTP request | Description
 [**external_channel_v1_replace_multi_discord_channel_default**](ExternalChannelV1Api.md#external_channel_v1_replace_multi_discord_channel_default) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults/{provider_channel_id} | Replace Multi Discord Channel Default
 [**external_channel_v1_replace_multi_slack_channel_default**](ExternalChannelV1Api.md#external_channel_v1_replace_multi_slack_channel_default) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults/{provider_channel_id} | Replace Multi Slack Channel Default
 [**external_channel_v1_revoke_access_grant**](ExternalChannelV1Api.md#external_channel_v1_revoke_access_grant) | **DELETE** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access/grants/{grant_id} | Revoke Access Grant
+[**external_channel_v1_set_discord_thread_duration**](ExternalChannelV1Api.md#external_channel_v1_set_discord_thread_duration) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord/thread-auto-archive-duration | Set Discord Thread Duration
+[**external_channel_v1_set_multi_discord_thread_duration**](ExternalChannelV1Api.md#external_channel_v1_set_multi_discord_thread_duration) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/thread-auto-archive-duration | Set Multi Discord Thread Duration
 [**external_channel_v1_setup_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/discord | Setup Discord Connection
 [**external_channel_v1_setup_multi_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi | Setup Multi Discord Connection
 [**external_channel_v1_setup_multi_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | Setup Multi Slack Connection
@@ -3050,6 +3052,176 @@ void (empty response body)
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **204** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_set_discord_thread_duration**
+> ManagedConnection external_channel_v1_set_discord_thread_duration(agent_id, connection_id, handle, discord_thread_auto_archive_duration_request)
+
+Set Discord Thread Duration
+
+Replace one dedicated Discord Thread policy without reactivation.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.discord_thread_auto_archive_duration_request import DiscordThreadAutoArchiveDurationRequest
+from azentspublicclient.models.managed_connection import ManagedConnection
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    connection_id = 'connection_id_example' # str | 
+    handle = 'handle_example' # str | 
+    discord_thread_auto_archive_duration_request = azentspublicclient.DiscordThreadAutoArchiveDurationRequest() # DiscordThreadAutoArchiveDurationRequest | 
+
+    try:
+        # Set Discord Thread Duration
+        api_response = api_instance.external_channel_v1_set_discord_thread_duration(agent_id, connection_id, handle, discord_thread_auto_archive_duration_request)
+        print("The response of ExternalChannelV1Api->external_channel_v1_set_discord_thread_duration:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_set_discord_thread_duration: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **connection_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **discord_thread_auto_archive_duration_request** | [**DiscordThreadAutoArchiveDurationRequest**](DiscordThreadAutoArchiveDurationRequest.md)|  | 
+
+### Return type
+
+[**ManagedConnection**](ManagedConnection.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_set_multi_discord_thread_duration**
+> ManagedMultiConnection external_channel_v1_set_multi_discord_thread_duration(connection_id, handle, multi_discord_thread_auto_archive_duration_request)
+
+Set Multi Discord Thread Duration
+
+Replace one Discord Multi App Thread policy without reactivation.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.managed_multi_connection import ManagedMultiConnection
+from azentspublicclient.models.multi_discord_thread_auto_archive_duration_request import MultiDiscordThreadAutoArchiveDurationRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    connection_id = 'connection_id_example' # str | 
+    handle = 'handle_example' # str | 
+    multi_discord_thread_auto_archive_duration_request = azentspublicclient.MultiDiscordThreadAutoArchiveDurationRequest() # MultiDiscordThreadAutoArchiveDurationRequest | 
+
+    try:
+        # Set Multi Discord Thread Duration
+        api_response = api_instance.external_channel_v1_set_multi_discord_thread_duration(connection_id, handle, multi_discord_thread_auto_archive_duration_request)
+        print("The response of ExternalChannelV1Api->external_channel_v1_set_multi_discord_thread_duration:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_set_multi_discord_thread_duration: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **connection_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **multi_discord_thread_auto_archive_duration_request** | [**MultiDiscordThreadAutoArchiveDurationRequest**](MultiDiscordThreadAutoArchiveDurationRequest.md)|  | 
+
+### Return type
+
+[**ManagedMultiConnection**](ManagedMultiConnection.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

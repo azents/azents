@@ -43,6 +43,7 @@ def _plan() -> ProviderEffectPlan:
             encrypted_credentials="encrypted",
             provider_tenant_id="tenant-1",
             capabilities=None,
+            provider_configuration=None,
             workspace_handle="workspace",
             agent_id="agent-1",
             agent_session_id="session-1",

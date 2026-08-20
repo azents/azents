@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.discord_connection_configuration import DiscordConnectionConfiguration
+from azentspublicclient.models.discord_thread_auto_archive_duration_request import DiscordThreadAutoArchiveDurationRequest
 
-class TestDiscordConnectionConfiguration(unittest.TestCase):
-    """DiscordConnectionConfiguration unit test stubs"""
+class TestDiscordThreadAutoArchiveDurationRequest(unittest.TestCase):
+    """DiscordThreadAutoArchiveDurationRequest unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,29 +25,26 @@ class TestDiscordConnectionConfiguration(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> DiscordConnectionConfiguration:
-        """Test DiscordConnectionConfiguration
+    def make_instance(self, include_optional) -> DiscordThreadAutoArchiveDurationRequest:
+        """Test DiscordThreadAutoArchiveDurationRequest
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `DiscordConnectionConfiguration`
+        # uncomment below to create an instance of `DiscordThreadAutoArchiveDurationRequest`
         """
-        model = DiscordConnectionConfiguration()
+        model = DiscordThreadAutoArchiveDurationRequest()
         if include_optional:
-            return DiscordConnectionConfiguration(
-                provider = 'discord',
-                target_guild_id = '',
+            return DiscordThreadAutoArchiveDurationRequest(
                 thread_auto_archive_duration_minutes = 60
             )
         else:
-            return DiscordConnectionConfiguration(
-                target_guild_id = '',
+            return DiscordThreadAutoArchiveDurationRequest(
                 thread_auto_archive_duration_minutes = 60,
         )
         """
 
-    def testDiscordConnectionConfiguration(self):
-        """Test DiscordConnectionConfiguration"""
+    def testDiscordThreadAutoArchiveDurationRequest(self):
+        """Test DiscordThreadAutoArchiveDurationRequest"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

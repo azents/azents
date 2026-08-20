@@ -169,6 +169,8 @@ azentspublicclient/docs/Detail.md
 azentspublicclient/docs/DiscordConnectionConfiguration.md
 azentspublicclient/docs/DiscordConnectionCredentials.md
 azentspublicclient/docs/DiscordConnectionSetupRequest.md
+azentspublicclient/docs/DiscordThreadAutoArchiveDurationMinutes.md
+azentspublicclient/docs/DiscordThreadAutoArchiveDurationRequest.md
 azentspublicclient/docs/DockerContainerProfileSpecV1.md
 azentspublicclient/docs/DockerContainerProfileSpecV2.md
 azentspublicclient/docs/DockerContainerResources.md
@@ -312,6 +314,7 @@ azentspublicclient/docs/ModelReasoningCapabilities.md
 azentspublicclient/docs/ModelReasoningEffort.md
 azentspublicclient/docs/ModelToolCallingCapabilities.md
 azentspublicclient/docs/MultiChannelDefaultRequest.md
+azentspublicclient/docs/MultiDiscordThreadAutoArchiveDurationRequest.md
 azentspublicclient/docs/MultiRouteCreateRequest.md
 azentspublicclient/docs/MyJoinRequestResponse.md
 azentspublicclient/docs/MySystemRolesResponse.md
@@ -645,6 +648,8 @@ azentspublicclient/models/detail.py
 azentspublicclient/models/discord_connection_configuration.py
 azentspublicclient/models/discord_connection_credentials.py
 azentspublicclient/models/discord_connection_setup_request.py
+azentspublicclient/models/discord_thread_auto_archive_duration_minutes.py
+azentspublicclient/models/discord_thread_auto_archive_duration_request.py
 azentspublicclient/models/docker_container_profile_spec_v1.py
 azentspublicclient/models/docker_container_profile_spec_v2.py
 azentspublicclient/models/docker_container_resources.py
@@ -782,6 +787,7 @@ azentspublicclient/models/model_reasoning_capabilities.py
 azentspublicclient/models/model_reasoning_effort.py
 azentspublicclient/models/model_tool_calling_capabilities.py
 azentspublicclient/models/multi_channel_default_request.py
+azentspublicclient/models/multi_discord_thread_auto_archive_duration_request.py
 azentspublicclient/models/multi_route_create_request.py
 azentspublicclient/models/my_join_request_response.py
 azentspublicclient/models/my_system_roles_response.py
@@ -1108,6 +1114,8 @@ azentspublicclient/test/test_detail.py
 azentspublicclient/test/test_discord_connection_configuration.py
 azentspublicclient/test/test_discord_connection_credentials.py
 azentspublicclient/test/test_discord_connection_setup_request.py
+azentspublicclient/test/test_discord_thread_auto_archive_duration_minutes.py
+azentspublicclient/test/test_discord_thread_auto_archive_duration_request.py
 azentspublicclient/test/test_docker_container_profile_spec_v1.py
 azentspublicclient/test/test_docker_container_profile_spec_v2.py
 azentspublicclient/test/test_docker_container_resources.py
@@ -1251,6 +1259,7 @@ azentspublicclient/test/test_model_reasoning_capabilities.py
 azentspublicclient/test/test_model_reasoning_effort.py
 azentspublicclient/test/test_model_tool_calling_capabilities.py
 azentspublicclient/test/test_multi_channel_default_request.py
+azentspublicclient/test/test_multi_discord_thread_auto_archive_duration_request.py
 azentspublicclient/test/test_multi_route_create_request.py
 azentspublicclient/test/test_my_join_request_response.py
 azentspublicclient/test/test_my_system_roles_response.py

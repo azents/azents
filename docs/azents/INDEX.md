@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-19 | 67 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-19 | 151 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-16 | 62 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-20 | 63 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-18 | 20 |
@@ -26,7 +26,7 @@ Design documents are accumulated records and are not listed individually in this
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-18 | 95 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-18 | 68 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-20 | 69 |
 
 ## Living Specs — Flow
 
@@ -39,7 +39,7 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-16 | 34 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-17 | 47 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-20 | 48 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-16 | 37 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-19 | 47 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |
@@ -145,6 +145,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Discord Agent App Routing Requirements](requirements/discord-260726-agent-app-routing.md) | discord-260726 | 2026-07-26 | - |
 | [Discord External Channel Slack Parity Requirements](requirements/discord-260728-slack-parity.md) | discord-260728 | 2026-07-28 | - |
 | [Discord Bot Role Mention Invocation Requirements](requirements/discord-260802-bot-role-mention-invocation.md) | discord-260802 | 2026-08-02 | - |
+| [Discord Thread Automatic Archive Duration Requirements](requirements/discord-260820-thread-auto-archive-duration.md) | discord-260820 | 2026-08-20 | 2026-08-20 |
 | [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
 | [DockerAgentHomeClient sandbox-daemon Sidecar Historical Requirements Reconstruction](requirements/docker-260409-docker-home-sidecar.md) | docker-260409 | 2026-04-09 | 2026-04-09 |
 | [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |
@@ -540,6 +541,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Discord Agent App Routing](adr/discord-260726-agent-app-routing.md)
 - [Discord External Channel Slack Parity ADR](adr/discord-260728-slack-parity.md)
 - [Discord Bot Role Mention Invocation](adr/discord-260802-bot-role-mention-invocation.md)
+- [Discord Thread Automatic Archive Duration Decisions](adr/discord-260820-thread-auto-archive-duration.md)
 - [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
 - [DockerAgentHomeClient sandbox-daemon Sidecar Historical Decision Reconstruction](adr/docker-260409-docker-home-sidecar.md)
 - [Introduce system Docker Sandbox Provider](adr/docker-260523-docker-sandbox.md)

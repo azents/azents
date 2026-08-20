@@ -1331,7 +1331,15 @@
         "discordGuideOAuthScopesLabel": "필수 OAuth2 Scopes",
         "discordGuideBotPermissionsLabel": "필수 Bot Permissions",
         "discordGuideChannelPermissionsLabel": "채널별 확인 권한",
-        "discordGuideLeastPrivilegeNote": "Bot에게 Administrator 또는 Manage Messages 권한을 줄 필요가 없습니다. Presence Intent와 Server Members Intent도 켜지 마세요. 서버 역할에서 권한을 허용했더라도 채널이나 카테고리의 Deny가 우선할 수 있습니다."
+        "discordGuideLeastPrivilegeNote": "Bot에게 Administrator 또는 Manage Messages 권한을 줄 필요가 없습니다. Presence Intent와 Server Members Intent도 켜지 마세요. 서버 역할에서 권한을 허용했더라도 채널이나 카테고리의 Deny가 우선할 수 있습니다.",
+        "discordThreadAutoArchiveDuration": "스레드 자동 보관 기간",
+        "discordThreadAutoArchiveDurationOptions": {
+          "oneHour": "1시간",
+          "oneDay": "1일",
+          "threeDays": "3일",
+          "sevenDays": "7일"
+        },
+        "discordThreadAutoArchiveDurationSaved": "스레드 자동 보관 기간을 저장했습니다."
       },
       "sessionChannels": {
         "title": "채널",
@@ -2109,7 +2117,15 @@
       "discordGuideOAuthScopesLabel": "필수 OAuth2 Scopes",
       "discordGuideBotPermissionsLabel": "필수 Bot Permissions",
       "discordGuideChannelPermissionsLabel": "채널별 확인 권한",
-      "discordGuideLeastPrivilegeNote": "Bot에게 Administrator 또는 Manage Messages 권한을 줄 필요가 없습니다. Presence Intent와 Server Members Intent도 켜지 마세요. 서버 역할에서 권한을 허용했더라도 채널이나 카테고리의 Deny가 우선할 수 있습니다."
+      "discordGuideLeastPrivilegeNote": "Bot에게 Administrator 또는 Manage Messages 권한을 줄 필요가 없습니다. Presence Intent와 Server Members Intent도 켜지 마세요. 서버 역할에서 권한을 허용했더라도 채널이나 카테고리의 Deny가 우선할 수 있습니다.",
+      "discordThreadAutoArchiveDuration": "스레드 자동 보관 기간",
+      "discordThreadAutoArchiveDurationOptions": {
+        "oneHour": "1시간",
+        "oneDay": "1일",
+        "threeDays": "3일",
+        "sevenDays": "7일"
+      },
+      "discordThreadAutoArchiveDurationSaved": "스레드 자동 보관 기간을 저장했습니다."
     }
   },
   "memberProfile": {

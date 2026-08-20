@@ -28,6 +28,7 @@ from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
     _provider_mutation_outcome,
 )
+from azents.services.external_channel.data import DiscordConnectionConfiguration
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
 from azents.services.external_channel.discord_sdk import DiscordSDKUnavailable
 from azents.services.external_channel.provider_effect import (
@@ -126,6 +127,14 @@ def _target(
             "T1" if provider is ExternalChannelProvider.SLACK else "111"
         ),
         capabilities=None,
+        provider_configuration=(
+            None
+            if provider is ExternalChannelProvider.SLACK
+            else DiscordConnectionConfiguration(
+                target_guild_id="111",
+                thread_auto_archive_duration_minutes=1440,
+            )
+        ),
         workspace_handle="team",
         agent_id="agent-1",
         agent_session_id="session-1",

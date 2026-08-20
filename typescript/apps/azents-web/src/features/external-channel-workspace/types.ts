@@ -1,4 +1,5 @@
 import type {
+  DiscordThreadAutoArchiveDurationMinutes,
   ExternalChannelMultiConnectionImpact,
   ExternalChannelMultiRouteImpact,
   ExternalChannelTransport,
@@ -23,6 +24,7 @@ export interface MultiConnectionDraft {
 export interface DiscordMultiConnectionDraft {
   appId: string;
   targetGuildId: string;
+  threadAutoArchiveDurationMinutes: DiscordThreadAutoArchiveDurationMinutes;
   botToken: string;
 }
 

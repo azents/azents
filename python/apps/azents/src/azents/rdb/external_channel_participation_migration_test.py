@@ -18,7 +18,7 @@ from azents.rdb.models.external_channel import (
 
 _PARENT_REVISION = "d0a55d801644"
 _PARTICIPATION_REVISION = "772e7ab22a8e"
-_HEAD_REVISION = "d0e25b8b7f90"
+_HEAD_REVISION = "ff79e1119f1d"
 
 
 @contextmanager

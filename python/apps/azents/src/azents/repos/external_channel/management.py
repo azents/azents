@@ -64,6 +64,10 @@ from azents.repos.external_channel.work_state import (
     ExternalChannelWorkStateStore,
 )
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
+from azents.services.external_channel.data import (
+    DiscordThreadAutoArchiveDurationMinutes,
+    decode_discord_connection_configuration,
+)
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 
@@ -87,6 +91,18 @@ class ExternalChannelBindingMutationScope:
     connection_id: str
     provider_parent_channel_id: str
     resource_type: ExternalChannelResourceType
+
+
+def _set_discord_thread_auto_archive_duration(
+    connection: RDBExternalChannelConnection,
+    *,
+    duration: DiscordThreadAutoArchiveDurationMinutes,
+) -> None:
+    """Replace only the validated Discord Thread policy JSON key."""
+    decode_discord_connection_configuration(connection.provider_config)
+    provider_config = dict(connection.provider_config or {})
+    provider_config["thread_auto_archive_duration_minutes"] = duration
+    connection.provider_config = provider_config
 
 
 class ExternalChannelManagementRepository:
@@ -522,6 +538,30 @@ class ExternalChannelManagementRepository:
         return await self.get_managed_multi_connection(
             session,
             workspace_id=workspace_id,
+            connection_id=connection.id,
+            provider=ExternalChannelProvider.DISCORD,
+        )
+
+    async def update_multi_discord_thread_auto_archive_duration(
+        self,
+        session: AsyncSession,
+        *,
+        connection: RDBExternalChannelConnection,
+        duration: DiscordThreadAutoArchiveDurationMinutes,
+    ) -> ManagedMultiConnection | None:
+        """Update only one locked Discord Multi App's Thread policy."""
+        if (
+            connection.provider is not ExternalChannelProvider.DISCORD
+            or connection.app_mode is not ExternalChannelAppMode.MULTI
+            or connection.status is ExternalChannelConnectionStatus.DISCONNECTED
+        ):
+            return None
+        _set_discord_thread_auto_archive_duration(connection, duration=duration)
+        await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
+        return await self.get_managed_multi_connection(
+            session,
+            workspace_id=connection.workspace_id,
             connection_id=connection.id,
             provider=ExternalChannelProvider.DISCORD,
         )
@@ -1192,6 +1232,36 @@ class ExternalChannelManagementRepository:
             encrypted_credentials=encrypted_credentials,
             provider_config=provider_config,
         )
+        await session.flush()
+        await session.refresh(connection, attribute_names=["updated_at"])
+        return _connection(connection, route)
+
+    async def update_discord_thread_auto_archive_duration(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        connection_id: str,
+        duration: DiscordThreadAutoArchiveDurationMinutes,
+    ) -> ManagedConnection | None:
+        """Update only one dedicated Discord connection's Thread policy."""
+        row = await self.get_connection(
+            session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            connection_id=connection_id,
+            lock=True,
+        )
+        if row is None:
+            return None
+        connection, route = row
+        if (
+            connection.provider is not ExternalChannelProvider.DISCORD
+            or connection.status is ExternalChannelConnectionStatus.DISCONNECTED
+        ):
+            return None
+        _set_discord_thread_auto_archive_duration(connection, duration=duration)
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)

@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION,
+  discordThreadAutoArchiveDurationFromConfiguration,
+} from "@/shared/lib/discord-thread-auto-archive-duration";
 import { trpc } from "@/trpc/client";
 import type {
   DiscordMultiConnectionDraft,
@@ -9,6 +13,7 @@ import type {
   WorkspaceMultiAppsState,
 } from "../types";
 import type {
+  DiscordThreadAutoArchiveDurationMinutes,
   ExternalChannelConnectionStatusSnapshot,
   ExternalChannelMultiConnectionImpact,
   ExternalChannelMultiRouteImpact,
@@ -27,6 +32,8 @@ const EMPTY_DRAFT: MultiConnectionDraft = {
 const EMPTY_DISCORD_DRAFT: DiscordMultiConnectionDraft = {
   appId: "",
   targetGuildId: "",
+  threadAutoArchiveDurationMinutes:
+    DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION,
   botToken: "",
 };
 
@@ -55,6 +62,8 @@ export interface WorkspaceSlackAppsContainerOutput {
   editDraft: MultiConnectionDraft;
   discordSetupDraft: DiscordMultiConnectionDraft;
   discordEditDraft: DiscordMultiConnectionDraft;
+  discordThreadDurationDraft: DiscordThreadAutoArchiveDurationMinutes;
+  discordThreadDurationSaved: boolean;
   agentId: string;
   providerChannelId: string;
   defaultRouteId: string;
@@ -76,6 +85,9 @@ export interface WorkspaceSlackAppsContainerOutput {
   onEditDraftChange: (draft: MultiConnectionDraft) => void;
   onDiscordSetupDraftChange: (draft: DiscordMultiConnectionDraft) => void;
   onDiscordEditDraftChange: (draft: DiscordMultiConnectionDraft) => void;
+  onDiscordThreadDurationChange: (
+    duration: DiscordThreadAutoArchiveDurationMinutes,
+  ) => void;
   onAgentIdChange: (agentId: string) => void;
   onProviderChannelIdChange: (channelId: string) => void;
   onDefaultRouteIdChange: (routeId: string) => void;
@@ -83,6 +95,7 @@ export interface WorkspaceSlackAppsContainerOutput {
   onSaveConnection: () => void;
   onCreateDiscord: () => void;
   onSaveDiscordConnection: () => void;
+  onSaveDiscordThreadDuration: () => void;
   onValidate: () => void;
   onPreviewRouteRemoval: (routeId: string) => void;
   onRemoveRoute: () => void;
@@ -148,6 +161,12 @@ export function useWorkspaceSlackAppsContainer({
     useState<DiscordMultiConnectionDraft>(EMPTY_DISCORD_DRAFT);
   const [discordEditDraft, setDiscordEditDraft] =
     useState<DiscordMultiConnectionDraft>(EMPTY_DISCORD_DRAFT);
+  const [discordThreadDurationDraft, setDiscordThreadDurationDraft] =
+    useState<DiscordThreadAutoArchiveDurationMinutes>(
+      DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION,
+    );
+  const [discordThreadDurationSaved, setDiscordThreadDurationSaved] =
+    useState(false);
   const [agentId, setAgentId] = useState("");
   const [providerChannelId, setProviderChannelId] = useState("");
   const [defaultRouteId, setDefaultRouteId] = useState("");
@@ -262,14 +281,21 @@ export function useWorkspaceSlackAppsContainer({
     if (detailQuery.data?.provider !== "discord") {
       return;
     }
+    const threadAutoArchiveDurationMinutes =
+      discordThreadAutoArchiveDurationFromConfiguration(
+        detailQuery.data.provider_config,
+      );
     setDiscordEditDraft({
       appId: detailQuery.data.provider_app_id ?? "",
       targetGuildId:
         typeof detailQuery.data.provider_config?.target_guild_id === "string"
           ? detailQuery.data.provider_config.target_guild_id
           : "",
+      threadAutoArchiveDurationMinutes,
       botToken: "",
     });
+    setDiscordThreadDurationDraft(threadAutoArchiveDurationMinutes);
+    setDiscordThreadDurationSaved(false);
   }, [detailQuery.data]);
 
   useEffect((): void => {
@@ -330,6 +356,15 @@ export function useWorkspaceSlackAppsContainer({
       onSuccess: (result) => {
         setActionError(validationMessage(result));
         void refresh();
+      },
+      onError: (error) => void fail(error),
+    });
+  const discordThreadDurationMutation =
+    trpc.externalChannel.setMultiDiscordThreadDuration.useMutation({
+      onSuccess: async () => {
+        setActionError(null);
+        await refresh();
+        setDiscordThreadDurationSaved(true);
       },
       onError: (error) => void fail(error),
     });
@@ -405,6 +440,7 @@ export function useWorkspaceSlackAppsContainer({
     createDiscordMutation.isPending ||
     updateMutation.isPending ||
     updateDiscordMutation.isPending ||
+    discordThreadDurationMutation.isPending ||
     validateMutation.isPending ||
     addRouteMutation.isPending ||
     removeRouteMutation.isPending ||
@@ -457,6 +493,8 @@ export function useWorkspaceSlackAppsContainer({
     editDraft,
     discordSetupDraft,
     discordEditDraft,
+    discordThreadDurationDraft,
+    discordThreadDurationSaved,
     agentId,
     providerChannelId,
     defaultRouteId,
@@ -489,11 +527,16 @@ export function useWorkspaceSlackAppsContainer({
       setPreviewDisconnect(false);
       setDefaultMutation(null);
       setActionError(null);
+      setDiscordThreadDurationSaved(false);
     },
     onSetupDraftChange: setSetupDraft,
     onEditDraftChange: setEditDraft,
     onDiscordSetupDraftChange: setDiscordSetupDraft,
     onDiscordEditDraftChange: setDiscordEditDraft,
+    onDiscordThreadDurationChange: (duration) => {
+      setDiscordThreadDurationDraft(duration);
+      setDiscordThreadDurationSaved(false);
+    },
     onAgentIdChange: setAgentId,
     onProviderChannelIdChange: setProviderChannelId,
     onDefaultRouteIdChange: setDefaultRouteId,
@@ -519,6 +562,8 @@ export function useWorkspaceSlackAppsContainer({
           botToken: discordSetupDraft.botToken,
           targetGuildId: discordSetupDraft.targetGuildId,
         },
+        threadAutoArchiveDurationMinutes:
+          discordSetupDraft.threadAutoArchiveDurationMinutes,
       });
     },
     onSaveConnection: () => {
@@ -551,6 +596,25 @@ export function useWorkspaceSlackAppsContainer({
           botToken: discordEditDraft.botToken,
           targetGuildId: discordEditDraft.targetGuildId,
         },
+        threadAutoArchiveDurationMinutes:
+          discordEditDraft.threadAutoArchiveDurationMinutes,
+      });
+    },
+    onSaveDiscordThreadDuration: () => {
+      if (
+        selectedConnectionId === null ||
+        generation === null ||
+        selectedProvider !== "discord"
+      ) {
+        return;
+      }
+      setActionError(null);
+      setDiscordThreadDurationSaved(false);
+      discordThreadDurationMutation.mutate({
+        handle,
+        connectionId: selectedConnectionId,
+        expectedGeneration: generation,
+        threadAutoArchiveDurationMinutes: discordThreadDurationDraft,
       });
     },
     onValidate: () => {

@@ -6039,6 +6039,73 @@
         }
       }
     },
+    "/external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/thread-auto-archive-duration": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Set Multi Discord Thread Duration",
+        "description": "Replace one Discord Multi App Thread policy without reactivation.",
+        "operationId": "external_channel_v1_set_multi_discord_thread_duration",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultiDiscordThreadAutoArchiveDurationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedMultiConnection"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/validate": {
       "post": {
         "tags": [
@@ -7969,6 +8036,82 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ExternalChannelConnectionStatusSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord/thread-auto-archive-duration": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Set Discord Thread Duration",
+        "description": "Replace one dedicated Discord Thread policy without reactivation.",
+        "operationId": "external_channel_v1_set_discord_thread_duration",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Connection Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscordThreadAutoArchiveDurationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedConnection"
                 }
               }
             }
@@ -18809,11 +18952,16 @@
             "type": "string",
             "title": "Target Guild Id",
             "description": "Target Discord Guild snowflake"
+          },
+          "thread_auto_archive_duration_minutes": {
+            "$ref": "#/components/schemas/DiscordThreadAutoArchiveDurationMinutes",
+            "description": "Automatic archive duration for newly created Discord Threads"
           }
         },
         "type": "object",
         "required": [
-          "target_guild_id"
+          "target_guild_id",
+          "thread_auto_archive_duration_minutes"
         ],
         "title": "DiscordConnectionConfiguration",
         "description": "Validated non-secret configuration for one Discord App connection."
@@ -18862,6 +19010,28 @@
         ],
         "title": "DiscordConnectionSetupRequest",
         "description": "Secret-bearing Discord App setup input."
+      },
+      "DiscordThreadAutoArchiveDurationMinutes": {
+        "type": "integer",
+        "enum": [
+          60,
+          1440,
+          4320,
+          10080
+        ]
+      },
+      "DiscordThreadAutoArchiveDurationRequest": {
+        "properties": {
+          "thread_auto_archive_duration_minutes": {
+            "$ref": "#/components/schemas/DiscordThreadAutoArchiveDurationMinutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "thread_auto_archive_duration_minutes"
+        ],
+        "title": "DiscordThreadAutoArchiveDurationRequest",
+        "description": "Required full-value Discord Thread automatic archive request."
       },
       "DockerContainerProfileSpecV1": {
         "properties": {
@@ -24202,6 +24372,25 @@
           "route_id"
         ],
         "title": "MultiChannelDefaultRequest"
+      },
+      "MultiDiscordThreadAutoArchiveDurationRequest": {
+        "properties": {
+          "thread_auto_archive_duration_minutes": {
+            "$ref": "#/components/schemas/DiscordThreadAutoArchiveDurationMinutes"
+          },
+          "expected_generation": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expected Generation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "thread_auto_archive_duration_minutes",
+          "expected_generation"
+        ],
+        "title": "MultiDiscordThreadAutoArchiveDurationRequest",
+        "description": "Generation-fenced Discord Multi App Thread policy request."
       },
       "MultiRouteCreateRequest": {
         "properties": {

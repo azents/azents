@@ -278,6 +278,7 @@ async def test_ensure_thread_creates_or_reuses_one_sdk_thread() -> None:
         parent_channel_id="222",
         root_message_id="333",
         name=None,
+        auto_archive_duration=1440,
     )
 
     assert result == DiscordDeliveryResult(
@@ -293,6 +294,7 @@ async def test_ensure_thread_creates_or_reuses_one_sdk_thread() -> None:
         parent_channel_id="222",
         root_message_id="333",
         name=None,
+        auto_archive_duration=1440,
     )
     assert reused.provider_message_key == "discord-thread:444"
     assert [name for name, _ in session.calls] == ["fetch_root_thread"]
@@ -314,6 +316,7 @@ async def test_ensure_thread_reconciles_ambiguous_sdk_create_without_replay() ->
         parent_channel_id="222",
         root_message_id="333",
         name=None,
+        auto_archive_duration=1440,
     )
 
     assert result.provider_message_key == "discord-thread:444"

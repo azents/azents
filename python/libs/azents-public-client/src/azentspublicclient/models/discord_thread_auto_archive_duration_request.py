@@ -17,31 +17,19 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List, Optional
+from pydantic import BaseModel, ConfigDict
+from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.discord_thread_auto_archive_duration_minutes import DiscordThreadAutoArchiveDurationMinutes
 from typing import Optional, Set
 from typing_extensions import Self
 
-class DiscordConnectionConfiguration(BaseModel):
+class DiscordThreadAutoArchiveDurationRequest(BaseModel):
     """
-    Validated non-secret configuration for one Discord App connection.
+    Required full-value Discord Thread automatic archive request.
     """ # noqa: E501
-    provider: Optional[StrictStr] = 'discord'
-    target_guild_id: StrictStr = Field(description="Target Discord Guild snowflake")
-    thread_auto_archive_duration_minutes: DiscordThreadAutoArchiveDurationMinutes = Field(description="Automatic archive duration for newly created Discord Threads")
+    thread_auto_archive_duration_minutes: DiscordThreadAutoArchiveDurationMinutes
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["provider", "target_guild_id", "thread_auto_archive_duration_minutes"]
-
-    @field_validator('provider')
-    def provider_validate_enum(cls, value):
-        """Validates the enum"""
-        if value is None:
-            return value
-
-        if value not in set(['discord']):
-            raise ValueError("must be one of enum values ('discord')")
-        return value
+    __properties: ClassVar[List[str]] = ["thread_auto_archive_duration_minutes"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -61,7 +49,7 @@ class DiscordConnectionConfiguration(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of DiscordConnectionConfiguration from a JSON string"""
+        """Create an instance of DiscordThreadAutoArchiveDurationRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -93,7 +81,7 @@ class DiscordConnectionConfiguration(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of DiscordConnectionConfiguration from a dict"""
+        """Create an instance of DiscordThreadAutoArchiveDurationRequest from a dict"""
         if obj is None:
             return None
 
@@ -101,8 +89,6 @@ class DiscordConnectionConfiguration(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "provider": obj.get("provider") if obj.get("provider") is not None else 'discord',
-            "target_guild_id": obj.get("target_guild_id"),
             "thread_auto_archive_duration_minutes": obj.get("thread_auto_archive_duration_minutes")
         })
         # store additional fields in additional_properties

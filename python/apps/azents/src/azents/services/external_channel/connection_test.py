@@ -330,7 +330,10 @@ async def test_discord_setup_uses_fixed_gateway_http_ingress_and_redacts_token(
     await service.create_discord_connection(
         workspace_id="workspace-1",
         app_id="discord-app-1",
-        configuration=DiscordConnectionConfiguration(target_guild_id="guild-1"),
+        configuration=DiscordConnectionConfiguration(
+            target_guild_id="guild-1",
+            thread_auto_archive_duration_minutes=1440,
+        ),
         credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
         app_mode=ExternalChannelAppMode.MULTI,
     )
@@ -347,6 +350,7 @@ async def test_discord_setup_uses_fixed_gateway_http_ingress_and_redacts_token(
     assert repository.create.provider_config == {
         "provider": "discord",
         "target_guild_id": "guild-1",
+        "thread_auto_archive_duration_minutes": 1440,
     }
     assert "discord-bot-token" not in repr(repository.create)
     assert session.commits == 1

@@ -64,8 +64,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-16
-spec_version: 62
+last_verified_at: 2026-08-20
+spec_version: 63
 ---
 
 # External Channel
@@ -144,7 +144,7 @@ contain multiple independent bindings.
 
 | Record | Current contract |
 | --- | --- |
-| Connection | Workspace-owned provider App identity, immutable `single` or `multi` mode, encrypted credentials, capability/health snapshot, configuration and App-claim generations, terminal disconnect state, and provider ingress lease/gap state. Slack has one selected HTTP or Socket transport; Discord concurrently uses signed HTTP interactions and a Gateway session. |
+| Connection | Workspace-owned provider App identity, immutable `single` or `multi` mode, encrypted credentials, capability/health snapshot, configuration and App-claim generations, terminal disconnect state, and provider ingress lease/gap state. Slack has one selected HTTP or Socket transport. Discord concurrently uses signed HTTP interactions and a Gateway session, and its typed non-secret configuration owns the target Guild plus the required new-Thread automatic archive duration. |
 | Agent route | Persistent connection-to-Agent relationship. Single Apps require exactly one current route. Multi Apps retain zero or more available or removed catalog routes; immutable Agent identity snapshots preserve history after Agent deletion. Each active dedicated route defaults to open human access and separately defaults to rejecting external bot messages. |
 | Channel default | Multi App channel-to-route preference with exactly one Azents User or provider-principal configuration actor. At most one active default exists per connection and provider parent channel. Replacement or clear terminalizes the old route's parent binding and invalidates its participation setting and pending setup claim rather than silently retargeting them. |
 | Participation setting | One active `channel` or `threads` location and concrete response-mode default for the connection and provider parent channel's selected route. The setting has a generation, exactly one User-or-principal latest actor, and terminal invalidation evidence. It is never inferred from an existing binding. |
@@ -378,6 +378,13 @@ and complete credential replacement, impact previews, and generation-fenced rout
 removal/default mutation/App disconnect. Disconnected Multi Apps remain readable
 historical records but accept no further mutation.
 
+Discord Single and Multi management also expose a connection-wide Thread automatic
+archive duration of 60, 1440, 4320, or 10080 minutes. New and migrated connections use
+1440. A dedicated non-secret mutation changes only this typed provider configuration,
+preserving credentials, callback and Gateway authority, health, routes, Bindings, and
+Sessions. Agent settings keep associated Workspace Multi Apps read-only; their policy
+is managed only from Workspace integrations.
+
 Provider-native Multi setup may create the first channel default with provider-principal
 provenance after showing only routes that principal may invoke. Web replacement or
 clear remains a Workspace Owner/Manager action. Both use the same old-route transition:
@@ -476,6 +483,9 @@ current provider principal and interaction before mutation.
 
 ## Changelog
 
+- **2026-08-20** (spec_version 63) — Added the connection-owned Discord Thread
+  automatic archive duration, one-day migration/default, and non-secret Single/Multi
+  policy updates that preserve active connection authority.
 - **2026-08-16** (spec_version 62) — Added exact opaque Scheduled Task Binding
   authority, signed provider controls, and Scheduled-owned provider projection
   state distinct from Channel Work.

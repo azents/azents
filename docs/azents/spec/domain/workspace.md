@@ -97,8 +97,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-18
-spec_version: 68
+last_verified_at: 2026-08-20
+spec_version: 69
 ---
 
 # Workspace & Membership
@@ -560,6 +560,13 @@ Apps. App mode is immutable, route addition/re-enable remains rollout-gated, and
 destructive route/default/App mutations use the current connection generation.
 Disconnected Multi Apps remain readable history but are not mutable.
 
+Discord Multi App setup defaults its connection-wide new-Thread automatic archive
+duration to one day and offers exactly one hour, one day, three days, or seven days.
+Owners and Managers may replace this non-secret policy with the current management
+generation without replacing credentials or resetting callback, Gateway, identity,
+capability, or health authority. The Select has no helper copy, and disconnected
+history remains read-only.
+
 A provider participant may establish the first channel default only through the
 provider-native selector and only from routes that principal may currently invoke.
 That default stores provider-principal provenance; Web mutations store the authenticated
@@ -748,6 +755,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-20 (spec_version=69)** — Added generation-fenced Discord Multi App
+  Thread automatic archive policy management with a one-day default and no credential
+  or connection lifecycle reset.
 - **2026-08-18 (spec_version=68)** — Removed the deleted ShellEnvironment creation contract,
   clarified that Workspace creation adds only the Workspace and OWNER membership, and repaired the
   dynamic join-page `code_paths` declaration.

@@ -21,7 +21,10 @@ from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import DiscordConnectionCredentials
+from azents.services.external_channel.data import (
+    DiscordConnectionCredentials,
+    decode_discord_connection_configuration,
+)
 from azents.services.external_channel.discord_delivery import DiscordDeliveryClient
 
 
@@ -116,10 +119,18 @@ class ExternalChannelConversationProvisioningService:
             and delivery_channel_id is None
         ):
             try:
+                discord_configuration = decode_discord_connection_configuration(
+                    configuration.provider_config
+                )
                 credentials = self.credentials_codec.decrypt(
                     configuration.encrypted_credentials
                 )
-            except (InvalidToken, UnicodeDecodeError, ValidationError) as error:
+            except (
+                InvalidToken,
+                UnicodeDecodeError,
+                ValidationError,
+                ValueError,
+            ) as error:
                 raise ExternalChannelConversationProvisioningError(
                     category="credentials_invalid",
                     retryable=False,
@@ -137,12 +148,20 @@ class ExternalChannelConversationProvisioningService:
                     category="ownership_stale",
                     retryable=False,
                 )
+            if guild_id != discord_configuration.target_guild_id:
+                raise ExternalChannelConversationProvisioningError(
+                    category="ownership_stale",
+                    retryable=False,
+                )
             result = await self.discord_client.ensure_thread(
                 bot_token=credentials.bot_token,
                 guild_id=guild_id,
                 parent_channel_id=parent_channel_id,
                 root_message_id=root_message_id,
                 name=None,
+                auto_archive_duration=(
+                    discord_configuration.thread_auto_archive_duration_minutes
+                ),
             )
             if result.status != "delivered" or result.provider_message_key is None:
                 raise ExternalChannelConversationProvisioningError(

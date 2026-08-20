@@ -7,6 +7,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
 )
+from azents.services.external_channel.data import DiscordConnectionConfiguration
 from azents.services.external_channel.provider_effect import (
     ProviderEffectOutcome,
     ProviderEffectPlan,
@@ -47,6 +48,10 @@ def test_provider_plan_and_effect_outcome_exclude_durable_identifiers() -> None:
         encrypted_credentials="ciphertext",
         provider_tenant_id="111",
         capabilities=None,
+        provider_configuration=DiscordConnectionConfiguration(
+            target_guild_id="111",
+            thread_auto_archive_duration_minutes=1440,
+        ),
         workspace_handle="workspace",
         agent_id="agent-1",
         agent_session_id="session-1",

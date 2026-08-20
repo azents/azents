@@ -38,7 +38,8 @@ class TestDiscordConnectionSetupRequest(unittest.TestCase):
                 app_id = '0',
                 configuration = azentspublicclient.models.discord_connection_configuration.DiscordConnectionConfiguration(
                     provider = 'discord', 
-                    target_guild_id = '', ),
+                    target_guild_id = '', 
+                    thread_auto_archive_duration_minutes = 60, ),
                 credentials = azentspublicclient.models.discord_connection_credentials.DiscordConnectionCredentials(
                     provider = 'discord', 
                     bot_token = '', )
@@ -48,7 +49,8 @@ class TestDiscordConnectionSetupRequest(unittest.TestCase):
                 app_id = '0',
                 configuration = azentspublicclient.models.discord_connection_configuration.DiscordConnectionConfiguration(
                     provider = 'discord', 
-                    target_guild_id = '', ),
+                    target_guild_id = '', 
+                    thread_auto_archive_duration_minutes = 60, ),
                 credentials = azentspublicclient.models.discord_connection_credentials.DiscordConnectionCredentials(
                     provider = 'discord', 
                     bot_token = '', ),

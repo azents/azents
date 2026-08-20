@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **provider** | **str** |  | [optional] [default to 'discord']
 **target_guild_id** | **str** | Target Discord Guild snowflake | 
+**thread_auto_archive_duration_minutes** | [**DiscordThreadAutoArchiveDurationMinutes**](DiscordThreadAutoArchiveDurationMinutes.md) | Automatic archive duration for newly created Discord Threads | 
 
 ## Example
 

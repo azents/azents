@@ -29,6 +29,9 @@ from azents.repos.mailbox.data import (
     ScheduledTaskTriggerMailboxPayload,
 )
 from azents.repos.scheduled_task_cycle.data import ScheduledTaskCycleState
+from azents.services.external_channel.data import (
+    decode_provider_connection_configuration,
+)
 from azents.services.external_channel.provider_effect import (
     ProviderEffectPlan,
     ProviderOperationKey,
@@ -608,6 +611,12 @@ class ScheduledTaskLifecycleRepository:
                         encrypted_credentials=target.connection.encrypted_credentials,
                         provider_tenant_id=target.connection.provider_tenant_id,
                         capabilities=target.connection.capabilities,
+                        provider_configuration=(
+                            decode_provider_connection_configuration(
+                                target.connection.provider,
+                                target.connection.provider_config,
+                            )
+                        ),
                         workspace_handle=(
                             None
                             if target.workspace is None

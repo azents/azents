@@ -40,6 +40,7 @@ def _target(
         encrypted_credentials="ciphertext",
         provider_tenant_id="T-1",
         capabilities=capabilities,
+        provider_configuration=None,
         workspace_handle=None,
         agent_id=None,
         agent_session_id=None,

@@ -38,8 +38,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-17
-spec_version: 47
+last_verified_at: 2026-08-20
+spec_version: 48
 ---
 
 # External Channel Delivery and Channel Work
@@ -261,9 +261,11 @@ Parent-channel Resources deliver directly to the provider parent channel. Slack 
 `thread_ts`; Discord never provisions a thread. Thread Resources retain the existing
 target behavior: Slack uses the bound root and Discord reuses an existing thread or
 provisions one delivery thread. New Discord provider threads explicitly use the
-minimum supported 60-minute automatic archive duration instead of inheriting the
-parent channel default. All later approval, Session navigation, reply, file, progress,
-and cleanup effects use the Resource's explicit target. A failed or ambiguous thread
+current connection-owned automatic archive duration, restricted to 60, 1440, 4320, or
+10080 minutes and defaulted to 1440 by setup and migration. The value is read for a new
+create operation only. Existing, reused, and reconciled threads are never updated when
+the connection policy changes. All later approval, Session navigation, reply, file,
+progress, and cleanup effects use the Resource's explicit target. A failed or ambiguous thread
 creation returns that immediate outcome and does not cause automatic replay.
 
 After the matching External Channel Session title is successfully committed as
@@ -448,6 +450,9 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-08-20** (spec_version 48) — Made new Discord Thread creation use the
+  connection-owned four-value automatic archive policy while leaving existing and
+  reconciled Threads unchanged.
 - **2026-08-17** (spec_version 47) — Replaced Discord Scheduled Task native edit
   controls with exact Session Web editor links and added provider-authorized
   ephemeral cancellation confirmation; Slack and Web destructive copy now use

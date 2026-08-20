@@ -130,11 +130,15 @@ const args: WorkspaceSlackAppsContainerOutput = {
   discordSetupDraft: {
     appId: "",
     targetGuildId: "",
+    threadAutoArchiveDurationMinutes: 1440,
     botToken: "",
   },
+  discordThreadDurationDraft: 1440,
+  discordThreadDurationSaved: false,
   discordEditDraft: {
     appId: "",
     targetGuildId: "",
+    threadAutoArchiveDurationMinutes: 1440,
     botToken: "",
   },
   agentId: "",
@@ -158,6 +162,7 @@ const args: WorkspaceSlackAppsContainerOutput = {
   onEditDraftChange: noop,
   onDiscordSetupDraftChange: noop,
   onDiscordEditDraftChange: noop,
+  onDiscordThreadDurationChange: noop,
   onAgentIdChange: noop,
   onProviderChannelIdChange: noop,
   onDefaultRouteIdChange: noop,
@@ -165,6 +170,7 @@ const args: WorkspaceSlackAppsContainerOutput = {
   onSaveConnection: noop,
   onCreateDiscord: noop,
   onSaveDiscordConnection: noop,
+  onSaveDiscordThreadDuration: noop,
   onValidate: noop,
   onPreviewRouteRemoval: noop,
   onRemoveRoute: noop,
@@ -210,6 +216,10 @@ export const DiscordActive = {
       transport: "http",
       provider_app_id: "discord_app_01",
       provider_tenant_id: "Discord Engineering Guild",
+      provider_config: {
+        target_guild_id: "guild_01",
+        thread_auto_archive_duration_minutes: 4320,
+      },
     },
     state: {
       type: "LOADED",
@@ -221,6 +231,10 @@ export const DiscordActive = {
           transport: "http",
           provider_app_id: "discord_app_01",
           provider_tenant_id: "Discord Engineering Guild",
+          provider_config: {
+            target_guild_id: "guild_01",
+            thread_auto_archive_duration_minutes: 4320,
+          },
         },
       ],
     },

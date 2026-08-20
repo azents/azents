@@ -134,6 +134,11 @@ async def test_prepare_discord_thread_has_no_db_transition() -> None:
         return_value=ExternalChannelConnectionConfiguration.model_construct(
             provider=ExternalChannelProvider.DISCORD,
             encrypted_credentials="ciphertext",
+            provider_config={
+                "provider": "discord",
+                "target_guild_id": "100",
+                "thread_auto_archive_duration_minutes": 1440,
+            },
         )
     )
     codec = MagicMock()
@@ -180,6 +185,11 @@ async def test_prepare_classifies_invalid_encrypted_credentials() -> None:
         return_value=ExternalChannelConnectionConfiguration.model_construct(
             provider=ExternalChannelProvider.DISCORD,
             encrypted_credentials="ciphertext",
+            provider_config={
+                "provider": "discord",
+                "target_guild_id": "100",
+                "thread_auto_archive_duration_minutes": 1440,
+            },
         )
     )
     codec = MagicMock()
@@ -201,6 +211,11 @@ async def test_prepare_classifies_non_utf8_encrypted_credentials() -> None:
         return_value=ExternalChannelConnectionConfiguration.model_construct(
             provider=ExternalChannelProvider.DISCORD,
             encrypted_credentials="ciphertext",
+            provider_config={
+                "provider": "discord",
+                "target_guild_id": "100",
+                "thread_auto_archive_duration_minutes": 1440,
+            },
         )
     )
     codec = MagicMock()
