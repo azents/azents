@@ -5,7 +5,7 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import NamedTuple, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -53,6 +53,18 @@ from .scheduled import ScheduledToolkit
 _NOW = datetime.datetime(2026, 8, 16, 12, 0, tzinfo=datetime.UTC)
 _RUN_ID = "r" * 32
 _CYCLE_ID = "c" * 32
+
+
+class _ScheduledToolkitFixture(NamedTuple):
+    """Toolkit fixture and its assertion-visible collaborators."""
+
+    toolkit: ScheduledToolkit
+    service: AsyncMock
+    terminal_service: AsyncMock
+    channel_service: AsyncMock
+    transfer_service: AsyncMock
+    cycle_repository: AsyncMock
+    run_repository: AsyncMock
 
 
 @asynccontextmanager
@@ -123,15 +135,7 @@ def _toolkit(
     *,
     active_cycle: ScheduledTaskCycleRecord | None,
     file_transfer_service: AsyncMock | None = None,
-) -> tuple[
-    ScheduledToolkit,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-]:
+) -> _ScheduledToolkitFixture:
     """Compose one Toolkit with assertion-visible collaborators."""
     service = AsyncMock()
     terminal_service = AsyncMock()
@@ -164,14 +168,14 @@ def _toolkit(
         agent_id="a" * 32,
         session_id="s" * 32,
     )
-    return (
-        toolkit,
-        service,
-        terminal_service,
-        channel_service,
-        transfer_service,
-        cycle_repository,
-        run_repository,
+    return _ScheduledToolkitFixture(
+        toolkit=toolkit,
+        service=service,
+        terminal_service=terminal_service,
+        channel_service=channel_service,
+        transfer_service=transfer_service,
+        cycle_repository=cycle_repository,
+        run_repository=run_repository,
     )
 
 

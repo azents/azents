@@ -619,6 +619,8 @@ class AgentRunRepository:
             scheduled_task_cycle_id=create.scheduled_task_cycle_id,
             run_index=run_index,
             parent_agent_run_id=create.parent_agent_run_id,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
             phase=create.phase,
             status=create.status,
         )
@@ -657,6 +659,8 @@ class AgentRunRepository:
             scheduled_task_cycle_id=scheduled_task_cycle_id,
             run_index=run_index,
             parent_agent_run_id=parent_agent_run_id,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
             phase=AgentRunPhase.IDLE,
             status=AgentRunStatus.PENDING,
         )

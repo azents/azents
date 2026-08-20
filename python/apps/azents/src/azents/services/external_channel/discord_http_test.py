@@ -6,7 +6,7 @@ import json
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import NamedTuple, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -19,6 +19,7 @@ from azents.core.enums import (
     ExternalChannelIngressProfile,
     ExternalChannelProvider,
     ExternalChannelTransport,
+    ScheduledTaskScheduleType,
 )
 from azents.core.external_channel_projection import is_external_channel_projection
 from azents.rdb.session import SessionManager
@@ -52,15 +53,38 @@ from azents.services.external_channel.discord_settings_scope import (
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
-from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.scheduled_task.control import (
     ScheduledTaskProviderControlResult,
-    ScheduledTaskProviderControlService,
     build_scheduled_task_control_locator,
 )
 from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
+
+
+def _scheduled_task() -> ScheduledTask:
+    """Build one committed Task snapshot for provider-control tests."""
+    return ScheduledTask(
+        id="task-1",
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+        title="Daily report",
+        objective="Prepare the daily report.",
+        schedule_type=ScheduledTaskScheduleType.ONCE,
+        scheduled_at=_NOW,
+        cron_expression=None,
+        timezone=None,
+        next_eligible_at=_NOW,
+        active_cycle_id=None,
+        active_scheduled_for=None,
+        pending_scheduled_for=None,
+        lease_owner=None,
+        lease_until=None,
+        created_at=_NOW,
+        updated_at=_NOW,
+    )
 
 
 def test_scheduled_task_cancel_confirmation_is_ephemeral() -> None:
@@ -298,14 +322,22 @@ def _configuration(
     )
 
 
+class _DiscordHTTPServiceFixture(NamedTuple):
+    """HTTP service and its assertion-visible collaborator doubles."""
+
+    service: DiscordHTTPAdmissionService
+    repository: _RepositoryDouble
+    shortcut_source: _ShortcutSourceDouble
+
+
 def _service(
     *,
     configuration: ExternalChannelConnectionConfiguration,
     admission: _AdmissionDouble,
+    scheduled_task_control: object,
+    scheduled_task_channel: object,
     cleanup_plans: tuple[str, ...] = (),
-    scheduled_task_control: object | None = None,
-    scheduled_task_channel: object | None = None,
-) -> tuple[DiscordHTTPAdmissionService, _RepositoryDouble, _ShortcutSourceDouble]:
+) -> _DiscordHTTPServiceFixture:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
         yield cast(AsyncSession, object())
@@ -314,8 +346,8 @@ def _service(
     shortcut_source = _ShortcutSourceDouble()
     selector_response = _SelectorResponseDouble()
     settings_response = _SettingsResponseDouble(cleanup_plans=cleanup_plans)
-    return (
-        DiscordHTTPAdmissionService(
+    return _DiscordHTTPServiceFixture(
+        service=DiscordHTTPAdmissionService(
             session_manager=cast(SessionManager[AsyncSession], session_manager),
             repository=cast(ExternalChannelRepository, repository),
             admission_service=cast(ExternalChannelAdmissionService, admission),
@@ -331,17 +363,11 @@ def _service(
                 DiscordSettingsResponseService,
                 settings_response,
             ),
-            scheduled_task_control=cast(
-                ScheduledTaskProviderControlService,
-                scheduled_task_control or SimpleNamespace(),
-            ),
-            scheduled_task_channel=cast(
-                ScheduledTaskChannelService,
-                scheduled_task_channel or SimpleNamespace(),
-            ),
+            scheduled_task_control=scheduled_task_control,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
+            scheduled_task_channel=scheduled_task_channel,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
         ),
-        repository,
-        shortcut_source,
+        repository=repository,
+        shortcut_source=shortcut_source,
     )
 
 
@@ -492,6 +518,8 @@ async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
     service, repository, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
     )
     body = _body()
     timestamp, signature = _signature(private_key, body)
@@ -543,6 +571,8 @@ async def test_message_command_materializes_safe_source_before_claim() -> None:
             app_mode=ExternalChannelAppMode.MULTI,
         ),
         admission=admission,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
     )
     body = _message_command_body()
     timestamp, signature = _signature(private_key, body)
@@ -589,6 +619,8 @@ async def test_selector_component_keeps_scope_and_route_request_local() -> None:
     service, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
     )
     body = _selector_component_body()
     timestamp, signature = _signature(private_key, body)
@@ -628,6 +660,8 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
         cleanup_plans=("presence-delete-1", "progress-delete-1"),
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
     )
     body = _settings_component_body()
     timestamp, signature = _signature(private_key, body)
@@ -662,7 +696,7 @@ async def test_scheduled_task_confirm_delete_prepares_notice_after_ack() -> None
     """Confirmed Discord cancellation returns its ack and a post-response notice."""
     private_key = Ed25519PrivateKey.generate()
     admission = _AdmissionDouble()
-    task = cast(ScheduledTask, SimpleNamespace(id="task-1", binding_id="binding-1"))
+    task = _scheduled_task()
     plan = make_provider_effect_plan("scheduled-task-deletion")
     plan.target.request_payload["control_kind"] = "scheduled_task_deletion"
     scheduled_task_control = SimpleNamespace(
@@ -731,6 +765,8 @@ async def test_ping_skips_durable_interaction_admission() -> None:
     service, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
     )
     body = json.dumps(
         {"id": "ping-1", "type": 1, "application_id": "app-1"},
@@ -759,6 +795,8 @@ async def test_unsupported_or_cross_scope_interactions_fail_before_admission() -
     service, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
     )
     unsupported = _body(interaction_type=99)
     unsupported_timestamp, unsupported_signature = _signature(private_key, unsupported)

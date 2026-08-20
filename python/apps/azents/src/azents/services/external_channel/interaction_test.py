@@ -21,6 +21,7 @@ from azents.core.enums import (
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
+    ScheduledTaskScheduleType,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -75,10 +76,8 @@ from azents.services.external_channel.slack_events import (
     SlackInteractionView,
     SlackInteractionViewResult,
 )
-from azents.services.scheduled_task.channel import ScheduledTaskChannelService
 from azents.services.scheduled_task.control import (
     ScheduledTaskProviderControlResult,
-    ScheduledTaskProviderControlService,
     build_scheduled_task_control_locator,
 )
 from azents.testing.external_channel import make_provider_effect_plan
@@ -86,6 +85,32 @@ from azents.testing.external_channel import make_provider_effect_plan
 _VALID_EXPIRY = datetime.datetime.max.replace(tzinfo=datetime.UTC)
 _EXPIRED_AT = datetime.datetime.min.replace(tzinfo=datetime.UTC)
 _SECRET = "selector-metadata-test-secret"
+
+
+def _scheduled_task() -> ScheduledTask:
+    """Build one committed Task snapshot for provider-control tests."""
+    now = datetime.datetime(2026, 8, 16, tzinfo=datetime.UTC)
+    return ScheduledTask(
+        id="task-1",
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+        title="Daily report",
+        objective="Prepare the daily report.",
+        schedule_type=ScheduledTaskScheduleType.ONCE,
+        scheduled_at=now,
+        cron_expression=None,
+        timezone=None,
+        next_eligible_at=now,
+        active_cycle_id=None,
+        active_scheduled_for=None,
+        pending_scheduled_for=None,
+        lease_owner=None,
+        lease_until=None,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 class _Session:
@@ -292,11 +317,11 @@ def _processor(
     repository: _Repository,
     selector: _Selector,
     slack: _Slack,
+    scheduled_task_control: object,
+    scheduled_task_channel: object,
     replay: _Replay | None = None,
     provider_control: _ProviderControl | None = None,
     participation: object | None = None,
-    scheduled_task_control: object | None = None,
-    scheduled_task_channel: object | None = None,
 ) -> ExternalChannelInteractionProcessor:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -320,14 +345,8 @@ def _processor(
             ExternalChannelParticipationService,
             participation or SimpleNamespace(),
         ),
-        scheduled_task_control=cast(
-            ScheduledTaskProviderControlService,
-            scheduled_task_control or SimpleNamespace(),
-        ),
-        scheduled_task_channel=cast(
-            ScheduledTaskChannelService,
-            scheduled_task_channel or SimpleNamespace(),
-        ),
+        scheduled_task_control=scheduled_task_control,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
+        scheduled_task_channel=scheduled_task_channel,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
         config=cast(
             Config,
             SimpleNamespace(
@@ -386,7 +405,7 @@ async def test_scheduled_task_delete_notifies_bound_slack_channel() -> None:
             error_summary=None,
         )
     )
-    task = cast(ScheduledTask, SimpleNamespace(id="task-1", binding_id="binding-1"))
+    task = _scheduled_task()
     scheduled_task_control = SimpleNamespace(
         mutate=AsyncMock(
             return_value=ScheduledTaskProviderControlResult(
@@ -492,6 +511,8 @@ async def test_settings_submission_revalidates_distinct_origin_interaction() -> 
             )
         ),
         participation=participation,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
     ).process(
         ExternalChannelInteractionHandoff(
             interaction_id=submission.id,
@@ -525,7 +546,13 @@ async def test_shortcut_modal_is_deterministic_and_secret_free() -> None:
     )
     handoff = _handoff()
 
-    await _processor(repository, selector, slack).process(handoff)
+    await _processor(
+        repository,
+        selector,
+        slack,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+    ).process(handoff)
 
     assert len(selector.calls) == 1
     assert selector.calls[0]["selector_interaction_id"] == "interaction-1"
@@ -582,9 +609,13 @@ async def test_block_action_rejects_cross_scope_admission_before_provider_io() -
     repository.interactions[repository.selector.id] = repository.selector
 
     with pytest.raises(ValueError, match="interaction is unavailable"):
-        await _processor(repository, selector, slack).process(
-            _handoff(selector_interaction_id="admission-1")
-        )
+        await _processor(
+            repository,
+            selector,
+            slack,
+            scheduled_task_control=SimpleNamespace(),
+            scheduled_task_channel=SimpleNamespace(),
+        ).process(_handoff(selector_interaction_id="admission-1"))
 
     assert selector.calls == []
     assert slack.views == []
@@ -602,7 +633,13 @@ async def test_empty_catalog_opens_explicit_safe_state() -> None:
         )
     )
 
-    await _processor(repository, selector, slack).process(_handoff())
+    await _processor(
+        repository,
+        selector,
+        slack,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+    ).process(_handoff())
 
     view = slack.views[0]
     assert view.submit_title is None
@@ -651,7 +688,13 @@ async def test_provider_modal_outcomes_are_safe(
     )
 
     with pytest.raises(exception):
-        await _processor(repository, selector, slack).process(_handoff())
+        await _processor(
+            repository,
+            selector,
+            slack,
+            scheduled_task_control=SimpleNamespace(),
+            scheduled_task_channel=SimpleNamespace(),
+        ).process(_handoff())
 
     assert slack.triggers == ["trigger-secret-must-not-persist"]
 
@@ -732,7 +775,13 @@ async def test_navigation_requeries_search_page_and_updates_current_modal() -> N
         offset=0,
     )
 
-    await _processor(repository, selector, slack).process(
+    await _processor(
+        repository,
+        selector,
+        slack,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+    ).process(
         ExternalChannelInteractionHandoff(
             interaction_id="interaction-2",
             handler="selector_navigation",
@@ -804,7 +853,14 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
     )
 
     replay = _Replay()
-    await _processor(repository, selector, slack, replay).process(
+    await _processor(
+        repository,
+        selector,
+        slack,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+        replay=replay,
+    ).process(
         ExternalChannelInteractionHandoff(
             interaction_id="interaction-2",
             handler="selector_submission",
@@ -884,8 +940,10 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
         repository,
         selector,
         slack,
-        replay,
-        provider_control,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+        replay=replay,
+        provider_control=provider_control,
     ).process(
         ExternalChannelInteractionHandoff(
             interaction_id="interaction-2",
@@ -937,7 +995,13 @@ async def test_submission_rejects_tampered_metadata_before_selection() -> None:
     )
 
     with pytest.raises(ValueError, match="metadata"):
-        await _processor(repository, selector, slack).process(
+        await _processor(
+            repository,
+            selector,
+            slack,
+            scheduled_task_control=SimpleNamespace(),
+            scheduled_task_channel=SimpleNamespace(),
+        ).process(
             ExternalChannelInteractionHandoff(
                 interaction_id="interaction-2",
                 handler="selector_submission",
@@ -972,7 +1036,13 @@ async def test_expired_selector_interaction_blocks_modal_before_provider_io() ->
     )
 
     with pytest.raises(ValueError, match="interaction is unavailable"):
-        await _processor(repository, selector, slack).process(_handoff())
+        await _processor(
+            repository,
+            selector,
+            slack,
+            scheduled_task_control=SimpleNamespace(),
+            scheduled_task_channel=SimpleNamespace(),
+        ).process(_handoff())
 
     assert selector.calls == []
     assert slack.views == []

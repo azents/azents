@@ -383,10 +383,10 @@ def _service(
     events: list[str],
     task_repository: _TaskRepository,
     authority_validator: _AuthorityValidator,
+    channel_service: AsyncMock,
     agent_session_repository: _AgentSessionRepository | None = None,
     agent_repository: _AgentRepository | None = None,
     cycle_repository: _CycleRepository | None = None,
-    channel_service: AsyncMock | None = None,
 ) -> ScheduledTaskManagementService:
     return ScheduledTaskManagementService(
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
@@ -412,10 +412,7 @@ def _service(
             ExternalChannelManagementRepository,
             AsyncMock(spec=ExternalChannelManagementRepository),
         ),
-        channel_service=cast(
-            ScheduledTaskChannelService,
-            channel_service or AsyncMock(spec=ScheduledTaskChannelService),
-        ),
+        channel_service=channel_service,
         authority_validator=cast(
             ScheduledTaskAuthorityValidator,
             authority_validator,
@@ -435,6 +432,7 @@ async def test_requested_binding_is_locked_then_hidden_before_create() -> None:
             events,
             unavailable_binding_id=_REQUESTED_BINDING_ID,
         ),
+        channel_service=AsyncMock(spec=ScheduledTaskChannelService),
     )
 
     with pytest.raises(ScheduledTaskManagementUnavailable) as raised:
@@ -497,6 +495,7 @@ async def test_create_rejects_locked_lifecycle_authority(
             events,
             lifecycle_status=agent_status,
         ),
+        channel_service=AsyncMock(spec=ScheduledTaskChannelService),
     )
 
     with pytest.raises(ScheduledTaskManagementUnavailable) as raised:
@@ -527,6 +526,7 @@ async def test_invalid_schedule_remains_distinct_from_binding_unavailability() -
         events=events,
         task_repository=repository,
         authority_validator=_AuthorityValidator(events),
+        channel_service=AsyncMock(spec=ScheduledTaskChannelService),
     )
 
     with pytest.raises(ScheduledTaskManagementUnavailable) as raised:
@@ -555,6 +555,7 @@ async def test_wrong_task_and_wrong_session_are_opaque_not_found() -> None:
         events=events,
         task_repository=_TaskRepository(events, task=None),
         authority_validator=_AuthorityValidator(events),
+        channel_service=AsyncMock(spec=ScheduledTaskChannelService),
     )
     with pytest.raises(ScheduledTaskManagementUnavailable) as missing:
         await missing_service.get(
@@ -570,6 +571,7 @@ async def test_wrong_task_and_wrong_session_are_opaque_not_found() -> None:
         task_repository=_TaskRepository(events, task=_task()),
         authority_validator=_AuthorityValidator(events),
         agent_session_repository=_AgentSessionRepository(agent_id="foreign-agent"),
+        channel_service=AsyncMock(spec=ScheduledTaskChannelService),
     )
     with pytest.raises(ScheduledTaskManagementUnavailable) as wrong_session:
         await wrong_session_service.get(
@@ -596,6 +598,7 @@ async def test_binding_locks_and_authority_precede_shared_mutation_fence() -> No
         events=events,
         task_repository=repository,
         authority_validator=_AuthorityValidator(events),
+        channel_service=AsyncMock(spec=ScheduledTaskChannelService),
     )
 
     with pytest.raises(ScheduledTaskManagementUnavailable) as raised:
@@ -641,6 +644,7 @@ async def test_delete_revalidates_current_binding_before_shared_mutation() -> No
             events,
             unavailable_binding_id=_CURRENT_BINDING_ID,
         ),
+        channel_service=AsyncMock(spec=ScheduledTaskChannelService),
     )
 
     with pytest.raises(ScheduledTaskManagementUnavailable) as raised:
@@ -701,6 +705,7 @@ async def test_started_one_time_edit_is_conflict_after_canonical_lock_order() ->
         task_repository=repository,
         authority_validator=_AuthorityValidator(events),
         cycle_repository=_CycleRepository(events, record=cycle),
+        channel_service=AsyncMock(spec=ScheduledTaskChannelService),
     )
 
     with pytest.raises(ScheduledTaskManagementUnavailable) as raised:

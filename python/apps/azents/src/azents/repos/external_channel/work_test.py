@@ -4,7 +4,7 @@ import datetime
 from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
-from typing import cast
+from typing import NamedTuple, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -51,6 +51,14 @@ from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
 from azents.testing.external_channel import make_provider_effect_plan
+
+
+class _CommitIgnoreResult(NamedTuple):
+    """Committed ignore transition and state-store observation."""
+
+    transition: ChannelActionTransition
+    work: ChannelWorkState
+    update: AsyncMock
 
 
 def _work(
@@ -694,7 +702,7 @@ async def _commit_ignore(
     work: ChannelWorkState,
     *,
     provider: ExternalChannelProvider,
-) -> tuple[ChannelActionTransition, ChannelWorkState, AsyncMock]:
+) -> _CommitIgnoreResult:
     """Execute the canonical ignore mutator through repository authority checks."""
     binding = SimpleNamespace(
         id="binding-1",
@@ -799,7 +807,11 @@ async def _commit_ignore(
         files=(),
         now=datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC),
     )
-    return transition, current, state_store.update
+    return _CommitIgnoreResult(
+        transition=transition,
+        work=current,
+        update=state_store.update,
+    )
 
 
 @pytest.mark.parametrize(

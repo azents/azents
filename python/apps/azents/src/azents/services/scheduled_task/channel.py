@@ -126,14 +126,12 @@ class ScheduledTaskChannelService:
             task_id=task.id,
             binding_id=binding_id,
         )
-        slack_text, slack_blocks = render_scheduled_task_slack_registration(
+        slack_render = render_scheduled_task_slack_registration(
             task=task,
             edit_locator=edit_locator,
             delete_locator=delete_locator,
         )
-        discord_text, discord_embeds = render_scheduled_task_discord_registration(
-            task=task,
-        )
+        discord_render = render_scheduled_task_discord_registration(task=task)
         async with self.session_manager() as session:
             plan = await self.provider_repository.prepare_binding_effect(
                 session,
@@ -143,13 +141,13 @@ class ScheduledTaskChannelService:
                 operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
                 slack_payload={
                     "control_kind": "scheduled_task_registration",
-                    "text": slack_text,
-                    "blocks": slack_blocks,
+                    "text": slack_render.text,
+                    "blocks": slack_render.payload,
                 },
                 discord_payload={
                     "control_kind": "scheduled_task_registration",
-                    "text": discord_text,
-                    "embeds": discord_embeds,
+                    "text": discord_render.text,
+                    "embeds": discord_render.payload,
                     "task_id": task.id,
                     "delete_locator": delete_locator,
                 },
@@ -191,8 +189,8 @@ class ScheduledTaskChannelService:
         binding_id = task.binding_id
         if binding_id is None:
             return None
-        slack_text, slack_blocks = render_scheduled_task_slack_deletion(task=task)
-        discord_text, discord_embeds = render_scheduled_task_discord_deletion(task=task)
+        slack_render = render_scheduled_task_slack_deletion(task=task)
+        discord_render = render_scheduled_task_discord_deletion(task=task)
         async with self.session_manager() as session:
             return await self.provider_repository.prepare_binding_effect(
                 session,
@@ -202,13 +200,13 @@ class ScheduledTaskChannelService:
                 operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
                 slack_payload={
                     "control_kind": "scheduled_task_deletion",
-                    "text": slack_text,
-                    "blocks": slack_blocks,
+                    "text": slack_render.text,
+                    "blocks": slack_render.payload,
                 },
                 discord_payload={
                     "control_kind": "scheduled_task_deletion",
-                    "text": discord_text,
-                    "embeds": discord_embeds,
+                    "text": discord_render.text,
+                    "embeds": discord_render.payload,
                 },
                 operation_seed=f"scheduled-deletion:{task.id}",
             )

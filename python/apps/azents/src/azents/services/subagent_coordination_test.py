@@ -1,7 +1,7 @@
 """Subagent coordination projection service tests."""
 
 import datetime
-from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,9 +27,9 @@ _NOW = datetime.datetime.now(datetime.UTC)
 def _row(
     *,
     path: str,
-    session_run_state: AgentSessionRunState = AgentSessionRunState.IDLE,
-    latest_run_status: AgentRunStatus | None = None,
-    kind: SessionAgentKind = SessionAgentKind.SUBAGENT,
+    session_run_state: AgentSessionRunState,
+    latest_run_status: AgentRunStatus | None,
+    kind: SessionAgentKind,
 ) -> SubagentCoordinationSnapshotRow:
     """Build one repository projection row."""
     slug = path.rsplit("/", 1)[-1]
@@ -48,7 +48,7 @@ def _row(
     )
 
 
-class _Repository:
+class _Repository(SubagentCoordinationRepository):
     """SubagentCoordinationRepository fake."""
 
     def __init__(self, snapshot: SubagentCoordinationSnapshot | None) -> None:
@@ -67,6 +67,11 @@ class _Repository:
         del session
         self.calls.append((current_session_id, configured_capacity))
         return self.snapshot
+
+
+def _session() -> AsyncSession:
+    """Build one unused typed session double."""
+    return AsyncMock(spec=AsyncSession)
 
 
 @pytest.mark.parametrize(
@@ -95,6 +100,7 @@ async def test_list_agents_projects_bounded_statuses(
                 path="/root/child",
                 session_run_state=session_run_state,
                 latest_run_status=latest_run_status,
+                kind=SessionAgentKind.SUBAGENT,
             ),
         ),
         configured_capacity=2,
@@ -103,12 +109,10 @@ async def test_list_agents_projects_bounded_statuses(
         omitted_inactive_count=3,
     )
     repository = _Repository(snapshot)
-    service = SubagentCoordinationService(
-        repository=cast(SubagentCoordinationRepository, repository)
-    )
+    service = SubagentCoordinationService(repository=repository)
 
     projection = await service.list_agents(
-        cast(AsyncSession, object()),
+        _session(),
         current_session_id="child-session",
         configured_capacity=2,
     )
@@ -130,21 +134,25 @@ async def test_list_agents_preserves_root_first_canonical_rows() -> None:
             _row(
                 path="/root",
                 session_run_state=AgentSessionRunState.RUNNING,
+                latest_run_status=None,
                 kind=SessionAgentKind.ROOT,
             ),
-            _row(path="/root/a", latest_run_status=AgentRunStatus.COMPLETED),
+            _row(
+                path="/root/a",
+                session_run_state=AgentSessionRunState.IDLE,
+                latest_run_status=AgentRunStatus.COMPLETED,
+                kind=SessionAgentKind.SUBAGENT,
+            ),
         ),
         configured_capacity=1,
         required_count=0,
         selected_inactive_count=1,
         omitted_inactive_count=4,
     )
-    service = SubagentCoordinationService(
-        repository=cast(SubagentCoordinationRepository, _Repository(snapshot))
-    )
+    service = SubagentCoordinationService(repository=_Repository(snapshot))
 
     projection = await service.list_agents(
-        cast(AsyncSession, object()),
+        _session(),
         current_session_id="root-session",
         configured_capacity=1,
     )
@@ -158,12 +166,10 @@ async def test_list_agents_preserves_root_first_canonical_rows() -> None:
 
 async def test_list_agents_returns_none_for_missing_current_tree() -> None:
     """Propagate missing current/root identity to the Toolkit error boundary."""
-    service = SubagentCoordinationService(
-        repository=cast(SubagentCoordinationRepository, _Repository(None))
-    )
+    service = SubagentCoordinationService(repository=_Repository(None))
 
     projection = await service.list_agents(
-        cast(AsyncSession, object()),
+        _session(),
         current_session_id="missing-session",
         configured_capacity=3,
     )

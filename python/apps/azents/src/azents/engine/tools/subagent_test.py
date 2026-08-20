@@ -7,14 +7,13 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.types import (
     BrokerMessage,
-    SessionBroker,
     SessionStopSignal,
     SessionWakeUp,
 )
@@ -40,17 +39,13 @@ from azents.core.tools import ToolkitStatus, TurnContext
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.types import AgentRunState, Event, UserMessagePayload
 from azents.engine.run.types import FunctionToolError
-from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.agent_mailbox import AgentMailboxService
-from azents.services.mailbox import MailboxEnqueue, MailboxService
+from azents.services.mailbox import MailboxEnqueue
 from azents.services.subagent_coordination import (
     ListedAgent,
-    SubagentCoordinationService,
     SubagentListProjection,
 )
 from azents.testing.model_selection import (
@@ -716,14 +711,18 @@ class _SubagentCoordinationService:
         return self.projection
 
 
-async def _make_toolkit() -> tuple[
-    SubagentToolkit,
-    _AgentSessionRepository,
-    _MailboxService,
-    _Broker,
-    _AgentRunRepository,
-    list[SubagentTreeChanged],
-]:
+class _SubagentToolkitFixture(NamedTuple):
+    """Initialized Toolkit and its assertion-visible collaborators."""
+
+    toolkit: SubagentToolkit
+    agent_session_repository: _AgentSessionRepository
+    mailbox_item_service: _MailboxService
+    broker: _Broker
+    run_repository: _AgentRunRepository
+    published_events: list[SubagentTreeChanged]
+
+
+async def _make_toolkit() -> _SubagentToolkitFixture:
     """Create an initialized SubagentToolkit fixture."""
     agent_session_repository = _AgentSessionRepository()
     mailbox_item_service = _MailboxService()
@@ -734,30 +733,23 @@ async def _make_toolkit() -> tuple[
     agent_repository = _AgentRepository(agent)
     published_events: list[SubagentTreeChanged] = []
 
-    async def publish_event(event: SubagentTreeChanged) -> None:
+    async def publish_event(event: object) -> None:
+        assert isinstance(event, SubagentTreeChanged)
         published_events.append(event)
 
     toolkit = SubagentToolkit(
         session_manager=_session_manager,
-        agent_session_repository=cast(AgentSessionRepository, agent_session_repository),
-        agent_run_repository=cast(AgentRunRepository, run_repository),
-        event_transcript_repository=cast(
-            EventTranscriptRepository, _EventTranscriptRepository()
-        ),
-        subagent_coordination_service=cast(
-            SubagentCoordinationService,
-            coordination_service,
-        ),
+        agent_session_repository=agent_session_repository,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised repository operations.
+        agent_run_repository=run_repository,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised repository operations.
+        event_transcript_repository=_EventTranscriptRepository(),  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised repository operations.
+        subagent_coordination_service=coordination_service,  # ty: ignore[invalid-argument-type] # Focused fake implements list_agents only.
         agent_mailbox_service=AgentMailboxService(
-            mailbox_item_service=cast(MailboxService, mailbox_item_service),
-            agent_session_repository=cast(
-                AgentSessionRepository,
-                agent_session_repository,
-            ),
+            mailbox_item_service=mailbox_item_service,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised mailbox operations.
+            agent_session_repository=agent_session_repository,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised repository operations.
         ),
-        mailbox_item_service=cast(MailboxService, mailbox_item_service),
-        broker=cast(SessionBroker, broker),
-        agent_repository=cast(AgentRepository, agent_repository),
+        mailbox_item_service=mailbox_item_service,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised mailbox operations.
+        broker=broker,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised broker operations.
+        agent_repository=agent_repository,  # ty: ignore[invalid-argument-type] # Focused fake implements the exercised repository operations.
         agent=agent,
         subagent_settings=SubagentSettings(),
     )
@@ -766,18 +758,18 @@ async def _make_toolkit() -> tuple[
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, publish_event),
+            publish_event=publish_event,
             session_id="root-session",
         )
     )
     assert state.status == ToolkitStatus.ENABLED
-    return (
-        toolkit,
-        agent_session_repository,
-        mailbox_item_service,
-        broker,
-        run_repository,
-        published_events,
+    return _SubagentToolkitFixture(
+        toolkit=toolkit,
+        agent_session_repository=agent_session_repository,
+        mailbox_item_service=mailbox_item_service,
+        broker=broker,
+        run_repository=run_repository,
+        published_events=published_events,
     )
 
 
@@ -862,7 +854,7 @@ async def test_subagent_static_prompt_matches_codex_root_prompt() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -881,7 +873,7 @@ async def test_subagent_static_prompt_matches_codex_child_prompt() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id="run-1",
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="child-session",
         )
     )
@@ -976,7 +968,7 @@ async def test_spawn_agent_schema_lists_labels_without_model_identity() -> None:
             workspace_id="workspace-1",
             model="secret-parent-runtime-model",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1012,7 +1004,7 @@ async def test_spawn_agent_schema_explains_inherit_when_no_targets_are_enabled()
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1036,7 +1028,8 @@ async def test_send_message_is_queue_only() -> None:
         published_events,
     ) = await _make_toolkit()
 
-    async def publish_event(event: SubagentTreeChanged) -> None:
+    async def publish_event(event: object) -> None:
+        assert isinstance(event, SubagentTreeChanged)
         published_events.append(event)
 
     state = await toolkit.update_context(
@@ -1044,7 +1037,7 @@ async def test_send_message_is_queue_only() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, publish_event),
+            publish_event=publish_event,
             session_id="root-session",
         )
     )
@@ -1076,7 +1069,7 @@ async def test_send_message_from_child_can_target_root() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="child-session",
         )
     )
@@ -1107,7 +1100,8 @@ async def test_followup_task_wakes_target_child() -> None:
         published_events,
     ) = await _make_toolkit()
 
-    async def publish_event(event: SubagentTreeChanged) -> None:
+    async def publish_event(event: object) -> None:
+        assert isinstance(event, SubagentTreeChanged)
         published_events.append(event)
 
     state = await toolkit.update_context(
@@ -1115,7 +1109,7 @@ async def test_followup_task_wakes_target_child() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, publish_event),
+            publish_event=publish_event,
             session_id="root-session",
         )
     )
@@ -1164,7 +1158,7 @@ async def test_followup_task_rejects_new_activation_over_capacity() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1196,7 +1190,7 @@ async def test_followup_task_allows_already_active_target_at_capacity() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1218,7 +1212,7 @@ async def test_followup_task_from_child_rejects_root() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="child-session",
         )
     )
@@ -1242,7 +1236,7 @@ async def test_interrupt_agent_rejects_root_and_self() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="child-session",
         )
     )
@@ -1265,7 +1259,7 @@ async def test_interrupt_agent_locks_root_before_stopping_child() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1289,7 +1283,7 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="child-session",
         )
     )
@@ -1297,27 +1291,30 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
 
     result = await tool.handler("{}")
 
-    assert json.loads(cast(str, result)) == {
+    assert isinstance(result, str)
+    assert json.loads(result) == {
         "agents": [
             {"agent_name": "/root", "agent_status": "running"},
             {"agent_name": "/root/child", "agent_status": "completed"},
         ]
     }
-    service = cast(_SubagentCoordinationService, toolkit.subagent_coordination_service)
+    service = toolkit.subagent_coordination_service
+    assert isinstance(service, _SubagentCoordinationService)
     assert service.calls == [("child-session", 3)]
 
 
 async def test_list_agents_rejects_missing_current_projection() -> None:
     """list_agents raises when the current SessionAgent cannot be projected."""
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
-    service = cast(_SubagentCoordinationService, toolkit.subagent_coordination_service)
+    service = toolkit.subagent_coordination_service
+    assert isinstance(service, _SubagentCoordinationService)
     service.projection = None
     state = await toolkit.update_context(
         TurnContext(
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1420,7 +1417,7 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1475,7 +1472,7 @@ async def test_spawn_agent_allows_effort_only_override_on_disabled_parent_target
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1699,7 +1696,7 @@ async def test_spawn_agent_rejects_invalid_parent_run(
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=parent_run_id,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1739,7 +1736,7 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1780,7 +1777,7 @@ async def test_spawn_agent_does_not_insert_boundary_without_forked_history() -> 
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1814,7 +1811,7 @@ async def test_spawn_agent_rejects_when_active_subagent_limit_is_reached() -> No
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1872,7 +1869,7 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="root-session",
         )
     )
@@ -1906,7 +1903,7 @@ async def test_spawn_agent_rejects_when_depth_limit_is_reached() -> None:
             workspace_id="workspace-1",
             model="gpt-5.1",
             run_id=_PARENT_RUN_ID,
-            publish_event=cast(Any, _noop_publish),
+            publish_event=_noop_publish,
             session_id="child-session",
         )
     )

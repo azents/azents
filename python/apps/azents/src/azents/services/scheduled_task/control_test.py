@@ -278,19 +278,21 @@ def test_registration_renderers_use_web_edit_and_cancel_controls() -> None:
         binding_id=_BINDING_ID,
     )
 
-    slack_text, slack_blocks = render_scheduled_task_slack_registration(
+    slack_render = render_scheduled_task_slack_registration(
         task=task,
         edit_locator=edit,
         delete_locator=delete,
     )
-    discord_text, embeds = render_scheduled_task_discord_registration(task=task)
+    discord_render = render_scheduled_task_discord_registration(task=task)
     components = render_scheduled_task_discord_controls(
         edit_url="https://azents.example/task",
         delete_locator=delete,
     )
 
-    assert slack_text == "Scheduled Task registered: Daily report"
-    assert discord_text == ""
+    assert slack_render.text == "Scheduled Task registered: Daily report"
+    assert discord_render.text == ""
+    slack_blocks = slack_render.payload
+    embeds = discord_render.payload
     slack_actions = slack_blocks[-1]["elements"]
     assert isinstance(slack_actions, list)
     edit_button, delete_button = slack_actions
@@ -331,11 +333,13 @@ def test_deletion_renderers_notify_without_repeating_task_objective() -> None:
     """Deletion notices identify the removed Task and preserve objective privacy."""
     task = _task()
 
-    slack_text, slack_blocks = render_scheduled_task_slack_deletion(task=task)
-    discord_text, embeds = render_scheduled_task_discord_deletion(task=task)
+    slack_render = render_scheduled_task_slack_deletion(task=task)
+    discord_render = render_scheduled_task_discord_deletion(task=task)
 
-    assert slack_text == "Scheduled Task deleted: Daily report"
-    assert discord_text == ""
+    assert slack_render.text == "Scheduled Task deleted: Daily report"
+    assert discord_render.text == ""
+    slack_blocks = slack_render.payload
+    embeds = discord_render.payload
     assert slack_blocks[0] == {
         "type": "header",
         "text": {
