@@ -19,12 +19,10 @@ from azents.rdb.models.workspace_user import RDBWorkspaceUser
 from .data import (
     AgentToolkit,
     AgentToolkitCreate,
-    AgentToolkitNotFound,
     DuplicateAgentToolkit,
     DuplicateScope,
     DuplicateSlug,
     NotFound,
-    ScopeNotFound,
     ToolkitConfig,
     ToolkitCreate,
     ToolkitScope,
@@ -434,12 +432,8 @@ class AgentToolkitRepository:
         )
 
 
-# Re-export AgentToolkitNotFound as repo-layer error
 __all__ = [
     "AgentToolkitRepository",
     "ToolkitRepository",
     "ToolkitScopeRepository",
-    "AgentToolkitNotFound",
-    "DuplicateAgentToolkit",
-    "ScopeNotFound",
 ]
