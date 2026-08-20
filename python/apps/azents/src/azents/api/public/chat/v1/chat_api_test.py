@@ -10,21 +10,7 @@ from azcommon.result import Failure, Result, Success
 from fastapi import BackgroundTasks, HTTPException
 from pydantic import ValidationError
 
-from azents.api.public.chat.v1.data import (
-    AgentSessionCreateRequest,
-    AgentSessionPinUpdateRequest,
-    AgentSessionTitleUpdateRequest,
-    ChatCommandWriteRequest,
-    ChatEditMessageWriteRequest,
-    ChatInputWriteRequest,
-    ChatMessageWriteRequest,
-    ChatSessionCreateMessageWriteRequest,
-    ChatSessionModelProfileUpdateRequest,
-    CleanupSessionGitWorktreeRequest,
-    GoalStatusUpdateRequest,
-    PrepareSessionWorkingFolderRequest,
-)
-from azents.api.public.chat.v1.routes import (
+from azents.api.public.chat.v1 import (
     # Pin Session-folder retry finalization behavior directly.
     _prepare_session_working_folder_via_rest,
     _run_session_receive_loop,  # Pin health-check generation behavior.
@@ -54,8 +40,22 @@ from azents.api.public.chat.v1.routes import (
     update_agent_session_title,
     update_session_goal_status,
 )
-from azents.api.public.chat.v1.routes import (
+from azents.api.public.chat.v1 import (
     router as chat_router,
+)
+from azents.api.public.chat.v1.data import (
+    AgentSessionCreateRequest,
+    AgentSessionPinUpdateRequest,
+    AgentSessionTitleUpdateRequest,
+    ChatCommandWriteRequest,
+    ChatEditMessageWriteRequest,
+    ChatInputWriteRequest,
+    ChatMessageWriteRequest,
+    ChatSessionCreateMessageWriteRequest,
+    ChatSessionModelProfileUpdateRequest,
+    CleanupSessionGitWorktreeRequest,
+    GoalStatusUpdateRequest,
+    PrepareSessionWorkingFolderRequest,
 )
 from azents.broker.broadcast import (
     WebSocketBroadcast,

@@ -21,7 +21,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_workspace_project import (
     SessionWorkspaceProjectCleanupInProgress,
     SessionWorkspaceProjectRepository,

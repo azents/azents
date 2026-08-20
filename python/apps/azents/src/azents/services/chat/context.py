@@ -37,8 +37,8 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import EventTranscriptRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )

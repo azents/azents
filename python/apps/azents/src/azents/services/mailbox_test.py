@@ -74,7 +74,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.external_channel.data import (
     ExternalChannelMailboxProjectionItem,

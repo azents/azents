@@ -28,7 +28,7 @@ from azents.core.session_lifecycle import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.exchange_file import ExchangeFileRepository

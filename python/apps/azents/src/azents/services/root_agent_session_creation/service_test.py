@@ -28,19 +28,19 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
+from . import RootAgentSessionCreationService
 from .data import (
     AgentDefaultRootWorkspaceIntent,
     ExplicitRootWorkspaceIntent,
     RootAgentSessionCreationResult,
 )
-from .service import RootAgentSessionCreationService
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:

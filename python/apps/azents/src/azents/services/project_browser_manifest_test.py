@@ -23,7 +23,7 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogStatusPatch
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository

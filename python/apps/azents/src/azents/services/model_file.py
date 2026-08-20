@@ -23,7 +23,7 @@ from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.model_file import ModelFileRepository, model_file_storage_key
 from azents.repos.model_file.data import ModelFile, ModelFileCreate
 from azents.repos.workspace_user import WorkspaceUserRepository

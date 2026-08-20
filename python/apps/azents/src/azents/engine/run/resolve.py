@@ -80,8 +80,7 @@ from azents.repos.agent import AgentRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
-from azents.repos.toolkit.agent_toolkit_repository import AgentToolkitRepository
-from azents.repos.toolkit.repository import ToolkitRepository
+from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 from azents.runtime.types import RuntimeDomainConfig
 from azents.services.chatgpt_oauth.data import (
     ProviderRejected as ChatGPTOAuthProviderRejected,

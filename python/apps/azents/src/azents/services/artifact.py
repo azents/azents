@@ -26,7 +26,7 @@ from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.artifact import ArtifactRepository, artifact_storage_key
 from azents.repos.artifact.data import Artifact, ArtifactCreate
 from azents.repos.workspace_user import WorkspaceUserRepository

@@ -54,12 +54,12 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
-from azents.repos.toolkit.repository import ToolkitRepository
+from azents.repos.toolkit import ToolkitRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationClient as ControlRuntimeRunnerOperationClient,

@@ -24,8 +24,8 @@ from azents.repos.action_execution.data import (
     ActionExecutionCreate,
     ActionExecutionEventCreate,
 )
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict

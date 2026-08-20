@@ -31,7 +31,7 @@ from azents.core.session_lifecycle import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.archived_session_retention.data import ArchivedSessionPurgeJob
 from azents.repos.artifact import ArtifactRepository

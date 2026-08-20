@@ -28,7 +28,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
 )
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelConnection,

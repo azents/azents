@@ -15,8 +15,8 @@ from azents.core.session_working_folder import build_session_working_folder_path
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import SessionWorkingFolderContext
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTarget
 
 

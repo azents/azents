@@ -41,8 +41,8 @@ from azents.repos.agent_project_default.data import AgentProjectDefaultCreate
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.chat_write_request.data import ChatWriteRequestCreate
 from azents.repos.mailbox.data import MailboxItem
@@ -54,11 +54,11 @@ from azents.services.exchange_file import (
     ExchangeFileService,
 )
 from azents.services.mailbox import MailboxEnqueue, MailboxService
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
 from azents.services.root_agent_session_creation.data import (
     ExplicitRootWorkspaceIntent,
-)
-from azents.services.root_agent_session_creation.service import (
-    RootAgentSessionCreationService,
 )
 from azents.services.session_git_worktree import (
     ExistingProjectWorkspaceItem,

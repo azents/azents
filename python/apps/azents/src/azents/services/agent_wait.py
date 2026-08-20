@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.engine.events.types import AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.services.mailbox import MailboxService
 
 

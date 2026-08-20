@@ -35,7 +35,7 @@ from azents.repos.agent_decommission_finalizer import (
 )
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.external_channel.data import (

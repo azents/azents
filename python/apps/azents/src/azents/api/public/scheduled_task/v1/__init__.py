@@ -11,7 +11,7 @@ from azents.engine.tools.deps import get_scheduled_task_channel_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.management import (
     ExternalChannelManagementRepository,
 )

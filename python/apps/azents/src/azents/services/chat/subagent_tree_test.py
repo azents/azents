@@ -26,8 +26,8 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.message import MessageRepository
 from azents.repos.scheduled_task.lifecycle import ScheduledTaskLifecycleRepository
@@ -42,7 +42,7 @@ from azents.repos.workspace_user.data import WorkspaceUserCreate
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTargetResolver
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.mailbox import MailboxService
-from azents.services.root_agent_session_creation.service import (
+from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService

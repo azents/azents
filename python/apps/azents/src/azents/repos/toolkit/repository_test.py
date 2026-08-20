@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.toolkit import RDBToolkitConfig
 
+from . import ToolkitRepository
 from .data import ToolkitCreate, ToolkitUpdate
-from .repository import ToolkitRepository
 
 
 class _StopAfterWrite(Exception):

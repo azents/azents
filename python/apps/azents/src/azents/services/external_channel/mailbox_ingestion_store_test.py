@@ -78,7 +78,7 @@ from azents.services.external_channel.participation_state import (
     setup_source_from_projection,
 )
 from azents.services.mailbox import MailboxService
-from azents.services.root_agent_session_creation.service import (
+from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
 from azents.testing.external_channel import make_provider_effect_plan

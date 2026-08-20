@@ -56,7 +56,7 @@ from azents.repos.github_user_installation import (
     GithubUserInstallationRepository,
 )
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
-from azents.repos.toolkit.repository import ToolkitRepository
+from azents.repos.toolkit import ToolkitRepository
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )

@@ -15,8 +15,8 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
 )
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.worker.session.lifecycle import SessionLifecycleService
 from azents.worker.session.recovery import StuckSessionRecovery
 

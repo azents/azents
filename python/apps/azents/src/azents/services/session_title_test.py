@@ -48,8 +48,8 @@ from azents.engine.run.provider_failure import (
 from azents.engine.run.retry_policy import FailedRunRetryPolicy
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.services.session_title import (

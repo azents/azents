@@ -21,7 +21,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_avatar_cleanup import AgentAvatarCleanupRepository
 from azents.repos.agent_avatar_cleanup.data import AgentAvatarCleanupJob
 from azents.repos.agent_execution import EventTranscriptRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.artifact import ArtifactRepository
 from azents.repos.exchange_file import ExchangeFileRepository
 from azents.repos.model_file import ModelFileRepository

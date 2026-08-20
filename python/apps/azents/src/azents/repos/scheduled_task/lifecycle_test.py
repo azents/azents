@@ -23,8 +23,8 @@ from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.scheduled_task import RDBScheduledTask
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItemCreate
 from azents.repos.scheduled_task.data import ScheduledTaskCreate

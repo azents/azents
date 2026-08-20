@@ -26,7 +26,7 @@ from azents.engine.events.types import Event, ExternalChannelMessagePayload
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_session.repository import AgentSessionRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.channel_action import (
     get_discord_delivery_client,

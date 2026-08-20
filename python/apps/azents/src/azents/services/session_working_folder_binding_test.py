@@ -17,8 +17,8 @@ from azents.core.enums import (
 )
 from azents.core.runtime_capabilities import RuntimeCapabilitySnapshot
 from azents.repos.agent.data import Agent
+from azents.repos.agent_session import LockedSessionWorkingFolderBinding
 from azents.repos.agent_session.data import SessionWorkingFolderContext
-from azents.repos.agent_session.repository import LockedSessionWorkingFolderBinding
 from azents.services.agent_runtime.lifecycle_data import RuntimeOperationTarget
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderAuthority,

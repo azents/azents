@@ -54,6 +54,7 @@ from azents.repos.agent_project_default.data import (
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_project_preset.data import AgentProjectPreset
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import (
     AgentSession,
     AgentSessionCreate,
@@ -61,7 +62,6 @@ from azents.repos.agent_session.data import (
     SessionAgent,
     SessionWorkingFolderContext,
 )
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
@@ -83,11 +83,11 @@ from azents.services.mailbox import (
     MailboxEnqueue,
     MailboxService,
 )
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
+)
 from azents.services.root_agent_session_creation.data import (
     ExplicitRootWorkspaceIntent,
-)
-from azents.services.root_agent_session_creation.service import (
-    RootAgentSessionCreationService,
 )
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.scheduled_task.lifecycle import ScheduledTaskLifecycleService

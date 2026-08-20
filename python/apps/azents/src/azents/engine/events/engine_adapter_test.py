@@ -122,8 +122,8 @@ from azents.engine.tooling.tool_search import (
 )
 from azents.engine.tools.xai_image_generation import XaiImagineClientFactory
 from azents.repos.agent_execution.data import AgentRunCreate, EventCreate
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
-from azents.repos.agent_session.repository import AgentSessionRepository
 from azents.repos.agent_session_system_prompt_snapshot import (
     AgentSessionSystemPromptSnapshotRepository,
 )
