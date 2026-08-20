@@ -860,12 +860,12 @@ class RunExecutor:
                 explicit_profile = pending_input.requested_inference_profile
 
             retry_model_target_label = (
-                getattr(recoverable_run, "requested_model_target_label", None)
+                recoverable_run.requested_model_target_label
                 if recoverable_run is not None
                 else None
             )
             retry_reasoning_effort = (
-                getattr(recoverable_run, "requested_reasoning_effort", None)
+                recoverable_run.requested_reasoning_effort
                 if recoverable_run is not None
                 else None
             )
@@ -1168,6 +1168,7 @@ class RunExecutor:
                     if command is not None
                     else AgentRunPhase.IDLE
                 ),
+                requested_profile=selected_profile.profile,
             )
         elif agent_run.status != AgentRunStatus.RUNNING:
             raise ValueError("Recoverable AgentRun is already terminal")

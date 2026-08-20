@@ -14,6 +14,8 @@ from azents.core.enums import (
     AgentRunStatus,
     MailboxSchedulingMode,
 )
+from azents.core.inference_profile import RequestedInferenceProfile
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.types import AgentRunState
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
@@ -323,9 +325,16 @@ class _AgentRunRepository:
         *,
         run_id: str,
         activated_at: datetime,
+        requested_model_target_label: str,
+        requested_reasoning_effort: ModelReasoningEffort | None,
     ) -> AgentRunState:
         """Return the test inherited run selected for activation."""
-        del session, activated_at
+        del (
+            session,
+            activated_at,
+            requested_model_target_label,
+            requested_reasoning_effort,
+        )
         self.activation_run_ids.append(run_id)
         if self.activated_run is None:
             raise AssertionError("Activation test run was not configured")
@@ -371,6 +380,8 @@ def _running_run() -> AgentRunState:
         phase=AgentRunPhase.EXECUTING_TOOLS,
         status=AgentRunStatus.RUNNING,
         parent_agent_run_id=None,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
         active_tool_calls=[],
         parent_result_delivery_state=None,
         parent_result_mailbox_item_id=None,
@@ -711,6 +722,10 @@ async def test_activate_pending_sets_initial_phase_before_commit() -> None:
         owner_generation=0,
         run_id=activated_run.id,
         initial_phase=AgentRunPhase.COMPACTING,
+        requested_profile=RequestedInferenceProfile(
+            model_target_label="default",
+            reasoning_effort=None,
+        ),
     )
 
     assert run.phase == AgentRunPhase.COMPACTING
@@ -740,6 +755,10 @@ async def test_activate_pending_rejects_session_mismatch() -> None:
             owner_generation=0,
             run_id=activated_run.id,
             initial_phase=AgentRunPhase.COMPACTING,
+            requested_profile=RequestedInferenceProfile(
+                model_target_label="default",
+                reasoning_effort=None,
+            ),
         )
 
     assert agent_run_repository.activation_run_ids == [activated_run.id]

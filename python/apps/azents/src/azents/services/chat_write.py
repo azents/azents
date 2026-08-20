@@ -472,6 +472,11 @@ class ChatWriteService:
                     parent_agent_run_id=None,
                     scheduled_task_cycle_id=None,
                 )
+                await self.agent_run_repository.copy_requested_inference_profile(
+                    session,
+                    source_run_id=original_run.id,
+                    target_run_id=retry_run.id,
+                )
                 await self.agent_run_repository.associate_input_events(
                     session,
                     run_id=retry_run.id,

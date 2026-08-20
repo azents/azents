@@ -26,8 +26,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-08-18
-spec_version: 28
+last_verified_at: 2026-08-20
+spec_version: 29
 ---
 
 # Run Resume
@@ -272,9 +272,9 @@ worker instead of writing durable failed history.
 
 ## Inference Profile Recovery
 
-Pending and running `AgentRun` rows are active recovery sources. Recovery claims the existing run and its ordered input-event associations rather than creating a new run boundary. The Session current inference snapshot is the turn execution authority: it contains requested label, resolved physical selection, effort, effective limits, and resolution time. Recovery must not overwrite it from older run-owned provenance. A pending normal input resolves during preparation; successful preparation atomically updates the Session snapshot with canonical events and buffer deletion. A handled resolution failure preserves the previous snapshot, appends a deterministic user-safe error, consumes the failed head, and completes the active run without retry. A later profile change within a running run updates the Session snapshot for the next turn and rebuilds that same run's request.
+Pending and running `AgentRun` rows are active recovery sources. Recovery claims the existing run and its ordered input-event associations rather than creating a new run boundary. The Session current inference snapshot is the turn execution authority: it contains the resolved physical selection, effort, effective limits, and resolution time. A pending run independently stores the requested model target label and nullable reasoning effort selected for its first activation. Profile selection is finalized before activation, and the owner-generation-locked activation transaction persists that requested profile with the pending-to-running transition. Recovery uses that durable requested profile to select a recovered pending run's original inference intent; it never reconstructs Session resolved state from it. A pending normal input resolves during preparation; successful preparation atomically updates the Session snapshot with canonical events and buffer deletion. A handled resolution failure preserves the previous snapshot, appends a deterministic user-safe error, consumes the failed head, and completes the active run without retry. A later profile change within a running run updates the Session snapshot for the next turn and rebuilds that same run's request.
 
-Manual failed-run retry is a distinct new pending run. It copies the original requested profile and ordered input associations, marks source `retry_original`, and leaves resolved provenance empty so current Agent routing is resolved once at activation. The first child subagent run is different: it is precreated with a parent run id and a complete resolved snapshot, effort, and limits. It uses source `parent_run` for exact inheritance or `spawn_override` for a statically resolved non-full-history override. Recovery activates either pre-resolved source without re-routing the requested label, so first-run execution does not depend on whether the original target label still exists. Later child runs resolve the stored session-last-used label normally.
+Manual failed-run retry is a distinct new pending run. It copies the original requested profile and ordered input associations before recovery can claim it, then resolves the current Agent routing once at activation. The first child subagent run is precreated with a parent run id and a complete Session inference snapshot. It uses exact inheritance or a statically resolved non-full-history override for its initial Session state. Later child runs resolve the stored session-last-used label normally.
 
 ## Tool Recovery
 
@@ -322,6 +322,7 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-08-20** (spec_version 29) — Persisted each pending run's selected requested inference profile at activation and copied it into manual failed-run retries, so recovery retains the original profile intent without restoring resolved Session state from the run.
 - **2026-08-12** (spec_version 27) — Added Agent-managed worktree bridge recovery: cancelled
   no-replay terminal continuation, atomic history/continuation handoff, predecessor-Run fencing,
   and idempotent fresh-Run promotion.

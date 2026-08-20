@@ -425,6 +425,8 @@ def _running_run(session_id: str) -> AgentRunState:
         phase=AgentRunPhase.STREAMING_MODEL,
         status=AgentRunStatus.RUNNING,
         parent_agent_run_id=None,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
         active_tool_calls=[
             ActiveToolCall(
                 call_id="call-1",

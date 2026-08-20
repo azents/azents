@@ -172,6 +172,8 @@ class _RunRepo:
             phase=self.phases[-1] if self.phases else AgentRunPhase.IDLE,
             status=self.terminal or AgentRunStatus.RUNNING,
             parent_agent_run_id=None,
+            requested_model_target_label=None,
+            requested_reasoning_effort=None,
             active_tool_calls=list(self.active_tool_calls),
             parent_result_delivery_state=None,
             parent_result_mailbox_item_id=None,
