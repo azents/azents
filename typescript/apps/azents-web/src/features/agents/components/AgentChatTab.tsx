@@ -9,7 +9,7 @@
 
 import { Box, Center, Loader, Text } from "@mantine/core";
 import { useEffect } from "react";
-import { ChatSessionView } from "@/features/chat/components/ChatSessionView";
+import { ChatSessionViewContainer } from "@/features/chat/containers/useChatSessionViewContainer";
 import styles from "./AgentChatTab.module.css";
 import type { AgentChatContainerOutput } from "../containers/useAgentChatContainer";
 
@@ -71,7 +71,7 @@ export function AgentChatTab(
 
   return (
     <Box className={styles.chatArea} style={{ flex: 1, minHeight: 0 }}>
-      <ChatSessionView
+      <ChatSessionViewContainer
         key={mountKey}
         handle={props.handle}
         sessionId={mountSessionId}
