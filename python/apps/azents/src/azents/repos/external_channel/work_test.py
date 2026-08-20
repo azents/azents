@@ -171,6 +171,11 @@ async def test_direct_control_ignores_connection_health_status() -> None:
         encrypted_credentials="ciphertext-only",
         provider_tenant_id="tenant-1",
         capabilities={},
+        provider_config={
+            "provider": "discord",
+            "target_guild_id": "tenant-1",
+            "thread_auto_archive_duration_minutes": 1440,
+        },
     )
     session = MagicMock(spec=AsyncSession)
     session.scalar = AsyncMock(return_value=connection)
@@ -593,6 +598,7 @@ async def test_continue_after_finished_work_creates_replacement_tracker() -> Non
         encrypted_credentials="ciphertext",
         provider_tenant_id="tenant-1",
         capabilities={},
+        provider_config=None,
     )
     agent = SimpleNamespace(
         id="agent-1",
@@ -705,6 +711,15 @@ async def _commit_ignore(
             "T1" if provider is ExternalChannelProvider.SLACK else "111"
         ),
         capabilities=None,
+        provider_config=(
+            None
+            if provider is ExternalChannelProvider.SLACK
+            else {
+                "provider": "discord",
+                "target_guild_id": "111",
+                "thread_auto_archive_duration_minutes": 1440,
+            }
+        ),
     )
     agent = SimpleNamespace(
         id="agent-1",
