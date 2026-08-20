@@ -91,6 +91,7 @@ def render_summary(
     junit_path: Path,
     timings_path: Path | None = None,
     image_build_timings_path: Path | None = None,
+    lane_duration_path: Path | None = None,
 ) -> str:
     """Render one lane summary without including failure messages or logs."""
     lines = [
@@ -99,6 +100,14 @@ def render_summary(
         f"Job result: `{_escape_text(job_result)}`",
         "",
     ]
+    if lane_duration_path is not None and lane_duration_path.is_file():
+        lines.extend(
+            [
+                "E2E execution time: "
+                f"**{_format_duration(_parse_duration(lane_duration_path))}**",
+                "",
+            ]
+        )
     if not junit_path.is_file():
         lines.extend(
             [
@@ -344,6 +353,24 @@ def _inline_code(value: str) -> str:
     return f"<code>{_escape_text(value)}</code>"
 
 
+def _parse_duration(path: Path) -> float:
+    duration_seconds = float(path.read_text(encoding="utf-8").strip())
+    if duration_seconds < 0:
+        raise ValueError("lane duration must not be negative")
+    return duration_seconds
+
+
+def _format_duration(duration_seconds: float) -> str:
+    rounded_seconds = round(duration_seconds)
+    hours, remainder = divmod(rounded_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes}m {seconds}s"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -356,6 +383,7 @@ def _build_parser() -> argparse.ArgumentParser:
     summarize.add_argument("--junit", type=Path, required=True)
     summarize.add_argument("--timings", type=Path)
     summarize.add_argument("--image-build-timings", type=Path)
+    summarize.add_argument("--lane-duration", type=Path)
     summarize.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -375,6 +403,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             junit_path=args.junit,
             timings_path=args.timings,
             image_build_timings_path=args.image_build_timings,
+            lane_duration_path=args.lane_duration,
         ),
         encoding="utf-8",
     )
