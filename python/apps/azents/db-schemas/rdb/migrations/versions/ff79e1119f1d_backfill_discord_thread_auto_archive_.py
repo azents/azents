@@ -5,7 +5,7 @@ from typing import Sequence
 from alembic import op
 
 revision: str = "ff79e1119f1d"
-down_revision: str | Sequence[str] | None = "936373d16d53"
+down_revision: str | Sequence[str] | None = "d0e25b8b7f90"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

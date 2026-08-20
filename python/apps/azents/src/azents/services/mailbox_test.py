@@ -2141,6 +2141,8 @@ class TestMailboxService:
                 session,
                 run_id=predecessor.id,
                 activated_at=tznow(),
+                requested_model_target_label="default",
+                requested_reasoning_effort=None,
             )
             buffer = await MailboxRepository().create(
                 session,

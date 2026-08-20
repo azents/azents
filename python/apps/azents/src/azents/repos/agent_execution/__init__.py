@@ -18,6 +18,7 @@ from azents.core.enums import (
     EventKind,
     SessionAgentKind,
 )
+from azents.core.llm_catalog import ModelReasoningEffort
 from azents.core.vfs import VfsProjection
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.types import (
@@ -710,8 +711,10 @@ class AgentRunRepository:
         *,
         run_id: str,
         activated_at: datetime.datetime,
+        requested_model_target_label: str,
+        requested_reasoning_effort: ModelReasoningEffort | None,
     ) -> AgentRunState:
-        """Activate one model-independent pending run."""
+        """Persist its selected profile and activate one pending run."""
         rdb = await session.scalar(
             sa.select(RDBAgentRun)
             .where(
@@ -726,6 +729,8 @@ class AgentRunRepository:
             session,
             session_id=rdb.session_id,
         )
+        rdb.requested_model_target_label = requested_model_target_label
+        rdb.requested_reasoning_effort = requested_reasoning_effort
         rdb.status = AgentRunStatus.RUNNING
         rdb.started_at = activated_at
         await session.flush()
@@ -735,6 +740,34 @@ class AgentRunRepository:
         )
         await session.refresh(rdb)
         return self._build(rdb)
+
+    async def copy_requested_inference_profile(
+        self,
+        session: AsyncSession,
+        *,
+        source_run_id: str,
+        target_run_id: str,
+    ) -> AgentRunState:
+        """Copy the original requested profile to a retry pending run."""
+        source = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(RDBAgentRun.id == source_run_id)
+            .with_for_update()
+        )
+        target = await session.scalar(
+            sa.select(RDBAgentRun)
+            .where(RDBAgentRun.id == target_run_id)
+            .with_for_update()
+        )
+        if source is None or target is None:
+            raise ValueError("AgentRun not found")
+        if source.session_id != target.session_id:
+            raise ValueError("AgentRun session mismatch")
+        target.requested_model_target_label = source.requested_model_target_label
+        target.requested_reasoning_effort = source.requested_reasoning_effort
+        await session.flush()
+        await session.refresh(target)
+        return self._build(target)
 
     async def associate_input_events(
         self,
@@ -1428,6 +1461,8 @@ class AgentRunRepository:
             phase=rdb.phase,
             status=rdb.status,
             parent_agent_run_id=rdb.parent_agent_run_id,
+            requested_model_target_label=rdb.requested_model_target_label,
+            requested_reasoning_effort=rdb.requested_reasoning_effort,
             active_tool_calls=active_tool_calls,
             retry_state=FailedRunRetryState.model_validate(rdb.retry_state)
             if rdb.retry_state is not None

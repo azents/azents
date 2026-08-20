@@ -10,7 +10,7 @@ from testcontainers.postgres import PostgresContainer
 
 from azents.consts import PROJECT_ROOT
 
-_PARENT_REVISION = "936373d16d53"
+_PARENT_REVISION = "d0e25b8b7f90"
 _POLICY_REVISION = "ff79e1119f1d"
 
 

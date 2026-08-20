@@ -24,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-17
-spec_version: 30
+last_verified_at: 2026-08-20
+spec_version: 31
 ---
 
 # E2E Primary Test Strategy
@@ -198,6 +198,9 @@ Always-on required CI does not depend on external credentials.
   scenarios that were outside required CI are not retained.
 - Worktree-built Server, Runtime Runner, Docker Runtime Provider, Main Web, and
   Admin Web E2E images import image-specific BuildKit GitHub Actions cache scopes.
+  Independent images for the selected CI suite build concurrently inside each lane;
+  focused local runs retain lazy per-image builds unless they explicitly select a CI
+  image-build profile.
   Only `main` push jobs export cache, with one existing lane owning each scope;
   pull request jobs import without exporting. E2E artifacts include safe per-image
   build timing metadata and Buildx cache disk usage, but never cache credentials or

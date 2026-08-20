@@ -295,6 +295,7 @@ class _SessionLifecycle:
         self.pending_run_create_calls = 0
         self.activation_calls = 0
         self.activation_phases: list[AgentRunPhase] = []
+        self.activation_profiles: list[RequestedInferenceProfile] = []
         self.inherited_activation_calls = 0
         self.cancelled_pending_run_ids: list[str] = []
         self.completed_bridge_predecessors: list[str] = []
@@ -470,11 +471,13 @@ class _SessionLifecycle:
         owner_generation: int,
         run_id: str,
         initial_phase: AgentRunPhase,
+        requested_profile: RequestedInferenceProfile,
     ) -> _PendingRun:
         """Accept activation before provider invocation."""
         del session_id, owner_generation, run_id
         self.activation_calls += 1
         self.activation_phases.append(initial_phase)
+        self.activation_profiles.append(requested_profile)
         if self.order is not None:
             self.order.append("activate_pending")
         return _PendingRun(
@@ -2030,6 +2033,8 @@ async def test_execute_uses_atomic_scheduled_admission(
         phase=AgentRunPhase.IDLE,
         status=AgentRunStatus.PENDING,
         parent_agent_run_id=None,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
         active_tool_calls=[],
         parent_result_delivery_state=None,
         parent_result_mailbox_item_id=None,
@@ -2103,6 +2108,12 @@ async def test_execute_uses_atomic_scheduled_admission(
     ]
     assert lifecycle.pending_run_create_calls == 0
     assert lifecycle.activation_calls == 1
+    assert lifecycle.activation_profiles == [
+        RequestedInferenceProfile(
+            model_target_label="default",
+            reasoning_effort=None,
+        )
+    ]
     assert result.run_id == scheduled_run.id
     assert result.terminal_run_status is AgentRunStatus.COMPLETED
     assert order[:3] == ["vfs", "activate_pending", "provider"]

@@ -118,6 +118,8 @@ def _running_run(run_id: str) -> AgentRunState:
         phase=AgentRunPhase.WAITING_FOR_MODEL,
         status=AgentRunStatus.RUNNING,
         parent_agent_run_id=None,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
         active_tool_calls=[],
         last_completed_event_id=None,
         parent_result_delivery_state=None,

@@ -44,8 +44,8 @@ Details of all living specs. Synchronized from frontmatter.
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
 | [Periodic Execution Flow Spec](flow/periodic-execution.md) | - | 2026-08-18 | 16 |
-| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-08-18 | 28 |
+| [Run Resume](flow/run-resume.md) | @Hardtack | 2026-08-20 | 29 |
 | [Session Context Inspector](flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-17 | 30 |
+| [E2E Primary Test Strategy](flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-20 | 31 |
 | [xAI API Key Provider Flow](flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
 | [xAI OAuth Flow](flow/xai-oauth.md) | @Hardtack | 2026-08-18 | 7 |

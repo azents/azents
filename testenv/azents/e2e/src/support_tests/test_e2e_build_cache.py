@@ -2,6 +2,7 @@
 
 import importlib.util
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -114,6 +115,96 @@ def test_build_passes_gha_cache_options_to_buildx_and_records_duration(
     assert '"completed": true' in (tmp_path / "image-build-timings.jsonl").read_text(
         encoding="utf-8"
     )
+
+
+def test_required_profile_builds_independent_images_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The required CI profile overlaps all independent product image builds."""
+    barrier = threading.Barrier(3, timeout=5)
+    calls: list[tuple[str, int]] = []
+    for image_build in _CONFTEST_MODULE._CORE_E2E_IMAGE_BUILDS:
+        monkeypatch.delenv(image_build.environment_variable, raising=False)
+
+    def fake_build(
+        *,
+        image_tag: str,
+        dockerfile: Path,
+        cache_repository: str,
+        build_contexts: dict[str, str] | None = None,
+    ) -> None:
+        del image_tag, dockerfile, build_contexts
+        calls.append((cache_repository, threading.get_ident()))
+        barrier.wait()
+
+    monkeypatch.setattr(_CONFTEST_MODULE, "_build_e2e_image", fake_build)
+
+    images = _CONFTEST_MODULE._prepare_e2e_images("required")
+
+    assert set(images) == {
+        "azents-server",
+        "azents-runtime-runner",
+        "azents-runtime-provider-docker",
+    }
+    assert {repository for repository, _ in calls} == set(images)
+    assert len({thread_id for _, thread_id in calls}) == 3
+
+
+def test_parallel_profile_reuses_preconfigured_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configured immutable image is excluded from the concurrent build batch."""
+    for image_build in _CONFTEST_MODULE._CORE_E2E_IMAGE_BUILDS:
+        monkeypatch.delenv(image_build.environment_variable, raising=False)
+    monkeypatch.setenv("AZENTS_E2E_SERVER_IMAGE", "registry/azents-server:test")
+    calls: list[str] = []
+
+    def fake_build(
+        *,
+        image_tag: str,
+        dockerfile: Path,
+        cache_repository: str,
+        build_contexts: dict[str, str] | None = None,
+    ) -> None:
+        del image_tag, dockerfile, build_contexts
+        calls.append(cache_repository)
+
+    monkeypatch.setattr(_CONFTEST_MODULE, "_build_e2e_image", fake_build)
+
+    images = _CONFTEST_MODULE._prepare_e2e_images("required")
+
+    assert images["azents-server"] == "registry/azents-server:test"
+    assert set(calls) == {
+        "azents-runtime-runner",
+        "azents-runtime-provider-docker",
+    }
+
+
+def test_parallel_profile_accepts_fully_preconfigured_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fully prebuilt CI lane does not create an empty executor."""
+    for image_build in _CONFTEST_MODULE._CORE_E2E_IMAGE_BUILDS:
+        monkeypatch.setenv(
+            image_build.environment_variable,
+            f"registry/{image_build.cache_repository}:test",
+        )
+
+    images = _CONFTEST_MODULE._prepare_e2e_images("required")
+
+    assert images == {
+        image_build.cache_repository: (f"registry/{image_build.cache_repository}:test")
+        for image_build in _CONFTEST_MODULE._CORE_E2E_IMAGE_BUILDS
+    }
+
+
+def test_parallel_profile_rejects_unknown_suite() -> None:
+    """CI cannot silently select an incomplete image portfolio."""
+    with pytest.raises(
+        RuntimeError,
+        match="Unsupported AZENTS_E2E_IMAGE_BUILD_PROFILE",
+    ):
+        _CONFTEST_MODULE._prepare_e2e_images("unknown")
 
 
 def test_image_build_observability_excludes_runtime_cache_credentials(
