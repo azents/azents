@@ -29,8 +29,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-08-18
-spec_version: 4
+last_verified_at: 2026-08-20
+spec_version: 5
 ---
 
 # Scheduled Task Domain Spec
@@ -217,6 +217,11 @@ A Task may target one exact connected Slack or Discord Binding.
   an Edit link to the exact Session Web tab and Task editor plus a Cancel button
   that first returns an ephemeral confirmation; only the signed confirmation
   control executes the mutation.
+- Explicit Toolkit and Public API/Web deletion commits before attempting one
+  provider-native deletion notification in the exact bound conversation.
+  Session-only deletion has no provider effect, and notification failure never
+  rolls back the canonical deletion. Automatic one-time Task cleanup after
+  terminal completion does not publish a deletion notice.
 - A started cycle owns its own progress Tracker state. It reuses lower-level
   External Channel provider primitives but never reuses Channel Work state.
 - Progress messages and Tracker updates are immediate one-attempt effects.
@@ -273,6 +278,9 @@ prompt. The result payload contains only title, scheduled instant, terminal stat
 and result text.
 
 ## Changelog
+
+- **2026-08-20** (spec_version 5) — Added best-effort exact-Binding deletion
+  notifications after explicit Toolkit and Public API/Web deletion commits.
 
 - **2026-08-17** (spec_version 4) — Moved Web management into each concrete
   Session tab, fixed creation and editing to that Session, renamed destructive UI

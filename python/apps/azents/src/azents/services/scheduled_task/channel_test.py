@@ -1,5 +1,6 @@
 """Scheduled-owned External Channel orchestration tests."""
 
+import dataclasses
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -213,6 +214,45 @@ async def test_registration_uses_exact_binding_and_returns_immediate_outcome() -
     assert isinstance(kwargs["discord_payload"]["delete_locator"], str)
     assert "components" not in kwargs["discord_payload"]
     assert "Prepare the report." not in str(kwargs["slack_payload"])
+
+
+@pytest.mark.asyncio
+async def test_deletion_uses_exact_binding_and_returns_immediate_outcome() -> None:
+    service, _, _, provider_repository, action_service = _service()
+    plan = _plan(ExternalChannelDeliveryOperation.CONTROL_MESSAGE)
+    provider_repository.prepare_binding_effect.return_value = plan
+    action_service.execute_binding_effect.return_value = ProviderMutationOutcome(
+        status="delivered",
+        provider_message_key="slack:tenant:channel:deletion",
+        error_kind=None,
+        error_summary=None,
+    )
+
+    outcome = await service.execute_deletion(_task())
+
+    assert outcome is not None
+    assert outcome.status == "delivered"
+    _, kwargs = provider_repository.prepare_binding_effect.await_args
+    assert kwargs["binding_id"] == _BINDING_ID
+    assert kwargs["operation"] is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+    assert kwargs["operation_seed"] == f"scheduled-deletion:{'t' * 32}"
+    assert kwargs["slack_payload"]["control_kind"] == "scheduled_task_deletion"
+    assert kwargs["discord_payload"]["control_kind"] == "scheduled_task_deletion"
+    assert "Scheduled Task deleted: Daily report" in str(kwargs["slack_payload"])
+    assert "Prepare the report." not in str(kwargs["discord_payload"])
+
+
+@pytest.mark.asyncio
+async def test_session_only_deletion_has_no_provider_effect() -> None:
+    service, _, _, provider_repository, action_service = _service()
+
+    outcome = await service.execute_deletion(
+        dataclasses.replace(_task(), binding_id=None)
+    )
+
+    assert outcome is None
+    provider_repository.prepare_binding_effect.assert_not_awaited()
+    action_service.execute_binding_effect.assert_not_awaited()
 
 
 @pytest.mark.asyncio

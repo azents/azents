@@ -437,18 +437,36 @@ class ScheduledTaskService:
         task_id: str,
     ) -> bool:
         """Delete one exact Session-owned Task definition."""
+        return (
+            await self.delete_with_snapshot(
+                session,
+                session_id=session_id,
+                task_id=task_id,
+            )
+            is not None
+        )
+
+    async def delete_with_snapshot(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        task_id: str,
+    ) -> ScheduledTask | None:
+        """Delete one exact Session-owned Task and return its deleted snapshot."""
         target = await self._lock_mutation_target(
             session,
             session_id=session_id,
             task_id=task_id,
         )
         if target is None:
-            return False
-        return await self.delete_locked_provider_target(
+            return None
+        deleted = await self.delete_locked_provider_target(
             session,
             target=target,
             expected_binding_id=None,
         )
+        return target.task if deleted else None
 
     async def delete_locked_provider_target(
         self,

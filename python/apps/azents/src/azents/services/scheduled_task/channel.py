@@ -46,7 +46,9 @@ from azents.services.external_channel.provider_effect import (
 from azents.services.file_storage import FileStorage
 from azents.services.scheduled_task.control import (
     build_scheduled_task_control_locator,
+    render_scheduled_task_discord_deletion,
     render_scheduled_task_discord_registration,
+    render_scheduled_task_slack_deletion,
     render_scheduled_task_slack_registration,
 )
 from azents.services.scheduled_task.terminal import (
@@ -148,6 +150,47 @@ class ScheduledTaskChannelService:
                     "delete_locator": delete_locator,
                 },
                 operation_seed=f"scheduled-registration:{task.id}",
+            )
+        if plan is None:
+            return _unavailable_outcome(
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                part=0,
+            )
+        outcome = await self.action_service.execute_binding_effect(plan)
+        return _provider_outcome(
+            operation=plan.target.operation,
+            part=0,
+            outcome=outcome,
+        )
+
+    async def execute_deletion(
+        self,
+        task: ScheduledTask,
+    ) -> ProviderEffectOutcome | None:
+        """Attempt one post-delete notification after Task deletion commits."""
+        binding_id = task.binding_id
+        if binding_id is None:
+            return None
+        slack_text, slack_blocks = render_scheduled_task_slack_deletion(task=task)
+        discord_text, discord_embeds = render_scheduled_task_discord_deletion(task=task)
+        async with self.session_manager() as session:
+            plan = await self.provider_repository.prepare_binding_effect(
+                session,
+                agent_id=task.agent_id,
+                session_id=task.session_id,
+                binding_id=binding_id,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                slack_payload={
+                    "control_kind": "scheduled_task_deletion",
+                    "text": slack_text,
+                    "blocks": slack_blocks,
+                },
+                discord_payload={
+                    "control_kind": "scheduled_task_deletion",
+                    "text": discord_text,
+                    "embeds": discord_embeds,
+                },
+                operation_seed=f"scheduled-deletion:{task.id}",
             )
         if plan is None:
             return _unavailable_outcome(

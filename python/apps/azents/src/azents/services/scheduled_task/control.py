@@ -297,6 +297,71 @@ def render_scheduled_task_discord_registration(
     )
 
 
+def render_scheduled_task_slack_deletion(
+    *,
+    task: ScheduledTask,
+) -> tuple[str, list[dict[str, object]]]:
+    """Render one bounded Slack Block Kit Task deletion notice."""
+    text = f"Scheduled Task deleted: {task.title}"
+    return (
+        text,
+        [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "Scheduled Task deleted",
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{_slack(task.title)}*",
+                },
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": (
+                            "Future runs are cancelled. Work that has already "
+                            "started continues."
+                        ),
+                    }
+                ],
+            },
+        ],
+    )
+
+
+def render_scheduled_task_discord_deletion(
+    *,
+    task: ScheduledTask,
+) -> tuple[str, list[dict[str, object]]]:
+    """Render one bounded Discord Task deletion notice."""
+    return (
+        f"Scheduled Task deleted: {task.title}",
+        [
+            {
+                "title": task.title[:256],
+                "description": "Scheduled Task deleted",
+                "color": 0xED4245,
+                "fields": [
+                    {
+                        "name": "Status",
+                        "value": (
+                            "Future runs are cancelled. Work that has already "
+                            "started continues."
+                        ),
+                    }
+                ],
+            }
+        ],
+    )
+
+
 def render_scheduled_task_discord_controls(
     *,
     edit_url: str,

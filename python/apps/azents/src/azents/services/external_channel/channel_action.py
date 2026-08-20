@@ -1184,7 +1184,10 @@ class ExternalChannelActionService:
         if payload_tenant_id is not None and payload_tenant_id != tenant_id:
             return _invalid_payload()
         control_kind = payload.get("control_kind")
-        if control_kind == "scheduled_task_registration":
+        if control_kind in {
+            "scheduled_task_registration",
+            "scheduled_task_deletion",
+        }:
             text = payload.get("text")
             blocks = _blocks(payload.get("blocks"))
             if not isinstance(text, str) or blocks is None:

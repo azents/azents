@@ -228,6 +228,7 @@ class _TaskRepository:
         self.get_count = 0
         self.created = False
         self.replaced = False
+        self.deleted = False
 
     async def get_by_id(
         self,
@@ -266,6 +267,20 @@ class _TaskRepository:
         del session, kwargs
         self.replaced = True
         raise AssertionError("Unexpected Task replacement.")
+
+    async def delete_by_session_and_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        task_id: str,
+    ) -> bool:
+        del session
+        if session_id != _SESSION_ID or task_id != _TASK_ID:
+            return False
+        self.events.append("task-delete")
+        self.deleted = True
+        return True
 
 
 class _CycleRepository:
@@ -371,6 +386,7 @@ def _service(
     agent_session_repository: _AgentSessionRepository | None = None,
     agent_repository: _AgentRepository | None = None,
     cycle_repository: _CycleRepository | None = None,
+    channel_service: AsyncMock | None = None,
 ) -> ScheduledTaskManagementService:
     return ScheduledTaskManagementService(
         session_manager=cast(SessionManager[AsyncSession], _SessionManager()),
@@ -396,7 +412,10 @@ def _service(
             ExternalChannelManagementRepository,
             AsyncMock(spec=ExternalChannelManagementRepository),
         ),
-        channel_service=AsyncMock(spec=ScheduledTaskChannelService),
+        channel_service=cast(
+            ScheduledTaskChannelService,
+            channel_service or AsyncMock(spec=ScheduledTaskChannelService),
+        ),
         authority_validator=cast(
             ScheduledTaskAuthorityValidator,
             authority_validator,
@@ -640,6 +659,31 @@ async def test_delete_revalidates_current_binding_before_shared_mutation() -> No
         f"binding-lock:{_CURRENT_BINDING_ID}",
         f"authority:{_CURRENT_BINDING_ID}",
     ]
+
+
+@pytest.mark.asyncio
+async def test_delete_notifies_bound_channel_after_commit() -> None:
+    """Successful explicit management deletion publishes its committed snapshot."""
+    events: list[str] = []
+    task = _task(binding_id=_CURRENT_BINDING_ID)
+    repository = _TaskRepository(events, task=task)
+    channel_service = AsyncMock(spec=ScheduledTaskChannelService)
+    service = _service(
+        events=events,
+        task_repository=repository,
+        authority_validator=_AuthorityValidator(events),
+        channel_service=channel_service,
+    )
+
+    await service.delete(
+        workspace_id=_WORKSPACE_ID,
+        agent_id=_AGENT_ID,
+        user_id="user-1",
+        task_id=_TASK_ID,
+    )
+
+    assert repository.deleted is True
+    channel_service.execute_deletion.assert_awaited_once_with(task)
 
 
 @pytest.mark.asyncio
