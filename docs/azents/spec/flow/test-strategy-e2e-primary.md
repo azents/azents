@@ -234,10 +234,10 @@ Always-on required CI does not depend on external credentials.
   capture a screenshot and page HTML when the WebDriver remains available.
 - Same-repository pull requests receive one sticky E2E observability comment. The
   comment is updated in place and contains only bounded JUnit-derived counts, failed
-  node IDs, slow-test timing, lane job results, and a link to the workflow artifacts.
-  Test execution jobs retain read-only permissions; only the dedicated comment job
-  receives `pull-requests: write`. Fork pull requests remain read-only and skip comment
-  publication.
+  node IDs, slow-test timing, wall-clock pytest execution time per lane, lane job
+  results, and a link to the workflow artifacts. Test execution jobs retain read-only
+  permissions; only the dedicated comment job receives `pull-requests: write`. Fork
+  pull requests remain read-only and skip comment publication.
 - Web Surface path filtering includes backend/E2E dependencies, both web Dockerfiles, and the TypeScript workspace.
 - testenv fixture/prerequisite unit, contract lint.
 

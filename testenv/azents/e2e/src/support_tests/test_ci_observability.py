@@ -74,6 +74,28 @@ def test_render_summary_lists_bounded_failures_and_slowest_tests(
     assert "traceback" not in rendered
 
 
+def test_render_summary_reports_lane_execution_time(tmp_path: Path) -> None:
+    """Report wall-clock pytest duration separately from summed test time."""
+    junit_path = tmp_path / "junit.xml"
+    junit_path.write_text(
+        '<testsuite><testcase classname="tests.test_example" '
+        'name="test_example" time="100" /></testsuite>',
+        encoding="utf-8",
+    )
+    lane_duration_path = tmp_path / "lane-duration-seconds.txt"
+    lane_duration_path.write_text("605\n", encoding="utf-8")
+
+    rendered = render_summary(
+        lane="Deterministic E2E",
+        job_result="success",
+        junit_path=junit_path,
+        lane_duration_path=lane_duration_path,
+    )
+
+    assert "E2E execution time: **10m 5s**" in rendered
+    assert "| 1 | 1 | 0 | 0 | 0 | 100.0s |" in rendered
+
+
 def test_render_summary_reports_missing_junit(tmp_path: Path) -> None:
     """Explain setup failures when pytest cannot produce JUnit XML."""
     timings_path = tmp_path / "pytest-timings.jsonl"
@@ -85,13 +107,17 @@ def test_render_summary_reports_missing_junit(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    lane_duration_path = tmp_path / "lane-duration-seconds.txt"
+    lane_duration_path.write_text("65\n", encoding="utf-8")
     rendered = render_summary(
         lane="Web Surface E2E",
         job_result="failure",
         junit_path=tmp_path / "missing.xml",
         timings_path=timings_path,
+        lane_duration_path=lane_duration_path,
     )
 
+    assert "E2E execution time: **1m 5s**" in rendered
     assert "JUnit XML was not produced" in rendered
     assert "setup or infrastructure failures" in rendered
     assert "service_container (setup)" in rendered

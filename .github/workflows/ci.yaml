@@ -390,6 +390,8 @@ jobs:
             && [ "${{ github.ref }}" = 'refs/heads/main' ]; then
             cache_writers="$CACHE_WRITE_REPOSITORIES"
           fi
+          SECONDS=0
+          set +e
           AZENTS_E2E_ARTIFACT_DIR="$report_dir" \
             AZENTS_E2E_DOCKER_BUILDER="${{ steps.buildx.outputs.name }}" \
             AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX="azents-e2e-v1" \
@@ -399,6 +401,10 @@ jobs:
             --durations=30 \
             --durations-min=0.25 \
             "${test_files[@]}"
+          pytest_status=$?
+          set -e
+          printf '%s\n' "$SECONDS" > "$report_dir/lane-duration-seconds.txt"
+          exit "$pytest_status"
       - name: Capture E2E diagnostics
         if: always()
         run: |
@@ -414,6 +420,7 @@ jobs:
             --junit "$report_dir/junit.xml" \
             --timings "$report_dir/pytest-timings.jsonl" \
             --image-build-timings "$report_dir/image-build-timings.jsonl" \
+            --lane-duration "$report_dir/lane-duration-seconds.txt" \
             --output "$report_dir/summary.md"
       - name: Upload E2E observability
         if: always()
