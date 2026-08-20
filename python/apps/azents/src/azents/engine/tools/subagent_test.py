@@ -48,6 +48,11 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.mailbox import MailboxEnqueue, MailboxService
+from azents.services.subagent_coordination import (
+    ListedAgent,
+    SubagentCoordinationService,
+    SubagentListProjection,
+)
 from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
@@ -681,6 +686,36 @@ class _Broker:
         self.activities.append(session_id)
 
 
+class _SubagentCoordinationService:
+    """Subagent coordination projection fake for Toolkit tests."""
+
+    def __init__(self) -> None:
+        """Initialize the default root-tree projection."""
+        self.calls: list[tuple[str, int]] = []
+        self.projection: SubagentListProjection | None = SubagentListProjection(
+            agents=(
+                ListedAgent(agent_name="/root", agent_status="running"),
+                ListedAgent(agent_name="/root/child", agent_status="completed"),
+            ),
+            configured_capacity=3,
+            required_count=0,
+            selected_inactive_count=1,
+            omitted_inactive_count=0,
+        )
+
+    async def list_agents(
+        self,
+        session: AsyncSession,
+        *,
+        current_session_id: str,
+        configured_capacity: int,
+    ) -> SubagentListProjection | None:
+        """Return the configured bounded projection."""
+        del session
+        self.calls.append((current_session_id, configured_capacity))
+        return self.projection
+
+
 async def _make_toolkit() -> tuple[
     SubagentToolkit,
     _AgentSessionRepository,
@@ -694,6 +729,7 @@ async def _make_toolkit() -> tuple[
     mailbox_item_service = _MailboxService()
     broker = _Broker()
     run_repository = _AgentRunRepository()
+    coordination_service = _SubagentCoordinationService()
     agent = _agent()
     agent_repository = _AgentRepository(agent)
     published_events: list[SubagentTreeChanged] = []
@@ -707,6 +743,10 @@ async def _make_toolkit() -> tuple[
         agent_run_repository=cast(AgentRunRepository, run_repository),
         event_transcript_repository=cast(
             EventTranscriptRepository, _EventTranscriptRepository()
+        ),
+        subagent_coordination_service=cast(
+            SubagentCoordinationService,
+            coordination_service,
         ),
         agent_mailbox_service=AgentMailboxService(
             mailbox_item_service=cast(MailboxService, mailbox_item_service),
@@ -739,6 +779,15 @@ async def _make_toolkit() -> tuple[
         run_repository,
         published_events,
     )
+
+
+def _set_subagent_settings(
+    toolkit: SubagentToolkit,
+    settings: SubagentSettings,
+) -> None:
+    """Update the current and refreshable Agent policy fixtures together."""
+    toolkit.subagent_settings = settings
+    toolkit.agent.subagent_settings = settings
 
 
 _EXPECTED_ROOT_USAGE_HINT = """You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
@@ -1095,7 +1144,10 @@ async def test_followup_task_wakes_target_child() -> None:
 async def test_followup_task_rejects_new_activation_over_capacity() -> None:
     """Follow-up reuse cannot activate an additional child beyond the limit."""
     toolkit, repo, input_service, broker, _run_repo, _events = await _make_toolkit()
-    toolkit.subagent_settings = SubagentSettings(max_subagents=1, max_depth=1)
+    _set_subagent_settings(
+        toolkit,
+        SubagentSettings(max_subagents=1, max_depth=1),
+    )
     busy = _session_agent(
         id="busy-agent",
         path="/root/busy",
@@ -1132,7 +1184,10 @@ async def test_followup_task_rejects_new_activation_over_capacity() -> None:
 async def test_followup_task_allows_already_active_target_at_capacity() -> None:
     """Adding work to an active child does not consume another concurrency slot."""
     toolkit, repo, input_service, broker, _run_repo, _events = await _make_toolkit()
-    toolkit.subagent_settings = SubagentSettings(max_subagents=1, max_depth=1)
+    _set_subagent_settings(
+        toolkit,
+        SubagentSettings(max_subagents=1, max_depth=1),
+    )
     repo.sessions["child-session"] = repo.sessions["child-session"].model_copy(
         update={"run_state": AgentSessionRunState.RUNNING}
     )
@@ -1227,7 +1282,7 @@ async def test_interrupt_agent_locks_root_before_stopping_child() -> None:
 
 
 async def test_list_agents_from_child_includes_root_tree() -> None:
-    """list_agents matches Codex by exposing the root and known agent tree."""
+    """list_agents emits canonical two-field rows for the bounded root tree."""
     toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
     state = await toolkit.update_context(
         TurnContext(
@@ -1242,8 +1297,37 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
 
     result = await tool.handler("{}")
 
-    agents = json.loads(cast(str, result))["agents"]
-    assert [agent["agent_path"] for agent in agents] == ["/root", "/root/child"]
+    assert json.loads(cast(str, result)) == {
+        "agents": [
+            {"agent_name": "/root", "agent_status": "running"},
+            {"agent_name": "/root/child", "agent_status": "completed"},
+        ]
+    }
+    service = cast(_SubagentCoordinationService, toolkit.subagent_coordination_service)
+    assert service.calls == [("child-session", 3)]
+
+
+async def test_list_agents_rejects_missing_current_projection() -> None:
+    """list_agents raises when the current SessionAgent cannot be projected."""
+    toolkit, _repo, _input_service, _broker, _run_repo, _events = await _make_toolkit()
+    service = cast(_SubagentCoordinationService, toolkit.subagent_coordination_service)
+    service.projection = None
+    state = await toolkit.update_context(
+        TurnContext(
+            workspace_id="workspace-1",
+            model="gpt-5.1",
+            run_id=_PARENT_RUN_ID,
+            publish_event=cast(Any, _noop_publish),
+            session_id="root-session",
+        )
+    )
+    tool = next(tool for tool in state.tools if tool.spec.name == "list_agents")
+
+    with pytest.raises(
+        FunctionToolError,
+        match="Current SessionAgent was not found",
+    ):
+        await tool.handler("{}")
 
 
 async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
@@ -1717,7 +1801,10 @@ async def test_spawn_agent_rejects_when_active_subagent_limit_is_reached() -> No
         _run_repo,
         _published_events,
     ) = await _make_toolkit()
-    toolkit.subagent_settings = SubagentSettings(max_subagents=1, max_depth=1)
+    _set_subagent_settings(
+        toolkit,
+        SubagentSettings(max_subagents=1, max_depth=1),
+    )
     repo.sessions["child-session"] = _agent_session(
         id="child-session",
         run_state=AgentSessionRunState.RUNNING,
@@ -1751,7 +1838,10 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
         run_repo,
         _published_events,
     ) = await _make_toolkit()
-    toolkit.subagent_settings = SubagentSettings(max_subagents=1, max_depth=1)
+    _set_subagent_settings(
+        toolkit,
+        SubagentSettings(max_subagents=1, max_depth=1),
+    )
     repo.sessions["child-session"] = _agent_session(
         id="child-session",
         run_state=AgentSessionRunState.IDLE,
@@ -1807,7 +1897,10 @@ async def test_spawn_agent_rejects_when_depth_limit_is_reached() -> None:
         _published_events,
     ) = await _make_toolkit()
     toolkit.session_id = "child-session"
-    toolkit.subagent_settings = SubagentSettings(max_subagents=3, max_depth=1)
+    _set_subagent_settings(
+        toolkit,
+        SubagentSettings(max_subagents=3, max_depth=1),
+    )
     state = await toolkit.update_context(
         TurnContext(
             workspace_id="workspace-1",

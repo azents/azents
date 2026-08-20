@@ -1080,3 +1080,79 @@ void test("falls back locally when a structured builtin result drifts", () => {
   );
   assert.deepEqual(result, { type: "generic", reason: "invalid-output" });
 });
+
+void test("renders the canonical bounded list_agents contract", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "list_agents",
+      arguments: "{}",
+      result: JSON.stringify({
+        agents: [
+          { agent_name: "/root", agent_status: "running" },
+          { agent_name: "/root/reviewer", agent_status: "completed" },
+        ],
+      }),
+    }),
+  );
+
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "listAgents",
+      subject: null,
+      qualifier: "2",
+      detail: {
+        type: "semantic",
+        fields: [],
+        sections: [],
+        items: [
+          {
+            title: "/root",
+            subtitle: "running",
+            content: null,
+          },
+          {
+            title: "/root/reviewer",
+            subtitle: "completed",
+            content: null,
+          },
+        ],
+      },
+    },
+  });
+});
+
+void test("falls back for historical four-field list_agents results", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "list_agents",
+      arguments: "{}",
+      result: JSON.stringify({
+        agents: [
+          {
+            agent_name: "reviewer",
+            agent_path: "/root/reviewer",
+            agent_status: "completed",
+            last_task_message: "historical task preview",
+          },
+        ],
+      }),
+    }),
+  );
+
+  assert.deepEqual(result, { type: "generic", reason: "invalid-output" });
+});
+
+void test("falls back for malformed two-field list_agents results", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "list_agents",
+      arguments: "{}",
+      result: JSON.stringify({
+        agents: [{ agent_name: "/root/reviewer" }],
+      }),
+    }),
+  );
+
+  assert.deepEqual(result, { type: "generic", reason: "invalid-output" });
+});

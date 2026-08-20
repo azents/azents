@@ -420,16 +420,18 @@ const waitResultSchema = z.object({
   timed_out: z.boolean(),
 });
 const interruptResultSchema = z.object({ previous_status: z.string().min(1) });
-const agentListResultSchema = z.object({
-  agents: z.array(
-    z.object({
-      agent_name: z.string().min(1),
-      agent_path: z.string().min(1),
-      agent_status: z.string().min(1),
-      last_task_message: z.string().nullable(),
-    }),
-  ),
-});
+const agentListResultSchema = z
+  .object({
+    agents: z.array(
+      z
+        .object({
+          agent_name: z.string().min(1),
+          agent_status: z.string().min(1),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
 const toolSearchResultSchema = z.object({
   activated_tools: z.array(
     z.object({
@@ -1475,8 +1477,8 @@ export function knownToolPresentation(
             : semanticDetail({
                 items: result.agents.map((agent) => ({
                   title: agent.agent_name,
-                  subtitle: `${agent.agent_status} · ${agent.agent_path}`,
-                  content: agent.last_task_message,
+                  subtitle: agent.agent_status,
+                  content: null,
                 })),
               }),
         );

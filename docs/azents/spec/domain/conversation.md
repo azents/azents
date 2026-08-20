@@ -38,6 +38,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_execution/**
   - python/apps/azents/src/azents/repos/message/**
   - python/apps/azents/src/azents/repos/mailbox/**
+  - python/apps/azents/src/azents/repos/subagent_coordination/**
   - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/repos/chat_write_request/**
@@ -53,6 +54,7 @@ code_paths:
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
+  - python/apps/azents/src/azents/services/subagent_coordination.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/services/session_git_worktree/**
@@ -102,8 +104,8 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-last_verified_at: 2026-08-19
-spec_version: 151
+last_verified_at: 2026-08-20
+spec_version: 152
 ---
 
 # Conversation & Events
@@ -474,6 +476,12 @@ It never resolves across root trees. Ordinary agent session list APIs filter to 
 so child sessions stay hidden from the Agent rail while remaining directly readable through authorized
 history, live, and detail routes.
 
+The complete tree remains the authority for canonical agent targeting, historical
+child reuse, terminal-result delivery, observation cursors, and the public
+Subagent Tree. The model-facing `list_agents` result is a separate bounded,
+read-only coordination projection: omission from that result neither removes a
+participant nor prevents path-based targeting of its existing Session.
+
 ### SessionWorkspaceProject
 
 `rdb/models/session_workspace_project.py` stores the project registry used as session working
@@ -808,6 +816,13 @@ terminal result consumed by the renderer. Toolkit-owned, unknown, malformed, his
 preparing, or incompatible calls render through the Generic card for that call only. Exact provider
 `web_search` calls use their canonical provider query and validated HTTP references for a dedicated
 presentation; other provider identities retain their Generic presentation.
+
+The specialized `list_agents` result renderer accepts only a strict top-level
+`agents` array whose items contain exactly non-empty `agent_name` and
+`agent_status` strings. It displays the canonical path and status without task
+content. Legacy four-field rows, extra fields, missing fields, and malformed
+payloads remain Generic so historical or incompatible results are not partially
+reinterpreted.
 
 The chat presentation layer consumes the ordered durable event stream plus the latest live partial
 stream, rather than regrouping rendered messages into semantic phases. It preserves the transcript order
@@ -1199,6 +1214,10 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-08-20** — v152. Separated the bounded model-facing subagent
+  coordination list from complete durable tree authority and required the web
+  specialized renderer to accept only the canonical two-field result, with
+  legacy or malformed payloads retaining Generic presentation.
 - **2026-08-19** — v151. Replaced preliminary Agent row locking during root
   Session creation with a final capability/version conditional update after
   Runtime FK-dependent persistence.

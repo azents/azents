@@ -23,6 +23,7 @@ from azentspublicclient.models.agent_toolkit_attach_request import (
     AgentToolkitAttachRequest,
 )
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.agent_update_request import AgentUpdateRequest
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
@@ -30,6 +31,7 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
 from azentspublicclient.models.secrets import Secrets
+from azentspublicclient.models.subagent_settings import SubagentSettings
 from azentspublicclient.models.toolkit_config_create_request import (
     ToolkitConfigCreateRequest,
 )
@@ -82,6 +84,36 @@ _FAILED_SPAWN_RESPONSE = "Subagent failed child was spawned."
 _FAILED_OBSERVE_MESSAGE = "Subagent E2E observe failed result"
 _FAILED_OBSERVE_RESPONSE = "Subagent failed result was observed."
 _FAILED_INTERNAL_MARKER = "SUBAGENT_INTERNAL_PROVIDER_FAILURE_MARKER"
+_BOUNDED_SPAWN_MESSAGES = (
+    "Subagent E2E bounded spawn oldest",
+    "Subagent E2E bounded spawn middle",
+    "Subagent E2E bounded spawn newest",
+)
+_BOUNDED_CHILD_TASK = "Subagent E2E bounded child task"
+_BOUNDED_CHILD_RESPONSE = "Subagent bounded child completed."
+_BOUNDED_LIST_MESSAGE = "Subagent E2E bounded list"
+_BOUNDED_LIST_CALL_ID = "call_subagent_bounded_list"
+_BOUNDED_LIST_RESPONSE = "Subagent bounded list observed."
+_BOUNDED_FOLLOWUP_MESSAGE = "Subagent E2E bounded historical followup"
+_BOUNDED_FOLLOWUP_CALL_ID = "call_subagent_bounded_followup"
+_BOUNDED_FOLLOWUP_TASK = "Subagent E2E bounded reused child task"
+_BOUNDED_FOLLOWUP_RESPONSE = "Subagent bounded reused child completed."
+_BOUNDED_RELIST_MESSAGE = "Subagent E2E bounded relist"
+_BOUNDED_RELIST_CALL_ID = "call_subagent_bounded_relist"
+_BOUNDED_RELIST_RESPONSE = "Subagent bounded relist observed."
+_OVERFLOW_SPAWN_MESSAGE = "Subagent E2E active overflow spawn"
+_OVERFLOW_SPAWN_RESPONSE = "Subagent active overflow children were spawned."
+_OVERFLOW_CHILD_TASK = "Subagent E2E active overflow child task"
+_OVERFLOW_CHILD_RESPONSE = "Subagent active overflow child completed."
+_OVERFLOW_LIST_MESSAGE = "Subagent E2E active overflow list"
+_OVERFLOW_LIST_CALL_ID = "call_subagent_active_overflow_list"
+_OVERFLOW_LIST_RESPONSE = "Subagent active overflow list observed."
+_OVERFLOW_REJECT_MESSAGE = "Subagent E2E active overflow reject spawn"
+_OVERFLOW_REJECT_CALL_ID = "call_subagent_active_overflow_reject"
+_OVERFLOW_REJECT_RESPONSE = "Subagent active overflow rejection observed."
+_OVERFLOW_CONTRACTED_LIST_MESSAGE = "Subagent E2E active overflow contracted list"
+_OVERFLOW_CONTRACTED_LIST_CALL_ID = "call_subagent_active_overflow_contracted_list"
+_OVERFLOW_CONTRACTED_LIST_RESPONSE = "Subagent contracted list observed."
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
@@ -197,6 +229,7 @@ def _create_agent(
     workspace: _Workspace,
     *,
     release_file_path: str | None = None,
+    max_subagents: int | None = None,
 ) -> str:
     """Create an Agent with subagent tools and an optional release barrier."""
     agent_create_request = AgentCreateRequest(
@@ -207,6 +240,11 @@ def _create_agent(
         runtime_profile_id=workspace.runtime_profile_id,
         shell_enabled=True,
     )
+    if max_subagents is not None:
+        agent_create_request.subagent_settings = SubagentSettings(
+            max_subagents=max_subagents,
+            max_depth=1,
+        )
     if release_file_path is not None:
         agent_create_request.tool_search_enabled = False
     agent = AgentV1Api(public_api_client).agent_v1_create_agent(
@@ -575,6 +613,57 @@ def _wait_for_tool_result_outcome(
     raise TimeoutError(
         f"tool result outcome not observed: {call_id}, {expected}, {last_outputs!r}"
     )
+
+
+def _wait_for_tool_result_json(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    call_id: str,
+    timeout: float = 120,
+) -> dict[str, object]:
+    """Wait until a client tool result contains one JSON object."""
+    deadline = time.monotonic() + timeout
+    last_outputs: list[str] = []
+    while time.monotonic() < deadline:
+        last_outputs = []
+        for event in _history(
+            public_url=public_url,
+            token=token,
+            session_id=session_id,
+        ):
+            payload = _event_payload(event)
+            if payload.get("call_id") != call_id:
+                continue
+            output = _tool_result_output_text(event)
+            if output is None:
+                continue
+            last_outputs.append(output)
+            try:
+                parsed = json.loads(output)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                return _json_object_payload(
+                    parsed,
+                    label=f"tool result {call_id}",
+                )
+        time.sleep(0.5)
+    raise TimeoutError(f"JSON tool result not observed: {call_id}, {last_outputs!r}")
+
+
+def _listed_agents(payload: dict[str, object]) -> list[dict[str, object]]:
+    """Validate the exact canonical list_agents item contract."""
+    agents = _json_object_list_payload(
+        payload.get("agents"),
+        label="list_agents agents",
+    )
+    for agent in agents:
+        assert set(agent) == {"agent_name", "agent_status"}
+        assert isinstance(agent.get("agent_name"), str)
+        assert isinstance(agent.get("agent_status"), str)
+    return agents
 
 
 def _run_marker_completed(event: dict[str, object]) -> bool:
@@ -1575,3 +1664,410 @@ class TestSubagents:
             expected_status="errored",
             expected_unread=False,
         )
+
+    def test_bounded_list_contract_and_historical_reuse(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Bound inactive history while preserving canonical child reuse."""
+        del azents_engine_worker_container
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(
+            public_api_client,
+            workspace,
+            max_subagents=2,
+        )
+        root_session_id = _team_primary_session(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+        )
+        child_names = (
+            "bounded_oldest",
+            "bounded_middle",
+            "bounded_newest",
+        )
+
+        for message, child_name in zip(
+            _BOUNDED_SPAWN_MESSAGES,
+            child_names,
+            strict=True,
+        ):
+            _run_message(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=root_session_id,
+                message=message,
+            )
+            _wait_for_child_node(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=root_session_id,
+                name=child_name,
+                expected_status="completed",
+                expected_unread=True,
+            )
+            _wait_for_session_run_state(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=root_session_id,
+                expected="idle",
+            )
+
+        initial_tree = _subagent_tree(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+        )
+        initial_nodes = _tree_nodes(initial_tree)
+        oldest = _find_node(initial_nodes, "bounded_oldest")
+        assert oldest is not None
+        for child_name in child_names:
+            assert _find_node(initial_nodes, child_name) is not None
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_BOUNDED_LIST_MESSAGE,
+        )
+        first_list = _listed_agents(
+            _wait_for_tool_result_json(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=root_session_id,
+                call_id=_BOUNDED_LIST_CALL_ID,
+            )
+        )
+        assert first_list == [
+            {"agent_name": "/root", "agent_status": "running"},
+            {
+                "agent_name": "/root/bounded_middle",
+                "agent_status": "completed",
+            },
+            {
+                "agent_name": "/root/bounded_newest",
+                "agent_status": "completed",
+            },
+        ]
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_BOUNDED_LIST_RESPONSE,
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_BOUNDED_FOLLOWUP_MESSAGE,
+        )
+        _wait_for_tool_result_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_BOUNDED_FOLLOWUP_CALL_ID,
+            expected="assigned",
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=oldest.agent_session_id,
+            expected=_BOUNDED_FOLLOWUP_TASK,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=oldest.agent_session_id,
+            expected=_BOUNDED_FOLLOWUP_RESPONSE,
+        )
+        _, reused = _wait_for_child_node(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            name="bounded_oldest",
+            expected_status="completed",
+            expected_unread=True,
+        )
+        assert reused.agent_session_id == oldest.agent_session_id
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_BOUNDED_RELIST_MESSAGE,
+        )
+        second_list = _listed_agents(
+            _wait_for_tool_result_json(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=root_session_id,
+                call_id=_BOUNDED_RELIST_CALL_ID,
+            )
+        )
+        assert len(second_list) == 3
+        assert second_list[0] == {
+            "agent_name": "/root",
+            "agent_status": "running",
+        }
+        assert any(
+            agent.get("agent_name") == "/root/bounded_oldest" for agent in second_list
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_BOUNDED_RELIST_RESPONSE,
+        )
+        reused_results = [
+            payload
+            for payload in _agent_message_payloads(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=root_session_id,
+            )
+            if payload.get("message_kind") == "agent_result"
+            and payload.get("source_path") == "/root/bounded_oldest"
+            and payload.get("content") == _BOUNDED_FOLLOWUP_RESPONSE
+        ]
+        assert len(reused_results) == 1
+        final_nodes = _tree_nodes(
+            _subagent_tree(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=root_session_id,
+            )
+        )
+        for child_name in child_names:
+            assert _find_node(final_nodes, child_name) is not None
+
+    def test_active_overflow_remains_visible_and_blocks_new_activation(
+        self,
+        request: pytest.FixtureRequest,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: DockerContainer,
+    ) -> None:
+        """Keep active children visible after a capacity reduction."""
+        release_file_path = f"/tmp/azents-subagent-overflow-{unique()}"
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=False,
+        )
+        request.addfinalizer(
+            lambda: _set_release_file(
+                azents_engine_worker_container,
+                release_file_path,
+                present=True,
+            )
+        )
+        workspace = _setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = _create_agent(
+            public_api_client,
+            workspace,
+            release_file_path=release_file_path,
+            max_subagents=3,
+        )
+        root_session_id = _team_primary_session(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+        )
+        overflow_names = ("overflow_one", "overflow_two", "overflow_three")
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_OVERFLOW_SPAWN_MESSAGE,
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_OVERFLOW_SPAWN_RESPONSE,
+        )
+        for child_name in overflow_names:
+            _wait_for_child_node(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=root_session_id,
+                name=child_name,
+                expected_status="running",
+                expected_unread=False,
+            )
+        _wait_for_release_barriers(
+            azents_engine_worker_container,
+            release_file_path,
+            expected_count=3,
+        )
+        _wait_for_session_run_state(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            expected="idle",
+        )
+
+        updated = AgentV1Api(public_api_client).agent_v1_update_agent(
+            handle=workspace.handle,
+            agent_id=agent_id,
+            agent_update_request=AgentUpdateRequest(
+                subagent_settings=SubagentSettings(
+                    max_subagents=1,
+                    max_depth=1,
+                )
+            ),
+            _headers=_headers(workspace.token),
+        )
+        assert updated.subagent_settings.max_subagents == 1
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_OVERFLOW_LIST_MESSAGE,
+        )
+        active_list = _listed_agents(
+            _wait_for_tool_result_json(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=root_session_id,
+                call_id=_OVERFLOW_LIST_CALL_ID,
+            )
+        )
+        assert active_list == [
+            {"agent_name": "/root", "agent_status": "running"},
+            {"agent_name": "/root/overflow_one", "agent_status": "running"},
+            {"agent_name": "/root/overflow_three", "agent_status": "running"},
+            {"agent_name": "/root/overflow_two", "agent_status": "running"},
+        ]
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_OVERFLOW_LIST_RESPONSE,
+        )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_OVERFLOW_REJECT_MESSAGE,
+        )
+        _wait_for_tool_result_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            call_id=_OVERFLOW_REJECT_CALL_ID,
+            expected="max_subagents 1 is already reached",
+        )
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_OVERFLOW_REJECT_RESPONSE,
+        )
+        overflow_tree = _tree_nodes(
+            _subagent_tree(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=root_session_id,
+            )
+        )
+        assert _find_node(overflow_tree, "overflow_four") is None
+
+        _set_release_file(
+            azents_engine_worker_container,
+            release_file_path,
+            present=True,
+        )
+        for child_name in overflow_names:
+            _wait_for_child_node(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=root_session_id,
+                name=child_name,
+                expected_status="completed",
+                expected_unread=True,
+            )
+
+        _run_message(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            session_id=root_session_id,
+            message=_OVERFLOW_CONTRACTED_LIST_MESSAGE,
+        )
+        contracted = _listed_agents(
+            _wait_for_tool_result_json(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                session_id=root_session_id,
+                call_id=_OVERFLOW_CONTRACTED_LIST_CALL_ID,
+            )
+        )
+        assert len(contracted) == 2
+        assert contracted[0] == {
+            "agent_name": "/root",
+            "agent_status": "running",
+        }
+        contracted_child_name = contracted[1].get("agent_name")
+        assert contracted_child_name in {
+            "/root/overflow_one",
+            "/root/overflow_two",
+            "/root/overflow_three",
+        }
+        assert contracted[1].get("agent_status") == "completed"
+        _wait_for_content(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=root_session_id,
+            expected=_OVERFLOW_CONTRACTED_LIST_RESPONSE,
+        )
+        final_tree = _tree_nodes(
+            _subagent_tree(
+                public_url=azents_public_server_url,
+                token=workspace.token,
+                agent_id=agent_id,
+                session_id=root_session_id,
+            )
+        )
+        for child_name in overflow_names:
+            assert _find_node(final_tree, child_name) is not None

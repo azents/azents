@@ -5,6 +5,7 @@
 import dataclasses
 import datetime
 import json
+import logging
 from textwrap import dedent
 from typing import Literal
 
@@ -55,8 +56,14 @@ from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepo
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, SessionAgent
+from azents.repos.subagent_coordination.repository import (
+    SubagentCoordinationRepository,
+)
 from azents.services.agent_mailbox import AgentMailboxService
 from azents.services.mailbox import MailboxService
+from azents.services.subagent_coordination import SubagentCoordinationService
+
+logger = logging.getLogger(__name__)
 
 _ROOT_AGENT_USAGE_HINT_TEXT = """You are `/root`, the primary agent in a team of agents collaborating to fulfill the user's goals.
 
@@ -189,6 +196,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         agent_session_repository: AgentSessionRepository,
         agent_run_repository: AgentRunRepository,
         event_transcript_repository: EventTranscriptRepository,
+        subagent_coordination_service: SubagentCoordinationService,
         agent_mailbox_service: AgentMailboxService,
         mailbox_item_service: MailboxService,
         broker: SessionBroker,
@@ -200,6 +208,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.agent_session_repository = agent_session_repository
         self.agent_run_repository = agent_run_repository
         self.event_transcript_repository = event_transcript_repository
+        self.subagent_coordination_service = subagent_coordination_service
         self.agent_mailbox_service = agent_mailbox_service
         self.mailbox_item_service = mailbox_item_service
         self.broker = broker
@@ -219,6 +228,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         self.publish_event = context.publish_event
         async with self.session_manager() as session:
             self.agent = await self._current_agent(session)
+            self.subagent_settings = self.agent.subagent_settings
         return ToolkitState(
             status=ToolkitStatus.ENABLED,
             tools=[
@@ -678,26 +688,39 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
 
     def _list_agents_tool(self) -> FunctionTool:
         async def list_agents() -> str:
-            """List agents in the current root SessionAgent tree."""
+            """List bounded agents in the current root SessionAgent tree."""
             async with self.session_manager() as session:
-                current = await self._current_session_agent(session)
-                tree = await self.agent_session_repository.list_session_agent_tree(
+                projection = await self.subagent_coordination_service.list_agents(
                     session,
-                    root_session_agent_id=current.root_session_agent_id,
+                    current_session_id=self._current_session_id(),
+                    configured_capacity=self.subagent_settings.max_subagents,
                 )
-                rows = []
-                for agent in tree:
-                    rows.append(
+                if projection is None:
+                    raise FunctionToolError("Current SessionAgent was not found")
+            logger.debug(
+                "Projected bounded subagent coordination list",
+                extra={
+                    "configured_capacity": projection.configured_capacity,
+                    "required_count": projection.required_count,
+                    "selected_inactive_count": projection.selected_inactive_count,
+                    "omitted_inactive_count": projection.omitted_inactive_count,
+                    "emitted_count": len(projection.agents),
+                    "capacity_converging": (
+                        projection.required_count > projection.configured_capacity
+                    ),
+                },
+            )
+            return _json(
+                {
+                    "agents": [
                         {
-                            "agent_name": agent.name,
-                            "agent_path": agent.path,
-                            "agent_status": await self._project_agent_status(
-                                session, agent
-                            ),
-                            "last_task_message": agent.last_task_message,
+                            "agent_name": agent.agent_name,
+                            "agent_status": agent.agent_status,
                         }
-                    )
-            return _json({"agents": rows})
+                        for agent in projection.agents
+                    ]
+                }
+            )
 
         return make_tool(list_agents, name="list_agents")
 
@@ -919,6 +942,7 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
         session: AsyncSession,
         agent: SessionAgent,
     ) -> str:
+        """Project one target status for the interrupt response."""
         agent_session = await self.agent_session_repository.get_by_id(
             session,
             agent.agent_session_id,
@@ -992,6 +1016,9 @@ class SubagentToolkitProvider(ToolkitProvider[SubagentToolkitConfig]):
             agent_session_repository=agent_session_repository,
             agent_run_repository=agent_run_repository,
             event_transcript_repository=EventTranscriptRepository(),
+            subagent_coordination_service=SubagentCoordinationService(
+                repository=SubagentCoordinationRepository(),
+            ),
             agent_mailbox_service=agent_mailbox_service,
             mailbox_item_service=self.mailbox_item_service,
             broker=self.broker,

@@ -48,6 +48,7 @@ code_paths:
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
+  - python/apps/azents/src/azents/services/subagent_coordination.py
   - python/apps/azents/src/azents/services/model_file.py
   - python/apps/azents/src/azents/services/xai_imagine.py
   - python/apps/azents/src/azents/services/xai_oauth/runtime.py
@@ -55,6 +56,7 @@ code_paths:
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/repos/mailbox/**
+  - python/apps/azents/src/azents/repos/subagent_coordination/**
   - python/apps/azents/src/azents/repos/agent_session/**
   - python/apps/azents/src/azents/repos/archived_session_retention/**
   - python/apps/azents/src/azents/repos/action_execution/**
@@ -79,8 +81,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-19
-spec_version: 158
+last_verified_at: 2026-08-20
+spec_version: 159
 ---
 
 # Agent Execution Loop
@@ -677,8 +679,17 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   positive integer selection. It identifies the child by name and full path, marks preceding messages
   as inherited parent context, and states that `wait` observes the child's current mailbox plus
   descendants rather than another selected agent.
-- Agent references follow Codex v2 visibility and targeting semantics within the current root tree.
-  `list_agents` includes the root and the known agent tree, including ancestors of the caller.
+- Agent references resolve against the complete durable root tree, independently
+  of model-facing list membership. `list_agents` performs one bounded PostgreSQL
+  projection for the caller's root tree. It always includes the root and every
+  child whose Session is running, latest Run is pending or running, or mailbox has
+  pending `wake_session` input. Those required-visible children may exceed
+  `subagent_settings.max_subagents` after a capacity reduction. Any remaining
+  slots up to the configured child capacity are filled by inactive recency using
+  `SessionAgent.last_message_at`, with creation time and canonical path as
+  deterministic fallbacks. The result emits only canonical `agent_name` and
+  `agent_status` fields. Omitted inactive children remain targetable by canonical
+  path and reusable in their existing Session.
 - `send_message` writes an `agent_message` to any resolved agent, including the root, without waking it.
 - `followup_task` writes an `agent_message`, marks the target running, and sends a broker wake-up,
   but rejects the root as a target. It holds the root-tree lock while evaluating active capacity.
@@ -1301,6 +1312,10 @@ icon.
 
 ## Changelog
 
+- **2026-08-20** (spec_version 159) — Added the bounded PostgreSQL
+  `list_agents` coordination projection, required-visible overflow behavior,
+  inactive-recency fill, canonical two-field output, and complete-tree historical
+  targeting independence.
 - **2026-08-18** (spec_version 157) — Added exact final-observer traceback
   logging for late model-stream operations and owned cleanup support tasks while
   preserving authoritative timeout and caller-cancellation outcomes.

@@ -28,6 +28,8 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
+  - python/apps/azents/src/azents/services/subagent_coordination.py
+  - python/apps/azents/src/azents/repos/subagent_coordination/**
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/engine/run/tool_budget.py
   - python/apps/azents/src/azents/engine/tooling/tool_search.py
@@ -55,8 +57,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-08-18
-spec_version: 95
+last_verified_at: 2026-08-20
+spec_version: 96
 ---
 
 # Toolkit
@@ -509,6 +511,25 @@ and subagent execution modes and exposes the coherent collaboration bundle as un
 - `interrupt_agent`
 - `list_agents`
 
+`list_agents` is a read-only PostgreSQL projection over the caller's complete root
+`SessionAgent` tree. Its exact result is
+`{"agents":[{"agent_name":"/root/...","agent_status":"..."}]}`; each item has only
+the canonical path in `agent_name` and the projected status in `agent_status`.
+The root is always present. Every non-root participant whose linked Session is
+running, whose latest Run is pending or running, or whose mailbox has pending
+`wake_session` input is required-visible even when those rows exceed the current
+`max_subagents` value. Remaining capacity is filled with inactive participants by
+descending `last_message_at`, then descending creation time and ascending path.
+The emitted rows are ordered with the root first and the selected children by
+canonical path. No delegated task or message content is included.
+
+This bounded model-facing projection does not change the durable coordination
+authority. Canonical path resolution for message, follow-up, and interrupt
+operations still uses the complete tree, and an omitted inactive child can be
+woken in its existing Session subject to the ordinary active-capacity check.
+Terminal-result delivery, parent observation cursors, and the public Subagent Tree
+remain independent and complete.
+
 `spawn_agent` currently supports only `agent_type = default`; unsupported values fail as tool errors.
 Its `fork_turns` parameter defaults to `all`, so the child starts with the parent's current
 model-visible context unless the caller explicitly selects no context or a bounded number of turns.
@@ -836,6 +857,10 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-08-20** (spec_version 96) — Bounded the model-facing `list_agents`
+  PostgreSQL projection by required-visible work plus recent inactive capacity,
+  adopted the canonical two-field result, and preserved complete-tree targeting,
+  terminal delivery, and public history.
 - **2026-08-18** (spec_version 95) — Added the ToolkitConfig-level
   `always_expose_tools` policy, false-by-default migration behavior, common API/UI
   control, and direct catalog classification for every tool from an opted-in
