@@ -1,13 +1,14 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-08-19T22:22:43Z",
+    "checked_at": "2026-08-20T22:51:59Z",
     "checked_ruleset_revisions": [
-      "91e6f323ff0749cc1baf04932f71fc810ceaa09f2b8d3723951d3175a185983e",
-      "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c",
-      "c9bf0754039e7be7cf894b4350911b693543b2fbfb9cbcf849ac1058ef07b255",
-      "d785d15ff0888ecdca39802bb34d6821d0194ac1cf970e8105ef944fcb7feb66"
+      "047b782eff7e0e020cc9064656daa2d570633333783fb8b511c66aa29b486b45",
+      "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
+      "d556e229dc9c943dfc7fced08799a8387a9ee7b9e97be7fad97194b2f5491181",
+      "f26baa3451662cb769c092c1775c9e08157d1fcf5cfd3eac2eafe513f9e687e4",
+      "f48f6a4b5c3c07cacb9a7f64be6d43152badc7e2f79c595464e0303c5e09c590"
     ],
-    "checked_through_commit": "8473921385da294a0bad31a185470bcf77408e44"
+    "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -71,34 +72,34 @@
       "checked_through_commit": "8473921385da294a0bad31a185470bcf77408e44"
     },
     ".claude/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-20T22:51:59Z",
+      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
+      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
     },
     ".claude/**::bucket-5-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-20T22:51:59Z",
+      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
+      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
     },
     ".claude/**::bucket-6-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-20T22:51:59Z",
+      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
+      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
     },
     ".claude/**::bucket-7-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-20T22:51:59Z",
+      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
+      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
     },
     ".claude/**::bucket-8-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-20T22:51:59Z",
+      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
+      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
     },
     ".codex/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-20T22:51:59Z",
+      "checked_ruleset_revision": "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd",
+      "checked_through_commit": "fec4d095f1a3f37cf35aa858b4d8ffb679453506"
     },
     ".codex/**::bucket-5-of-8": {
       "checked_at": null,
@@ -862,7 +863,41 @@
     }
   },
   "rulesets": {
-    "22896c550d39b0714ef34724de25dfc9f581a4d72fa96b91588ce3298291577d": [
+    "047b782eff7e0e020cc9064656daa2d570633333783fb8b511c66aa29b486b45": [
+      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
+      ".claude/conventions/global/comments-and-docstrings-in-english.md",
+      ".claude/conventions/global/decode-json-into-typed-payloads.md",
+      ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
+      ".claude/conventions/global/diagrams-in-mermaid.md",
+      ".claude/conventions/global/patch-null-means-set-null.md",
+      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
+      ".claude/conventions/global/redis-optional-no-ha.md",
+      ".claude/conventions/global/runner-reported-agent-workspace.md",
+      ".claude/conventions/global/stacked-pr-rebase-script.md",
+      ".claude/conventions/global/user-facing-text-in-english.md",
+      ".claude/conventions/global/worktree-rebase-origin-main.md",
+      ".claude/conventions/typescript/adt-state-types.md",
+      ".claude/conventions/typescript/apps-depend-on-packages-only.md",
+      ".claude/conventions/typescript/avoid-type-assertions.md",
+      ".claude/conventions/typescript/browser-persistence-hooks.md",
+      ".claude/conventions/typescript/container-component-pattern.md",
+      ".claude/conventions/typescript/cookie-based-locale.md",
+      ".claude/conventions/typescript/explicit-return-types.md",
+      ".claude/conventions/typescript/mantine-tokens-no-hardcoded.md",
+      ".claude/conventions/typescript/natural-technical-term-localization.md",
+      ".claude/conventions/typescript/no-direct-process-env.md",
+      ".claude/conventions/typescript/no-edit-generated.md",
+      ".claude/conventions/typescript/no-index-files.md",
+      ".claude/conventions/typescript/no-reverse-layer-imports.md",
+      ".claude/conventions/typescript/page-tsx-thin-entrypoint.md",
+      ".claude/conventions/typescript/pure-ui-stories.md",
+      ".claude/conventions/typescript/server-component-by-default.md",
+      ".claude/conventions/typescript/storybook-provider-structure.md",
+      ".claude/conventions/typescript/trpc-cache-invalidation.md",
+      ".claude/conventions/typescript/use-generated-public-client.md"
+    ],
+    "23e702a442d9885864e6c8f8f525586116e49861d6e70be9d188f04aab7bf6fb": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
       ".claude/conventions/global/comments-and-docstrings-in-english.md",
       ".claude/conventions/global/decode-json-into-typed-payloads.md",
@@ -884,8 +919,7 @@
       ".claude/conventions/infra/resource-naming-prefix.md",
       ".claude/conventions/infra/snake-case-vs-camel-case.md"
     ],
-    "27f1cf2964ca58a1181ac08eb9f32d09ad2f5b50ac5fa84cbf571e6ec3585f42": [
-      ".claude/conventions/github-actions/pin-actions-to-commit-hash.md",
+    "b0ab4c8acce3682456801902d945d5ecc9ae48cdf9e5e51ed643a8b6edb7d7fd": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
       ".claude/conventions/global/comments-and-docstrings-in-english.md",
       ".claude/conventions/global/decode-json-into-typed-payloads.md",
@@ -899,25 +933,6 @@
       ".claude/conventions/global/stacked-pr-rebase-script.md",
       ".claude/conventions/global/user-facing-text-in-english.md",
       ".claude/conventions/global/worktree-rebase-origin-main.md"
-    ],
-    "91e6f323ff0749cc1baf04932f71fc810ceaa09f2b8d3723951d3175a185983e": [
-      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
-      ".claude/conventions/global/comments-and-docstrings-in-english.md",
-      ".claude/conventions/global/decode-json-into-typed-payloads.md",
-      ".claude/conventions/global/dependency-updates-without-overrides.md",
-      ".claude/conventions/global/deterministic-test-synchronization.md",
-      ".claude/conventions/global/diagrams-in-mermaid.md",
-      ".claude/conventions/global/patch-null-means-set-null.md",
-      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
-      ".claude/conventions/global/redis-optional-no-ha.md",
-      ".claude/conventions/global/runner-reported-agent-workspace.md",
-      ".claude/conventions/global/stacked-pr-rebase-script.md",
-      ".claude/conventions/global/user-facing-text-in-english.md",
-      ".claude/conventions/global/worktree-rebase-origin-main.md",
-      ".claude/conventions/testenv/azents-web-cookie-names.md",
-      ".claude/conventions/testenv/no-direct-db-write-in-tests.md",
-      ".claude/conventions/testenv/qa-report-includes-slack-link.md",
-      ".claude/conventions/testenv/slack-password-login-uses-hidden-url.md"
     ],
     "b9e977ecb464a4caf083ed082d4edd1efd44359bac493db5aea5daff6813613c": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
@@ -934,7 +949,23 @@
       ".claude/conventions/global/user-facing-text-in-english.md",
       ".claude/conventions/global/worktree-rebase-origin-main.md"
     ],
-    "c9bf0754039e7be7cf894b4350911b693543b2fbfb9cbcf849ac1058ef07b255": [
+    "d556e229dc9c943dfc7fced08799a8387a9ee7b9e97be7fad97194b2f5491181": [
+      ".claude/conventions/github-actions/pin-actions-to-commit-hash.md",
+      ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
+      ".claude/conventions/global/comments-and-docstrings-in-english.md",
+      ".claude/conventions/global/decode-json-into-typed-payloads.md",
+      ".claude/conventions/global/dependency-updates-without-overrides.md",
+      ".claude/conventions/global/deterministic-test-synchronization.md",
+      ".claude/conventions/global/diagrams-in-mermaid.md",
+      ".claude/conventions/global/patch-null-means-set-null.md",
+      ".claude/conventions/global/prefer-supported-external-service-sdks.md",
+      ".claude/conventions/global/redis-optional-no-ha.md",
+      ".claude/conventions/global/runner-reported-agent-workspace.md",
+      ".claude/conventions/global/stacked-pr-rebase-script.md",
+      ".claude/conventions/global/user-facing-text-in-english.md",
+      ".claude/conventions/global/worktree-rebase-origin-main.md"
+    ],
+    "f26baa3451662cb769c092c1775c9e08157d1fcf5cfd3eac2eafe513f9e687e4": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
       ".claude/conventions/global/comments-and-docstrings-in-english.md",
       ".claude/conventions/global/decode-json-into-typed-payloads.md",
@@ -984,7 +1015,7 @@
       ".claude/conventions/python/type-safety-order.md",
       ".claude/conventions/python/typeddict-for-update-apis.md"
     ],
-    "d785d15ff0888ecdca39802bb34d6821d0194ac1cf970e8105ef944fcb7feb66": [
+    "f48f6a4b5c3c07cacb9a7f64be6d43152badc7e2f79c595464e0303c5e09c590": [
       ".claude/conventions/global/avoid-oppositional-negative-rewrites.md",
       ".claude/conventions/global/comments-and-docstrings-in-english.md",
       ".claude/conventions/global/decode-json-into-typed-payloads.md",
@@ -998,25 +1029,10 @@
       ".claude/conventions/global/stacked-pr-rebase-script.md",
       ".claude/conventions/global/user-facing-text-in-english.md",
       ".claude/conventions/global/worktree-rebase-origin-main.md",
-      ".claude/conventions/typescript/adt-state-types.md",
-      ".claude/conventions/typescript/apps-depend-on-packages-only.md",
-      ".claude/conventions/typescript/avoid-type-assertions.md",
-      ".claude/conventions/typescript/browser-persistence-hooks.md",
-      ".claude/conventions/typescript/container-component-pattern.md",
-      ".claude/conventions/typescript/cookie-based-locale.md",
-      ".claude/conventions/typescript/explicit-return-types.md",
-      ".claude/conventions/typescript/mantine-tokens-no-hardcoded.md",
-      ".claude/conventions/typescript/natural-technical-term-localization.md",
-      ".claude/conventions/typescript/no-direct-process-env.md",
-      ".claude/conventions/typescript/no-edit-generated.md",
-      ".claude/conventions/typescript/no-index-files.md",
-      ".claude/conventions/typescript/no-reverse-layer-imports.md",
-      ".claude/conventions/typescript/page-tsx-thin-entrypoint.md",
-      ".claude/conventions/typescript/pure-ui-stories.md",
-      ".claude/conventions/typescript/server-component-by-default.md",
-      ".claude/conventions/typescript/storybook-provider-structure.md",
-      ".claude/conventions/typescript/trpc-cache-invalidation.md",
-      ".claude/conventions/typescript/use-generated-public-client.md"
+      ".claude/conventions/testenv/azents-web-cookie-names.md",
+      ".claude/conventions/testenv/no-direct-db-write-in-tests.md",
+      ".claude/conventions/testenv/qa-report-includes-slack-link.md",
+      ".claude/conventions/testenv/slack-password-login-uses-hidden-url.md"
     ]
   },
   "schema_version": 2
