@@ -30,7 +30,7 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
 last_verified_at: 2026-08-20
-spec_version: 6
+spec_version: 7
 ---
 
 # Scheduled Task Domain Spec
@@ -131,7 +131,9 @@ Binding selection, exact-ID management, autonomous continuation, and explicit
 terminal result submission. Its creation contract states the mutually exclusive
 field shapes explicitly: one-time work supplies aware `at` with `cron` and
 `timezone` null, while recurring work supplies `cron` plus IANA `timezone` with
-`at` null.
+`at` null. When requester timezone context is reliably known, the Skill preserves
+the target instant's local UTC offset in one-time `at` values, including
+duration-relative requests, instead of normalizing equivalent input to `Z`.
 
 Chat activity groups all four Scheduled tools under the Schedule category. Their
 tool-call rows use dedicated summaries and bounded details for title, schedule,
@@ -217,8 +219,9 @@ A Task may target one exact connected Slack or Discord Binding.
   an Edit link to the exact Session Web tab and Task editor plus a Cancel button
   that first returns an ephemeral confirmation; only the signed confirmation
   control executes the mutation.
-- Explicit Toolkit and Public API/Web deletion commits before attempting one
-  provider-native deletion notification in the exact bound conversation.
+- Explicit Toolkit, Public API/Web, and provider-native control deletion commits
+  before attempting one provider-native deletion notification in the exact bound
+  conversation.
   Session-only deletion has no provider effect, and notification failure never
   rolls back the canonical deletion. Automatic one-time Task cleanup after
   terminal completion does not publish a deletion notice.
@@ -281,6 +284,11 @@ prompt. The result payload contains only title, scheduled instant, terminal stat
 and result text.
 
 ## Changelog
+
+- **2026-08-20** (spec_version 7) — Extended exact-Binding deletion notices to
+  provider-native cancellation controls and required the Scheduled Task Skill to
+  preserve a reliably known requester timezone offset in one-time `at` input,
+  including duration-relative schedules.
 
 - **2026-08-20** (spec_version 6) — Removed duplicate standalone Scheduled Task
   status/title content from Discord registration and deletion notifications while

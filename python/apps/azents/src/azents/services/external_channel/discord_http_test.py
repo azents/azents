@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -51,7 +52,13 @@ from azents.services.external_channel.discord_settings_scope import (
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
-from azents.services.scheduled_task.control import ScheduledTaskProviderControlService
+from azents.services.scheduled_task.channel import ScheduledTaskChannelService
+from azents.services.scheduled_task.control import (
+    ScheduledTaskProviderControlResult,
+    ScheduledTaskProviderControlService,
+    build_scheduled_task_control_locator,
+)
+from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 7, 26, 1, 0, tzinfo=datetime.UTC)
 
@@ -296,6 +303,8 @@ def _service(
     configuration: ExternalChannelConnectionConfiguration,
     admission: _AdmissionDouble,
     cleanup_plans: tuple[str, ...] = (),
+    scheduled_task_control: object | None = None,
+    scheduled_task_channel: object | None = None,
 ) -> tuple[DiscordHTTPAdmissionService, _RepositoryDouble, _ShortcutSourceDouble]:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -324,7 +333,11 @@ def _service(
             ),
             scheduled_task_control=cast(
                 ScheduledTaskProviderControlService,
-                SimpleNamespace(),
+                scheduled_task_control or SimpleNamespace(),
+            ),
+            scheduled_task_channel=cast(
+                ScheduledTaskChannelService,
+                scheduled_task_channel or SimpleNamespace(),
             ),
         ),
         repository,
@@ -442,6 +455,23 @@ def _settings_component_body() -> bytes:
     return json.dumps(
         {
             "id": "discord-settings-component-1",
+            "type": 3,
+            "application_id": "app-1",
+            "guild_id": "guild-1",
+            "channel_id": "channel-1",
+            "channel": {"id": "channel-1", "type": 0},
+            "member": {"user": {"id": "user-1"}},
+            "data": {"custom_id": custom_id},
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
+def _scheduled_task_component_body(custom_id: str) -> bytes:
+    """Build one signed Scheduled Task component callback."""
+    return json.dumps(
+        {
+            "id": "discord-scheduled-task-component-1",
             "type": 3,
             "application_id": "app-1",
             "guild_id": "guild-1",
@@ -625,6 +655,72 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
         service.settings_response_service,
     )
     assert settings_response.component_calls[0]["interaction_id"] == "interaction-row-1"
+
+
+@pytest.mark.asyncio
+async def test_scheduled_task_confirm_delete_prepares_notice_after_ack() -> None:
+    """Confirmed Discord cancellation returns its ack and a post-response notice."""
+    private_key = Ed25519PrivateKey.generate()
+    admission = _AdmissionDouble()
+    task = cast(ScheduledTask, SimpleNamespace(id="task-1", binding_id="binding-1"))
+    plan = make_provider_effect_plan("scheduled-task-deletion")
+    plan.target.request_payload["control_kind"] = "scheduled_task_deletion"
+    scheduled_task_control = SimpleNamespace(
+        config=SimpleNamespace(
+            auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="scheduled-secret"))
+        ),
+        mutate=AsyncMock(
+            return_value=ScheduledTaskProviderControlResult(
+                action="delete",
+                task=task,
+            )
+        ),
+    )
+    scheduled_task_channel = SimpleNamespace(
+        prepare_deletion=AsyncMock(return_value=plan),
+        execute_deletion_plan=AsyncMock(),
+    )
+    service, _, _ = _service(
+        configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
+        admission=admission,
+        scheduled_task_control=scheduled_task_control,
+        scheduled_task_channel=scheduled_task_channel,
+    )
+    body = _scheduled_task_component_body(
+        build_scheduled_task_control_locator(
+            secret="scheduled-secret",
+            action="confirm_delete",
+            task_id="task-1",
+            binding_id="binding-1",
+        )
+    )
+    timestamp, signature = _signature(private_key, body)
+
+    result = await service.handle(
+        selector="opaque-selector",
+        raw_body=body,
+        timestamp=timestamp,
+        signature=signature,
+        received_at=_NOW,
+    )
+
+    assert result.response == {
+        "type": 7,
+        "data": {
+            "content": "Scheduled Task cancelled.",
+            "components": [],
+        },
+    }
+    assert result.control_plans == (plan,)
+    assert result.control_delivery_connection_id == "connection-1"
+    scheduled_task_channel.prepare_deletion.assert_awaited_once_with(task)
+
+    await service.attempt_control_delivery(
+        connection_id="connection-1",
+        plan=plan,
+    )
+
+    scheduled_task_channel.execute_deletion_plan.assert_awaited_once_with(plan)
 
 
 @pytest.mark.asyncio

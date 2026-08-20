@@ -44,6 +44,10 @@ from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
+from azents.services.scheduled_task.channel import (
+    ScheduledTaskChannelService,
+    get_scheduled_task_channel_service,
+)
 from azents.services.scheduled_task.control import (
     ScheduledTaskProviderControlError,
     ScheduledTaskProviderControlService,
@@ -99,6 +103,10 @@ class DiscordHTTPAdmissionService:
     scheduled_task_control: Annotated[
         ScheduledTaskProviderControlService,
         Depends(ScheduledTaskProviderControlService),
+    ]
+    scheduled_task_channel: Annotated[
+        ScheduledTaskChannelService,
+        Depends(get_scheduled_task_channel_service),
     ]
 
     async def handle(
@@ -380,6 +388,7 @@ class DiscordHTTPAdmissionService:
     ) -> DiscordHTTPAdmissionResult:
         """Render or apply one idempotently claimed Scheduled Task component."""
         response: dict[str, object]
+        deletion_plan: ProviderEffectPlan | None = None
         claim = await self.admission_service.begin_interaction_provider_mutation(
             interaction_id=admission.interaction.id,
             now=received_at,
@@ -408,7 +417,7 @@ class DiscordHTTPAdmissionService:
                     ),
                 )
             elif locator.action == "confirm_delete":
-                await self.scheduled_task_control.mutate(
+                result = await self.scheduled_task_control.mutate(
                     interaction_id=admission.interaction.id,
                     locator=locator,
                     provider_parent_channel_id=context.provider_parent_channel_id,
@@ -416,6 +425,9 @@ class DiscordHTTPAdmissionService:
                     origin_interaction_id=None,
                     edit=None,
                     now=received_at,
+                )
+                deletion_plan = await self.scheduled_task_channel.prepare_deletion(
+                    result.task
                 )
                 response = {
                     "type": 7,
@@ -450,6 +462,10 @@ class DiscordHTTPAdmissionService:
             envelope=envelope,
             admission=admission,
             response=response,
+            control_plans=(() if deletion_plan is None else (deletion_plan,)),
+            control_delivery_connection_id=(
+                None if deletion_plan is None else context.connection_id
+            ),
         )
 
     async def _modal_result(
@@ -653,6 +669,11 @@ class DiscordHTTPAdmissionService:
         plan: ProviderEffectPlan,
     ) -> None:
         """Attempt one control only after the provider acknowledgement."""
+        if plan.target.request_payload.get("control_kind") == (
+            "scheduled_task_deletion"
+        ):
+            await self.scheduled_task_channel.execute_deletion_plan(plan)
+            return
         await self.selector_response_service.attempt_control_delivery(
             connection_id=connection_id,
             plan=plan,

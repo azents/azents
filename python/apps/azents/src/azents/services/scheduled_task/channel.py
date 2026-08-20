@@ -2,10 +2,13 @@
 
 import dataclasses
 from collections.abc import Sequence
+from typing import Annotated
 
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelActionMode,
     ExternalChannelDeliveryOperation,
@@ -19,6 +22,7 @@ from azents.core.external_channel_progress import (
     checking_progress,
 )
 from azents.core.slack_external_channel_progress import render_slack_progress
+from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
@@ -171,10 +175,26 @@ class ScheduledTaskChannelService:
         binding_id = task.binding_id
         if binding_id is None:
             return None
+        plan = await self.prepare_deletion(task)
+        if plan is None:
+            return _unavailable_outcome(
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                part=0,
+            )
+        return await self.execute_deletion_plan(plan)
+
+    async def prepare_deletion(
+        self,
+        task: ScheduledTask,
+    ) -> ProviderEffectPlan | None:
+        """Prepare one exact-Binding deletion notice without provider I/O."""
+        binding_id = task.binding_id
+        if binding_id is None:
+            return None
         slack_text, slack_blocks = render_scheduled_task_slack_deletion(task=task)
         discord_text, discord_embeds = render_scheduled_task_discord_deletion(task=task)
         async with self.session_manager() as session:
-            plan = await self.provider_repository.prepare_binding_effect(
+            return await self.provider_repository.prepare_binding_effect(
                 session,
                 agent_id=task.agent_id,
                 session_id=task.session_id,
@@ -192,11 +212,12 @@ class ScheduledTaskChannelService:
                 },
                 operation_seed=f"scheduled-deletion:{task.id}",
             )
-        if plan is None:
-            return _unavailable_outcome(
-                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                part=0,
-            )
+
+    async def execute_deletion_plan(
+        self,
+        plan: ProviderEffectPlan,
+    ) -> ProviderEffectOutcome:
+        """Attempt one prepared deletion notice against unchanged Binding authority."""
         outcome = await self.action_service.execute_binding_effect(plan)
         return _provider_outcome(
             operation=plan.target.operation,
@@ -659,6 +680,32 @@ class ScheduledTaskChannelService:
                 status=status,
                 provider_message_key=provider_message_key,
             )
+
+
+def get_scheduled_task_channel_service(
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+    run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
+    cycle_repository: Annotated[
+        ScheduledTaskCycleRepository, Depends(ScheduledTaskCycleRepository)
+    ],
+    provider_repository: Annotated[
+        ExternalChannelWorkRepository,
+        Depends(ExternalChannelWorkRepository.create),
+    ],
+    action_service: Annotated[ExternalChannelActionService, Depends()],
+    config: Annotated[Config, Depends(get_config)],
+) -> ScheduledTaskChannelService:
+    """Create the Scheduled-owned External Channel effect service."""
+    return ScheduledTaskChannelService(
+        session_manager=session_manager,
+        run_repository=run_repository,
+        cycle_repository=cycle_repository,
+        provider_repository=provider_repository,
+        action_service=action_service,
+        config=config,
+    )
 
 
 def _projection_outcome(

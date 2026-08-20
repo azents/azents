@@ -83,7 +83,7 @@ class ScheduledTaskProviderControlResult:
     """Canonical mutation outcome rendered by the provider-specific caller."""
 
     action: ScheduledTaskControlAction
-    task: ScheduledTask | None
+    task: ScheduledTask
 
 
 def build_scheduled_task_control_locator(
@@ -473,7 +473,10 @@ class ScheduledTaskProviderControlService:
                         "Scheduled Task is no longer available."
                     )
                 await session.commit()
-                return ScheduledTaskProviderControlResult(action="delete", task=None)
+                return ScheduledTaskProviderControlResult(
+                    action="delete",
+                    task=target.task,
+                )
             assert edit is not None
             replacement = await service.replace_locked_provider_target(
                 session,

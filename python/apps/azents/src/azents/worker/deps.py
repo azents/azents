@@ -33,10 +33,7 @@ from azents.engine.tools.claude_rules import (
     ClaudeRulesToolkitProvider,
     ToolkitClaudeRulesAppendixDedupeStateStore,
 )
-from azents.engine.tools.deps import (
-    get_scheduled_task_channel_service,
-    get_vfs_projection_service,
-)
+from azents.engine.tools.deps import get_vfs_projection_service
 from azents.engine.tools.dynamic_worktree import DynamicWorktreeToolkitProvider
 from azents.engine.tools.external_channel import ExternalChannelToolkitProvider
 from azents.engine.tools.import_file import ImportFileStagingConfiguration
@@ -103,7 +100,10 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.external_channel.slack_events import SlackConversationClient
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
-from azents.services.scheduled_task.channel import ScheduledTaskChannelService
+from azents.services.scheduled_task.channel import (
+    ScheduledTaskChannelService,
+    get_scheduled_task_channel_service,
+)
 from azents.services.session_git_worktree import SessionGitWorktreeService
 from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingService,

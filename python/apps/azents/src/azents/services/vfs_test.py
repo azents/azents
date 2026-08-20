@@ -285,7 +285,9 @@ async def test_preview_includes_required_scheduled_skill_without_attachment() ->
 
     entry = projection.find("azents://skills/scheduled/scheduled-task/SKILL.md")
     assert entry is not None
-    assert "name: scheduled-task" in entry.decode_body().decode()
+    body = entry.decode_body().decode()
+    assert "name: scheduled-task" in body
+    assert "Do not normalize it to `Z`" in body
 
 
 @pytest.mark.parametrize(

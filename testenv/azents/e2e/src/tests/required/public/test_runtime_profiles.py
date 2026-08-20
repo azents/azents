@@ -271,22 +271,57 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
     assert explicit_profile.capability_revision_id is not None
 
     runtime_api = AgentRuntimeV1Api(public_api_client)
-    read_only_runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
-        agent_id=explicit_agent.id,
-        handle=handle,
-        _headers=headers,
+    reconciled_runtime: AgentRuntimeResponse | None = None
+
+    def runtime_reconciled_without_compute() -> bool:
+        nonlocal reconciled_runtime
+        current = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=explicit_agent.id,
+            handle=handle,
+            _headers=headers,
+        )
+        runtime = current.runtime
+        state = current.state
+        configuration = current.configuration
+        if runtime is None or state is None or configuration is None:
+            return False
+        reconciled_runtime = current
+        return (
+            state.summary == RuntimeSummary.STOPPED
+            and configuration.status == "configured_not_created"
+            and configuration.desired is not None
+            and configuration.applied is None
+            and runtime.workspace_path is None
+            and runtime.last_lifecycle_command is None
+        )
+
+    wait_until(
+        runtime_reconciled_without_compute,
+        timeout=30,
+        interval=1,
+        message=(
+            "Runtime Profile reconciliation did not establish a stopped logical Runtime"
+        ),
     )
-    assert read_only_runtime.capability == AgentRuntimeCapability.MANAGED
-    assert read_only_runtime.runtime_profile_id == explicit_profile_id
-    assert read_only_runtime.runtime is None
-    assert read_only_runtime.state is None
-    read_only_configuration = read_only_runtime.configuration
-    if read_only_configuration is not None:
-        assert read_only_configuration.status == "configured_not_created"
-        assert read_only_configuration.desired is not None
-        assert read_only_configuration.applied is None
-    assert read_only_runtime.actions.add is False
-    assert read_only_runtime.actions.start is True
+    assert reconciled_runtime is not None
+    assert reconciled_runtime.capability == AgentRuntimeCapability.MANAGED
+    assert reconciled_runtime.runtime_profile_id == explicit_profile_id
+    assert reconciled_runtime.runtime is not None
+    assert (
+        reconciled_runtime.runtime.runtime_provider_id == explicit_profile.provider_id
+    )
+    assert reconciled_runtime.state is not None
+    assert reconciled_runtime.state.summary == RuntimeSummary.STOPPED
+    assert reconciled_runtime.configuration is not None
+    assert reconciled_runtime.configuration.status == "configured_not_created"
+    assert reconciled_runtime.configuration.desired is not None
+    assert (
+        reconciled_runtime.configuration.desired.workspace_runtime_profile_id
+        == explicit_profile_id
+    )
+    assert reconciled_runtime.configuration.applied is None
+    assert reconciled_runtime.actions.add is False
+    assert reconciled_runtime.actions.start is True
 
     initial_runtime = runtime_api.agent_runtime_v1_start_agent_runtime(
         agent_id=explicit_agent.id,

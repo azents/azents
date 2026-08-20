@@ -73,6 +73,10 @@ from azents.services.external_channel.slack_http import (
 from azents.services.external_channel.slack_settings import (
     parse_slack_settings_locator,
 )
+from azents.services.scheduled_task.channel import (
+    ScheduledTaskChannelService,
+    get_scheduled_task_channel_service,
+)
 from azents.services.scheduled_task.control import (
     ScheduledTaskEditInput,
     ScheduledTaskProviderControlError,
@@ -200,6 +204,10 @@ class ExternalChannelInteractionProcessor:
     scheduled_task_control: Annotated[
         ScheduledTaskProviderControlService,
         Depends(ScheduledTaskProviderControlService),
+    ]
+    scheduled_task_channel: Annotated[
+        ScheduledTaskChannelService,
+        Depends(get_scheduled_task_channel_service),
     ]
     config: Annotated[Config, Depends(get_config)]
 
@@ -704,6 +712,7 @@ class ExternalChannelInteractionProcessor:
             secret=self.config.auth.jwt.secret_key,
         )
         interaction, configuration = await self._load_processing_interaction(handoff)
+        deleted_task: ScheduledTask | None = None
         try:
             if handoff.handler == "scheduled_task_edit_open":
                 if locator.action != "edit":
@@ -751,6 +760,8 @@ class ExternalChannelInteractionProcessor:
                     edit=handoff.scheduled_task_edit,
                     now=now,
                 )
+                if result.action == "delete":
+                    deleted_task = result.task
                 view = _scheduled_task_notice_view(
                     "Scheduled Task saved."
                     if result.action == "edit"
@@ -758,18 +769,20 @@ class ExternalChannelInteractionProcessor:
                 )
         except (ScheduledTaskProviderControlError, ValueError) as error:
             view = _scheduled_task_notice_view(str(error))
-        if handoff.trigger_id is None:
-            return
-        result = await self.slack_client.open_interaction_view(
-            bot_token=self._slack_credentials(configuration).bot_token,
-            trigger_id=handoff.trigger_id,
-            view=view,
-        )
-        if result.status == "opened":
-            return
-        if result.status == "expired":
-            raise SlackInteractionTriggerExpired
-        raise RuntimeError("Slack Scheduled Task control could not be processed.")
+        if handoff.trigger_id is not None:
+            result = await self.slack_client.open_interaction_view(
+                bot_token=self._slack_credentials(configuration).bot_token,
+                trigger_id=handoff.trigger_id,
+                view=view,
+            )
+            if result.status == "expired":
+                raise SlackInteractionTriggerExpired
+            if result.status != "opened":
+                raise RuntimeError(
+                    "Slack Scheduled Task control could not be processed."
+                )
+        if deleted_task is not None:
+            await self.scheduled_task_channel.execute_deletion(deleted_task)
 
     async def _load_processing_interaction(
         self,
