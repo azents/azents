@@ -19,7 +19,7 @@ Details of all living specs. Synchronized from frontmatter.
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-08-18 | 20 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-18 | 27 |
-| scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-08-20 | 5 |
+| scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-08-20 | 6 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-08-18 | 95 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-08-18 | 12 |

@@ -210,6 +210,7 @@ async def test_registration_uses_exact_binding_and_returns_immediate_outcome() -
     assert kwargs["binding_id"] == _BINDING_ID
     assert kwargs["operation"] is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
     assert kwargs["slack_payload"]["control_kind"] == ("scheduled_task_registration")
+    assert kwargs["discord_payload"]["text"] == ""
     assert kwargs["discord_payload"]["task_id"] == "t" * 32
     assert isinstance(kwargs["discord_payload"]["delete_locator"], str)
     assert "components" not in kwargs["discord_payload"]
@@ -238,6 +239,7 @@ async def test_deletion_uses_exact_binding_and_returns_immediate_outcome() -> No
     assert kwargs["operation_seed"] == f"scheduled-deletion:{'t' * 32}"
     assert kwargs["slack_payload"]["control_kind"] == "scheduled_task_deletion"
     assert kwargs["discord_payload"]["control_kind"] == "scheduled_task_deletion"
+    assert kwargs["discord_payload"]["text"] == ""
     assert "Scheduled Task deleted: Daily report" in str(kwargs["slack_payload"])
     assert "Prepare the report." not in str(kwargs["discord_payload"])
 

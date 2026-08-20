@@ -288,7 +288,8 @@ def test_registration_renderers_use_web_edit_and_cancel_controls() -> None:
         delete_locator=delete,
     )
 
-    assert slack_text == discord_text == "Scheduled Task registered: Daily report"
+    assert slack_text == "Scheduled Task registered: Daily report"
+    assert discord_text == ""
     slack_actions = slack_blocks[-1]["elements"]
     assert isinstance(slack_actions, list)
     edit_button, delete_button = slack_actions
@@ -332,7 +333,8 @@ def test_deletion_renderers_notify_without_repeating_task_objective() -> None:
     slack_text, slack_blocks = render_scheduled_task_slack_deletion(task=task)
     discord_text, embeds = render_scheduled_task_discord_deletion(task=task)
 
-    assert slack_text == discord_text == "Scheduled Task deleted: Daily report"
+    assert slack_text == "Scheduled Task deleted: Daily report"
+    assert discord_text == ""
     assert slack_blocks[0] == {
         "type": "header",
         "text": {

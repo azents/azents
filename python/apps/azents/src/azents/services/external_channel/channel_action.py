@@ -817,7 +817,7 @@ class ExternalChannelActionService:
                     )
                     if (
                         files
-                        or not isinstance(text, str)
+                        or text != ""
                         or embeds is None
                         or not isinstance(delete_locator, str)
                         or edit_url is None
@@ -833,6 +833,22 @@ class ExternalChannelActionService:
                             edit_url=edit_url,
                             delete_locator=delete_locator,
                         ),
+                        embeds=embeds,
+                    )
+                if (
+                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+                    and payload.get("control_kind") == "scheduled_task_deletion"
+                ):
+                    text = payload.get("text")
+                    embeds = _discord_embeds(payload.get("embeds"))
+                    if files or text != "" or embeds is None:
+                        return _discord_invalid_payload()
+                    return await discord_client.create_message(
+                        bot_token=bot_token,
+                        guild_id=guild_id,
+                        channel_id=delivery_channel_id,
+                        content=_discord_agent_content(target, text),
+                        operation_key=operation_key,
                         embeds=embeds,
                     )
                 text = payload.get("text")

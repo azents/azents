@@ -275,10 +275,9 @@ def render_scheduled_task_discord_registration(
     task: ScheduledTask,
 ) -> tuple[str, list[dict[str, object]]]:
     """Render one Discord registration message before current Web URL resolution."""
-    text = f"Scheduled Task registered: {task.title}"
     schedule = _schedule_presentation(task)
     return (
-        text,
+        "",
         [
             {
                 "title": task.title[:256],
@@ -342,7 +341,7 @@ def render_scheduled_task_discord_deletion(
 ) -> tuple[str, list[dict[str, object]]]:
     """Render one bounded Discord Task deletion notice."""
     return (
-        f"Scheduled Task deleted: {task.title}",
+        "",
         [
             {
                 "title": task.title[:256],

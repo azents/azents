@@ -30,7 +30,7 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
 last_verified_at: 2026-08-20
-spec_version: 5
+spec_version: 6
 ---
 
 # Scheduled Task Domain Spec
@@ -222,6 +222,9 @@ A Task may target one exact connected Slack or Discord Binding.
   Session-only deletion has no provider effect, and notification failure never
   rolls back the canonical deletion. Automatic one-time Task cleanup after
   terminal completion does not publish a deletion notice.
+- Discord registration and deletion notifications omit duplicate standalone
+  Scheduled Task status/title content before the embed. Multi-App Agent identity
+  presentation remains available.
 - A started cycle owns its own progress Tracker state. It reuses lower-level
   External Channel provider primitives but never reuses Channel Work state.
 - Progress messages and Tracker updates are immediate one-attempt effects.
@@ -278,6 +281,10 @@ prompt. The result payload contains only title, scheduled instant, terminal stat
 and result text.
 
 ## Changelog
+
+- **2026-08-20** (spec_version 6) — Removed duplicate standalone Scheduled Task
+  status/title content from Discord registration and deletion notifications while
+  preserving Multi-App Agent identity presentation.
 
 - **2026-08-20** (spec_version 5) — Added best-effort exact-Binding deletion
   notifications after explicit Toolkit and Public API/Web deletion commits.
