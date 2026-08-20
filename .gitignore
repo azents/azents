@@ -6,7 +6,6 @@
 **/.env.*.local
 !**/.env.example
 .claude/scheduled_tasks.lock
-.claude/codingbot/state/
 .claude/worktrees/
 /db-data
 /temporal-db-data
@@ -32,8 +31,6 @@ storybook-static/
 .vault/
 .obsidian/workspace/
 
-# Codingbot runtime files
-.claude/codingbot/channel-state.json
 .mcp.json
 /config.json
 /opencode.json
