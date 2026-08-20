@@ -3,10 +3,11 @@
 Quick validation script for skills - minimal version
 """
 
-import sys
 import re
-import yaml
+import sys
 from pathlib import Path
+
+import yaml
 
 
 def validate_skill(skill_path):

@@ -14,7 +14,6 @@ Examples:
 import sys
 from pathlib import Path
 
-
 SKILL_TEMPLATE = """---
 name: {skill_name}
 description: [TODO: Complete and informative explanation of what the skill does and when to use it. Include WHEN to use this skill - specific scenarios, file types, or tasks that trigger it.]
@@ -214,7 +213,7 @@ def init_skill(skill_name, path):
     try:
         skill_dir.mkdir(parents=True, exist_ok=False)
         print(f"✅ Created skill directory: {skill_dir}")
-    except Exception as e:
+    except OSError as e:
         print(f"❌ Error creating directory: {e}")
         return None
 
@@ -228,7 +227,7 @@ def init_skill(skill_name, path):
     try:
         skill_md_path.write_text(skill_content)
         print("✅ Created SKILL.md")
-    except Exception as e:
+    except OSError as e:
         print(f"❌ Error creating SKILL.md: {e}")
         return None
 
@@ -255,7 +254,7 @@ def init_skill(skill_name, path):
         example_asset = assets_dir / "example_asset.txt"
         example_asset.write_text(EXAMPLE_ASSET)
         print("✅ Created assets/example_asset.txt")
-    except Exception as e:
+    except OSError as e:
         print(f"❌ Error creating resource directories: {e}")
         return None
 

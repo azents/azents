@@ -13,6 +13,7 @@ Example:
 import sys
 import zipfile
 from pathlib import Path
+
 from quick_validate import validate_skill
 
 
@@ -77,7 +78,7 @@ def package_skill(skill_path, output_dir=None):
         print(f"\n✅ Successfully packaged skill to: {skill_filename}")
         return skill_filename
 
-    except Exception as e:
+    except (OSError, zipfile.LargeZipFile) as e:
         print(f"❌ Error creating .skill file: {e}")
         return None
 

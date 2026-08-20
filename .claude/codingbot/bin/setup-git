@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Bot identity를 동적 추출하여 worktree 로컬 git config에 설정한다.
+# Dynamically retrieve the bot identity and configure it in the worktree-local Git config.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Bot identity 동적 추출 (/app endpoint는 JWT Bearer 인증 필요)
+# Dynamically retrieve the bot identity (the /app endpoint requires JWT Bearer authentication).
 JWT=$("$SCRIPT_DIR/gh-app-token" --jwt)
 APP_JSON=$(curl -sS --fail -H "Authorization: Bearer $JWT" -H "Accept: application/vnd.github+json" https://api.github.com/app)
 APP_SLUG=$(echo "$APP_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['slug'])")
@@ -12,11 +12,11 @@ APP_ID=$(echo "$APP_JSON" | python3 -c "import json,sys; print(json.load(sys.std
 BOT_NAME="${APP_SLUG}[bot]"
 BOT_EMAIL="${APP_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
-# worktree 로컬 git config에만 적용
+# Apply only to the worktree-local Git config.
 git config user.name "$BOT_NAME"
 git config user.email "$BOT_EMAIL"
 
-# session repo 기본값과 credential helper 를 worktree 로컬 git config 에 저장한다.
+# Store the default session repository and credential helper in the worktree-local Git config.
 REPO_SLUG="${REPO:-}"
 CONFIG_PATH="${CODINGBOT_CONFIG:-}"
 if [[ -n "$REPO_SLUG" ]]; then
