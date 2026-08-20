@@ -33,6 +33,8 @@ import {
   externalChannelV1ReplaceMultiDiscordChannelDefault,
   externalChannelV1ReplaceMultiSlackChannelDefault,
   externalChannelV1RevokeAccessGrant,
+  externalChannelV1SetDiscordThreadDuration,
+  externalChannelV1SetMultiDiscordThreadDuration,
   externalChannelV1SetupDiscordConnection,
   externalChannelV1SetupMultiDiscordConnection,
   externalChannelV1SetupMultiSlackConnection,
@@ -61,6 +63,12 @@ const approvalDecisionSchema = z.enum([
 const transportSchema = z.enum(["http", "socket"]);
 const providerSchema = z.enum(["slack", "discord"]);
 const responseModeSchema = z.enum(["mention_only", "all_messages"]);
+const discordThreadAutoArchiveDurationSchema = z.union([
+  z.literal(60),
+  z.literal(1440),
+  z.literal(4320),
+  z.literal(10080),
+]);
 const slackCredentialsSchema = z.object({
   botToken: z.string().min(1),
   signingSecret: z.string().min(1),
@@ -230,6 +238,8 @@ export const externalChannelRouter = router({
         handle: z.string().min(1),
         appId: z.string().min(1),
         credentials: discordCredentialsSchema,
+        threadAutoArchiveDurationMinutes:
+          discordThreadAutoArchiveDurationSchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -239,7 +249,11 @@ export const externalChannelRouter = router({
           path: { handle: input.handle },
           body: {
             app_id: input.appId,
-            configuration: { target_guild_id: input.credentials.targetGuildId },
+            configuration: {
+              target_guild_id: input.credentials.targetGuildId,
+              thread_auto_archive_duration_minutes:
+                input.threadAutoArchiveDurationMinutes,
+            },
             credentials: { bot_token: input.credentials.botToken },
           },
           throwOnError: true,
@@ -289,6 +303,8 @@ export const externalChannelRouter = router({
         connectionId: z.string().min(1),
         appId: z.string().min(1),
         credentials: discordCredentialsSchema,
+        threadAutoArchiveDurationMinutes:
+          discordThreadAutoArchiveDurationSchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -298,8 +314,43 @@ export const externalChannelRouter = router({
           path: { handle: input.handle, connection_id: input.connectionId },
           body: {
             app_id: input.appId,
-            configuration: { target_guild_id: input.credentials.targetGuildId },
+            configuration: {
+              target_guild_id: input.credentials.targetGuildId,
+              thread_auto_archive_duration_minutes:
+                input.threadAutoArchiveDurationMinutes,
+            },
             credentials: { bot_token: input.credentials.botToken },
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
+  setMultiDiscordThreadDuration: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        connectionId: z.string().min(1),
+        expectedGeneration: z.string().min(1),
+        threadAutoArchiveDurationMinutes:
+          discordThreadAutoArchiveDurationSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await externalChannelV1SetMultiDiscordThreadDuration({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            connection_id: input.connectionId,
+          },
+          body: {
+            expected_generation: input.expectedGeneration,
+            thread_auto_archive_duration_minutes:
+              input.threadAutoArchiveDurationMinutes,
           },
           throwOnError: true,
         });
@@ -690,6 +741,8 @@ export const externalChannelRouter = router({
         agentId: z.string().min(1),
         appId: z.string().min(1),
         credentials: discordCredentialsSchema,
+        threadAutoArchiveDurationMinutes:
+          discordThreadAutoArchiveDurationSchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -699,7 +752,11 @@ export const externalChannelRouter = router({
           path: { handle: input.handle, agent_id: input.agentId },
           body: {
             app_id: input.appId,
-            configuration: { target_guild_id: input.credentials.targetGuildId },
+            configuration: {
+              target_guild_id: input.credentials.targetGuildId,
+              thread_auto_archive_duration_minutes:
+                input.threadAutoArchiveDurationMinutes,
+            },
             credentials: { bot_token: input.credentials.botToken },
           },
           throwOnError: true,
@@ -780,6 +837,8 @@ export const externalChannelRouter = router({
         connectionId: z.string().min(1),
         appId: z.string().min(1),
         credentials: discordCredentialsSchema,
+        threadAutoArchiveDurationMinutes:
+          discordThreadAutoArchiveDurationSchema,
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -793,8 +852,43 @@ export const externalChannelRouter = router({
           },
           body: {
             app_id: input.appId,
-            configuration: { target_guild_id: input.credentials.targetGuildId },
+            configuration: {
+              target_guild_id: input.credentials.targetGuildId,
+              thread_auto_archive_duration_minutes:
+                input.threadAutoArchiveDurationMinutes,
+            },
             credentials: { bot_token: input.credentials.botToken },
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
+  setDiscordThreadDuration: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        connectionId: z.string().min(1),
+        threadAutoArchiveDurationMinutes:
+          discordThreadAutoArchiveDurationSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await externalChannelV1SetDiscordThreadDuration({
+          client: ctx.apiClient,
+          path: {
+            handle: input.handle,
+            agent_id: input.agentId,
+            connection_id: input.connectionId,
+          },
+          body: {
+            thread_auto_archive_duration_minutes:
+              input.threadAutoArchiveDurationMinutes,
           },
           throwOnError: true,
         });

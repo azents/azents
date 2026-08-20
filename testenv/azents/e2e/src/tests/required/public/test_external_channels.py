@@ -3912,7 +3912,8 @@ def test_discord_single_activation_and_interaction_journey(
         discord_connection_setup_request=DiscordConnectionSetupRequest(
             app_id=_DISCORD_APPLICATION_ID,
             configuration=DiscordConnectionConfiguration(
-                target_guild_id=_DISCORD_GUILD_ID
+                target_guild_id=_DISCORD_GUILD_ID,
+                thread_auto_archive_duration_minutes=1440,
             ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
         ),
@@ -4167,7 +4168,10 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         handle=handle,
         discord_connection_setup_request=DiscordConnectionSetupRequest(
             app_id=application_id,
-            configuration=DiscordConnectionConfiguration(target_guild_id=guild_id),
+            configuration=DiscordConnectionConfiguration(
+                target_guild_id=guild_id,
+                thread_auto_archive_duration_minutes=1440,
+            ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
         ),
         _headers=headers,
@@ -4684,7 +4688,10 @@ def test_discord_configured_message_durably_provisions_conversation(
         handle=handle,
         discord_connection_setup_request=DiscordConnectionSetupRequest(
             app_id=application_id,
-            configuration=DiscordConnectionConfiguration(target_guild_id=guild_id),
+            configuration=DiscordConnectionConfiguration(
+                target_guild_id=guild_id,
+                thread_auto_archive_duration_minutes=1440,
+            ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
         ),
         _headers=headers,
@@ -4996,7 +5003,8 @@ def test_discord_message_command_selector_and_component_journey(
         discord_connection_setup_request=DiscordConnectionSetupRequest(
             app_id=_DISCORD_SELECTOR_APPLICATION_ID,
             configuration=DiscordConnectionConfiguration(
-                target_guild_id=_DISCORD_GUILD_ID
+                target_guild_id=_DISCORD_GUILD_ID,
+                thread_auto_archive_duration_minutes=1440,
             ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
         ),
@@ -5361,7 +5369,8 @@ def test_discord_multi_management_and_lifecycle_journey(
         discord_connection_setup_request=DiscordConnectionSetupRequest(
             app_id=_DISCORD_MULTI_APPLICATION_ID,
             configuration=DiscordConnectionConfiguration(
-                target_guild_id=_DISCORD_GUILD_ID
+                target_guild_id=_DISCORD_GUILD_ID,
+                thread_auto_archive_duration_minutes=1440,
             ),
             credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
         ),

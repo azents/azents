@@ -605,10 +605,13 @@ class ExternalChannelActionService:
         payload = target.request_payload
         guild_id = payload.get("guild_id")
         channel_id = payload.get("channel_id")
+        configuration = target.provider_configuration
         if (
             not isinstance(guild_id, str)
             or not guild_id.isdigit()
             or target.provider_tenant_id != guild_id
+            or configuration is None
+            or configuration.target_guild_id != guild_id
             or not isinstance(channel_id, str)
             or not channel_id.isdigit()
         ):
@@ -661,6 +664,9 @@ class ExternalChannelActionService:
                 parent_channel_id=parent_channel_id,
                 root_message_id=root_message_id,
                 name=target.agent_name,
+                auto_archive_duration=(
+                    configuration.thread_auto_archive_duration_minutes
+                ),
             )
             if thread.status != "delivered":
                 return thread

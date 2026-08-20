@@ -71,6 +71,7 @@ from azents.services.external_channel.conversation import (
 from azents.services.external_channel.data import (
     DiscordConnectionConfiguration,
     DiscordConnectionCredentials,
+    DiscordThreadAutoArchiveDurationMinutes,
     ExternalChannelConnectionCredentialPayload,
     ExternalChannelConnectionStatusSnapshot,
     SlackConnectionCredentials,
@@ -152,6 +153,14 @@ class ExternalChannelResponseModeSetting(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     response_mode: ExternalChannelResponseMode
+
+
+class DiscordThreadAutoArchiveDurationSetting(BaseModel):
+    """Canonical full-value Discord Thread automatic archive setting."""
+
+    model_config = ConfigDict(frozen=True)
+
+    thread_auto_archive_duration_minutes: DiscordThreadAutoArchiveDurationMinutes
 
 
 @dataclass
@@ -589,6 +598,35 @@ class ExternalChannelManagementService:
         return await self.discord_activation_service.activate(
             connection_id=connection_id
         )
+
+    async def update_multi_discord_thread_auto_archive_duration(
+        self,
+        *,
+        workspace_id: str,
+        connection_id: str,
+        expected_generation: datetime.datetime,
+        setting: DiscordThreadAutoArchiveDurationSetting,
+    ) -> ManagedMultiConnection:
+        """Replace one Multi App Thread policy without provider reactivation."""
+        async with self.session_manager() as session:
+            connection = await self._lock_multi_connection_generation(
+                session,
+                workspace_id=workspace_id,
+                connection_id=connection_id,
+                provider=ExternalChannelProvider.DISCORD,
+                expected_generation=expected_generation,
+            )
+            managed = (
+                await self.repository.update_multi_discord_thread_auto_archive_duration(
+                    session,
+                    connection=connection,
+                    duration=setting.thread_auto_archive_duration_minutes,
+                )
+            )
+            if managed is None:
+                raise ExternalChannelManagementNotFound(connection_id)
+            await session.commit()
+        return managed
 
     async def list_multi_routes(
         self,
@@ -1139,6 +1177,37 @@ class ExternalChannelManagementService:
         return await self.discord_activation_service.activate(
             connection_id=connection_id
         )
+
+    async def update_discord_thread_auto_archive_duration(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        workspace_user_id: str,
+        connection_id: str,
+        setting: DiscordThreadAutoArchiveDurationSetting,
+    ) -> ManagedConnection:
+        """Replace one dedicated Thread policy without provider reactivation."""
+        await self._require_owned_connection(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            connection_id=connection_id,
+        )
+        async with self.session_manager() as session:
+            connection = (
+                await self.repository.update_discord_thread_auto_archive_duration(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    connection_id=connection_id,
+                    duration=setting.thread_auto_archive_duration_minutes,
+                )
+            )
+            if connection is None:
+                raise ExternalChannelManagementNotFound(connection_id)
+            await session.commit()
+        return connection
 
     async def disconnect_connection(
         self,

@@ -1,6 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
+import {
+  DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION,
+  discordThreadAutoArchiveDurationFromConfiguration,
+} from "@/shared/lib/discord-thread-auto-archive-duration";
 import { trpc } from "@/trpc/client";
 import {
   externalChannelSettingsInvalidationPlan,
@@ -15,6 +19,7 @@ import type {
 } from "../types";
 import type {
   AgentResponse,
+  DiscordThreadAutoArchiveDurationMinutes,
   ExternalChannelConnectionStatusSnapshot,
   ExternalChannelResponseMode,
   ExternalChannelTransport,
@@ -38,6 +43,11 @@ export interface ExternalChannelSettingsContainerOutput {
   actionError: string | null;
   actionTarget: string | null;
   actionsBusy: boolean;
+  discordThreadDurationDrafts: Record<
+    string,
+    DiscordThreadAutoArchiveDurationMinutes
+  >;
+  discordThreadDurationSavedConnectionId: string | null;
   defaultResponseMode: ExternalChannelResponseMode;
   defaultResponseModeDraft: ExternalChannelResponseMode;
   defaultResponseModeSaving: boolean;
@@ -63,6 +73,11 @@ export interface ExternalChannelSettingsContainerOutput {
     connection: ManagedConnection,
     openAccessEnabled: boolean,
   ) => void;
+  onDiscordThreadDurationChange: (
+    connectionId: string,
+    duration: DiscordThreadAutoArchiveDurationMinutes,
+  ) => void;
+  onSaveDiscordThreadDuration: (connection: ManagedConnection) => void;
   onRevokeGrant: (grant: ManagedGrant) => void;
   onRemoveBlock: (block: ManagedBlock) => void;
 }
@@ -100,6 +115,12 @@ export function useExternalChannelSettingsContainer({
     useState<DiscordConnectionDialogState>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionTarget, setActionTarget] = useState<string | null>(null);
+  const [discordThreadDurationDrafts, setDiscordThreadDurationDrafts] =
+    useState<Record<string, DiscordThreadAutoArchiveDurationMinutes>>({});
+  const [
+    discordThreadDurationSavedConnectionId,
+    setDiscordThreadDurationSavedConnectionId,
+  ] = useState<string | null>(null);
   const [defaultResponseModeDraft, setDefaultResponseModeDraft] =
     useState<ExternalChannelResponseMode | null>(null);
   const [defaultResponseModeError, setDefaultResponseModeError] = useState<
@@ -137,6 +158,7 @@ export function useExternalChannelSettingsContainer({
     actionLock.current = true;
     setActionError(null);
     setActionTarget(target);
+    setDiscordThreadDurationSavedConnectionId(null);
     return true;
   };
   const failAction = (error: unknown): void => {
@@ -222,6 +244,18 @@ export function useExternalChannelSettingsContainer({
           actionLock.current = false;
           setActionTarget(null);
           setActionError(validationMessage(result));
+        }
+      },
+      onError: (error) => failAction(error),
+    });
+  const discordThreadDurationMutation =
+    trpc.externalChannel.setDiscordThreadDuration.useMutation({
+      onSuccess: async (_, variables) => {
+        try {
+          await invalidate("update");
+          setDiscordThreadDurationSavedConnectionId(variables.connectionId);
+        } finally {
+          clearAction();
         }
       },
       onError: (error) => failAction(error),
@@ -326,6 +360,8 @@ export function useExternalChannelSettingsContainer({
     actionError,
     actionTarget,
     actionsBusy: actionTarget !== null,
+    discordThreadDurationDrafts,
+    discordThreadDurationSavedConnectionId,
     defaultResponseMode,
     defaultResponseModeDraft: effectiveDefaultResponseMode,
     defaultResponseModeSaving: defaultResponseModeMutation.isPending,
@@ -375,6 +411,8 @@ export function useExternalChannelSettingsContainer({
         type: "SETUP",
         appId: "",
         targetGuildId: "",
+        threadAutoArchiveDurationMinutes:
+          DEFAULT_DISCORD_THREAD_AUTO_ARCHIVE_DURATION,
         botToken: "",
       });
     },
@@ -392,6 +430,10 @@ export function useExternalChannelSettingsContainer({
             typeof connection.provider_config?.target_guild_id === "string"
               ? connection.provider_config.target_guild_id
               : "",
+          threadAutoArchiveDurationMinutes:
+            discordThreadAutoArchiveDurationFromConfiguration(
+              connection.provider_config,
+            ),
           botToken: "",
         });
         return;
@@ -467,6 +509,8 @@ export function useExternalChannelSettingsContainer({
           ...queryInput,
           appId: discordDialogState.appId,
           credentials,
+          threadAutoArchiveDurationMinutes:
+            discordDialogState.threadAutoArchiveDurationMinutes,
         });
         return;
       }
@@ -475,6 +519,8 @@ export function useExternalChannelSettingsContainer({
         connectionId: discordDialogState.connectionId,
         appId: discordDialogState.appId,
         credentials,
+        threadAutoArchiveDurationMinutes:
+          discordDialogState.threadAutoArchiveDurationMinutes,
       });
     },
     onValidate: (connection) => {
@@ -503,6 +549,28 @@ export function useExternalChannelSettingsContainer({
         ...queryInput,
         connectionId: connection.id,
         openAccessEnabled,
+      });
+    },
+    onDiscordThreadDurationChange: (connectionId, duration) => {
+      setDiscordThreadDurationDrafts((current) => ({
+        ...current,
+        [connectionId]: duration,
+      }));
+      setDiscordThreadDurationSavedConnectionId(null);
+    },
+    onSaveDiscordThreadDuration: (connection) => {
+      const duration =
+        discordThreadDurationDrafts[connection.id] ??
+        discordThreadAutoArchiveDurationFromConfiguration(
+          connection.provider_config,
+        );
+      if (!beginAction(connection.id)) {
+        return;
+      }
+      discordThreadDurationMutation.mutate({
+        ...queryInput,
+        connectionId: connection.id,
+        threadAutoArchiveDurationMinutes: duration,
       });
     },
     onRevokeGrant: (grant) => {

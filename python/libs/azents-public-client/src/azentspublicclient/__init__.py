@@ -188,6 +188,8 @@ __all__ = [
     "DiscordConnectionConfiguration",
     "DiscordConnectionCredentials",
     "DiscordConnectionSetupRequest",
+    "DiscordThreadAutoArchiveDurationMinutes",
+    "DiscordThreadAutoArchiveDurationRequest",
     "DockerContainerProfileSpecV1",
     "DockerContainerProfileSpecV2",
     "DockerContainerResources",
@@ -325,6 +327,7 @@ __all__ = [
     "ModelReasoningEffort",
     "ModelToolCallingCapabilities",
     "MultiChannelDefaultRequest",
+    "MultiDiscordThreadAutoArchiveDurationRequest",
     "MultiRouteCreateRequest",
     "MyJoinRequestResponse",
     "MySystemRolesResponse",
@@ -683,6 +686,8 @@ from azentspublicclient.models.detail import Detail as Detail
 from azentspublicclient.models.discord_connection_configuration import DiscordConnectionConfiguration as DiscordConnectionConfiguration
 from azentspublicclient.models.discord_connection_credentials import DiscordConnectionCredentials as DiscordConnectionCredentials
 from azentspublicclient.models.discord_connection_setup_request import DiscordConnectionSetupRequest as DiscordConnectionSetupRequest
+from azentspublicclient.models.discord_thread_auto_archive_duration_minutes import DiscordThreadAutoArchiveDurationMinutes as DiscordThreadAutoArchiveDurationMinutes
+from azentspublicclient.models.discord_thread_auto_archive_duration_request import DiscordThreadAutoArchiveDurationRequest as DiscordThreadAutoArchiveDurationRequest
 from azentspublicclient.models.docker_container_profile_spec_v1 import DockerContainerProfileSpecV1 as DockerContainerProfileSpecV1
 from azentspublicclient.models.docker_container_profile_spec_v2 import DockerContainerProfileSpecV2 as DockerContainerProfileSpecV2
 from azentspublicclient.models.docker_container_resources import DockerContainerResources as DockerContainerResources
@@ -820,6 +825,7 @@ from azentspublicclient.models.model_reasoning_capabilities import ModelReasonin
 from azentspublicclient.models.model_reasoning_effort import ModelReasoningEffort as ModelReasoningEffort
 from azentspublicclient.models.model_tool_calling_capabilities import ModelToolCallingCapabilities as ModelToolCallingCapabilities
 from azentspublicclient.models.multi_channel_default_request import MultiChannelDefaultRequest as MultiChannelDefaultRequest
+from azentspublicclient.models.multi_discord_thread_auto_archive_duration_request import MultiDiscordThreadAutoArchiveDurationRequest as MultiDiscordThreadAutoArchiveDurationRequest
 from azentspublicclient.models.multi_route_create_request import MultiRouteCreateRequest as MultiRouteCreateRequest
 from azentspublicclient.models.my_join_request_response import MyJoinRequestResponse as MyJoinRequestResponse
 from azentspublicclient.models.my_system_roles_response import MySystemRolesResponse as MySystemRolesResponse

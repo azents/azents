@@ -9,6 +9,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
 )
+from azents.services.external_channel.data import DiscordConnectionConfiguration
 
 _PROVIDER_OPERATION_KEY_MAX_LENGTH = 25
 
@@ -55,6 +56,7 @@ class ProviderTarget:
     encrypted_credentials: str | None = field(repr=False)
     provider_tenant_id: str | None
     capabilities: dict[str, Any] | None = field(repr=False)
+    provider_configuration: DiscordConnectionConfiguration | None = field(repr=False)
     workspace_handle: str | None
     agent_id: str | None
     agent_session_id: str | None

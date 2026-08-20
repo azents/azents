@@ -1331,7 +1331,15 @@
         "discordGuideOAuthScopesLabel": "OAuth2 Scopes requis",
         "discordGuideBotPermissionsLabel": "Bot Permissions requises",
         "discordGuideChannelPermissionsLabel": "Autorisations à vérifier par canal",
-        "discordGuideLeastPrivilegeNote": "Le bot n’a pas besoin des autorisations Administrator ou Manage Messages. N’activez pas Presence Intent ni Server Members Intent. Une règle Deny de canal ou de catégorie peut remplacer les autorisations accordées au rôle du serveur."
+        "discordGuideLeastPrivilegeNote": "Le bot n’a pas besoin des autorisations Administrator ou Manage Messages. N’activez pas Presence Intent ni Server Members Intent. Une règle Deny de canal ou de catégorie peut remplacer les autorisations accordées au rôle du serveur.",
+        "discordThreadAutoArchiveDuration": "Durée d’archivage automatique du fil",
+        "discordThreadAutoArchiveDurationOptions": {
+          "oneHour": "1 heure",
+          "oneDay": "1 jour",
+          "threeDays": "3 jours",
+          "sevenDays": "7 jours"
+        },
+        "discordThreadAutoArchiveDurationSaved": "La durée d’archivage automatique du fil a été enregistrée."
       },
       "sessionChannels": {
         "title": "Canaux",
@@ -2109,7 +2117,15 @@
       "discordGuideOAuthScopesLabel": "OAuth2 Scopes requis",
       "discordGuideBotPermissionsLabel": "Bot Permissions requises",
       "discordGuideChannelPermissionsLabel": "Autorisations à vérifier par canal",
-      "discordGuideLeastPrivilegeNote": "Le bot n’a pas besoin des autorisations Administrator ou Manage Messages. N’activez pas Presence Intent ni Server Members Intent. Une règle Deny de canal ou de catégorie peut remplacer les autorisations accordées au rôle du serveur."
+      "discordGuideLeastPrivilegeNote": "Le bot n’a pas besoin des autorisations Administrator ou Manage Messages. N’activez pas Presence Intent ni Server Members Intent. Une règle Deny de canal ou de catégorie peut remplacer les autorisations accordées au rôle du serveur.",
+      "discordThreadAutoArchiveDuration": "Durée d’archivage automatique du fil",
+      "discordThreadAutoArchiveDurationOptions": {
+        "oneHour": "1 heure",
+        "oneDay": "1 jour",
+        "threeDays": "3 jours",
+        "sevenDays": "7 jours"
+      },
+      "discordThreadAutoArchiveDurationSaved": "La durée d’archivage automatique du fil a été enregistrée."
     }
   },
   "memberProfile": {

@@ -12,6 +12,9 @@ from typing import Literal, Protocol
 import httpx
 
 from azents.core.external_channel_title import normalize_discord_thread_title
+from azents.services.external_channel.data import (
+    DiscordThreadAutoArchiveDurationMinutes,
+)
 from azents.services.external_channel.discord_endpoint import discord_api_base_url
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKClientFactory,
@@ -29,7 +32,6 @@ from azents.services.external_channel.discord_sdk import (
 )
 from azents.services.external_channel.provider_effect import ProviderOperationKey
 
-_DISCORD_MIN_AUTO_ARCHIVE_MINUTES = 60
 DISCORD_DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024
 DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES = 25 * 1024 * 1024
 _DISCORD_DELIVERY_TIMEOUT_SECONDS = 20.0
@@ -196,6 +198,7 @@ class DiscordDeliveryClient:
         parent_channel_id: str,
         root_message_id: str,
         name: str | None,
+        auto_archive_duration: DiscordThreadAutoArchiveDurationMinutes,
     ) -> DiscordDeliveryResult:
         """Return only after the root Discord message has a usable Thread."""
         thread_name = _discord_thread_name(name)
@@ -218,7 +221,7 @@ class DiscordDeliveryClient:
                         parent_channel_id=parent_channel_id,
                         root_message_id=root_message_id,
                         name=thread_name,
-                        auto_archive_duration=_DISCORD_MIN_AUTO_ARCHIVE_MINUTES,
+                        auto_archive_duration=auto_archive_duration,
                     )
                 except DiscordSDKError as error:
                     result = _sdk_delivery_failure(error)

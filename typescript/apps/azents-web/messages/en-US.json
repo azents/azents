@@ -1331,7 +1331,15 @@
         "discordGuideOAuthScopesLabel": "Required OAuth2 Scopes",
         "discordGuideBotPermissionsLabel": "Required Bot Permissions",
         "discordGuideChannelPermissionsLabel": "Permissions to verify per channel",
-        "discordGuideLeastPrivilegeNote": "The Bot does not need Administrator or Manage Messages. Do not enable Presence Intent or Server Members Intent. A channel or category Deny can override permissions granted to the server role."
+        "discordGuideLeastPrivilegeNote": "The Bot does not need Administrator or Manage Messages. Do not enable Presence Intent or Server Members Intent. A channel or category Deny can override permissions granted to the server role.",
+        "discordThreadAutoArchiveDuration": "Thread auto-archive duration",
+        "discordThreadAutoArchiveDurationOptions": {
+          "oneHour": "1 hour",
+          "oneDay": "1 day",
+          "threeDays": "3 days",
+          "sevenDays": "7 days"
+        },
+        "discordThreadAutoArchiveDurationSaved": "Thread auto-archive duration saved."
       },
       "sessionChannels": {
         "title": "Channels",
@@ -2109,7 +2117,15 @@
       "discordGuideOAuthScopesLabel": "Required OAuth2 Scopes",
       "discordGuideBotPermissionsLabel": "Required Bot Permissions",
       "discordGuideChannelPermissionsLabel": "Permissions to verify per channel",
-      "discordGuideLeastPrivilegeNote": "The Bot does not need Administrator or Manage Messages. Do not enable Presence Intent or Server Members Intent. A channel or category Deny can override permissions granted to the server role."
+      "discordGuideLeastPrivilegeNote": "The Bot does not need Administrator or Manage Messages. Do not enable Presence Intent or Server Members Intent. A channel or category Deny can override permissions granted to the server role.",
+      "discordThreadAutoArchiveDuration": "Thread auto-archive duration",
+      "discordThreadAutoArchiveDurationOptions": {
+        "oneHour": "1 hour",
+        "oneDay": "1 day",
+        "threeDays": "3 days",
+        "sevenDays": "7 days"
+      },
+      "discordThreadAutoArchiveDurationSaved": "Thread auto-archive duration saved."
     }
   },
   "memberProfile": {

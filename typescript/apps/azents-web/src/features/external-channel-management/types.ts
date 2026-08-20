@@ -1,4 +1,5 @@
 import type {
+  DiscordThreadAutoArchiveDurationMinutes,
   ExternalChannelResponseMode,
   ExternalChannelTransport,
   ManagedBlock,
@@ -35,6 +36,7 @@ export type DiscordConnectionDialogState =
       type: "SETUP";
       appId: string;
       targetGuildId: string;
+      threadAutoArchiveDurationMinutes: DiscordThreadAutoArchiveDurationMinutes;
       botToken: string;
     }
   | {
@@ -42,6 +44,7 @@ export type DiscordConnectionDialogState =
       connectionId: string;
       appId: string;
       targetGuildId: string;
+      threadAutoArchiveDurationMinutes: DiscordThreadAutoArchiveDurationMinutes;
       botToken: string;
     }
   | null;

@@ -469,6 +469,7 @@ def test_discord_creation_is_available_without_a_rollout_flag(
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
                 "provider": "discord",
@@ -496,6 +497,7 @@ def test_discord_multi_app_creation_is_blocked_before_mode_aware_enablement() ->
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
                 "provider": "discord",
@@ -525,6 +527,7 @@ def test_discord_multi_app_creation_succeeds_after_mode_aware_enablement() -> No
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
                 "provider": "discord",
@@ -567,6 +570,7 @@ def test_discord_replacement_is_available_without_a_rollout_flag(
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
                 "provider": "discord",
@@ -609,6 +613,7 @@ def test_discord_replacement_returns_redacted_status(
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
                 "provider": "discord",
@@ -704,6 +709,7 @@ def test_discord_setup_returns_safe_structured_provider_errors(
                 "configuration": {
                     "provider": "discord",
                     "target_guild_id": "guild-1",
+                    "thread_auto_archive_duration_minutes": 1440,
                 },
                 "credentials": {
                     "provider": "discord",
@@ -750,6 +756,7 @@ def test_discord_setup_failure_log_never_serializes_exception_text(
                 "configuration": {
                     "provider": "discord",
                     "target_guild_id": "guild-1",
+                    "thread_auto_archive_duration_minutes": 1440,
                 },
                 "credentials": {
                     "provider": "discord",
@@ -786,6 +793,7 @@ def test_member_cannot_replace_workspace_discord_multi_app() -> None:
             "configuration": {
                 "provider": "discord",
                 "target_guild_id": "guild-1",
+                "thread_auto_archive_duration_minutes": 1440,
             },
             "credentials": {
                 "provider": "discord",
@@ -1151,3 +1159,60 @@ def test_openapi_includes_management_but_excludes_provider_callback() -> None:
         for path in paths
     )
     assert "/external-channel/v1/slack/events" not in paths
+
+
+def test_update_dedicated_discord_thread_duration() -> None:
+    """The dedicated policy route forwards one validated non-secret value."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.update_discord_thread_auto_archive_duration.return_value = _connection()
+
+    response = _client(service).put(
+        "/external-channel/v1/workspaces/ws/agents/agent-1/"
+        "external-channels/connection-1/discord/thread-auto-archive-duration",
+        json={"thread_auto_archive_duration_minutes": 10080},
+    )
+
+    assert response.status_code == 200
+    call = service.update_discord_thread_auto_archive_duration.await_args
+    assert call.kwargs["connection_id"] == "connection-1"
+    assert call.kwargs["setting"].thread_auto_archive_duration_minutes == 10080
+
+
+def test_update_multi_discord_thread_duration_uses_generation_fence() -> None:
+    """The Workspace policy route forwards the management generation."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.update_multi_discord_thread_auto_archive_duration.return_value = (
+        _multi_connection()
+    )
+
+    response = _client(service, role=WorkspaceUserRole.MANAGER).put(
+        "/external-channel/v1/workspaces/ws/external-channels/discord/multi/"
+        "connection-1/thread-auto-archive-duration",
+        json={
+            "thread_auto_archive_duration_minutes": 4320,
+            "expected_generation": "2026-08-20T00:00:00Z",
+        },
+    )
+
+    assert response.status_code == 200
+    call = service.update_multi_discord_thread_auto_archive_duration.await_args
+    assert call.kwargs["connection_id"] == "connection-1"
+    assert call.kwargs["expected_generation"] == datetime.datetime(
+        2026, 8, 20, tzinfo=datetime.UTC
+    )
+    assert call.kwargs["setting"].thread_auto_archive_duration_minutes == 4320
+
+
+@pytest.mark.parametrize("duration", [0, 59, 61, 2880, 10081])
+def test_discord_thread_duration_rejects_unsupported_values(duration: int) -> None:
+    """The policy route rejects values outside Discord's closed set."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+
+    response = _client(service).put(
+        "/external-channel/v1/workspaces/ws/agents/agent-1/"
+        "external-channels/connection-1/discord/thread-auto-archive-duration",
+        json={"thread_auto_archive_duration_minutes": duration},
+    )
+
+    assert response.status_code == 422
+    service.update_discord_thread_auto_archive_duration.assert_not_awaited()

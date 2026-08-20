@@ -1331,7 +1331,15 @@
         "discordGuideOAuthScopesLabel": "必須 OAuth2 Scopes",
         "discordGuideBotPermissionsLabel": "必須 Bot Permissions",
         "discordGuideChannelPermissionsLabel": "チャンネルごとに確認する権限",
-        "discordGuideLeastPrivilegeNote": "Bot に Administrator や Manage Messages を付与する必要はありません。Presence Intent と Server Members Intent も有効にしないでください。サーバー role で許可していても、チャンネルやカテゴリの Deny が優先される場合があります。"
+        "discordGuideLeastPrivilegeNote": "Bot に Administrator や Manage Messages を付与する必要はありません。Presence Intent と Server Members Intent も有効にしないでください。サーバー role で許可していても、チャンネルやカテゴリの Deny が優先される場合があります。",
+        "discordThreadAutoArchiveDuration": "スレッドの自動アーカイブ期間",
+        "discordThreadAutoArchiveDurationOptions": {
+          "oneHour": "1時間",
+          "oneDay": "1日",
+          "threeDays": "3日",
+          "sevenDays": "7日"
+        },
+        "discordThreadAutoArchiveDurationSaved": "スレッドの自動アーカイブ期間を保存しました。"
       },
       "sessionChannels": {
         "title": "チャンネル",
@@ -2109,7 +2117,15 @@
       "discordGuideOAuthScopesLabel": "必須 OAuth2 Scopes",
       "discordGuideBotPermissionsLabel": "必須 Bot Permissions",
       "discordGuideChannelPermissionsLabel": "チャンネルごとに確認する権限",
-      "discordGuideLeastPrivilegeNote": "Bot に Administrator や Manage Messages を付与する必要はありません。Presence Intent と Server Members Intent も有効にしないでください。サーバー role で許可していても、チャンネルやカテゴリの Deny が優先される場合があります。"
+      "discordGuideLeastPrivilegeNote": "Bot に Administrator や Manage Messages を付与する必要はありません。Presence Intent と Server Members Intent も有効にしないでください。サーバー role で許可していても、チャンネルやカテゴリの Deny が優先される場合があります。",
+      "discordThreadAutoArchiveDuration": "スレッドの自動アーカイブ期間",
+      "discordThreadAutoArchiveDurationOptions": {
+        "oneHour": "1時間",
+        "oneDay": "1日",
+        "threeDays": "3日",
+        "sevenDays": "7日"
+      },
+      "discordThreadAutoArchiveDurationSaved": "スレッドの自動アーカイブ期間を保存しました。"
     }
   },
   "memberProfile": {

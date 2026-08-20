@@ -57,6 +57,9 @@ from azents.repos.external_channel.work_state import (
 from azents.repos.scheduled_task.lifecycle import (
     ScheduledTaskLifecycleRepository,
 )
+from azents.services.external_channel.data import (
+    decode_provider_connection_configuration,
+)
 from azents.services.external_channel.discord_delivery import (
     DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
     DISCORD_DEFAULT_MAX_FILE_BYTES,
@@ -260,6 +263,10 @@ class ExternalChannelWorkRepository:
                 encrypted_credentials=connection.encrypted_credentials,
                 provider_tenant_id=connection.provider_tenant_id,
                 capabilities=connection.capabilities,
+                provider_configuration=decode_provider_connection_configuration(
+                    connection.provider,
+                    connection.provider_config,
+                ),
                 workspace_handle=None if workspace is None else workspace.handle,
                 agent_id=None if agent is None else agent.id,
                 agent_session_id=(None if agent_session is None else agent_session.id),
@@ -1203,6 +1210,10 @@ class ExternalChannelWorkRepository:
                     encrypted_credentials=connection.encrypted_credentials,
                     provider_tenant_id=connection.provider_tenant_id,
                     capabilities=connection.capabilities,
+                    provider_configuration=decode_provider_connection_configuration(
+                        connection.provider,
+                        connection.provider_config,
+                    ),
                     workspace_handle=None if workspace is None else workspace.handle,
                     agent_id=agent.id,
                     agent_session_id=session_id,
@@ -1511,6 +1522,10 @@ class ExternalChannelWorkRepository:
                 encrypted_credentials=connection.encrypted_credentials,
                 provider_tenant_id=connection.provider_tenant_id,
                 capabilities=connection.capabilities,
+                provider_configuration=decode_provider_connection_configuration(
+                    connection.provider,
+                    connection.provider_config,
+                ),
                 workspace_handle=workspace.handle,
                 agent_id=agent.id,
                 agent_session_id=agent_session.id,
@@ -1977,6 +1992,10 @@ async def terminate_binding_with_plans(
                     encrypted_credentials=connection.encrypted_credentials,
                     provider_tenant_id=connection.provider_tenant_id,
                     capabilities=connection.capabilities,
+                    provider_configuration=decode_provider_connection_configuration(
+                        connection.provider,
+                        connection.provider_config,
+                    ),
                     workspace_handle=None if workspace is None else workspace.handle,
                     agent_id=agent.id,
                     agent_session_id=agent_session.id,
@@ -2039,6 +2058,12 @@ async def terminate_binding_with_plans(
                         encrypted_credentials=connection.encrypted_credentials,
                         provider_tenant_id=connection.provider_tenant_id,
                         capabilities=connection.capabilities,
+                        provider_configuration=(
+                            decode_provider_connection_configuration(
+                                connection.provider,
+                                connection.provider_config,
+                            )
+                        ),
                         workspace_handle=(
                             None if workspace is None else workspace.handle
                         ),

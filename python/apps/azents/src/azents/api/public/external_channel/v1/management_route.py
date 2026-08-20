@@ -58,6 +58,7 @@ from azents.services.external_channel.discord_api import (
     DiscordAPIUnavailable,
 )
 from azents.services.external_channel.management import (
+    DiscordThreadAutoArchiveDurationSetting,
     ExternalChannelAccessPolicyInput,
     ExternalChannelDecisionInput,
     ExternalChannelManagementGenerationChanged,
@@ -142,6 +143,17 @@ class ConnectionAccessPolicyRequest(ExternalChannelAccessPolicyInput):
 
 class ResponseModeRequest(ExternalChannelResponseModeSetting):
     """Required full-value response-mode request."""
+
+
+class DiscordThreadAutoArchiveDurationRequest(DiscordThreadAutoArchiveDurationSetting):
+    """Required full-value Discord Thread automatic archive request."""
+
+
+class MultiDiscordThreadAutoArchiveDurationRequest(
+    GenerationFenceRequest,
+    DiscordThreadAutoArchiveDurationSetting,
+):
+    """Generation-fenced Discord Multi App Thread policy request."""
 
 
 @router.get("/workspaces/{handle}/external-channels/multi")
@@ -363,6 +375,32 @@ async def update_multi_discord_connection(
             operation="update_multi",
             connection_id=connection_id,
         ) from error
+
+
+@router.put(
+    "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/"
+    "thread-auto-archive-duration"
+)
+async def set_multi_discord_thread_duration(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    connection_id: str,
+    request_body: MultiDiscordThreadAutoArchiveDurationRequest,
+) -> ManagedMultiConnection:
+    """Replace one Discord Multi App Thread policy without reactivation."""
+    _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
+    try:
+        return await service.update_multi_discord_thread_auto_archive_duration(
+            workspace_id=member.workspace_id,
+            connection_id=connection_id,
+            expected_generation=request_body.expected_generation,
+            setting=request_body,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+    except ExternalChannelManagementGenerationChanged as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.post(
@@ -1242,6 +1280,31 @@ async def update_discord_connection(
             operation="update_dedicated",
             connection_id=connection_id,
         ) from error
+
+
+@router.put(
+    "/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/"
+    "discord/thread-auto-archive-duration"
+)
+async def set_discord_thread_duration(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    agent_id: str,
+    connection_id: str,
+    request_body: DiscordThreadAutoArchiveDurationRequest,
+) -> ManagedConnection:
+    """Replace one dedicated Discord Thread policy without reactivation."""
+    try:
+        return await service.update_discord_thread_auto_archive_duration(
+            workspace_id=member.workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=member.workspace_user_id,
+            connection_id=connection_id,
+            setting=request_body,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
 
 
 @router.delete(

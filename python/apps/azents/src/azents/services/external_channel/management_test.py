@@ -28,7 +28,10 @@ from azents.rdb.models.external_channel import (
 from azents.repos.external_channel.data import (
     ExternalChannelMultiConnectionDisconnect,
 )
-from azents.repos.external_channel.management import ExternalChannelManagementRepository
+from azents.repos.external_channel.management import (
+    ExternalChannelManagementRepository,
+    _set_discord_thread_auto_archive_duration,
+)
 from azents.repos.external_channel.management_data import (
     ManagedBinding,
     ManagedChannelDefault,
@@ -607,7 +610,10 @@ async def test_setup_discord_commits_route_before_callback_activation() -> None:
         agent_id="agent-1",
         workspace_user_id="workspace-user-1",
         app_id="app-1",
-        configuration=DiscordConnectionConfiguration(target_guild_id="guild-1"),
+        configuration=DiscordConnectionConfiguration(
+            target_guild_id="guild-1",
+            thread_auto_archive_duration_minutes=1440,
+        ),
         credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
     )
 
@@ -681,7 +687,10 @@ async def test_update_discord_commits_reset_before_callback_activation() -> None
         workspace_user_id="workspace-user-1",
         connection_id="connection-1",
         app_id="discord-app-1",
-        configuration=DiscordConnectionConfiguration(target_guild_id="guild-1"),
+        configuration=DiscordConnectionConfiguration(
+            target_guild_id="guild-1",
+            thread_auto_archive_duration_minutes=1440,
+        ),
         credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
     )
 
@@ -693,7 +702,11 @@ async def test_update_discord_commits_reset_before_callback_activation() -> None
         connection_id="connection-1",
         provider_app_id="discord-app-1",
         encrypted_credentials="encrypted-token",
-        provider_config={"provider": "discord", "target_guild_id": "guild-1"},
+        provider_config={
+            "provider": "discord",
+            "target_guild_id": "guild-1",
+            "thread_auto_archive_duration_minutes": 1440,
+        },
     )
 
 
@@ -753,7 +766,10 @@ async def test_update_multi_discord_commits_reset_before_callback_activation() -
         workspace_id="workspace-1",
         connection_id="connection-1",
         app_id="discord-app-1",
-        configuration=DiscordConnectionConfiguration(target_guild_id="guild-1"),
+        configuration=DiscordConnectionConfiguration(
+            target_guild_id="guild-1",
+            thread_auto_archive_duration_minutes=1440,
+        ),
         credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
     )
 
@@ -764,7 +780,11 @@ async def test_update_multi_discord_commits_reset_before_callback_activation() -
         connection_id="connection-1",
         provider_app_id="discord-app-1",
         encrypted_credentials="encrypted-token",
-        provider_config={"provider": "discord", "target_guild_id": "guild-1"},
+        provider_config={
+            "provider": "discord",
+            "target_guild_id": "guild-1",
+            "thread_auto_archive_duration_minutes": 1440,
+        },
     )
 
 
@@ -807,7 +827,10 @@ async def test_discord_replacement_failure_leaves_durable_fence_committed() -> N
             workspace_id="workspace-1",
             connection_id="connection-1",
             app_id="discord-app-1",
-            configuration=DiscordConnectionConfiguration(target_guild_id="guild-1"),
+            configuration=DiscordConnectionConfiguration(
+                target_guild_id="guild-1",
+                thread_auto_archive_duration_minutes=1440,
+            ),
             credentials=DiscordConnectionCredentials(bot_token="discord-bot-token"),
         )
 
@@ -861,7 +884,11 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
         connection_id="connection-1",
         provider_app_id="discord-app-1",
         encrypted_credentials="encrypted-token",
-        provider_config={"provider": "discord", "target_guild_id": "guild-1"},
+        provider_config={
+            "provider": "discord",
+            "target_guild_id": "guild-1",
+            "thread_auto_archive_duration_minutes": 1440,
+        },
     )
 
     assert result is not None
@@ -870,6 +897,7 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
     assert result.provider_config == {
         "provider": "discord",
         "target_guild_id": "guild-1",
+        "thread_auto_archive_duration_minutes": 1440,
     }
     assert connection.provider_app_id == "discord-app-1"
     assert connection.provider_tenant_id is None
@@ -887,6 +915,30 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
     assert connection.socket_heartbeat_at is None
     assert connection.socket_gap_detected_at is None
     assert connection.socket_gap_reason is None
+
+
+def test_discord_thread_duration_update_preserves_unknown_configuration() -> None:
+    """A policy-only update replaces one key without narrowing stored JSON."""
+    connection = cast(
+        RDBExternalChannelConnection,
+        SimpleNamespace(
+            provider_config={
+                "provider": "discord",
+                "target_guild_id": "guild-1",
+                "thread_auto_archive_duration_minutes": 1440,
+                "future_policy": {"enabled": True},
+            }
+        ),
+    )
+
+    _set_discord_thread_auto_archive_duration(connection, duration=10080)
+
+    assert connection.provider_config == {
+        "provider": "discord",
+        "target_guild_id": "guild-1",
+        "thread_auto_archive_duration_minutes": 10080,
+        "future_policy": {"enabled": True},
+    }
 
 
 def _multi_route(

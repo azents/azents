@@ -17,6 +17,10 @@ from azents.core.enums import (
     ExternalChannelTransport,
 )
 
+type DiscordThreadAutoArchiveDurationMinutes = Literal[60, 1440, 4320, 10080]
+
+DISCORD_DEFAULT_THREAD_AUTO_ARCHIVE_DURATION_MINUTES = 1440
+
 
 def _require_non_blank(value: str) -> str:
     """Reject blank identifiers and credentials without modifying their value."""
@@ -88,12 +92,40 @@ class DiscordConnectionConfiguration(BaseModel):
         default=ExternalChannelProvider.DISCORD
     )
     target_guild_id: str = Field(description="Target Discord Guild snowflake")
+    thread_auto_archive_duration_minutes: DiscordThreadAutoArchiveDurationMinutes = (
+        Field(
+            description="Automatic archive duration for newly created Discord Threads"
+        )
+    )
 
     @field_validator("target_guild_id")
     @classmethod
     def _validate_target_guild_id(cls, value: str) -> str:
         """Reject blank configured Guild identities."""
         return _require_non_blank(value)
+
+
+def decode_discord_connection_configuration(
+    provider_config: dict[str, object] | None,
+) -> DiscordConnectionConfiguration:
+    """Decode one persisted Discord connection configuration."""
+    if provider_config is None:
+        raise ValueError("Discord connection configuration is unavailable.")
+    return DiscordConnectionConfiguration.model_validate(provider_config)
+
+
+def decode_provider_connection_configuration(
+    provider: ExternalChannelProvider,
+    provider_config: dict[str, object] | None,
+) -> DiscordConnectionConfiguration | None:
+    """Decode provider-specific non-secret connection configuration."""
+    match provider:
+        case ExternalChannelProvider.SLACK:
+            return None
+        case ExternalChannelProvider.DISCORD:
+            return decode_discord_connection_configuration(provider_config)
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 type ExternalChannelConnectionCredentials = Annotated[

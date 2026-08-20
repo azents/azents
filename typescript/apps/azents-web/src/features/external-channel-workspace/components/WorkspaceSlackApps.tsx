@@ -35,12 +35,17 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { DiscordSetupGuide } from "@/shared/components/DiscordSetupGuide";
+import {
+  discordThreadAutoArchiveDurationFromConfiguration,
+  discordThreadAutoArchiveDurationFromSelectValue,
+} from "@/shared/lib/discord-thread-auto-archive-duration";
 import type { WorkspaceSlackAppsContainerOutput } from "../containers/useWorkspaceSlackAppsContainer";
 import type {
   DiscordMultiConnectionDraft,
   MultiConnectionDraft,
 } from "../types";
 import type {
+  DiscordThreadAutoArchiveDurationMinutes,
   ExternalChannelTransport,
   ManagedChannelDefaultMutation,
 } from "@azents/public-client";
@@ -82,6 +87,50 @@ function isDiscordDraftComplete(draft: DiscordMultiConnectionDraft): boolean {
     draft.appId.trim() !== "" &&
     draft.targetGuildId.trim() !== "" &&
     draft.botToken.trim() !== ""
+  );
+}
+
+function DiscordThreadAutoArchiveDurationSelect({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: DiscordThreadAutoArchiveDurationMinutes;
+  disabled: boolean;
+  onChange: (value: DiscordThreadAutoArchiveDurationMinutes) => void;
+}): ReactElement {
+  const t = useTranslations("workspace.integrations");
+  return (
+    <Select
+      label={t("discordThreadAutoArchiveDuration")}
+      value={String(value)}
+      disabled={disabled}
+      data={[
+        {
+          value: "60",
+          label: t("discordThreadAutoArchiveDurationOptions.oneHour"),
+        },
+        {
+          value: "1440",
+          label: t("discordThreadAutoArchiveDurationOptions.oneDay"),
+        },
+        {
+          value: "4320",
+          label: t("discordThreadAutoArchiveDurationOptions.threeDays"),
+        },
+        {
+          value: "10080",
+          label: t("discordThreadAutoArchiveDurationOptions.sevenDays"),
+        },
+      ]}
+      onChange={(selected) => {
+        const duration =
+          discordThreadAutoArchiveDurationFromSelectValue(selected);
+        if (duration !== null) {
+          onChange(duration);
+        }
+      }}
+    />
   );
 }
 
@@ -213,9 +262,11 @@ function CredentialFields({
 function DiscordCredentialFields({
   draft,
   onChange,
+  showThreadDuration,
 }: {
   draft: DiscordMultiConnectionDraft;
   onChange: (draft: DiscordMultiConnectionDraft) => void;
+  showThreadDuration: boolean;
 }): ReactElement {
   const t = useTranslations("workspace.integrations");
 
@@ -237,6 +288,15 @@ function DiscordCredentialFields({
           onChange({ ...draft, targetGuildId: event.currentTarget.value })
         }
       />
+      {showThreadDuration && (
+        <DiscordThreadAutoArchiveDurationSelect
+          value={draft.threadAutoArchiveDurationMinutes}
+          disabled={false}
+          onChange={(threadAutoArchiveDurationMinutes) =>
+            onChange({ ...draft, threadAutoArchiveDurationMinutes })
+          }
+        />
+      )}
       <PasswordInput
         label={t("discordBotToken")}
         required
@@ -600,6 +660,7 @@ export function WorkspaceSlackApps(
               <DiscordCredentialFields
                 draft={props.discordSetupDraft}
                 onChange={props.onDiscordSetupDraftChange}
+                showThreadDuration
               />
               <Group justify="flex-end">
                 <Button
@@ -783,6 +844,43 @@ export function WorkspaceSlackApps(
                   {t("noAgentsDescription")}
                 </Alert>
               )}
+            {props.canManage &&
+              !selectedConnectionIsDisconnected &&
+              props.selectedConnection.provider === "discord" && (
+                <>
+                  <DiscordThreadAutoArchiveDurationSelect
+                    value={props.discordThreadDurationDraft}
+                    disabled={props.busy}
+                    onChange={props.onDiscordThreadDurationChange}
+                  />
+                  <Group justify="flex-end" gap="xs">
+                    {props.discordThreadDurationSaved &&
+                      props.discordThreadDurationDraft ===
+                        discordThreadAutoArchiveDurationFromConfiguration(
+                          props.selectedConnection.provider_config,
+                        ) && (
+                        <Text size="sm" c="teal">
+                          {t("discordThreadAutoArchiveDurationSaved")}
+                        </Text>
+                      )}
+                    <Button
+                      size="xs"
+                      loading={props.busy}
+                      disabled={
+                        props.busy ||
+                        props.discordThreadDurationDraft ===
+                          discordThreadAutoArchiveDurationFromConfiguration(
+                            props.selectedConnection.provider_config,
+                          )
+                      }
+                      onClick={props.onSaveDiscordThreadDuration}
+                    >
+                      {t("save")}
+                    </Button>
+                  </Group>
+                  <Divider />
+                </>
+              )}
             {props.canManage && !selectedConnectionIsDisconnected && (
               <>
                 <Text size="sm" c="dimmed">
@@ -794,6 +892,7 @@ export function WorkspaceSlackApps(
                   <DiscordCredentialFields
                     draft={props.discordEditDraft}
                     onChange={props.onDiscordEditDraftChange}
+                    showThreadDuration={false}
                   />
                 ) : (
                   <CredentialFields
