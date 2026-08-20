@@ -1,5 +1,5 @@
 ---
-title: "Use Mermaid for architecture, flow, sequence, and relationship diagrams in Markdown; keep ASCII directory trees as text."
+title: "Use Mermaid code blocks for all diagrams in markdown documents (architecture, flow, sequence) — never ASCII art."
 ---
 
 # Diagrams in Mermaid
