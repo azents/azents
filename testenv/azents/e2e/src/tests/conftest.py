@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
@@ -95,6 +96,7 @@ _GHA_DOCKER_CACHE_WRITE_REPOSITORIES_ENV = (
 _LOCAL_DOCKER_CACHE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_ROOT"
 _LOCAL_DOCKER_CACHE_WRITE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_WRITE_ROOT"
 _E2E_ARTIFACT_DIR_ENV = "AZENTS_E2E_ARTIFACT_DIR"
+_E2E_IMAGE_BUILD_PROFILE_ENV = "AZENTS_E2E_IMAGE_BUILD_PROFILE"
 _SELENIUM_IMAGE = "selenium/standalone-chromium:4.45.0-20260606"
 _MAIN_WEB_UPSTREAM_URL = "http://azents-web:3000"
 _ADMIN_WEB_UPSTREAM_URL = "http://azents-admin-web:3000"
@@ -104,6 +106,66 @@ _ADMIN_WEB_BROWSER_URL = "https://azents-web-gateway:8445"
 _JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST_ADAPTER = TypeAdapter(list[dict[str, object]])
 _BROWSER_CALL_REPORT = pytest.StashKey[pytest.TestReport]()
+_IMAGE_BUILD_OBSERVABILITY_LOCK = threading.Lock()
+
+
+@dataclasses.dataclass(frozen=True)
+class _E2EImageBuild:
+    """Describe one product image that an E2E lane may build."""
+
+    environment_variable: str
+    tag_prefix: str
+    dockerfile: Path
+    cache_repository: str
+    web: bool
+
+
+_SERVER_IMAGE_BUILD = _E2EImageBuild(
+    environment_variable="AZENTS_E2E_SERVER_IMAGE",
+    tag_prefix="azents-e2e",
+    dockerfile=REPOSITORY_ROOT / "azents.Dockerfile",
+    cache_repository="azents-server",
+    web=False,
+)
+_RUNTIME_RUNNER_IMAGE_BUILD = _E2EImageBuild(
+    environment_variable="AZENTS_E2E_RUNTIME_RUNNER_IMAGE",
+    tag_prefix="azents-runtime-runner-e2e",
+    dockerfile=REPOSITORY_ROOT / "python/apps/azents-runtime-runner/Dockerfile",
+    cache_repository="azents-runtime-runner",
+    web=False,
+)
+_RUNTIME_PROVIDER_DOCKER_IMAGE_BUILD = _E2EImageBuild(
+    environment_variable="AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE",
+    tag_prefix="azents-runtime-provider-docker-e2e",
+    dockerfile=(
+        REPOSITORY_ROOT / "python/apps/azents-runtime-provider-docker/Dockerfile"
+    ),
+    cache_repository="azents-runtime-provider-docker",
+    web=False,
+)
+_WEB_IMAGE_BUILD = _E2EImageBuild(
+    environment_variable="AZENTS_E2E_WEB_IMAGE",
+    tag_prefix="azents-web-e2e",
+    dockerfile=REPOSITORY_ROOT / "azents-web.Dockerfile",
+    cache_repository="azents-web",
+    web=True,
+)
+_ADMIN_WEB_IMAGE_BUILD = _E2EImageBuild(
+    environment_variable="AZENTS_E2E_ADMIN_WEB_IMAGE",
+    tag_prefix="azents-admin-web-e2e",
+    dockerfile=REPOSITORY_ROOT / "azents-admin-web.Dockerfile",
+    cache_repository="azents-admin-web",
+    web=True,
+)
+_CORE_E2E_IMAGE_BUILDS = (
+    _SERVER_IMAGE_BUILD,
+    _RUNTIME_RUNNER_IMAGE_BUILD,
+    _RUNTIME_PROVIDER_DOCKER_IMAGE_BUILD,
+)
+_E2E_IMAGE_BUILD_PROFILES = {
+    "required": _CORE_E2E_IMAGE_BUILDS,
+    "web": (*_CORE_E2E_IMAGE_BUILDS, _WEB_IMAGE_BUILD, _ADMIN_WEB_IMAGE_BUILD),
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -552,20 +614,6 @@ def s3_bucket_name(
 # =============================================================================
 
 
-@pytest.fixture(scope="session")
-def azents_server_image() -> str:
-    if image := os.environ.get("AZENTS_E2E_SERVER_IMAGE"):
-        return image
-
-    image_tag = f"azents-e2e:{random_secret(8)}"
-    _build_e2e_image(
-        image_tag=image_tag,
-        dockerfile=REPOSITORY_ROOT / "azents.Dockerfile",
-        cache_repository="azents-server",
-    )
-    return image_tag
-
-
 def _build_e2e_web_image(
     *,
     image_tag: str,
@@ -583,63 +631,108 @@ def _build_e2e_web_image(
         )
 
 
+def _build_configured_e2e_image(
+    image_build: _E2EImageBuild,
+    image_tag: str,
+) -> None:
+    """Build one configured image using its required context."""
+    if image_build.web:
+        _build_e2e_web_image(
+            image_tag=image_tag,
+            dockerfile=image_build.dockerfile,
+            cache_repository=image_build.cache_repository,
+        )
+        return
+
+    _build_e2e_image(
+        image_tag=image_tag,
+        dockerfile=image_build.dockerfile,
+        cache_repository=image_build.cache_repository,
+    )
+
+
+def _prepare_e2e_images(profile: str | None) -> dict[str, str]:
+    """Build one CI lane's independent product images concurrently."""
+    if profile is None:
+        return {}
+    try:
+        image_builds = _E2E_IMAGE_BUILD_PROFILES[profile]
+    except KeyError:
+        supported = ", ".join(sorted(_E2E_IMAGE_BUILD_PROFILES))
+        raise RuntimeError(
+            f"Unsupported {_E2E_IMAGE_BUILD_PROFILE_ENV} {profile!r}; "
+            f"expected one of: {supported}."
+        ) from None
+
+    images: dict[str, str] = {}
+    pending_builds: list[tuple[_E2EImageBuild, str]] = []
+    for image_build in image_builds:
+        if image := os.environ.get(image_build.environment_variable):
+            images[image_build.cache_repository] = image
+            continue
+        image_tag = f"{image_build.tag_prefix}:{random_secret(8)}"
+        images[image_build.cache_repository] = image_tag
+        pending_builds.append((image_build, image_tag))
+
+    if not pending_builds:
+        return images
+
+    with ThreadPoolExecutor(max_workers=len(pending_builds)) as executor:
+        futures = [
+            executor.submit(_build_configured_e2e_image, image_build, image_tag)
+            for image_build, image_tag in pending_builds
+        ]
+        for future in futures:
+            future.result()
+    return images
+
+
 @pytest.fixture(scope="session")
-def azents_web_image() -> str:
+def e2e_images() -> dict[str, str]:
+    """Return CI-prepared images, leaving focused local builds lazy by default."""
+    return _prepare_e2e_images(os.environ.get(_E2E_IMAGE_BUILD_PROFILE_ENV))
+
+
+def _resolve_e2e_image(
+    image_build: _E2EImageBuild,
+    prepared_images: dict[str, str],
+) -> str:
+    """Return a prepared image or build only the locally requested image."""
+    if image := prepared_images.get(image_build.cache_repository):
+        return image
+    if image := os.environ.get(image_build.environment_variable):
+        return image
+
+    image_tag = f"{image_build.tag_prefix}:{random_secret(8)}"
+    _build_configured_e2e_image(image_build, image_tag)
+    return image_tag
+
+
+@pytest.fixture(scope="session")
+def azents_server_image(e2e_images: dict[str, str]) -> str:
+    return _resolve_e2e_image(_SERVER_IMAGE_BUILD, e2e_images)
+
+
+@pytest.fixture(scope="session")
+def azents_web_image(e2e_images: dict[str, str]) -> str:
     """Build or reuse the Main Web image for browser E2E."""
-    if image := os.environ.get("AZENTS_E2E_WEB_IMAGE"):
-        return image
-
-    image_tag = f"azents-web-e2e:{random_secret(8)}"
-    _build_e2e_web_image(
-        image_tag=image_tag,
-        dockerfile=REPOSITORY_ROOT / "azents-web.Dockerfile",
-        cache_repository="azents-web",
-    )
-    return image_tag
+    return _resolve_e2e_image(_WEB_IMAGE_BUILD, e2e_images)
 
 
 @pytest.fixture(scope="session")
-def azents_admin_web_image() -> str:
+def azents_admin_web_image(e2e_images: dict[str, str]) -> str:
     """Build or reuse the Admin Web image for browser E2E."""
-    if image := os.environ.get("AZENTS_E2E_ADMIN_WEB_IMAGE"):
-        return image
-
-    image_tag = f"azents-admin-web-e2e:{random_secret(8)}"
-    _build_e2e_web_image(
-        image_tag=image_tag,
-        dockerfile=REPOSITORY_ROOT / "azents-admin-web.Dockerfile",
-        cache_repository="azents-admin-web",
-    )
-    return image_tag
+    return _resolve_e2e_image(_ADMIN_WEB_IMAGE_BUILD, e2e_images)
 
 
 @pytest.fixture(scope="session")
-def azents_runtime_runner_image() -> str:
-    if image := os.environ.get("AZENTS_E2E_RUNTIME_RUNNER_IMAGE"):
-        return image
-
-    image_tag = f"azents-runtime-runner-e2e:{random_secret(8)}"
-    _build_e2e_image(
-        image_tag=image_tag,
-        dockerfile=REPOSITORY_ROOT / "python/apps/azents-runtime-runner/Dockerfile",
-        cache_repository="azents-runtime-runner",
-    )
-    return image_tag
+def azents_runtime_runner_image(e2e_images: dict[str, str]) -> str:
+    return _resolve_e2e_image(_RUNTIME_RUNNER_IMAGE_BUILD, e2e_images)
 
 
 @pytest.fixture(scope="session")
-def azents_runtime_provider_docker_image() -> str:
-    if image := os.environ.get("AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE"):
-        return image
-
-    image_tag = f"azents-runtime-provider-docker-e2e:{random_secret(8)}"
-    _build_e2e_image(
-        image_tag=image_tag,
-        dockerfile=REPOSITORY_ROOT
-        / "python/apps/azents-runtime-provider-docker/Dockerfile",
-        cache_repository="azents-runtime-provider-docker",
-    )
-    return image_tag
+def azents_runtime_provider_docker_image(e2e_images: dict[str, str]) -> str:
+    return _resolve_e2e_image(_RUNTIME_PROVIDER_DOCKER_IMAGE_BUILD, e2e_images)
 
 
 def _build_e2e_image(
@@ -759,9 +852,9 @@ def _write_e2e_image_build_observability(
         "completed": completed,
         "duration_seconds": round(duration_seconds, 3),
     }
-    with artifact_path.open("a", encoding="utf-8") as artifact_file:
-        artifact_file.write(json.dumps(artifact_record, sort_keys=True))
-        artifact_file.write("\n")
+    with _IMAGE_BUILD_OBSERVABILITY_LOCK:
+        with artifact_path.open("a", encoding="utf-8") as artifact_file:
+            artifact_file.write(json.dumps(artifact_record, sort_keys=True) + "\n")
 
 
 @pytest.fixture(scope="session")
