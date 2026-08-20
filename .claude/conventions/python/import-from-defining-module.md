@@ -1,31 +1,41 @@
 ---
-title: "Import symbols from the module that defines them, not from a re-exporting `__init__.py` — keep `__init__.py` files minimal (docstring only)."
+title: "Import symbols from the module that defines them; avoid `__init__.py` re-exports, but allow symbols defined directly in `__init__.py`."
 ---
 
 # Import From the Defining Module
 
-A re-exporting `__init__.py` makes import paths look short but loses the connection between import statement and source location, and creates circular import hazards as the package grows.
+A re-exporting `__init__.py` hides the source location and can create circular import hazards. An `__init__.py` is also a normal module and may define package-owned symbols directly.
 
-- ALWAYS import from the module that defines the symbol (`from foo.bar.baz import X`)
-- Keep `__init__.py` files limited to a module docstring — no re-exports
-- AVOID `from foo import X` when `X` actually lives in `foo.bar.baz`
+- ALWAYS import a symbol from the module where it is defined.
+- AVOID re-exporting a child-module symbol from `__init__.py` to shorten its import path.
+- Definitions implemented directly in `__init__.py` are allowed; the package module is their defining module.
 
 ## Bad
 
 ```python
 # foo/__init__.py
-from foo.bar.baz import X  # re-export
+from foo.repository import Repository  # re-export
 
 # caller
-from foo import X
+from foo import Repository
 ```
 
 ## Good
 
 ```python
-# foo/__init__.py
-"""Foo package."""
+# foo/repository.py
+class Repository:
+    ...
 
 # caller
-from foo.bar.baz import X
+from foo.repository import Repository
+```
+
+```python
+# foo/__init__.py
+class PackageRegistry:
+    ...
+
+# caller: PackageRegistry is defined by the package module
+from foo import PackageRegistry
 ```
