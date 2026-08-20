@@ -1341,6 +1341,344 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Subagent E2E bounded spawn oldest",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_bounded_spawn_oldest",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "bounded_oldest",
+              "task": "Subagent E2E bounded child task",
+              "agent_type": "default",
+              "fork_turns": "none"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_bounded_spawn_oldest"
+      },
+      "response": {
+        "content": "Subagent bounded oldest child was spawned."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E bounded spawn middle"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_bounded_spawn_middle",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "bounded_middle",
+              "task": "Subagent E2E bounded child task",
+              "agent_type": "default",
+              "fork_turns": "none"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_bounded_spawn_middle"
+      },
+      "response": {
+        "content": "Subagent bounded middle child was spawned."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E bounded spawn newest"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_bounded_spawn_newest",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "bounded_newest",
+              "task": "Subagent E2E bounded child task",
+              "agent_type": "default",
+              "fork_turns": "none"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_bounded_spawn_newest"
+      },
+      "response": {
+        "content": "Subagent bounded newest child was spawned."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E bounded child task",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Subagent bounded child completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E bounded list"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_bounded_list",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_bounded_list"
+      },
+      "response": {
+        "content": "Subagent bounded list observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E bounded historical followup"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_bounded_followup",
+            "name": "followup_task",
+            "arguments": {
+              "agent_name": "/root/bounded_oldest",
+              "task": "Subagent E2E bounded reused child task"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_bounded_followup"
+      },
+      "response": {
+        "content": "Subagent bounded historical follow-up assigned."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E bounded reused child task",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Subagent bounded reused child completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E bounded relist"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_bounded_relist",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_bounded_relist"
+      },
+      "response": {
+        "content": "Subagent bounded relist observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E active overflow spawn",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_active_overflow_spawn_one",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "overflow_one",
+              "task": "Subagent E2E active overflow child task",
+              "agent_type": "default",
+              "fork_turns": "none"
+            }
+          },
+          {
+            "id": "call_subagent_active_overflow_spawn_two",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "overflow_two",
+              "task": "Subagent E2E active overflow child task",
+              "agent_type": "default",
+              "fork_turns": "none"
+            }
+          },
+          {
+            "id": "call_subagent_active_overflow_spawn_three",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "overflow_three",
+              "task": "Subagent E2E active overflow child task",
+              "agent_type": "default",
+              "fork_turns": "none"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E active overflow spawn",
+        "hasToolResult": true
+      },
+      "response": {
+        "content": "Subagent active overflow children were spawned."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E active overflow child task",
+        "hasToolResult": false
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_active_overflow_child_barrier",
+            "name": "subagentqa__runtime_hook_qa_probe",
+            "arguments": {
+              "marker": "active overflow child"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_active_overflow_child_barrier"
+      },
+      "response": {
+        "content": "Subagent active overflow child completed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E active overflow list"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_active_overflow_list",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_active_overflow_list"
+      },
+      "response": {
+        "content": "Subagent active overflow list observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E active overflow reject spawn"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_active_overflow_reject",
+            "name": "spawn_agent",
+            "arguments": {
+              "name": "overflow_four",
+              "task": "This child must not be created",
+              "agent_type": "default",
+              "fork_turns": "none"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_active_overflow_reject"
+      },
+      "response": {
+        "content": "Subagent active overflow rejection observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Subagent E2E active overflow contracted list"
+      },
+      "response": {
+        "toolCalls": [
+          {
+            "id": "call_subagent_active_overflow_contracted_list",
+            "name": "list_agents",
+            "arguments": {}
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "toolCallId": "call_subagent_active_overflow_contracted_list"
+      },
+      "response": {
+        "content": "Subagent contracted list observed."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Subagent spawn with Fast override",
         "hasToolResult": false
       },

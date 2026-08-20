@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-19 | 67 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-19 | 151 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-20 | 152 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-20 | 63 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
@@ -24,7 +24,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-18 | 27 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-18 | 4 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-18 | 95 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-20 | 96 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-20 | 69 |
 
@@ -32,7 +32,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-19 | 158 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-20 | 159 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-18 | 63 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-13 | 26 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
@@ -402,6 +402,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Subagents Inherit the Parent Run Profile Historical Requirements Reconstruction](requirements/subagent-260710-subagent-parent-profile-inheritance.md) | subagent-260710 | 2026-07-10 | - |
 | [Allow Explicit Inference Profiles When Spawning Subagents Historical Requirements Reconstruction](requirements/subagent-260711-subagent-spawn-inference-profile-overrides.md) | subagent-260711 | 2026-07-11 | - |
 | [Model-Scoped Subagent Override Policy Historical Requirements Reconstruction](requirements/subagent-260717-subagent-override-policy.md) | subagent-260717 | 2026-07-17 | - |
+| [Bounded Subagent Coordination Requirements](requirements/subagent-260820-bounded-agent-coordination.md) | subagent-260820 | 2026-08-20 | 2026-08-20 |
 | [Project Subscription Usage from the Selected Composer Model Historical Requirements Reconstruction](requirements/subscription-260719-subscription-usage-from.md) | subscription-260719 | 2026-07-19 | 2026-07-19 |
 | [Keep Agent Main Model as the Default Target Historical Requirements Reconstruction](requirements/target-260710-target-role.md) | target-260710 | 2026-07-10 | - |
 | [Team CRUD Document Historical Requirements Reconstruction](requirements/team-260212-team-crud.md) | team-260212 | 2026-02-12 | 2026-02-12 |
@@ -798,6 +799,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Subagents Inherit the Parent Run Profile](adr/subagent-260710-subagent-parent-profile-inheritance.md)
 - [Allow Explicit Inference Profiles When Spawning Subagents](adr/subagent-260711-subagent-spawn-inference-profile-overrides.md)
 - [Model-Scoped Subagent Override Policy](adr/subagent-260717-subagent-override-policy.md)
+- [Bounded Subagent Coordination](adr/subagent-260820-bounded-agent-coordination.md)
 - [Project Subscription Usage from the Selected Composer Model](adr/subscription-260719-subscription-usage-from.md)
 - [Keep Agent Main Model as the Default Target](adr/target-260710-target-role.md)
 - [Team CRUD Document Historical Decision Reconstruction](adr/team-260212-team-crud.md)
