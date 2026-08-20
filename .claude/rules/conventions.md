@@ -26,6 +26,6 @@ How to add a new convention: use the `add-convention` skill.
 | Derive Agent Workspace paths only from current Runner-reported Runtime evidence — never from fixed absolute paths, server HOME, or Provider mount configuration. | [runner-reported-agent-workspace](../conventions/global/runner-reported-agent-workspace.md) |
 | Use `scripts/rebase-stacked-prs.sh` when rebasing stacked PR branches together so the process stops cleanly at the first conflict. | [stacked-pr-rebase-script](../conventions/global/stacked-pr-rebase-script.md) |
 | All log lines, error messages, API response messages, and WebSocket text returned to users or operators must be in English — this is a global service whose users do not read Korean. | [user-facing-text-in-english](../conventions/global/user-facing-text-in-english.md) |
-| In codingbot or bare-cache worktrees, refresh origin/main with an explicit refspec before rebasing onto main — `git fetch origin main` alone may leave origin/main stale. | [worktree-rebase-origin-main](../conventions/global/worktree-rebase-origin-main.md) |
+| In bare-cache worktrees, refresh origin/main with an explicit refspec before rebasing onto main — `git fetch origin main` alone may leave origin/main stale. | [worktree-rebase-origin-main](../conventions/global/worktree-rebase-origin-main.md) |
 
 <!-- END_TABLE -->

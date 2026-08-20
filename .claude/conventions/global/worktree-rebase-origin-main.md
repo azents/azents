@@ -1,5 +1,5 @@
 ---
-title: In codingbot or bare-cache worktrees, refresh origin/main with an explicit refspec before rebasing onto main — `git fetch origin main` alone may leave origin/main stale.
+title: In bare-cache worktrees, refresh origin/main with an explicit refspec before rebasing onto main — `git fetch origin main` alone may leave origin/main stale.
 ---
 
 # Worktree Rebase Onto Main
