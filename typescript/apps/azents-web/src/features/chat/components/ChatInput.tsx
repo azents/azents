@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * chat input component.
+ * Chat composer component.
  *
- * inputValue status internally with manage input when parent(ChatView) entire
- * is not rerendered on input.
+ * Keeps rapidly changing composer state local so typing does not rerender the
+ * entire parent ChatView.
  */
 
 import {
@@ -85,7 +85,7 @@ interface ChatInputProps {
   agentId: string | null;
   /** current session ID */
   sessionId: string | null;
-  /** whether mobile */
+  /** Whether the mobile composer layout is active */
   isMobile: boolean;
   /** Agent-owned selectable model targets */
   selectableModelOptions: AgentResponse["selectable_model_options"];
@@ -107,13 +107,13 @@ interface ChatInputProps {
   onApplyInferenceProfile?: (
     profile: RequestedInferenceProfile,
   ) => Promise<boolean>;
-  /** file whether uploading */
+  /** Whether any attachment is currently uploading */
   isUploading: boolean;
   /** pending file list */
   pendingFiles: PendingFile[];
-  /** to attach and show on input goal snapshot */
+  /** Goal snapshot displayed above the composer */
   goal: GoalStateSnapshot | null;
-  /** to attach and show on input todo snapshot */
+  /** Todo snapshot displayed above the composer */
   todo: TodoStateSnapshot | null;
   /** Goal delete callback */
   onClearGoal?: () => Promise<boolean>;
@@ -134,7 +134,7 @@ interface ChatInputProps {
   ) => Promise<boolean>;
   /** clear attached file draft state */
   clearFiles: () => void;
-  /** complete file status pending  with text. */
+  /** Reset completed attachment states after sending */
   resetDoneFiles: () => void;
   /** file add callback */
   addFiles: (files: FileList) => void;
@@ -142,11 +142,11 @@ interface ChatInputProps {
   removeFile: (id: string) => void;
   /** scroll callback after send */
   onAfterSend: () => void;
-  /** inputinput scroll adjustment callback on focus */
+  /** Adjust the chat scroll position when the composer receives focus */
   onFocus?: () => void;
   /** whether commands are blocked during Run */
   wasCommandBlocked: boolean;
-  /** Session run_state based on stop button exposed whether */
+  /** Whether the current Session state permits a Stop request */
   isStopAvailable: boolean;
   /** whether stop request is being sent */
   isStopPending: boolean;
@@ -154,7 +154,7 @@ interface ChatInputProps {
   onStopRequest: () => void;
   /** server-managed input action list */
   inputActions: InputActionDefinition[];
-  /** Storybook etc. in used to inject initial input value */
+  /** Initial input value for Storybook and other controlled previews */
   initialInputValue?: string;
   /** currently edited message ID */
   editingMessageId?: string | null;
@@ -823,7 +823,7 @@ export const ChatInput = memo(function ChatInput({
         return;
       }
 
-      // file attachment existstextwhen Agent based on with upload after send.
+      // Upload attachments for the selected Agent before sending the message.
       if (hasAttachedFiles) {
         if (!agentId) {
           return;
@@ -954,7 +954,7 @@ export const ChatInput = memo(function ChatInput({
           return;
         }
       }
-      // mobile in Enter with textrow, text button withonly send
+      // On mobile, Enter inserts a line break; messages are sent with the button.
       if (isMobile) {
         return;
       }
@@ -976,13 +976,13 @@ export const ChatInput = memo(function ChatInput({
     ],
   );
 
-  /** file select handler */
+  /** Handle files selected through the hidden input. */
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files.length > 0) {
         addFiles(e.target.files);
       }
-      // input value sectext (text file textselect textalsotext)
+      // Clear the input so selecting the same file again triggers a change.
       e.target.value = "";
     },
     [addFiles],

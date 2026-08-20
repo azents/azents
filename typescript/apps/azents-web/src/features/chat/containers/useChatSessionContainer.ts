@@ -3,10 +3,9 @@
 /**
  * Single-session container hook.
  *
- * WebSocket connection, message history, pagination, authorization request, compaction status etc.
- * that must be isolated per session status manages.. parent(useChatPageContainer) in
- * key based remount with when session switches  hook  of instance is completely replaced
- * previous session of WebSocket/buffer new session to ensures it does not leak.
+ * Manages Session-scoped WebSocket, history, pagination, authorization,
+ * compaction, and related state. The parent remounts this hook by Session key
+ * so state from the previous Session cannot leak into the next one.
  */
 
 import { useDocumentVisibility } from "@mantine/hooks";
@@ -127,9 +126,9 @@ function writableChatAction(
 interface ChatSessionContainerProps {
   /** URL-selected AgentSession ID */
   sessionId: string;
-  /** this session agent */
+  /** Agent that owns this Session */
   agent: AgentResponse;
-  /** WebSocket connection status parent to push (for sidebar badge) */
+  /** Publish WebSocket connection status to the parent for the sidebar badge */
   onConnectionStatusChange: (status: ConnectionStatus) => void;
 }
 
@@ -144,7 +143,7 @@ export interface ChatSessionContainerOutput {
   messages: ChatMessage[];
   /** canonical durable and latest-following live event stream for chat presentation */
   timelineEvents: ChatEventResponse[];
-  /** not yet model turn  to not injected pending input buffers */
+  /** Pending input buffers not yet admitted to a model turn */
   pendingInputBuffers: PendingInputBuffer[];
   /** typed durable pending mailbox entries */
   pendingMailboxEntries: ReturnType<typeof selectPendingMailboxEntries>;
@@ -206,11 +205,11 @@ export interface ChatSessionContainerOutput {
   ) => Promise<boolean>;
   /** retry the latest terminal failed run */
   onRetryFailedRun: (failedEventId: string) => Promise<boolean>;
-  /** Context compaction whether in progress */
+  /** Whether context compaction is in progress */
   isCompacting: boolean;
   /** whether commands are blocked during Run */
   wasCommandBlocked: boolean;
-  /** Session run_state based on stop button exposed whether */
+  /** Whether the current Session state permits a Stop request */
   isStopAvailable: boolean;
   /** whether stop request is being sent */
   isStopPending: boolean;
@@ -220,7 +219,7 @@ export interface ChatSessionContainerOutput {
   inputActions: InputActionDefinition[];
   /** pending OAuth authorization request list */
   authorizationRequests: AuthorizationRequest[];
-  /** auth complete when remove corresponding request */
+  /** Remove the matching request after authorization completes */
   onAuthorizationComplete: (toolkitId: string) => void;
   /** current operation TurnAction execution projections */
   actionExecutions: ActionExecutionProjection[];
@@ -2208,7 +2207,7 @@ export function useChatSessionContainer(
   const lastEventReceivedAt = managedLiveState.lastEventReceivedAt;
   const sessionRunState = managedLiveState.sessionRunState;
 
-  // WebSocket connection text (ticket + wsUrl)
+  // Fetch WebSocket connection details, including the ticket and URL.
   const connectionInfoQuery = trpc.chat.getConnectionInfo.useQuery();
   const inputActionsQuery = trpc.chat.listInputActions.useQuery(
     { sessionId },
@@ -2843,7 +2842,7 @@ export function useChatSessionContainer(
     startResync({ reason: "compaction", continuing });
   };
 
-  // connection status parent with push (sidebar badge so it can reflect)
+  // Publish connection status so the parent can update the sidebar badge.
   useEffect(() => {
     onConnectionStatusChange(connectionStatus);
   }, [connectionStatus, onConnectionStatusChange]);

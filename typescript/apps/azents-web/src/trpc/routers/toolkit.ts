@@ -1,12 +1,12 @@
 /**
  * Toolkit tRPC router
  *
- * Per-workspace Toolkit CRUD + Scope management + Agent-Toolkit attach:
- * - list / get: Toolkit fetch (auth required, manager or higher)
- * - listAvailable: current user use available Toolkit fetch (member or higher)
- * - create / update / remove: Toolkit CRUD (manager or higher)
- * - listScopes / createScope / deleteScope: Scope management (manager or higher)
- * - listAgentToolkits / attachToAgent / detachFromAgent: Agent-Toolkit attach (member or higher)
+ * Provides workspace Toolkit CRUD, Scope management, and Agent attachments:
+ * - list / get: fetch Toolkit configurations (manager or higher)
+ * - listAvailable: fetch Toolkit configurations available to the current user
+ * - create / update / remove: manage Toolkit configurations (manager or higher)
+ * - listScopes / createScope / deleteScope: manage Scopes (manager or higher)
+ * - listAgentToolkits / attachToAgent / detachFromAgent: manage Agent attachments
  */
 import {
   toolkitOauthV1ConnectOauth,
@@ -52,7 +52,7 @@ export const toolkitRouter = router({
   }),
 
   /**
-   * workspace of Toolkit Config list fetch
+   * Fetch Toolkit Configs for a workspace.
    */
   listConfigs: publicProcedure
     .input(z.object({ handle: z.string().min(1) }))
@@ -73,7 +73,7 @@ export const toolkitRouter = router({
     }),
 
   /**
-   * current user use available Toolkit Config list
+   * Fetch Toolkit Configs available to the current user.
    */
   listAvailableConfigs: publicProcedure
     .input(z.object({ handle: z.string().min(1) }))
@@ -94,7 +94,7 @@ export const toolkitRouter = router({
     }),
 
   /**
-   * Toolkit Config detail fetch
+   * Fetch Toolkit Config details.
    */
   getConfig: publicProcedure
     .input(
@@ -337,7 +337,7 @@ export const toolkitRouter = router({
     }),
 
   /**
-   * Agent to attach Toolkit list
+   * List Toolkits attached to an Agent.
    */
   listAgentToolkits: publicProcedure
     .input(
@@ -364,7 +364,7 @@ export const toolkitRouter = router({
     }),
 
   /**
-   * Agent to Toolkit attach
+   * Attach a Toolkit to an Agent.
    */
   attachToAgent: publicProcedure
     .input(
@@ -394,7 +394,7 @@ export const toolkitRouter = router({
     }),
 
   /**
-   * Agent in Toolkit detach
+   * Detach a Toolkit from an Agent.
    */
   detachFromAgent: publicProcedure
     .input(
@@ -426,10 +426,10 @@ export const toolkitRouter = router({
     }),
 
   /**
-   * GitHub Platform App installation URL fetch
+   * Fetch the GitHub Platform App installation URL.
    *
-   * Call GitHub API with Platform App credentials configured on server
-   * Fetch App slug and return installation URL.
+   * Uses the server-configured Platform App credentials to fetch the App slug
+   * and return its installation URL.
    */
   getGithubInstallUrl: publicProcedure
     .input(z.object({ handle: z.string().min(1) }))
@@ -452,10 +452,9 @@ export const toolkitRouter = router({
     }),
 
   /**
-   * GitHub OAuth URL fetch
+   * Fetch the GitHub OAuth authorization URL.
    *
-   * Let user sign in to GitHub and
-   * return OAuth auth URL so own installation list can be fetched.
+   * Lets the user sign in to GitHub before fetching their installation list.
    */
   getGithubOauthUrl: publicProcedure
     .input(z.object({ handle: z.string().min(1) }))
@@ -477,9 +476,9 @@ export const toolkitRouter = router({
     }),
 
   /**
-   * GitHub Platform App installation list fetch (OAuth auth required)
+   * Fetch GitHub Platform App installations. OAuth authorization is required.
    *
-   * Return only installations accessible with user GitHub OAuth code.
+   * Returns only installations accessible with the user's GitHub OAuth grant.
    */
   getGithubInstallations: publicProcedure
     .input(
@@ -609,7 +608,8 @@ export const toolkitRouter = router({
   /**
    * Toolkit connection test
    *
-   * always unsaved endpoint use: send form values + toolkit_config_id with DB credentials merge.
+   * Always uses the unsaved endpoint and merges form values with stored credentials
+   * identified by toolkit_config_id.
    */
   testConnection: publicProcedure
     .input(

@@ -1,7 +1,7 @@
 /**
  * Chat tRPC router
  *
- * WebSocket for attachment ticket issue, message history fetch.
+ * Issues WebSocket attachment tickets and fetches message history.
  */
 import {
   agentRuntimeV1AddAgentRuntime,
@@ -669,13 +669,13 @@ export const chatRouter = router({
     }),
 
   /**
-   * WebSocket attach information fetch
-   * - Receive short-lived HMAC ticket issued by backend and return it (prevents JWT exposure)
+   * Fetch WebSocket attachment information.
+   * Returns a short-lived backend-issued HMAC ticket so the JWT is never exposed.
    */
   getConnectionInfo: publicProcedure.query(async ({ ctx }) => {
     const config = getServerConfig();
 
-    // public URL for browser → WS URL convert
+    // Convert the public browser URL into a WebSocket URL.
     const wsUrl = config.publicApiUrl
       .replace(/^https:/, "wss:")
       .replace(/^http:/, "ws:");
@@ -687,7 +687,7 @@ export const chatRouter = router({
       });
       return { wsUrl, ticket: data.ticket };
     } catch {
-      // auth even on failure wsUrl is return (unauthenticated status)
+      // Return the WebSocket URL even when authentication fails so status is visible.
       return { wsUrl, ticket: null };
     }
   }),
