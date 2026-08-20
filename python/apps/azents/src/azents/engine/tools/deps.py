@@ -28,7 +28,6 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mcp_oauth_connection import MCPOAuthConnectionRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
@@ -44,7 +43,10 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.github_platform_system_setting.runtime import (
     PlatformGitHubAppRuntimeService,
 )
-from azents.services.scheduled_task.channel import ScheduledTaskChannelService
+from azents.services.scheduled_task.channel import (
+    ScheduledTaskChannelService,
+    get_scheduled_task_channel_service,
+)
 from azents.services.scheduled_task.service import (
     RDBScheduledTaskAuthorityValidator,
     ScheduledTaskService,
@@ -119,32 +121,6 @@ async def get_release_vfs_catalog(
         yield ReleaseVfsCatalog()
 
     return await appctx.get_variable(f"{__name__}.release_vfs_catalog", create)
-
-
-def get_scheduled_task_channel_service(
-    session_manager: Annotated[
-        SessionManager[AsyncSession], Depends(get_session_manager)
-    ],
-    run_repository: Annotated[AgentRunRepository, Depends(AgentRunRepository)],
-    cycle_repository: Annotated[
-        ScheduledTaskCycleRepository, Depends(ScheduledTaskCycleRepository)
-    ],
-    provider_repository: Annotated[
-        ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository.create),
-    ],
-    action_service: Annotated[ExternalChannelActionService, Depends()],
-    config: Annotated[Config, Depends(get_config)],
-) -> ScheduledTaskChannelService:
-    """Create the Scheduled-owned External Channel effect service."""
-    return ScheduledTaskChannelService(
-        session_manager=session_manager,
-        run_repository=run_repository,
-        cycle_repository=cycle_repository,
-        provider_repository=provider_repository,
-        action_service=action_service,
-        config=config,
-    )
 
 
 def get_scheduled_toolkit_provider(

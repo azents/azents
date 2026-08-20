@@ -198,6 +198,7 @@ async def test_provider_mutation_authorizes_binding_before_scheduled_locks(
     )
 
     assert result.action == "delete"
+    assert result.task == task
     assert calls == [
         "candidate",
         "binding-authorization",

@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
-from azents.engine.tools.deps import get_scheduled_task_channel_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -19,7 +18,10 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.scheduled_task.repository import ScheduledTaskRepository
 from azents.repos.scheduled_task_cycle import ScheduledTaskCycleRepository
-from azents.services.scheduled_task.channel import ScheduledTaskChannelService
+from azents.services.scheduled_task.channel import (
+    ScheduledTaskChannelService,
+    get_scheduled_task_channel_service,
+)
 from azents.services.scheduled_task.management import (
     ScheduledTaskManagementService,
     ScheduledTaskManagementUnavailable,

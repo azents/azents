@@ -31,6 +31,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.scheduled_task.data import ScheduledTask
 from azents.services.external_channel.credentials import (
     ExternalChannelCredentialsCodec,
 )
@@ -74,7 +75,12 @@ from azents.services.external_channel.slack_events import (
     SlackInteractionView,
     SlackInteractionViewResult,
 )
-from azents.services.scheduled_task.control import ScheduledTaskProviderControlService
+from azents.services.scheduled_task.channel import ScheduledTaskChannelService
+from azents.services.scheduled_task.control import (
+    ScheduledTaskProviderControlResult,
+    ScheduledTaskProviderControlService,
+    build_scheduled_task_control_locator,
+)
 from azents.testing.external_channel import make_provider_effect_plan
 
 _VALID_EXPIRY = datetime.datetime.max.replace(tzinfo=datetime.UTC)
@@ -289,6 +295,8 @@ def _processor(
     replay: _Replay | None = None,
     provider_control: _ProviderControl | None = None,
     participation: object | None = None,
+    scheduled_task_control: object | None = None,
+    scheduled_task_channel: object | None = None,
 ) -> ExternalChannelInteractionProcessor:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -314,7 +322,11 @@ def _processor(
         ),
         scheduled_task_control=cast(
             ScheduledTaskProviderControlService,
-            SimpleNamespace(),
+            scheduled_task_control or SimpleNamespace(),
+        ),
+        scheduled_task_channel=cast(
+            ScheduledTaskChannelService,
+            scheduled_task_channel or SimpleNamespace(),
         ),
         config=cast(
             Config,
@@ -361,6 +373,57 @@ def _handoff(
         trigger_id="trigger-secret-must-not-persist",
         selector_interaction_id=selector_interaction_id,
     )
+
+
+@pytest.mark.asyncio
+async def test_scheduled_task_delete_notifies_bound_slack_channel() -> None:
+    """Slack provider cancellation publishes the committed deleted Task snapshot."""
+    repository = _Repository()
+    slack = _Slack(
+        SlackInteractionViewResult(
+            status="opened",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    task = cast(ScheduledTask, SimpleNamespace(id="task-1", binding_id="binding-1"))
+    scheduled_task_control = SimpleNamespace(
+        mutate=AsyncMock(
+            return_value=ScheduledTaskProviderControlResult(
+                action="delete",
+                task=task,
+            )
+        )
+    )
+    scheduled_task_channel = SimpleNamespace(execute_deletion=AsyncMock())
+    handoff = ExternalChannelInteractionHandoff(
+        interaction_id="interaction-1",
+        handler="scheduled_task_delete",
+        provider_parent_channel_id="C-1",
+        provider_thread_key="100.0001",
+        settings_metadata=None,
+        settings_location=None,
+        settings_response_mode=None,
+        trigger_id="trigger-secret-must-not-persist",
+        scheduled_task_locator=build_scheduled_task_control_locator(
+            secret=_SECRET,
+            action="delete",
+            task_id="task-1",
+            binding_id="binding-1",
+        ),
+    )
+
+    await _processor(
+        repository,
+        _Selector(_catalog()),
+        slack,
+        scheduled_task_control=scheduled_task_control,
+        scheduled_task_channel=scheduled_task_channel,
+    ).process(handoff)
+
+    scheduled_task_channel.execute_deletion.assert_awaited_once_with(task)
+    assert len(slack.views) == 1
+    assert "Scheduled Task cancelled." in str(slack.views[0])
 
 
 @pytest.mark.asyncio

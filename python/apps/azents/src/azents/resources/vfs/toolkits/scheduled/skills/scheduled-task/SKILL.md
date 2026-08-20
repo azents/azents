@@ -73,6 +73,11 @@ Choose exactly one of these shapes:
 
 `at` and `timezone` are mutually exclusive. Never send a separate `timezone`
 with `at`; the offset or `Z` inside `at` already defines the one-time instant.
+When the requester's timezone is reliably known, serialize every one-time `at`
+value with the UTC offset effective in that timezone at the target instant,
+including duration-relative requests. Do not normalize it to `Z` merely because
+the instant is technically equivalent. If a duration-relative request has no
+reliably known requester timezone, `Z` is acceptable.
 
 ```json
 {"at":"2026-08-18T09:00:00+09:00","cron":null,"timezone":null}
@@ -83,7 +88,9 @@ with `at`; the offset or `Z` inside `at` already defines the one-time instant.
 ```
 
 - For a duration-relative request such as "one hour from now," derive the instant
-  from the current time without asking for a timezone.
+  from the current time without asking for a timezone. Preserve the requester's
+  known timezone offset in `at`; use `Z` only when that timezone is not reliably
+  known.
 - For a calendar-time request, use an explicitly stated timezone first.
 - Otherwise, use a timezone that can be inferred reliably from the current user
   or conversation context.

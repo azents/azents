@@ -22,6 +22,12 @@ Never combine `at` with a separate `timezone`. A one-time `at` value carries its
 own `Z` or explicit UTC offset. The `timezone` field exists only to evaluate a
 recurring cron expression.
 
+When the requester's timezone is reliably known, preserve its offset in every
+one-time `at` value instead of normalizing the same instant to `Z`. Resolve the
+offset at the target instant so daylight-saving changes are represented
+correctly. This preserves user-facing schedule context without changing the
+instant.
+
 ## One-time schedules
 
 Use one timezone-bearing RFC 3339 timestamp. The timestamp must contain `Z` or an
@@ -36,7 +42,9 @@ For a request such as "one hour from now":
 
 - derive the instant from the current time;
 - do not ask for the user's timezone; and
-- serialize the resulting instant as timezone-bearing RFC 3339.
+- when the requester timezone is reliably known, serialize the result with the
+  target instant's local UTC offset; and
+- otherwise, serialize the result with `Z`.
 
 ### Calendar-time request
 
@@ -81,7 +89,8 @@ User request:
 > Check the deployment again in one hour.
 
 Do not ask for timezone. Add one hour to the current instant and create a
-one-time RFC 3339 schedule.
+one-time RFC 3339 schedule. If the requester timezone is already known, preserve
+its target-instant offset instead of converting the value to `Z`.
 
 ### Calendar one-time request with known context
 
