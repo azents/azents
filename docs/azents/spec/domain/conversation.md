@@ -105,7 +105,7 @@ api_routes:
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
 last_verified_at: 2026-08-20
-spec_version: 152
+spec_version: 153
 ---
 
 # Conversation & Events
@@ -565,6 +565,8 @@ before destructive cleanup can remove a path or branch.
 | `run_index`                     | int                     | Session-scoped monotonic run index                                                                                                                           |
 | `phase`                         | enum                    | UI activity source                                                                                                                                           |
 | `status`                        | enum                    | `pending`, `running`, `completed`, `stopped`, `failed`, `interrupted`, or `cancelled`                                                                        |
+| `requested_model_target_label`  | string \| null          | Agent-owned target label selected for first activation; null only before activation or on historical rows.                                                   |
+| `requested_reasoning_effort`    | enum \| null            | Nullable requested effort paired with the activation label; it does not store resolved physical model state.                                                 |
 | `active_tool_calls`             | JSONB array             | `call_id`, `name`, redacted/summarized `arguments`, `started_at`, and `owner_generation`                                                                     |
 | `retry_state`                   | JSONB \| null           | Durable current-model-turn retry state; cleared on successful model output admission or terminal transition                                                  |
 | `vfs_projection`                | JSONB \| null           | Self-contained immutable `azents://` source and file snapshot authorized for this run. It is ensured before input promotion and reused by recovery.           |
@@ -603,7 +605,7 @@ mailbox item, appends a deterministic `system_error`, preserves the previous Ses
 and completes the active run without retry. Only one pending run may exist for a session. Pending and
 running runs are active recovery state.
 
-The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. `AgentRun` stores lifecycle, parentage, activity, retry, terminal-result state, and its immutable managed-file projection; it does not own or restore model selection. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual retry creates a new pending run, preserves the original ordered input-event associations, and re-resolves the Session's requested profile against current Agent routing before execution. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving model state from the parent run row. Each child run independently owns its VFS projection row rather than inheriting the parent run's projection.
+The requested label is intent, while the Session-owned current inference snapshot is the execution authority at each turn boundary. On first activation, `AgentRun` stores only that selected requested label and nullable effort alongside lifecycle, parentage, activity, retry, terminal-result state, and its immutable managed-file projection; it does not own or restore the resolved physical model selection or effective limits. A profile change arriving during an active run is prepared for the next boundary, and the same run rebuilds its physical request and effective limits from the new Session snapshot instead of creating a replacement run. Manual retry creates a new pending run, preserves the original ordered input-event associations, copies the original run's requested intent, and re-resolves current Agent routing at activation. A subagent's first run is precreated with `parent_agent_run_id`; child creation first stores either the exact parent Session snapshot or a statically validated spawn override on the child Session. Recovery activates the child from that Session snapshot without deriving resolved model state from the parent or child run row. Each child run independently owns its VFS projection row rather than inheriting the parent run's projection.
 
 Every current subagent Run that reaches `completed`, `failed`, `stopped`, `interrupted`, or
 `cancelled` is eligible for one queue-only terminal result to its direct parent. Terminal state,
@@ -1214,6 +1216,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-08-20** — v153. Added the activation-time requested profile fields to
+  the AgentRun model and clarified that resolved model selection and effective
+  limits remain Session-owned across recovery, retry, and subagent activation.
 - **2026-08-20** — v152. Separated the bounded model-facing subagent
   coordination list from complete durable tree authority and required the web
   specialized renderer to accept only the canonical two-field result, with

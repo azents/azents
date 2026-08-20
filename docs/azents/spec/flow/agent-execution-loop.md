@@ -82,7 +82,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-20
-spec_version: 159
+spec_version: 160
 ---
 
 # Agent Execution Loop
@@ -541,7 +541,7 @@ The pre-lower order is significant. Event attachment/file availability filters r
 compaction. Scheduler-owned file cleanup does not run in run input preparation. The runtime does not omit old tool outputs in normal model input. If the lowered request
 is still too large, `NativeRequestSizeGuard` remains the final post-lower hard guard.
 
-`AgentWorker` resolves the requested main target before the engine starts. The target label is resolved only against the current Agent-owned selectable option snapshots; Workspace defaults and model catalogs are not consulted. The selected main snapshot, requested effort, effective context limit, and compaction threshold become immutable `AgentRun` provenance. The Agent's lightweight snapshot remains the compaction model. The execution core receives physical selections and limits in `RunRequest`, never the target label.
+`AgentWorker` resolves the requested main target before the engine starts. The target label is resolved only against the current Agent-owned selectable option snapshots; Workspace defaults and model catalogs are not consulted. The selected requested target label and nullable effort are persisted when the pending `AgentRun` activates. The complete resolved main-model snapshot, effective context limit, and compaction threshold remain on the Session inference state for the current turn and may be replaced by a later prepared boundary in the same run. The Agent's lightweight snapshot remains the compaction model. The execution core receives physical selections and limits in `RunRequest`, never the target label.
 
 The selected lowerer owns the full provider-native request surface: generation options, client
 function tool passthrough, and provider-hosted tool lowering. OpenAI logical requests preserve
@@ -669,7 +669,7 @@ Subagent collaboration tools communicate through resolved agent input buffers:
   `SessionAgent` row lock for the tree. It fails with a tool error instead of queueing when the root
   tree already has `subagent_settings.max_subagents` active subagents or the requested child would
   exceed `subagent_settings.max_depth`. If allowed, it creates
-  a child `SessionAgent` plus hidden child `AgentSession`. Without a profile override it precreates the child's first pending run with source `parent_run` and the exact current parent-run requested and resolved profile, limits, and parent run id, regardless of whether that inherited Agent option allows explicit subagent selection. For `fork_turns = none` or a positive bounded count, optional `model_target_label` and `reasoning_effort` fields may instead pre-resolve an Agent-owned target profile with source `spawn_override`. An explicit target resolves only among options whose `settings.subagent_enabled` is true; unknown and disabled labels fail identically before side effects. An effort-only override retains the inherited parent target. Full-history `all` forks reject either override. Target-only changes normalize effort from the parent resolved effort; explicit efforts validate exactly. Label, effort, fork, and parent-provenance validation happens before child records or wake-up side effects. The tool description uses the same enabled-option set, lists labels and explicit effort levels, renders optional bounded `subagent_guidance`, and does not project disabled labels or physical model and integration metadata. If the set is empty, the description advertises inheritance only. The spawn flow then forks the parent's selected model-visible
+  a child `SessionAgent` plus hidden child `AgentSession` and a model-independent first pending run carrying only the parent run id. Without a profile override it copies the exact current parent Session inference state into the child Session, regardless of whether that inherited Agent option allows explicit subagent selection. For `fork_turns = none` or a positive bounded count, optional `model_target_label` and `reasoning_effort` fields may instead resolve and store a complete Agent-owned override state on the child Session. An explicit target resolves only among options whose `settings.subagent_enabled` is true; unknown and disabled labels fail identically before side effects. An effort-only override retains the inherited parent target. Full-history `all` forks reject either override. Target-only changes normalize effort from the parent resolved effort; explicit efforts validate exactly. Label, effort, fork, and parent-state validation happens before child records or wake-up side effects. The first-run activation persists the selected requested label and nullable effort on the pending child run without copying resolved physical selection or limits into that row. The tool description uses the same enabled-option set, lists labels and explicit effort levels, renders optional bounded `subagent_guidance`, and does not project disabled labels or physical model and integration metadata. If the set is empty, the description advertises inheritance only. The spawn flow then forks the parent's selected model-visible
   context, appends that selected context to the child transcript, appends a
   `system_reminder` event rendered as a `<system-reminder>` boundary when any parent history
   was copied, writes an initial `agent_message`, marks the child running, and sends a broker
@@ -708,9 +708,10 @@ session. `spawn_agent` and `followup_task` render `Message Type: NEW_TASK`; `sen
 status. The envelope includes the target path as task name, sender path, and payload text. Terminal
 payloads additionally retain source Run identity/index/status and nullable terminal event identity in
 durable metadata, while model-visible content uses only the safe terminal projection or fixed status
-fallback. The first child run initializes `agent_sessions.last_model_target_label` and
-`last_reasoning_effort` from its selected requested profile. Later `followup_task` runs therefore use
-normal session-last-used precedence and re-resolve the saved Agent-owned label against the current
+fallback. Child creation initializes `agent_sessions.applied_inference_profile` and
+`inference_state` from the inherited or overridden selection. The first activation copies only that
+requested label and nullable effort to the child `AgentRun`. Later `followup_task` runs therefore use
+normal Session-applied precedence and re-resolve the saved Agent-owned label against the current
 Agent snapshot rather than pinning the first run's physical snapshot. Broker wake-ups remain
 payload-free; recovery is based on persisted input buffers and `agent_sessions.run_state`.
 
@@ -1312,6 +1313,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-20** (spec_version 160) — Clarified activation-time requested
+  profile persistence, Session-owned resolved turn state, retry re-resolution,
+  and first-child profile storage without run-owned physical snapshots.
 - **2026-08-20** (spec_version 159) — Added the bounded PostgreSQL
   `list_agents` coordination projection, required-visible overflow behavior,
   inactive-recency fill, canonical two-field output, and complete-tree historical

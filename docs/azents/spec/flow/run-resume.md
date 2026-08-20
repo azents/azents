@@ -27,7 +27,7 @@ code_paths:
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
 last_verified_at: 2026-08-20
-spec_version: 29
+spec_version: 30
 ---
 
 # Run Resume
@@ -43,7 +43,7 @@ The event runtime resumes from durable transcript and `agent_runs`, not SDK seri
 | Broker wake-up | New session wake-up signal | Live sticky owner receives the wake-up directly; otherwise a worker can take over after owner heartbeat expiry |
 | Broker redelivery | Unacked session wake-up signal | Another worker receives and resumes from durable DB state |
 | Stale session activity | Worker recovery scan of `agent_sessions.run_state` | Worker enqueues a wake-up signal for the affected session |
-| Active event run | pending/running `agent_runs`, resolved inference provenance, phase, active tools, retry state, and nullable VFS projection | Runtime preserves the run/input boundary, ensures or reuses the immutable managed-file snapshot, resumes from an activated snapshot, and repairs missing interrupted results |
+| Active event run | pending/running `agent_runs`, activation requested profile, phase, active tools, retry state, and nullable VFS projection, plus the Session inference snapshot | Runtime preserves the run/input boundary, ensures or reuses the immutable managed-file snapshot, resolves or reuses the Session-owned turn state as appropriate, and repairs missing interrupted results |
 | Pending tool call | Event transcript has call without result | Runtime appends one deterministic cancelled result without executing the handler |
 | Leftover operation action | Session has an active buffer-keyed action execution at a new processing boundary | Worker records one cancelled durable snapshot and deletes the live execution before admitting new work; it never invokes the stale handler. |
 
@@ -322,6 +322,9 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-08-20** (spec_version 30) — Corrected the active-run recovery source
+  description to separate run-owned requested intent from Session-owned resolved
+  inference state.
 - **2026-08-20** (spec_version 29) — Persisted each pending run's selected requested inference profile at activation and copied it into manual failed-run retries, so recovery retains the original profile intent without restoring resolved Session state from the run.
 - **2026-08-12** (spec_version 27) — Added Agent-managed worktree bridge recovery: cancelled
   no-replay terminal continuation, atomic history/continuation handoff, predecessor-Run fencing,
