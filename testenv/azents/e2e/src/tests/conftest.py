@@ -120,6 +120,15 @@ class _E2EImageBuild:
     web: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class _CoreServiceContainers:
+    """Hold the concurrently started core product services."""
+
+    public: DockerContainer
+    admin: DockerContainer
+    engine: DockerContainer
+
+
 _SERVER_IMAGE_BUILD = _E2EImageBuild(
     environment_variable="AZENTS_E2E_SERVER_IMAGE",
     tag_prefix="azents-e2e",
@@ -1141,7 +1150,7 @@ def _remove_agent_runtime_containers(network_name: str) -> None:
 
 
 @pytest.fixture(scope="session")
-def azents_public_server_container(
+def azents_database_schema(
     container_network: Network,
     postgres_container: PostgresContainer,
     rustfs_container: DockerContainer,
@@ -1153,21 +1162,26 @@ def azents_public_server_container(
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
-    openai_proxy_container: DockerContainer,
-    slack_provider_fake_container: DockerContainer,
-) -> Generator[DockerContainer, None, None]:
-    """azents Public API server container (port 8010)."""
-    del openai_proxy_container, slack_provider_fake_container
+) -> None:
+    """Upgrade the shared E2E database before core services start concurrently."""
+    del rustfs_container, valkey_container
     base_container = (
         DockerContainer(
             image=azents_server_image,
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
         )
-        .with_name(f"azents-public-server-{random_secret(4)}")
-        .with_network_aliases("azents-public-server")
-        .with_exposed_ports(8010)
+        .with_name(f"azents-database-migration-{random_secret(4)}")
+        .with_command(
+            [
+                "/bin/sh",
+                "-ec",
+                (
+                    'revision="$(cat db-schemas/rdb/revision)"; '
+                    'alembic -c db-schemas/rdb/alembic.ini upgrade "$revision"'
+                ),
+            ]
+        )
     )
-
     container = _configure_azents_server_container(
         base_container,
         container_network,
@@ -1181,19 +1195,17 @@ def azents_public_server_container(
     )
 
     with container:
-        wait_for_server_ready(container, 8010, "azents-public-server")
-        _register_server_log_capture(
-            "azents-public-server",
-            container,
-        )
-        try:
-            yield container
-        finally:
-            _unregister_server_log_capture("azents-public-server")
+        result = container.get_wrapped_container().wait(timeout=120)
+        if result["StatusCode"] != 0:
+            stdout, stderr = container.get_logs()
+            pytest.fail(
+                "azents database migration failed\n\n"
+                f"stdout: {stdout.decode()}\n\nstderr: {stderr.decode()}"
+            )
 
 
 @pytest.fixture(scope="session")
-def azents_admin_server_container(
+def azents_core_service_containers(
     container_network: Network,
     postgres_container: PostgresContainer,
     rustfs_container: DockerContainer,
@@ -1202,17 +1214,43 @@ def azents_admin_server_container(
     rustfs_secret_key: str,
     s3_bucket_name: str,
     azents_server_image: str,
-    azents_public_server_container: DockerContainer,
+    azents_database_schema: None,
     auth_jwt_secret_key: str,
     credential_encryption_key: str,
     system_bootstrap_setup_token: str,
     openai_proxy_container: DockerContainer,
+    slack_provider_fake_container: DockerContainer,
     github_validation_proxy_container: DockerContainer,
     runtime_provider_bootstrap_source_path: Path,
-) -> Generator[DockerContainer, None, None]:
-    """azents Admin API server container (port 8011)."""
-    del openai_proxy_container, github_validation_proxy_container
-    base_container = (
+) -> Generator[_CoreServiceContainers, None, None]:
+    """Start Public API, Admin API, and Engine Worker concurrently."""
+    del (
+        azents_database_schema,
+        openai_proxy_container,
+        slack_provider_fake_container,
+        github_validation_proxy_container,
+    )
+    public_base_container = (
+        DockerContainer(
+            image=azents_server_image,
+            docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
+        )
+        .with_name(f"azents-public-server-{random_secret(4)}")
+        .with_network_aliases("azents-public-server")
+        .with_exposed_ports(8010)
+    )
+    public_container = _configure_azents_server_container(
+        public_base_container,
+        container_network,
+        postgres_container,
+        rustfs_access_key,
+        rustfs_secret_key,
+        s3_bucket_name,
+        auth_jwt_secret_key,
+        credential_encryption_key,
+        system_bootstrap_setup_token,
+    )
+    admin_base_container = (
         DockerContainer(
             image=azents_server_image,
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
@@ -1222,10 +1260,9 @@ def azents_admin_server_container(
         .with_command(["./bin/adminserver.sh"])
         .with_exposed_ports(8011)
     )
-
-    container = (
+    admin_container = (
         _configure_azents_server_container(
-            base_container,
+            admin_base_container,
             container_network,
             postgres_container,
             rustfs_access_key,
@@ -1254,44 +1291,7 @@ def azents_admin_server_container(
             "ro",
         )
     )
-
-    with container:
-        wait_for_server_ready(container, 8011, "azents-admin-server")
-        _register_server_log_capture(
-            "azents-admin-server",
-            container,
-        )
-        try:
-            yield container
-        finally:
-            _unregister_server_log_capture("azents-admin-server")
-
-
-@pytest.fixture(scope="session")
-def azents_engine_worker_container(
-    container_network: Network,
-    postgres_container: PostgresContainer,
-    rustfs_container: DockerContainer,
-    valkey_container: DockerContainer,
-    rustfs_access_key: str,
-    rustfs_secret_key: str,
-    s3_bucket_name: str,
-    azents_server_image: str,
-    azents_admin_server_container: DockerContainer,
-    auth_jwt_secret_key: str,
-    credential_encryption_key: str,
-    system_bootstrap_setup_token: str,
-    openai_proxy_container: DockerContainer,
-    slack_provider_fake_container: DockerContainer,
-) -> Generator[DockerContainer, None, None]:
-    """WebSocket session runt processt azents engine worker container."""
-    del (
-        azents_admin_server_container,
-        openai_proxy_container,
-        slack_provider_fake_container,
-    )
-
-    base_container = (
+    engine_base_container = (
         DockerContainer(
             image=azents_server_image,
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
@@ -1302,8 +1302,8 @@ def azents_engine_worker_container(
         .with_exposed_ports(8012)
         .with_volume_mapping("/var/run/docker.sock", "/var/run/docker.sock", "rw")
     )
-    container = _configure_azents_server_container(
-        base_container,
+    engine_container = _configure_azents_server_container(
+        engine_base_container,
         container_network,
         postgres_container,
         rustfs_access_key,
@@ -1313,21 +1313,31 @@ def azents_engine_worker_container(
         credential_encryption_key,
         system_bootstrap_setup_token,
     )
-    container = container.with_env("AZ_WORKER_HEALTH_PORT", "8012").with_env(
-        "AZ_AGENT_HOME_DOCKER_NETWORK", container_network.name
-    )
-    container = container.with_env(
-        "AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT",
-        "runtime-control:8030",
+    engine_container = engine_container.with_env(
+        "AZ_WORKER_HEALTH_PORT", "8012"
+    ).with_env("AZ_AGENT_HOME_DOCKER_NETWORK", container_network.name)
+    engine_container = engine_container.with_env(
+        "AZ_RUNTIME_TRANSFER_COORDINATOR_ENDPOINT", "runtime-control:8030"
     ).with_env("AZ_RUNTIME_TRANSFER_COORDINATOR_ALLOW_INSECURE", "true")
 
-    with container:
-        host = container.get_container_host_ip()
-        port = container.get_exposed_port(8012)
+    containers = _CoreServiceContainers(
+        public=public_container,
+        admin=admin_container,
+        engine=engine_container,
+    )
+    container_items = (
+        ("azents-public-server", containers.public),
+        ("azents-admin-server", containers.admin),
+        ("azents-engine-worker", containers.engine),
+    )
+
+    def wait_for_engine_worker_ready() -> None:
+        host = containers.engine.get_container_host_ip()
+        port = containers.engine.get_exposed_port(8012)
         base_url = f"http://{host}:{port}"
         for _ in range(60):
-            if container.get_wrapped_container().status == "exited":
-                stdout, stderr = container.get_logs()
+            if containers.engine.get_wrapped_container().status == "exited":
+                stdout, stderr = containers.engine.get_logs()
                 pytest.fail(
                     "azents-engine-worker exited\n\n"
                     f"stdout: {stdout.decode()}\n\nstderr: {stderr.decode()}"
@@ -1340,20 +1350,87 @@ def azents_engine_worker_container(
                 pass
             time.sleep(1)
         else:
-            stdout, stderr = container.get_logs()
+            stdout, stderr = containers.engine.get_logs()
             pytest.fail(
                 "azents-engine-worker did not start in time\n\n"
                 f"stdout: {stdout.decode()}\n\nstderr: {stderr.decode()}"
             )
-        _register_server_log_capture(
-            "azents-engine-worker",
-            container,
-        )
+
+    started_containers: list[DockerContainer] = []
+    started_containers_lock = threading.Lock()
+    registered_names: list[str] = []
+
+    def start_container(container: DockerContainer) -> None:
+        container.start()
+        with started_containers_lock:
+            started_containers.append(container)
+
+    try:
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            start_futures = [
+                executor.submit(start_container, container)
+                for _, container in container_items
+            ]
+            for future in start_futures:
+                future.result()
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            readiness_futures = (
+                executor.submit(
+                    wait_for_server_ready,
+                    containers.public,
+                    8010,
+                    "azents-public-server",
+                ),
+                executor.submit(
+                    wait_for_server_ready,
+                    containers.admin,
+                    8011,
+                    "azents-admin-server",
+                ),
+                executor.submit(wait_for_engine_worker_ready),
+            )
+            for future in readiness_futures:
+                future.result()
+        for server_name, container in container_items:
+            _register_server_log_capture(server_name, container)
+            registered_names.append(server_name)
+        yield containers
+    finally:
         try:
-            yield container
-        finally:
-            _unregister_server_log_capture("azents-engine-worker")
+            for server_name in reversed(registered_names):
+                _unregister_server_log_capture(server_name)
             _remove_agent_runtime_containers(container_network.name)
+        finally:
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                stop_futures = [
+                    executor.submit(container.stop) for container in started_containers
+                ]
+                for future in stop_futures:
+                    future.result()
+
+
+@pytest.fixture(scope="session")
+def azents_public_server_container(
+    azents_core_service_containers: _CoreServiceContainers,
+) -> DockerContainer:
+    """azents Public API server container (port 8010)."""
+    return azents_core_service_containers.public
+
+
+@pytest.fixture(scope="session")
+def azents_admin_server_container(
+    azents_core_service_containers: _CoreServiceContainers,
+) -> DockerContainer:
+    """azents Admin API server container (port 8011)."""
+    return azents_core_service_containers.admin
+
+
+@pytest.fixture(scope="session")
+def azents_engine_worker_container(
+    azents_core_service_containers: _CoreServiceContainers,
+) -> DockerContainer:
+    """WebSocket session runtime process azents Engine Worker container."""
+    return azents_core_service_containers.engine
 
 
 @pytest.fixture
