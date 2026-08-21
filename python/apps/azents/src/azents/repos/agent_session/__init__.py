@@ -101,11 +101,23 @@ class LockedSessionWorkingFolderBinding:
 
 
 @dataclass(frozen=True)
-class _RootCreationAuthority:
-    """Optimistic Agent authority captured before root Session persistence."""
+class _RuntimeFreeRootCreationAuthority:
+    """Runtime-free Agent authority captured before root Session persistence."""
 
-    runtime_capability: AgentRuntimeCapability
     runtime_capability_version: int
+
+
+@dataclass(frozen=True)
+class _ManagedRootCreationAuthority:
+    """Managed Agent authority with its locked Runtime reference."""
+
+    runtime_capability_version: int
+    agent_runtime_id: str
+
+
+type _RootCreationAuthority = (
+    _RuntimeFreeRootCreationAuthority | _ManagedRootCreationAuthority
+)
 
 
 class AgentSessionRepository:
@@ -121,15 +133,6 @@ class AgentSessionRepository:
         root_authority = (
             await self._root_creation_authority(session, agent_id=create.agent_id)
             if create.session_kind is AgentSessionKind.ROOT
-            else None
-        )
-        root_runtime_id = (
-            await self._lock_root_creation_runtime(
-                session,
-                agent_id=create.agent_id,
-                authority=root_authority,
-            )
-            if root_authority is not None
             else None
         )
         if root_authority is None:
@@ -161,8 +164,7 @@ class AgentSessionRepository:
             )
             rdb = result.scalar_one_or_none()
             if rdb is not None:
-                if create.session_kind is AgentSessionKind.ROOT:
-                    assert root_authority is not None
+                if root_authority is not None:
                     await self._create_root_session_agent_tree(
                         session,
                         agent_session_id=rdb.id,
@@ -170,7 +172,6 @@ class AgentSessionRepository:
                         workspace_id=rdb.workspace_id,
                         agent_id=rdb.agent_id,
                         authority=root_authority,
-                        agent_runtime_id=root_runtime_id,
                     )
                     await self._confirm_root_creation_authority(
                         session,
@@ -1417,11 +1418,6 @@ class AgentSessionRepository:
             session,
             agent_id=agent_id,
         )
-        root_runtime_id = await self._lock_root_creation_runtime(
-            session,
-            agent_id=agent_id,
-            authority=root_authority,
-        )
         for _ in range(SESSION_HANDLE_INSERT_ATTEMPTS):
             result = await session.execute(
                 pg_insert(RDBAgentSession)
@@ -1450,7 +1446,6 @@ class AgentSessionRepository:
                     workspace_id=rdb.workspace_id,
                     agent_id=rdb.agent_id,
                     authority=root_authority,
-                    agent_runtime_id=root_runtime_id,
                 )
                 await self._confirm_root_creation_authority(
                     session,
@@ -2209,24 +2204,21 @@ class AgentSessionRepository:
         workspace_id: str,
         agent_id: str,
         authority: _RootCreationAuthority,
-        agent_runtime_id: str | None,
     ) -> None:
         """Create the root SessionAgent and context for a root AgentSession."""
         context_id = uuid7().hex
         root_session_agent_id = uuid7().hex
-        if authority.runtime_capability is AgentRuntimeCapability.NONE:
-            assert agent_runtime_id is None
-            working_folder_path = None
+        if isinstance(authority, _RuntimeFreeRootCreationAuthority):
+            agent_runtime_id = None
             working_folder_binding_state = SessionWorkingFolderBindingState.NONE
         else:
-            assert agent_runtime_id is not None
-            working_folder_path = None
+            agent_runtime_id = authority.agent_runtime_id
             working_folder_binding_state = SessionWorkingFolderBindingState.PENDING
         context = RDBSessionAgentContext(
             agent_id=agent_id,
             workspace_id=workspace_id,
             agent_runtime_id=agent_runtime_id,
-            working_folder_path=working_folder_path,
+            working_folder_path=None,
             working_folder_binding_state=working_folder_binding_state,
             working_folder_cleanup_status=(
                 SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
@@ -2257,7 +2249,7 @@ class AgentSessionRepository:
         *,
         agent_id: str,
     ) -> _RootCreationAuthority:
-        """Read root creation authority without retaining a preliminary row lock."""
+        """Prepare root authority and lock its managed Runtime before FK writes."""
         row = (
             await session.execute(
                 sa.select(
@@ -2272,23 +2264,12 @@ class AgentSessionRepository:
         lifecycle_status, runtime_capability, runtime_capability_version = row
         if lifecycle_status is not AgentLifecycleStatus.ACTIVE:
             raise ValueError("Agent is not active for Session creation")
-        if runtime_capability is AgentRuntimeCapability.REMOVING:
+        if runtime_capability is AgentRuntimeCapability.NONE:
+            return _RuntimeFreeRootCreationAuthority(
+                runtime_capability_version=runtime_capability_version,
+            )
+        if runtime_capability is not AgentRuntimeCapability.MANAGED:
             raise RuntimeError("Agent Runtime is being removed")
-        return _RootCreationAuthority(
-            runtime_capability=runtime_capability,
-            runtime_capability_version=runtime_capability_version,
-        )
-
-    async def _lock_root_creation_runtime(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        authority: _RootCreationAuthority,
-    ) -> str | None:
-        """Lock the managed Runtime before any root Agent foreign-key write."""
-        if authority.runtime_capability is AgentRuntimeCapability.NONE:
-            return None
         runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
         locked_runtime_id = await session.scalar(
             sa.select(RDBAgentRuntime.id)
@@ -2297,7 +2278,10 @@ class AgentSessionRepository:
         )
         if locked_runtime_id is None:
             raise RuntimeError("Agent Runtime is unavailable for Session creation")
-        return locked_runtime_id
+        return _ManagedRootCreationAuthority(
+            runtime_capability_version=runtime_capability_version,
+            agent_runtime_id=locked_runtime_id,
+        )
 
     async def _confirm_root_creation_authority(
         self,
@@ -2307,12 +2291,17 @@ class AgentSessionRepository:
         authority: _RootCreationAuthority,
     ) -> None:
         """Fence root creation with one final conditional Agent update."""
+        expected_runtime_capability = (
+            AgentRuntimeCapability.NONE
+            if isinstance(authority, _RuntimeFreeRootCreationAuthority)
+            else AgentRuntimeCapability.MANAGED
+        )
         confirmed_id = await session.scalar(
             sa.update(RDBAgent)
             .where(
                 RDBAgent.id == agent_id,
                 RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
-                RDBAgent.runtime_capability == authority.runtime_capability,
+                RDBAgent.runtime_capability == expected_runtime_capability,
                 RDBAgent.runtime_capability_version
                 == authority.runtime_capability_version,
             )
