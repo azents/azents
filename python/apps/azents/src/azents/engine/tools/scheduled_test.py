@@ -291,6 +291,60 @@ async def test_management_tools_derive_scope_and_project_execution_state() -> No
     channel_service.execute_deletion.assert_awaited_once_with(created)
 
 
+@pytest.mark.parametrize(
+    ("schedule", "expected"),
+    [
+        (
+            {
+                "at": "2026-08-16T12:00:00Z",
+                "cron": "",
+                "timezone": "",
+            },
+            {
+                "at": "2026-08-16T12:00:00Z",
+                "cron": None,
+                "timezone": None,
+            },
+        ),
+        (
+            {
+                "at": "",
+                "cron": "0 9 * * 1-5",
+                "timezone": "Asia/Seoul",
+            },
+            {
+                "at": None,
+                "cron": "0 9 * * 1-5",
+                "timezone": "Asia/Seoul",
+            },
+        ),
+    ],
+)
+async def test_add_tool_normalizes_empty_schedule_fields(
+    schedule: dict[str, str],
+    expected: dict[str, str | None],
+) -> None:
+    """Empty mutually exclusive schedule fields behave as omitted values."""
+    toolkit, service, _, _, _, _, _ = _toolkit(active_cycle=None)
+    service.create.return_value = _task()
+    state = await toolkit.update_context(_turn_context())
+
+    await state.tools[0].handler(
+        json.dumps(
+            {
+                "title": "Daily report",
+                "objective": "Prepare the report.",
+                **schedule,
+                "channel_id": None,
+            }
+        )
+    )
+
+    service.create.assert_awaited_once()
+    _, create_kwargs = service.create.await_args
+    assert {key: create_kwargs[key] for key in ("at", "cron", "timezone")} == expected
+
+
 async def test_terminal_tool_publishes_new_event_and_requests_run_completion() -> None:
     """A canonical terminal outcome becomes an engine-terminal tool result."""
     toolkit, _, terminal_service, _, _, _, _ = _toolkit(active_cycle=_cycle())

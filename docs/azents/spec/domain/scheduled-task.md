@@ -29,8 +29,8 @@ api_routes:
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}
   - /scheduled-task/v1/workspaces/{handle}/agents/{agent_id}/scheduled-tasks/{task_id}/cycle
-last_verified_at: 2026-08-20
-spec_version: 7
+last_verified_at: 2026-08-21
+spec_version: 8
 ---
 
 # Scheduled Task Domain Spec
@@ -131,9 +131,11 @@ Binding selection, exact-ID management, autonomous continuation, and explicit
 terminal result submission. Its creation contract states the mutually exclusive
 field shapes explicitly: one-time work supplies aware `at` with `cron` and
 `timezone` null, while recurring work supplies `cron` plus IANA `timezone` with
-`at` null. When requester timezone context is reliably known, the Skill preserves
-the target instant's local UTC offset in one-time `at` values, including
-duration-relative requests, instead of normalizing equivalent input to `Z`.
+`at` null. The creation tool normalizes empty strings in `at`, `cron`, and
+`timezone` to null before enforcing those canonical shapes. When requester
+timezone context is reliably known, the Skill preserves the target instant's
+local UTC offset in one-time `at` values, including duration-relative requests,
+instead of normalizing equivalent input to `Z`.
 
 Chat activity groups all four Scheduled tools under the Schedule category. Their
 tool-call rows use dedicated summaries and bounded details for title, schedule,
@@ -284,6 +286,10 @@ prompt. The result payload contains only title, scheduled instant, terminal stat
 and result text.
 
 ## Changelog
+
+- **2026-08-21** (spec_version 8) — Made Scheduled Task creation normalize empty
+  `at`, `cron`, and `timezone` strings to omitted values before canonical schedule
+  validation.
 
 - **2026-08-20** (spec_version 7) — Extended exact-Binding deletion notices to
   provider-native cancellation controls and required the Scheduled Task Skill to

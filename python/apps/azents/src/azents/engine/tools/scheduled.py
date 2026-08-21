@@ -12,6 +12,7 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
 )
 from azents.core.tools import (
+    EmptyToNone,
     ResolveContext,
     Toolkit,
     ToolkitProvider,
@@ -86,19 +87,19 @@ class AddScheduledTaskInput(BaseModel):
         min_length=1,
         max_length=MAX_SCHEDULED_TASK_OBJECTIVE_LENGTH,
     )
-    at: str | None = Field(
+    at: EmptyToNone = Field(
         description=(
             "One-time timezone-bearing RFC 3339 timestamp. Set cron and timezone "
             "to null when at is supplied; set at to null for recurring schedules."
         )
     )
-    cron: str | None = Field(
+    cron: EmptyToNone = Field(
         description=(
             "Recurring standard five-field cron expression. Requires an IANA "
             "timezone and requires at to be null."
         )
     )
-    timezone: str | None = Field(
+    timezone: EmptyToNone = Field(
         description=(
             "IANA timezone for a recurring cron schedule only. Must be null when "
             "at is supplied."
