@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
   pull-requests: read
 
 concurrency:
@@ -26,6 +27,9 @@ jobs:
       python: ${{ github.event_name != 'pull_request' || steps.filter.outputs.python == 'true' }}
       python_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['python-e2e'] == 'true' }}
       web_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['web-e2e'] == 'true' }}
+      e2e_server_image: ${{ github.event_name != 'pull_request' || steps.filter.outputs['e2e-server-image'] == 'true' }}
+      e2e_runtime_runner_image: ${{ github.event_name != 'pull_request' || steps.filter.outputs['e2e-runtime-runner-image'] == 'true' }}
+      e2e_runtime_provider_docker_image: ${{ github.event_name != 'pull_request' || steps.filter.outputs['e2e-runtime-provider-docker-image'] == 'true' }}
       typescript: ${{ github.event_name != 'pull_request' || steps.filter.outputs.typescript == 'true' }}
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
       docker: ${{ github.event_name != 'pull_request' || steps.filter.outputs.docker == 'true' }}
@@ -81,6 +85,20 @@ jobs:
               - 'python/libs/azents-runtime-control/**'
               - 'testenv/azents/**'
               - 'typescript/**'
+            e2e-server-image:
+              - '.dockerignore'
+              - 'azents.Dockerfile'
+              - 'python/apps/azents/**'
+              - 'python/libs/az-common/**'
+              - 'python/libs/azents-runtime-control/**'
+            e2e-runtime-runner-image:
+              - '.dockerignore'
+              - 'python/apps/azents-runtime-runner/**'
+              - 'python/libs/azents-runtime-control/**'
+            e2e-runtime-provider-docker-image:
+              - '.dockerignore'
+              - 'python/apps/azents-runtime-provider-docker/**'
+              - 'python/libs/azents-runtime-control/**'
             typescript:
               - '.github/workflows/**'
               - 'azents-admin-web.Dockerfile'
@@ -355,6 +373,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Prepare unchanged required E2E snapshot images
+        id: snapshot_images
+        if: github.event_name == 'pull_request' && matrix.suite == 'required'
+        env:
+          AZENTS_E2E_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          AZENTS_E2E_SERVER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_server_image }}
+          AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_runner_image }}
+          AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_provider_docker_image }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          report_dir="${RUNNER_TEMP}/e2e-observability/${{ matrix.lane }}"
+          mkdir -p "$report_dir"
+          python testenv/azents/e2e/src/support/e2e_snapshot_images.py \
+            --artifact-dir "$report_dir" \
+            --github-env "$GITHUB_ENV" \
+            --github-output "$GITHUB_OUTPUT"
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
       - name: Setup Python
@@ -362,9 +396,11 @@ jobs:
         with:
           python-version: "3.14"
       - name: Setup Docker Buildx
+        if: steps.snapshot_images.outputs.all_images_prepared != 'true'
         id: buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
       - name: Expose GitHub Actions runtime
+        if: steps.snapshot_images.outputs.all_images_prepared != 'true'
         uses: ./.github/actions/expose-github-runtime
       - name: Install dependencies
         run: |
