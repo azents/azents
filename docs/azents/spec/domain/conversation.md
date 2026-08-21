@@ -104,8 +104,8 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-last_verified_at: 2026-08-20
-spec_version: 153
+last_verified_at: 2026-08-21
+spec_version: 154
 ---
 
 # Conversation & Events
@@ -246,9 +246,10 @@ authorized Runtime-dependent operation binds it.
 Root creation reads the Agent lifecycle, Runtime capability, and capability version
 without retaining a preliminary Agent row lock. After the Runtime FK-dependent
 context write, one final conditional Agent update revalidates the exact authority.
-A concurrent lifecycle or capability transition rejects and rolls back the entire
-root tree, while Runtime-first reconciliation can complete without a cross-row lock
-cycle.
+For managed authority, creation acquires the Runtime row's FK-compatible `KEY SHARE`
+lock before writing any Agent foreign key. A concurrent lifecycle or capability
+transition rejects and rolls back the entire root tree, while Runtime-first
+reconciliation can complete without a cross-row lock cycle.
 The creation result may report the source policy revision for transaction-local
 provenance; the durable authority is the context Project snapshot.
 
@@ -1216,6 +1217,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-08-21** — v154. Required managed root Session creation to acquire the
+  Runtime FK-compatible lock before any Agent FK write, preserving final Agent
+  authority fencing without a Runtime-to-Agent lock cycle.
 - **2026-08-20** — v153. Added the activation-time requested profile fields to
   the AgentRun model and clarified that resolved model selection and effective
   limits remain Session-owned across recovery, retry, and subagent activation.

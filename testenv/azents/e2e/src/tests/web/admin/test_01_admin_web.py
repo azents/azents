@@ -66,7 +66,13 @@ def _login_admin_web(
     )
     password_input = driver.find_element(By.CSS_SELECTOR, "input[type='password']")
     email_input.send_keys(email)
-    password_input.send_keys(password, Keys.ENTER)
+    password_input.send_keys(password)
+    login_button = _wait(driver).until(
+        ec.element_to_be_clickable(
+            (By.XPATH, "//button[@type='submit' and normalize-space()='Sign in']")
+        )
+    )
+    login_button.click()
     _wait(driver).until(ec.url_contains("/workspaces"))
     _wait(driver).until(ec.visibility_of_element_located((By.LINK_TEXT, "Users")))
 

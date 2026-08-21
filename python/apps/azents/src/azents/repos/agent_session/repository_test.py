@@ -48,6 +48,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelResource,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.session_lifecycle_finalizer import (
@@ -289,12 +290,12 @@ class TestAgentSessionRepository:
             is SessionWorkingFolderBindingState.PENDING
         )
 
-    async def test_root_context_creation_uses_final_authority_cas_after_runtime_fk(
+    async def test_root_context_creation_locks_runtime_before_agent_fk_and_cas(
         self,
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """Runtime-first work cannot deadlock with root creation authority fencing."""
+        """Root creation waits on Runtime before taking an Agent FK lock."""
         del latest_db_schema
         suffix = uuid4().hex[:8]
         repository = AgentSessionRepository()
@@ -343,7 +344,7 @@ class TestAgentSessionRepository:
                 await create_session.commit()
                 return created.id
 
-        async def wait_for_runtime_fk() -> None:
+        async def wait_for_runtime_key_share() -> None:
             deadline = asyncio.get_running_loop().time() + 5
             while asyncio.get_running_loop().time() < deadline:
                 async with AsyncSession(rdb_engine) as observer:
@@ -355,7 +356,8 @@ class TestAgentSessionRepository:
                                 FROM pg_stat_activity
                                 WHERE application_name = :application_name
                                   AND wait_event_type = 'Lock'
-                                  AND query LIKE 'INSERT INTO session_agent_contexts%'
+                                  AND query LIKE '%FROM agent_runtimes%'
+                                  AND query LIKE '%FOR KEY SHARE%'
                             )
                             """
                         ),
@@ -364,7 +366,7 @@ class TestAgentSessionRepository:
                 if waiting:
                     return
                 await asyncio.sleep(0.01)
-            raise TimeoutError("Root creation did not reach the Runtime FK boundary")
+            raise TimeoutError("Root creation did not wait for Runtime KEY SHARE")
 
         async with AsyncSession(
             rdb_engine,
@@ -377,7 +379,7 @@ class TestAgentSessionRepository:
             )
             assert locked_runtime_id == runtime.id
             creation_task = asyncio.create_task(create_root_context())
-            await wait_for_runtime_fk()
+            await wait_for_runtime_key_share()
             updated_agent_id = await runtime_session.scalar(
                 sa.update(RDBAgent)
                 .where(
@@ -407,7 +409,23 @@ class TestAgentSessionRepository:
                 .select_from(RDBAgentSession)
                 .where(RDBAgentSession.agent_id == agent_id)
             )
+            context_count = await verification_session.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBSessionAgentContext)
+                .where(RDBSessionAgentContext.agent_id == agent_id)
+            )
+            session_agent_count = await verification_session.scalar(
+                sa.select(sa.func.count())
+                .select_from(RDBSessionAgent)
+                .join(
+                    RDBSessionAgentContext,
+                    RDBSessionAgentContext.id == RDBSessionAgent.context_id,
+                )
+                .where(RDBSessionAgentContext.agent_id == agent_id)
+            )
             assert created_count == 0
+            assert context_count == 0
+            assert session_agent_count == 0
 
     async def test_lock_by_id_acquires_agent_parent_before_session(
         self,
