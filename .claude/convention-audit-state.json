@@ -1,13 +1,12 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-08-21T22:17:56Z",
+    "checked_at": "2026-08-22T22:14:57Z",
     "checked_ruleset_revisions": [
-      "3b75807bd9bd839d2338d830342aacda7fa10552605a962107a06eda6b28c5e3",
+      "003a9e301d840a6c9ed7f80d53af97dcba72af640610d6cf4b594c6fdfce55ba",
       "9ee13eef997aae469810fe2d54dcf8cfb25f363b454f92fe3a4d242bd8c39eae",
-      "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8",
-      "e3c3422c0a88996bba47869210d933fc3f6fd231fe699083bd04bc60ab4a91d6"
+      "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8"
     ],
-    "checked_through_commit": "3390e7ba3a58a86e0acc3227ac99f2827aa5f9f2"
+    "checked_through_commit": "1425e1cc52e6d99c5838366f0f149a8520c699b3"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -131,34 +130,34 @@
       "checked_through_commit": "3390e7ba3a58a86e0acc3227ac99f2827aa5f9f2"
     },
     ".github/**::bucket-6-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-22T22:14:57Z",
+      "checked_ruleset_revision": "003a9e301d840a6c9ed7f80d53af97dcba72af640610d6cf4b594c6fdfce55ba",
+      "checked_through_commit": "1425e1cc52e6d99c5838366f0f149a8520c699b3"
     },
     ".github/**::bucket-7-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-22T22:14:57Z",
+      "checked_ruleset_revision": "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8",
+      "checked_through_commit": "1425e1cc52e6d99c5838366f0f149a8520c699b3"
     },
     ".github/**::bucket-8-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-22T22:14:57Z",
+      "checked_ruleset_revision": "003a9e301d840a6c9ed7f80d53af97dcba72af640610d6cf4b594c6fdfce55ba",
+      "checked_through_commit": "1425e1cc52e6d99c5838366f0f149a8520c699b3"
     },
     "docs/**::bucket-1-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-22T22:14:57Z",
+      "checked_ruleset_revision": "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8",
+      "checked_through_commit": "1425e1cc52e6d99c5838366f0f149a8520c699b3"
     },
     "docs/**::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-22T22:14:57Z",
+      "checked_ruleset_revision": "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8",
+      "checked_through_commit": "1425e1cc52e6d99c5838366f0f149a8520c699b3"
     },
     "docs/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-22T22:14:57Z",
+      "checked_ruleset_revision": "d3273713102261830b2b966c3519368115303d2baf000c398dc12b1fb00645c8",
+      "checked_through_commit": "1425e1cc52e6d99c5838366f0f149a8520c699b3"
     },
     "docs/**::bucket-4-of-8": {
       "checked_at": null,
