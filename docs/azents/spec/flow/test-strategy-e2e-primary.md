@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-21
-spec_version: 33
+last_verified_at: 2026-08-22
+spec_version: 34
 ---
 
 # E2E Primary Test Strategy
@@ -159,6 +159,17 @@ Always-on required CI does not depend on external credentials.
   It balances files only within a suite using the latest successful `main` timing
   baseline, with a deterministic source-based fallback. Required uses three lanes;
   Web uses one lane. Lanes are parallel partitions, not additional profiles.
+  Large scenario families may expose multiple natural collection files backed by
+  one reusable scenario module. When such a split replaces an existing collection
+  file, the planner projects that file's historical per-test call timings onto the
+  new collection files so the first plan retains representative weights.
+  Deterministic External Channel collection uses
+  `test_external_channel_management.py` for Slack HTTP, connection management, and
+  provider-native progress; `test_external_channel_slack_socket.py` for Socket Mode;
+  `test_external_channel_discord_provisioning.py` for location wait and durable
+  conversation provisioning; and `test_external_channel_discord_journeys.py` for
+  activation, commands, components, and lifecycle. These files collect reusable
+  implementations from `external_channel_scenarios.py`.
 - Each lane upgrades the shared database to the tested Server image revision through
   one bounded migration container before product services start. Public API, Admin API,
   and Engine Worker then start concurrently; their ordinary launchers retain the
@@ -302,6 +313,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-22** (spec_version 34) — Split deterministic External Channel
+  collection into natural scenario files for file-level required-lane balancing
+  and added historical per-test timing projection for the first post-split plan.
 - **2026-08-20** (spec_version 32) — Added one migration owner followed by concurrent
   Public API, Admin API, and Engine Worker startup in each E2E lane, and linked the
   recurring E2E CI optimization skill to the current test strategy.

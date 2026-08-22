@@ -1,4 +1,4 @@
-"""External Channel deterministic provider and management E2E journeys."""
+"""Reusable External Channel provider and management E2E scenarios."""
 
 import hashlib
 import hmac

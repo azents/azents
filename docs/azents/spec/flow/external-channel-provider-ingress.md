@@ -58,12 +58,12 @@ code_paths:
   - python/apps/azents/src/cli/externalchannelgateway.py
   - testenv/azents/e2e/src/support/slack_provider_fake.py
   - testenv/azents/e2e/src/support/discord_provider_fake.py
-  - testenv/azents/e2e/src/tests/required/public/test_external_channels.py
+  - testenv/azents/e2e/src/tests/required/public/external_channel_scenarios.py
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-19
-spec_version: 47
+last_verified_at: 2026-08-22
+spec_version: 48
 ---
 
 # External Channel Provider Ingress
@@ -496,6 +496,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-22** (spec_version 48) — Updated deterministic External Channel
+  E2E source ownership to the reusable scenario module after collection was split
+  into file-level CI partitions; product ingress behavior is unchanged.
 - **2026-08-19** (spec_version 47) — Removed the preliminary Agent row lock
   from External Channel root Session creation and retained removal/lifecycle
   fencing through a final capability/version conditional update.
