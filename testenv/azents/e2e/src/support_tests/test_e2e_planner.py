@@ -110,3 +110,91 @@ def test_load_file_timings_maps_pre_suite_paths(tmp_path: Path) -> None:
         "src/tests/web/admin/test_01_admin_web.py": 2.0,
         "src/tests/required/test_slack_provider_fake.py": 2.0,
     }
+
+
+def test_load_file_timings_projects_external_channel_split(tmp_path: Path) -> None:
+    timings_path = tmp_path / "timings.jsonl"
+    timings_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "record_type": "test_phase",
+                    "phase": "call",
+                    "node_id": node_id,
+                    "duration_seconds": duration,
+                }
+            )
+            for node_id, duration in (
+                (
+                    "src/tests/azents/public/test_external_channels.py"
+                    "::test_http_admission_unknown_participant_and_approval_journey",
+                    1.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_connection_update_and_repeated_disconnect",
+                    2.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_slack_binding_response_modes_gate_and_preserve_context",
+                    3.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_multi_app_workspace_management_default_and_disconnect_journey",
+                    4.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_multi_app_mention_selector_deduplicates_and_binds_open_access_route",
+                    5.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_provider_native_channel_work_progress_journey",
+                    6.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_socket_mode_recovers_then_acknowledges_and_preserves_route",
+                    7.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_discord_gateway_message_waits_for_location_then_binds",
+                    8.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_discord_configured_message_durably_provisions_conversation",
+                    9.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_discord_single_activation_and_interaction_journey[param]",
+                    10.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_discord_message_command_selector_and_component_journey",
+                    11.0,
+                ),
+                (
+                    "src/tests/required/public/test_external_channels.py"
+                    "::test_discord_multi_management_and_lifecycle_journey",
+                    12.0,
+                ),
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_file_timings(timings_path) == {
+        "src/tests/required/public/test_external_channel_management.py": 21.0,
+        "src/tests/required/public/test_external_channel_slack_socket.py": 7.0,
+        "src/tests/required/public/test_external_channel_discord_provisioning.py": (
+            17.0
+        ),
+        "src/tests/required/public/test_external_channel_discord_journeys.py": 33.0,
+    }

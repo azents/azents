@@ -4,7 +4,7 @@ import azentsadminclient
 import azentspublicclient
 from selenium.webdriver.remote.webdriver import WebDriver
 
-from tests.required.public import test_external_channels as required_scenarios
+from tests.required.public import external_channel_scenarios as required_scenarios
 
 
 def test_connection_management_web_surface_uses_redacted_operational_state(

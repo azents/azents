@@ -9,6 +9,45 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+_EXTERNAL_CHANNEL_TIMING_FILES = {
+    "test_http_admission_unknown_participant_and_approval_journey": (
+        "test_external_channel_management.py"
+    ),
+    "test_connection_update_and_repeated_disconnect": (
+        "test_external_channel_management.py"
+    ),
+    "test_slack_binding_response_modes_gate_and_preserve_context": (
+        "test_external_channel_management.py"
+    ),
+    "test_multi_app_workspace_management_default_and_disconnect_journey": (
+        "test_external_channel_management.py"
+    ),
+    "test_multi_app_mention_selector_deduplicates_and_binds_open_access_route": (
+        "test_external_channel_management.py"
+    ),
+    "test_provider_native_channel_work_progress_journey": (
+        "test_external_channel_management.py"
+    ),
+    "test_socket_mode_recovers_then_acknowledges_and_preserves_route": (
+        "test_external_channel_slack_socket.py"
+    ),
+    "test_discord_gateway_message_waits_for_location_then_binds": (
+        "test_external_channel_discord_provisioning.py"
+    ),
+    "test_discord_configured_message_durably_provisions_conversation": (
+        "test_external_channel_discord_provisioning.py"
+    ),
+    "test_discord_single_activation_and_interaction_journey": (
+        "test_external_channel_discord_journeys.py"
+    ),
+    "test_discord_message_command_selector_and_component_journey": (
+        "test_external_channel_discord_journeys.py"
+    ),
+    "test_discord_multi_management_and_lifecycle_journey": (
+        "test_external_channel_discord_journeys.py"
+    ),
+}
+
 
 @dataclass(frozen=True)
 class Suite:
@@ -77,7 +116,7 @@ def load_file_timings(path: Path | None) -> dict[str, float]:
         duration = payload.get("duration_seconds")
         if not isinstance(node_id, str) or not isinstance(duration, int | float):
             raise ValueError("invalid test timing record")
-        file_path = _current_suite_path(node_id.split("::", 1)[0])
+        file_path = _current_timing_path(node_id)
         totals[file_path] = totals.get(file_path, 0.0) + float(duration)
     return totals
 
@@ -179,6 +218,19 @@ def _current_suite_path(path: str) -> str:
     if path.startswith("src/tests/test_"):
         return path.replace("src/tests/", "src/tests/required/", 1)
     return path
+
+
+def _current_timing_path(node_id: str) -> str:
+    """Map historical timing nodes onto the file that currently collects them."""
+    parts = node_id.split("::")
+    path = _current_suite_path(parts[0])
+    if not path.endswith("/test_external_channels.py") or len(parts) < 2:
+        return path
+    test_name = parts[1].split("[", 1)[0]
+    current_name = _EXTERNAL_CHANNEL_TIMING_FILES.get(test_name)
+    if current_name is None:
+        return path
+    return path.rsplit("/", 1)[0] + f"/{current_name}"
 
 
 def _required_string(config: dict[str, Any], key: str) -> str:
