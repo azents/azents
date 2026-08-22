@@ -1,6 +1,7 @@
 ---
 title: "Local sandbox provider daemon research"
 created: 2026-05-20
+updated: 2026-08-22
 tags: [nointern, sandbox, provider, docker, agent-runtime, research]
 status: research-note
 ---
@@ -157,39 +158,26 @@ The `generation` field fences stale connections. This is important for container
 
 The recommended direction is to keep the existing `sandbox-control` protocol and add a new provider lifecycle plane.
 
-```text
-Customer local machine
-┌──────────────────────────────────────────────┐
-│ nointern-sandbox-provider daemon              │
-│                                              │
-│  - authenticates with NoIntern                │
-│  - registers as workspace sandbox provider    │
-│  - receives allocation requests over outbound │
-│    provider-control stream                    │
-│  - manages local Docker containers            │
-│                                              │
-│  Docker                                      │
-│   └─ nointern-agent-runtime                  │
-│       └─ nointern-sandbox-client             │
-│           └─ outbound sandbox-control gRPC    │
-└──────────────────────────────────────────────┘
-                 │ outbound
-                 ▼
-NoIntern cloud
-┌──────────────────────────────────────────────┐
-│ Provider Control Service                      │
-│  - provider registration                      │
-│  - provider heartbeat/capacity                │
-│  - allocation/delete/observe routing          │
-│                                              │
-│ Sandbox Control Service                       │
-│  - existing runtime gRPC stream               │
-│  - exec/file/checkpoint routing               │
-│                                              │
-│ Sandbox lifecycle manager                     │
-│  - AgentRuntime lifecycle                     │
-│  - hibernate/checkpoint/restore               │
-└──────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Local["Customer local machine"]
+        Provider["nointern-sandbox-provider daemon<br/>Authenticates with NoIntern<br/>Registers as a workspace sandbox provider<br/>Manages local Docker containers"]
+        Docker["Docker"]
+        Runtime["nointern-agent-runtime"]
+        Client["nointern-sandbox-client"]
+        Provider --> Docker --> Runtime --> Client
+    end
+
+    subgraph Cloud["NoIntern cloud"]
+        ProviderControl["Provider Control Service<br/>Provider registration<br/>Provider heartbeat and capacity<br/>Allocation, deletion, and observation routing"]
+        SandboxControl["Sandbox Control Service<br/>Existing Runtime gRPC stream<br/>Exec, file, and checkpoint routing"]
+        Lifecycle["Sandbox lifecycle manager<br/>AgentRuntime lifecycle<br/>Hibernate, checkpoint, and restore"]
+        ProviderControl --> Lifecycle
+        SandboxControl --> Lifecycle
+    end
+
+    Provider -- "Outbound provider-control stream" --> ProviderControl
+    Client -- "Outbound sandbox-control gRPC" --> SandboxControl
 ```
 
 There are two outbound connections:

@@ -1,6 +1,7 @@
 ---
 title: "New Session Project Selection Design"
 created: 2026-06-29
+updated: 2026-08-22
 tags: [product, backend, frontend, api, engine]
 document_role: supporting
 document_type: supporting-consolidation
@@ -469,20 +470,18 @@ typescript/apps/azents-web/src/features/agents/components/NewSessionProjectSelec
 
 UI shape:
 
-```text
-Projects
-[ azents × ] [ api × ] [ + Add project ]
-```
+- Show a `Projects` section label.
+- Render each selected Project as a removable chip, such as `azents ×` and
+  `api ×`.
+- Render `+ Add project` as the trailing action.
 
-Add dropdown:
+The add dropdown contains:
 
-```text
-+ Add project
-  azents      /workspace/agent/azents
-  api         /workspace/agent/azents/packages/api
-  ─────────────────────────────────
-  Choose folder...
-```
+| Entry | Path or action |
+| --- | --- |
+| `azents` | `/workspace/agent/azents` |
+| `api` | `/workspace/agent/azents/packages/api` |
+| `Choose folder...` | Open the directory picker |
 
 Chip behavior:
 

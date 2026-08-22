@@ -1,7 +1,7 @@
 ---
 title: "Team Session Execution Boundaries Design"
 created: 2026-07-24
-updated: 2026-07-24
+updated: 2026-08-22
 tags: [session, authorization, engine, security, backend, migration]
 document_role: primary
 document_type: design
@@ -279,22 +279,23 @@ models, Toolkits, commands, inputs, or resources.
 
 A representative immutable contract is:
 
-```text
-SessionExecutionSnapshot
-├── session
-├── agent
-├── workspace
-├── current_session_agent
-├── root_session_agent
-├── session_agent_context
-├── owner_generation
-├── execution_mode: root | subagent
-├── workspace_handle
-└── work_expectation
-    ├── FIFO InputBuffer head identity, if present
-    ├── pending command identity, if present
-    ├── recoverable AgentRun identity, if present
-    └── pending idle-continuation identity, if present
+```mermaid
+flowchart TB
+    Snapshot["SessionExecutionSnapshot"]
+    Snapshot --> Session["session"]
+    Snapshot --> Agent["agent"]
+    Snapshot --> Workspace["workspace"]
+    Snapshot --> CurrentSessionAgent["current_session_agent"]
+    Snapshot --> RootSessionAgent["root_session_agent"]
+    Snapshot --> SessionAgentContext["session_agent_context"]
+    Snapshot --> OwnerGeneration["owner_generation"]
+    Snapshot --> ExecutionMode["execution_mode: root | subagent"]
+    Snapshot --> WorkspaceHandle["workspace_handle"]
+    Snapshot --> WorkExpectation["work_expectation"]
+    WorkExpectation --> InputBuffer["FIFO InputBuffer head identity, if present"]
+    WorkExpectation --> Command["pending command identity, if present"]
+    WorkExpectation --> AgentRun["recoverable AgentRun identity, if present"]
+    WorkExpectation --> Continuation["pending idle-continuation identity, if present"]
 ```
 
 The exact class may compose domain-specific loader results rather than becoming one large repository.
@@ -405,15 +406,16 @@ No row in this table uses a Human sender as execution authority.
 Internal file services accept a validated workload contract instead of `user_id`. A representative
 contract contains:
 
-```text
-SessionResourceAuthority
-├── workspace_id
-├── agent_id
-├── session_id
-├── root_session_id
-├── run_id
-├── run_index
-└── owner_generation
+```mermaid
+flowchart TB
+    Authority["SessionResourceAuthority"]
+    Authority --> WorkspaceId["workspace_id"]
+    Authority --> AgentId["agent_id"]
+    Authority --> SessionId["session_id"]
+    Authority --> RootSessionId["root_session_id"]
+    Authority --> RunId["run_id"]
+    Authority --> RunIndex["run_index"]
+    Authority --> OwnerGeneration["owner_generation"]
 ```
 
 Input promotion also supplies the claimed InputBuffer identity. Services revalidate the relevant
