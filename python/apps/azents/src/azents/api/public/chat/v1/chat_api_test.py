@@ -95,10 +95,11 @@ from azents.engine.events.action_messages import (
 )
 from azents.engine.events.types import Event, UserMessagePayload
 from azents.engine.run.input import InputMessage
-from azents.engine.tools.goal import GoalStateSnapshot
+from azents.engine.tools.goal import GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.skill import SkillProjectionState, SkillStateStore
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import JSONValue
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import (
     AgentSession,
     AgentSessionUnreadTerminalRunProjection,
@@ -155,6 +156,7 @@ from azents.services.session_git_worktree import (
     SessionGitWorktreeService,
 )
 from azents.services.session_workspace_project import InvalidProjectPath
+from azents.services.turn_action import TurnActionCapabilityRegistry
 
 
 class _MemoryBroker:
@@ -963,6 +965,18 @@ class _EmptySkillStore(SkillStateStore):
         """Return empty Skill projection state."""
         del agent_id, session_id
         return SkillProjectionState()
+
+
+def _turn_action_capabilities(
+    skill_store: SkillStateStore | None = None,
+) -> TurnActionCapabilityRegistry:
+    """Create a TurnAction registry for route tests."""
+    return TurnActionCapabilityRegistry(
+        agent_session_repository=cast(AgentSessionRepository, object()),
+        goal_store=cast(GoalStateStore, object()),
+        skill_store=skill_store or _EmptySkillStore(),
+        vfs_projection_service=None,
+    )
 
 
 class _DeleteInputBufferService(ChatSessionService):
@@ -2174,8 +2188,7 @@ class TestListInputActions:
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
             _EventService(),
-            _EmptySkillStore(),
-            None,
+            _turn_action_capabilities(),
         )
 
         items = response.model_dump(mode="json")["items"]
@@ -2765,6 +2778,7 @@ class TestRestMessageWriteContract:
             broker,
             broadcast,
             InMemoryLiveEventStore(),
+            _turn_action_capabilities(),
             ChatInputWriteRequest(
                 agent_id="agent-1",
                 client_request_id="worktree-1",
@@ -2811,6 +2825,7 @@ class TestRestMessageWriteContract:
             broker,
             broadcast,
             InMemoryLiveEventStore(),
+            _turn_action_capabilities(),
             ChatInputWriteRequest(
                 agent_id="agent-1",
                 client_request_id="skill-1",

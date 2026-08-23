@@ -39,6 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/services/runtime_directory_validation.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
+  - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/archived_session_purge.py
   - python/apps/azents/src/azents/services/runtime_profile_workspace/**
   - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
@@ -64,6 +65,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents/src/azents/api/public/agent_runtime/**
   - python/apps/azents/src/azents/runtime/**
+  - python/apps/azents/src/azents/worker/run/turn_action_executor.py
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
@@ -97,8 +99,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-20
-spec_version: 69
+last_verified_at: 2026-08-23
+spec_version: 70
 ---
 
 # Workspace & Membership
@@ -386,6 +388,11 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
   best-effort non-blocking competitor. The action's live and durable result is bounded and
   content-free, with per-candidate `removed`, `already_absent`, `protected`, `failed`, or
   `unresolved` outcome.
+- Workspace operation TurnActions share the closed public policy and preparation
+  registry with other actions, then execute through a Worker-owned closed
+  operation registry. Public worktree creation and cleanup retain required
+  inference-profile admission without requiring inference during operation
+  preparation. Session-folder and Agent-managed worktree variants remain internal.
 - Path policy follows: the current Agent Workspace root is forbidden, paths outside that root are forbidden, and exact duplicate Project paths per session are forbidden. Nested Project paths are allowed.
 New-session azents-web UI shows a compact additive workspace item list above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, lets users add repository folders to the list, and lets each selected folder switch between repository and new worktree modes from the row-level type selector. The runtime-backed folder picker can select the current folder so a Git repository directory itself can be added without relying on an existing preset. Worktree branch selection in this draft UI uses the Git ref preview endpoint but exposes only local branches by default; remote branches and tags are not shown in the base branch selector. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project browser root rows display the folder basename as the primary label and render the full absolute path as dimmed, truncated secondary text after the name. The secondary path truncates before the primary label; the primary label truncates only when it exceeds the available row width. Git-backed Project root rows use a Git folder icon; non-Git Project roots keep the normal folder icon.
 
@@ -755,6 +762,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-23 (spec_version=70)** — Centralized Workspace TurnAction policy and
+  Worker operation dispatch while preserving worktree admission, execution, and
+  recovery behavior.
 - **2026-08-20 (spec_version=69)** — Added generation-fenced Discord Multi App
   Thread automatic archive policy management with a one-day default and no credential
   or connection lifecycle reset.

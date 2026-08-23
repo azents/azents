@@ -16,23 +16,23 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-19 | 67 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-21 | 154 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-23 | 155 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-20 | 63 |
-| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
+| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-18 | 20 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-18 | 27 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-21 | 8 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-20 | 96 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-23 | 97 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-20 | 69 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-23 | 70 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-20 | 160 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-23 | 161 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-18 | 63 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-13 | 26 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
@@ -47,7 +47,7 @@ Design documents are accumulated records and are not listed individually in this
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-18 | 16 |
-| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-20 | 30 |
+| [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-23 | 31 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-22 | 34 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
@@ -60,6 +60,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Platform Account Linking Historical Requirements Reconstruction](requirements/account-260315-account-linking.md) | account-260315 | 2026-03-15 | 2026-03-15 |
 | [Model Session Operations as Turn Actions Historical Requirements Reconstruction](requirements/action-260705-action-as-operation-turn-actions.md) | action-260705 | 2026-07-05 | - |
 | [Keep Action Messages Buffer-Only Historical Requirements Reconstruction](requirements/action-260712-action-messages-buffer-only.md) | action-260712 | 2026-07-12 | - |
+| [Consistent TurnAction Capability Requirements](requirements/action-260823-consistent-turn-actions.md) | action-260823 | 2026-08-23 | 2026-08-23 |
 | [Provider Tool Live Activity Historical Requirements Reconstruction](requirements/activity-260716-live-activity.md) | activity-260716 | 2026-07-16 | 2026-07-16 |
 | [Slack Activity Tracker Lifecycle Requirements](requirements/activity-260723-slack-tracker-lifecycle.md) | activity-260723 | 2026-07-23 | - |
 | [Generalize Admin-Managed System Configuration Historical Requirements Reconstruction](requirements/admin-260718-admin-configuration.md) | admin-260718 | 2026-07-18 | - |
@@ -458,6 +459,7 @@ Design documents are accumulated records and are not listed individually in this
 - [External Platform Account Linking Historical Decision Reconstruction](adr/account-260315-account-linking.md)
 - [Model Session Operations as Turn Actions](adr/action-260705-action-as-operation-turn-actions.md)
 - [Keep Action Messages Buffer-Only](adr/action-260712-action-messages-buffer-only.md)
+- [Consistent TurnAction Capabilities](adr/action-260823-consistent-turn-actions.md)
 - [Provider Tool Live Activity Historical Decision Reconstruction](adr/activity-260716-live-activity.md)
 - [Slack Activity Tracker Lifecycle](adr/activity-260723-slack-tracker-lifecycle.md)
 - [Generalize Admin-Managed System Configuration](adr/admin-260718-admin-configuration.md)

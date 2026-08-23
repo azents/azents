@@ -81,6 +81,7 @@ from azents.testing.model_selection import (
     make_test_model_settings,
     make_test_selectable_model_options,
 )
+from azents.testing.turn_action import make_test_turn_action_capabilities
 
 
 @asynccontextmanager
@@ -222,7 +223,9 @@ def _service(
             toolkit_state_repository=ToolkitStateRepository(),
         ),
         action_execution_repository=ActionExecutionRepository(),
-        vfs_projection_service=None,
+        turn_action_capabilities=make_test_turn_action_capabilities(
+            rdb_session_manager
+        ),
         external_channel_repository=ExternalChannelRepository(),
     )
     return ChatWriteService(
@@ -1074,7 +1077,9 @@ class TestChatWriteService:
                     toolkit_state_repository=ToolkitStateRepository(),
                 ),
                 action_execution_repository=ActionExecutionRepository(),
-                vfs_projection_service=None,
+                turn_action_capabilities=make_test_turn_action_capabilities(
+                    rdb_session_manager
+                ),
                 external_channel_repository=ExternalChannelRepository(),
             ),
             session_manager=rdb_session_manager,
