@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/stdio-mcp-ga4-integration.md"
 
 ## Problem
 
-Build infrastructure to use stdio-based MCP servers in nointern, and integrate Google Analytics 4 as first stdio MCP Toolkit.
+Build infrastructure to use stdio-based MCP servers in azents, and integrate Google Analytics 4 as first stdio MCP Toolkit.
 
 **Two tasks as one feature:**
 1. **stdio MCP infrastructure** — add mcp-proxy sidecar to Agent Home Pod

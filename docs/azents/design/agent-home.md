@@ -18,7 +18,7 @@ Keep one persistent pod ("Agent Home") per agent, managing execution environment
 
 ### Motivation
 
-The core value of nointern is "the whole team talks to and collaborates with one agent." Current "1 agent : 1 session : 1 sandbox" architecture creates these inefficiencies:
+The core value of azents is "the whole team talks to and collaborates with one agent." Current "1 agent : 1 session : 1 sandbox" architecture creates these inefficiencies:
 
 - Sandbox Pod per session → N Pods for same team with same credential
 - Ephemeral state → detour through S3 file-gateway
@@ -108,16 +108,16 @@ apiVersion: v1
 kind: Pod
 metadata:
   name: agent-home-{agent-id}
-  namespace: nointern-sandbox
+  namespace: azents-sandbox
   labels:
     app: agent-home
-    nointern/agent-id: "{agent-id}"
+    azents/agent-id: "{agent-id}"
   annotations:
-    nointern/last-used-at: "2026-03-23T10:00:00Z"
+    azents/last-used-at: "2026-03-23T10:00:00Z"
 spec:
   containers:
     - name: sandbox
-      image: nointern-agent-runtime:latest
+      image: azents-agent-runtime:latest
       args: ["sleep", "infinity"]
       env:
         - name: ENABLE_PROXY
@@ -172,14 +172,14 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: file-api
-  namespace: nointern-sandbox
+  namespace: azents-sandbox
 spec:
   replicas: 2
   template:
     spec:
       containers:
         - name: file-api
-          image: nointern-file-api:latest
+          image: azents-file-api:latest
           ports:
             - containerPort: 8081
           volumeMounts:
@@ -326,7 +326,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: agent-home-egress
-  namespace: nointern-sandbox
+  namespace: azents-sandbox
 spec:
   podSelector:
     matchLabels:
@@ -685,7 +685,7 @@ Reproduce Agent Home as Docker container in local dev environment. Convert curre
 ```yaml
 # Agent Home container (per-agent, persistent)
 agent-home-{agent-id}:
-  image: nointern-agent-runtime:local
+  image: azents-agent-runtime:local
   volumes:
     - ./data/agents/{agent-id}:/mnt/agent-data
   environment:
@@ -701,7 +701,7 @@ agent-home-{agent-id}:
 
 # File-API service (separate container, full data mount)
 file-api:
-  image: nointern-file-api:local
+  image: azents-file-api:local
   ports:
     - "8081:8081"
   volumes:

@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Overview
 
-In nointern, **anyone (Member or above) can create an agent**, but **which tools can be attached is controlled by Manager**.
+In azents, **anyone (Member or above) can create an agent**, but **which tools can be attached is controlled by Manager**.
 
 Core flow:
 

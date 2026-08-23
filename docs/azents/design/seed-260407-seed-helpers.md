@@ -21,7 +21,7 @@ historical_reconstruction: true
 
 ## Overview
 
-Stage 1a (preflight) and Stage 1b (devserver lifecycle) are complete, so an agent can start local infra + devserver to ready state in one line. However, DB is empty. Stage 1c provides seed building block library `testenv.nointern.seed` so an agent can **assemble different QA scenarios for each PR with short Python scripts**.
+Stage 1a (preflight) and Stage 1b (devserver lifecycle) are complete, so an agent can start local infra + devserver to ready state in one line. However, DB is empty. Stage 1c provides seed building block library `testenv.azents.seed` so an agent can **assemble different QA scenarios for each PR with short Python scripts**.
 
 ### Core reframe (Discussion #2358 §2)
 
@@ -32,7 +32,7 @@ From this reframe, six follow-up decisions naturally derive: "library (not CLI),
 ## Usage Scenario
 
 ```python
-from testenv.nointern import seed
+from testenv.azents import seed
 
 # Scenario 1 — user + workspace
 user = seed.auth.create_user()
@@ -49,7 +49,7 @@ agent = seed.agent.create(user, ws, integration, model="gpt-4o-mini")
 #     by second user. See §Feasibility Verification Results §4 for details.
 
 # Scenario 4 — direct admin client use (internal network, no token required)
-from testenv.nointern.seed._client import admin_client
+from testenv.azents.seed._client import admin_client
 admin = admin_client()
 
 # Scenario 5 — QA needing real LLM call (after Stage 2)
@@ -68,7 +68,7 @@ Detailed rationale in Discussion #2358 §3.
 | 3 | e2e utils reuse | **Option B (own code)** — separate due to dependency direction and granularity philosophy |
 | 4 | granularity | one function = one domain object, dependencies as explicit args |
 | 5 | LLM key | default `"sk-test-dummy"`; caller explicitly passes real key |
-| 6 | module layout | `testenv/nointern/seed/{auth,workspace,agent,llm}.py` + internal helpers `_client/_types/_unique` |
+| 6 | module layout | `testenv/azents/seed/{auth,workspace,agent,llm}.py` + internal helpers `_client/_types/_unique` |
 | 7 | Admin auth | internal network assumption, admin client used without token (feasibility needed) |
 
 Discarded items: CLI structure / output-storage style / preflight integration (Discussion #2358 §5).
@@ -76,7 +76,7 @@ Discarded items: CLI structure / output-storage style / preflight integration (D
 ## Module Layout
 
 ```
-testenv/nointern/seed/
+testenv/azents/seed/
 ├── __init__.py       # expose auth, workspace, agent, llm submodules + core types
 ├── _client.py        # public_client(), admin_client() factory
 ├── _types.py         # User, Workspace, Agent, Integration dataclass
@@ -87,7 +87,7 @@ testenv/nointern/seed/
 └── llm.py            # register_model, create_integration
 ```
 
-After `from testenv.nointern import seed`, access by namespace such as `seed.auth.create_user(...)`.
+After `from testenv.azents import seed`, access by namespace such as `seed.auth.create_user(...)`.
 
 ## Data Model
 
@@ -152,30 +152,30 @@ Since devserver is assumed to be running on same machine, localhost defaults are
 """
 
 import os
-import nointernpublicclient
-import nointernadminclient
+import azentspublicclient
+import azentsadminclient
 
 DEFAULT_PUBLIC_URL = "http://localhost:8010"
 DEFAULT_ADMIN_URL = "http://localhost:8011"
 
 
-def public_client() -> nointernpublicclient.ApiClient:
+def public_client() -> azentspublicclient.ApiClient:
     """Public API client (caller passes token via _headers)."""
-    host = os.environ.get("TESTENV_NOINTERN_PUBLIC_URL", DEFAULT_PUBLIC_URL)
-    return nointernpublicclient.ApiClient(
-        configuration=nointernpublicclient.Configuration(host=host)
+    host = os.environ.get("TESTENV_AZ_PUBLIC_URL", DEFAULT_PUBLIC_URL)
+    return azentspublicclient.ApiClient(
+        configuration=azentspublicclient.Configuration(host=host)
     )
 
 
-def admin_client() -> nointernadminclient.ApiClient:
+def admin_client() -> azentsadminclient.ApiClient:
     """Admin API client.
 
     Discussion §3.7: assumes internal network, no token required. Finalized after
     Phase 3 feasibility verifies whether admin API actually works without auth.
     """
-    host = os.environ.get("TESTENV_NOINTERN_ADMIN_URL", DEFAULT_ADMIN_URL)
-    return nointernadminclient.ApiClient(
-        configuration=nointernadminclient.Configuration(host=host)
+    host = os.environ.get("TESTENV_AZ_ADMIN_URL", DEFAULT_ADMIN_URL)
+    return azentsadminclient.ApiClient(
+        configuration=azentsadminclient.Configuration(host=host)
     )
 ```
 
@@ -277,19 +277,19 @@ Whether this flow is alive in testenv devserver (especially admin email-verifica
 
 ## External Dependencies
 
-Add to `testenv/nointern/pyproject.toml`:
+Add to `testenv/azents/pyproject.toml`:
 
 ```toml
 dependencies = [
     "typer==0.24.1",
     "python-dotenv==1.2.2",
-    "nointern-public-client",
-    "nointern-admin-client",
+    "azents-public-client",
+    "azents-admin-client",
 ]
 
 [tool.uv.sources]
-nointern-public-client = { path = "../../python/libs/nointern-public-client", editable = true }
-nointern-admin-client = { path = "../../python/libs/nointern-admin-client", editable = true }
+azents-public-client = { path = "../../python/libs/azents-public-client", editable = true }
+azents-admin-client = { path = "../../python/libs/azents-admin-client", editable = true }
 ```
 
 e2e already imports both clients with same pattern, so there is no cost to introducing new dependencies.
@@ -304,7 +304,7 @@ Executed the 5 items listed in Discussion #2358 §7 Phase 3 immediately after dr
 
 | # | Item | Result | Note |
 |---|---|---|---|
-| 1 | utils.py dependency | ✓ | imports only `nointernadminclient`, `nointernpublicclient`, `requests`, `websockets`. no conftest dependency — can separate-import in testenv |
+| 1 | utils.py dependency | ✓ | imports only `azentsadminclient`, `azentspublicclient`, `requests`, `websockets`. no conftest dependency — can separate-import in testenv |
 | 2 | Admin API auth | ✓ | verified. `curl :8011/auth/v1/email-verifications/by-email?...` returns 200 without token + DB row as-is. `:8011/health/v1/readiness` also 200 |
 | 3 | email auth backdoor | ✓ | verified. send-code → admin peek → verify all passed with 200 against testenv devserver (after `up --timeout 120`). `access_token`, `refresh_token`, `expires_in` issued normally |
 | 4 | Workspace add_member API | ✗ | `workspace_v1_api.py` has only `create / get_by_handle / list / list_workspaces`. **No add_member** |
@@ -312,17 +312,17 @@ Executed the 5 items listed in Discussion #2358 §7 Phase 3 immediately after dr
 
 ### Finding #4 — add_member absent → change Scenario 3
 
-Current `nointern-public-client/.../workspace_v1_api.py` has no member invitation/add endpoint. Therefore usage scenario 3 (two users, same workspace member) is handled in first scope with one of these options:
+Current `azents-public-client/.../workspace_v1_api.py` has no member invitation/add endpoint. Therefore usage scenario 3 (two users, same workspace member) is handled in first scope with one of these options:
 
 - **A. Remove from first scope.** Start with 4 README scenarios, and add `seed.workspace.add_member` when member invitation API is added.
 - **B. If flow exists where second user directly joins same workspace, use that.** Needs additional code investigation.
 
-**Choice**: A. Without member invitation API in nointern-server, simulating it in testenv is meaningless. Move scenario 3 to future scenario 5, and first PR series starts with scenarios 1, 2, 4 (+ 5 placeholder).
+**Choice**: A. Without member invitation API in azents-server, simulating it in testenv is meaningless. Move scenario 3 to future scenario 5, and first PR series starts with scenarios 1, 2, 4 (+ 5 placeholder).
 
 ### Live Verification Command Log (Reproducible)
 
 ```bash
-cd testenv/nointern && cp .env.example .env
+cd testenv/azents && cp .env.example .env
 uv run devserver.py up --timeout 120
 
 # 1) Admin API health (no auth)
@@ -368,7 +368,7 @@ Decision 7 (Admin auth token unnecessary) was confirmed true in practice.
 3. **Phase 3** — `seed/workspace.py` (`create`)
 4. **Phase 4** — `seed/llm.py` (`register_model`, `create_integration`)
 5. **Phase 5** — `seed/agent.py` (`create`)
-6. **Phase 6** — seed section in `testenv/nointern/README.md` + run scenarios 1/2/4 once for verification
+6. **Phase 6** — seed section in `testenv/azents/README.md` + run scenarios 1/2/4 once for verification
 7. **cleanup** — remove temporary plan document
 
 Each phase PR passes ruff/pyright strict + verifies corresponding function with one live call (no test code, live verification).
@@ -399,7 +399,7 @@ Each phase PR passes ruff/pyright strict + verifies corresponding function with 
 
 - WebSocket chat helper (`seed.chat`) — Stage 2
 - Agent tool execution, sandbox, MCP toolkit seed — Stage 3
-- Browser / nointern-web seed — Stage 4
+- Browser / azents-web seed — Stage 4
 - Unit/integration tests for seed library itself — README scenarios are verification (Discussion §3.7)
 
 ## References
@@ -407,6 +407,6 @@ Each phase PR passes ruff/pyright strict + verifies corresponding function with 
 - Parent design: [`local-260406-local-fullstack-test-env.md`](./local-260406-local-fullstack-test-env.md)
 - Discussion: azents/azents#2358
 - 1c implementation issue: azents/azents#2351
-- Original e2e seed pattern: `python/apps/nointern-e2e/src/tests/utils.py` (`authenticate_user`, `_seed_llm_model`, `create_chat_session`)
-- OpenAPI clients: `python/libs/nointern-public-client/`, `python/libs/nointern-admin-client/`
-- testenv infra: `testenv/nointern/{preflight.py,devserver.py,docker-compose.yaml}`
+- Original e2e seed pattern: `python/apps/azents-e2e/src/tests/utils.py` (`authenticate_user`, `_seed_llm_model`, `create_chat_session`)
+- OpenAPI clients: `python/libs/azents-public-client/`, `python/libs/azents-admin-client/`
+- testenv infra: `testenv/azents/{preflight.py,devserver.py,docker-compose.yaml}`

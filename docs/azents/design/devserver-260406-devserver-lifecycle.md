@@ -21,11 +21,11 @@ historical_reconstruction: true
 
 ## Overview
 
-Stage 1a made it possible to diagnose local environment prerequisites with `testenv/nointern/preflight.py`. Stage 1b is next step: provide CLI entrypoint `testenv/nointern/devserver.py` that lets agents start/stop/check status of devserver in background.
+Stage 1a made it possible to diagnose local environment prerequisites with `testenv/azents/preflight.py`. Stage 1b is next step: provide CLI entrypoint `testenv/azents/devserver.py` that lets agents start/stop/check status of devserver in background.
 
 ### Problem
 
-Currently `python/apps/nointern/bin/devserver.sh` supports only foreground execution. For an agent to repeat "code change → restart → test", following are needed but absent:
+Currently `python/apps/azents/bin/devserver.sh` supports only foreground execution. For an agent to repeat "code change → restart → test", following are needed but absent:
 
 - background execution + cleanup across sessions
 - programmatic way to know "server is ready"
@@ -35,7 +35,7 @@ Currently `python/apps/nointern/bin/devserver.sh` supports only foreground execu
 ### Target Scenario
 
 ```bash
-cd testenv/nointern
+cd testenv/azents
 
 # 0. diagnosis
 python preflight.py
@@ -48,7 +48,7 @@ uv run devserver.py status && echo ready
 
 # 3. tail logs (attach directly if observation needed)
 uv run devserver.py logs -f
-tmux attach -t nointern-testenv-devserver
+tmux attach -t azents-testenv-devserver
 
 # 4. graceful cleanup
 uv run devserver.py down
@@ -60,11 +60,11 @@ See #2339 for detailed discussion. Six discussion point decisions:
 
 | # | Point | Decision |
 |---|---|---|
-| 1 | Process management | **tmux session** — `nointern-testenv-devserver` |
+| 1 | Process management | **tmux session** — `azents-testenv-devserver` |
 | 2 | Infra integration | **`up` = compose + alembic + devserver**, separate `build-runtime` |
 | 3 | Readiness detection | **Public + Admin readiness polling + tmux session liveness + log output on failure** |
 | 4 | Idempotency | **idempotent `up`**, automatic unhealthy recovery, stale cleanup + warning |
-| 5 | File/CLI structure | **`testenv/nointern/.state/` + single `devserver.py` + argparse subparser** |
+| 5 | File/CLI structure | **`testenv/azents/.state/` + single `devserver.py` + argparse subparser** |
 | 6 | Relationship with `devserver.sh` | **parallel** — both directly call `src/cli/devserver.py` |
 
 Additional scope: **`tmux-installed` preflight check** — first extension case of Stage 1a framework.
@@ -73,10 +73,10 @@ Additional scope: **`tmux-installed` preflight check** — first extension case 
 
 ```mermaid
 flowchart LR
-    Agent([Agent]) -->|up/down/status/logs| CLI[testenv/nointern/devserver.py]
+    Agent([Agent]) -->|up/down/status/logs| CLI[testenv/azents/devserver.py]
     CLI -->|docker compose up -d| Compose[testenv compose]
     CLI -->|uv run alembic upgrade head| Alembic[Alembic]
-    CLI -->|tmux new-session| Tmux[tmux: nointern-testenv-devserver]
+    CLI -->|tmux new-session| Tmux[tmux: azents-testenv-devserver]
     Tmux -->|uv run python src/cli/devserver.py| Devserver[devserver process]
     Devserver --> PublicAPI[:8010 Public API]
     Devserver --> AdminAPI[:8011 Admin API]
@@ -98,7 +98,7 @@ flowchart LR
 ### `.state/` directory
 
 ```
-testenv/nointern/.state/
+testenv/azents/.state/
 ├── devserver.log          # continuously append by pipe-pane (no rotation)
 └── devserver.state.json   # startup metadata
 ```
@@ -109,10 +109,10 @@ Add `.state/` to `.gitignore`.
 
 ```json
 {
-  "session_name": "nointern-testenv-devserver",
+  "session_name": "azents-testenv-devserver",
   "started_at": "2026-04-06T14:30:00Z",
   "command": ["uv", "run", "python", "src/cli/devserver.py"],
-  "cwd": "python/apps/nointern",
+  "cwd": "python/apps/azents",
   "reload": false,
   "public_port": 8010,
   "admin_port": 8011
@@ -126,33 +126,33 @@ Add `.state/` to `.gitignore`.
 ### Full command list
 
 ```
-testenv/nointern/devserver.py up [--force] [--timeout SECONDS] [--reload] [--no-infra] [--no-migrate]
-testenv/nointern/devserver.py down [--all] [--force]
-testenv/nointern/devserver.py restart  # up --force alias
-testenv/nointern/devserver.py status
-testenv/nointern/devserver.py logs [-f] [-n LINES]
-testenv/nointern/devserver.py build-runtime [--no-cache]
+testenv/azents/devserver.py up [--force] [--timeout SECONDS] [--reload] [--no-infra] [--no-migrate]
+testenv/azents/devserver.py down [--all] [--force]
+testenv/azents/devserver.py restart  # up --force alias
+testenv/azents/devserver.py status
+testenv/azents/devserver.py logs [-f] [-n LINES]
+testenv/azents/devserver.py build-runtime [--no-cache]
 ```
 
 ### `up` details
 
 Order:
-1. **Pre-check**: confirm repo root & `testenv/nointern/.env` exists (if absent, guide to preflight + exit)
+1. **Pre-check**: confirm repo root & `testenv/azents/.env` exists (if absent, guide to preflight + exit)
 2. **Check tmux session existence**:
    - session exists + readiness 200 → if not `--force`, print "already running" + exit 0
    - session exists + readiness failed → stop existing and restart (stderr warning)
    - no session but state.json exists → stale cleanup + restart (stderr warning)
-3. **Start infra** (skip with `--no-infra`): `docker compose -f testenv/nointern/docker-compose.yaml up -d --wait`
-4. **Migration** (skip with `--no-migrate`): `uv run --project python/apps/nointern alembic -c db-schemas/rdb/alembic.ini upgrade head`
+3. **Start infra** (skip with `--no-infra`): `docker compose -f testenv/azents/docker-compose.yaml up -d --wait`
+4. **Migration** (skip with `--no-migrate`): `uv run --project python/apps/azents alembic -c db-schemas/rdb/alembic.ini upgrade head`
 5. **Create tmux session + start devserver** (confirmed in Feasibility verification):
    ```bash
-   tmux new-session -d -s nointern-testenv-devserver \
-       -c python/apps/nointern \
-       -e NI_RDB_HOST=localhost -e NI_RDB_PORT=5433 ... \
+   tmux new-session -d -s azents-testenv-devserver \
+       -c python/apps/azents \
+       -e AZ_RDB_HOST=localhost -e AZ_RDB_PORT=5433 ... \
        uv run python src/cli/devserver.py
-   tmux pipe-pane -t nointern-testenv-devserver -o 'cat >> .../.state/devserver.log'
+   tmux pipe-pane -t azents-testenv-devserver -o 'cat >> .../.state/devserver.log'
    ```
-   Execute command directly in pane without shell wrapper. Inject result of parsing `testenv/nointern/.env` for all variables through `-e` flags (pydantic-settings prioritizes env vars over `.env` file, so testenv values win).
+   Execute command directly in pane without shell wrapper. Inject result of parsing `testenv/azents/.env` for all variables through `-e` flags (pydantic-settings prioritizes env vars over `.env` file, so testenv values win).
 6. **Write state.json**
 7. **Readiness polling**: every 0.5s check `http://localhost:8010/health/v1/readiness` + `:8011/...` + `tmux has-session`. Consider true failure after 5 consecutive failures. Default timeout 60s (`--timeout`).
 8. **Success**: print `ready (public=:8010 admin=:8011 pid=<tmux pid>)` + exit 0
@@ -165,7 +165,7 @@ Order:
 2. `tmux send-keys -t <session> C-c` → wait 30s, checking `tmux has-session` every 1s
 3. If session still alive, `tmux kill-session` (SIGKILL equivalent) + stderr warning
 4. `--force`: immediately kill-session without waiting
-5. `--all`: after session cleanup, `docker compose -f testenv/nointern/docker-compose.yaml down`
+5. `--all`: after session cleanup, `docker compose -f testenv/azents/docker-compose.yaml down`
 6. delete state.json
 
 ### `restart`
@@ -177,7 +177,7 @@ Alias of `up --force`. Stop existing session → start new session.
 Output example (ready):
 ```
 devserver: running
-  session:   nointern-testenv-devserver
+  session:   azents-testenv-devserver
   started:   2026-04-06T14:30:00Z (42s ago)
   public:    http://localhost:8010  (200 OK)
   admin:     http://localhost:8011  (200 OK)
@@ -188,7 +188,7 @@ exit 0
 Output example (unhealthy):
 ```
 devserver: unhealthy
-  session:   nointern-testenv-devserver (alive)
+  session:   azents-testenv-devserver (alive)
   public:    http://localhost:8010  (connection refused)
 exit 1
 ```
@@ -210,7 +210,7 @@ Exit codes: `0` ready / `1` unhealthy / `2` not running. Usable in shell conditi
 ### `build-runtime`
 
 ```bash
-docker build -t nointern-agent-runtime:local -f docker/nointern/agent-runtime/Dockerfile .
+docker build -t azents-agent-runtime:local -f docker/azents/agent-runtime/Dockerfile .
 ```
 
 - `--no-cache`: ignore cache
@@ -220,7 +220,7 @@ docker build -t nointern-agent-runtime:local -f docker/nointern/agent-runtime/Do
 ## File Structure
 
 ```
-testenv/nointern/
+testenv/azents/
 ├── .gitignore                  # + .state/
 ├── .state/                     # gitignored
 │   ├── devserver.log
@@ -251,7 +251,7 @@ Start with single file without splitting internal helpers from beginning. If lin
 
 ## TmuxInstalled Check
 
-Add to `testenv/nointern/checks/system.py`:
+Add to `testenv/azents/checks/system.py`:
 
 ```python
 class TmuxInstalled(Check):
@@ -289,10 +289,10 @@ Add `TmuxInstalled()` to system section of `all_checks()` factory (after existin
 
 ### Phase 2 — devserver CLI skeleton
 
-- `testenv/nointern/devserver.py` — argparse subparser (up/down/restart/status/logs/build-runtime)
+- `testenv/azents/devserver.py` — argparse subparser (up/down/restart/status/logs/build-runtime)
 - Each subcommand is stub (`raise NotImplementedError` or "not implemented yet")
 - Add `.state/` to `.gitignore`
-- Smoke test: confirm full command list with `python testenv/nointern/devserver.py --help`
+- Smoke test: confirm full command list with `python testenv/azents/devserver.py --help`
 
 ### Phase 3 — tmux process management
 
@@ -335,10 +335,10 @@ Verification result run immediately after draft creation. Main findings are summ
 | `new-session -d -s NAME CMD` + `pipe-pane -o` log capture | ✓ | initial output captured too |
 | SIGINT delivery with `send-keys C-c` | ✓ | Python signal handler received it in direct command mode |
 | `tmux kill-session` cleans uvicorn `--reload` process tree | ✓ | both reloader + worker cleaned, no leak |
-| Public `/health/v1/readiness` | ✓ | `python/apps/nointern/src/nointern/api/public/health/v1/__init__.py` exists |
-| Admin `/health/v1/readiness` | ✓ | `python/apps/nointern/src/nointern/api/admin/health/v1/__init__.py` exists |
-| alembic config path | ✓ | `python/apps/nointern/db-schemas/rdb/alembic.ini` exists |
-| `docker compose -f testenv/nointern/docker-compose.yaml up -d --wait` | ✓ | works. However, most services lack healthcheck so only waits for "running" state |
+| Public `/health/v1/readiness` | ✓ | `python/apps/azents/src/azents/api/public/health/v1/__init__.py` exists |
+| Admin `/health/v1/readiness` | ✓ | `python/apps/azents/src/azents/api/admin/health/v1/__init__.py` exists |
+| alembic config path | ✓ | `python/apps/azents/db-schemas/rdb/alembic.ini` exists |
+| `docker compose -f testenv/azents/docker-compose.yaml up -d --wait` | ✓ | works. However, most services lack healthcheck so only waits for "running" state |
 | env loading method of `Config.from_env()` | ! | **pydantic-settings reads `.env` in CWD**. testenv wrapper needs separate handling |
 | pass env to tmux with `subprocess.run(..., env=...)` | ✗ | if tmux server is already running, inherits server env — new env not reflected |
 | inject env with `tmux new-session -e KEY=VAL` flag | ✓ | can repeat multiple times and accurately reflects in session |
@@ -353,8 +353,8 @@ Use **direct command mode** instead of shell wrapping (`exec …`):
 subprocess.run([
     "tmux", "new-session",
     "-d",                                 # detached
-    "-s", "nointern-testenv-devserver",
-    "-c", str(repo_root / "python/apps/nointern"),
+    "-s", "azents-testenv-devserver",
+    "-c", str(repo_root / "python/apps/azents"),
     # parse .env and pass each as -e flag (see "env injection" below)
     *env_flags,
     "uv", "run", "python", "src/cli/devserver.py",
@@ -372,11 +372,11 @@ This pattern is better than shell + exec wrapping:
 
 #### env injection (key finding)
 
-`Settings` in `python/apps/nointern/src/nointern/core/config.py` uses `SettingsConfigDict(env_file=".env")`, so it reads **`.env` in CWD**. If devserver starts with cwd `python/apps/nointern/`, it loads `python/apps/nointern/.env`; `testenv/nointern/.env` is ignored.
+`Settings` in `python/apps/azents/src/azents/core/config.py` uses `SettingsConfigDict(env_file=".env")`, so it reads **`.env` in CWD**. If devserver starts with cwd `python/apps/azents/`, it loads `python/apps/azents/.env`; `testenv/azents/.env` is ignored.
 
 Also, even if env is passed to tmux client with `subprocess.run(..., env=...)`, **when tmux server is already running, server env is inherited**, so new env is not reflected.
 
-**Solution**: testenv wrapper directly parses `testenv/nointern/.env` and injects each `NI_*` variable with `tmux new-session -e KEY=VAL`. pydantic-settings prioritizes environment variables over `.env` file, so testenv values win.
+**Solution**: testenv wrapper directly parses `testenv/azents/.env` and injects each `AZ_*` variable with `tmux new-session -e KEY=VAL`. pydantic-settings prioritizes environment variables over `.env` file, so testenv values win.
 
 ```python
 env_flags: list[str] = []
@@ -392,7 +392,7 @@ Notes:
 
 - `GET http://localhost:8010/health/v1/readiness`
 - `GET http://localhost:8011/health/v1/readiness`
-- simultaneously `tmux has-session -t nointern-testenv-devserver`
+- simultaneously `tmux has-session -t azents-testenv-devserver`
 - 0.5s interval, timeout 60s, consider true failure after 5 consecutive failures
 
 If session dies, fail immediately (do not wait for timeout).
@@ -410,7 +410,7 @@ Confirmed that `kill-session` cleans entire process tree even for uvicorn `--rel
 
 #### docker compose `--wait`
 
-Current `testenv/nointern/docker-compose.yaml` has no healthcheck for services except rustfs, so `--wait` only waits until "running" state. This complements preflight `postgres-container-healthy` check and is sufficient for current scope. Adding healthcheck to db/valkey is follow-up.
+Current `testenv/azents/docker-compose.yaml` has no healthcheck for services except rustfs, so `--wait` only waits until "running" state. This complements preflight `postgres-container-healthy` check and is sufficient for current scope. Adding healthcheck to db/valkey is follow-up.
 
 ### Risks and Mitigations
 
@@ -458,6 +458,6 @@ Current `testenv/nointern/docker-compose.yaml` has no healthcheck for services e
 - Parent design: [`local-260406-local-fullstack-test-env.md`](./local-260406-local-fullstack-test-env.md)
 - Discussion: azents/azents#2339
 - Implementation issue: azents/azents#2338
-- Existing entrypoint: `python/apps/nointern/bin/devserver.sh`, `python/apps/nointern/src/cli/devserver.py`
-- testenv compose: `testenv/nointern/docker-compose.yaml` (Stage 1a)
-- preflight framework: `testenv/nointern/checks/` (Stage 1a)
+- Existing entrypoint: `python/apps/azents/bin/devserver.sh`, `python/apps/azents/src/cli/devserver.py`
+- testenv compose: `testenv/azents/docker-compose.yaml` (Stage 1a)
+- preflight framework: `testenv/azents/checks/` (Stage 1a)

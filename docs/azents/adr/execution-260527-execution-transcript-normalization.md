@@ -31,7 +31,7 @@ Scope:
 
 ## Background
 
-Existing azents agent execution uses OpenAI Agents SDK based `OpenAIEngineAdapter`. In production, `httpx.RemoteProtocolError: peer closed connection without sending complete message body (incomplete chunked read)` occurred during SDK stream. UI saw streaming delta, but completed SDK item batch never reached `NointernSession.add_items()`, so partial text did not remain in durable transcript.
+Existing azents agent execution uses OpenAI Agents SDK based `OpenAIEngineAdapter`. In production, `httpx.RemoteProtocolError: peer closed connection without sending complete message body (incomplete chunked read)` occurred during SDK stream. UI saw streaming delta, but completed SDK item batch never reached `AzentsSession.add_items()`, so partial text did not remain in durable transcript.
 
 However, durable partial text storage is excluded from core decisions of this ADR. It is deferred to later streaming draft design.
 

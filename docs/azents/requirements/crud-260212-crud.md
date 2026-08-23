@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/user-crud.md"
 
 ## Problem
 
-nointern user management consists of two layers:
+azents user management consists of two layers:
 - **User (global)**: unique user across the whole system (email-based)
 - **WorkspaceUser (membership)**: User's profile inside workspace
 

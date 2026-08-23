@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Overview
 
-Switch nointern sandbox scope **from per-agent to per-session**. Current structure keeps one persistent container per `RDBAgent` and shares it across multiple sessions. This changes each `RDBConversationSession` to have its own independent container. Agent shared identity, toolkit, credentials, memory, and skills remain in `RDBAgent` DB layer.
+Switch azents sandbox scope **from per-agent to per-session**. Current structure keeps one persistent container per `RDBAgent` and shares it across multiple sessions. This changes each `RDBConversationSession` to have its own independent container. Agent shared identity, toolkit, credentials, memory, and skills remain in `RDBAgent` DB layer.
 
 ### Problems solved
 
@@ -74,7 +74,7 @@ Switch nointern sandbox scope **from per-agent to per-session**. Current structu
 | | Decision | |
 |---|---|---|
 | A | A2 — class rename | `AgentHomeSandboxManager` → `SessionSandboxManager`, update files/tests/comments throughout |
-| B | B1 + label | Pod name `nointern-session-{session_short}`, expose agent/workspace through labels |
+| B | B1 + label | Pod name `azents-session-{session_short}`, expose agent/workspace through labels |
 | C | C-path-1 + C-ttl-A | subPath `sessions/{session_id}/home-sandbox`, application-level cleanup job (Temporal/cron) |
 | D | D1 | reuse existing `agent-snapshotter` ECR repo, only tag becomes session-based |
 | E | E1 | rename clients too (`SessionSandboxClient`, etc.) |
@@ -104,7 +104,7 @@ flowchart TB
         S4["last_activity_at (existing)"]
     end
 
-    subgraph Pod["Per-session Pod (nointern-session-{short})"]
+    subgraph Pod["Per-session Pod (azents-session-{short})"]
         P1[main container]
         P2[sandbox-daemon container]
         P3["rootfs (hibernate target)"]
@@ -240,13 +240,13 @@ class SessionSandboxManager:
 ```python
 # session_sandbox_k8s.py — pod spec summary
 metadata = V1ObjectMeta(
-    name=f"nointern-session-{session_short}",
+    name=f"azents-session-{session_short}",
     namespace=namespace,
     labels={
-        "app.kubernetes.io/name": "nointern-session",
-        "nointern/session-id": session_id,
-        "nointern/agent-id": agent_id,
-        "nointern/workspace-id": workspace_id,
+        "app.kubernetes.io/name": "azents-session",
+        "azents/session-id": session_id,
+        "azents/agent-id": agent_id,
+        "azents/workspace-id": workspace_id,
     },
 )
 
@@ -273,7 +273,7 @@ volume_mounts = [
 ]
 ```
 
-Optional `nointern/agent-name-slug` label controlled by config flag (default off — avoid slugify cost).
+Optional `azents/agent-name-slug` label controlled by config flag (default off — avoid slugify cost).
 
 ### 4. Docker Pod (development/testenv)
 
@@ -285,7 +285,7 @@ binds = [
 ]
 ```
 
-`session_home_dir` is host path like `/tmp/nointern/sessions/{session_id}/home-sandbox` in testenv.
+`session_home_dir` is host path like `/tmp/azents/sessions/{session_id}/home-sandbox` in testenv.
 
 ### 5. Snapshot path (Phase 4)
 
@@ -293,7 +293,7 @@ binds = [
 - Image tag: `session-{session_short}-{yyyymmddHHMMSS}-{random8hex}`
   (common format for `session_snapshot_docker.py` / K8s snapshotter DaemonSet).
   session prefix allows filtering while random suffix prevents collision.
-- Snapshotter DaemonSet identifies target by container label, so it works as-is if label includes `nointern/session-id`.
+- Snapshotter DaemonSet identifies target by container label, so it works as-is if label includes `azents/session-id`.
 - Reuse Phase 3 logic for `RDBSessionSnapshot.base_image_ref` drift check.
 
 ### 6. Worker / Engine (Phase 2~3)
@@ -356,10 +356,10 @@ Internally, only timing of `POST /conversation_sessions` calling `SessionSandbox
 | ECR repo | none. Continue using existing `agent-snapshotter` (only tag naming changes) |
 | ECR lifecycle policy | review. Reflect snapshot TTL 1 day (check current Phase 3 policy then adjust) |
 | K8s RBAC / ServiceAccount | none |
-| NetworkPolicy | only pod name pattern change (`nointern-session-*`) |
+| NetworkPolicy | only pod name pattern change (`azents-session-*`) |
 | Temporal workflow | new — session lifecycle loop, EFS cleanup activity |
 | Sentry alert | new — EFS cleanup job failure alert |
-| Metrics dashboards | update filters (grouping by `nointern/agent-id` label) |
+| Metrics dashboards | update filters (grouping by `azents/agent-id` label) |
 
 ## Feasibility Verification Result (summary)
 
@@ -474,9 +474,9 @@ assert "No such file" in s1.last_shell_output
 - **docker-compose**: none. testenv uses docker backend (`SessionSandboxDocker`).
 - **.env.example**: add hibernate/snapshot/EFS TTL environment variables (can set short values in development):
   ```
-  NOINTERN_SESSION_HIBERNATE_IDLE_SECONDS=1800
-  NOINTERN_SESSION_SNAPSHOT_TTL_SECONDS=86400
-  NOINTERN_SESSION_EFS_TTL_SECONDS=2592000
+  AZ_SESSION_HIBERNATE_IDLE_SECONDS=1800
+  AZ_SESSION_SNAPSHOT_TTL_SECONDS=86400
+  AZ_SESSION_EFS_TTL_SECONDS=2592000
   ```
 - **Existing scenario impact**: update tests assuming per-agent behavior — update related area tests in each Phase PR ([G] G2 decision).
 
@@ -502,7 +502,7 @@ assert "No such file" in s1.last_shell_output
 ### Phase 3: K8s / Docker client
 
 - Rename `agent_home.py` / `agent_home_k8s.py` / `agent_home_docker.py`.
-- Pod naming (`nointern-session-{short}`) + labels (`nointern/agent-id`, `nointern/workspace-id`, optional `nointern/agent-name-slug`).
+- Pod naming (`azents-session-{short}`) + labels (`azents/agent-id`, `azents/workspace-id`, optional `azents/agent-name-slug`).
 - Two volume mounts (`/data` + `/home/sandbox`).
 
 ### Phase 4: Snapshot restore / commit
@@ -545,7 +545,7 @@ Add only `AgentHomeSandboxManager.get_or_allocate(agent_id, session_id)`. No ren
 Create `SessionSandboxManager` and leave existing as wrapper.
 **Rejected**: inconsistent with big-bang ([discussion 6] Q14). Maintaining duplicate code is burdensome.
 
-### B2: Include agent prefix in Pod name (`nointern-agent-home-{agent}-{session}`)
+### B2: Include agent prefix in Pod name (`azents-agent-home-{agent}-{session}`)
 **Rejected**: insufficient margin under K8s 63-character limit, and “agent-home” terminology mismatches per-session reality.
 
 ### C-path-2: monthly partition subPath
@@ -587,6 +587,6 @@ Create `SessionSandboxManager` and leave existing as wrapper.
 
 ## Follow-up Work
 
-- After merging this document, **add ADR** (`docs/nointern/adr/sandbox-260424-sandbox.md`).
+- After merging this document, **add ADR** (`docs/azents/adr/sandbox-260424-sandbox.md`).
 - Create stacked PR chain (8 phases) with `/ship-feature`.
 - On implementation completion, move this document to `design/`, create `spec/domain/session-sandbox.md`.

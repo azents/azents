@@ -1,5 +1,5 @@
 ---
-title: "nointern Core Concepts Historical Requirements Reconstruction"
+title: "azents Core Concepts Historical Requirements Reconstruction"
 created: 2026-02-07
 implemented: 2026-03-06
 tags: [documentation, historical-reconstruction, migration]
@@ -10,7 +10,7 @@ historical_reconstruction: true
 migration_source: "docs/azents/design/core-concepts.md"
 ---
 
-# nointern Core Concepts Historical Requirements Reconstruction
+# azents Core Concepts Historical Requirements Reconstruction
 
 > This is a provenance-marked historical reconstruction, not newly approved product intent.
 > It contains only statements recoverable from the source document. Unknown intent remains explicitly unknown.
@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/core-concepts.md"
 
 ## Problem
 
-nointern is an **Agent Builder SaaS** where users can **create AI agents only with a system prompt and tool set** and use them together as a team in messaging platforms such as Slack.
+azents is an **Agent Builder SaaS** where users can **create AI agents only with a system prompt and tool set** and use them together as a team in messaging platforms such as Slack.
 
 ## Primary Actor
 

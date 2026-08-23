@@ -51,7 +51,7 @@ Core principles are as follows.
 | ShellEnvironment | Sandbox config | schema/API rename is performed gradually. |
 | sandbox_policy | none | Do not create separate enum/flag. |
 
-Names provided by external SDK object or existing event payload schema such as `raw_item` remain only at compatibility boundary until separate event schema migration. Do not use them in new nointern domain vocabulary.
+Names provided by external SDK object or existing event payload schema such as `raw_item` remain only at compatibility boundary until separate event schema migration. Do not use them in new azents domain vocabulary.
 
 ## Current Structure
 

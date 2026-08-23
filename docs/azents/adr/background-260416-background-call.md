@@ -27,14 +27,14 @@ Support a **general background tool call mechanism** at the engine level so tool
 
 ## Background
 
-Claude Code's `run_in_background` feature lets the LLM dispatch a long-running tool and immediately continue other work. In current nointern, tool execution is **always blocking**: `engine.run()` waits for the tool handler to complete. This hurts UX for subagent calls that delegate research/analysis and for long-running shell commands.
+Claude Code's `run_in_background` feature lets the LLM dispatch a long-running tool and immediately continue other work. In current azents, tool execution is **always blocking**: `engine.run()` waits for the tool handler to complete. This hurts UX for subagent calls that delegate research/analysis and for long-running shell commands.
 
 ## Scope Redefinition
 
 The initial request in issue #2559 was "subagent background execution," but review showed that this should be treated as one application of a **general background tool call** mechanism:
 
 - Claude Code implements this as a per-tool pattern for Bash and Agent, not as a subagent-only feature.
-- Candidate tools in nointern are `subagent` and `shell__execute_code`.
+- Candidate tools in azents are `subagent` and `shell__execute_code`.
 - A framework-based design is needed for future long-running tools, such as large MCP calls.
 
 Therefore the design scope expanded from "subagent background execution" to "general background tool call mechanism plus subagent application."
@@ -100,7 +100,7 @@ Layer separation:
 
 **Rejected alternatives**:
 
-- Use a frontmatter-style setting such as `AgentSubagent.run_in_background` — less aligned with nointern's domain model; can be added later if needed.
+- Use a frontmatter-style setting such as `AgentSubagent.run_in_background` — less aligned with azents's domain model; can be added later if needed.
 - Separate tools such as `background_subagent` — doubles tool count and increases prompt burden.
 
 ### 5. Background Task Registry Location
@@ -164,7 +164,7 @@ Adopting the E2 execution structure also fixed these points:
 
 ## Reference: Major Framework Comparison
 
-| Dimension | Claude Code | nointern (this design) |
+| Dimension | Claude Code | azents (this design) |
 |------|-------------|-------------------|
 | Background-capable tools | Bash, Agent (subagent), Monitor | Phase 1: subagent; Phase 2: shell |
 | Declaration method | Per-tool schema: Bash as param, subagent as frontmatter | Unified: handler return type + input_schema `run_in_background` property |

@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Overview
 
-Provides an isolated execution environment (Sandbox) where nointern agents can perform **code execution, file manipulation, external API calls**, and similar work.
+Provides an isolated execution environment (Sandbox) where azents agents can perform **code execution, file manipulation, external API calls**, and similar work.
 
 ### Requirements
 
@@ -115,7 +115,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: sandbox-egress-deny-private
-  namespace: nointern-sandbox
+  namespace: azents-sandbox
 spec:
   podSelector:
     matchLabels:
@@ -218,7 +218,7 @@ apiVersion: sandbox.k8s.io/v1alpha1
 kind: SandboxWarmPool
 metadata:
   name: agent-sandbox-pool
-  namespace: nointern-sandbox
+  namespace: azents-sandbox
 spec:
   replicas: 1
   template:
@@ -226,13 +226,13 @@ spec:
       runtimeClassName: gvisor
       containers:
       - name: agent-runtime
-        image: nointern/agent-runtime:latest
+        image: azents/agent-runtime:latest
         volumeMounts:
         - name: ca-cert
           mountPath: /usr/local/share/ca-certificates/mitmproxy.crt
           subPath: ca.crt
       - name: mitmproxy
-        image: nointern/mitmproxy-sidecar:latest
+        image: azents/mitmproxy-sidecar:latest
         ports:
         - containerPort: 8080
         env:
@@ -364,11 +364,11 @@ class SandboxConfig:
     backend: Literal["docker", "k8s"] = "docker"  # local default
 
     # Docker backend
-    docker_image: str = "nointern/agent-runtime:latest"
+    docker_image: str = "azents/agent-runtime:latest"
     docker_network: str = "sandbox-restricted"
 
     # K8s backend
-    k8s_namespace: str = "nointern-sandbox"
+    k8s_namespace: str = "azents-sandbox"
     k8s_warm_pool: str = "agent-sandbox-pool"
 ```
 
@@ -467,10 +467,10 @@ spec:
   - alias: bottlerocket@latest
   subnetSelectorTerms:
   - tags:
-      karpenter.sh/discovery: nointern-cluster
+      karpenter.sh/discovery: azents-cluster
   securityGroupSelectorTerms:
   - tags:
-      karpenter.sh/discovery: nointern-cluster
+      karpenter.sh/discovery: azents-cluster
   blockDeviceMappings:
   - deviceName: /dev/xvdb
     ebs:
@@ -722,7 +722,7 @@ graph TB
 containers:
   # ... existing agent-runtime, mitmproxy unchanged ...
   - name: file-gateway
-    image: nointern/file-gateway:latest
+    image: azents/file-gateway:latest
     ports:
     - containerPort: 8081    # localhost only (accessed from agent-runtime)
     env:
@@ -733,7 +733,7 @@ containers:
     - name: STORAGE_BACKEND
       value: "s3"            # "s3" | "local"
     - name: S3_BUCKET
-      value: "nointern-session-data"
+      value: "azents-session-data"
     - name: S3_PREFIX
       value: "v1"
     - name: LOCAL_MOUNT_PATH
@@ -820,10 +820,10 @@ Each Worker sends its liveness signal with K8s Lease object:
 apiVersion: coordination.k8s.io/v1
 kind: Lease
 metadata:
-  name: nointern-worker-{worker_id}
-  namespace: nointern-sandbox
+  name: azents-worker-{worker_id}
+  namespace: azents-sandbox
   labels:
-    managed-by: nointern
+    managed-by: azents
 spec:
   holderIdentity: {worker_id}
   leaseDurationSeconds: 120          # 2x renewal interval (60s)
@@ -841,16 +841,16 @@ Record owner Worker and session info as labels on Sandbox CR:
 ```yaml
 metadata:
   labels:
-    managed-by: nointern
-    nointern/worker-id: {worker_uuid}   # owner Worker identity
-    nointern/session-id: {session_id}   # audit tracking
+    managed-by: azents
+    azents/worker-id: {worker_uuid}   # owner Worker identity
+    azents/session-id: {session_id}   # audit tracking
 ```
 
 ### GC algorithm
 
 ```mermaid
 flowchart TD
-    START["GC start<br/>(every 5 minutes)"] --> LIST["K8s API: query all Sandbox CR<br/>managed-by=nointern"]
+    START["GC start<br/>(every 5 minutes)"] --> LIST["K8s API: query all Sandbox CR<br/>managed-by=azents"]
     LIST --> LOOP{"iterate CR"}
     LOOP --> OWN{"worker-id == my ID?"}
 
@@ -913,7 +913,7 @@ sequenceDiagram
 
 | Env var | Default | Description |
 |---------|-------|------|
-| `NI_SANDBOX_K8S_ORPHAN_GC_INTERVAL_SECS` | 300 | GC interval (seconds) |
+| `AZ_SANDBOX_K8S_ORPHAN_GC_INTERVAL_SECS` | 300 | GC interval (seconds) |
 
 ## Future Considerations
 
@@ -928,7 +928,7 @@ sequenceDiagram
 
 #### Current state
 
-nointern agent sandbox runs with gVisor (runsc) runtime. gVisor is automatically installed through AL2023 node userData script.
+azents agent sandbox runs with gVisor (runsc) runtime. gVisor is automatically installed through AL2023 node userData script.
 
 #### Why gVisor is needed
 
@@ -985,7 +985,7 @@ flowchart TD
 #### Related files
 
 - `infra/terragrunt/_modules/eks-cluster/addons.tf` — EC2NodeClass, RuntimeClass
-- `infra/argocd/nointern-sandbox/overlays/production/base/resources/sandbox-template.yaml` — SandboxTemplate
+- `infra/argocd/azents-sandbox/overlays/production/base/resources/sandbox-template.yaml` — SandboxTemplate
 
 #### Deployment order
 
@@ -1009,7 +1009,7 @@ kubectl exec gvisor-test -- dmesg 2>&1 | head -5
 kubectl delete pod gvisor-test
 
 # 4. confirm gVisor on WarmPool Pod
-kubectl -n nointern-sandbox get pod <warmpool-pod> -o jsonpath='{.spec.runtimeClassName}'
+kubectl -n azents-sandbox get pod <warmpool-pod> -o jsonpath='{.spec.runtimeClassName}'
 # confirm "gvisor" output
 ```
 

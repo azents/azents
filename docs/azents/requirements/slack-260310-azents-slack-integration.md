@@ -1,5 +1,5 @@
 ---
-title: "nointern Slack Integration Historical Requirements Reconstruction"
+title: "azents Slack Integration Historical Requirements Reconstruction"
 created: 2026-03-10
 implemented: 2026-03-10
 tags: [documentation, historical-reconstruction, migration]
@@ -7,22 +7,22 @@ document_role: primary
 document_type: requirements
 snapshot_id: slack-260310
 historical_reconstruction: true
-migration_source: "docs/azents/design/nointern-slack-integration.md"
+migration_source: "docs/azents/design/azents-slack-integration.md"
 ---
 
-# nointern Slack Integration Historical Requirements Reconstruction
+# azents Slack Integration Historical Requirements Reconstruction
 
 > This is a provenance-marked historical reconstruction, not newly approved product intent.
 > It contains only statements recoverable from the source document. Unknown intent remains explicitly unknown.
 
 - Snapshot: `slack-260310`
-- Source: `docs/azents/design/slack-260310-nointern-slack-integration.md`
+- Source: `docs/azents/design/slack-260310-azents-slack-integration.md`
 - Historical source date basis: `2026-03-10`
 - Requester confirmation of the historical reconstruction: not recorded; confirmation is required before treating this as approved intent.
 
 ## Problem
 
-This design integrates nointern AI agents with Slack. It supports two integration models and shares the same engine and broker layers as the existing WebSocket-based interface.
+This design integrates azents AI agents with Slack. It supports two integration models and shares the same engine and broker layers as the existing WebSocket-based interface.
 
 **Core principles**:
 

@@ -1,6 +1,6 @@
 ---
 title: "Slack/Discord/Scheduled Event Subscription Migration Design"
-tags: [nointern, agent-session, slack, discord, scheduler, external-watch, historical-reconstruction]
+tags: [azents, agent-session, slack, discord, scheduler, external-watch, historical-reconstruction]
 created: 2026-05-08
 updated: 2026-05-08
 implemented: 2026-05-08
@@ -91,11 +91,11 @@ With this decision, event subscription owns only input routing, and output routi
 
 ### 2. Watch creation UX/API
 
-**Decision: restore `/nointern connect` / Discord select flow as ExternalWatch creation path**
+**Decision: restore `/azents connect` / Discord select flow as ExternalWatch creation path**
 
 Initial implementation makes watch from Slack/Discord internal user path. Web/backend management API remains long-term option.
 
-- Slack: `/nointern connect` or existing interaction flow → `SlackExternalWatch`
+- Slack: `/azents connect` or existing interaction flow → `SlackExternalWatch`
 - Discord: select/interaction flow → `DiscordExternalWatch`
 - testenv/live QA also uses this user-facing path instead of direct DB write.
 
@@ -136,7 +136,7 @@ Slack passes `SlackInterfaceContext` together so Slack Toolkit can resolve curre
 | `context` | `team_id`, `channel_id`, `thread_ts`, `message_ts` | `guild_id`, `channel_id`, `thread_id`, `message_id` | `scheduled_task_id`, `fire_at` |
 | `metadata` | `watch_id`, `source_event_id`, native `event_id` | `watch_id`, `source_event_id`, native `event_id` | `scheduled_task_id`, `source_event_id`, `schedule_type` |
 
-If source-specific account link exists, fill `user_id` with internal nointern user ID; otherwise keep `None`. Scheduled event uses task owner `owner_user_id`.
+If source-specific account link exists, fill `user_id` with internal azents user ID; otherwise keep `None`. Scheduled event uses task owner `owner_user_id`.
 
 ### 6. Scheduled task fire model
 
@@ -214,7 +214,7 @@ Dispatcher responsibilities:
 ### Phase 2 — Backend dispatcher and Slack/Discord watch creation
 
 - Add `ExternalEventDispatcher`.
-- Slack `/nointern connect` selection → create `SlackExternalWatch`.
+- Slack `/azents connect` selection → create `SlackExternalWatch`.
 - Discord select → create `DiscordExternalWatch`.
 - Slack/Discord message no-op handler → call dispatcher.
 - Slack external event → resolve Slack interface toolkit context.
@@ -246,7 +246,7 @@ Dispatcher responsibilities:
 ### TC-INT-EXTWATCH-001 — Slack ExternalWatch event reply
 
 1. Prepare `agent-with-shell`, `slack-account-session`, `slack-platform-installation`, `slack-qa-channel`, `tailscale-funnel-active` setup.
-2. Connect QA channel and agent with `/nointern connect` or signed interaction helper to create `SlackExternalWatch`.
+2. Connect QA channel and agent with `/azents connect` or signed interaction helper to create `SlackExternalWatch`.
 3. Post Slack user message in QA channel and request thread reply.
 4. Slack event endpoint receives that message.
 5. Verify active `AgentSession` `events` has exactly one `user_input` row with `external_id=source_event_id`.
@@ -257,11 +257,11 @@ Dispatcher responsibilities:
 
 | Spec | Change |
 |---|---|
-| `docs/nointern/spec/flow/message-routing.md` | Slack/Discord no-op → subscription dispatch flow |
-| `docs/nointern/spec/domain/slack.md` | SlackExternalWatch lifecycle, inbound event dedupe |
-| `docs/nointern/spec/domain/discord.md` | DiscordExternalWatch lifecycle, relationship between gateway dedupe and event dedupe |
-| `docs/nointern/spec/domain/conversation.md` | Scheduled fire external event envelope |
-| `docs/nointern/spec/flow/byoa-installation.md` | Re-express BYOA fixed agent routing as event subscription target |
+| `docs/azents/spec/flow/message-routing.md` | Slack/Discord no-op → subscription dispatch flow |
+| `docs/azents/spec/domain/slack.md` | SlackExternalWatch lifecycle, inbound event dedupe |
+| `docs/azents/spec/domain/discord.md` | DiscordExternalWatch lifecycle, relationship between gateway dedupe and event dedupe |
+| `docs/azents/spec/domain/conversation.md` | Scheduled fire external event envelope |
+| `docs/azents/spec/flow/byoa-installation.md` | Re-express BYOA fixed agent routing as event subscription target |
 
 ## Alternatives Considered
 

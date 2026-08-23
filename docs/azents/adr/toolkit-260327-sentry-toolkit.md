@@ -28,7 +28,7 @@ The following sections are copied only from explicit source Design text. No addi
 sequenceDiagram
     participant User as User
     participant Agent as Agent
-    participant NI as nointern server
+    participant NI as azents server
     participant Sentry as mcp.sentry.dev/mcp
 
     Note over User: enable Sentry Toolkit

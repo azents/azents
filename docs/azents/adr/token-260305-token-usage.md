@@ -39,7 +39,7 @@ Restrict existing truncate API (`DELETE /sessions/{id}/messages/{message_id}/aft
 
 ### Explicit source section: 4-3. Truncate API — add turn boundary constraint
 
-**File:** `nointern/services/chat/__init__.py`
+**File:** `azents/services/chat/__init__.py`
 
 Change `truncate_session()`: verify message_id has `role=turn_complete`.
 

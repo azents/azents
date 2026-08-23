@@ -22,14 +22,14 @@ migration_source: "docs/azents/adr/0008-agent-runtime-sandbox-control-channel.md
 
 ## Problem
 
-The current NoIntern sandbox control path has the nointern worker/API discover a Kubernetes Pod IP or Docker container network address, then call the `sandbox-daemon` sidecar HTTP API inbound. This was useful as an intermediate step for isolating helper processes from custom/root sandbox containers, but it does not fit the default product sandbox model.
+The current Azents sandbox control path has the azents worker/API discover a Kubernetes Pod IP or Docker container network address, then call the `sandbox-daemon` sidecar HTTP API inbound. This was useful as an intermediate step for isolating helper processes from custom/root sandbox containers, but it does not fit the default product sandbox model.
 
 The current model has these major limitations:
 
 1. Sandbox discovery and control are tightly coupled to Kubernetes Pod IPs, sidecar HTTP ports, and daemon readiness.
 2. The name and public API of `SessionSandboxManager` imply session-bound ownership. In reality, the sandbox lifecycle owner is `AgentRuntime`, not `AgentSession`.
 3. File read/write is based on whole-body request/response, making large file streaming, backpressure, and resume difficult to express.
-4. External sandbox vendors, local-machine sandboxes, and controlled sandbox images should have the sandbox client register outbound instead of having nointern connect inbound.
+4. External sandbox vendors, local-machine sandboxes, and controlled sandbox images should have the sandbox client register outbound instead of having azents connect inbound.
 5. Delivering commands through Kubernetes exec inside the same Pod unnecessarily binds the command/file control plane to the Kubernetes API.
 
 Issue #3426 and Discussion #3445 decided on the following direction.

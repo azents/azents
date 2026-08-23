@@ -124,6 +124,11 @@ The azents project uses the Living Spec system:
 - **ADR** (`docs/azents/adr/`) — append-only decision history. Implemented/adopted ADRs are immutable.
 - **Design** (`docs/azents/design/`) — development-time design documents. Do not rewrite implemented design documents as living specs; current behavior belongs in spec docs.
 
+The [branding-260823 historical document migration](docs/azents/adr/branding-260823-historical-document-migration.md)
+authorizes one completed brand-only rewrite of historical snapshots and canonical
+document identifiers. This exception does not make implemented snapshots generally
+mutable; the normal immutability rules apply after that migration.
+
 Development snapshots use one shared `{word}-{YYMMDD}-{slug}.md` basename across Requirements, ADR, and Design. Use `{word}-{YYMMDD}` as the snapshot ID and typed references such as `<snapshot>/REQ-N`, `<snapshot>/ADR-DN`, and `<snapshot>/DESIGN`. Legacy numbered ADRs and pre-migration Design filenames are historical inputs only; current core documents must use dated snapshot filenames. Preserve legacy references only in explicit provenance or ambiguity records.
 
 Always read `docs/azents/spec/` first for current behavior. Read Requirements, ADRs, and design documents only when product intent, rationale, or historical context is needed.

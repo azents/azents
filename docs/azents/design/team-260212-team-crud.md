@@ -227,7 +227,7 @@ CREATE INDEX ix_teams_parent_team_id ON teams (parent_team_id);
 ## File Structure
 
 ```
-python/apps/nointern/src/nointern/
+python/apps/azents/src/azents/
 ├── rdb/models/
 │   └── team.py                   # RDBTeam model
 ├── repos/team/

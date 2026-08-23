@@ -195,8 +195,8 @@ Delete pending invitation.
 ### Invitation Email Template
 
 **Subject:**
-- ko: `[NoIntern] You have been invited to the {workspace_name} workspace`
-- en: `[NoIntern] You've been invited to {workspace_name}`
+- ko: `[Azents] You have been invited to the {workspace_name} workspace`
+- en: `[Azents] You've been invited to {workspace_name}`
 
 **Body:**
 - Show workspace name.

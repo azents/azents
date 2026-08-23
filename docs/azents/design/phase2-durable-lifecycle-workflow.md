@@ -87,7 +87,7 @@ sequenceDiagram
 
 ### 3.1 Migration (extend `agents` table)
 
-File: `python/apps/nointern/db-schemas/rdb/migrations/versions/{new}_add_lifecycle_columns_to_agents.py`
+File: `python/apps/azents/db-schemas/rdb/migrations/versions/{new}_add_lifecycle_columns_to_agents.py`
 
 ```python
 def upgrade() -> None:
@@ -105,7 +105,7 @@ Backfill unnecessary — NULL = untracked.
 
 ### 3.2 Model Change
 
-`python/apps/nointern/src/nointern/rdb/models/agent.py`:
+`python/apps/azents/src/azents/rdb/models/agent.py`:
 
 ```python
 # Lifecycle management columns — Phase 2
@@ -122,7 +122,7 @@ lifecycle_claimed_at: Mapped[datetime.datetime | None] = mapped_column(
 
 ### 3.3 Repository Methods
 
-`python/apps/nointern/src/nointern/repos/agent/__init__.py` (or separate lifecycle repo):
+`python/apps/azents/src/azents/repos/agent/__init__.py` (or separate lifecycle repo):
 
 ```python
 async def claim_lifecycle_lease(
@@ -382,10 +382,10 @@ async def compute_earliest_idle_deadline(
 
 ### 4.4 DI Update
 
-`python/apps/nointern/src/nointern/engine/tools/deps.py`:
+`python/apps/azents/src/azents/engine/tools/deps.py`:
 
 ```python
-from nointern.repos.agent import AgentRepository
+from azents.repos.agent import AgentRepository
 
 def get_sandbox_manager(..., ...):
     return AgentHomeSandboxManager(
@@ -451,7 +451,7 @@ _LIFECYCLE_LOOP_CAP_SECS = 60.0  # Maximum sleep between evaluations
 ## 8. testenv Impact
 
 - **new seed**: none
-- **config override**: `NI_AGENT_HOME_IDLE_TIMEOUT_SECS=5` (testenv env)
+- **config override**: `AZ_AGENT_HOME_IDLE_TIMEOUT_SECS=5` (testenv env)
 - **existing scenarios**: no impact (loop replacement is internal behavior change)
 - **docker-compose**: no change
 
@@ -487,7 +487,7 @@ _LIFECYCLE_LOOP_CAP_SECS = 60.0  # Maximum sleep between evaluations
 |---|---|
 | Per-agent asyncio task (Vercel per-session workflow) | task management complexity high; global loop achieves same accuracy |
 | Redis sorted set based timer | duplicate state store, consistency problem, violates DB single source philosophy |
-| Temporal / Celery durable workflow | additional infra cost, overkill for current NoIntern scale |
+| Temporal / Celery durable workflow | additional infra cost, overkill for current Azents scale |
 | separate `agent_lifecycle_leases` table | agent count low; join cost vs separate table management cost unfavorable |
 | Heartbeat-based worker health | lease claimed_at sufficient; separate heartbeat excessive |
 

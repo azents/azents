@@ -22,14 +22,14 @@ migration_source: "docs/azents/adr/0018-mcp-stdio-sidecar.md"
 
 ## Background
 
-This design improves stdio MCP support and file management for nointern agents. During the discussion, we reviewed expanding the role of the Agent Home Pod and considered several architecture alternatives.
+This design improves stdio MCP support and file management for azents agents. During the discussion, we reviewed expanding the role of the Agent Home Pod and considered several architecture alternatives.
 
 ## Confirmed Architecture
 
 Keep the Engine in the Worker Pod and add sidecars to the Agent Home Pod.
 
 ```text
-Worker Pod (minimal changes)              Agent Home Pod (nointern-sandbox)
+Worker Pod (minimal changes)              Agent Home Pod (azents-sandbox)
 ┌──────────────────────────┐            ┌──────────────────────────────────┐
 │ Engine (unchanged)       │            │ sandbox container (existing)      │
 │ ├─ ReAct loop            │            │ └─ Shell (bwrap-exec)            │
@@ -276,7 +276,7 @@ For cases where Agent Home Pod recreation is needed, such as stdio toolkit confi
 
 ### ~~Discussion 6: Image strategy~~ — decided
 
-- sandbox container: keep existing nointern-agent-runtime image.
+- sandbox container: keep existing azents-agent-runtime image.
 - mcp-stdio sidecar: image including Python + Node.js.
   - Install mcp-proxy.
   - Do not preinstall stdio MCP servers; run them at runtime with `uvx` and `npx`.
@@ -388,8 +388,8 @@ entrypoint.sh → supervisord
 
 **Daemon code location:**
 
-- `python/apps/nointern-sandbox-daemon/` — separate app.
-- Same pattern as File-API (`nointern-file-api`).
+- `python/apps/azents-sandbox-daemon/` — separate app.
+- Same pattern as File-API (`azents-file-api`).
 
 ---
 

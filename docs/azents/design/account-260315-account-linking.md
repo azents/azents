@@ -15,7 +15,7 @@ tags: [documentation, historical-reconstruction]
 
 ## Overview
 
-Design feature that links external platform user IDs such as Slack/Discord with nointern user ID. After linking completes, bot can identify the user on mention and provide personalized responses plus per-user OAuth toolkit usage.
+Design feature that links external platform user IDs such as Slack/Discord with azents user ID. After linking completes, bot can identify the user on mention and provide personalized responses plus per-user OAuth toolkit usage.
 
 ## Design Principles
 
@@ -28,32 +28,32 @@ Design feature that links external platform user IDs such as Slack/Discord with 
 
 Use existing tables as-is.
 
-- `discord_user_links`: `(installation_id, discord_user_id)` unique → nointern `user_id`
-- `slack_user_links`: `(installation_id, slack_user_id)` unique → nointern `user_id`
+- `discord_user_links`: `(installation_id, discord_user_id)` unique → azents `user_id`
+- `slack_user_links`: `(installation_id, slack_user_id)` unique → azents `user_id`
 
 ### Mapping Policy
 
 | Direction | Allowed | Rationale |
 |------|------|------|
-| 1 nointern user → Discord + Slack simultaneously | ✅ | natural multi-platform scenario |
-| 1 platform account → 1 nointern user (per installation) | ✅ | `(installation_id, platform_user_id)` unique constraint |
-| 1 platform account → N nointern users | ❌ | blocked by above unique constraint |
+| 1 azents user → Discord + Slack simultaneously | ✅ | natural multi-platform scenario |
+| 1 platform account → 1 azents user (per installation) | ✅ | `(installation_id, platform_user_id)` unique constraint |
+| 1 platform account → N azents users | ❌ | blocked by above unique constraint |
 
 ## Scenarios
 
 ### Scenario 1: Bot mention on platform → nudge → link
 
-When user mentions nointern bot for first time in Slack/Discord, user receives account link nudge by DM and links account.
+When user mentions azents bot for first time in Slack/Discord, user receives account link nudge by DM and links account.
 
 ```mermaid
 sequenceDiagram
     actor U as User (Slack/Discord)
-    participant Bot as nointern bot
-    participant Server as Nointern Server
-    participant Web as Nointern Web
+    participant Bot as azents bot
+    participant Server as Azents Server
+    participant Web as Azents Web
     participant OAuth as Platform OAuth
 
-    U->>Bot: @nointern mention
+    U->>Bot: @azents mention
     Bot->>Server: message handling
     Server->>Server: resolve_user_id() → None
     Server->>Server: has_previous_sessions() → false
@@ -97,8 +97,8 @@ Unlinked user receives inline nudge when trying to use per-user OAuth toolkit (G
 ```mermaid
 sequenceDiagram
     actor U as User (Slack/Discord)
-    participant Bot as nointern bot
-    participant Server as Nointern Server
+    participant Bot as azents bot
+    participant Server as Azents Server
 
     U->>Bot: "Create issue in GitHub"
     Bot->>Server: toolkit execution request
@@ -119,13 +119,13 @@ sequenceDiagram
 
 ### Scenario 3: Reverse linking from Web
 
-User with existing nointern account links platform account from web dashboard settings.
+User with existing azents account links platform account from web dashboard settings.
 
 ```mermaid
 sequenceDiagram
     actor U as User
-    participant Web as Nointern Web
-    participant Server as Nointern Server
+    participant Web as Azents Web
+    participant Server as Azents Server
     participant OAuth as Platform OAuth
 
     U->>Web: Settings > Account linking > click "Connect Discord"
@@ -134,7 +134,7 @@ sequenceDiagram
     Server-->>Web: { url: "https://discord.com/oauth2/authorize?..." }
     Web->>Web: window.location.href = url
     Web->>OAuth: Discord OAuth authorize (scope: identify)
-    OAuth->>U: "nointern wants to access your account"
+    OAuth->>U: "azents wants to access your account"
     U->>OAuth: approve
     OAuth->>Web: redirect → /oauth/discord-link/callback?code=...&state=...
     Web->>Web: extract workspace_handle from state JWT (unverified decode)
@@ -155,10 +155,10 @@ Slack uses same structure, only OAuth endpoint differs (`oauth.v2.access`, scope
 ```mermaid
 sequenceDiagram
     actor U as User (Slack/Discord)
-    participant Bot as nointern bot
-    participant Server as Nointern Server
+    participant Bot as azents bot
+    participant Server as Azents Server
 
-    U->>Bot: @nointern "summarize"
+    U->>Bot: @azents "summarize"
     Bot->>Server: handle_message(platform_user_id)
     Server->>Server: resolve_user_id() → found user_id
     Server->>Server: load per-user context (OAuth tokens, preferences)

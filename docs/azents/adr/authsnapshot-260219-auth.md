@@ -1,5 +1,5 @@
 ---
-title: "nointern-web Authentication System Historical Decision Reconstruction"
+title: "azents-web Authentication System Historical Decision Reconstruction"
 created: 2026-02-19
 tags: [architecture, historical-reconstruction, migration]
 document_role: primary
@@ -9,7 +9,7 @@ historical_reconstruction: true
 migration_source: "docs/azents/design/auth.md"
 ---
 
-# nointern-web Authentication System Historical Decision Reconstruction
+# azents-web Authentication System Historical Decision Reconstruction
 
 - Snapshot: `authsnapshot-260219`
 - Status: historical reconstruction; not a newly accepted decision.
@@ -24,12 +24,12 @@ The following sections are copied only from explicit source Design text. No addi
 
 ### Explicit source section: Architecture Overview
 
-Next.js web serves as **BFF (Backend For Frontend)**. It safely manages tokens between browser and nointern API.
+Next.js web serves as **BFF (Backend For Frontend)**. It safely manages tokens between browser and azents API.
 
 ```mermaid
 flowchart LR
     Browser -->|tRPC<br/>cookie sent| NextJS[Next.js Server]
-    NextJS -->|@azents/public-client<br/>Bearer token| API[nointern API]
+    NextJS -->|@azents/public-client<br/>Bearer token| API[azents API]
 ```
 
 **Core principles**:

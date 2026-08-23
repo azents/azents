@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Overview
 
-Integrate Google-hosted Remote MCP servers as nointern Service Toolkit so agents can directly query and manage GCP resources.
+Integrate Google-hosted Remote MCP servers as azents Service Toolkit so agents can directly query and manage GCP resources.
 
 Prioritize services needed for application/infrastructure monitoring, and connect multiple GCP MCP servers from one `gcp` Toolkit.
 

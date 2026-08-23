@@ -13,16 +13,16 @@ migration_source: "docs/azents/design/provider-compat-audit-report-2026-05-03.md
 
 ## Audit Scope
 
-- Design document: `docs/nointern/design/provider-compat-layer.md`
+- Design document: `docs/azents/design/provider-compat-layer.md`
 - Phase documents:
-  - `docs/nointern/design/provider-compat-phase1.md`
-  - `docs/nointern/design/provider-compat-phase2.md`
-  - `docs/nointern/design/provider-compat-phase3.md`
-  - `docs/nointern/design/provider-compat-phase4.md`
+  - `docs/azents/design/provider-compat-phase1.md`
+  - `docs/azents/design/provider-compat-phase2.md`
+  - `docs/azents/design/provider-compat-phase3.md`
+  - `docs/azents/design/provider-compat-phase4.md`
 - Code:
-  - `python/apps/nointern/src/nointern/engine/sdk/filters/**`
-  - `python/apps/nointern/src/nointern/engine/sdk/engine_adapter.py`
-  - `python/apps/nointern/src/nointern/engine/sdk/filters_test.py`
+  - `python/apps/azents/src/azents/engine/sdk/filters/**`
+  - `python/apps/azents/src/azents/engine/sdk/engine_adapter.py`
+  - `python/apps/azents/src/azents/engine/sdk/filters_test.py`
 
 ## Result Summary
 

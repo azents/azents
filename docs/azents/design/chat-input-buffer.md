@@ -41,7 +41,7 @@ This feature represents "input accepted but not yet injected into model" as sepa
 - `EngineWorker.process_message()` stores first/normal input with `EventStore.append()` before engine execution. In target state, this direct storage path is also unified into buffer flush.
 - Additional input during run accumulates in `_SessionRunner._queue`; after tool execution, `poll_messages()` drains queue and converts to `UserInputEvent`.
 - `GET /chat/v1/sessions/{id}/messages` paginates only event repository and returns `run_state` together.
-- nointern-web immediately appends user bubble with temporary id (`user-${Date.now()}`) when sending message, and does not display durable `user_input` event from WebSocket.
+- azents-web immediately appends user bubble with temporary id (`user-${Date.now()}`) when sending message, and does not display durable `user_input` event from WebSocket.
 
 ## Target State
 
@@ -49,7 +49,7 @@ This feature represents "input accepted but not yet injected into model" as sepa
 sequenceDiagram
     autonumber
     actor User
-    participant Web as nointern-web
+    participant Web as azents-web
     participant WS as Chat WebSocket
     participant DB as PostgreSQL
     participant Runner as _SessionRunner

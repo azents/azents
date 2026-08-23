@@ -97,6 +97,12 @@ The shared format applies to the core Requirements, ADR, and primary Design for 
 - For later development on the same topic, create a new dated snapshot. Do not mark or rewrite the older snapshot.
 - Keep current behavior only in living specs.
 
+The [branding-260823 historical document migration](adr/branding-260823-historical-document-migration.md)
+is a one-time exception that permits brand-only rewriting and canonical identifier
+renaming across historical snapshots. Git history and the migration snapshot retain
+the prior provenance. This exception is complete once the migration is verified;
+all migrated and future implemented snapshots remain immutable afterward.
+
 ### Removed Legacy Directories
 
 | Old Directory | Destination |

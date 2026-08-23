@@ -19,7 +19,7 @@ Shipped 8-stack PR series through `/ship-feature` workflow.
 |---|---|---|
 | 1/8 | #2952 | design document (original of this file) |
 | 2/8 | #2953 | Phase 1 — Backend (`GitHubToolkit.expose_env()` + providers for 3 auth modes) |
-| 3/8 | #2954 | Phase 2 — agent-runtime `nointern-git-credential` helper + entrypoint |
+| 3/8 | #2954 | Phase 2 — agent-runtime `azents-git-credential` helper + entrypoint |
 | 4/8 | #2955 | Phase 3 — `GithubConfigFields.tsx` toggle + Warning Alert + i18n 4 locales |
 | 5/8 | #2956 | Phase 4 — 5 testenv QA scenarios (TC-CRED-GITHUB-SHELL-001~004 + TC-WEB-GITHUB-SHELL-001) |
 | 6/8 | #2957 | design-implementation audit + spec sync report |
@@ -39,7 +39,7 @@ See `design/github-toolkit-shell-env-audit-report-2026-04-24.md`.
 
 ### ADR Candidate (waiting for user approval)
 
-1. "Supply both MCP secret + shell env within single GitHubToolkit resolve path" — decision related to SRP interpretation. If user approves, create as `docs/nointern/adr/NNNN-github-toolkit-dual-consumer.md`.
+1. "Supply both MCP secret + shell env within single GitHubToolkit resolve path" — decision related to SRP interpretation. If user approves, create as `docs/azents/adr/NNNN-github-toolkit-dual-consumer.md`.
 
 # GitHubToolkit Shell Env Injection Feature
 
@@ -86,7 +86,7 @@ flowchart LR
   end
   TOK -->|MCP secret (existing)| MCP["GitHub MCP Toolkit"]
   TOK -->|expose_env() (new)| SHELL["Agent shell sandbox"]
-  SHELL -->|credential helper| HELPER["/usr/local/bin/<br/>nointern-git-credential"]
+  SHELL -->|credential helper| HELPER["/usr/local/bin/<br/>azents-git-credential"]
   HELPER -->|GH_TOKEN env| GIT["git push / fetch"]
   SHELL -->|GH_TOKEN env| GH["gh CLI"]
   MCP --> API[(api.github.com)]
@@ -102,7 +102,7 @@ flowchart LR
 
 ## Data Model
 
-### `GitHubToolkitConfig` change (`python/apps/nointern/src/nointern/core/tools.py`)
+### `GitHubToolkitConfig` change (`python/apps/azents/src/azents/core/tools.py`)
 
 ```python
 class GitHubToolkitConfig(BaseModel):
@@ -165,11 +165,11 @@ Previously only MCP secret was issued, so token was not passed when creating `Gi
 
 ## Sandbox-daemon Change
 
-### `nointern-git-credential` helper script
+### `azents-git-credential` helper script
 
 Add following file to sandbox image:
 
-`python/apps/nointern-sandbox-daemon/sandbox-image/usr/local/bin/nointern-git-credential`
+`python/apps/azents-sandbox-daemon/sandbox-image/usr/local/bin/azents-git-credential`
 ```sh
 #!/bin/sh
 # Respond to git credential helper protocol with token passed by GitHubToolkit as shell env.
@@ -195,8 +195,8 @@ echo "password=$token"
 
 `sandbox-image/entrypoint.sh` (or Dockerfile `RUN` line):
 ```sh
-chmod +x /usr/local/bin/nointern-git-credential
-git config --system credential.helper '!/usr/local/bin/nointern-git-credential'
+chmod +x /usr/local/bin/azents-git-credential
+git config --system credential.helper '!/usr/local/bin/azents-git-credential'
 ```
 
 Apply to all users/dirs with `--system` option. Even if agent only runs `git clone`, helper is immediately called → reads token from env and responds.
@@ -210,7 +210,7 @@ Almost no impact on existing image layer.
 
 ## Frontend (UI/UX)
 
-### `GitHubConfigFields.tsx` change (`typescript/apps/nointern-web/src/features/toolkits/components/`)
+### `GitHubConfigFields.tsx` change (`typescript/apps/azents-web/src/features/toolkits/components/`)
 
 Add section to existing GitHub toolkit edit form:
 
@@ -268,7 +268,7 @@ Same structure, `github_auth_type=github_app_platform`.
 ### TC-CRED-GITHUB-SHELL-004 — git clone via credential helper
 
 Run only once after all auth modes pass:
-- Prompt: "Run `git clone https://github.com/nointern-qa/sandbox-repo.git /tmp/repo` in shell and tell me whether clone succeeded"
+- Prompt: "Run `git clone https://github.com/azents-qa/sandbox-repo.git /tmp/repo` in shell and tell me whether clone succeeded"
 - Evidence: function_call output includes `Cloning into '/tmp/repo'...` + repo file confirmed by `ls /tmp/repo` result
 
 ### TC-WEB-GITHUB-SHELL-001 — UI toggle roundtrip
@@ -313,11 +313,11 @@ Last item is checked by investigating Dockerfile during Phase 2 implementation; 
 | Phase | Content | Target files |
 |---|---|---|
 | 1 (Backend) | `GitHubToolkitConfig.inject_shell_env` + `GitHubToolkit.expose_env()` + token cache injection in Provider.resolve + audit log | `core/tools.py`, `engine/tools/github.py`, `engine/tools/github_test.py` |
-| 2 (Sandbox-daemon) | `nointern-git-credential` helper script + Dockerfile + entrypoint change + docker integration test | `nointern-sandbox-daemon/sandbox-image/`, `executor_docker_integration_test.py` |
+| 2 (Sandbox-daemon) | `azents-git-credential` helper script + Dockerfile + entrypoint change + docker integration test | `azents-sandbox-daemon/sandbox-image/`, `executor_docker_integration_test.py` |
 | 3 (Frontend) | toggle + Warning Alert + ack checkbox in `GitHubConfigFields.tsx`, i18n 4 locales | `features/toolkits/components/GitHubConfigFields.tsx`, `messages/*.json` |
-| 4 (testenv QA) | TC-CRED-GITHUB-SHELL-001~004 + TC-WEB-GITHUB-SHELL-001 scenarios + handler | `testenv/nointern/scenarios/`, `tc_handlers/` |
+| 4 (testenv QA) | TC-CRED-GITHUB-SHELL-001~004 + TC-WEB-GITHUB-SHELL-001 scenarios + handler | `testenv/azents/scenarios/`, `tc_handlers/` |
 | 5 (audit + spec-sync) | full design↔implementation audit + affected spec (domain/toolkit.md) sync | audit report |
-| 6 (spec promotion) | finalize design `implemented` + spec update + ADR candidate | `docs/nointern/design/`, `spec/domain/toolkit.md` |
+| 6 (spec promotion) | finalize design `implemented` + spec update + ADR candidate | `docs/azents/design/`, `spec/domain/toolkit.md` |
 | 7 (cleanup) | remove stale docs | — |
 
 ## Alternatives Considered

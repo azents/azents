@@ -15,13 +15,13 @@ migration_source: "docs/azents/adr/0022-sandbox-runtime-profile.md"
 
 ## Background
 
-The current nointern sandbox is hardcoded to Kubernetes + gVisor, and nointern-snapshotter is fixed to a workaround using `nerdctl commit --pause=false` to avoid the gVisor runsc ttrpc issue. In the short term, we keep the gVisor `--pause=false` workaround. Long term, we plan to move to Kata Containers + bare metal and eventually cover full VM hibernate as a good-to-have.
+The current azents sandbox is hardcoded to Kubernetes + gVisor, and azents-snapshotter is fixed to a workaround using `nerdctl commit --pause=false` to avoid the gVisor runsc ttrpc issue. In the short term, we keep the gVisor `--pause=false` workaround. Long term, we plan to move to Kata Containers + bare metal and eventually cover full VM hibernate as a good-to-have.
 
 This document records design decisions for covering "current gVisor / future Kata / local runc" with a single abstraction layer.
 
 ## Current Structure, Starting Point
 
-**In the nointern app**
+**In the azents app**
 
 - `AgentHomeClient` ABC: implemented by `DockerAgentHomeClient` and `K8sAgentHomeClient`; backend abstraction already exists.
 - `AgentHomeSnapshotClient` Protocol: Docker / K8s / Fake implementations.
@@ -80,29 +80,29 @@ SandboxRuntimeProfile = GVisorProfile | RuncProfile | KataQemuProfile
 
 ### 2. Code placement
 
-**Decision: A — local to nointern app + duplicate only `SnapshotStrategy` enum in snapshotter**
+**Decision: A — local to azents app + duplicate only `SnapshotStrategy` enum in snapshotter**
 
-- Put profile + enum in `python/apps/nointern/src/nointern/runtime/sandbox/runtime_profile.py`.
-- `python/apps/nointern-snapshotter/` defines only its own `SnapshotStrategy` enum. Wire communication uses strings.
+- Put profile + enum in `python/apps/azents/src/azents/runtime/sandbox/runtime_profile.py`.
+- `python/apps/azents-snapshotter/` defines only its own `SnapshotStrategy` enum. Wire communication uses strings.
 
 **Rationale:**
 
 - Wire communication is one `str` field, so sharing the full class has little value.
-- Avoid mixing nointern domain types into `az-common`.
+- Avoid mixing azents domain types into `az-common`.
 - Enum duplication is closer to duplicating wire contract constants and is acceptable.
 
-**Rejected: shared az-common lib / new nointern-common lib**
+**Rejected: shared az-common lib / new azents-common lib**
 
-- `az-common` is shared with azents, so adding nointern domain types blurs boundaries.
-- There is weak justification for a new nointern-common library just for one type.
+- `az-common` is shared with azents, so adding azents domain types blurs boundaries.
+- There is weak justification for a new azents-common library just for one type.
 
-**Risk mitigation:** add one drift-prevention test that checks strategy string matching between snapshotter and nointern when snapshotter supports a new strategy.
+**Risk mitigation:** add one drift-prevention test that checks strategy string matching between snapshotter and azents when snapshotter supports a new strategy.
 
 ### 3. Path for injecting snapshotter strategy
 
 **Decision: A — DaemonSet env var through NodePool-specific Kustomize overlay**
 
-- `Settings.snapshot_strategy` reads from `NOINTERN_SNAPSHOT_STRATEGY` env.
+- `Settings.snapshot_strategy` reads from `AZ_SNAPSHOT_STRATEGY` env.
 - Separate Kustomize overlays per node group / Karpenter NodePool.
 
 **Rationale:**
@@ -164,7 +164,7 @@ SnapshotRef = RootfsSnapshotRef  # TypeAlias. Expand to Union when VM variant is
 
 **Rejected: no tests / azents-e2e runtime-swap scenario**
 
-**Additional deliverable:** new profile checklist in `docs/nointern/design/sandbox-runtime-profile.md`:
+**Additional deliverable:** new profile checklist in `docs/azents/design/sandbox-runtime-profile.md`:
 
 1. Verify `nerdctl commit` behavior for the runtime.
 2. Live test pause/unpause.
@@ -179,15 +179,15 @@ Four sequential PRs:
 
 1. **PR1** — Profile types + SnapshotRef union + config fields.
 2. **PR2** — Refactor K8sAgentHomeClient with profile injection.
-3. **PR3** — Refactor nointern-snapshotter with strategy injection.
+3. **PR3** — Refactor azents-snapshotter with strategy injection.
 4. **PR4** — Deployment config + docs + ctr.py docstring update.
 
 Each PR is a no-op in production behavior because gVisor remains the default.
 
 ## References
 
-- `docs/nointern/design/phase3-snapshot-hibernation.md` — original snapshot design
-- `docs/nointern/adr/gvisor-260403-gvisor-byoc-sandbox.md` — background for gVisor adoption
+- `docs/azents/design/phase3-snapshot-hibernation.md` — original snapshot design
+- `docs/azents/adr/gvisor-260403-gvisor-byoc-sandbox.md` — background for gVisor adoption
 - Live diagnosis from the previous turn: `nerdctl commit --pause=true` succeeds in about 4s under gVisor, but the following unpause fails with `ttrpc: closed`, causing the container to exit 255. This is the actual root cause of production stuck Pods.
 
 ## Migration provenance

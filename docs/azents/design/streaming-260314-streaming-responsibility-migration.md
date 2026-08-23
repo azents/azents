@@ -122,7 +122,7 @@ Responsibilities **remaining** in handler:
 - Discord: thread creation (response target must exist)
 
 Responsibilities **removed** from handler:
-- user mapping (platform user → nointern user)
+- user mapping (platform user → azents user)
 - account linking guide DM
 - history query (channel/thread history)
 - file download
@@ -216,7 +216,7 @@ Design principles:
 ```mermaid
 flowchart TD
     A[Receive message from Input Queue] --> B[Installation lookup + API Client caching]
-    B --> C[User mapping - platform → nointern]
+    B --> C[User mapping - platform → azents]
     C --> D[History query - using API client]
     D --> E[File download → SharedDataStorage]
     E --> F[System prompt generation]
@@ -403,7 +403,7 @@ Reason poll_messages() also broadcasts user messages:
 class WebSocketBroadcast:
     """Worker → WebSocket event broadcast. Redis Pub/Sub based."""
 
-    CHANNEL_PREFIX = "nointern:ws:{session_id}"
+    CHANNEL_PREFIX = "azents:ws:{session_id}"
 
     def __init__(self, redis: Redis) -> None:
         self._redis = redis
@@ -431,7 +431,7 @@ class WebSocketBroadcast:
 ```
 
 - **Redis Pub/Sub based**: all multiple WebSockets (multiple tabs) receive events.
-- **Channel key**: `nointern:ws:{session_id}` — separated from existing broker `nointern:session:{session_id}:events`.
+- **Channel key**: `azents:ws:{session_id}` — separated from existing broker `azents:session:{session_id}:events`.
 - **Separated from Broker**: independent from `broker.publish_event()`/`subscribe_events()`. Clear responsibility.
 
 ### 6. Web Handler (after change)

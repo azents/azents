@@ -13,7 +13,7 @@ migration_source: "docs/azents/adr/0036-sandbox-provider-routing-simplification.
 
 ## Context
 
-[sandbox-260521/ADR](./sandbox-260521-sandbox-control.md) introduced `SandboxProviderControl` and adopted a structure where a provider controller opens an outbound `ConnectProvider` stream to NoIntern. After implementation, production rollout repeatedly exposed these problems:
+[sandbox-260521/ADR](./sandbox-260521-sandbox-control.md) introduced `SandboxProviderControl` and adopted a structure where a provider controller opens an outbound `ConnectProvider` stream to Azents. After implementation, production rollout repeatedly exposed these problems:
 
 1. Provider stream is attached to a process-local store in `sandbox-control`.
 2. Worker reads Redis active provider registry and performs provider selection/allocation.
@@ -93,7 +93,7 @@ Rejected. This couples worker replica topology with provider ownership, and work
 
 ## Status
 
-Accepted. Detailed design follows `docs/nointern/design/sandbox-provider-routing-simplification.md`.
+Accepted. Detailed design follows `docs/azents/design/sandbox-provider-routing-simplification.md`.
 
 ## Migration provenance
 

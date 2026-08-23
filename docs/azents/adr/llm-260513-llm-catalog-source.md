@@ -15,7 +15,7 @@ migration_source: "docs/azents/adr/0030-llm-model-catalog-source.md"
 
 ## Context
 
-nointern currently manages LLM models through three layers: `LLMModel`, `LLMProviderModel`, and `LLMProviderIntegration`. `LLMProviderIntegration`, managed by Workspace Owners, is clearly workspace-specific credential information. However, the global model catalog, `LLMModel` and `LLMProviderModel`, is directly managed through Admin CRUD.
+azents currently manages LLM models through three layers: `LLMModel`, `LLMProviderModel`, and `LLMProviderIntegration`. `LLMProviderIntegration`, managed by Workspace Owners, is clearly workspace-specific credential information. However, the global model catalog, `LLMModel` and `LLMProviderModel`, is directly managed through Admin CRUD.
 
 This creates the following problems:
 
@@ -24,11 +24,11 @@ This creates the following problems:
 3. Admin UI exposes `LLM Models` and `Provider Models` management screens, assuming an operational model where humans continuously edit model lists.
 4. Agents reference `llm_provider_model_id` and integration id, so provider model identity must remain stable even if the catalog is rebuilt.
 
-Hermes/OpenClaw-like systems use catalog/capability metadata owned by providers/plugins as runtime contracts. OpenCode also imports many provider catalogs through AI SDK and Models.dev while keeping local config/custom provider overrides separately. nointern should move in the same direction.
+Hermes/OpenClaw-like systems use catalog/capability metadata owned by providers/plugins as runtime contracts. OpenCode also imports many provider catalogs through AI SDK and Models.dev while keeping local config/custom provider overrides separately. azents should move in the same direction.
 
 ## Decision
 
-Move the source of truth for nointern's model catalog to **external catalogs / official provider adapters + local overrides**.
+Move the source of truth for azents's model catalog to **external catalogs / official provider adapters + local overrides**.
 
 Specifically:
 
@@ -44,7 +44,7 @@ Specifically:
 
 3. **Normalize capability internal contract**
    - Do not use the `thinking` column and arbitrary `metadata` patches as the direct contract for capability judgment.
-   - Normalize external catalog/adapter results into nointern's internal typed capability contract.
+   - Normalize external catalog/adapter results into azents's internal typed capability contract.
    - Runtime, agent form, built-in tool selection, and context compaction all read this internal contract.
    - Provider-specific raw metadata may be preserved for auditing/debugging, but must not be the source of truth for runtime decisions.
 

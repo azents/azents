@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/integrations-e2e.md"
 
 ## Problem
 
-Stage 4 (browser/web QA) of `testenv/nointern` made standalone UI flows of nointern-web automatable. On top of that, build an integrated test environment that can automatically verify **the whole Slack/Discord integration surface** — OAuth installation, user account linking, channel binding, messages/slash commands/interactions, files, agent toolkit permissions.
+Stage 4 (browser/web QA) of `testenv/azents` made standalone UI flows of azents-web automatable. On top of that, build an integrated test environment that can automatically verify **the whole Slack/Discord integration surface** — OAuth installation, user account linking, channel binding, messages/slash commands/interactions, files, agent toolkit permissions.
 
 Scope expanded during Discussion from only initial OAuth (#2453 initial body) to **the entire integration surface**. First implementation target is **Slack**, and Discord follows same pattern after Slack completion.
 
@@ -32,14 +32,14 @@ Unknown — the historical source does not state this explicitly.
 
 ## Primary Scenario
 
-- After implementing new Slack feature, before PR merge — run `testenv/nointern/scenarios/integrations/TC-INT-SLACK-*.md` scenario once to confirm no regression.
-- After modifying Slack OAuth code in nointern backend — immediately verify with Phase 2 OAuth scenario.
+- After implementing new Slack feature, before PR merge — run `testenv/azents/scenarios/integrations/TC-INT-SLACK-*.md` scenario once to confirm no regression.
+- After modifying Slack OAuth code in azents backend — immediately verify with Phase 2 OAuth scenario.
 - After changing bot response flow — verify with Phase 3 message scenario.
 
 ## Supporting Scenarios
 
-- After implementing new Slack feature, before PR merge — run `testenv/nointern/scenarios/integrations/TC-INT-SLACK-*.md` scenario once to confirm no regression.
-- After modifying Slack OAuth code in nointern backend — immediately verify with Phase 2 OAuth scenario.
+- After implementing new Slack feature, before PR merge — run `testenv/azents/scenarios/integrations/TC-INT-SLACK-*.md` scenario once to confirm no regression.
+- After modifying Slack OAuth code in azents backend — immediately verify with Phase 2 OAuth scenario.
 - After changing bot response flow — verify with Phase 3 message scenario.
 
 ## Goals

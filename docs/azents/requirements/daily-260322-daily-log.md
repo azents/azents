@@ -1,5 +1,5 @@
 ---
-title: "nointern Daily Log Historical Requirements Reconstruction"
+title: "azents Daily Log Historical Requirements Reconstruction"
 created: 2026-03-22
 implemented: 2026-03-22
 tags: [documentation, historical-reconstruction, migration]
@@ -10,7 +10,7 @@ historical_reconstruction: true
 migration_source: "docs/azents/design/daily-log.md"
 ---
 
-# nointern Daily Log Historical Requirements Reconstruction
+# azents Daily Log Historical Requirements Reconstruction
 
 > This is a provenance-marked historical reconstruction, not newly approved product intent.
 > It contains only statements recoverable from the source document. Unknown intent remains explicitly unknown.

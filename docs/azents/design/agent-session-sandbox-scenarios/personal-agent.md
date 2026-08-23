@@ -81,8 +81,8 @@ synced_at
 Sandbox filesystem has materialized copy and resources.
 
 ```text
-/home/sandbox/.nointern/skills/{skill_slug}/SKILL.md
-/home/sandbox/.nointern/skills/{skill_slug}/resources/*
+/home/sandbox/.azents/skills/{skill_slug}/SKILL.md
+/home/sandbox/.azents/skills/{skill_slug}/resources/*
 ```
 
 ### Sync timing

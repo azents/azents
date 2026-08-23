@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/devserver-lifecycle.md"
 
 ## Problem
 
-Stage 1a made it possible to diagnose local environment prerequisites with `testenv/nointern/preflight.py`. Stage 1b is next step: provide CLI entrypoint `testenv/nointern/devserver.py` that lets agents start/stop/check status of devserver in background.
+Stage 1a made it possible to diagnose local environment prerequisites with `testenv/azents/preflight.py`. Stage 1b is next step: provide CLI entrypoint `testenv/azents/devserver.py` that lets agents start/stop/check status of devserver in background.
 
 ## Primary Actor
 
@@ -31,12 +31,12 @@ Unknown — the historical source does not state this explicitly.
 ## Primary Scenario
 
 ```bash
-cd testenv/nointern
+cd testenv/azents
 
 ## Supporting Scenarios
 
 ```bash
-cd testenv/nointern
+cd testenv/azents
 
 ## Goals
 

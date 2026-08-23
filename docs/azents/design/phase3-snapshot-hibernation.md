@@ -67,7 +67,7 @@ No user message (30 minutes)
 | `/tmp` | **Ephemeral** (skip by convention) | container rootfs | — |
 
 **Contract**:
-- **Persistent layer** — guarantees durable storage; `/data/*` can be accessed from nointern-server even without sandbox (space for memory/skills extension)
+- **Persistent layer** — guarantees durable storage; `/data/*` can be accessed from azents-server even without sandbox (space for memory/skills extension)
 - **Ephemeral layer** — best-effort snapshot. Fresh container fallback on failure
 
 ### 2.2 Snapshot Backend
@@ -174,7 +174,7 @@ sequenceDiagram
 
 ### 3.1 `agents` table extension (Phase 3)
 
-File: `python/apps/nointern/db-schemas/rdb/migrations/versions/{new}_add_snapshot_columns_to_agents.py`
+File: `python/apps/azents/db-schemas/rdb/migrations/versions/{new}_add_snapshot_columns_to_agents.py`
 
 ```python
 def upgrade() -> None:
@@ -329,7 +329,7 @@ Time budget: preStop 1-2s + snapshot 5-15s ≈ 20s → enough margin in `termina
 ### 5.1 agent-snapshotter DaemonSet
 
 **Configuration**:
-- Namespace: `nointern-snapshotter` (separate namespace)
+- Namespace: `azents-snapshotter` (separate namespace)
 - Privileged + `hostPath: /var/run/containerd/containerd.sock`
 - IAM: ECR push/pull only (Pod Identity)
 - Image: signature verification follow-up after Phase 3 (#2695 — cosign + Kyverno verifyImages)
@@ -363,14 +363,14 @@ Image tag format: `<ecr>/agent-snapshots:<agent_id_hash>-<ts>`
 ⚠️ **Change**: Actual implementation uses NetworkPolicy-based isolation. HMAC was not adopted.
 
 1. **NetworkPolicy**
-   - `nointern-snapshotter` namespace ingress → allow only `from: namespace=nointern, serviceAccount=nointern-server`
+   - `azents-snapshotter` namespace ingress → allow only `from: namespace=azents, serviceAccount=azents-server`
    - Default deny egress external + ECR endpoint allow-list
 
 2. **HMAC request signature**
    - Shared secret: K8s Secret mounted in both namespaces
    - Request header: `X-Signature: HMAC-SHA256(body + ":" + timestamp)`
    - `X-Timestamp` validation — 60-second replay window
-   - Reusable implementation: HMAC-SHA256 webhook validation pattern in `python/apps/nointern/src/nointern/core/auth/discord_gateway.py`
+   - Reusable implementation: HMAC-SHA256 webhook validation pattern in `python/apps/azents/src/azents/core/auth/discord_gateway.py`
 
 3. **Narrow API**
    - no endpoints beyond the 2 above
@@ -545,11 +545,11 @@ Snapshot is **best-effort cache** — user data is stored separately in `/data/*
 
 ### 8.4 Base image upgrade (D15)
 
-When Sandbox base image (`nointern_agent_runtime_image`) is deployed as new version, existing snapshot was committed on old base. If base changes, user runtime drift + delayed security patch can occur, so adopt **explicit invalidation policy** (D14, Option A).
+When Sandbox base image (`azents_agent_runtime_image`) is deployed as new version, existing snapshot was committed on old base. If base changes, user runtime drift + delayed security patch can occur, so adopt **explicit invalidation policy** (D14, Option A).
 
 **Mechanism**:
 
-1. Add `agent_snapshots.base_image_ref VARCHAR(512) NOT NULL` column — store OCI reference (including digest, e.g. `public.ecr.aws/.../nointern-sandbox@sha256:abc...`) of base image at snapshot creation time. Snapshotter returns actual pod image by querying with `crictl inspect`.
+1. Add `agent_snapshots.base_image_ref VARCHAR(512) NOT NULL` column — store OCI reference (including digest, e.g. `public.ecr.aws/.../azents-sandbox@sha256:abc...`) of base image at snapshot creation time. Snapshotter returns actual pod image by querying with `crictl inspect`.
 2. Manager restore path compares `snapshot.base_image_ref != config.agent_runtime_image`. On mismatch:
    - delete `agent_snapshots` row + async ECR untag
    - fallback to fresh pod path (reuse existing "no snapshot" flow)
@@ -672,7 +672,7 @@ In this case, state after last debounce snapshot is lost. Mitigation is to revis
 
 ### 12.1 System Prompt (static)
 
-Add following section to Agent default system prompt (`nointern/runtime/agent_prompt.py` or corresponding location):
+Add following section to Agent default system prompt (`azents/runtime/agent_prompt.py` or corresponding location):
 
 ```
 ## File storage guide
@@ -718,13 +718,13 @@ Prerequisites confirmed in feasibility verification (#2661 Phase 3 feasibility r
 
 **Current**: Node IAM only has ECR pull (`pod-identity.tf:87-100`). **Need add**: Pod Identity dedicated to DaemonSet + ECR push IAM role.
 
-Scope: extend `infra/terragrunt/_modules/nointern-server-infra/ecr.tf` and `pod-identity.tf`.
+Scope: extend `infra/terragrunt/_modules/azents-server-infra/ecr.tf` and `pod-identity.tf`.
 
 ### 13.2 cosign Signing Pipeline — Follow-up after Phase 3
 
 **Out of Phase 3 scope — moved to #2695.** Initial implementation deploys only DaemonSet manifest with placeholder image (`busybox:REPLACE_ME`), and before production switch, add cosign keyless (OIDC) signing + Kyverno `verifyImages` ClusterPolicy in separate PR.
 
-- TODO tracking: `infra/argocd/nointern-snapshotter/TODO.md`
+- TODO tracking: `infra/argocd/azents-snapshotter/TODO.md`
 - Scope: GitHub Actions `cosign sign` step + Rekor record + Kyverno policy deployment
 
 ### 13.3 Agent-home Pod Spec update
@@ -740,12 +740,12 @@ Scope: extend `infra/terragrunt/_modules/nointern-server-infra/ecr.tf` and `pod-
 
 ### 13.5 HMAC Shared Secret
 
-- K8s Secret — mounted in both namespaces (`nointern`, `nointern-snapshotter`)
+- K8s Secret — mounted in both namespaces (`azents`, `azents-snapshotter`)
 - rotation policy (initial yearly)
 
 ### 13.6 Kustomize / ArgoCD new app
 
-- new app `infra/argocd/nointern-snapshotter/`
+- new app `infra/argocd/azents-snapshotter/`
   - Namespace, DaemonSet (privileged + hostPath containerd.sock), NetworkPolicy, RBAC, Service, ServiceAccount
 
 ---
@@ -859,5 +859,5 @@ Stacked PR structure (details in separate plan document):
 - **Completion date**: 2026-04-18
 - **Changes from design**:
   - HMAC request signature → replaced with **NetworkPolicy-based ingress isolation** (§2.2 / §5.3 / §11.2)
-  - Snapshot debounce/max-wait → extended to be **configurable** through `NI_SNAPSHOT_DEBOUNCE_MAX_WAIT_SECS` env
+  - Snapshot debounce/max-wait → extended to be **configurable** through `AZ_SNAPSHOT_DEBOUNCE_MAX_WAIT_SECS` env
   - **Agent Awareness (§12)** — moved to Phase 4 (#2683), not implemented at time of this document

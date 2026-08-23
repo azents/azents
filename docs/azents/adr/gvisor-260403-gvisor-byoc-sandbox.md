@@ -89,7 +89,7 @@ Inside bwrap:
 
 ```text
 [sandbox Pod]  egress: allow only mitmproxy Pod through NetworkPolicy
-  app → HTTP_PROXY=http://agent-home-mitmproxy-{agent_id}.nointern-sandbox.svc:8080
+  app → HTTP_PROXY=http://agent-home-mitmproxy-{agent_id}.azents-sandbox.svc:8080
   sandbox-daemon
 
 [mitmproxy-{agent_id} Pod]  egress: open

@@ -17,7 +17,7 @@ historical_reconstruction: true
 
 This document organizes Session Workspace / Project contract finalized in #3367 and Discussion #3541 into implementable form. Terminology cleanup (#3532) is assumed to proceed in separate session, and this document uses following definitions.
 
-- **Workspace**: top-level unit of NoIntern service. Space where users create agents and collaborate.
+- **Workspace**: top-level unit of Azents service. Space where users create agents and collaborate.
 - **Session Workspace**: storage space where Agent works in a session. Current root is `/home/sandbox`.
 - **Project Source**: reusable source uploaded to Workspace that Agent can load as Project. MVP supports only archive upload.
 - **Project**: actual result of a Project Source or empty-folder request being loaded into specific Agent's Session Workspace. DB row tracks load request and status, but Project injected into prompt is only row with `loaded=true`.

@@ -1,6 +1,6 @@
 ---
 title: "Design for separating testenv setup scenarios and injecting INDEX"
-tags: [testenv, nointern, harness, scenarios]
+tags: [testenv, azents, harness, scenarios]
 created: 2026-04-11
 updated: 2026-04-11
 implemented: 2026-04-11
@@ -26,7 +26,7 @@ Separate prerequisites repeatedly described by testenv test scenarios (user/work
 
 1. Collect setup recipes in `scenarios/setup/` directory
 2. `scenarios/setup/INDEX.md` catalog (hybrid — manual top + automatic table)
-3. Decision rules + setup id list in `testenv/nointern/AGENTS.md` (automatic replacement)
+3. Decision rules + setup id list in `testenv/azents/AGENTS.md` (automatic replacement)
 4. Deliver setup output through `runs/<run-id>/state.json`
 5. Prevent drift with `scripts/gen-setup-index.py` + `scripts/lint-scenarios.py`
 
@@ -44,7 +44,7 @@ Agent is still the runner. Setup is only a reference document saying "prepare th
 
 ## Discussion Points and Decisions
 
-See `docs/nointern/adr/testenv-260411-testenv-setup-scenarios.md` for detailed discussion. Summary of 5 decisions:
+See `docs/azents/adr/testenv-260411-testenv-setup-scenarios.md` for detailed discussion. Summary of 5 decisions:
 
 1. **Setup output delivery**: `runs/<run-id>/state.json` file-based
 2. **Idempotency**: frontmatter `idempotent: bool` + `verify:` shell command
@@ -55,13 +55,13 @@ See `docs/nointern/adr/testenv-260411-testenv-setup-scenarios.md` for detailed d
 ## File Layout
 
 ```
-testenv/nointern/
+testenv/azents/
 ├── AGENTS.md                        # NEW — agent decision rules + setup-list marker
 ├── scenarios/
 │   ├── INDEX.md                     # (existing) test scenario catalog
 │   ├── setup/                       # NEW — setup recipe directory
 │   │   ├── INDEX.md                 # NEW — setup catalog (marker based auto-gen)
-│   │   ├── db-reset-nointern.md
+│   │   ├── db-reset-azents.md
 │   │   ├── test-user-workspace.md
 │   │   ├── default-shell-env.md
 │   │   ├── llm-provider-dummy.md
@@ -199,10 +199,10 @@ Merge semantics: setup records to dot-path such as `state["slack"]["installation
 
 ```bash
 export TESTENV_RUN_ID="$(date -u +%Y-%m-%d)/run-$(uuidgen | cut -c1-8)"
-mkdir -p "testenv/nointern/runs/$TESTENV_RUN_ID"
+mkdir -p "testenv/azents/runs/$TESTENV_RUN_ID"
 ```
 
-Setup body references `STATE_FILE="testenv/nointern/runs/$TESTENV_RUN_ID/state.json"`. All setups/tests in one session share same run id.
+Setup body references `STATE_FILE="testenv/azents/runs/$TESTENV_RUN_ID/state.json"`. All setups/tests in one session share same run id.
 
 ## Agent Decision Rules
 
@@ -254,8 +254,8 @@ Reusable setup recipe catalog. Test scenarios reference these recipes with
 <!-- AUTO-GENERATED:START -->
 | id | provides | requires | idempotent | purpose |
 |----|----------|----------|------------|------|
-| db-reset-nointern | — | — | ✓ | nointern DB table clean slate (idempotent) |
-| test-user-workspace | user.*, ws.* | — | ✗ | seed new nointern user/workspace |
+| db-reset-azents | — | — | ✓ | azents DB table clean slate (idempotent) |
+| test-user-workspace | user.*, ws.* | — | ✗ | seed new azents user/workspace |
 | default-shell-env | shell_env.id | test-user-workspace | ✗ | default shell environment of Workspace |
 | llm-provider-dummy | integration.id (dummy) | test-user-workspace | ✗ | Dummy key LLM integration (LLM bypass path) |
 | llm-provider-bedrock | integration.id | test-user-workspace | ✗ | Real Bedrock LLM integration |
@@ -263,7 +263,7 @@ Reusable setup recipe catalog. Test scenarios reference these recipes with
 | agent-with-shell | agent.id | llm-provider-bedrock, default-shell-env | ✗ | Bedrock agent with Shell tool |
 | sandbox-daemon-image | — | — | ✓ | build agent-runtime sidecar image |
 | mock-mcp-server | mock_mcp.* | — | ✓ | verify fixtures/mock_mcp_server.py availability |
-| web-storage-state | web_state.path | test-user-workspace | ✓ | nointern-web login storage state cache |
+| web-storage-state | web_state.path | test-user-workspace | ✓ | azents-web login storage state cache |
 <!-- AUTO-GENERATED:END -->
 
 ## FAQ / Troubleshooting
@@ -271,10 +271,10 @@ Reusable setup recipe catalog. Test scenarios reference these recipes with
 [manual section]
 ```
 
-### `testenv/nointern/AGENTS.md` (new file)
+### `testenv/azents/AGENTS.md` (new file)
 
 ```markdown
-# testenv/nointern — Agent Instructions
+# testenv/azents — Agent Instructions
 
 ## Role
 
@@ -287,8 +287,8 @@ Set `TESTENV_RUN_ID` at work start and create corresponding run directory:
 
 ​```bash
 export TESTENV_RUN_ID="$(date -u +%Y-%m-%d)/run-$(uuidgen | cut -c1-8)"
-mkdir -p "testenv/nointern/runs/$TESTENV_RUN_ID"
-echo '{}' > "testenv/nointern/runs/$TESTENV_RUN_ID/state.json"
+mkdir -p "testenv/azents/runs/$TESTENV_RUN_ID"
+echo '{}' > "testenv/azents/runs/$TESTENV_RUN_ID/state.json"
 ​```
 
 ## Setup Decision Rules
@@ -308,8 +308,8 @@ For each setup listed in test scenario `requires_setup` frontmatter:
 See [scenarios/setup/INDEX.md](scenarios/setup/INDEX.md) for details.
 
 <!-- SETUP-LIST:START -->
-- `db-reset-nointern` — nointern DB table clean slate (idempotent)
-- `test-user-workspace` — seed new nointern user/workspace
+- `db-reset-azents` — azents DB table clean slate (idempotent)
+- `test-user-workspace` — seed new azents user/workspace
 - `default-shell-env` — default shell environment of Workspace
 - `llm-provider-dummy` — Dummy key LLM integration (LLM bypass path)
 - `llm-provider-bedrock` — Real Bedrock LLM integration
@@ -317,7 +317,7 @@ See [scenarios/setup/INDEX.md](scenarios/setup/INDEX.md) for details.
 - `agent-with-shell` — Bedrock agent with Shell tool
 - `sandbox-daemon-image` — build agent-runtime sidecar image
 - `mock-mcp-server` — verify fixtures/mock_mcp_server.py availability
-- `web-storage-state` — nointern-web login storage state cache
+- `web-storage-state` — azents-web login storage state cache
 <!-- SETUP-LIST:END -->
 
 ## state.json
@@ -339,7 +339,7 @@ Append each test execution summary to `runs/$TESTENV_RUN_ID/<test_id>.log`.
 ```markdown
 ---
 id: test-user-workspace
-summary: Create new nointern user and workspace, record in state
+summary: Create new azents user and workspace, record in state
 requires: []
 provides:
   - user.email
@@ -358,8 +358,8 @@ verify: |
   # Confirm DB existence
   import subprocess
   r = subprocess.run(
-      ['docker', 'exec', 'nointern-testenv-db-1',
-       'psql', '-U', 'nointern', '-d', 'nointern', '-tA', '-c',
+      ['docker', 'exec', 'azents-testenv-db-1',
+       'psql', '-U', 'azents', '-d', 'azents', '-tA', '-c',
        f\"SELECT 1 FROM workspaces WHERE handle = '{handle}';\"],
       capture_output=True, text=True,
   )
@@ -373,11 +373,11 @@ created: 2026-04-11
 
 ## Purpose
 
-Create nointern user and workspace to use during one session.
+Create azents user and workspace to use during one session.
 
 ## Execution
 
-Use `testenv/nointern` as cwd:
+Use `testenv/azents` as cwd:
 
 ​```bash
 uv run python -c "
@@ -458,14 +458,14 @@ Duplicate seed blocks in each test disappear, and improving one place (setup rec
 
 **Function**: scan frontmatter of `scenarios/setup/*.md` → replace auto-gen blocks in INDEX.md and AGENTS.md.
 
-**Input**: `testenv/nointern/scenarios/setup/*.md` (excluding INDEX.md)
+**Input**: `testenv/azents/scenarios/setup/*.md` (excluding INDEX.md)
 **Output** (in-place modify):
-- `<!-- AUTO-GENERATED:START/END -->` in `testenv/nointern/scenarios/setup/INDEX.md`
-- `<!-- SETUP-LIST:START/END -->` in `testenv/nointern/AGENTS.md`
+- `<!-- AUTO-GENERATED:START/END -->` in `testenv/azents/scenarios/setup/INDEX.md`
+- `<!-- SETUP-LIST:START/END -->` in `testenv/azents/AGENTS.md`
 
 **Usage**:
 ```bash
-cd testenv/nointern
+cd testenv/azents
 uv run python scripts/gen-setup-index.py
 ```
 
@@ -490,7 +490,7 @@ uv run python scripts/lint-scenarios.py
 
 **exit**: 0 = pass, 1 = error (print each error to stderr)
 
-**CI integration**: Add to GitHub Actions workflow. Trigger on testenv/nointern/ changes.
+**CI integration**: Add to GitHub Actions workflow. Trigger on testenv/azents/ changes.
 
 ## Feasibility Verification Results
 
@@ -498,7 +498,7 @@ Prototype was actually written and executed in `/tmp/feasibility/`. All items pa
 
 ### Dependencies
 
-- `python-frontmatter==1.1.0` already exists in `testenv/nointern/pyproject.toml`. No new dependency.
+- `python-frontmatter==1.1.0` already exists in `testenv/azents/pyproject.toml`. No new dependency.
 - `graphlib` is Python standard library (3.9+). Use `TopologicalSorter` for DAG sort + cycle detection.
 
 ### gen-setup-index.py prototype (verified)
@@ -581,7 +581,7 @@ YAML literal block scalar (`|`) preserves multi-line bash well — no quote esca
 2. **No cascade** — verify failure of one setup does not automatically trigger rerun of upstream setup. Each setup verify checks its own reality, so cascade is unnecessary (and risky — can cause unintended reset). If needed, test scenario explicitly adds cleanup setup to `requires_setup`.
 3. **Need cleanup of lint drift check revert logic** — prototype runs gen, checks diff, then reverts original state. Implementation should be cleaner with "generate to temp file for comparison" → "compare to original". Functionality same.
 4. **Setup without verify allowed** — if provides is empty like `db-cleanup-*`, verify can also be absent (always run). Defined as optional field.
-5. **AGENTS.md currently absent** — `testenv/nointern/` currently has no AGENTS.md. Phase 3 PR must create it.
+5. **AGENTS.md currently absent** — `testenv/azents/` currently has no AGENTS.md. Phase 3 PR must create it.
 
 ### Prototype location
 
@@ -614,13 +614,13 @@ This design implementation aims to **migrate all existing testenv scenarios (13)
 ### Phase split
 
 1. **Design document** (current PR #2475) — discussion + design + plan
-2. **Phase 1: Setup infra skeleton + core setup** — `scenarios/setup/` directory, INDEX.md template, `runs/<run-id>/state.json` convention, core setup 4 files: `db-reset-nointern` / `test-user-workspace` / `default-shell-env` / `llm-provider-dummy` / `agent-dummy-key`
+2. **Phase 1: Setup infra skeleton + core setup** — `scenarios/setup/` directory, INDEX.md template, `runs/<run-id>/state.json` convention, core setup 4 files: `db-reset-azents` / `test-user-workspace` / `default-shell-env` / `llm-provider-dummy` / `agent-dummy-key`
 3. **Phase 2: Tooling** — `scripts/gen-setup-index.py` + `scripts/lint-scenarios.py` + CI workflow job registration. Smoke using Phase 1 setups.
-4. **Phase 3: AGENTS.md + decision rule injection** — create `testenv/nointern/AGENTS.md`, place markers, run gen script for first setup list fill.
+4. **Phase 3: AGENTS.md + decision rule injection** — create `testenv/azents/AGENTS.md`, place markers, run gen script for first setup list fill.
 5. **Phase 4: Sandbox-isolation + chat-streaming migration**
    - New setup: `sandbox-daemon-image`
    - Migration: TC-SBOX-001/002/005 (requires_setup: `[sandbox-daemon-image]`)
-   - Migration: TC-CHAT-001 (requires_setup: `[db-reset-nointern, test-user-workspace, default-shell-env, llm-provider-dummy, agent-dummy-key]`)
+   - Migration: TC-CHAT-001 (requires_setup: `[db-reset-azents, test-user-workspace, default-shell-env, llm-provider-dummy, agent-dummy-key]`)
    - actual execution and report
 6. **Phase 5: Shell-tool + mcp-toolkit migration**
    - New setup: `llm-provider-bedrock`, `agent-with-shell`, `mock-mcp-server`

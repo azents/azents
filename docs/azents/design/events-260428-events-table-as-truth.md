@@ -26,7 +26,7 @@ Problems:
 - Turn definition split across both sides (turn_id column vs TurnCompleteEvent row)
 - Compaction has two meanings (persistent row deletion + summary INSERT vs in-memory input replacement)
 
-Direction: **unify on events table**. Discard session_items_oai. NointernSession is thin adapter on top of EventStore.
+Direction: **unify on events table**. Discard session_items_oai. AzentsSession is thin adapter on top of EventStore.
 
 ## Decisions
 
@@ -67,12 +67,12 @@ class EventType(str, Enum):
     IMAGE_GENERATION_ITEM = "image_generation_item"
     UNKNOWN_ITEM = "unknown_item"
 
-    # NoIntern-formatted (raw_data NULL, formatter wraps as user role)
+    # Azents-formatted (raw_data NULL, formatter wraps as user role)
     USER_INPUT = "user_input"
     SYSTEM_REMINDER = "system_reminder"
     COMPACTION = "compaction"
 
-    # NoIntern-meta (raw_data NULL, no formatter, model-hidden)
+    # Azents-meta (raw_data NULL, no formatter, model-hidden)
     TURN_COMPLETE = "turn_complete"
     COMPACTION_STARTED = "compaction_started"
     SUBAGENT_START = "subagent_start"
@@ -142,16 +142,16 @@ New: 2 rows (SDK's function_call and function_call_output respectively)
 
 ```
 engine/events/parsers.py     — raw → data conversion for SDK origin types (write direction)
-engine/events/formatters.py  — data → user role conversion for NoIntern types (read direction)
+engine/events/formatters.py  — data → user role conversion for Azents types (read direction)
 ```
 
-SDK origin and NoIntern origin are disjoint type sets, so they are not pairs:
+SDK origin and Azents origin are disjoint type sets, so they are not pairs:
 
 | Group | parser (write) | formatter (read) |
 |---|---|---|
 | SDK origin (text_item, etc.) | ✅ | ❌ (raw_data passthrough) |
-| NoIntern formatted (user_input, etc.) | ❌ | ✅ |
-| NoIntern meta (turn_complete, etc.) | ❌ | ❌ (skip) |
+| Azents formatted (user_input, etc.) | ❌ | ✅ |
+| Azents meta (turn_complete, etc.) | ❌ | ❌ (skip) |
 
 ### H. Emit pipeline
 
@@ -164,9 +164,9 @@ SDK stream event:
 
 Worker:
   receive user input → INSERT user_input row (worker assigns external_id)
-                     → Runner.run_streamed(input=..., session=NointernSession)
+                     → Runner.run_streamed(input=..., session=AzentsSession)
 
-NoIntern emit (system_reminder, subagent_*, error, etc.):
+Azents emit (system_reminder, subagent_*, error, etc.):
   → durable emit → INSERT (raw_data NULL, data directly constructed)
 
 SDK add_items (turn end batch):
@@ -176,10 +176,10 @@ SDK add_items (turn end batch):
   → caller input conflicts with external_id assigned by worker → skipped
 ```
 
-### I. NointernSession (EventStore adapter)
+### I. AzentsSession (EventStore adapter)
 
 ```python
-class NointernSession(SessionABC):
+class AzentsSession(SessionABC):
     def __init__(self, session_id, event_store, model_id):
         self._sid = session_id
         self._store = event_store
@@ -195,7 +195,7 @@ class NointernSession(SessionABC):
                 items.append(event.raw_data)              # SDK passthrough
             else:
                 fmt = FORMATTERS[event.type]
-                items.extend(fmt.to_input_items(event))   # NoIntern → user role
+                items.extend(fmt.to_input_items(event))   # Azents → user role
         return items[-limit:] if limit else items
 
     async def add_items(self, items):
@@ -271,8 +271,8 @@ class NointernSession(SessionABC):
 **external_id decision rule**:
 1. if `item.get("id")` exists and != FAKE_RESPONSES_ID, use it
 2. otherwise `item.get("call_id")` (fallback for function_call_output)
-3. NoIntern-created row is assigned by worker (e.g. `"nointern_user_<uuid7>"`)
-4. NoIntern meta type (turn_complete, etc.) is NULL
+3. Azents-created row is assigned by worker (e.g. `"azents_user_<uuid7>"`)
+4. Azents meta type (turn_complete, etc.) is NULL
 
 ### L. Partial event handling
 
@@ -324,7 +324,7 @@ Keep ImageLifecycleFilter, operate on events:
 
 ### M5. Background event → Worker-managed system_reminder INSERT
 
-Worker tracks BackgroundHandle of background tool. When completion detected, directly INSERT type=system_reminder, data.source="background_tool_result" row into events. At next turn start, NointernSession.get_items naturally includes it.
+Worker tracks BackgroundHandle of background tool. When completion detected, directly INSERT type=system_reminder, data.source="background_tool_result" row into events. At next turn start, AzentsSession.get_items naturally includes it.
 
 ### A. Ephemeral emit (UI delivery) data structure → keep Legacy ContentDelta / ReasoningDelta dataclass
 
@@ -332,7 +332,7 @@ Keep Legacy UI client compatibility. ephemeral is not persisted, so there is lit
 
 ### B. external_id prefix rule → uuid7 hex (no prefix)
 
-external_id of NoIntern-origin row is only uuid7 hex. type column sufficiently indicates origin. Naturally distinguishable from SDK OpenAI id (msg_*, fc_*).
+external_id of Azents-origin row is only uuid7 hex. type column sufficiently indicates origin. Naturally distinguishable from SDK OpenAI id (msg_*, fc_*).
 
 ### C. Caller input format → list[TResponseInputItem] with worker-assigned id
 
@@ -345,7 +345,7 @@ Critical path 8 + auxiliary 3:
 1. Design documents (redesign + inventory + ADR)
 2. events schema (alembic + ENUM + RDBEvent + CHECK)
 3. events package (parsers + formatters + emitter)
-4. NointernSession (EventStore adapter)
+4. AzentsSession (EventStore adapter)
 5. LLM Model + DynamicAgent + tool_converter (PORT)
 6. Filters (4 types + CompactionStrategy)
 7. EngineAdapter + Worker integration
@@ -360,14 +360,14 @@ This work is **full migration**, not MVP. Once all 11 phases are merged, it prov
 
 ### F. Test strategy → unit + integration
 
-- **Unit**: parser/formatter tests per type, NointernSession dedup tests, Filter chain tests (included in Phase 3, 4, 6). Existing session_test/filters_test/engine_adapter_test are rewritten for new schema.
+- **Unit**: parser/formatter tests per type, AzentsSession dedup tests, Filter chain tests (included in Phase 3, 4, 6). Existing session_test/filters_test/engine_adapter_test are rewritten for new schema.
 - **Integration**: SDK + LiteLLM cross-model scenarios in testenv or azents-e2e (reasoning + function_call + image multipart round-trip for Bedrock Claude / Anthropic / OpenAI). Together with Phase 11 testenv item.
 
 ## Next Steps
 
 1. Merge this redesign doc + inventory + ADR 0003 (events unification decision) into main as first docs PR.
 2. Close existing 18 PRs (#3050, #3057-3098) + link this docs + comment mapping for corresponding inventory items.
-3. Proceed sequentially from new stack Phase 2 (events schema → events package → NointernSession → ...).
+3. Proceed sequentially from new stack Phase 2 (events schema → events package → AzentsSession → ...).
 4. Migration complete when all through Phase 11 are merged.
 
 ## Verification Evidence Quotes

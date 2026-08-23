@@ -21,7 +21,7 @@ migration_source: "docs/azents/adr/0034-chat-input-buffer.md"
 
 ## Problem
 
-nointern chat allows users to send additional messages while a run is active. Currently, the first input and normal inputs are stored as `UserInputEvent` before engine execution, but additional input during a run stays only in `_SessionRunner._queue` and is promoted to `events` only when `poll_messages()` is called. Therefore, if refresh, worker restart, or process termination happens between message receipt and model turn injection, there is a persistence gap where the user-sent message is not visible in durable history.
+Azents chat allows users to send additional messages while a run is active. Currently, the first input and normal inputs are stored as `UserInputEvent` before engine execution, but additional input during a run stays only in `_SessionRunner._queue` and is promoted to `events` only when `poll_messages()` is called. Therefore, if refresh, worker restart, or process termination happens between message receipt and model turn injection, there is a persistence gap where the user-sent message is not visible in durable history.
 
 Solving this gap by mixing queued state into `events` would blur the meaning of the append-only event log. `events` is already used as the durable source for model history and UI history, and `external_id` dedup plus run boundary/truncate rules all assume items that are already finalized as model turns or system events.
 

@@ -206,10 +206,10 @@ Engine does not need to structurally know toolkit internal state. toolkit expres
 | Situation | tools | prompt |
 |------|-------|--------|
 | MCP connecting | [] | "Loading Slack tools..." |
-| MCP connected | [post_message, ...] | "Connected to Slack workspace 'nointern'." |
+| MCP connected | [post_message, ...] | "Connected to Slack workspace 'azents'." |
 | MCP connection failed | [] | "Slack MCP server connection failed: connection refused" |
 | OAuth auth required | [request_authorization] | "Slack integration is required." |
-| OAuth auth complete | [post_message, ...] | "Connected to Slack workspace 'nointern'." |
+| OAuth auth complete | [post_message, ...] | "Connected to Slack workspace 'azents'." |
 | sidecar Pod preparing | [] | "Sandbox preparing..." |
 
 ### State Change Triggers

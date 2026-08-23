@@ -25,7 +25,7 @@ This document is the implementation design for the decisions recorded in [filesy
 - Keep Skill authoring filesystem-native and compatible with existing `SKILL.md` package conventions.
 - Avoid runtime filesystem reads on the normal session-loop read path.
 - Keep prompt rendering, `/actions`, and `load_skill` consistent for a whole run.
-- Preserve legacy nointern Skill prompt behavior with only the required path-based loading changes.
+- Preserve legacy Azents Skill prompt behavior with only the required path-based loading changes.
 - Support duplicate Skill slugs across registered Projects without hidden precedence.
 - Expose Skills as composer actions through the existing `/actions` model.
 - Keep parent and subagent Skill projections independent.
@@ -225,7 +225,7 @@ Non-responsibilities:
 
 ### Prompt rendering
 
-Keep the legacy nointern Skill prompt wording as the baseline and add only path-based loading details.
+Keep the legacy Azents Skill prompt wording as the baseline and add only path-based loading details.
 
 Representative output:
 

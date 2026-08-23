@@ -405,7 +405,7 @@ This logic is implemented in `DiscordAdapter` / `SlackAdapter`. It detects sched
 |------|-----------|
 | Redis Sorted Set store | Persistence uncertainty; PostgreSQL polling is enough |
 | Scheduler inside Engine Worker | Singleton logic does not fit horizontally scaled Workers |
-| Temporal Workflow | Not used in nointern and too large a dependency |
+| Temporal Workflow | Not used in azents and too large a dependency |
 | Reuse fixed session | Data comparison can be solved with tools; session may grow too large |
 | Structured fields such as interval/time/days | Limited expressiveness; cron is more general |
 | Separate schedule_runs table | Session itself is execution history; duplicate |

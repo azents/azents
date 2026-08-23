@@ -1,6 +1,6 @@
 ---
 title: "Stage 3 — testenv Tool Execution + Sandbox + MCP Verification Platform"
-tags: [testenv, nointern, stage3, tool-execution, sandbox, mcp]
+tags: [testenv, azents, stage3, tool-execution, sandbox, mcp]
 created: 2026-04-09
 updated: 2026-04-09
 implemented: 2026-04-09
@@ -17,11 +17,11 @@ migration_source: "docs/azents/design/llm-tool-execution.md"
 
 ## Overview
 
-Up to Stage 2, `testenv/nointern` became capable of preflight → devserver → seed → WebSocket LLM pipeline verification. Stage 3 aims to make **agent tool execution paths** (shell / file tool / Sandbox isolation / MCP toolkit credential injection) reproducible and verifiable locally. A large portion of bugs discovered only after deployment are concentrated in this area.
+Up to Stage 2, `testenv/azents` became capable of preflight → devserver → seed → WebSocket LLM pipeline verification. Stage 3 aims to make **agent tool execution paths** (shell / file tool / Sandbox isolation / MCP toolkit credential injection) reproducible and verifiable locally. A large portion of bugs discovered only after deployment are concentrated in this area.
 
-**Fundamental premise — testenv is not an automated e2e framework.** testenv is a platform used when an agent (coding agent such as Claude Code) acts as **QA engineer** and manually verifies nointern-server. Scenarios are not auto-execution scripts but **markdown procedures read and followed by agent** (hybrid of SRE runbook + Gherkin BDD + IEEE 829 test case).
+**Fundamental premise — testenv is not an automated e2e framework.** testenv is a platform used when an agent (coding agent such as Claude Code) acts as **QA engineer** and manually verifies azents-server. Scenarios are not auto-execution scripts but **markdown procedures read and followed by agent** (hybrid of SRE runbook + Gherkin BDD + IEEE 829 test case).
 
-Parent context: [#2327](https://github.com/azents/azents/issues/2327) — Stage 3 of full nointern test environment build.
+Parent context: [#2327](https://github.com/azents/azents/issues/2327) — Stage 3 of full azents test environment build.
 Discussion record: [Discussion #2403](https://github.com/azents/azents/discussions/2403) — 10 discussion points and feasibility verification result.
 
 ## Target Scenarios
@@ -41,11 +41,11 @@ Agent should be able to do following in local testenv:
 
 | # | Item | Decision | Rationale |
 |---|---|---|---|
-| 1 | Sandbox backend | **Start Docker-only** — force `sandbox_backend: "docker"` in testenv. K8s verification is future work (separate Stage). | nointern runtime already has Docker/K8s abstraction layer (`agent_home_factory.py`), so testenv can reproduce most deployment bugs locally with Docker path only. K8s-specific (NetworkPolicy) is infra layer concern. |
+| 1 | Sandbox backend | **Start Docker-only** — force `sandbox_backend: "docker"` in testenv. K8s verification is future work (separate Stage). | azents runtime already has Docker/K8s abstraction layer (`agent_home_factory.py`), so testenv can reproduce most deployment bugs locally with Docker path only. K8s-specific (NetworkPolicy) is infra layer concern. |
 | 2 | Image build automation | **Separate `devserver.py build-runtime` command** — build 3 images (agent-runtime / sandbox-daemon / mcp-proxy) with this command. preflight image existence failure fix_hint points to this command. | agent-runtime is not compose service (DockerAgentHomeClient directly `docker run`s) → tying into compose `build:` is conceptual mismatch. |
 | 3 | `live/` module extension | **Split submodules** — `live/chat.py` (existing), `live/sandbox.py`, `live/tools.py`, `live/mcp.py`, `live/matchers.py` (extension). | Each module owns one concern. Consistent with Stage 2 `chat` separation philosophy. |
 | 4 | Isolation verification method | **Low-level helper** (`live/sandbox.py`) — directly wrap `DockerAgentHomeClient` + `SandboxDaemonClient`, bypass LLM. | LLM prompt-based isolation verification is non-deterministic + requires real key. Low-level is deterministic + dummy-key-safe → can run in CI. |
-| 5 | MCP test strategy | **Start with Mock stdio server, design capable of covering real MCP later**. Add `testenv/nointern/fixtures/mock_mcp_server.py` + `mcp==1.26.0` dependency. | Verification target is not "MCP server itself" but "does our infra deliver credential correctly to MCP server". mock is optimal for credential injection verification. |
+| 5 | MCP test strategy | **Start with Mock stdio server, design capable of covering real MCP later**. Add `testenv/azents/fixtures/mock_mcp_server.py` + `mcp==1.26.0` dependency. | Verification target is not "MCP server itself" but "does our infra deliver credential correctly to MCP server". mock is optimal for credential injection verification. |
 | 6 | Preflight checks added | 4 required checks: `docker-socket-accessible`, `agent-runtime-image-exists`, `sandbox-daemon-image-exists`, `mcp-proxy-image-exists`. All FAIL category. | WARN-level checks have maintenance cost > value. fix_hint guides to `devserver.py build-runtime`. |
 | 7 | Matchers extension | **4 `function_call_item` based** + 2 for `live.sandbox`. Details below. | feasibility check found actual event type is single `function_call_item` (what we called "tool_call") — integrate earlier 7 proposals into 4. |
 | 8 | Phase split | **8 phase stacked PR** — same as Stage 2. See implementation plan below. | Independent review per PR and early abandonment possible if direction wrong. |
@@ -58,13 +58,13 @@ Agent should be able to do following in local testenv:
 
 ```mermaid
 flowchart LR
-  A[Agent] --> B[testenv/nointern]
+  A[Agent] --> B[testenv/azents]
   B --> C[checks/ preflight]
   B --> D[devserver.py<br/>up/down/logs]
   B --> E[seed/ helpers]
   B --> F[live/chat + matchers]
   D --> G[docker-compose<br/>db, valkey, rustfs, file-api]
-  F --> H[nointern-server<br/>public :8010]
+  F --> H[azents-server<br/>public :8010]
 ```
 
 ### Target (after Stage 3 completion)
@@ -72,14 +72,14 @@ flowchart LR
 ```mermaid
 flowchart LR
   A[Agent] --> R[scenarios/*.md<br/>catalog]
-  R --> B[testenv/nointern]
+  R --> B[testenv/azents]
   B --> C[checks/ + agent_home/docker/mcp checks]
   B --> D[devserver.py<br/>up/down/logs/build-runtime]
   B --> E[seed/ + toolkit seed]
   B --> F[live/chat + tools + sandbox + mcp]
   B --> T[fixtures/mock_mcp_server.py]
   D --> G[docker-compose<br/>existing + agent-runtime image build verification]
-  F --> H[nointern-server<br/>public :8010]
+  F --> H[azents-server<br/>public :8010]
   F --> I[DockerAgentHomeClient<br/>reuse]
   I --> J[agent-home-{id}<br/>container]
   J --> K[sandbox-daemon]
@@ -91,7 +91,7 @@ flowchart LR
 
 ### Scenario File Schema
 
-YAML frontmatter + markdown body. `testenv/nointern/scenarios/<category>/<name>.md`.
+YAML frontmatter + markdown body. `testenv/azents/scenarios/<category>/<name>.md`.
 
 ```yaml
 ---
@@ -120,7 +120,7 @@ Body sections:
 
 ### INDEX.md Schema
 
-Catalog root `testenv/nointern/scenarios/INDEX.md` has table of every scenario:
+Catalog root `testenv/azents/scenarios/INDEX.md` has table of every scenario:
 
 ```markdown
 | test_id | category | severity | requires | estimated_minutes | last_reviewed |
@@ -134,7 +134,7 @@ Agent reads this file first and selects relevant scenario when user asks. Mainta
 
 ### Result Record Schema
 
-`testenv/nointern/runs/<YYYY-MM-DD>/<test_id>.md`:
+`testenv/azents/runs/<YYYY-MM-DD>/<test_id>.md`:
 
 ```markdown
 ---
@@ -162,7 +162,7 @@ duration_seconds: 118
 
 ## Module Implementation
 
-### `testenv/nointern/live/sandbox.py`
+### `testenv/azents/live/sandbox.py`
 
 Thin wrapper around `DockerAgentHomeClient` + `SandboxDaemonClient`. Low-level helper bypassing LLM.
 
@@ -178,7 +178,7 @@ class Sandbox:
     """
 
     config: TestenvConfig
-    image: str = "nointern-agent-runtime:testenv"
+    image: str = "azents-agent-runtime:testenv"
 
     def start(
         self,
@@ -189,8 +189,8 @@ class Sandbox:
         """Start Agent Home container and return ready state."""
         client = DockerAgentHomeClient(
             image=self.image,
-            network="nointern-testenv_default",
-            data_path="/tmp/nointern-testenv/agent-data",
+            network="azents-testenv_default",
+            data_path="/tmp/azents-testenv/agent-data",
         )
         # ... ensure_ready + return AgentHome
 
@@ -206,7 +206,7 @@ class Sandbox:
         ...
 ```
 
-### `testenv/nointern/live/tools.py`
+### `testenv/azents/live/tools.py`
 
 Combination of `live.chat` + matchers. High-level helper used when agent verifies LLM-routed tool execution.
 
@@ -230,7 +230,7 @@ class Tools:
         ...
 ```
 
-### `testenv/nointern/live/mcp.py`
+### `testenv/azents/live/mcp.py`
 
 Start Mock stdio MCP server + seed toolkit_config.
 
@@ -267,7 +267,7 @@ class Mcp:
         ...
 ```
 
-### `testenv/nointern/live/matchers.py` (extension)
+### `testenv/azents/live/matchers.py` (extension)
 
 Feasibility check confirmed real event type is single `function_call_item`. Therefore, 7 proposals → 4 (+ 2 sandbox-specific).
 
@@ -303,17 +303,17 @@ def sandbox_exec_blocked(result: ExecResult) -> None:
 
 ## Preflight Checks
 
-Add to `testenv/nointern/checks/`:
+Add to `testenv/azents/checks/`:
 
 | check id | category | status | verification |
 |---|---|---|---|
 | `docker-socket-accessible` | system | FAIL | `docker.sock` accessible + `docker ps` succeeds |
-| `agent-runtime-image-exists` | images | FAIL | `docker image inspect nointern-agent-runtime:testenv` |
-| `sandbox-daemon-image-exists` | images | FAIL | `docker image inspect nointern-sandbox-daemon:testenv` |
-| `mcp-proxy-image-exists` | images | FAIL | `docker image inspect nointern-mcp-proxy:testenv` |
+| `agent-runtime-image-exists` | images | FAIL | `docker image inspect azents-agent-runtime:testenv` |
+| `sandbox-daemon-image-exists` | images | FAIL | `docker image inspect azents-sandbox-daemon:testenv` |
+| `mcp-proxy-image-exists` | images | FAIL | `docker image inspect azents-mcp-proxy:testenv` |
 
 All FAIL fix_hint:
-> `cd testenv/nointern && uv run devserver.py build-runtime`
+> `cd testenv/azents && uv run devserver.py build-runtime`
 
 ## devserver.py Extension
 
@@ -327,12 +327,12 @@ def build_runtime(force: bool = False) -> None:
         force: ignore cache and rebuild
     """
     images = [
-        ("agent-runtime", "docker/nointern/agent-runtime/Dockerfile"),
-        ("sandbox-daemon", "docker/nointern/sandbox-daemon/Dockerfile"),
-        ("mcp-proxy", "docker/nointern/mcp-proxy/Dockerfile"),
+        ("agent-runtime", "docker/azents/agent-runtime/Dockerfile"),
+        ("sandbox-daemon", "docker/azents/sandbox-daemon/Dockerfile"),
+        ("mcp-proxy", "docker/azents/mcp-proxy/Dockerfile"),
     ]
     for name, dockerfile in images:
-        tag = f"nointern-{name}:testenv"
+        tag = f"azents-{name}:testenv"
         cmd = ["docker", "build", "-f", dockerfile, "-t", tag]
         if force:
             cmd.append("--no-cache")
@@ -342,11 +342,11 @@ def build_runtime(force: bool = False) -> None:
 
 ## Dependencies Added
 
-Add to `testenv/nointern/pyproject.toml`:
+Add to `testenv/azents/pyproject.toml`:
 - `python-frontmatter==1.1.0` — scenario file parsing
 - `mcp==1.26.0` — mock stdio MCP server implementation
 
-Feasibility verification confirmed both packages already exist in nointern app but are missing in testenv.
+Feasibility verification confirmed both packages already exist in azents app but are missing in testenv.
 
 ## Phase Split
 
@@ -386,7 +386,7 @@ Verified in Discussion #2403 on 2026-04-09. Overall result: **7/7 items possible
 
 | # | Item | Result | Resolution |
 |---|---|---|---|
-| 1 | Reuse `DockerAgentHomeClient` | ✅ | constructor `(image, network, data_path, docker_host)`, instantiable without nointern DI |
+| 1 | Reuse `DockerAgentHomeClient` | ✅ | constructor `(image, network, data_path, docker_host)`, instantiable without azents DI |
 | 2 | `docker build` for 3 images | ✅ | buildx not required, no secrets |
 | 3 | MCP mock server | ⚠️ | add `mcp==1.26.0` to testenv pyproject |
 | 4 | YAML frontmatter parsing | ⚠️ | add `python-frontmatter==1.1.0` to testenv pyproject |
@@ -439,7 +439,7 @@ Result records accumulate and `runs/` grows. retention policy:
 - Sub issue: [#2401](https://github.com/azents/azents/issues/2401)
 - Previous Stage 2: [#2376](https://github.com/azents/azents/issues/2376)
 - Design discussion: [Discussion #2403](https://github.com/azents/azents/discussions/2403)
-- Stage 2 outputs: `testenv/nointern/live/chat.py`, `live/matchers.py`, `checks/config.py` (`LLMApiKeyAvailable`)
-- nointern runtime: `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_docker.py`, `agent_home_factory.py`
-- sandbox-daemon: `python/apps/nointern-sandbox-daemon/src/nointern_sandbox_daemon/routes.py`
-- Dockerfile: `docker/nointern/agent-runtime/Dockerfile`, `sandbox-daemon/Dockerfile`, `mcp-proxy/Dockerfile`
+- Stage 2 outputs: `testenv/azents/live/chat.py`, `live/matchers.py`, `checks/config.py` (`LLMApiKeyAvailable`)
+- azents runtime: `python/apps/azents/src/azents/runtime/sandbox/agent_home_docker.py`, `agent_home_factory.py`
+- sandbox-daemon: `python/apps/azents-sandbox-daemon/src/azents_sandbox_daemon/routes.py`
+- Dockerfile: `docker/azents/agent-runtime/Dockerfile`, `sandbox-daemon/Dockerfile`, `mcp-proxy/Dockerfile`

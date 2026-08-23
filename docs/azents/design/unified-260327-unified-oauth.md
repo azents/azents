@@ -211,7 +211,7 @@ Receive `nextToolkit?: string` prop and store it in sessionStorage before OAuth 
 ```typescript
 const onConnect = useCallback(() => {
   if (nextToolkit) {
-    sessionStorage.setItem('nointern_next_toolkit', nextToolkit);
+    sessionStorage.setItem('azents_next_toolkit', nextToolkit);
   }
   setState({ type: "LOADING" });
   mutation.mutate({ handle }, { onSuccess: ... });
@@ -224,9 +224,9 @@ const onConnect = useCallback(() => {
 
 ```typescript
 useEffect(() => {
-  const nextToolkit = sessionStorage.getItem('nointern_next_toolkit');
+  const nextToolkit = sessionStorage.getItem('azents_next_toolkit');
   if (state.type === 'SUCCESS' && isAccountLink && nextToolkit) {
-    sessionStorage.removeItem('nointern_next_toolkit');
+    sessionStorage.removeItem('azents_next_toolkit');
     userAuthorizeMutation.mutate(
       { handle: state.workspace, toolkitConfigId: nextToolkit },
       { onSuccess: (data) => { window.location.href = data.authorization_url; } }

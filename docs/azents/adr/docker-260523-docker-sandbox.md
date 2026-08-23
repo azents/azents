@@ -15,11 +15,11 @@ migration_source: "docs/azents/adr/0037-system-docker-sandbox-provider.md"
 
 After provider-control rollout, we needed a provider implementation that can reproduce and isolate production K8s provider issues locally. The current local dev path has `DockerSessionSandboxClient`, but that backend has the worker process directly control Docker. Therefore it cannot verify provider-control stream, provider heartbeat, lease, or provider-owned lifecycle command routing.
 
-The customer local Docker provider discussed in separate issues #3906/#3916 is a workspace-scoped provider daemon running on a customer's machine. That product feature includes login UX, provider credential, public TLS, credential revoke, workspace provider UI, and local-machine trust boundary hardening. The purpose here is not to implement that feature. It is to manage Docker runtime as a system-level provider inside NoIntern devserver/testenv so K8s provider issues can be separated from provider-control core issues.
+The customer local Docker provider discussed in separate issues #3906/#3916 is a workspace-scoped provider daemon running on a customer's machine. That product feature includes login UX, provider credential, public TLS, credential revoke, workspace provider UI, and local-machine trust boundary hardening. The purpose here is not to implement that feature. It is to manage Docker runtime as a system-level provider inside Azents devserver/testenv so K8s provider issues can be separated from provider-control core issues.
 
 ## Decision
 
-Introduce `system-docker` sandbox provider as an internal NoIntern system provider.
+Introduce `system-docker` sandbox provider as an internal Azents system provider.
 
 1. `system-docker` is a system provider run by operator/devserver. It is not workspace/user-owned provider.
 2. Separate its name, scope, and credential model from customer local Docker provider.
@@ -77,7 +77,7 @@ Rejected. Fake provider verifies only protocol handshake and some ack paths. It 
 
 ## Status
 
-Accepted. Detailed design follows `docs/nointern/design/docker-260523-docker-sandbox.md`.
+Accepted. Detailed design follows `docs/azents/design/docker-260523-docker-sandbox.md`.
 
 ## Migration provenance
 

@@ -17,14 +17,14 @@ The Session Workspace Project contract keeps `/home/sandbox` as the Agent's long
 
 The initial design considered creating a dedicated persistent store for AGENTS.md as S3 objects. However, AGENTS.md is only the first example of long-lived state storage needs required by Toolkit runtime. Future memory, policy, audit, and tool-specific caches will have the same lifecycle and identity problems. If we create an AGENTS.md-only store, runtime state source of truth becomes unclear across `runtime_state` blob, S3 objects, and Toolkit internal memory.
 
-Also, in the current nointern runtime, Toolkit is already the execution boundary for tool bundle, prompt, credential, and runtime context. Introducing a separate arbitrary plugin runtime would require designing capability, isolation, versioning, and multi-tenant security together, which is too broad for the current need.
+Also, in the current azents runtime, Toolkit is already the execution boundary for tool bundle, prompt, credential, and runtime context. Introducing a separate arbitrary plugin runtime would require designing capability, isolation, versioning, and multi-tenant security together, which is too broad for the current need.
 
 ## Decision
 
 Do not create a separate plugin runtime or AGENTS.md-only S3 store. Instead, add tool-call observation hooks and a generalized Toolkit State store to the existing Toolkit interface.
 
-- `Toolkit.on_before_tool_call(...)`: called before nointern function tool handler execution.
-- `Toolkit.on_after_tool_call(...)`: called after nointern function tool handler execution.
+- `Toolkit.on_before_tool_call(...)`: called before azents function tool handler execution.
+- `Toolkit.on_after_tool_call(...)`: called after azents function tool handler execution.
 - Initial hooks are observation/state-update only. Tool deny, args mutation, and output mutation are out of scope for this decision.
 - Hook failure is isolated fail-open. Cancellation is re-raised so normal cancellation can propagate.
 - `update_context()` reads Toolkit State updated by hooks and reflects it in prompt assembly.

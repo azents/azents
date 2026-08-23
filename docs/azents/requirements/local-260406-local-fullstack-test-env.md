@@ -28,7 +28,7 @@ migration_source: "docs/azents/adr/0017-local-fullstack-test-env.md"
 @dataclass
 class RunContext:
     repo_root: Path
-    nointern_dir: Path
+    azents_dir: Path
     env_file: Path
     env: dict[str, str]
     previous_results: dict[str, CheckResult]
@@ -43,7 +43,7 @@ Unknown — the historical source does not state this explicitly.
 
 ## Primary Scenario
 
-| | Infra | devserver | agent-runtime | LLM Key | nointern-web |
+| | Infra | devserver | agent-runtime | LLM Key | azents-web |
 |---|:-:|:-:|:-:|:-:|:-:|
 | A. API CRUD / prompt assembly | O | O | - | - | - |
 | B. WebSocket chat / LLM pipeline | O | O | - | O | - |
@@ -55,7 +55,7 @@ Unknown — the historical source does not state this explicitly.
 
 ## Supporting Scenarios
 
-| | Infra | devserver | agent-runtime | LLM Key | nointern-web |
+| | Infra | devserver | agent-runtime | LLM Key | azents-web |
 |---|:-:|:-:|:-:|:-:|:-:|
 | A. API CRUD / prompt assembly | O | O | - | - | - |
 | B. WebSocket chat / LLM pipeline | O | O | - | O | - |

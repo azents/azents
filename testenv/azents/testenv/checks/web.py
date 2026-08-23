@@ -97,7 +97,7 @@ class PnpmInstalled(Check):
         return CheckResult(status=Status.PASS, message=completed.stdout.strip())
 
 
-class NointernWebDepsInstalled(Check):
+class AzentsWebDepsInstalled(Check):
     """Check whether azents-web node_modules are installed."""
 
     def __init__(self) -> None:
@@ -119,7 +119,7 @@ class NointernWebDepsInstalled(Check):
         return CheckResult(status=Status.PASS)
 
 
-class NointernWebPortFree(Check):
+class AzentsWebPortFree(Check):
     """Check whether the azents-web port is free."""
 
     def __init__(self) -> None:

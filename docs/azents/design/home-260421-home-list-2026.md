@@ -1,11 +1,11 @@
 ---
 title: "Home-as-agent-list Reorganization"
-tags: [frontend, nointern-web, navigation, UX, historical-reconstruction]
+tags: [frontend, azents-web, navigation, UX, historical-reconstruction]
 created: 2026-04-21
 updated: 2026-04-21
 implemented: 2026-04-21
 issue: "#2779"
-supersedes: docs/nointern/design/nav-260420-nav.md
+supersedes: docs/azents/design/nav-260420-nav.md
 document_role: primary
 document_type: design
 snapshot_id: home-260421
@@ -20,7 +20,7 @@ historical_reconstruction: true
 
 ## Overview
 
-Simplify nointern-web workspace IA one more time.
+Simplify azents-web workspace IA one more time.
 
 After agent-centric-nav implementation in `#2779`, "agent existence" was spread across 3 places in workspace:
 
@@ -116,8 +116,8 @@ graph TB
 
 ## Testenv / Spec Impact
 
-- **testenv**: N/A. nointern testenv verifies backend flows — this change is pure FE. Manually verify with Playwright / devtools mobile emulation.
-- **spec**: N/A. `docs/nointern/spec/**` `code_paths` are backend-only. FE route change is not spec update target.
+- **testenv**: N/A. azents testenv verifies backend flows — this change is pure FE. Manually verify with Playwright / devtools mobile emulation.
+- **spec**: N/A. `docs/azents/spec/**` `code_paths` are backend-only. FE route change is not spec update target.
 
 ## Reviewer Checkpoints
 

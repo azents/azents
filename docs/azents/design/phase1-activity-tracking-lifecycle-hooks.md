@@ -100,7 +100,7 @@ flowchart LR
 
 ### 3.1 Migration (`conversation_sessions.last_activity_at`)
 
-File: `python/apps/nointern/db-schemas/rdb/migrations/versions/c2ea1992a602_add_last_activity_at_to_conversation_sessions.py`
+File: `python/apps/azents/db-schemas/rdb/migrations/versions/c2ea1992a602_add_last_activity_at_to_conversation_sessions.py`
 
 > **Actual implementation reflected (2026-04-15)**: `down_revision` is fixed to `0057dab8a446`, the latest `alembic heads` at PR-3 merge point. `revision` was generated as random 8-hex `c2ea1992a602`. Also `db-schemas/rdb/revision` file must be updated to `c2ea1992a602` so devserver `alembic_upgrade` applies to latest head (fixed forward in PR-5).
 
@@ -163,7 +163,7 @@ def downgrade() -> None:
 
 ### 3.2 Model change
 
-`python/apps/nointern/src/nointern/rdb/models/conversation_session.py`:
+`python/apps/azents/src/azents/rdb/models/conversation_session.py`:
 
 ```python
 last_activity_at: Mapped[datetime.datetime] = mapped_column(
@@ -178,9 +178,9 @@ last_activity_at: Mapped[datetime.datetime] = mapped_column(
 
 ### 3.3 Repository methods
 
-`python/apps/nointern/src/nointern/repos/conversation_session/__init__.py`:
+`python/apps/azents/src/azents/repos/conversation_session/__init__.py`:
 
-> **Actual implementation reflected (2026-04-15)**: Following existing NoIntern `ConversationSessionRepository` pattern, `session: AsyncSession` is the **first positional argument** (stateless repo convention, not using `self._session` stateful field).
+> **Actual implementation reflected (2026-04-15)**: Following existing Azents `ConversationSessionRepository` pattern, `session: AsyncSession` is the **first positional argument** (stateless repo convention, not using `self._session` stateful field).
 
 ```python
 async def touch_last_activity_at(
@@ -227,7 +227,7 @@ async def find_idle_agent_ids(
 
 ### 4.1 Clean up AgentHomeClient protocol
 
-`python/apps/nointern/src/nointern/runtime/sandbox/agent_home.py`:
+`python/apps/azents/src/azents/runtime/sandbox/agent_home.py`:
 
 - **Remove**: `update_last_used(agent_id)`, `list_idle_agents(threshold)`
 - Impact: remove these methods from `DockerAgentHomeClient`, `K8sAgentHomeClient`, `FakeAgentHomeClient` and update tests
@@ -235,7 +235,7 @@ async def find_idle_agent_ids(
 
 ### 4.2 Lifecycle Hook infrastructure
 
-`python/apps/nointern/src/nointern/runtime/sandbox/lifecycle_hooks.py` (new):
+`python/apps/azents/src/azents/runtime/sandbox/lifecycle_hooks.py` (new):
 
 ```python
 """Agent Home lifecycle hook interface.
@@ -385,7 +385,7 @@ async def _cleanup_idle(self) -> None:
 
 ### 4.4 EngineWorker activity update point
 
-`python/apps/nointern/src/nointern/worker/engine.py`:
+`python/apps/azents/src/azents/worker/engine.py`:
 
 - `EngineWorker` already has `conversation_session_repository: ConversationSessionRepository` (engine.py:220). No new DI needed.
 - In `EngineWorker.run()`, call `self.conversation_session_repository.touch_last_activity_at(session_id)` only for `SessionMessage` received by `broker.receive_messages()` with `kind != SessionMessageKind.RESUME`.
@@ -398,7 +398,7 @@ async def _cleanup_idle(self) -> None:
 
 ### 4.5 DI update
 
-`python/apps/nointern/src/nointern/worker/deps.py`:
+`python/apps/azents/src/azents/worker/deps.py`:
 
 - `ConversationSessionRepository` is already imported and injected into `EngineWorker` (deps.py:22, 164)
 - Need new injection of `ConversationSessionRepository` + `hooks=()` into `AgentHomeSandboxManager` (modify `get_agent_home_manager` factory)
@@ -431,7 +431,7 @@ async def _cleanup_idle(self) -> None:
 
 ## 7. testenv QA Scenarios
 
-`testenv/nointern/scenarios/` uses pair pattern of `TC-*.md` (frontmatter + description) + `tc_handlers/.../tc_*.py` (`docs/development/web/testenv-260414-testenv-runner-redesign.md`, existing `TC-SBOX-001` reference). Phase 1 adds following 4 TCs under new category `agent-home-lifecycle/`.
+`testenv/azents/scenarios/` uses pair pattern of `TC-*.md` (frontmatter + description) + `tc_handlers/.../tc_*.py` (`docs/development/web/testenv-260414-testenv-runner-redesign.md`, existing `TC-SBOX-001` reference). Phase 1 adds following 4 TCs under new category `agent-home-lifecycle/`.
 
 - `TC-LCY-001` — happy path: update `last_activity_at` on SessionMessage(USER) receive
 - `TC-LCY-002` — RESUME non-update: force RESUME injection and confirm `last_activity_at` unchanged
@@ -443,7 +443,7 @@ Example (TC-LCY-001 concept):
 ### TC-LCY-001: Activity update — happy path
 
 ```python
-# testenv/nointern/scenarios/phase1_activity_tracking.py
+# testenv/azents/scenarios/phase1_activity_tracking.py
 async def scenario(client):
     user = await client.auth.create_user()
     ws = await client.workspace.create(user)
@@ -544,14 +544,14 @@ Ship as 2 stacked PRs.
 **Branch**: `feat/phase1-activity-tracking` (base: `main`)
 
 Files:
-- `python/apps/nointern/db-schemas/rdb/migrations/versions/{new}_add_last_activity_at_to_conversation_sessions.py`
-- `python/apps/nointern/src/nointern/rdb/models/conversation_session.py`
-- `python/apps/nointern/src/nointern/repos/conversation_session/__init__.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/agent_home.py` (remove `update_last_used`, `list_idle_agents`)
-- `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_manager.py` (switch to DB idle query, remove `update_last_used` calls)
-- `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_docker.py`, `agent_home_k8s.py` (remove deprecated methods)
-- `python/apps/nointern/src/nointern/worker/engine.py` (touch last_activity_at at dispatch)
-- `python/apps/nointern/src/nointern/worker/deps.py` (inject ConversationSessionRepo into manager)
+- `python/apps/azents/db-schemas/rdb/migrations/versions/{new}_add_last_activity_at_to_conversation_sessions.py`
+- `python/apps/azents/src/azents/rdb/models/conversation_session.py`
+- `python/apps/azents/src/azents/repos/conversation_session/__init__.py`
+- `python/apps/azents/src/azents/runtime/sandbox/agent_home.py` (remove `update_last_used`, `list_idle_agents`)
+- `python/apps/azents/src/azents/runtime/sandbox/agent_home_manager.py` (switch to DB idle query, remove `update_last_used` calls)
+- `python/apps/azents/src/azents/runtime/sandbox/agent_home_docker.py`, `agent_home_k8s.py` (remove deprecated methods)
+- `python/apps/azents/src/azents/worker/engine.py` (touch last_activity_at at dispatch)
+- `python/apps/azents/src/azents/worker/deps.py` (inject ConversationSessionRepo into manager)
 - Tests: `agent_home_manager_test.py`, `conversation_session_repo_test.py`, migration test
 
 ### PR-2: Lifecycle Hook Interface
@@ -559,9 +559,9 @@ Files:
 **Branch**: `feat/phase1-lifecycle-hooks` (base: `feat/phase1-activity-tracking`)
 
 Files:
-- `python/apps/nointern/src/nointern/runtime/sandbox/lifecycle_hooks.py` (new)
-- `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_manager.py` (hooks DI + dispatch)
-- `python/apps/nointern/src/nointern/worker/deps.py` (`hooks=()` wiring)
+- `python/apps/azents/src/azents/runtime/sandbox/lifecycle_hooks.py` (new)
+- `python/apps/azents/src/azents/runtime/sandbox/agent_home_manager.py` (hooks DI + dispatch)
+- `python/apps/azents/src/azents/worker/deps.py` (`hooks=()` wiring)
 - Tests: `lifecycle_hooks_test.py`, `agent_home_manager_test.py` (hook dispatch, CancelIdleTimeout)
 
 PR-2 is stacked PR based on PR-1. Once PR-1 is merged, automatically switch base to main.

@@ -30,7 +30,7 @@ Sentry User Auth Token (`sntryu_...`) does not work with remote endpoint (`mcp.s
 sequenceDiagram
     participant Admin as Admin
     participant Agent as Agent
-    participant NI as nointern server
+    participant NI as azents server
     participant Proxy as mcp-proxy sidecar
     participant MCP as @sentry/mcp-server (stdio)
 
@@ -59,7 +59,7 @@ sequenceDiagram
 Pre-install `@sentry/mcp-server` (same pattern as analytics-mcp):
 
 ```dockerfile
-# docker/nointern/mcp-proxy/Dockerfile
+# docker/azents/mcp-proxy/Dockerfile
 RUN npm install -g @sentry/mcp-server
 ```
 

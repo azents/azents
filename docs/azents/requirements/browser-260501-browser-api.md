@@ -22,7 +22,7 @@ migration_source: "docs/azents/adr/0005-workspace-browser-api.md"
 
 ## Problem
 
-The NoIntern web chat screen had an existing file exploration UX based on `session-data`, but that feature was not a browser for the `/home/sandbox` runtime filesystem. What users expect is to browse the actual `/home/sandbox` root that the session sandbox sees, then read and download files created by the agent directly from the Web UI.
+The Azents web chat screen had an existing file exploration UX based on `session-data`, but that feature was not a browser for the `/home/sandbox` runtime filesystem. What users expect is to browse the actual `/home/sandbox` root that the session sandbox sees, then read and download files created by the agent directly from the Web UI.
 
 Problems in the existing structure:
 

@@ -28,7 +28,7 @@ Introduce lightweight HTTP daemon inside sandbox container of Agent Home Pod to 
 ## Architecture
 
 ```
-Worker Pod                               Agent Home Pod (nointern-sandbox)
+Worker Pod                               Agent Home Pod (azents-sandbox)
 ┌──────────────────────────┐            ┌──────────────────────────────────┐
 │ Engine                   │            │ sandbox container                │
 │ ├─ ReAct loop            │            │ ┌──────────────────────────────┐ │
@@ -166,7 +166,7 @@ Response: 200 OK
 
 ### Code Location
 
-`python/apps/nointern-sandbox-daemon/` — separate app following same pattern as File-API (`nointern-file-api`).
+`python/apps/azents-sandbox-daemon/` — separate app following same pattern as File-API (`azents-file-api`).
 
 ### Framework
 
@@ -197,7 +197,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: sandbox-ingress-allow-worker
-  namespace: nointern-sandbox
+  namespace: azents-sandbox
 spec:
   podSelector:
     matchLabels:
@@ -208,7 +208,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              name: nointern-server
+              name: azents-server
       ports:
         - port: 8081
           protocol: TCP
@@ -295,7 +295,7 @@ stdout_logfile=/proc/1/fd/1
 stderr_logfile=/proc/1/fd/2
 
 [program:sandbox-daemon]
-command=python -m nointern_sandbox_daemon --port 8081
+command=python -m azents_sandbox_daemon --port 8081
 autostart=true
 autorestart=true
 stopsignal=TERM
@@ -384,7 +384,7 @@ Replace current `session_storage` (FileApiClient) with new `SandboxDaemonClient`
 
 ### Phase 1: Daemon MVP
 
-1. Create `python/apps/nointern-sandbox-daemon/`
+1. Create `python/apps/azents-sandbox-daemon/`
    - FastAPI app, `/exec`, `/files/*`, `/health` endpoints
    - bwrap-exec subprocess execution
    - Chunked HTTP streaming (shell stdout/stderr)

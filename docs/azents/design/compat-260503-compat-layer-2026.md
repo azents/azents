@@ -15,9 +15,9 @@ historical_reconstruction: true
 
 ## Overview
 
-NoIntern runtime reuses same conversation history across multiple providers/models. However, each provider has different constraints for request payload, tool call id, reasoning item, media part, schema, and reasoning option. OpenAI Agents SDK provides Responses request shape and tool conversion, but handles little history compatibility across providers/models.
+Azents runtime reuses same conversation history across multiple providers/models. However, each provider has different constraints for request payload, tool call id, reasoning item, media part, schema, and reasoning option. OpenAI Agents SDK provides Responses request shape and tool conversion, but handles little history compatibility across providers/models.
 
-This design introduces OpenCode-level provider/model compatibility handling into NoIntern runtime. Core principles are twofold.
+This design introduces OpenCode-level provider/model compatibility handling into Azents runtime. Core principles are twofold.
 
 1. Canonical event history in DB is not contaminated with provider-specific workarounds.
 2. provider/model constraints are applied deterministically only to request payload immediately before LLM call.
@@ -46,7 +46,7 @@ Rationale:
 
 - Like ChatGPT OAuth `input[*].id` removal in PR #3311, workaround needed only for provider request should not remain in DB.
 - OpenCode also handles provider compatibility at request boundary.
-- Existing NoIntern pre-Agents SDK implementation also applied deterministic transform when reconstructing history into request.
+- Existing Azents pre-Agents SDK implementation also applied deterministic transform when reconstructing history into request.
 
 ### D2. `filters.py` module split method
 
@@ -75,12 +75,12 @@ Rationale:
 - Even on worker restart/resume, same provider-safe id is recomputed from DB history.
 - Stateful mapping is reconsidered only later if provider constraint impossible to solve with deterministic transform is confirmed.
 
-Existing NoIntern implementation evidence:
+Existing Azents implementation evidence:
 
-- `fbacdb32b fix(nointern): normalize long call_ids for cross-provider compatibility`
+- `fbacdb32b fix(azents): normalize long call_ids for cross-provider compatibility`
   - deterministic conversion of long `call_id` to `sha256(call_id)[:64]`
   - same normalizer applied to both `function_call` and `function_call_output`
-- `7393dab5c fix(nointern): skip incompatible reasoning items on provider switch`
+- `7393dab5c fix(azents): skip incompatible reasoning items on provider switch`
   - judged compatibility by reasoning item id prefix and target model
 
 ### D5. Unsupported media handling policy
@@ -109,7 +109,7 @@ Existing NoIntern implementation evidence:
 
 ```mermaid
 flowchart LR
-    DB[(events DB)] --> Session[NointernSession.get_items]
+    DB[(events DB)] --> Session[AzentsSession.get_items]
     Session --> Filters[Existing request filters]
     Filters --> Compat[ProviderCompatibilityFilter]
     Compat --> SDK[OpenAI Agents SDK / LiteLLM]
@@ -140,9 +140,9 @@ Callers import directly from defining module, not re-export.
 Example:
 
 ```python
-from nointern.runtime.sdk.filters.combined import CombinedFilter
-from nointern.runtime.sdk.filters.compatibility import ProviderCompatibilityFilter
-from nointern.runtime.sdk.filters.compaction import CompactionFilter
+from azents.runtime.sdk.filters.combined import CombinedFilter
+from azents.runtime.sdk.filters.compatibility import ProviderCompatibilityFilter
+from azents.runtime.sdk.filters.compaction import CompactionFilter
 ```
 
 ### Compatibility rule model
@@ -173,7 +173,7 @@ Rule must have following properties.
 sequenceDiagram
     autonumber
     participant Worker
-    participant Session as NointernSession
+    participant Session as AzentsSession
     participant Filters as Filter chain
     participant Compat as ProviderCompatibilityFilter
     participant SDK as Model SDK
@@ -231,7 +231,7 @@ Notes:
 
 ### Message shape normalization
 
-Candidates identified from OpenCode are implemented in Phase 3 against NoIntern item shape.
+Candidates identified from OpenCode are implemented in Phase 3 against Azents item shape.
 
 - Anthropic/Bedrock: remove empty text/reasoning part and empty message.
 - Anthropic: split invalid assistant message shape where text follows `tool_use`.
@@ -322,14 +322,14 @@ No change. Compatibility transform is pure logic inside worker runtime.
 |---|---|
 | Agents SDK built-in handling scope | mostly Responses request builder level, little provider/model compatibility |
 | OpenCode implementation method | request boundary transform, metadata removal, provider-specific message/schema/options normalization confirmed |
-| Existing NoIntern implementation | deterministic transform precedent confirmed in `fbacdb32b`, `7393dab5c` |
+| Existing Azents implementation | deterministic transform precedent confirmed in `fbacdb32b`, `7393dab5c` |
 | DB schema change need | unnecessary in default design |
 | worker restart handling | can handle by recomputing deterministic transform |
 | `filters.py` split risk | import churn exists. Keep Phase 1 split-only to separate from behavior change |
 
 ## OpenCode parity matrix
 
-| OpenCode compatibility item | NoIntern application location | Phase |
+| OpenCode compatibility item | Azents application location | Phase |
 |---|---|---|
 | remove Responses `input[*].id` when `store !== true` | Responses rule in `ProviderCompatibilityFilter` | Phase 1/2 |
 | remove provider metadata from other model/provider | provider/model scoped metadata rule | Phase 2 |
@@ -406,7 +406,7 @@ Finalize following scenarios in implementation plan PR and cover all added/chang
 
 ### spec promotion
 
-- Update `docs/nointern/spec/flow/agent-execution-loop.md` and related domain specs.
+- Update `docs/azents/spec/flow/agent-execution-loop.md` and related domain specs.
 - Finalize `implemented` date in design document at completion time.
 - Propose ADR candidate.
 
@@ -436,7 +436,7 @@ Rejected reason:
 
 Rejected reason:
 
-- Existing NoIntern implementation has precedent preserving call/output matching with deterministic hash transform.
+- Existing Azents implementation has precedent preserving call/output matching with deterministic hash transform.
 - worker restart/resume can also recompute same transform from DB history.
 - stateful mapping is reconsidered only when provider constraint impossible to solve with deterministic transform is confirmed.
 

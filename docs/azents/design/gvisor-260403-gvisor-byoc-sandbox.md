@@ -19,7 +19,7 @@ historical_reconstruction: true
 
 | Phase | Status | Reference |
 |---|---|---|
-| Phase 1 — gVisor NodePool + RuntimeClass | Complete | PR #2262 · `infra/argocd/nointern-sandbox/base/runtimeclass.yaml` (`handler: runsc`) |
+| Phase 1 — gVisor NodePool + RuntimeClass | Complete | PR #2262 · `infra/argocd/azents-sandbox/base/runtimeclass.yaml` (`handler: runsc`) |
 | Phase 2 — separate mitmproxy Pod + NetworkPolicy | Complete | PR #2263 · `agent_home_k8s.py::_ensure_mitmproxy_pod` (L841) / `networkpolicy.yaml` (sandbox-egress-base + mitmproxy-egress) |
 | Phase 3 — remove bwrap | Complete | PR #2264, #2754 · all `bubblewrap`/`mitmproxy`/`socat` programs removed from Dockerfile/supervisord.conf · agent exec directly runs bash through sandbox-daemon |
 | BYOC sandbox (user image + sidecar inject) | Not started | "BYOC sandbox" section of this document remains as future capability |
@@ -51,7 +51,7 @@ Migrate current bwrap(bubblewrap)-based filesystem + network isolation to **gVis
 
 ```mermaid
 graph TB
-    subgraph "nointern-sandbox namespace"
+    subgraph "azents-sandbox namespace"
         subgraph "sandbox Pod (gVisor)"
             SB[sandbox container
 supervisord
@@ -65,7 +65,7 @@ ALLOWED/DENIED_DOMAINS]
         SVC[mitmproxy Service
 port 8080]
     end
-    subgraph "nointern-server namespace"
+    subgraph "azents-server namespace"
         WK[Engine Worker]
     end
 
@@ -140,7 +140,7 @@ spec:
       ports:
         - port: 8080
           protocol: TCP
-    # mcp-egress-proxy (nointern-server namespace, keep existing)
+    # mcp-egress-proxy (azents-server namespace, keep existing)
     - to:
         - podSelector:
             matchLabels:
@@ -244,7 +244,7 @@ def _build_exec_cmd(command, user_id, settings):
 On sandbox Pod creation:
 - add `runtime_class_name="gvisor"`
 - remove `seccomp_profile` (gVisor handles kernel isolation)
-- inject `HTTP_PROXY` env var: `http://agent-home-mitmproxy-{agent_id}.nointern-sandbox.svc:8080`
+- inject `HTTP_PROXY` env var: `http://agent-home-mitmproxy-{agent_id}.azents-sandbox.svc:8080`
 - add mitmproxy Pod + Service lifecycle (`_ensure_mitmproxy_pod`, `_delete_mitmproxy_pod`)
 
 ```python

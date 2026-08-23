@@ -99,7 +99,7 @@ class GitHubToolkitProvider(McpBasedToolkitProvider[GitHubToolkitConfig]):
 ### Conclusion
 
 - **Services with official MCP servers**, such as Slack and GitHub: hardcode the official URL as config default.
-- **Services without official MCP servers**, such as Discord: NoIntern hosts one and migrates when an official server appears.
+- **Services without official MCP servers**, such as Discord: Azents hosts one and migrates when an official server appears.
 - Since Service Toolkit abstracts the URL, user settings can remain unchanged even if the backend server changes later.
 
 Users do not need to know the MCP server URL. They only configure authentication.
@@ -124,7 +124,7 @@ Common patterns:
 
 ### Slack: Installation-based
 
-The NoIntern platform app's bot_token already includes the scopes needed for MCP calls. If a Slack Installation exists, Slack Toolkit works immediately without additional credentials.
+The Azents platform app's bot_token already includes the scopes needed for MCP calls. If a Slack Installation exists, Slack Toolkit works immediately without additional credentials.
 
 **BYOA**: Phase 1 implements Installation-based behavior while keeping BYOA in mind. Power users who need BYOA immediately can use Raw MCP Toolkit for now.
 

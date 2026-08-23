@@ -22,9 +22,9 @@ migration_source: "docs/azents/design/docker-agent-home-sidecar.md"
 
 ## Problem
 
-`DockerAgentHomeClient` in `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_docker.py` creates only **single container** `agent-home-{agent_id}` per agent. However, `.exec` / `.write_file` / `.read_file` call `SandboxDaemonClient` at `http://{container_ip}:8081`, and this port is supposed to be listened by `nointern-sandbox-daemon`.
+`DockerAgentHomeClient` in `python/apps/azents/src/azents/runtime/sandbox/agent_home_docker.py` creates only **single container** `agent-home-{agent_id}` per agent. However, `.exec` / `.write_file` / `.read_file` call `SandboxDaemonClient` at `http://{container_ip}:8081`, and this port is supposed to be listened by `azents-sandbox-daemon`.
 
-Actual `supervisord.conf` in `docker/nointern/agent-runtime` image runs only `[program:mcp-proxy]` and there is no sandbox-daemon. Comment in `entrypoint.sh:5` says "sandbox-daemon: always start", but actual program does not exist; this is comment rot.
+Actual `supervisord.conf` in `docker/azents/agent-runtime` image runs only `[program:mcp-proxy]` and there is no sandbox-daemon. Comment in `entrypoint.sh:5` says "sandbox-daemon: always start", but actual program does not exist; this is comment rot.
 
 Result: in local docker backend, `exec` / `write_file` / `read_file` all do not work. Stage 3 testenv `live/sandbox.py` depends on this path, so Stage 3 Phase 2+ is blocked.
 
@@ -36,7 +36,7 @@ RuntimeError: Sandbox daemon exec failed: All connection attempts failed
 
 ## Primary Actor
 
-**File**: `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_docker.py`
+**File**: `python/apps/azents/src/azents/runtime/sandbox/agent_home_docker.py`
 
 **Main changes**:
 1. Add `sandbox_daemon_image: str` field to `__init__` (no default, injected by factory)
@@ -87,9 +87,9 @@ RuntimeError: Sandbox daemon exec failed: All connection attempts failed
         "CpuQuota": 25_000,
     },
     "Labels": {
-        "managed-by": "nointern",
-        "nointern/agent-id": agent_id,
-        "nointern/role": "sandbox-daemon",
+        "managed-by": "azents",
+        "azents/agent-id": agent_id,
+        "azents/role": "sandbox-daemon",
     },
 }
 ```
@@ -109,7 +109,7 @@ K8s features that Docker backend **does not reproduce**. These are docker-specif
 | # | K8s feature | Docker reproduction? | Description |
 |---|---|---|---|
 | 1 | `runtimeClassName: sandbox` (gVisor/kata) | ❌ give up | docker has no runtimeClass concept. If similar isolation is needed, manually specify `--runtime=runsc` (when gVisor installed), not provided by default |
-| 2 | custom `seccompProfile` | ⚠️ partial | supports `--security-opt seccomp=profile.json`. Current `agent_home_docker.py` uses `seccomp=unconfined`. Prod profile can be ported to `testenv/nointern/fixtures/` if needed, but excluded from initial implementation |
+| 2 | custom `seccompProfile` | ⚠️ partial | supports `--security-opt seccomp=profile.json`. Current `agent_home_docker.py` uses `seccomp=unconfined`. Prod profile can be ported to `testenv/azents/fixtures/` if needed, but excluded from initial implementation |
 | 3 | `NetworkPolicy` (CNI layer egress/ingress) | ❌ give up | k8s NetworkPolicy is implemented by CNI. docker approximates with bridge + manual iptables rules or mitmproxy-based domain filtering (`ENABLE_PROXY` env). Current code already uses proxy method, so domain filtering is reproduced |
 | 4 | `ServiceAccount` `pods/exec` RBAC | ❌ give up | docker has no SA concept. daemon execs through `docker.sock` → permission boundary is **docker daemon permission (root-equivalent)** and excessive. Security boundary mismatch — accepted for local dev premise |
 | 5 | Pod lifecycle (restartPolicy, probes) | ⚠️ approximate | can approximate with docker `HostConfig.RestartPolicy` + `Healthcheck`. Initial implementation does not restart `always` |
@@ -128,7 +128,7 @@ K8s features that Docker backend **does not reproduce**. These are docker-specif
 | # | K8s feature | Docker reproduction? | Description |
 |---|---|---|---|
 | 1 | `runtimeClassName: sandbox` (gVisor/kata) | ❌ give up | docker has no runtimeClass concept. If similar isolation is needed, manually specify `--runtime=runsc` (when gVisor installed), not provided by default |
-| 2 | custom `seccompProfile` | ⚠️ partial | supports `--security-opt seccomp=profile.json`. Current `agent_home_docker.py` uses `seccomp=unconfined`. Prod profile can be ported to `testenv/nointern/fixtures/` if needed, but excluded from initial implementation |
+| 2 | custom `seccompProfile` | ⚠️ partial | supports `--security-opt seccomp=profile.json`. Current `agent_home_docker.py` uses `seccomp=unconfined`. Prod profile can be ported to `testenv/azents/fixtures/` if needed, but excluded from initial implementation |
 | 3 | `NetworkPolicy` (CNI layer egress/ingress) | ❌ give up | k8s NetworkPolicy is implemented by CNI. docker approximates with bridge + manual iptables rules or mitmproxy-based domain filtering (`ENABLE_PROXY` env). Current code already uses proxy method, so domain filtering is reproduced |
 | 4 | `ServiceAccount` `pods/exec` RBAC | ❌ give up | docker has no SA concept. daemon execs through `docker.sock` → permission boundary is **docker daemon permission (root-equivalent)** and excessive. Security boundary mismatch — accepted for local dev premise |
 | 5 | Pod lifecycle (restartPolicy, probes) | ⚠️ approximate | can approximate with docker `HostConfig.RestartPolicy` + `Healthcheck`. Initial implementation does not restart `always` |

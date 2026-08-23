@@ -33,7 +33,7 @@ Detailed rationale in Discussion #2358 §3.
 | 3 | e2e utils reuse | **Option B (own code)** — separate due to dependency direction and granularity philosophy |
 | 4 | granularity | one function = one domain object, dependencies as explicit args |
 | 5 | LLM key | default `"sk-test-dummy"`; caller explicitly passes real key |
-| 6 | module layout | `testenv/nointern/seed/{auth,workspace,agent,llm}.py` + internal helpers `_client/_types/_unique` |
+| 6 | module layout | `testenv/azents/seed/{auth,workspace,agent,llm}.py` + internal helpers `_client/_types/_unique` |
 | 7 | Admin auth | internal network assumption, admin client used without token (feasibility needed) |
 
 Discarded items: CLI structure / output-storage style / preflight integration (Discussion #2358 §5).

@@ -1,6 +1,6 @@
 ---
 title: "Slack/Discord Integration-Wide E2E Test Environment Design"
-tags: [nointern, testenv, qa, integrations, slack, discord, playwright, oauth, historical-reconstruction]
+tags: [azents, testenv, qa, integrations, slack, discord, playwright, oauth, historical-reconstruction]
 created: 2026-04-11
 updated: 2026-04-11
 implemented: 2026-04-11
@@ -22,20 +22,20 @@ historical_reconstruction: true
 
 ## Overview
 
-Stage 4 (browser/web QA) of `testenv/nointern` made standalone UI flows of nointern-web automatable. On top of that, build an integrated test environment that can automatically verify **the whole Slack/Discord integration surface** — OAuth installation, user account linking, channel binding, messages/slash commands/interactions, files, agent toolkit permissions.
+Stage 4 (browser/web QA) of `testenv/azents` made standalone UI flows of azents-web automatable. On top of that, build an integrated test environment that can automatically verify **the whole Slack/Discord integration surface** — OAuth installation, user account linking, channel binding, messages/slash commands/interactions, files, agent toolkit permissions.
 
 Scope expanded during Discussion from only initial OAuth (#2453 initial body) to **the entire integration surface**. First implementation target is **Slack**, and Discord follows same pattern after Slack completion.
 
 ### Problems solved
 
 1. **Regression prevention**: automatically verify to prevent recurrence of regressions like #2452 (500 on Settings page when OAuth unconfigured).
-2. **Integration behavior verification**: automatically confirm nointern backend Slack/Discord integrations (`services/slack/`, `services/discord/`, `worker/adapters/`) work end-to-end with actual external services.
+2. **Integration behavior verification**: automatically confirm azents backend Slack/Discord integrations (`services/slack/`, `services/discord/`, `worker/adapters/`) work end-to-end with actual external services.
 3. **Shorten development cycle**: replace manual clicking/typing every time Slack/Discord changes with one scenario run.
 
 ### Usage scenarios
 
-- After implementing new Slack feature, before PR merge — run `testenv/nointern/scenarios/integrations/TC-INT-SLACK-*.md` scenario once to confirm no regression.
-- After modifying Slack OAuth code in nointern backend — immediately verify with Phase 2 OAuth scenario.
+- After implementing new Slack feature, before PR merge — run `testenv/azents/scenarios/integrations/TC-INT-SLACK-*.md` scenario once to confirm no regression.
+- After modifying Slack OAuth code in azents backend — immediately verify with Phase 2 OAuth scenario.
 - After changing bot response flow — verify with Phase 3 message scenario.
 
 ## Background
@@ -48,7 +48,7 @@ Code research summarized entire Slack/Discord integration surface as follows (se
 | User Account Linking | ✅ | ✅ |
 | Channel Binding | ✅ | ✅ |
 | Event handling | Bolt AsyncApp (multi-workspace authorize callback) | Dual: Gateway (`discord.py`) + REST/Interactions Endpoint (HA Phase 1) |
-| Slash Commands | `/nointern connect/link/reset` | `/nointern connect/link/reset` |
+| Slash Commands | `/azents connect/link/reset` | `/azents connect/link/reset` |
 | Interactions | Modal, button | Button, select |
 | Conversation Session | (channel + thread + user) → ConversationSession | (channel + thread + user) |
 | History Injection | Channel + thread | Channel + thread |
@@ -85,8 +85,8 @@ flowchart LR
         QA["Claude Code\n(QA runner)"]
         PW["Playwright\n(bundled chromium)"]
         TS["tailscaled\n+ funnel"]
-        Backend["nointern backend\n(devserver, 8010/8011)"]
-        Web["nointern-web\n(devserver, 3003)"]
+        Backend["azents backend\n(devserver, 8010/8011)"]
+        Web["azents-web\n(devserver, 3003)"]
         Cred["seed/credentials.py\n(SSM pull)"]
 
         QA -- "browser_*" --> PW
@@ -115,13 +115,13 @@ Core points:
 | | Stage 4 (browser/web) | Stage 5 (integrations) |
 |--|----------------------|------------------------|
 | Caller | Claude Code (Playwright) | Claude Code (Playwright) |
-| Target | nointern-web standalone UI | nointern-web + Slack/Discord external services |
+| Target | azents-web standalone UI | azents-web + Slack/Discord external services |
 | External dependency | none | Slack workspace + app, Discord guild + app |
 | Public URL needed | none | Slack Events/Interactions, Discord OAuth/Interactions |
-| Storage state | nointern login | nointern login + Slack login |
+| Storage state | azents login | azents login + Slack login |
 | Cleanup | create new user each time | new user + cleanup existing installation |
 
-Stage 4 only sees nointern-web UI. Stage 5 layers external services on top.
+Stage 4 only sees azents-web UI. Stage 5 layers external services on top.
 
 ## Data Model
 
@@ -137,7 +137,7 @@ All `SecureString`. Path prefix `/testenv/{project}/`. kebab-case (D4 decision).
 │   ├── signing-secret
 │   └── app-token            # optional Socket Mode, currently unused
 ├── slack-account/
-│   ├── workspace-slug       # e.g. "nointernsandbox"
+│   ├── workspace-slug       # e.g. "azentssandbox"
 │   ├── email
 │   ├── password
 │   └── totp-secret          # optional base32 when 2FA enabled
@@ -180,8 +180,8 @@ If testenv needs additional AWS permissions later, add Statement to this policy 
 
 ```bash
 # existing (used from Stage 1~4)
-NI_RDB_HOST=localhost
-NI_RDB_PORT=5433
+AZ_RDB_HOST=localhost
+AZ_RDB_PORT=5433
 # ...
 
 # Stage 5 addition
@@ -197,7 +197,7 @@ TESTENV_AZENTS_FUNNEL_URL=https://example-testenv.example.invalid
 Single entrypoint to fetch testenv credentials from SSM Parameter Store.
 
 ```python
-# testenv/nointern/seed/credentials.py
+# testenv/azents/seed/credentials.py
 """Single entrypoint for test accounts / Slack App credentials.
 
 Direct environment variable access is forbidden — all access goes through this module.
@@ -257,7 +257,7 @@ class SlackTestAccount:
 Slack/Discord login + OAuth authorization + storage state management with Playwright bundled chromium.
 
 ```python
-# testenv/nointern/seed/oauth_browser.py
+# testenv/azents/seed/oauth_browser.py
 """Slack/Discord OAuth browser automation helper.
 
 Login + storage state persistence + OAuth authorize page handling.
@@ -323,10 +323,10 @@ def load_storage_state_path(key: str) -> Path:
 
 ### `seed/slack_discord_cleanup.py` (new)
 
-Called in scenario beforeAll. Cleans existing installation/session/binding/user_link through nointern admin API.
+Called in scenario beforeAll. Cleans existing installation/session/binding/user_link through azents admin API.
 
 ```python
-# testenv/nointern/seed/slack_discord_cleanup.py
+# testenv/azents/seed/slack_discord_cleanup.py
 """Cleanup helper for isolation between test scenarios."""
 
 from seed.client import build_admin_client
@@ -342,7 +342,7 @@ async def cleanup_slack(workspace_id: str) -> None:
     ...
 ```
 
-Prerequisite: confirm nointern admin API has corresponding cleanup endpoint. If absent, adding admin API becomes first PR of this work.
+Prerequisite: confirm azents admin API has corresponding cleanup endpoint. If absent, adding admin API becomes first PR of this work.
 
 ## Scenario Catalog
 
@@ -369,7 +369,7 @@ Prerequisite: confirm nointern admin API has corresponding cleanup endpoint. If 
 |---------|----------|----------|
 | TC-INT-SLACK-005 | high | DM message → bot response |
 | TC-INT-SLACK-006 | high | Channel mention → thread response |
-| TC-INT-SLACK-007 | high | `/nointern connect` → agent binding |
+| TC-INT-SLACK-007 | high | `/azents connect` → agent binding |
 | TC-INT-SLACK-008 | medium | file upload/download |
 | TC-INT-DISCORD-005~008 | same | Discord |
 
@@ -457,8 +457,8 @@ from seed.slack_discord_cleanup import cleanup_slack
 
 ### Explicitly no changes
 
-- nointern backend code (`python/apps/nointern/`) — no file modified. Integration test verifies externally without backend change.
-- nointern-web code — same.
+- azents backend code (`python/apps/azents/`) — no file modified. Integration test verifies externally without backend change.
+- azents-web code — same.
 - ArgoCD / EKS deployment manifest — no change.
 - Production Tailscale policy — no change (only separate testenv tailnet or tag added).
 
@@ -495,7 +495,7 @@ main
           ├─ seed/oauth_browser.py
           ├─ scripts/pull-secrets.sh
           ├─ checks/tunnel.py (Tailscale Funnel preflight)
-          ├─ docs/nointern/testing/slack-discord-setup.md
+          ├─ docs/azents/testing/slack-discord-setup.md
           └─ pyproject.toml: add pyotp
               └─ feat/integrations-e2e-phase1   ← Phase 1 scenarios (PR #3)
                   └─ feat/integrations-e2e-phase2   ← Phase 2 (PR #4)
@@ -521,7 +521,7 @@ main
 | Storage state expires → scenario fails | first scenario step checks state validity + relogin on expiration — `seed/oauth_browser.py` handles fallback |
 | Slack account locked (repeated login attempts) | normally reuse storage state → low login attempt frequency. human unlock if locked |
 | Tailscale Funnel free tier 3-device limit exceeded | currently only 1 codingbot machine → low risk. switch to paid or FRP if expanding later (Discussion #2456 D3 fallback) |
-| nointern-web UI change | same as Stage 4 — grep replace anchor text in runbook .md |
+| azents-web UI change | same as Stage 4 — grep replace anchor text in runbook .md |
 | SSM credential exposure | SecureString + KMS, read-only permission by IAM policy `testenv`, CloudTrail audit possible |
 | test messages accumulate in actual workspace | cleanup step per scenario (message delete or temporary channel) |
 | Slack bot detection → login block | no block at feasibility time. if occurs, staged response: stealth, headful (Xvfb), residential IP, login frequency throttling, etc. |
@@ -577,4 +577,4 @@ main
 - Separated origin: azents/azents#2450
 - Unconfigured graceful handling fix: azents/azents#2454 (merged)
 - testenv IAM PR: azents/azents#2462
-- Stage 4 (browser/web) design: `docs/nointern/design/stage4-260410-stage4-web.md`, Discussion #2441
+- Stage 4 (browser/web) design: `docs/azents/design/stage4-260410-stage4-web.md`, Discussion #2441

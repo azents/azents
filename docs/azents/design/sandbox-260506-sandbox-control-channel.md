@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## 1. Overview
 
-This document summarizes the nointern sandbox control channel design decided in #3426 / Discussion #3445 / Discussion #3464. Goal is to change current **server-discovered sandbox-daemon HTTP** structure to **gRPC control channel where a client inside sandbox connects outbound to nointern**.
+This document summarizes the azents sandbox control channel design decided in #3426 / Discussion #3445 / Discussion #3464. Goal is to change current **server-discovered sandbox-daemon HTTP** structure to **gRPC control channel where a client inside sandbox connects outbound to azents**.
 
 Core conclusions:
 
@@ -33,15 +33,15 @@ Core conclusions:
 
 ### 2.1 Professional coding agent
 
-Professional coding agent has long-lived `AgentRuntime` sandbox. User requests work through Web raw session or GitHub/Slack event, and agent performs repo checkout, test, build, file creation/modification inside sandbox. nointern worker sends shell/file requests through gRPC control channel, and sandbox client directly controls local POSIX filesystem and local process.
+Professional coding agent has long-lived `AgentRuntime` sandbox. User requests work through Web raw session or GitHub/Slack event, and agent performs repo checkout, test, build, file creation/modification inside sandbox. azents worker sends shell/file requests through gRPC control channel, and sandbox client directly controls local POSIX filesystem and local process.
 
 ### 2.2 local-machine sandbox
 
-When user runs sandbox client on local machine, client registers outbound to nointern control endpoint. nointern dispatches shell/file work with same AgentRuntime identity, and local file transfer uses chunked streaming.
+When user runs sandbox client on local machine, client registers outbound to azents control endpoint. azents dispatches shell/file work with same AgentRuntime identity, and local file transfer uses chunked streaming.
 
 ### 2.3 External sandbox vendor
 
-Sandbox provided by external vendor also does not require inbound calls from nointern. Client inside vendor runtime connects with same register handshake, and nointern uses identical gRPC protocol instead of vendor-specific API.
+Sandbox provided by external vendor also does not require inbound calls from azents. Client inside vendor runtime connects with same register handshake, and azents uses identical gRPC protocol instead of vendor-specific API.
 
 ## 3. Feasibility Check
 
@@ -62,7 +62,7 @@ Feasibility conclusion: **implementable**. Blocker is not gRPC itself but **Agen
 
 ```mermaid
 flowchart LR
-    Worker[nointern worker/API] --> Discover[K8s Pod IP / Docker network discovery]
+    Worker[azents worker/API] --> Discover[K8s Pod IP / Docker network discovery]
     Discover --> Daemon[sandbox-daemon sidecar :8081]
     Daemon --> Exec[K8s exec / Docker exec]
     Daemon --> FS["/home/sandbox, /tmp/agent shared mount"]
@@ -73,14 +73,14 @@ Current characteristics:
 - `SessionSandboxManager.get_or_allocate(session_id, agent_id, ...)` resolves AgentRuntime.
 - Actual backend key is AgentRuntime id, but public API and naming are session-bound.
 - `SandboxDaemonClient` calls HTTP `/exec`, `/files`, `/files/list`, `/files/stat`, `/files/glob`, `/files/grep` as whole-body request/response.
-- sandbox NetworkPolicy allows ingress from nointern-server namespace to sandbox daemon `8081`.
+- sandbox NetworkPolicy allows ingress from azents-server namespace to sandbox daemon `8081`.
 - sandbox egress allows only apiserver `8010` exception for preStop hibernate.
 
 ## 5. Target Structure
 
 ```mermaid
 flowchart LR
-    Worker[nointern worker/API]
+    Worker[azents worker/API]
 
     subgraph Service[Sandbox Management / Control Service]
         API[Worker-facing command/file API]
@@ -110,7 +110,7 @@ flowchart LR
 
 Target characteristics:
 
-- nointern does not directly discover sandbox Pod IP.
+- azents does not directly discover sandbox Pod IP.
 - sandbox client registers outbound.
 - worker sends command/file request based on `AgentRuntime.id` only.
 - worker does not know sandbox allocation/restore, connection registry, `control_instance_id`, `connection_id`, `generation`.
@@ -191,9 +191,9 @@ New control plane has following responsibilities.
 
 Composition choices:
 
-- K8s internal sandbox connects to ClusterIP gRPC Service such as `sandbox-control.nointern-server.svc`.
+- K8s internal sandbox connects to ClusterIP gRPC Service such as `sandbox-control.azents-server.svc`.
 - local-machine/external vendor uses separate public gRPC endpoint.
-- Initial implementation recommends `sandbox-control` component separate from nointern apiserver process, to separate FastAPI HTTP lifecycle and long-lived gRPC stream lifecycle.
+- Initial implementation recommends `sandbox-control` component separate from azents apiserver process, to separate FastAPI HTTP lifecycle and long-lived gRPC stream lifecycle.
 
 worker-facing API and sandbox-client-facing gRPC stream are in same service boundary but have different roles.
 
@@ -468,7 +468,7 @@ App runtime dependency uses `==` pin.
 Suggested paths:
 
 ```text
-python/apps/nointern/src/nointern/runtime/sandbox/control/
+python/apps/azents/src/azents/runtime/sandbox/control/
   proto/
   server.py
   registry.py
@@ -480,15 +480,15 @@ python/apps/nointern/src/nointern/runtime/sandbox/control/
   file_stream.py
   exec_stream.py
 
-python/apps/nointern-sandbox-client/
-  src/nointern_sandbox_client/
+python/apps/azents-sandbox-client/
+  src/azents_sandbox_client/
     main.py
     control.py
     files.py
     exec.py
 ```
 
-Existing `python/apps/nointern-sandbox-daemon/` remains only during migration and is removed finally.
+Existing `python/apps/azents-sandbox-daemon/` remains only during migration and is removed finally.
 
 ### 11.3 Existing caller migration
 
@@ -513,14 +513,14 @@ worker-facing client knows only service API. Following details are hidden as int
 
 K8s internal:
 
-- add `sandbox-control` Service to `nointern-server` namespace
+- add `sandbox-control` Service to `azents-server` namespace
 - add gRPC port, e.g. `8014`
 - allow control service port in sandbox egress NetworkPolicy
 - remove existing sandbox daemon `8081` ingress NetworkPolicy after migration completes
 
 External/local vendor:
 
-- separate host, e.g. `sandbox-control.nointern.com`
+- separate host, e.g. `sandbox-control.azents.io`
 - review AWS ALB gRPC/HTTP2 backend protocol annotations
 - public endpoint exposes no runtime information before register validation
 
@@ -631,7 +631,7 @@ External/local vendor:
 ### Phase 7 — Remove server-discovered daemon path
 
 - remove `SandboxDaemonClient` path
-- remove `nointern-sandbox-daemon` app/image/manifests
+- remove `azents-sandbox-daemon` app/image/manifests
 - docs/spec promotion
 
 ## 16. Risks and Mitigations

@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/mcp-toolkit.md"
 
 ## Problem
 
-Integrate MCP (Model Context Protocol) server as nointern Toolkit so agent can use tools from external MCP servers.
+Integrate MCP (Model Context Protocol) server as azents Toolkit so agent can use tools from external MCP servers.
 
 ## Primary Actor
 

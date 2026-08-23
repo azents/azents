@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/subagent-inherit-2026-04-24.md"
 
 ## Problem
 
-Current nointern subagent has independent **LLM model**, **toolkit bindings**, and **system prompt** from the parent agent. This independence fits the "specialist subagent" pattern (DB analyst, code reviewer, etc.), but makes it hard to create a "**general subagent** — a subagent that inherits the parent's tools and model as-is and only performs a specific role."
+Current azents subagent has independent **LLM model**, **toolkit bindings**, and **system prompt** from the parent agent. This independence fits the "specialist subagent" pattern (DB analyst, code reviewer, etc.), but makes it hard to create a "**general subagent** — a subagent that inherits the parent's tools and model as-is and only performs a specific role."
 
 This design adds options for subagent to selectively **inherit** parent's toolkit and model. At the same time, tools that must remain parent-only (`memory`, `schedule`, `subagent` itself, etc.) are explicitly separated.
 

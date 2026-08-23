@@ -137,7 +137,7 @@ Moved items (mcp.py → mcp_base.py):
 | Function/method | Role |
 |-------------|------|
 | `mcp_list_tools()` | Fetch tool list from MCP server |
-| `_wrap_mcp_tool()` | Wrap MCP tool into nointern Tool |
+| `_wrap_mcp_tool()` | Wrap MCP tool into azents Tool |
 | `_build_auth_headers()` | Build auth headers |
 | `_make_request_authorization_tool()` | Per-user OAuth2 authorization request tool |
 | `McpPerUserAuthContext` | Per-user OAuth2 context dataclass |

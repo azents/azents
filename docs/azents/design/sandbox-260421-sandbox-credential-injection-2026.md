@@ -21,7 +21,7 @@ Implemented as stacked PR series according to design. Related PRs:
 | 2/8 | #2913 | Phase 1 — `Toolkit.expose_env()` protocol + sandbox-daemon `/exec env` plumbing |
 | 3/8 | #2914 | Phase 2 — `EnvVarToolkit` implementation + `ToolkitType.ENVVAR` registry + `BuiltinToolkit.set_peer_toolkits` wiring |
 | 4/8 | #2915 | Phase 3 — `validate_credentials` (POSIX regex, size/count limits) + resolve audit log |
-| 5/8 | #2918 | Phase 4 — `nointern-web` admin UI (`EnvVarConfigFields.tsx` + i18n 4 locales) |
+| 5/8 | #2918 | Phase 4 — `azents-web` admin UI (`EnvVarConfigFields.tsx` + i18n 4 locales) |
 | 6/8 | #2933 | Phase 5 — testenv QA (TC-CRED-ENVVAR-001 + TC-WEB-ENVVAR-001) |
 | 7/8 | _this PR_ | Spec Promotion — confirm design `implemented` + spec update |
 | 8/8 | _next PR_ | Cleanup |
@@ -30,7 +30,7 @@ Implemented as stacked PR series according to design. Related PRs:
 
 - TC-002~005 in **Point 9 (verification)** were testenv scenarios in the specification, but actual coverage is 15 unit test cases (`envvar_test.py`, `executor_test.py`) + 3 docker integration test cases (`executor_docker_integration_test.py`) + 1 new shell peer integration test case in `shell_test.py`. TC-CRED-ENVVAR-001 is blocked on marker assertion due to LLM baseline issue (same symptom as TC-SHELL-001, orthogonal issue).
 - **regex (POSIX variable name)** changed from first design `^[A-Z_][A-Z0-9_]*$` to case-allowing `^[a-zA-Z_][a-zA-Z0-9_]*$` (reflecting PR #2913/#2915/#2918 review feedback).
-- **Phase 1 discussion contents** are archived in `docs/nointern/discussion/sandbox-credential-injection.md`.
+- **Phase 1 discussion contents** are archived in `docs/azents/discussion/sandbox-credential-injection.md`.
 
 # Generalized Sandbox Credential Injection Design
 
@@ -85,11 +85,11 @@ Phase 1 completed in [Discussion #2875](https://github.com/azents/azents/discuss
 
 ```mermaid
 graph TB
-    subgraph Frontend[nointern-web]
+    subgraph Frontend[azents-web]
         UI[Toolkit create/manage UI]
     end
 
-    subgraph Backend[nointern-server]
+    subgraph Backend[azents-server]
         API[toolkit/v1 API]
         Service[ToolkitService]
         Repo[ToolkitRepository]
@@ -186,7 +186,7 @@ Variable names are plaintext; values are serialized to JSON in `encrypted_creden
 
 ### Toolkit protocol extension
 
-Add `expose_env` method to `nointern.core.tools.Toolkit`. Default implementation returns empty dict — no existing toolkit change.
+Add `expose_env` method to `azents.core.tools.Toolkit`. Default implementation returns empty dict — no existing toolkit change.
 
 ```python
 class Toolkit(ABC, Generic[ConfigT]):
@@ -214,7 +214,7 @@ class Toolkit(ABC, Generic[ConfigT]):
 ### EnvVarToolkitProvider
 
 ```python
-# python/apps/nointern/src/nointern/engine/tools/envvar.py
+# python/apps/azents/src/azents/engine/tools/envvar.py
 
 class EnvVarToolkitProvider(ToolkitProvider[EnvVarToolkitConfig]):
     """General-purpose toolkit provider for environment variable injection.
@@ -342,7 +342,7 @@ class EnvVarToolkit(Toolkit[EnvVarToolkitConfig]):
 ### Registry registration
 
 ```python
-# python/apps/nointern/src/nointern/engine/tools/deps.py
+# python/apps/azents/src/azents/engine/tools/deps.py
 
 def get_toolkit_registry(
     cipher: CredentialCipher,
@@ -357,7 +357,7 @@ def get_toolkit_registry(
 ### ToolkitType enum update
 
 ```python
-# python/apps/nointern/src/nointern/core/tools.py
+# python/apps/azents/src/azents/core/tools.py
 
 class ToolkitType(enum.StrEnum):
     # ... existing ...
@@ -616,7 +616,7 @@ If there is leakage risk, revoke token directly at issuer (Notion, etc.).
 
 | Item | Result | Note |
 |---|---|---|
-| Add `expose_env` to `Toolkit` protocol | ✅ | `nointern.core.tools.Toolkit` is ABC; default implementation avoids impact on existing implementations |
+| Add `expose_env` to `Toolkit` protocol | ✅ | `azents.core.tools.Toolkit` is ABC; default implementation avoids impact on existing implementations |
 | Extend `ToolkitType` enum | ✅ | StrEnum, string-based storage, no DB change |
 | Reuse existing `toolkit_configs`/`agent_toolkits` | ✅ | config JSONB + encrypted_credentials sufficient |
 | Reuse `CredentialCipher` | ✅ | Fernet based, encrypt after JSON serialization |
@@ -639,7 +639,7 @@ If there is leakage risk, revoke token directly at issuer (Notion, etc.).
 
 ## testenv QA Scenarios
 
-> testenv basics: `python testenv/nointern/devserver.py up`
+> testenv basics: `python testenv/azents/devserver.py up`
 
 **Coverage distinction**:
 - Only **TC-CRED-ENVVAR-001** implemented as testenv scenario file + handler. Single smoke of end-to-end path: Toolkit state machine → `expose_env()` → `peer_toolkits` collection → `sandbox.exec(env=)` → sandbox-daemon `export` prefix.
@@ -732,7 +732,7 @@ Split as stacked PRs in Ship-feature:
 
 ### Stack 1. Design document (this document)
 - Branch: `docs/sandbox-credential-injection`
-- PR 1: `docs/nointern/design/sandbox-credential-injection.md`
+- PR 1: `docs/azents/design/sandbox-credential-injection.md`
 
 ### Stack 2. Backend — Toolkit protocol + sandbox-daemon env
 - Branch: `feat/envvar-toolkit-backend` (Stack 1 base)
@@ -792,21 +792,21 @@ Each PR uses previous PR as base with `/ship-pr`; create all stacked PRs at once
 ## References
 
 ### Code
-- `python/apps/nointern/src/nointern/core/tools.py` — `Toolkit`, `ToolkitProvider`
-- `python/apps/nointern/src/nointern/engine/tools/github.py` — Provider pattern reference
-- `python/apps/nointern/src/nointern/engine/tools/deps.py` — `get_toolkit_registry`
-- `python/apps/nointern/src/nointern/core/crypto.py` — `CredentialCipher`
-- `python/apps/nointern/src/nointern/rdb/models/toolkit.py` — `RDBToolkitConfig`, `RDBAgentToolkit`
-- `python/apps/nointern/src/nointern/services/toolkit/__init__.py` — `ToolkitService`
-- `python/apps/nointern/src/nointern/engine/tools/shell.py` — `make_execute_code_tool`
-- `python/apps/nointern/src/nointern/runtime/sandbox/agent_home*.py` — `AgentHome` backends
-- `python/apps/nointern-sandbox-daemon/` — daemon `/exec` endpoint
-- `typescript/apps/nointern-web/src/features/toolkits/` — UI
+- `python/apps/azents/src/azents/core/tools.py` — `Toolkit`, `ToolkitProvider`
+- `python/apps/azents/src/azents/engine/tools/github.py` — Provider pattern reference
+- `python/apps/azents/src/azents/engine/tools/deps.py` — `get_toolkit_registry`
+- `python/apps/azents/src/azents/core/crypto.py` — `CredentialCipher`
+- `python/apps/azents/src/azents/rdb/models/toolkit.py` — `RDBToolkitConfig`, `RDBAgentToolkit`
+- `python/apps/azents/src/azents/services/toolkit/__init__.py` — `ToolkitService`
+- `python/apps/azents/src/azents/engine/tools/shell.py` — `make_execute_code_tool`
+- `python/apps/azents/src/azents/runtime/sandbox/agent_home*.py` — `AgentHome` backends
+- `python/apps/azents-sandbox-daemon/` — daemon `/exec` endpoint
+- `typescript/apps/azents-web/src/features/toolkits/` — UI
 
 ### Design documents
-- `docs/nointern/design/agent-home.md`
-- `docs/nointern/design/phase3-snapshot-hibernation.md`
-- `docs/nointern/design/github-260313-github-toolkit.md`
+- `docs/azents/design/agent-home.md`
+- `docs/azents/design/phase3-snapshot-hibernation.md`
+- `docs/azents/design/github-260313-github-toolkit.md`
 
 ### Discussion / Issues
 - [#2873](https://github.com/azents/azents/issues/2873) — this design issue

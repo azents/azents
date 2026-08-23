@@ -18,7 +18,7 @@ historical_reconstruction: true
 
 Per-Agent profile image upload/serving feature. Reflect per-agent avatar in web UI display and Slack message sending.
 
-This feature is the first nointern feature to **store/serve user-uploaded files in S3**. Therefore, instead of avatar-specific implementation, it introduces a **generalized file upload framework** (`UploadService` + `UploadHandler`) that future chat attachments / workspace icons can share. Avatar is implemented as its first handler.
+This feature is the first azents feature to **store/serve user-uploaded files in S3**. Therefore, instead of avatar-specific implementation, it introduces a **generalized file upload framework** (`UploadService` + `UploadHandler`) that future chat attachments / workspace icons can share. Avatar is implemented as its first handler.
 
 - Related issue: [#2828](https://github.com/azents/azents/issues/2828)
 - Discussion: [#2830](https://github.com/azents/azents/discussions/2830)
@@ -87,7 +87,7 @@ sequenceDiagram
 flowchart LR
     REPO[(agents.avatar JSONB)] --> SVC[AgentService]
     SVC --> RESP[AgentResponse]
-    RESP -.serves.-> WEB[nointern-web]
+    RESP -.serves.-> WEB[azents-web]
     RESP -.serves.-> SLACK[SlackAdapter]
 
     CDN{{CDN or presigned URL}} -->|serves| RUSTFS[(RustFS / AWS S3<br/>public/avatar/...)]
@@ -112,10 +112,10 @@ flowchart LR
 
 ### UploadHandler protocol
 
-Adopt `typing.Protocol` — inside nointern, handler is lightweight contract assembled as instance in DI module, so multiple inheritance unnecessary.
+Adopt `typing.Protocol` — inside azents, handler is lightweight contract assembled as instance in DI module, so multiple inheritance unnecessary.
 
 ```python
-# python/apps/nointern/src/nointern/services/uploads/__init__.py
+# python/apps/azents/src/azents/services/uploads/__init__.py
 from typing import ClassVar, Protocol
 
 class UploadHandler(Protocol):
@@ -249,7 +249,7 @@ Each only needs new handler registration and can reuse `/upload-url` + `/finaliz
 
 ### Common schema
 
-`python/apps/nointern/src/nointern/services/uploads/schema.py`:
+`python/apps/azents/src/azents/services/uploads/schema.py`:
 
 ```python
 # For JSONB storage (internal) — S3 key + metadata
@@ -310,7 +310,7 @@ Follow pattern of azents `FoodImageOutput` (`python/apps/azents/src/azents/servi
 ### DB migration
 
 ```bash
-cd python/apps/nointern
+cd python/apps/azents
 uv run alembic revision -m "add avatar column to agents"
 ```
 
@@ -349,7 +349,7 @@ class AgentRepository:
 
 ### AvatarUploadHandler
 
-`python/apps/nointern/src/nointern/services/uploads/handlers/avatar.py`:
+`python/apps/azents/src/azents/services/uploads/handlers/avatar.py`:
 
 ```python
 class AvatarUploadHandler:
@@ -473,7 +473,7 @@ Add `avatar: UploadedImage | None` field to `AgentResponse` in existing `GET /ag
 
 ### Dependency
 
-`pnpm add react-easy-crop` (nointern-web).
+`pnpm add react-easy-crop` (azents-web).
 
 ### Components
 
@@ -517,7 +517,7 @@ Need CORS settings allowing browser PUT on S3/RustFS bucket:
 {
   "CORSRules": [{
     "AllowedMethods": ["PUT", "GET"],
-    "AllowedOrigins": ["https://{nointern-web-domain}"],
+    "AllowedOrigins": ["https://{azents-web-domain}"],
     "AllowedHeaders": ["Content-Type", "x-amz-*"],
     "MaxAgeSeconds": 300
   }]
@@ -623,7 +623,7 @@ Manual:
 
 **Webhook-based Discord sending** (P1 B/C) — rejected reason: redesign burden for existing Bot-based UX (edit, reaction, streaming).
 
-**Create separate `nointern-avatars` bucket** — rejected reason: config already designed to use `workspace_s3_bucket` as shared bucket (`core/config.py:188-190`). Prefix separation is sufficient.
+**Create separate `azents-avatars` bucket** — rejected reason: config already designed to use `workspace_s3_bucket` as shared bucket (`core/config.py:188-190`). Prefix separation is sufficient.
 
 **multipart POST (upload through server)** — rejected reason: server traffic load (review feedback). presigned PUT gives browser → S3 direct.
 

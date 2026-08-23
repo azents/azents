@@ -1,24 +1,24 @@
 ---
-title: "nointern Discord Integration Historical Decision Reconstruction"
+title: "azents Discord Integration Historical Decision Reconstruction"
 created: 2026-03-10
 tags: [architecture, historical-reconstruction, migration]
 document_role: primary
 document_type: adr
-snapshot_id: nointern-260310
+snapshot_id: azents-260310
 historical_reconstruction: true
-migration_source: "docs/azents/design/nointern-discord-integration.md"
+migration_source: "docs/azents/design/azents-discord-integration.md"
 ---
 
-# nointern Discord Integration Historical Decision Reconstruction
+# azents Discord Integration Historical Decision Reconstruction
 
-- Snapshot: `nointern-260310`
+- Snapshot: `azents-260310`
 - Status: historical reconstruction; not a newly accepted decision.
-- Source Design: `docs/azents/design/nointern-discord-integration.md`
+- Source Design: `docs/azents/design/azents-discord-integration.md`
 - Original requester confirmation: not recorded in this reconstruction.
 
 ## Reconstructed Decisions
 
-### nointern-260310/ADR-D1 — Explicit decisions recoverable from the source Design
+### azents-260310/ADR-D1 — Explicit decisions recoverable from the source Design
 
 The following sections are copied only from explicit source Design text. No additional intent is inferred.
 
@@ -28,7 +28,7 @@ Slack receives events through HTTP callbacks, but Discord delivers normal messag
 
 Therefore this design runs a separate Gateway process:
 
-- **`nointern-discord-gateway`** — Maintains a Discord Gateway WebSocket connection and receives events.
+- **`azents-discord-gateway`** — Maintains a Discord Gateway WebSocket connection and receives events.
 - Forwards received events to the Redis broker so the existing engine worker can process them.
 - Also receives interactions such as slash commands through the Gateway; no separate Interactions Endpoint is operated.
 

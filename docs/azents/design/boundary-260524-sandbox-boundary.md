@@ -226,7 +226,7 @@ UI rules:
 ## Migration Plan
 
 1. Add the new response models and service split.
-2. Regenerate nointern public client.
+2. Regenerate the Azents public client.
 3. Update Workspace panel container/component to consume `runtime`, `workspace`, and `actions`.
 4. Delete old `READY`/`RESTORING`/`RESTORE_FAILED` response mapping and old UI state branches.
 5. Update tests to assert:

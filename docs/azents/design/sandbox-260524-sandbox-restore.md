@@ -139,6 +139,6 @@ Primary unit tests:
 
 Frontend checks:
 
-- nointern-web typecheck validates generated response shape.
+- azents-web typecheck validates generated response shape.
 - Workspace panel story covers restore-failed two-action UI.
 - Agent settings renders reset action and calls the reset mutation.

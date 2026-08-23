@@ -13,14 +13,14 @@ migration_source: "docs/azents/adr/0008-agent-runtime-sandbox-control-channel.md
 
 ## Context
 
-The current NoIntern sandbox control path has the nointern worker/API discover a Kubernetes Pod IP or Docker container network address, then call the `sandbox-daemon` sidecar HTTP API inbound. This was useful as an intermediate step for isolating helper processes from custom/root sandbox containers, but it does not fit the default product sandbox model.
+The current Azents sandbox control path has the azents worker/API discover a Kubernetes Pod IP or Docker container network address, then call the `sandbox-daemon` sidecar HTTP API inbound. This was useful as an intermediate step for isolating helper processes from custom/root sandbox containers, but it does not fit the default product sandbox model.
 
 The current model has these major limitations:
 
 1. Sandbox discovery and control are tightly coupled to Kubernetes Pod IPs, sidecar HTTP ports, and daemon readiness.
 2. The name and public API of `SessionSandboxManager` imply session-bound ownership. In reality, the sandbox lifecycle owner is `AgentRuntime`, not `AgentSession`.
 3. File read/write is based on whole-body request/response, making large file streaming, backpressure, and resume difficult to express.
-4. External sandbox vendors, local-machine sandboxes, and controlled sandbox images should have the sandbox client register outbound instead of having nointern connect inbound.
+4. External sandbox vendors, local-machine sandboxes, and controlled sandbox images should have the sandbox client register outbound instead of having azents connect inbound.
 5. Delivering commands through Kubernetes exec inside the same Pod unnecessarily binds the command/file control plane to the Kubernetes API.
 
 Issue #3426 and Discussion #3445 decided on the following direction.
@@ -31,7 +31,7 @@ Adopt the following principles:
 
 1. The sandbox lifecycle owner is `AgentRuntime`. `AgentSession` is used only as a permission, UI, and event boundary.
 2. Treat the session-bound API of `SessionSandboxManager` as a design error and correct it to a runtime-centric API.
-3. The sandbox client runs inside the sandbox and opens an outbound control channel to nointern.
+3. The sandbox client runs inside the sandbox and opens an outbound control channel to azents.
 4. The control channel protocol uses gRPC bidirectional streaming.
 5. The primary key for the connection registry is `AgentRuntime.id`. Each stream also has its own `connection_id` and `generation`.
 6. Command and file protocols are streaming-first. Existing tool and workspace browser call sites remain behind facades during migration, but the internal transport moves to gRPC streams.
@@ -85,11 +85,11 @@ Rejected. AgentSession is a conversation/event boundary and can rotate on reset/
 
 ### Routing using only process-local store in the control service
 
-Rejected. nointern workers and nointern-server/control endpoints run in separate Pods, so a worker cannot directly see the stream owner's process-local store. Process-local store is used only for live stream dispatch owned by that replica; worker requests must be forwarded to the owner replica through a separate routing design.
+Rejected. azents workers and azents-server/control endpoints run in separate Pods, so a worker cannot directly see the stream owner's process-local store. Process-local store is used only for live stream dispatch owned by that replica; worker requests must be forwarded to the owner replica through a separate routing design.
 
 ## Status
 
-Accepted. The detailed design follows `docs/nointern/design/sandbox-260506-sandbox-control-channel.md`.
+Accepted. The detailed design follows `docs/azents/design/sandbox-260506-sandbox-control-channel.md`.
 
 ## Migration provenance
 

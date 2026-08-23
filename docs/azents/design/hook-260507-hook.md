@@ -42,16 +42,16 @@ Related design: [toolkit-260514-toolkit-hooks-for-agents-md.md](./toolkit-260514
 
 Relevant current structure:
 
-- `python/apps/nointern/src/nointern/core/tools.py`
+- `python/apps/azents/src/azents/core/tools.py`
   - defines `Toolkit`, `ToolkitState`, `TurnContext`, `ToolkitProvider`.
   - Toolkit provides tools and prompt through `update_context()`.
-- `python/apps/nointern/src/nointern/engine/sdk/agent.py`
+- `python/apps/azents/src/azents/engine/sdk/agent.py`
   - updates active Toolkit context and combines Toolkit prompt into system instruction.
-- `python/apps/nointern/src/nointern/engine/sdk/tool_converter.py`
-  - wraps nointern function tool handler call path.
-- `python/apps/nointern/src/nointern/engine/tools/builtin.py`
+- `python/apps/azents/src/azents/engine/sdk/tool_converter.py`
+  - wraps azents function tool handler call path.
+- `python/apps/azents/src/azents/engine/tools/builtin.py`
   - location for builtin Toolkit family and AGENTS.md-related runtime features.
-- `docs/nointern/design/toolkit-260514-toolkit-hooks-for-agents-md.md`
+- `docs/azents/design/toolkit-260514-toolkit-hooks-for-agents-md.md`
   - records already implemented Toolkit hook/state design where AGENTS.md is first consumer.
 
 Existing Toolkit hook in current design document is tool-call-observation oriented for AGENTS.md state update. Registration shape, ordering, failure policy, and trace policy covering whole session/run/turn/sandbox lifecycle are not yet organized as a common contract.
@@ -179,7 +179,7 @@ Context object contains only minimal metadata needed by each lifecycle. Due to t
 
 `on_session_start` does not query event store every time to determine duplication. Put a marker such as `agent_sessions.lifecycle_started_at` on session row and claim first dispatch with conditional update. Runner that fails the claim treats it as already dispatched or in progress by another runner and does not repeatedly call session start hook.
 
-Marker is based on `agent_sessions.id` lifecycle, not `agent_runtime_id`. nointern manual reset/clear is close to active `AgentSession` rotation, so new `agent_sessions.id` means new session lifecycle.
+Marker is based on `agent_sessions.id` lifecycle, not `agent_runtime_id`. azents manual reset/clear is close to active `AgentSession` rotation, so new `agent_sessions.id` means new session lifecycle.
 
 Session clear/compact hook is an observation point for provider state init/reset/compact. `on_session_clear` corresponds to active `AgentSession` rotation/manual reset operation, not events row deletion. It cannot block or alter original session operation.
 
@@ -423,7 +423,7 @@ Hook system must roll out additively, without regressions when existing Toolkit 
 
 #### How to check
 
-Run nointern E2E baseline agent run without hook fixture and confirm normal tool call and final response succeed through existing path.
+Run azents E2E baseline agent run without hook fixture and confirm normal tool call and final response succeed through existing path.
 
 #### Expected result
 
@@ -431,7 +431,7 @@ Conversation and tool call succeed, and test trace sink contains no registered h
 
 #### Execution result
 
-PASS — `cd testenv/nointern/e2e && uv run pytest src/tests/nointern/public/test_00_agents_md_loader.py -q` passed (1 passed, 2 warnings in 29.25s). Existing public chat + shell tool behavior still succeeds outside the new runtime hook QA provider.
+PASS — `cd testenv/azents/e2e && uv run pytest src/tests/azents/public/test_00_agents_md_loader.py -q` passed (1 passed, 2 warnings in 29.25s). Existing public chat + shell tool behavior still succeeds outside the new runtime hook QA provider.
 
 #### Fixes applied
 

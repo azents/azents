@@ -19,7 +19,7 @@ migration_source: "docs/azents/adr/0017-local-fullstack-test-env.md"
 
 ## Background
 
-Most NoIntern functionality can currently be tested realistically **only after deployment**. We want an environment where an agent, such as Claude Code, can implement a new feature, run the server locally, verify behavior, and directly reproduce bugs.
+Most Azents functionality can currently be tested realistically **only after deployment**. We want an environment where an agent, such as Claude Code, can implement a new feature, run the server locally, verify behavior, and directly reproduce bugs.
 
 Goals:
 
@@ -73,24 +73,24 @@ Things Claude Code can catch deterministically:
 | devserver.py | Exists | All-in-one Public API (8010) + Admin API (8011) + Engine Worker |
 | agent-runtime image | Dockerfile exists | Includes Sandbox Daemon + MCP Proxy + Playwright; needs build |
 | OpenAPI clients | Exist | Auto-generated for both Python and TypeScript |
-| E2E test pattern | Exists | `nointern-e2e` conftest.py / utils.py can be reused |
+| E2E test pattern | Exists | `azents-e2e` conftest.py / utils.py can be reused |
 | **Local full-stack execution automation** | **Missing** | No guide/skill usable by agents |
 
 ### Major Technical Points
 
 - **devserver**: runs Public/Admin API + Engine Worker + Scheduler in one asyncio process. Supports `--reload`.
 - **Graceful shutdown**: SIGTERM → wait up to 30 seconds for ongoing engine.run to finish. Do not use `kill -9`.
-- **Required environment variables**: `NI_RDB_*`, `NI_AUTH_JWT_SECRET_KEY`, `NI_CREDENTIAL_ENCRYPTION_KEY`, `NI_AGENT_HOME_K8S_MCP_PROXY_IMAGE`, `NI_AGENT_HOME_K8S_SANDBOX_DAEMON_IMAGE`.
+- **Required environment variables**: `AZ_RDB_*`, `AZ_AUTH_JWT_SECRET_KEY`, `AZ_CREDENTIAL_ENCRYPTION_KEY`, `AZ_AGENT_HOME_K8S_MCP_PROXY_IMAGE`, `AZ_AGENT_HOME_K8S_SANDBOX_DAEMON_IMAGE`.
 - **agent-runtime image**: build takes about 3-5 minutes, size about 700MB-1GB. Chromium binary is installed at runtime.
 - **Agent Home Docker**: `sandbox-restricted` bridge network, 512MB/0.5 CPU per container.
 - **MCP**: config.json bind mount + mcp-proxy sidecar managed by supervisord.
 - **WebSocket chat**: issue ticket with 30-second HMAC → connect → JSON event stream.
-- **Docker Compose project name**: `nointern`, usable for container filtering.
+- **Docker Compose project name**: `azents`, usable for container filtering.
 - **Health endpoints**: `/health/v1/readiness`, `/health/v1/liveness`; simple responses with no DB/Redis dependency.
 
 ## Scenario Configuration Matrix
 
-| | Infra | devserver | agent-runtime | LLM Key | nointern-web |
+| | Infra | devserver | agent-runtime | LLM Key | azents-web |
 |---|:-:|:-:|:-:|:-:|:-:|
 | A. API CRUD / prompt assembly | O | O | - | - | - |
 | B. WebSocket chat / LLM pipeline | O | O | - | O | - |
@@ -130,7 +130,7 @@ Stage 3: Tool execution + Sandbox
     └─ Verify MCP toolkit behavior
 
 Stage 4: Browser / frontend (optional)
-    ├─ Run nointern-web locally
+    ├─ Run azents-web locally
     └─ Verify UI through Playwright MCP
 ```
 
@@ -154,19 +154,19 @@ Stage 4: Browser / frontend (optional)
 
 **Options**:
 
-- A. `testenv/nointern/`, top-level repository path
-- B. `python/apps/nointern/testenv/`, app-scoped
-- C. `docker/nointern/testenv/`
+- A. `testenv/azents/`, top-level repository path
+- B. `python/apps/azents/testenv/`, app-scoped
+- C. `docker/azents/testenv/`
 - D. `scripts/local-test/`
 
-**Decision**: **A. `testenv/nointern/`**
+**Decision**: **A. `testenv/azents/`**
 
 **Rationale**:
 
-- `docker-compose.nointern.yaml` is at the repository root, so operating at the same level keeps paths simple.
+- `docker-compose.azents.yaml` is at the repository root, so operating at the same level keeps paths simple.
 - Matches top-level concern-based directories such as `python/`, `docker/`, and `infra/`.
 - Allows future expansion such as `testenv/azents/`.
-- The environment needs to touch items outside the nointern Python app, such as docker-compose, agent-runtime, and nointern-web, so placing it inside the Python subdirectory is awkward.
+- The environment needs to touch items outside the azents Python app, such as docker-compose, agent-runtime, and azents-web, so placing it inside the Python subdirectory is awkward.
 
 ### 4. Entrypoint Invocation Method
 
@@ -174,9 +174,9 @@ Stage 4: Browser / frontend (optional)
 
 **Options**:
 
-- A. Direct script execution: `./testenv/nointern/preflight.py`
+- A. Direct script execution: `./testenv/azents/preflight.py`
 - B. Makefile: `make preflight`
-- C. Root dispatcher: `./testenv/preflight nointern`
+- C. Root dispatcher: `./testenv/preflight azents`
 
 **Decision**: **A. direct script execution**
 
@@ -201,7 +201,7 @@ Stage 4: Browser / frontend (optional)
 14-python-deps-installed           # uv sync completed
 20-devserver-ports-free            # 8010 and 8011 are free
 30-env-file-exists                 # .env file exists
-31-required-env-vars               # NI_* variables configured
+31-required-env-vars               # AZ_* variables configured
 40-postgres-container-healthy      # docker compose state
 41-postgres-connectable            # real host connection + auth
 42-valkey-reachable                # TCP port check
@@ -227,12 +227,12 @@ Stage 4: Browser / frontend (optional)
 - Level 2: value format, such as Fernet key or URL scheme
 - Level 3: actual connectivity/usability
 
-**Decision**: **Level 1 + Level 2 only for `NI_CREDENTIAL_ENCRYPTION_KEY`**
+**Decision**: **Level 1 + Level 2 only for `AZ_CREDENTIAL_ENCRYPTION_KEY`**
 
 **Rationale**:
 
 - Most bugs are missing values or typos, so Level 1 is enough.
-- If `NI_CREDENTIAL_ENCRYPTION_KEY` has the wrong format, devserver can silently die at startup, so format validation is valuable as an exception.
+- If `AZ_CREDENTIAL_ENCRYPTION_KEY` has the wrong format, devserver can silently die at startup, so format validation is valuable as an exception.
 - Other cases are covered by check 41, real connection validation, so duplicating them is unnecessary.
 
 ### 7. Behavior on Failure
@@ -333,7 +333,7 @@ Stage 4: Browser / frontend (optional)
 @dataclass
 class RunContext:
     repo_root: Path
-    nointern_dir: Path
+    azents_dir: Path
     env_file: Path
     env: dict[str, str]
     previous_results: dict[str, CheckResult]
@@ -354,7 +354,7 @@ class RunContext:
 
 - LLM API key management method (Stage 2)
 - agent-runtime image build automation trigger (Stage 3)
-- Whether and how to include nointern-web (Stage 4)
+- Whether and how to include azents-web (Stage 4)
 - devserver process management, such as PID file, tmux, or systemd; decide when adding up/down commands after Stage 1
 
 ## Migration provenance

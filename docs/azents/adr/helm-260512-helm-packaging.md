@@ -1,5 +1,5 @@
 ---
-title: "NoIntern Helm Packaging Historical Decision Reconstruction"
+title: "Azents Helm Packaging Historical Decision Reconstruction"
 created: 2026-05-12
 tags: [architecture, historical-reconstruction, migration]
 document_role: primary
@@ -9,7 +9,7 @@ historical_reconstruction: true
 migration_source: "docs/azents/design/helm-packaging.md"
 ---
 
-# NoIntern Helm Packaging Historical Decision Reconstruction
+# Azents Helm Packaging Historical Decision Reconstruction
 
 - Snapshot: `helm-260512`
 - Status: historical reconstruction; not a newly accepted decision.
@@ -24,7 +24,7 @@ The following sections are copied only from explicit source Design text. No addi
 
 ### Explicit source section: Namespace and sandbox-server contract
 
-Current production deployment places `nointern-server` and `nointern-sandbox` in separate namespaces. Before implementation, Helm chart must explicitly choose one of following.
+Current production deployment places `azents-server` and `azents-sandbox` in separate namespaces. Before implementation, Helm chart must explicitly choose one of following.
 
 1. **Keep multi-namespace**: closer to current production structure. Chart receives `server.namespace`, `sandbox.namespace` and must correctly render sandbox NetworkPolicy namespace selector and cross-namespace service address.
 2. **Simplify to single namespace**: easier home cluster install. But less production parity and requires re-review of sandbox isolation model.
@@ -33,8 +33,8 @@ Default direction of this design is keeping multi-namespace for production parit
 
 - sandbox Pod preStop hook must be able to call `apiserver` internal endpoint.
 - sandbox control client must be able to open outbound gRPC stream to `sandbox-control` service.
-- `nointern-server` and `nointern-sandbox` must share same `internal-api-hmac` value.
-- If NetworkPolicy is enabled, `nointern-sandbox` → `nointern-server` egress rule must render together.
+- `azents-server` and `azents-sandbox` must share same `internal-api-hmac` value.
+- If NetworkPolicy is enabled, `azents-sandbox` → `azents-server` egress rule must render together.
 
 ### Explicit source section: Step 2: optional component parity
 
@@ -45,7 +45,7 @@ Default direction of this design is keeping multi-namespace for production parit
 ### Explicit source section: Unresolved Decisions and User Confirmation Needed
 
 1. **Public image registry**: Need decide where OSS/home cluster users pull images from. Current production ECR cannot be default.
-2. **RustFS packaging method**: Need confirm before implementation whether to use public RustFS Helm chart as dependency or provide RustFS resources through nointern chart internal template.
+2. **RustFS packaging method**: Need confirm before implementation whether to use public RustFS Helm chart as dependency or provide RustFS resources through azents chart internal template.
 3. **Sandbox prerequisite fail-fast**: Since default install includes `sandbox`, need decide how much RuntimeClass/NetworkPolicy/node scheduling assumptions are validated fail-fast through Helm schema, NOTES, preflight.
 4. **`mcpEgressProxy` location**: Need check call path before implementation and decide whether to keep as server sub opt-in or promote to top-level component.
 5. **Secret key contract**: Need decide whether to fix existing Secret names and keys according to production env wiring, or convert to chart-specific normalized keys.

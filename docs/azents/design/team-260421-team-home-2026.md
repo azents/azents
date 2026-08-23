@@ -1,11 +1,11 @@
 ---
 title: "Agent-Team Home Design"
-tags: [frontend, nointern-web, navigation, UX, historical-reconstruction]
+tags: [frontend, azents-web, navigation, UX, historical-reconstruction]
 created: 2026-04-21
 updated: 2026-04-21
 implemented: 2026-04-21
 issue: "#2779"
-supersedes: docs/nointern/design/home-260421-home-list-2026.md
+supersedes: docs/azents/design/home-260421-home-list-2026.md
 document_role: primary
 document_type: design
 snapshot_id: team-260421
@@ -23,7 +23,7 @@ historical_reconstruction: true
 
 `home-as-agent-list` simply replaced Home with `AgentList` (cards + SegmentedControl), but the design team proposed a follow-up Home that emphasizes the **team view** nature of "Our Team Agents." Sidebar also exposes only **pinned + recent** instead of all agents, and Home takes the role of full directory.
 
-Design handle: `api.anthropic.com/v1/design/h/M1P3PGa_LxPQZVVCJmKvPg` — `NoIntern+Agent-Centric+Nav.html`. File structure:
+Design handle: `api.anthropic.com/v1/design/h/M1P3PGa_LxPQZVVCJmKvPg` — `Azents+Agent-Centric+Nav.html`. File structure:
 
 - `home.jsx` — TeamStatRow / AgentCard / SubagentRow / HomePage
 - `sidebar.jsx` — Sidebar (pinned + recent + "View all")
@@ -151,7 +151,7 @@ type WorkspaceHomeState =
 ## Testenv / Spec Impact
 
 - **testenv**: N/A (FE only)
-- **spec**: N/A. `docs/nointern/spec/**` code_paths are backend-only.
+- **spec**: N/A. `docs/azents/spec/**` code_paths are backend-only.
 
 ## Reviewer Checkpoints
 

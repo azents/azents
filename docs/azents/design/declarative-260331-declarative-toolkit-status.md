@@ -231,7 +231,7 @@ From LLM perspective: if usable tool exists, use it; if not, judge from prompt. 
 
 Single PR and single commit is sufficient:
 
-1. `feat(nointern): add wait_ready and retry tools to mcp_base`
+1. `feat(azents): add wait_ready and retry tools to mcp_base`
 
 ## Alternatives Considered
 

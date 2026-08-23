@@ -74,7 +74,7 @@ When user visits this page:
 3. Redirect to returned `authorization_url`.
 
 ```typescript
-// typescript/apps/nointern-web/src/app/(app)/w/[handle]/toolkit/[toolkitId]/setup/page.tsx
+// typescript/apps/azents-web/src/app/(app)/w/[handle]/toolkit/[toolkitId]/setup/page.tsx
 export default function ToolkitSetupPage({
   params,
 }: {

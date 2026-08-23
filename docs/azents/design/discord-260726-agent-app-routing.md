@@ -23,7 +23,7 @@ Channel domain. It preserves the confirmed Slack parity baseline while using Dis
 Gateway, signed HTTP interactions, threads, messages, components, and attachments as
 provider adapters.
 
-The design does not restore the removed nointern Discord domain. Historical code is
+The design does not restore the removed Azents Discord domain. Historical code is
 used only as operational evidence. PostgreSQL External Channel records remain the
 canonical connection, routing, authorization, conversation, work, and delivery state.
 

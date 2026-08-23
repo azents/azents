@@ -19,7 +19,7 @@ migration_source: "docs/azents/adr/0011-builtin-tools.md"
 
 LLM providers offer **built-in tools** that run server-side. For example, Gemini's Google Search does not require us to implement a function; the provider performs search on the server and includes the result in the response. The client only declares the tool and does not need a handler.
 
-NoIntern's current tool system is structured as `Tool = ToolSpec + ToolHandler`, requiring a client-side handler for every tool. Supporting built-in tools requires a way to represent handlerless tools and to process server-side execution results.
+Azents's current tool system is structured as `Tool = ToolSpec + ToolHandler`, requiring a client-side handler for every tool. Supporting built-in tools requires a way to represent handlerless tools and to process server-side execution results.
 
 ### Provider-Specific Built-in Tools
 

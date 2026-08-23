@@ -1,6 +1,6 @@
 ---
 title: "Stage 4 (browser/web QA) Design"
-tags: [nointern, testenv, qa, browser, playwright, historical-reconstruction]
+tags: [azents, testenv, qa, browser, playwright, historical-reconstruction]
 created: 2026-04-10
 updated: 2026-04-10
 implemented: 2026-04-10
@@ -16,11 +16,11 @@ migration_source: "docs/azents/design/stage4-web.md"
 historical_reconstruction: true
 ---
 
-# Stage 4 — browser/web QA for nointern testenv
+# Stage 4 — browser/web QA for azents testenv
 
 ## Background
 
-`testenv/nointern` is an isolated integration test environment for nointern backend + agent runtime. Stage 1~3 secured these outputs:
+`testenv/azents` is an isolated integration test environment for azents backend + agent runtime. Stage 1~3 secured these outputs:
 
 | Stage | Output |
 |---|---|
@@ -28,16 +28,16 @@ historical_reconstruction: true
 | 2 | `live/chat.py` — chat session WS collection helper |
 | 3 | `live/sandbox.py`, `live/tools.py`, `live/mcp.py`, shell-tool / sandbox-isolation / mcp-toolkit scenarios |
 
-Stage 4 enables end-to-end QA including the **screen seen by human users (nointern-web Next.js)**.
+Stage 4 enables end-to-end QA including the **screen seen by human users (azents-web Next.js)**.
 
 ## Error in Previous Design (closed #2430~#2436)
 
-Previous stack attached Playwright MCP toolkit to **nointern agent** so agent would call `browser_navigate`, etc. In other words, it made a structure where "system under test (nointern) has a bot manipulating itself."
+Previous stack attached Playwright MCP toolkit to **azents agent** so agent would call `browser_navigate`, etc. In other words, it made a structure where "system under test (azents) has a bot manipulating itself."
 
 Problems with this structure:
 - The test target tests itself, so verification loses meaning.
 - Execution depends on LLM prompt and is non-deterministic.
-- In actual run, nointern engine ↔ Playwright MCP HTTP streamable_http transport hangs permanently (same at 30s and 120s) — suspected structural problem.
+- In actual run, azents engine ↔ Playwright MCP HTTP streamable_http transport hangs permanently (same at 30s and 120s) — suspected structural problem.
 
 Discussion #2441 identified the error and decided full redesign.
 
@@ -45,8 +45,8 @@ Discussion #2441 identified the error and decided full redesign.
 
 | ID | Decision |
 |---|---|
-| **P1** | Caller of Playwright MCP is **Claude Code (QA runner)**. Do not touch nointern engine/toolkit code. |
-| **P2** | Add only `devserver.py up --web`; do **not** add MCP server lifecycle such as `--playwright`. Enable Playwright plugin in `testenv/nointern/.claude/settings.json`. |
+| **P1** | Caller of Playwright MCP is **Claude Code (QA runner)**. Do not touch azents engine/toolkit code. |
+| **P2** | Add only `devserver.py up --web`; do **not** add MCP server lifecycle such as `--playwright`. Enable Playwright plugin in `testenv/azents/.claude/settings.json`. |
 | **P3** | Scenarios use **runbook .md format**. Browser tests minimize API bypass and verify directly through UI. |
 | **P4** | `seed/web.py` — storage state cache helper. Backend seed reuses existing helpers such as `seed/auth.py`. |
 | **P5** | No need for browser_* matchers in `live/matchers.py` — Claude Code judges snapshot directly in its own context with natural language. |
@@ -63,8 +63,8 @@ flowchart LR
     end
 
     subgraph Devserver["devserver.py up --web"]
-        Backend["nointern backend\n(public 8010, admin 8011)"]
-        Web["nointern-web\nNext.js dev (3003)"]
+        Backend["azents backend\n(public 8010, admin 8011)"]
+        Web["azents-web\nNext.js dev (3003)"]
     end
 
     PW -- "HTTP" --> Web
@@ -73,9 +73,9 @@ flowchart LR
 ```
 
 Core:
-- **Playwright caller is Claude Code itself**. There is no browser-related toolkit inside nointern.
-- nointern-web communicates with nointern backend as usual (no change).
-- testenv seeds only backend state (user, workspace, agent, model integration, ...) through nointern public/admin client. All UI manipulation is done directly by Claude Code through Playwright.
+- **Playwright caller is Claude Code itself**. There is no browser-related toolkit inside azents.
+- azents-web communicates with azents backend as usual (no change).
+- testenv seeds only backend state (user, workspace, agent, model integration, ...) through azents public/admin client. All UI manipulation is done directly by Claude Code through Playwright.
 
 ## Scenario Format (runbook)
 
@@ -120,10 +120,10 @@ No separate Python runner file. QA runner (Claude Code) reads .md directly, exec
 
 | test_id | severity | Core verification | Dependency |
 |---|---|---|---|
-| TC-WEB-001 | medium | homepage load smoke (logged out) | nointern-web only |
+| TC-WEB-001 | medium | homepage load smoke (logged out) | azents-web only |
 | TC-WEB-002 | critical | UI login flow (admin API code fetch) → storage state cache | + admin API |
 | TC-WEB-003 | high | chat session → message → response UI rendering | + LLM key |
-| TC-WEB-004 | high | agent creation form → appears in list | + nointern-web form |
+| TC-WEB-004 | high | agent creation form → appears in list | + azents-web form |
 | TC-WEB-005 | high | shell tool result is exposed in chat UI ToolCallCard | + Stage 3 sandbox |
 
 ## Feasibility Result Summary
@@ -132,7 +132,7 @@ All passed. The following 4 items are **facts** that must be reflected in scenar
 
 1. Chat page path = `/w/[handle]/chat` (workspace handle is in path)
 2. `ToolCallCard` is collapsed Accordion → TC-WEB-005 needs Accordion expand step
-3. `auth_v1_get_email_verification_by_email(email, csrf_token)` is already called in `testenv/nointern/seed/auth.py:51-54` — reuse as-is
+3. `auth_v1_get_email_verification_by_email(email, csrf_token)` is already called in `testenv/azents/seed/auth.py:51-54` — reuse as-is
 4. Stable anchor for TC-WEB-001: `"Stop delegating to humans."` (HeroSection headline)
 
 Additional facts:
@@ -143,15 +143,15 @@ Additional facts:
 ## Implementation Scope
 
 ### Add
-- `testenv/nointern/.claude/settings.json` — `playwright@claude-plugins-official: true`
-- `testenv/nointern/devserverlib/web.py` — `start_web` / `stop_web` / `is_web_running` / `wait_for_web_ready`
-- `testenv/nointern/devserverlib/paths.py` — `WEB_SESSION_NAME`, `WEB_LOG_FILE`, `NOINTERN_WEB_DIR`, `TYPESCRIPT_DIR`, `DEFAULT_WEB_PORT=3003`
-- `testenv/nointern/devserver.py` — `up --web` flag, web handling in `down`/`status`
-- `testenv/nointern/checks/web.py` — checks node / pnpm / nointern-web deps / 3003 port
-- `testenv/nointern/seed/web.py` — storage state cache helper (`StorageState.path / has / save / load`)
-- `testenv/nointern/scenarios/browser/TC-WEB-001.md` ~ `TC-WEB-005.md` — runbook format
-- `testenv/nointern/scenarios/INDEX.md` — add `### browser` section
-- `testenv/nointern/README.md` — add Stage 4 section
+- `testenv/azents/.claude/settings.json` — `playwright@claude-plugins-official: true`
+- `testenv/azents/devserverlib/web.py` — `start_web` / `stop_web` / `is_web_running` / `wait_for_web_ready`
+- `testenv/azents/devserverlib/paths.py` — `WEB_SESSION_NAME`, `WEB_LOG_FILE`, `AZ_WEB_DIR`, `TYPESCRIPT_DIR`, `DEFAULT_WEB_PORT=3003`
+- `testenv/azents/devserver.py` — `up --web` flag, web handling in `down`/`status`
+- `testenv/azents/checks/web.py` — checks node / pnpm / azents-web deps / 3003 port
+- `testenv/azents/seed/web.py` — storage state cache helper (`StorageState.path / has / save / load`)
+- `testenv/azents/scenarios/browser/TC-WEB-001.md` ~ `TC-WEB-005.md` — runbook format
+- `testenv/azents/scenarios/INDEX.md` — add `### browser` section
+- `testenv/azents/README.md` — add Stage 4 section
 
 ### Explicitly Excluded (difference from previous design)
 - Playwright MCP HTTP server lifecycle (`devserverlib/playwright.py`) — none
@@ -165,14 +165,14 @@ Additional facts:
 | Risk | Mitigation |
 |---|---|
 | Claude Code playwright plugin tool prefix changes in later version | Document "current tool prefix" in scenario .md and handle change with grep replace |
-| nointern-web UI changes later and anchor text/path breaks | Run scenario directly once before each PR merge — runbook enables quick re-run |
+| azents-web UI changes later and anchor text/path breaks | Run scenario directly once before each PR merge — runbook enables quick re-run |
 | Storage state cache becomes stale and login reuse fails | TC-WEB-002 is responsible for creating cache again, so rerun it on invalidation |
 
 ## Alternatives Considered
 
 | Alternative | Rejection reason |
 |---|---|
-| Attach Playwright MCP toolkit to nointern agent (previous design) | Test target tests itself, non-deterministic, structural hang in actual run |
+| Attach Playwright MCP toolkit to azents agent (previous design) | Test target tests itself, non-deterministic, structural hang in actual run |
 | Python runner + assertion helper (reuse Stage 3 pattern) | Caller is Claude Code, so routing call result back through Python is unnatural. Runbook is clearer |
 | devserver starts Playwright HTTP server | Claude Code has its own plugin, so duplicate. Previous design hang occurred on this path too |
 

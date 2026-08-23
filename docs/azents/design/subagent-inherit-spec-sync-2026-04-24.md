@@ -13,7 +13,7 @@ migration_source: "docs/azents/design/subagent-inherit-spec-sync-2026-04-24.md"
 
 ## 1. Audit Scope
 
-Audit whether Phase A-D changes of Subagent Toolkit/Model Inherit feature (issue #2967) were correctly reflected in nointern Living Spec (`docs/nointern/spec/**`). Manual full audit as extension of `/spec-review`.
+Audit whether Phase A-D changes of Subagent Toolkit/Model Inherit feature (issue #2967) were correctly reflected in azents Living Spec (`docs/azents/spec/**`). Manual full audit as extension of `/spec-review`.
 
 ### 1.1 Target Spec Files
 
@@ -120,7 +120,7 @@ These decisions involve trade-offs that may be reverted or extended later, so it
 - **Decision**: store in `agents.toolkit_inherit_mode` (agent row). Not an Agent row property.
 - **Context**: In M:N structure where same subagent can attach to multiple parents, per-parent policy such as "Parent A inherits, Parent B independent" is needed.
 - **Trade-off**: extra attribute on junction vs simplifying as Agent row property and sacrificing reusability. Different form from Claude Agent SDK `model: "inherit"`.
-- **Alternative rationale**: DP1 A (agent level) does not fit nointern M:N.
+- **Alternative rationale**: DP1 A (agent level) does not fit azents M:N.
 - **Follow-up impact**: Per-toolkit allowlist (`'explicit'`) extension also at same agent row level.
 
 ### ADR-C2. Exclusive vs Merge toolkit inherit policy (DP6)
@@ -146,7 +146,7 @@ These decisions involve trade-offs that may be reverted or extended later, so it
 
 ### 5.2 Carried over follow-ups (Phase 9 Spec Promotion scope)
 
-- Decide whether to create ADR-C1, C2, C3. If created, write in `docs/nointern/adr/NNNN-{slug}.md` format. This audit only **suggests** and actual creation is carried over.
+- Decide whether to create ADR-C1, C2, C3. If created, write in `docs/azents/adr/NNNN-{slug}.md` format. This audit only **suggests** and actual creation is carried over.
 - Move `design/subagent-inherit.md` to `design/subagent-inherit-{YYYY-MM-DD}.md` (`status: archived`, record archive date). Since this branch is right after implementation completion, perform in Phase 9 after ship confirmation.
 
 ### 5.3 No carry-over (informational)

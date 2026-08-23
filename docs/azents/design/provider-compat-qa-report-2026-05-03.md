@@ -35,11 +35,11 @@ migration_source: "docs/azents/design/provider-compat-qa-report-2026-05-03.md"
 ## Commands
 
 ```bash
-cd python/apps/nointern
-uv run ruff check --fix src/nointern/engine/sdk/filters src/nointern/engine/sdk/engine_adapter.py src/nointern/engine/sdk/filters_test.py
-uv run ruff format src/nointern/engine/sdk/filters src/nointern/engine/sdk/engine_adapter.py src/nointern/engine/sdk/filters_test.py
+cd python/apps/azents
+uv run ruff check --fix src/azents/engine/sdk/filters src/azents/engine/sdk/engine_adapter.py src/azents/engine/sdk/filters_test.py
+uv run ruff format src/azents/engine/sdk/filters src/azents/engine/sdk/engine_adapter.py src/azents/engine/sdk/filters_test.py
 uv run pyright
-uv run pytest src/nointern/engine/sdk/filters_test.py
+uv run pytest src/azents/engine/sdk/filters_test.py
 ```
 
 ## Results

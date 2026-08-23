@@ -11,7 +11,7 @@ migration_source: "docs/azents/design/event-architecture-review.md"
 historical_reconstruction: true
 ---
 
-# Nointern Event Architecture Review Discussion
+# Azents Event Architecture Review Discussion
 
 > Discussion record from 2026-03-08. Based on design in `unified-event-architecture.md`, discusses problems in current structure and improvement direction.
 
@@ -48,7 +48,7 @@ AgentEngine.run()
 ### WebSocket
 
 - **Auth**: `POST /chat/v1/ticket` (JWT → 30s HMAC ticket) → WS `/chat/v1/sessions/{id}?ticket=…`
-- **Redis Broker**: incoming is Redis List, outgoing is Redis Pub/Sub (`nointern:session:{id}:events`)
+- **Redis Broker**: incoming is Redis List, outgoing is Redis Pub/Sub (`azents:session:{id}:events`)
 - **Serialization** (`broker/serialization.py`): EngineEvent → JSON. Message-like events are unified as `type: "message"`; control events keep unique type.
 - **WS handler**: `receive_loop` (client→broker) + `send_loop` (broker→client) two tasks in parallel
 

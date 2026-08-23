@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/agent-sandbox.md"
 
 ## Problem
 
-Provides an isolated execution environment (Sandbox) where nointern agents can perform **code execution, file manipulation, external API calls**, and similar work.
+Provides an isolated execution environment (Sandbox) where azents agents can perform **code execution, file manipulation, external API calls**, and similar work.
 
 ## Primary Actor
 

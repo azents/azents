@@ -27,7 +27,7 @@ Feature that enables agent sessions running in Discord/Slack to be viewed in rea
 
 ## Discussion Points and Decisions
 
-> Detailed discussion process: `docs/nointern/adr/web-260416-web-viewer.md`
+> Detailed discussion process: `docs/azents/adr/web-260416-web-viewer.md`
 
 | Point | Decision | Core rationale |
 |--------|------|----------|
@@ -298,7 +298,7 @@ No change. Reuse existing Redis Pub/Sub and WebSocket infrastructure.
 | Risk | Impact | Mitigation |
 |--------|------|------|
 | broadcast delay slows platform delivery | medium | process broadcast fire-and-forget, possibly task without await |
-| Discord/Slack session owner not linked to nointern web account | low | if unlinked, user_id=None → hidden from session list (intended). account link nudge encourages linking |
+| Discord/Slack session owner not linked to azents web account | low | if unlinked, user_id=None → hidden from session list (intended). account link nudge encourages linking |
 | Redis Pub/Sub load from high event volume | low | current Web sessions use same path, load pattern identical |
 
 ## testenv QA Scenarios
@@ -342,26 +342,26 @@ No change. Reuse existing Redis Pub/Sub and WebSocket infrastructure.
 ### Phase 1: Dual Event Publish + Session Type Exposure (Backend)
 
 **Changed files**:
-- `python/apps/nointern/src/nointern/worker/engine.py` — modify `dispatch_event()`
-- `python/apps/nointern/src/nointern/worker/engine_test.py` — add dual publish test
-- `python/apps/nointern/src/nointern/api/public/chat/v1/data.py` — add `type` to `ConversationSessionResponse`
-- `python/apps/nointern/src/nointern/api/public/chat/v1/__init__.py` — include `type` in list_sessions response
+- `python/apps/azents/src/azents/worker/engine.py` — modify `dispatch_event()`
+- `python/apps/azents/src/azents/worker/engine_test.py` — add dual publish test
+- `python/apps/azents/src/azents/api/public/chat/v1/data.py` — add `type` to `ConversationSessionResponse`
+- `python/apps/azents/src/azents/api/public/chat/v1/__init__.py` — include `type` in list_sessions response
 
 ### Phase 2: Discord/Slack "View in Web" Button (Backend)
 
 **Changed files**:
-- `python/apps/nointern/src/nointern/worker/adapters/discord.py` — View in Web button in status embed
-- `python/apps/nointern/src/nointern/worker/adapters/slack.py` — View in Web button in control message
-- `python/apps/nointern/src/nointern/worker/engine.py` — View in Web in scheduled task thread start message
+- `python/apps/azents/src/azents/worker/adapters/discord.py` — View in Web button in status embed
+- `python/apps/azents/src/azents/worker/adapters/slack.py` — View in Web button in control message
+- `python/apps/azents/src/azents/worker/engine.py` — View in Web in scheduled task thread start message
 
 ### Phase 3: Web UI Viewer Mode (Frontend)
 
 **Changed files**:
-- `typescript/packages/nointern-public-client/` — regenerate OpenAPI client (reflect type field)
-- `typescript/apps/nointern-web/src/features/chat/components/SessionSidebar.tsx` — platform icons
-- `typescript/apps/nointern-web/src/features/chat/components/ChatInput.tsx` — readOnly mode
-- `typescript/apps/nointern-web/src/features/chat/components/ChatPageContent.tsx` — pass session type
-- `typescript/apps/nointern-web/src/features/chat/containers/useChatPageContainer.ts` — session type state
+- `typescript/packages/azents-public-client/` — regenerate OpenAPI client (reflect type field)
+- `typescript/apps/azents-web/src/features/chat/components/SessionSidebar.tsx` — platform icons
+- `typescript/apps/azents-web/src/features/chat/components/ChatInput.tsx` — readOnly mode
+- `typescript/apps/azents-web/src/features/chat/components/ChatPageContent.tsx` — pass session type
+- `typescript/apps/azents-web/src/features/chat/containers/useChatPageContainer.ts` — session type state
 
 ## Alternatives Considered
 

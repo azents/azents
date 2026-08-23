@@ -22,8 +22,8 @@ Separate Discord Gateway into ultra-light HTTP callback pattern to achieve zero-
 Current Discord Gateway problems:
 
 1. **Message loss during deploy**: replicas=1 + Recreate → 10-30s loss
-2. **Unnecessary redeploy**: same image as nointern-server → Gateway restarts even when only worker code changes
-3. **Heavy dependencies**: depends on entire nointern stack such as broker, DB, session service → slow start
+2. **Unnecessary redeploy**: same image as azents-server → Gateway restarts even when only worker code changes
+3. **Heavy dependencies**: depends on entire azents stack such as broker, DB, session service → slow start
 4. **Single point of failure**: 1 pod → complete outage on crash
 
 ### Core idea
@@ -46,8 +46,8 @@ Gateway is responsible only for **event receive + HTTP delivery**. API server ha
 |---|---|---|
 | Gateway role | event receive + session resolve + history collection + broker delivery | event receive + HTTP POST |
 | Dependencies | discord.py, broker, DB, session service, ... | discord.py, httpx |
-| Image | nointern-server (shared) | separate light image |
-| Deploy | with nointern-server (dozens per day) | only when Gateway code changes |
+| Image | azents-server (shared) | separate light image |
+| Deploy | with azents-server (dozens per day) | only when Gateway code changes |
 | replicas | 1 | 2 |
 | strategy | Recreate | RollingUpdate |
 | loss during deploy | 10-30s | 0 |
@@ -65,7 +65,7 @@ Gateway is responsible only for **event receive + HTTP delivery**. API server ha
 - B) separate image + separate ArgoCD App — dependency sync needed
 - **C) separate Python app + HTTP callback pattern** — adopted
 
-**Rationale:** If Gateway only does HTTP POST, nointern code dependency disappears. Since only discord.py + httpx are needed, a fully independent app is realistic. Architecture consistency is also achieved with same pattern as Slack Events API.
+**Rationale:** If Gateway only does HTTP POST, azents code dependency disappears. Since only discord.py + httpx are needed, a fully independent app is realistic. Architecture consistency is also achieved with same pattern as Slack Events API.
 
 ### 2. Duplicate event prevention
 
@@ -81,7 +81,7 @@ Gateway is responsible only for **event receive + HTTP delivery**. API server ha
 ```python
 # In API server:
 async def handle_discord_event(request: DiscordEventRequest) -> None:
-    key = f"nointern:discord:event:{request.event_id}"
+    key = f"azents:discord:event:{request.event_id}"
     if not await redis.set(key, "1", nx=True, ex=60):
         return  # event already delivered by another Gateway pod
     # existing handler logic...
@@ -171,7 +171,7 @@ sequenceDiagram
 ### App Structure
 
 ```
-python/apps/nointern-discord-gateway/
+python/apps/azents-discord-gateway/
 ├── pyproject.toml          # only discord.py, httpx, aiohttp
 ├── src/
 │   └── discord_gateway/
@@ -270,7 +270,7 @@ CMD ["python", "-m", "discord_gateway.main"]
 
 ### Endpoint Structure
 
-Create new `api/internal/` directory following existing nointern API pattern (`api/public/`, `api/admin/`).
+Create new `api/internal/` directory following existing azents API pattern (`api/public/`, `api/admin/`).
 
 ```
 api/
@@ -362,7 +362,7 @@ async def handle_gateway_event(
 ) -> GatewayEventResponse:
     """Handle Discord message event delivered from Gateway."""
     # Deduplicate
-    key = f"nointern:discord:event:{body.event_id}"
+    key = f"azents:discord:event:{body.event_id}"
     if not await redis.set(key, "1", nx=True, ex=60):
         return GatewayEventResponse(status="duplicate")
 
@@ -427,8 +427,8 @@ class GatewayEventResponse(BaseModel):
 
 ```python
 # core/config.py
-discord_gateway_secret: str = ""  # HMAC shared secret (env var: NI_DISCORD_GATEWAY_SECRET)
-discord_public_key: str = ""      # Discord Application Public Key (env var: NI_DISCORD_PUBLIC_KEY)
+discord_gateway_secret: str = ""  # HMAC shared secret (env var: AZ_DISCORD_GATEWAY_SECRET)
+discord_public_key: str = ""      # Discord Application Public Key (env var: AZ_DISCORD_PUBLIC_KEY)
 ```
 
 ### Reuse Existing Logic
@@ -445,7 +445,7 @@ kind: Deployment
 metadata:
   name: discord-gateway
   labels:
-    app.kubernetes.io/name: nointern-discord-gateway
+    app.kubernetes.io/name: azents-discord-gateway
 spec:
   replicas: 2
   strategy:
@@ -458,13 +458,13 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: gateway
-          image: nointern-discord-gateway:latest
+          image: azents-discord-gateway:latest
           env:
             - name: DISCORD_BOT_TOKEN
               valueFrom:
                 secretKeyRef: ...
             - name: CALLBACK_URL
-              value: "http://nointern-server-apiserver:8010/discord/events"
+              value: "http://azents-server-apiserver:8010/discord/events"
             - name: CALLBACK_SECRET
               valueFrom:
                 secretKeyRef: ...
@@ -499,7 +499,7 @@ spec:
   minAvailable: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: nointern-discord-gateway
+      app.kubernetes.io/name: azents-discord-gateway
 ```
 
 ## Cost
@@ -519,7 +519,7 @@ spec:
 - can run in parallel with existing Gateway (only callback endpoint added, not called yet)
 
 ### Phase 2: Implement ultra-light Gateway app
-- new app `python/apps/nointern-discord-gateway/`
+- new app `python/apps/azents-discord-gateway/`
 - discord.py + httpx + aiohttp (health)
 - Dockerfile + CI build
 - local test

@@ -94,7 +94,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mcp-egress-proxy
-  namespace: nointern
+  namespace: azents
 spec:
   replicas: 1
   selector:
@@ -130,7 +130,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mcp-egress-proxy
-  namespace: nointern
+  namespace: azents
 spec:
   selector:
     app: mcp-egress-proxy
@@ -142,7 +142,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: mcp-egress-proxy-config
-  namespace: nointern
+  namespace: azents
 data:
   squid.conf: |
     # Block private IPs
@@ -256,4 +256,4 @@ async with httpx.AsyncClient(
 | 2 | Pass proxy parameter in `mcp_transport.py` | transport + call sites |
 | 3 | Pass proxy parameter in `mcp_discovery.py` | discovery |
 | 4 | Write Squid Deployment + Service + ConfigMap | infra |
-| 5 | Add `MCP_PROXY_URL=http://mcp-egress-proxy:3128` to nointern-server environment variables | infra |
+| 5 | Add `MCP_PROXY_URL=http://mcp-egress-proxy:3128` to azents-server environment variables | infra |

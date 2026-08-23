@@ -11,7 +11,7 @@ migration_source: "docs/azents/design/github-toolkit-shell-env-audit-report-2026
 
 # github-toolkit-shell-env Audit Report
 
-Combined report for Phase 3 (complete design-implementation audit) and Phase 4 (spec sync audit) of the `/ship-feature` workflow. It compared cumulative diffs from Phase 1–4 PRs against the design document (`docs/nointern/design/github-toolkit-shell-env.md`).
+Combined report for Phase 3 (complete design-implementation audit) and Phase 4 (spec sync audit) of the `/ship-feature` workflow. It compared cumulative diffs from Phase 1–4 PRs against the design document (`docs/azents/design/github-toolkit-shell-env.md`).
 
 ## Summary
 
@@ -38,7 +38,7 @@ Combined report for Phase 3 (complete design-implementation audit) and Phase 4 (
 | Provider implementation | Installation token exchange in `github_app_platform` mode | IMPLEMENTED | `engine/tools/github.py:655-672` |
 | Provider implementation | TTL cache (default 55 minutes) | IMPLEMENTED | `engine/tools/github.py:235-249` |
 | Provider implementation | per_user_pat 60s TTL (DB read refresh) | IMPLEMENTED | `engine/tools/github.py:548` |
-| Sandbox-daemon | `nointern-git-credential` helper script | IMPLEMENTED | `docker/nointern/agent-runtime/nointern-git-credential.sh` |
+| Sandbox-daemon | `azents-git-credential` helper script | IMPLEMENTED | `docker/azents/agent-runtime/azents-git-credential.sh` |
 | Sandbox-daemon | Prefer `GH_TOKEN`, fallback to `GITHUB_TOKEN` | IMPLEMENTED | helper script line 18 |
 | Sandbox-daemon | Handle only `get`, ignore `store`/`erase` | IMPLEMENTED | helper script line 10-16 |
 | Sandbox-daemon | `git config --system credential.helper` | IMPLEMENTED | `Dockerfile` line 125 |
@@ -70,7 +70,7 @@ The remaining TODO item is **non-blocking** — code implementation of this feat
 
 ## Spec Sync (Phase 4)
 
-Manual review equivalent to `/spec-review` — `docs/nointern/spec/domain/toolkit.md` is affected because its `code_paths` includes `engine/tools/github.py` and `core/tools.py`.
+Manual review equivalent to `/spec-review` — `docs/azents/spec/domain/toolkit.md` is affected because its `code_paths` includes `engine/tools/github.py` and `core/tools.py`.
 
 ### Required updates to `toolkit.md`
 

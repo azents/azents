@@ -23,7 +23,7 @@ Separate sandbox-daemon from agent-runtime container and operate it as separate 
 - supervisord manages process lifecycle → K8s native healthcheck/restart not used.
 
 **Things not changed:**
-- `SandboxDaemonClient` HTTP interface (keep nointern server → daemon communication path).
+- `SandboxDaemonClient` HTTP interface (keep azents server → daemon communication path).
 - File API path routing (direct access to shared volume `/mnt/agent-data`).
 - Per-user isolation model (decided in separate discussion).
 
@@ -60,7 +60,7 @@ graph TB
     end
   end
 
-  nointern["nointern server"] -->|"HTTP POST /exec"| daemon
+  azents["azents server"] -->|"HTTP POST /exec"| daemon
   daemon -->|"subprocess (bwrap-exec)"| cmd["shell command"]
 ```
 
@@ -83,7 +83,7 @@ graph TB
     SidecarDaemon -.->|"volume mount"| SharedVol
   end
 
-  nointern["nointern server"] -->|"HTTP POST /exec"| daemon
+  azents["azents server"] -->|"HTTP POST /exec"| daemon
   daemon -->|"kube API exec"| shell
 ```
 
@@ -93,29 +93,29 @@ graph TB
 
 Separate sandbox-daemon from agent-runtime image and build as separate image.
 
-**Dockerfile location:** `docker/nointern/sandbox-daemon/Dockerfile`
+**Dockerfile location:** `docker/azents/sandbox-daemon/Dockerfile`
 
 ```dockerfile
 FROM python:3.14-slim
 
 # install only sandbox-daemon package
-COPY python/apps/nointern-sandbox-daemon /tmp/nointern-sandbox-daemon
-RUN pip install --no-cache-dir /tmp/nointern-sandbox-daemon
+COPY python/apps/azents-sandbox-daemon /tmp/azents-sandbox-daemon
+RUN pip install --no-cache-dir /tmp/azents-sandbox-daemon
 
 # add kubernetes_asyncio (for kube exec call)
-# add dependency to nointern-sandbox-daemon pyproject.toml
+# add dependency to azents-sandbox-daemon pyproject.toml
 
 USER 1000
 EXPOSE 8081
-CMD ["python", "-m", "nointern_sandbox_daemon"]
+CMD ["python", "-m", "azents_sandbox_daemon"]
 ```
 
-**ECR repository:** `nointern-production-server/nointern-sandbox-daemon`
+**ECR repository:** `azents-production-server/azents-sandbox-daemon`
 
 ### agent-runtime Image Change
 
 - Remove `[program:sandbox-daemon]` from `supervisord.conf`.
-- Remove nointern-sandbox-daemon package install from Dockerfile.
+- Remove azents-sandbox-daemon package install from Dockerfile.
 - Programs remaining in supervisord: mitmproxy, socat, mcp-proxy (conditional)
   - If mitmproxy/socat are also sidecar separation targets, supervisord itself can be removed.
 
@@ -277,12 +277,12 @@ For sandbox-daemon sidecar to call kube exec into agent-runtime container in sam
 ### Add New Role
 
 ```yaml
-# infra/argocd/nointern-sandbox/base/daemon-rbac.yaml
+# infra/argocd/azents-sandbox/base/daemon-rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: sandbox-daemon-exec
-  namespace: nointern-sandbox
+  namespace: azents-sandbox
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -304,13 +304,13 @@ Add sandbox-daemon image build job following existing multi-image build pattern:
 
 ```yaml
 inputs:
-  build_nointern_sandbox_daemon:
+  build_azents_sandbox_daemon:
     type: boolean
     default: true
 
 jobs:
-  build-nointern-sandbox-daemon:
-    if: ${{ inputs.build_nointern_sandbox_daemon }}
+  build-azents-sandbox-daemon:
+    if: ${{ inputs.build_azents_sandbox_daemon }}
     runs-on: arc-medium-dind
     steps:
       # checkout, AWS credentials, ECR login (same existing pattern)
@@ -318,20 +318,20 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/nointern/sandbox-daemon/Dockerfile
+          file: docker/azents/sandbox-daemon/Dockerfile
           push: true
           tags: |
-            ${{ env.ECR_URI }}/nointern-sandbox-daemon:${{ github.sha }}
-            ${{ env.ECR_URI }}/nointern-sandbox-daemon:latest
+            ${{ env.ECR_URI }}/azents-sandbox-daemon:${{ github.sha }}
+            ${{ env.ECR_URI }}/azents-sandbox-daemon:latest
 ```
 
 ## Infra Change
 
 | Item | Change |
 |------|----------|
-| ECR repository | create new `nointern-sandbox-daemon` |
-| Dockerfile | add `docker/nointern/sandbox-daemon/Dockerfile` |
-| CI workflow | add `build-nointern-sandbox-daemon` job |
+| ECR repository | create new `azents-sandbox-daemon` |
+| Dockerfile | add `docker/azents/sandbox-daemon/Dockerfile` |
+| CI workflow | add `build-azents-sandbox-daemon` job |
 | RBAC | add `sandbox-daemon-exec` Role + RoleBinding |
 | Karpenter | no change (use existing sandbox NodePool) |
 | ArgoCD | add sandbox-daemon image tag management |
@@ -380,7 +380,7 @@ jobs:
 | Alternative | Rejection reason |
 |------|----------|
 | Same image + different entrypoint | invalid because image separation is the purpose of this work |
-| nointern directly calls kube exec | requires SandboxDaemonClient interface change, scatters responsibilities |
+| azents directly calls kube exec | requires SandboxDaemonClient interface change, scatters responsibilities |
 | fully remove daemon | complex file API operations such as glob/grep/edit must be reimplemented with kube exec |
 | 3-step gradual transition | unnecessary dual-running period, 2 steps are enough |
 | feature flag based transition | no benefit compared to code complexity of maintaining two paths |

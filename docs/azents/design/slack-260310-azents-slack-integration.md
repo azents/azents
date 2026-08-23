@@ -1,21 +1,21 @@
 ---
-title: "nointern Slack Integration Design"
+title: "azents Slack Integration Design"
 created: 2026-03-10
 updated: 2026-03-10
 implemented: 2026-03-10
 document_role: primary
 document_type: design
 snapshot_id: slack-260310
-migration_source: "docs/azents/design/nointern-slack-integration.md"
+migration_source: "docs/azents/design/azents-slack-integration.md"
 historical_reconstruction: true
 tags: [documentation, historical-reconstruction]
 ---
 
-# nointern Slack Integration Design
+# azents Slack Integration Design
 
 ## Overview
 
-This design integrates nointern AI agents with Slack. It supports two integration models and shares the same engine and broker layers as the existing WebSocket-based interface.
+This design integrates azents AI agents with Slack. It supports two integration models and shares the same engine and broker layers as the existing WebSocket-based interface.
 
 **Core principles**:
 
@@ -33,7 +33,7 @@ flowchart TB
         PLAT[Platform Slack App]
     end
 
-    subgraph API["nointern-api (FastAPI)"]
+    subgraph API["azents-api (FastAPI)"]
         WS["/chat/v1 (WebSocket)"]
         SLACK["/slack/v1 (HTTP callback)"]
         SM["Socket Mode (dev only)"]
@@ -56,13 +56,13 @@ flowchart TB
 
 ### Model A: BYOA (Bring Your Own App)
 
-- The agent owner creates a Slack App directly and registers the bot token with nointern.
+- The agent owner creates a Slack App directly and registers the bot token with azents.
 - 1 App = 1 Agent, so no routing is required.
 - Enables custom branding and scope control.
 
-### Model B: nointern Platform App
+### Model B: azents Platform App
 
-- A single Slack App provided by nointern.
+- A single Slack App provided by azents.
 - One-click installation through "Add to Slack".
 - Multi-agent support, available only in the Platform App model.
 - Agent bindings per channel or DM.
@@ -119,19 +119,19 @@ erDiagram
 
 ### Table Descriptions
 
-**slack_installations** — Slack App installation unit. `slack_team_id` is unique, so a single Slack workspace can be connected to only one nointern workspace. Within the same nointern workspace, multiple BYOA apps and the Platform App can coexist. This table implements Bolt's `AsyncInstallationStore` interface.
+**slack_installations** — Slack App installation unit. `slack_team_id` is unique, so a single Slack workspace can be connected to only one azents workspace. Within the same azents workspace, multiple BYOA apps and the Platform App can coexist. This table implements Bolt's `AsyncInstallationStore` interface.
 
-**slack_channel_bindings** — Mapping that binds an agent to a channel or DM in the Platform App model. Managed by the `/nointern connect` command. BYOA routes directly through `slack_installations.agent_id`, so it does not use this table.
+**slack_channel_bindings** — Mapping that binds an agent to a channel or DM in the Platform App model. Managed by the `/azents connect` command. BYOA routes directly through `slack_installations.agent_id`, so it does not use this table.
 
-**slack_user_links** — Mapping between a Slack user and a nointern user. The `installation_id` scopes the link to a workspace. If a link exists, session creation fills `user_id`; otherwise sessions are created with `user_id = NULL`.
+**slack_user_links** — Mapping between a Slack user and a azents user. The `installation_id` scopes the link to a workspace. If a link exists, session creation fills `user_id`; otherwise sessions are created with `user_id = NULL`.
 
-**slack_sessions** — Mapping between a Slack channel/thread and a nointern ConversationSession. Used as the session lookup key.
+**slack_sessions** — Mapping between a Slack channel/thread and a azents ConversationSession. Used as the session lookup key.
 
 ## User Identity Mapping
 
 ### Mapping Method
 
-When a Slack message arrives, look up the nointern user in `slack_user_links`:
+When a Slack message arrives, look up the azents user in `slack_user_links`:
 
 - If the user is linked → fill `ConversationSession.user_id`.
 - If the user is not linked → create the session with `user_id = NULL`.
@@ -142,20 +142,20 @@ When a Slack message arrives, look up the nointern user in `slack_user_links`:
 Do not force account linking. Instead, guide users naturally:
 
 1. **DM nudge on first conversation** — If the user first talks in a channel, send a one-time DM explaining account linking.
-2. **Prompt when a feature needs it** — Encourage linking when the user tries a feature that requires a nointern user, such as per-user OAuth toolkits.
-3. **Manual linking** — Users can link at any time with `/nointern link`.
+2. **Prompt when a feature needs it** — Encourage linking when the user tries a feature that requires a azents user, such as per-user OAuth toolkits.
+3. **Manual linking** — Users can link at any time with `/azents link`.
 
 ### Link Flow
 
 ```mermaid
 sequenceDiagram
     participant U as Slack User
-    participant B as nointern Bot
-    participant W as nointern Web
+    participant B as azents Bot
+    participant W as azents Web
 
-    U->>B: /nointern link
-    B->>U: nointern login URL with one-time token
-    U->>W: Click URL → login to nointern
+    U->>B: /azents link
+    B->>U: azents login URL with one-time token
+    U->>W: Click URL → login to azents
     W->>W: Create slack_user_links record
     W->>B: Notify link completion
     B->>U: "Account linking is complete"
@@ -176,7 +176,7 @@ sequenceDiagram
 
 ### Session Reset
 
-`/nointern reset` resets the session for the current context. It breaks the existing session mapping and creates a new session.
+`/azents reset` resets the session for the current context. It breaks the existing session mapping and creates a new session.
 
 Session lifetime management is delegated to the existing compaction mechanism.
 
@@ -193,10 +193,10 @@ Bind an agent to a channel or DM:
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant B as nointern Bot
+    participant B as azents Bot
     participant S as Slack API
 
-    U->>B: /nointern connect
+    U->>B: /azents connect
     B->>S: views.open (trigger_id, agent selection modal)
     S->>U: Show modal (agent dropdown)
     U->>S: Select agent → Submit
@@ -205,8 +205,8 @@ sequenceDiagram
     B->>U: "[Agent name] has been connected to this channel"
 ```
 
-- If a DM conversation starts without an agent binding, send a text message guiding the user to `/nointern connect`.
-- To change the binding, run `/nointern connect` again.
+- If a DM conversation starts without an agent binding, send a text message guiding the user to `/azents connect`.
+- To change the binding, run `/azents connect` again.
 
 ## Streaming Conversion
 
@@ -261,10 +261,10 @@ sequenceDiagram
 
 ### Deployment Structure
 
-Implemented as an internal nointern-api module. No separate process is required:
+Implemented as an internal azents-api module. No separate process is required:
 
 ```text
-nointern/
+azents/
 ├── api/public/
 │   ├── chat/v1/           ← existing WebSocket interface
 │   └── slack/v1/          ← Slack HTTP callback, delegated to Bolt handler
@@ -348,7 +348,7 @@ async def slack_events(req: Request):
 
 ### Blocking Risks
 
-None. All required features are supported by official SDKs and fit naturally into the existing nointern architecture.
+None. All required features are supported by official SDKs and fit naturally into the existing azents architecture.
 
 ## Frontend UI
 
@@ -380,9 +380,9 @@ Connected accounts section:
 - Slack link status: connected, showing Slack username; or not connected.
 - Disconnect button.
 
-### `/nointern link` Landing Page
+### `/azents link` Landing Page
 
-Landing page for the URL provided by the Slack `/nointern link` command:
+Landing page for the URL provided by the Slack `/azents link` command:
 
 - If the user is not logged in → login or prompt signup.
 - After login → create `slack_user_links` → show "link complete".
@@ -397,11 +397,11 @@ TBD — decide together with the history page design.
 This design uses Slack-specific tables and adapter code, while keeping the same pattern available for other messengers:
 
 ```text
-nointern/api/public/
+azents/api/public/
 ├── slack/v1/           ← Slack adapter
 ├── discord/v1/         ← Discord adapter (future)
 
-nointern/rdb/models/
+azents/rdb/models/
 ├── slack.py            ← slack_* tables
 ├── discord.py          ← discord_* tables (future)
 ```

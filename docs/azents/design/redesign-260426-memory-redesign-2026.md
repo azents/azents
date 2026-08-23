@@ -825,4 +825,4 @@ Keep existing file structure while resolving concurrency with S3 conditional PUT
 
 Split dedicated service for Memory.
 
-**Rejected because:** service split is over-abstracted at current scale. Adding table to existing NoIntern PostgreSQL is simplest.
+**Rejected because:** service split is over-abstracted at current scale. Adding table to existing Azents PostgreSQL is simplest.

@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Overview
 
-Support provider-side server-executed tools (Google Search, Web Search, etc.) in NoIntern. Unlike existing function-call tools, these do not require client handler; provider server executes them and includes result in response.
+Support provider-side server-executed tools (Google Search, Web Search, etc.) in Azents. Unlike existing function-call tools, these do not require client handler; provider server executes them and includes result in response.
 
 ### Core Design Principles
 
@@ -173,7 +173,7 @@ class WebSearchRule(BuiltinToolRule):
 
     name = "web_search"
 
-    _GEMINI_PROVIDERS = frozenset({
+    _GEMIAZ_PROVIDERS = frozenset({
         LLMProvider.GOOGLE_GEMINI,
         LLMProvider.GOOGLE_VERTEX_AI,
     })
@@ -187,7 +187,7 @@ class WebSearchRule(BuiltinToolRule):
             errors.append(f"Model does not support Web Search.")
 
         # Gemini: exclusive constraints (same as existing Google Search)
-        if ctx.provider_model.provider in self._GEMINI_PROVIDERS:
+        if ctx.provider_model.provider in self._GEMIAZ_PROVIDERS:
             if ctx.agent_role != AgentRole.SUBAGENT:
                 errors.append("Web Search on Gemini: subagent only.")
             if ctx.shell_enabled:

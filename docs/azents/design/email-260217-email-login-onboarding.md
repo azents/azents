@@ -182,9 +182,9 @@ All tokens are managed by server as **httpOnly cookies**. Request interceptor in
 ```mermaid
 sequenceDiagram
     participant User
-    participant Web as nointern-web
+    participant Web as azents-web
     participant tRPC as tRPC Server
-    participant API as nointern API
+    participant API as azents API
     participant DB as PostgreSQL
 
     User->>Web: Access /login
@@ -221,7 +221,7 @@ sequenceDiagram
 sequenceDiagram
     participant User
     participant tRPC as tRPC Server
-    participant API as nointern API
+    participant API as azents API
     participant DB as PostgreSQL
 
     User->>tRPC: auth.verify({ email, code, csrfToken })
@@ -241,7 +241,7 @@ sequenceDiagram
 ### Backend
 
 ```
-python/apps/nointern/src/nointern/
+python/apps/azents/src/azents/
 ├── rdb/models/
 │   ├── global_user.py           # RDBUser model
 │   ├── user_email.py            # RDBUserEmail model
@@ -260,7 +260,7 @@ python/apps/nointern/src/nointern/
 ### Frontend
 
 ```
-typescript/apps/nointern-web/src/
+typescript/apps/azents-web/src/
 ├── shared/lib/
 │   ├── cookies.ts               # cookie utilities (read/write, expiration check, Set-Cookie builder)
 │   └── getInitialAuthState.ts   # server-side auth state check

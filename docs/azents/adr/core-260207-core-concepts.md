@@ -1,5 +1,5 @@
 ---
-title: "nointern Core Concepts Historical Decision Reconstruction"
+title: "azents Core Concepts Historical Decision Reconstruction"
 created: 2026-02-07
 tags: [architecture, historical-reconstruction, migration]
 document_role: primary
@@ -9,7 +9,7 @@ historical_reconstruction: true
 migration_source: "docs/azents/design/core-concepts.md"
 ---
 
-# nointern Core Concepts Historical Decision Reconstruction
+# azents Core Concepts Historical Decision Reconstruction
 
 - Snapshot: `core-260207`
 - Status: historical reconstruction; not a newly accepted decision.
@@ -33,7 +33,7 @@ def can_create_sub_team(parent_team: Team) -> bool:
 
 ### Explicit source section: Architecture comparison
 
-| Item | Existing approach (skill-only) | nointern (platform-mediated) |
+| Item | Existing approach (skill-only) | azents (platform-mediated) |
 |------|----------------------|--------------------------|
 | Credential access | agent accesses directly | only platform accesses; agent cannot access |
 | Prompt Injection risk | credentials can leak | no credentials in context to leak |

@@ -13,7 +13,7 @@ historical_reconstruction: true
 
 ## Overview / Problem
 
-nointern runs Agents using provider integrations registered by workspace. Model used by Agent is selected from global catalog `LLMModel` / `LLMProviderModel`, and Agent row references `llm_provider_model_id` and `llm_provider_integration_id`.
+Azents runs Agents using provider integrations registered by workspace. Model used by Agent is selected from global catalog `LLMModel` / `LLMProviderModel`, and Agent row references `llm_provider_model_id` and `llm_provider_integration_id`.
 
 Current global catalog is directly managed by Admin CRUD. This structure does not match LLM provider environment where model lists are added and deprecated quickly. Capabilities depended on by runtime and frontend are also distributed across these places:
 
@@ -23,7 +23,7 @@ Current global catalog is directly managed by Admin CRUD. This structure does no
 - LiteLLM fallback in `runtime.context.get_max_input_tokens()`
 - model option derivation logic in agent form
 
-As a result, humans must keep correcting model list and capabilities in Admin UI, causing drift between external source, backend, frontend, and runtime. This design changes catalog source of truth to external/official sources plus local override, and normalizes capability into nointern internal typed contract.
+As a result, humans must keep correcting model list and capabilities in Admin UI, causing drift between external source, backend, frontend, and runtime. This design changes catalog source of truth to external/official sources plus local override, and normalizes capability into Azents internal typed contract.
 
 ## Goals
 
@@ -46,19 +46,19 @@ As a result, humans must keep correcting model list and capabilities in Admin UI
 
 ### Backend/domain
 
-- `python/apps/nointern/src/nointern/rdb/models/llm_model.py`
+- `python/apps/azents/src/azents/rdb/models/llm_model.py`
   - uses `llm_models.slug` as PK.
   - stores vendor, name, description.
-- `python/apps/nointern/src/nointern/rdb/models/llm_provider_model.py`
+- `python/apps/azents/src/azents/rdb/models/llm_provider_model.py`
   - `id` is uuid7 hex PK.
   - `(provider, model_identifier)` is unique constraint.
   - stores `model_slug`, `available`, `thinking`, `metadata`.
-- `python/apps/nointern/src/nointern/rdb/models/agent.py`
+- `python/apps/azents/src/azents/rdb/models/agent.py`
   - Agent references `llm_provider_model_id` to `llm_provider_models.id`.
   - FK is `ondelete=RESTRICT`, so deleting provider model in use is unsafe.
-- `python/apps/nointern/src/nointern/api/admin/llm_model/v1/` and `api/admin/llm_provider_model/v1/`
+- `python/apps/azents/src/azents/api/admin/llm_model/v1/` and `api/admin/llm_provider_model/v1/`
   - provide Admin CRUD endpoints.
-- `python/apps/nointern/src/nointern/api/public/llm_provider_model/v1/`
+- `python/apps/azents/src/azents/api/public/llm_provider_model/v1/`
   - workspace member queries available model list by provider.
 
 ### Runtime/frontend capability usage
@@ -69,9 +69,9 @@ As a result, humans must keep correcting model list and capabilities in Admin UI
   - re-queries model vendor from `LLMModel` for built-in tool vendor conversion.
 - `engine/context.py`
   - determines max input token in order: `metadata.max_input_tokens` → LiteLLM model info → `128_000` fallback.
-- `typescript/apps/nointern-web/src/features/agents/containers/useAgentFormContainer.ts`
+- `typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts`
   - reads `thinking`, `metadata.supported_builtin_tools`, `metadata.max_input_tokens` from public model list response to build reasoning effort, built-in tools, and compaction model warning.
-- `typescript/apps/nointern-admin-web/`
+- `typescript/apps/azents-admin-web/`
   - has `LLM Models`, `Provider Models` navigation and CRUD screens.
 
 ### Core problem
@@ -86,7 +86,7 @@ Current `metadata` mixes provider raw data, operator override, and runtime contr
 
 - Primary source uses Models.dev catalog.
 - If source coverage or field quality is insufficient, add supplemental adapters based on provider official API or official docs.
-- nointern DB acts as materialized cache for source snapshot and normalized catalog.
+- Azents DB acts as materialized cache for source snapshot and normalized catalog.
 
 Rejected alternatives:
 
@@ -100,7 +100,7 @@ Rejected alternatives:
 Local override is used only for:
 
 - adding custom model absent from external source
-- adjusting nointern exposure/availability of a specific model
+- adjusting Azents exposure/availability of a specific model
 - supplementing missing capability from source with verified typed field
 - marking disable/deprecation for temporary provider failure or policy change
 
@@ -133,15 +133,15 @@ flowchart TD
     Override[Local override store] --> Merge[Catalog merge + validation]
     Adapter --> Merge
     Merge --> Contract[Normalized capability contract]
-    Contract --> DB[(nointern catalog tables)]
+    Contract --> DB[(Azents catalog tables)]
     DB --> PublicAPI[Public model list API]
     DB --> Resolver[Agent runtime resolver]
     DB --> AdminStatus[Optional read-only admin sync status]
-    PublicAPI --> AgentForm[nointern-web Agent form]
+    PublicAPI --> AgentForm[azents-web Agent form]
     Resolver --> Runtime[LLM runtime / compaction / tools]
 ```
 
-In target state, nointern DB is not human-edited source but materialized catalog storing result of merge between external/official source and local override. Runtime does not call external source per request; it uses last successful sync result in DB.
+In target state, Azents DB is not human-edited source but materialized catalog storing result of merge between external/official source and local override. Runtime does not call external source per request; it uses last successful sync result in DB.
 
 ## Data Model
 
@@ -282,7 +282,7 @@ expires_at: null
 
 ## Capability Contract
 
-Capability contract is semantic contract shared by backend, public API, nointern-web, and runtime. Field names must expose same meaning in Python/Pydantic and TypeScript generated client.
+Capability contract is semantic contract shared by backend, public API, azents-web, and runtime. Field names must expose same meaning in Python/Pydantic and TypeScript generated client.
 
 ```text
 ModelCapabilities
@@ -301,7 +301,7 @@ ModelCapabilities
     effort_levels: list of low/medium/high or provider-specific normalized values
     summaries: bool | null
   built_in_tools
-    supported: list of nointern built-in tool ids
+    supported: list of Azents built-in tool ids
   compatibility
     provider_family: string | null
     responses_api: bool | null
@@ -327,9 +327,9 @@ The file/function/behavior in this section should be sufficient to reproduce the
 
 | Responsibility | File/package | Implement |
 | --- | --- | --- |
-| capability contract | `python/apps/nointern/src/nointern/core/llm_catalog.py` | `ModelCapabilities` and nested Pydantic models, built-in tool/reasoning/modality enums, `build_initial_model_capabilities()` |
-| sync intermediate contract | `python/apps/nointern/src/nointern/core/llm_catalog_sync.py` | `CatalogProviderModel`, `CatalogSourceSnapshot`, `MergedCatalogModel`, `CatalogSyncResult`, override patch model, source key/version helper |
-| enum | `python/apps/nointern/src/nointern/core/enums.py` | `LLMModelLifecycleStatus`, `LLMModelCatalogSourceType`, `LLMModelCatalogSourceStatus` |
+| capability contract | `python/apps/azents/src/azents/core/llm_catalog.py` | `ModelCapabilities` and nested Pydantic models, built-in tool/reasoning/modality enums, `build_initial_model_capabilities()` |
+| sync intermediate contract | `python/apps/azents/src/azents/core/llm_catalog_sync.py` | `CatalogProviderModel`, `CatalogSourceSnapshot`, `MergedCatalogModel`, `CatalogSyncResult`, override patch model, source key/version helper |
+| enum | `python/apps/azents/src/azents/core/enums.py` | `LLMModelLifecycleStatus`, `LLMModelCatalogSourceType`, `LLMModelCatalogSourceStatus` |
 | RDB model | `rdb/models/llm_catalog_source.py` | `RDBLLMCatalogSource` |
 | RDB model | `rdb/models/llm_model_override.py` | `RDBLLMModelOverride` |
 | RDB extension | `rdb/models/llm_model.py`, `rdb/models/llm_provider_model.py` | add source/capability/lifecycle columns |
@@ -365,9 +365,9 @@ Each adapter maps source raw record to `CatalogProviderModel` as follows.
 | --- | --- |
 | `source_key` | one of source keys above |
 | `source_record_id` | stable id from source record; fallback `{provider}/{model_identifier}` |
-| `provider` | normalized to nointern `LLMProvider` enum |
+| `provider` | normalized to Azents `LLMProvider` enum |
 | `model_identifier` | model name passed to provider API, e.g. `gpt-5.5` |
-| `vendor` | normalized to nointern `LLMVendor` / runtime vendor |
+| `vendor` | normalized to Azents `LLMVendor` / runtime vendor |
 | `model_slug_candidate` | deterministic slug, e.g. `openai-gpt-5-5` |
 | `display_name` | UI display name; fallback `model_identifier` |
 | `description` | source description; fallback null |
@@ -382,9 +382,9 @@ Normal runtime does not auto-run sync at startup. Use opt-in flags only when fix
 
 | Setting | Env var | Default | Meaning |
 | --- | --- | --- | --- |
-| `llm_catalog_sync_enabled` | `NI_LLM_CATALOG_SYNC_ENABLED` | `false` | whether catalog sync feature is available |
-| `llm_catalog_startup_sync_enabled` | `NI_LLM_CATALOG_STARTUP_SYNC_ENABLED` | `false` | whether fixture sync runs during app startup |
-| `llm_catalog_source_mode` | `NI_LLM_CATALOG_SOURCE_MODE` | `fixture` | startup sync allowed only in `fixture` mode |
+| `llm_catalog_sync_enabled` | `AZ_LLM_CATALOG_SYNC_ENABLED` | `false` | whether catalog sync feature is available |
+| `llm_catalog_startup_sync_enabled` | `AZ_LLM_CATALOG_STARTUP_SYNC_ENABLED` | `false` | whether fixture sync runs during app startup |
+| `llm_catalog_source_mode` | `AZ_LLM_CATALOG_SOURCE_MODE` | `fixture` | startup sync allowed only in `fixture` mode |
 
 FastAPI lifespan calls `_run_startup_llm_catalog_sync()` only when `startup_sync_enabled=true`. Helper must include safeguards:
 
@@ -444,9 +444,9 @@ FastAPI lifespan calls `_run_startup_llm_catalog_sync()` only when `startup_sync
 
 ## Frontend / Admin UX Changes
 
-### nointern-web
+### azents-web
 
-- `typescript/apps/nointern-web/src/trpc/routers/llm-provider-model.ts`
+- `typescript/apps/azents-web/src/trpc/routers/llm-provider-model.ts`
   - `listByProvider` uses list endpoint from generated public client.
   - `getById` uses current detail endpoint from generated public client and converts 404 to `null`.
 - `features/agents/containers/useAgentFormContainer.ts`
@@ -465,9 +465,9 @@ FastAPI lifespan calls `_run_startup_llm_catalog_sync()` only when `startup_sync
   - deprecated/removed/disabled/unavailable/missing states are shown as warning/alert.
 - `AgentForm.stories.tsx` fixes static fixtures for capability controls, deprecated current model, missing current model parameter preservation, compaction warning states.
 
-### nointern-admin-web
+### azents-admin-web
 
-- Remove `LLM Models` and `Provider Models` navigation entries from `typescript/apps/nointern-admin-web/src/app/client-layout.tsx`.
+- Remove `LLM Models` and `Provider Models` navigation entries from `typescript/apps/azents-admin-web/src/app/client-layout.tsx`.
 - Remove `src/app/llm-models/page.tsx`, `src/app/provider-models/page.tsx`.
 - Remove `src/features/llm-models/**`, `src/features/provider-models/**`.
 - Remove `src/trpc/routers/llmModel.ts`, `src/trpc/routers/llmProviderModel.ts`, and router registration from `src/trpc/routers/_app.ts`.
@@ -501,7 +501,7 @@ FastAPI lifespan calls `_run_startup_llm_catalog_sync()` only when `startup_sync
 - Initial rollout generates dry-run diff and compares with existing catalog before applying sync result.
 - Automatic delete is forbidden. Missing models transition to unavailable/deprecated state.
 - Before/after Admin CRUD removal, verify public model list and Agent execution keep same model id.
-- After OpenAPI/client generation, remove nointern-web paths directly reading `metadata` key.
+- After OpenAPI/client generation, remove azents-web paths directly reading `metadata` key.
 
 ### Failure modes
 
@@ -514,7 +514,7 @@ FastAPI lifespan calls `_run_startup_llm_catalog_sync()` only when `startup_sync
 
 ## Test Strategy
 
-nointern product behavior verification is E2E-primary. testenv QA is fallback/diagnostic only for fixture readiness, deterministic source snapshot, and sync prerequisites that are hard to verify through E2E. Do not wrap E2E with `testenv qa run`.
+Azents product behavior verification is E2E-primary. testenv QA is fallback/diagnostic only for fixture readiness, deterministic source snapshot, and sync prerequisites that are hard to verify through E2E. Do not wrap E2E with `testenv qa run`.
 
 ### E2E primary / testenv fallback matrix
 
@@ -523,7 +523,7 @@ nointern product behavior verification is E2E-primary. testenv QA is fallback/di
 | Fixture catalog materialization | deterministic E2E server startup materializes `openai/gpt-5.5` into `llm_provider_models` and Agent/Toolkit fixtures use it | diagnose startup sync fixture path, source status, readiness failure | E2E pass log, admin read-only catalog response, startup sync structured log |
 | Public model list/detail contract | workspace member queries provider model list/detail and receives `capabilities`, `lifecycle_status`, `source`; response lacks `thinking`, `metadata`, `raw_source_metadata` | spot-check API response JSON for schema mismatch | response body assertion, generated client typecheck |
 | Runtime capability consumption | Agent create/edit/run E2E interprets reasoning effort, built-in tools, context compaction max input token from normalized capability | change capability fixture values and narrow-check runtime resolver with unit/integration test | Agent CRUD/execute E2E, resolver/context unit test result |
-| nointern-web Agent form | browser E2E or component UI verification builds reasoning/tool/compaction UI from capability and displays deprecated/removed current model but excludes it from new selection | reproduce UI state with Storybook fixture and API fixture | E2E screenshot/DOM assertion or Storybook story + typecheck/lint |
+| azents-web Agent form | browser E2E or component UI verification builds reasoning/tool/compaction UI from capability and displays deprecated/removed current model but excludes it from new selection | reproduce UI state with Storybook fixture and API fixture | E2E screenshot/DOM assertion or Storybook story + typecheck/lint |
 | Admin model management removal | admin-web E2E/compile check has no `LLM Models`, `Provider Models` nav/page/router; backend Admin OpenAPI lacks create/update/delete operations | OpenAPI diff and route list spot-check write surface leftovers | admin-web typecheck/lint, admin OpenAPI assertion |
 | Source failure and last-good behavior | service integration test keeps existing catalog and records source status `failed` on source fetch/materialization failure | verify per-source failure summary with fixture adapter failure mode | service test result, source status row assertion |
 | Local override merge | service/repository test applies local override patch, invalid override does not remove valid source row; expired/invalid local-only moves existing local row to removed/unavailable | diagnose validation issue summary with override fixture JSON | merge/materialize service test result |
@@ -532,9 +532,9 @@ nointern product behavior verification is E2E-primary. testenv QA is fallback/di
 
 - Deterministic E2E does not call network live catalog. It materializes `models_dev_fixture` primary source and `openai_official`, `anthropic_official`, `google_official` supplement sources through package fixture adapter.
 - E2E server runs startup sync only with explicit opt-in:
-  - `NI_LLM_CATALOG_SYNC_ENABLED=true`
-  - `NI_LLM_CATALOG_STARTUP_SYNC_ENABLED=true`
-  - `NI_LLM_CATALOG_SOURCE_MODE=fixture`
+  - `AZ_LLM_CATALOG_SYNC_ENABLED=true`
+  - `AZ_LLM_CATALOG_STARTUP_SYNC_ENABLED=true`
+  - `AZ_LLM_CATALOG_SOURCE_MODE=fixture`
 - Startup sync fail-fast if mode is not fixture. If readiness passes, catalog fixture materialization should also be considered successful.
 - Agent/Toolkit E2E fixture does not create model through Admin write API. It references `openai/gpt-5.5` provider model materialized by startup sync.
 - Admin model lifecycle E2E verifies read-only synced catalog visibility, not create/update/delete.
@@ -574,7 +574,7 @@ If Admin model CRUD is removed, E2E can no longer depend on manual Admin seed. C
 
 #### How to check
 
-Run deterministic E2E from `testenv/nointern/e2e`. Server env uses `NI_LLM_CATALOG_SYNC_ENABLED=true`, `NI_LLM_CATALOG_STARTUP_SYNC_ENABLED=true`, `NI_LLM_CATALOG_SOURCE_MODE=fixture`. If needed, confirm `openai-gpt-5-5` / `openai:gpt-5.5` mapping through admin read-only catalog API.
+Run deterministic E2E from `testenv/azents/e2e`. Server env uses `AZ_LLM_CATALOG_SYNC_ENABLED=true`, `AZ_LLM_CATALOG_STARTUP_SYNC_ENABLED=true`, `AZ_LLM_CATALOG_SOURCE_MODE=fixture`. If needed, confirm `openai-gpt-5-5` / `openai:gpt-5.5` mapping through admin read-only catalog API.
 
 #### Expected result
 
@@ -640,7 +640,7 @@ TBD
 
 TBD
 
-### QA-4. nointern-web Agent form capability UI
+### QA-4. azents-web Agent form capability UI
 
 #### What to check
 
@@ -652,7 +652,7 @@ If frontend remains on legacy `thinking` / `metadata`, user-visible behavior sti
 
 #### How to check
 
-Run nointern-web typecheck/lint and Agent form Storybook fixture or browser/component E2E. Include current non-selectable model and missing current model parameter preservation.
+Run azents-web typecheck/lint and Agent form Storybook fixture or browser/component E2E. Include current non-selectable model and missing current model parameter preservation.
 
 #### Expected result
 
@@ -670,7 +670,7 @@ TBD
 
 #### What to check
 
-`LLM Models` / `Provider Models` navigation, pages, and tRPC routers are removed from nointern-admin-web, and backend Admin OpenAPI has no model/provider-model create/update/delete operation.
+`LLM Models` / `Provider Models` navigation, pages, and tRPC routers are removed from azents-admin-web, and backend Admin OpenAPI has no model/provider-model create/update/delete operation.
 
 #### Why it matters
 
@@ -678,7 +678,7 @@ If Admin manual write surface remains, it can bypass external catalog source of 
 
 #### How to check
 
-Run nointern-admin-web typecheck/lint, admin OpenAPI diff/operation assertion, and E2E admin catalog read-only visibility test.
+Run azents-admin-web typecheck/lint, admin OpenAPI diff/operation assertion, and E2E admin catalog read-only visibility test.
 
 #### Expected result
 
@@ -749,7 +749,7 @@ TBD
 - Local/testenv must be able to use fixture adapter or recorded source snapshot without direct network call to external source.
 - Catalog sync dry-run must produce diff without DB write so QA can compare existing seed catalog and sync result.
 - Public API diagnostic checks whether available model list returns normalized capability in workspace with provider integration.
-- nointern-web diagnostic checks Agent create/edit screen behavior for reasoning effort, built-in tool, and compaction warning based on `capabilities`.
+- azents-web diagnostic checks Agent create/edit screen behavior for reasoning effort, built-in tool, and compaction warning based on `capabilities`.
 - Runtime diagnostic checks max input token decision is capability-based and fallback is observable when source value is missing.
 - Admin diagnostic confirms model CRUD navigation/page disappeared and manual model create/update/delete cannot be performed.
 
@@ -759,13 +759,13 @@ TBD
 - Models.dev catalog is primary source; missing providers are supplemented by official adapters.
 - Models absent from external/official source are added only by local override, which remains auditable and separated from source catalog.
 - Distributed capability dependencies such as `thinking`, `metadata.supported_builtin_tools`, `metadata.max_input_tokens` are replaced with normalized internal capability contract.
-- Backend resolver, runtime compaction/tool/reasoning decisions, and nointern-web Agent form use same capability contract.
+- Backend resolver, runtime compaction/tool/reasoning decisions, and azents-web Agent form use same capability contract.
 - Model management CRUD is removed from Admin UI so Admin does not need to manage model list directly.
 - Existing Agent `llm_provider_model_id` references are preserved after catalog sync.
 - Models removed from source are not deleted immediately; they are displayed as unavailable/deprecated.
 - If external catalog sync fails, Agent execution and model list query continue with last successful catalog, and operator can inspect failure status.
 - Public model list API provides normalized capability instead of arbitrary raw metadata.
-- QA plan clearly separates E2E primary / testenv fallback boundaries and verifies deterministic fixture sync, public API contract, runtime capability consumption, nointern-web Agent form, Admin CRUD removal, source failure/last-good, and local override merge with evidence.
+- QA plan clearly separates E2E primary / testenv fallback boundaries and verifies deterministic fixture sync, public API contract, runtime capability consumption, azents-web Agent form, Admin CRUD removal, source failure/last-good, and local override merge with evidence.
 
 ## Alternatives Considered
 
@@ -775,7 +775,7 @@ Rejected. Operators can still manually edit, so drift is not fundamentally preve
 
 ### Use LiteLLM metadata as sole source
 
-Rejected. It is already used as fallback in runtime, but insufficient to represent nointern-required built-in tools, lifecycle/deprecation, local custom models, and provider-official differences.
+Rejected. It is already used as fallback in runtime, but insufficient to represent Azents-required built-in tools, lifecycle/deprecation, local custom models, and provider-official differences.
 
 ### Keep documenting raw `metadata` JSONB schema
 
@@ -783,7 +783,7 @@ Rejected. It appears quick, but frontend/runtime/public API continue depending o
 
 ### Query external catalog on every request
 
-Rejected. Although always fresh, it creates latency, outage propagation, rate limit, and reproducibility problems. nointern runtime must use last successful sync result materialized in DB.
+Rejected. Although always fresh, it creates latency, outage propagation, rate limit, and reproducibility problems. Azents runtime must use last successful sync result materialized in DB.
 
 ### Immediately delete models removed from source
 

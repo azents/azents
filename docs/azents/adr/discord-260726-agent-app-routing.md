@@ -39,7 +39,7 @@ Socket Mode model:
 - Discord can create a thread from an existing message, but the source message can own
   only one such thread and channel types have different thread behavior.
 
-Historical nointern Discord designs are evidence only. They used a platform-owned bot
+Historical azents Discord designs are evidence only. They used a platform-owned bot
 and source-specific Session tables, which conflict with the confirmed customer-owned
 Single/Multi App model and the current External Channel canonical domain. Their useful
 operational lessons are limited to keeping Gateway protocol handling lightweight,
@@ -85,7 +85,7 @@ separating it from business transactions, and expecting duplicate/replayed event
 
 ## Research Synthesis
 
-### Historical nointern evidence
+### Historical azents evidence
 
 The legacy implementation was inspected at its pre-removal revisions rather than
 treated as an architectural template.
@@ -94,7 +94,7 @@ treated as an architectural template.
   directly on a Discord installation. It was removed by `7fc0dde64` on 2026-03-11
   and cannot represent the confirmed Single/Multi App catalog or current External
   Channel ownership graph.
-- The first Gateway ran inside the main nointern process and owned provider protocol,
+- The first Gateway ran inside the main azents process and owned provider protocol,
   Session resolution, history, broker delivery, and outbound rendering. Operational
   fixes repeatedly separated channel and thread identity, pre-created threads, tracked
   provider message identities, refreshed typing state, split long messages, hardened

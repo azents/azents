@@ -72,5 +72,5 @@ Legacy `/session-data` and `/shared-data` endpoints are removed in later cleanup
 
 - Exchange URI parser and service permission/metadata/S3 interaction unit tests
 - Existing AgentRuntimeService / resolver regression tests
-- nointern ruff, format, pyright
+- azents ruff, format, pyright
 - public OpenAPI regeneration

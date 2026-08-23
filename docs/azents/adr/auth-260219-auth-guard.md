@@ -1,5 +1,5 @@
 ---
-title: "nointern-web Login Guard Historical Decision Reconstruction"
+title: "azents-web Login Guard Historical Decision Reconstruction"
 created: 2026-02-19
 tags: [architecture, historical-reconstruction, migration]
 document_role: primary
@@ -9,7 +9,7 @@ historical_reconstruction: true
 migration_source: "docs/azents/design/auth-guard.md"
 ---
 
-# nointern-web Login Guard Historical Decision Reconstruction
+# azents-web Login Guard Historical Decision Reconstruction
 
 - Snapshot: `auth-260219`
 - Status: historical reconstruction; not a newly accepted decision.

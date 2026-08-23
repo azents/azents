@@ -17,15 +17,15 @@ Cumulative diff range: `main...feat/provider-compat/phase4`
 
 Primary changed files:
 
-- `python/apps/nointern/src/nointern/engine/sdk/filters/**`
-- `python/apps/nointern/src/nointern/engine/sdk/engine_adapter.py`
-- `python/apps/nointern/src/nointern/engine/sdk/filters_test.py`
+- `python/apps/azents/src/azents/engine/sdk/filters/**`
+- `python/apps/azents/src/azents/engine/sdk/engine_adapter.py`
+- `python/apps/azents/src/azents/engine/sdk/filters_test.py`
 
 ## Impacted Spec
 
 | Spec | Category | Action |
 |---|---|---|
-| `docs/nointern/spec/flow/agent-execution-loop.md` | SPEC-UPDATE-NEEDED | Add request compatibility filter stage in spec promotion PR |
+| `docs/azents/spec/flow/agent-execution-loop.md` | SPEC-UPDATE-NEEDED | Add request compatibility filter stage in spec promotion PR |
 
 ## SPEC-UPDATE-NEEDED Draft
 

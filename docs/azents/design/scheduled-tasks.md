@@ -206,7 +206,7 @@ async def main() -> None:
 
 ### Leader Election
 
-- Redis `SETNX nointern:scheduler:leader {worker_id}` (TTL 30 seconds)
+- Redis `SETNX azents:scheduler:leader {worker_id}` (TTL 30 seconds)
 - Renew TTL every 10 seconds
 - If acquire fails, wait 10 seconds and retry
 - K8s replicas: 1 (HA guaranteed by leader election)

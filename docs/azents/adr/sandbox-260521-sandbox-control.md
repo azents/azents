@@ -13,13 +13,13 @@ migration_source: "docs/azents/adr/0035-sandbox-provider-control.md"
 
 ## Context
 
-[sandbox-260506/ADR](./sandbox-260506-sandbox-control-channel.md) adopted a structure where an in-sandbox client opens an outbound `SandboxControlRuntime.Connect` gRPC stream to NoIntern, and the worker requests command/file/checkpoint operations through `SandboxControlWorker`. This decision separated command/file/checkpoint transport from Kubernetes Pod IP, Docker network discovery, and inbound sidecar daemon calls.
+[sandbox-260506/ADR](./sandbox-260506-sandbox-control-channel.md) adopted a structure where an in-sandbox client opens an outbound `SandboxControlRuntime.Connect` gRPC stream to Azents, and the worker requests command/file/checkpoint operations through `SandboxControlWorker`. This decision separated command/file/checkpoint transport from Kubernetes Pod IP, Docker network discovery, and inbound sidecar daemon calls.
 
-However, the sandbox **lifecycle provider** still has NoIntern worker/control plane directly creating Kubernetes Pods or local Docker containers. This structure does not sufficiently express the following requirements:
+However, the sandbox **lifecycle provider** still has Azents worker/control plane directly creating Kubernetes Pods or local Docker containers. This structure does not sufficiently express the following requirements:
 
-1. Providers outside the NoIntern-managed Kubernetes cluster must be able to provide sandbox capacity.
-2. To support customer/local Docker providers long term, the provider must connect outbound to NoIntern without exposing inbound ports.
-3. K8s-based provider controller should be separated as an optional component in the NoIntern Helm chart so operational topology is explicit.
+1. Providers outside the Azents-managed Kubernetes cluster must be able to provide sandbox capacity.
+2. To support customer/local Docker providers long term, the provider must connect outbound to Azents without exposing inbound ports.
+3. K8s-based provider controller should be separated as an optional component in the Azents Helm chart so operational topology is explicit.
 4. Provider identity, active liveness, runtime allocation lease, and sandbox-control runtime registration auth must have separate state authorities.
 5. The durable contract preserved on hibernate/resume must clearly distinguish `/home/sandbox/**` from rootfs/S3 snapshot/container snapshot.
 
@@ -30,8 +30,8 @@ In issue #3914 Phase 2 design discussion, we decided to first settle the directi
 Adopt the following decisions.
 
 1. The first SandboxProvider implementation is **K8s-first**, not local Docker-first.
-2. K8s provider is an **out-of-process provider controller**, not an implementation inside the NoIntern server process. Its deployment unit targets an optional component of the NoIntern Helm chart.
-3. SandboxProviderControl is a **bidirectional reverse gRPC stream** opened outbound from provider controller/daemon to NoIntern. Service name is `SandboxProviderControl`, and the main RPC is `ConnectProvider`.
+2. K8s provider is an **out-of-process provider controller**, not an implementation inside the Azents server process. Its deployment unit targets an optional component of the Azents Helm chart.
+3. SandboxProviderControl is a **bidirectional reverse gRPC stream** opened outbound from provider controller/daemon to Azents. Service name is `SandboxProviderControl`, and the main RPC is `ConnectProvider`.
 4. Provider state taxonomy has two axes:
    - static vs dynamic
    - system vs user/workspace
@@ -42,7 +42,7 @@ Adopt the following decisions.
 9. Provider-native home preservation may become a future provider capability, but #3914 K8s provider porting does not introduce new persistence backends such as PVC/object-backed volume.
 10. #3914 is a protocol/abstraction/security prerequisite for local Docker provider. Detailed local Docker UX, daemon packaging, Docker hardening, and customer onboarding are downstream requirements outside this ADR.
 
-This ADR records target architecture before implementation. The S3/RustFS checkpoint authority described in `docs/nointern/spec/flow/sandbox-checkpoint-lifecycle.md` remains current system spec after K8s provider porting. Provider-native `/home/sandbox` preservation will be handled in follow-up design as a separate provider capability.
+This ADR records target architecture before implementation. The S3/RustFS checkpoint authority described in `docs/azents/spec/flow/sandbox-checkpoint-lifecycle.md` remains current system spec after K8s provider porting. Provider-native `/home/sandbox` preservation will be handled in follow-up design as a separate provider capability.
 
 ## Considered Options
 
@@ -54,7 +54,7 @@ Adopted. Kubernetes is the current primary production sandbox backend, and Helm 
 
 Rejected. Local Docker provider is an important downstream goal, but it has many concerns: customer machine trust boundary, Docker socket hardening, credential UX, and persistent volume policy. Implementing local UX before protocol/abstraction/security contract risks diverging from the K8s operations path.
 
-### Keep direct Kubernetes API calls from NoIntern worker
+### Keep direct Kubernetes API calls from Azents worker
 
 Rejected. This is closest to current structure, but it does not create provider abstraction and cannot easily represent optional Helm component or external provider connection.
 
@@ -74,7 +74,7 @@ Rejected. Keep it in `RegisterRequest.auth_token` field so sandbox-control runti
 
 ### Positive
 
-- K8s lifecycle control can be separated from NoIntern core worker process and deployed as an optional Helm component.
+- K8s lifecycle control can be separated from Azents core worker process and deployed as an optional Helm component.
 - Local Docker provider can later be implemented on the same provider-control protocol.
 - Authorities are separated for provider identity, provider liveness, runtime allocation lease, and sandbox-control runtime auth token.
 - K8s provider-control cutover does not change existing S3/RustFS checkpoint-based hibernate/resume semantics.
@@ -83,14 +83,14 @@ Rejected. Keep it in `RegisterRequest.auth_token` field so sandbox-control runti
 ### Negative
 
 - Adds SandboxProviderControl proto, provider registry, active lease table, and auth token issuance/validation.
-- Version compatibility between K8s provider controller and NoIntern server/control plane must be managed.
+- Version compatibility between K8s provider controller and Azents server/control plane must be managed.
 - Helm chart adds optional provider controller component and related secret/config wiring.
 - Failure recovery becomes more complex than existing single backend client. Provider stream disconnect, stale runtime lease, and sandbox-control stream readiness must be reconciled separately.
 - Existing `SessionSandboxClient` naming/API and runtime lifecycle manager must be cleaned up to accept provider abstraction.
 
 ## Status
 
-Accepted. Detailed design draft follows `docs/nointern/design/sandbox-provider-control.md`.
+Accepted. Detailed design draft follows `docs/azents/design/sandbox-provider-control.md`.
 
 ## Migration provenance
 

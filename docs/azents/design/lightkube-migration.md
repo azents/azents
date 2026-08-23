@@ -17,7 +17,7 @@ supporting_role: consolidation
 Replace K8s client in Kubernetes Toolkit (`engine/tools/kubernetes.py`) from `kubernetes_asyncio` to `lightkube`.
 
 **Problems solved:**
-- Repeated type bugs in kubernetes_asyncio DynamicClient (#2198, NOINTERN-SEVER-3N, etc.)
+- Repeated type bugs in kubernetes_asyncio DynamicClient (#2198, AZENTS-SEVER-3N, etc.)
 - Burden of manually maintaining type stubs (kubernetes_asyncio does not provide its own types)
 
 **Not migrated:**
@@ -310,7 +310,7 @@ for doc in docs:
     kind = doc.get("kind")
     res_class = discovery_cache.get_resource_class(api_version, kind)
     obj = res_class(doc)  # GenericNamespacedResource(dict) — dict subclass
-    await client.apply(obj, field_manager="nointern-toolkit")
+    await client.apply(obj, field_manager="azents-toolkit")
 ```
 
 ### k8s_delete
