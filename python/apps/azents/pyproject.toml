@@ -28,7 +28,7 @@ dependencies = [
     # Monitoring
     "sentry-sdk[fastapi]==2.68.0",
     # CLI
-    "typer==0.26.8",
+    "typer==0.27.1",
     # Template rendering
     "jinja2==3.1.6",
     # Type stubs
