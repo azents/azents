@@ -54,7 +54,7 @@ dependencies = [
     "python-frontmatter==1.3.0",
     "google-auth==2.52.0",
     "croniter==6.2.4",
-    "google-analytics-data==0.22.0",
+    "google-analytics-data==0.23.0",
     "google-analytics-admin==0.29.0",
     "grpcio==1.83.0",
     "azents-runtime-control",
