@@ -82,6 +82,7 @@ from azents.testing.model_selection import (
     make_test_model_selection_dict,
     make_test_model_settings,
 )
+from azents.testing.turn_action import make_test_turn_action_capabilities
 
 from . import ChatSessionService
 from .data import SessionAccessDenied, SessionNotFound, SubagentSessionReadOnly
@@ -206,7 +207,9 @@ def _service(
             toolkit_state_repository=ToolkitStateRepository(),
         ),
         action_execution_repository=ActionExecutionRepository(),
-        vfs_projection_service=None,
+        turn_action_capabilities=make_test_turn_action_capabilities(
+            rdb_session_manager
+        ),
         external_channel_repository=ExternalChannelRepository(),
     )
     return ChatSessionService(
@@ -570,7 +573,9 @@ class TestChatSessionMailboxItem:
                 toolkit_state_repository=ToolkitStateRepository(),
             ),
             action_execution_repository=ActionExecutionRepository(),
-            vfs_projection_service=None,
+            turn_action_capabilities=make_test_turn_action_capabilities(
+                rdb_session_manager
+            ),
             external_channel_repository=ExternalChannelRepository(),
         )
         promoted = await mailbox_item_service.flush_session_mailbox_items(

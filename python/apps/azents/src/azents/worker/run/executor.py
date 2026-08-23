@@ -6,13 +6,12 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Annotated, Any, assert_never
+from typing import Annotated, Any
 
 from azcommon.datetime import tznow
 from azcommon.logging import bind_extra
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
-from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import WebSocketBroadcast
@@ -48,14 +47,7 @@ from azents.core.tools import (
     ToolkitProvider,
 )
 from azents.engine.context.window import compute_auto_compaction_threshold_tokens
-from azents.engine.events.action_messages import (
-    AgentCreateGitWorktreeAction,
-    AgentRemoveGitWorktreeAction,
-    CleanupOrphanGitWorktreesAction,
-    CreateGitWorktreeAction,
-    CreateSessionWorkingFolderAction,
-    PersistedChatAction,
-)
+from azents.engine.events.action_messages import OperationAction
 from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_adapter import AgentEngineAdapter
 from azents.engine.events.engine_events import (
@@ -221,6 +213,10 @@ from azents.worker.run.helpers import (
     user_stop_cancelled,
 )
 from azents.worker.run.results import RunExecutionResult
+from azents.worker.run.turn_action_executor import (
+    OperationActionExecutionContext,
+    OperationActionExecutorRegistry,
+)
 from azents.worker.session.contracts import PrepareToolkits
 from azents.worker.session.execution_snapshot import (
     CanonicalExecutionOwnerGenerationStaleError,
@@ -232,7 +228,6 @@ from azents.worker.session.mailbox_activity import MailboxActivityObserver
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 logger = logging.getLogger(__name__)
-_PERSISTED_CHAT_ACTION_ADAPTER = TypeAdapter(PersistedChatAction)
 _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
 _RUN_HEARTBEAT_INTERVAL_SECONDS = 30.0
 _FAILED_RUN_RETRY_WAIT_POLL_SECONDS = 0.2
@@ -403,6 +398,7 @@ class RunExecutor:
     session_git_worktree_service: Annotated[
         SessionGitWorktreeService, Depends(SessionGitWorktreeService)
     ]
+    operation_action_executor: Annotated[OperationActionExecutorRegistry, Depends()]
     session_title_service: Annotated[SessionTitleService, Depends(SessionTitleService)]
     live_event_projector: Annotated[LiveEventProjector, Depends(LiveEventProjector)]
     user_stop_finalizer: Annotated[UserStopFinalizer, Depends(UserStopFinalizer)]
@@ -2744,60 +2740,16 @@ class RunExecutor:
             and projection.execution.mailbox_item_id not in processed_mailbox_item_ids
         ]
         for execution in pending:
-            action = _PERSISTED_CHAT_ACTION_ADAPTER.validate_python(execution.action)
-            match action:
-                case CreateGitWorktreeAction():
-                    result = await self._process_operation_action(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        active_run_id=active_run_id,
-                        execution=execution,
-                        action=action,
-                        owner_generation=owner_generation,
-                        tool_admission_barrier=tool_admission_barrier,
-                    )
-                case CleanupOrphanGitWorktreesAction():
-                    result = await self._process_operation_action(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        active_run_id=active_run_id,
-                        execution=execution,
-                        action=action,
-                        owner_generation=owner_generation,
-                        tool_admission_barrier=tool_admission_barrier,
-                    )
-                case CreateSessionWorkingFolderAction():
-                    result = await self._process_operation_action(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        active_run_id=active_run_id,
-                        execution=execution,
-                        action=action,
-                        owner_generation=owner_generation,
-                        tool_admission_barrier=tool_admission_barrier,
-                    )
-                case AgentCreateGitWorktreeAction():
-                    result = await self._process_operation_action(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        active_run_id=active_run_id,
-                        execution=execution,
-                        action=action,
-                        owner_generation=owner_generation,
-                        tool_admission_barrier=tool_admission_barrier,
-                    )
-                case AgentRemoveGitWorktreeAction():
-                    result = await self._process_operation_action(
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        active_run_id=active_run_id,
-                        execution=execution,
-                        action=action,
-                        owner_generation=owner_generation,
-                        tool_admission_barrier=tool_admission_barrier,
-                    )
-                case _:
-                    assert_never(action)  # ty: ignore[type-assertion-failure] — persisted action validation is broader than the operation-action execution queue.
+            action = self.operation_action_executor.decode(execution.action)
+            result = await self._process_operation_action(
+                agent_id=agent_id,
+                session_id=session_id,
+                active_run_id=active_run_id,
+                execution=execution,
+                action=action,
+                owner_generation=owner_generation,
+                tool_admission_barrier=tool_admission_barrier,
+            )
             context_invalidated = context_invalidated or result.context_invalidated
             complete_run = complete_run or result.complete_run
             if context_invalidated or complete_run:
@@ -2814,13 +2766,7 @@ class RunExecutor:
         session_id: str,
         active_run_id: str | None,
         execution: ActionExecution,
-        action: (
-            CreateGitWorktreeAction
-            | CleanupOrphanGitWorktreesAction
-            | CreateSessionWorkingFolderAction
-            | AgentCreateGitWorktreeAction
-            | AgentRemoveGitWorktreeAction
-        ),
+        action: OperationAction,
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
     ) -> GitWorktreeActionExecutionResult:
@@ -2898,73 +2844,18 @@ class RunExecutor:
                 complete_run=False,
             )
 
-        match action:
-            case CreateGitWorktreeAction():
-                return await self.session_git_worktree_service.run_git_worktree_action(
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    execution=execution,
-                    action=action,
-                    owner_generation=owner_generation,
-                    on_projection_updated=publish_projection,
-                    on_history_event_appended=publish_history_event,
-                )
-            case CleanupOrphanGitWorktreesAction():
-                worktree_service = self.session_git_worktree_service
-                return await worktree_service.run_cleanup_orphan_git_worktrees_action(
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    execution=execution,
-                    action=action,
-                    owner_generation=owner_generation,
-                    on_projection_updated=publish_projection,
-                    on_history_event_appended=publish_history_event,
-                )
-            case CreateSessionWorkingFolderAction():
-                worktree_service = self.session_git_worktree_service
-                return await worktree_service.run_create_session_working_folder_action(
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    execution=execution,
-                    action=action,
-                    owner_generation=owner_generation,
-                    on_projection_updated=publish_projection,
-                    on_history_event_appended=publish_history_event,
-                )
-            case AgentCreateGitWorktreeAction():
-                if active_run_id is None:
-                    raise RuntimeError(
-                        "Agent worktree bridge requires an active processing Run"
-                    )
-                worktree_service = self.session_git_worktree_service
-                return await worktree_service.run_agent_create_git_worktree_action(
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    execution=execution,
-                    action=action,
-                    owner_generation=owner_generation,
-                    predecessor_run_id=active_run_id,
-                    on_projection_updated=publish_projection,
-                    on_history_event_appended=publish_history_event,
-                )
-            case AgentRemoveGitWorktreeAction():
-                if active_run_id is None:
-                    raise RuntimeError(
-                        "Agent worktree bridge requires an active processing Run"
-                    )
-                worktree_service = self.session_git_worktree_service
-                return await worktree_service.run_agent_remove_git_worktree_action(
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    execution=execution,
-                    action=action,
-                    owner_generation=owner_generation,
-                    predecessor_run_id=active_run_id,
-                    on_projection_updated=publish_projection,
-                    on_history_event_appended=publish_history_event,
-                )
-            case _:
-                assert_never(action)
+        return await self.operation_action_executor.execute(
+            action=action,
+            context=OperationActionExecutionContext(
+                agent_id=agent_id,
+                session_id=session_id,
+                active_run_id=active_run_id,
+                execution=execution,
+                owner_generation=owner_generation,
+                on_projection_updated=publish_projection,
+                on_history_event_appended=publish_history_event,
+            ),
+        )
 
     async def _promote_mailbox_items(
         self,
