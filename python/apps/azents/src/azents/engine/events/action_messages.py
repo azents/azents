@@ -114,6 +114,17 @@ ChatAction = Annotated[
     | CleanupOrphanGitWorktreesAction,
     Field(discriminator="type"),
 ]
+PublicTurnAction = (
+    GoalAction | SkillAction | CreateGitWorktreeAction | CleanupOrphanGitWorktreesAction
+)
+ModelProducingTurnAction = GoalAction | SkillAction
+OperationAction = (
+    CreateGitWorktreeAction
+    | CleanupOrphanGitWorktreesAction
+    | CreateSessionWorkingFolderAction
+    | AgentCreateGitWorktreeAction
+    | AgentRemoveGitWorktreeAction
+)
 PersistedChatAction = Annotated[
     CommandAction
     | GoalAction
@@ -126,13 +137,7 @@ PersistedChatAction = Annotated[
     Field(discriminator="type"),
 ]
 TurnAction = Annotated[
-    GoalAction
-    | SkillAction
-    | CreateGitWorktreeAction
-    | CleanupOrphanGitWorktreesAction
-    | CreateSessionWorkingFolderAction
-    | AgentCreateGitWorktreeAction
-    | AgentRemoveGitWorktreeAction,
+    ModelProducingTurnAction | OperationAction,
     Field(discriminator="type"),
 ]
 

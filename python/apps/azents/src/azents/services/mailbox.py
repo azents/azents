@@ -30,14 +30,8 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
-    AgentCreateGitWorktreeAction,
-    AgentRemoveGitWorktreeAction,
-    CleanupOrphanGitWorktreesAction,
-    CreateGitWorktreeAction,
-    CreateSessionWorkingFolderAction,
-    GoalAction,
-    PersistedChatAction,
-    SkillAction,
+    OperationAction,
+    TurnAction,
 )
 from azents.engine.events.types import (
     AgentMessagePayload,
@@ -47,7 +41,6 @@ from azents.engine.events.types import (
     FileOutputPart,
     ScheduledTaskContinuationPayload,
     ScheduledTaskTriggerPayload,
-    SkillLoadedPayload,
     SystemErrorPayload,
     SystemReminderPayload,
 )
@@ -56,14 +49,6 @@ from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.resolve import (
     materialize_admitted_input_exchange_file_attachments,
-)
-from azents.engine.tools.deps import get_vfs_projection_service
-from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
-from azents.engine.tools.skill import (
-    SkillProjectionItem,
-    SkillStateStore,
-    resolve_active_skill,
-    skill_item_from_vfs_entry,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.event import JSONValue
@@ -101,11 +86,14 @@ from azents.services.session_title import (
     initial_title_from_event,
     initial_title_from_external_channel_event,
 )
-from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
+from azents.services.turn_action import (
+    TurnActionCapabilityRegistry,
+    TurnActionPreparationContext,
+    TurnActionPreparationEffect,
+)
 
 logger = logging.getLogger(__name__)
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
-_PERSISTED_CHAT_ACTION_ADAPTER = TypeAdapter(PersistedChatAction)
 _AGENT_MESSAGE_ADAPTER = TypeAdapter(AgentMessagePayload)
 _EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER = (
     "Earlier messages from this external conversation were omitted. "
@@ -186,13 +174,7 @@ class OperationActionInput:
     """Durably claimed buffer-only operation action awaiting external execution."""
 
     buffer: MailboxItem
-    action: (
-        CreateGitWorktreeAction
-        | CleanupOrphanGitWorktreesAction
-        | CreateSessionWorkingFolderAction
-        | AgentCreateGitWorktreeAction
-        | AgentRemoveGitWorktreeAction
-    )
+    action: OperationAction
     execution: ActionExecution | None
 
 
@@ -281,22 +263,6 @@ class MailboxProcessor(Protocol):
         ...
 
 
-class VfsFileResolver(Protocol):
-    """Resolve managed VFS files for a concrete active run."""
-
-    async def resolve_file(
-        self,
-        *,
-        run_id: str,
-        agent_id: str,
-        session_id: str,
-        workspace_id: str,
-        uri: str,
-    ) -> VfsResolvedFile:
-        """Resolve one exact authorized VFS file."""
-        ...
-
-
 @dataclasses.dataclass(frozen=True)
 class MailboxService:
     """Own session-bound input buffer reads, writes, and promotion."""
@@ -323,10 +289,7 @@ class MailboxService:
     action_execution_repository: Annotated[
         ActionExecutionRepository, Depends(ActionExecutionRepository)
     ]
-    vfs_projection_service: Annotated[
-        VfsFileResolver | None,
-        Depends(get_vfs_projection_service),
-    ]
+    turn_action_capabilities: Annotated[TurnActionCapabilityRegistry, Depends()]
     external_channel_repository: Annotated[
         ExternalChannelRepository,
         Depends(ExternalChannelRepository.create),
@@ -529,7 +492,9 @@ class MailboxService:
             mailbox_item_id=buffer.id if buffer is not None else None,
             exists=buffer is not None,
             requires_inference=(
-                _buffer_requires_inference(buffer) if buffer is not None else False
+                _buffer_requires_inference(buffer, self.turn_action_capabilities)
+                if buffer is not None
+                else False
             ),
             requested_inference_profile=(
                 _requested_inference_profile(buffer) if buffer is not None else None
@@ -1219,7 +1184,7 @@ class MailboxService:
             if fenced is not None:
                 return fenced
         if (
-            _buffer_requires_inference(buffer)
+            _buffer_requires_inference(buffer, self.turn_action_capabilities)
             and profile_resolution_failure is not None
         ):
             return _preparation_outcome(
@@ -1254,184 +1219,12 @@ class MailboxService:
                     raise ValueError(
                         "Action message input buffer requires action payload"
                     )
-                action = _PERSISTED_CHAT_ACTION_ADAPTER.validate_python(
+                action = self.turn_action_capabilities.decode(
                     buffer.presentation.action
                 )
-                match action:
-                    case GoalAction():
-                        return _GoalActionMailboxProcessor(self)
-                    case SkillAction():
-                        return _SkillActionMailboxProcessor(self, action)
-                    case (
-                        CreateGitWorktreeAction()
-                        | CleanupOrphanGitWorktreesAction()
-                        | CreateSessionWorkingFolderAction()
-                        | AgentCreateGitWorktreeAction()
-                        | AgentRemoveGitWorktreeAction()
-                    ):
-                        return _OperationActionMailboxProcessor(action)
-                    case _:
-                        assert_never(action)  # ty: ignore[type-assertion-failure] — persisted action validation excludes CommandAction at this mailbox boundary, but TypeAdapter retains its broader union.
+                return _TurnActionMailboxProcessor(self, action)
             case _:
                 assert_never(buffer.kind)
-
-    async def promote_goal_action(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        buffer: MailboxItem,
-        prepared_inference_state: SessionInferenceState | None,
-        prepared_files: PreparedMailboxFiles,
-    ) -> list[_PromotedMailboxItem]:
-        """Apply Goal create side effect for one action_message buffer."""
-        objective = buffer.presentation.content.strip()
-        if not objective:
-            return [
-                _system_error_promoted_buffer(buffer, "Goal objective is required.")
-            ]
-        agent_session = await self.agent_session_repository.get_by_id(
-            session,
-            session_id,
-        )
-        if agent_session is None:
-            return [_system_error_promoted_buffer(buffer, "Session not found.")]
-        updated_at = datetime.datetime.now(datetime.UTC).isoformat()
-        store = GoalStateStore(session_manager=self.session_manager)
-
-        def mutate(current: GoalState) -> GoalState:
-            if current.status in {"active", "paused", "blocked"} and current.objective:
-                raise _GoalActionError("An unfinished goal already exists.")
-            return GoalState(
-                objective=objective,
-                status="active",
-                created_at=updated_at,
-                updated_at=updated_at,
-            )
-
-        try:
-            updated = await store.update_in_session(
-                session,
-                agent_session.agent_id,
-                session_id,
-                mutate,
-            )
-        except _GoalActionError as exc:
-            return [_system_error_promoted_buffer(buffer, exc.message)]
-        snapshot = GoalStateSnapshot.from_state(updated)
-        user_message = self.buffer_to_user_message(
-            buffer,
-            external_id=f"{buffer.id}:user_message",
-            fallback_profile=_requested_inference_profile(buffer),
-            prepared_inference_state=prepared_inference_state,
-            prepared_files=prepared_files,
-        )
-        return [
-            _PromotedMailboxItem(
-                buffer=buffer,
-                user_message=None,
-                event_kind=EventKind.GOAL_UPDATED,
-                payload=_goal_updated_payload(snapshot, action="create"),
-                external_id=f"{buffer.id}:goal_updated",
-            ),
-            _PromotedMailboxItem(
-                buffer=buffer,
-                user_message=user_message,
-                event_kind=EventKind.USER_MESSAGE,
-                payload=_user_message_payload_json(user_message),
-                external_id=user_message.external_id,
-            ),
-        ]
-
-    async def promote_skill_action(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        buffer: MailboxItem,
-        action: SkillAction,
-        active_run_id: str | None,
-        prepared_inference_state: SessionInferenceState | None,
-        prepared_files: PreparedMailboxFiles,
-    ) -> list[_PromotedMailboxItem]:
-        """Create durable reminder for one Skill action_message buffer."""
-        agent_session = await self.agent_session_repository.get_by_id(
-            session,
-            session_id,
-        )
-        if agent_session is None:
-            return [_system_error_promoted_buffer(buffer, "Session not found.")]
-        item: SkillProjectionItem | None
-        if action.skill_path.startswith("azents://"):
-            item = None
-            if active_run_id is not None and self.vfs_projection_service is not None:
-                try:
-                    resolved = await self.vfs_projection_service.resolve_file(
-                        run_id=active_run_id,
-                        agent_id=agent_session.agent_id,
-                        session_id=session_id,
-                        workspace_id=agent_session.workspace_id,
-                        uri=action.skill_path,
-                    )
-                    item = skill_item_from_vfs_entry(resolved.entry)
-                except (VfsFileResolutionError, ValueError) as exc:
-                    logger.warning(
-                        "Managed Skill action resolution failed",
-                        extra={
-                            "agent_id": agent_session.agent_id,
-                            "session_id": session_id,
-                            "run_id": active_run_id,
-                            "skill_path": action.skill_path,
-                            "error_type": type(exc).__name__,
-                        },
-                    )
-        else:
-            store = SkillStateStore(session_manager=self.session_manager)
-            state = await store.load_in_session(
-                session,
-                agent_session.agent_id,
-                session_id,
-            )
-            item = resolve_active_skill(state, skill_path=action.skill_path)
-        if item is None:
-            return [
-                _system_error_promoted_buffer(
-                    buffer,
-                    "Selected Skill is not available in the active projection.",
-                )
-            ]
-        loaded_payload = _skill_loaded_payload(
-            item, user_message=buffer.presentation.content
-        )
-        promoted = [
-            _PromotedMailboxItem(
-                buffer=buffer,
-                user_message=None,
-                event_kind=EventKind.SKILL_LOADED,
-                payload=_JSON_OBJECT_ADAPTER.validate_python(
-                    loaded_payload.model_dump(mode="json")
-                ),
-                external_id=f"{buffer.id}:skill_loaded",
-            )
-        ]
-        if buffer.presentation.content.strip():
-            user_message = self.buffer_to_user_message(
-                buffer,
-                external_id=f"{buffer.id}:user_message",
-                fallback_profile=_requested_inference_profile(buffer),
-                prepared_inference_state=prepared_inference_state,
-                prepared_files=prepared_files,
-            )
-            promoted.append(
-                _PromotedMailboxItem(
-                    buffer=buffer,
-                    user_message=user_message,
-                    event_kind=EventKind.USER_MESSAGE,
-                    payload=_user_message_payload_json(user_message),
-                    external_id=user_message.external_id,
-                )
-            )
-        return promoted
 
     @staticmethod
     def buffer_to_user_message(
@@ -1839,75 +1632,68 @@ class ExternalChannelMessageMailboxProcessor:
 
 
 @dataclasses.dataclass(frozen=True)
-class _GoalActionMailboxProcessor:
-    """Prepare a closed Goal action."""
+class _TurnActionMailboxProcessor:
+    """Prepare one closed TurnAction through its registered capability."""
 
     service: MailboxService
+    action: TurnAction
 
     async def process(
         self,
         context: MailboxPreparationContext,
         buffer: MailboxItem,
     ) -> MailboxPreparationOutcome:
-        promoted = await self.service.promote_goal_action(
-            context.session,
-            session_id=context.session_id,
-            buffer=buffer,
-            prepared_inference_state=context.prepared_inference_state,
-            prepared_files=context.prepared_files,
-        )
-        return _preparation_outcome(promoted, _turn_effect_for_promoted(promoted))
-
-
-@dataclasses.dataclass(frozen=True)
-class _SkillActionMailboxProcessor:
-    """Prepare a closed Skill action."""
-
-    service: MailboxService
-    action: SkillAction
-
-    async def process(
-        self,
-        context: MailboxPreparationContext,
-        buffer: MailboxItem,
-    ) -> MailboxPreparationOutcome:
-        promoted = await self.service.promote_skill_action(
-            context.session,
-            session_id=context.session_id,
-            buffer=buffer,
+        prepared = await self.service.turn_action_capabilities.prepare(
             action=self.action,
-            active_run_id=context.active_run_id,
-            prepared_inference_state=context.prepared_inference_state,
-            prepared_files=context.prepared_files,
+            context=TurnActionPreparationContext(
+                session=context.session,
+                session_id=context.session_id,
+                active_run_id=context.active_run_id,
+                mailbox_item_id=buffer.id,
+                content=buffer.presentation.content,
+            ),
         )
-        return _preparation_outcome(promoted, _turn_effect_for_promoted(promoted))
-
-
-@dataclasses.dataclass(frozen=True)
-class _OperationActionMailboxProcessor:
-    """Preserve an operation action boundary until durable claims replace it."""
-
-    action: (
-        CreateGitWorktreeAction
-        | CleanupOrphanGitWorktreesAction
-        | CreateSessionWorkingFolderAction
-        | AgentCreateGitWorktreeAction
-        | AgentRemoveGitWorktreeAction
-    )
-
-    async def process(
-        self,
-        context: MailboxPreparationContext,
-        buffer: MailboxItem,
-    ) -> MailboxPreparationOutcome:
-        del context
+        if prepared.handled_failure is not None:
+            promoted = [_system_error_promoted_buffer(buffer, prepared.handled_failure)]
+        else:
+            promoted = [
+                _PromotedMailboxItem(
+                    buffer=buffer,
+                    user_message=None,
+                    event_kind=event.kind,
+                    payload=event.payload,
+                    external_id=f"{buffer.id}:{event.external_id_suffix}",
+                )
+                for event in prepared.events
+            ]
+            if prepared.append_user_message:
+                user_message = self.service.buffer_to_user_message(
+                    buffer,
+                    external_id=f"{buffer.id}:user_message",
+                    fallback_profile=_requested_inference_profile(buffer),
+                    prepared_inference_state=context.prepared_inference_state,
+                    prepared_files=context.prepared_files,
+                )
+                promoted.append(
+                    _PromotedMailboxItem(
+                        buffer=buffer,
+                        user_message=user_message,
+                        event_kind=EventKind.USER_MESSAGE,
+                        payload=_user_message_payload_json(user_message),
+                        external_id=user_message.external_id,
+                    )
+                )
         return MailboxPreparationOutcome(
-            promoted=[],
-            turn_effect=TurnEffect.NEUTRAL,
-            operation_action=OperationActionInput(
-                buffer=buffer,
-                action=self.action,
-                execution=None,
+            promoted=promoted,
+            turn_effect=_turn_effect_from_action(prepared.effect),
+            operation_action=(
+                OperationActionInput(
+                    buffer=buffer,
+                    action=prepared.operation_action,
+                    execution=None,
+                )
+                if prepared.operation_action is not None
+                else None
             ),
             complete_run=False,
             suppress_parent_result=False,
@@ -1928,24 +1714,19 @@ def _preparation_outcome(
     )
 
 
-class _GoalActionError(Exception):
-    """User-visible Goal action failure."""
-
-    def __init__(self, message: str) -> None:
-        """Create error."""
-        super().__init__(message)
-        self.message = message
-
-
-def _turn_effect_for_promoted(
-    promoted: Sequence[_PromotedMailboxItem],
+def _turn_effect_from_action(
+    effect: TurnActionPreparationEffect,
 ) -> TurnEffect:
-    """Derive the fold effect from one processor result."""
-    if any(item.event_kind is EventKind.SYSTEM_ERROR for item in promoted):
-        return TurnEffect.FAILED
-    if promoted:
-        return TurnEffect.ELIGIBLE
-    return TurnEffect.NEUTRAL
+    """Map the action-owned effect to the mailbox fold effect."""
+    match effect:
+        case TurnActionPreparationEffect.ELIGIBLE:
+            return TurnEffect.ELIGIBLE
+        case TurnActionPreparationEffect.NEUTRAL:
+            return TurnEffect.NEUTRAL
+        case TurnActionPreparationEffect.FAILED:
+            return TurnEffect.FAILED
+        case _:
+            assert_never(effect)
 
 
 def _external_resource_label(item: ExternalChannelMailboxProjectionItem) -> str:
@@ -1997,7 +1778,10 @@ def _external_reference_mappings(
     return mappings
 
 
-def _buffer_requires_inference(buffer: MailboxItem) -> bool:
+def _buffer_requires_inference(
+    buffer: MailboxItem,
+    capabilities: TurnActionCapabilityRegistry,
+) -> bool:
     """Return whether preparing the buffer needs a resolved inference state."""
     match buffer.kind:
         case (
@@ -2017,10 +1801,8 @@ def _buffer_requires_inference(buffer: MailboxItem) -> bool:
         case MailboxItemKind.ACTION_MESSAGE:
             if buffer.presentation.action is None:
                 raise ValueError("Action message input buffer requires action payload")
-            action = _PERSISTED_CHAT_ACTION_ADAPTER.validate_python(
-                buffer.presentation.action
-            )
-            return isinstance(action, GoalAction | SkillAction)
+            action = capabilities.decode(buffer.presentation.action)
+            return capabilities.preparation_requires_inference(action)
         case _:
             assert_never(buffer.kind)
 
@@ -2165,45 +1947,4 @@ def _system_error_promoted_buffer(
             payload.model_dump(mode="json", exclude_none=True)
         ),
         external_id=f"{buffer.id}:failure",
-    )
-
-
-def _skill_loaded_payload(
-    item: SkillProjectionItem,
-    *,
-    user_message: str,
-) -> SkillLoadedPayload:
-    """Return skill_loaded event payload for a Skill action side effect."""
-    return SkillLoadedPayload(
-        name=item.name,
-        skill_path=item.skill_path,
-        body=item.body,
-        user_message=user_message,
-        content_hash=item.content_hash,
-        source_label=item.source_label,
-        relative_hint=item.relative_hint,
-    )
-
-
-def _goal_updated_payload(
-    snapshot: GoalStateSnapshot,
-    *,
-    action: str,
-) -> dict[str, JSONValue]:
-    """Return goal_updated event payload for a Goal side effect."""
-    return _JSON_OBJECT_ADAPTER.validate_python(
-        {
-            "sender_user_id": None,
-            "content": "",
-            "attachments": [],
-            "metadata": {
-                "source": "goal",
-                "provider_slug": "goal",
-                "goal_control_action": action,
-                "goal_objective": snapshot.objective or "",
-                "goal_status": snapshot.status or "",
-                "goal_created_at": snapshot.created_at or "",
-                "goal_updated_at": snapshot.updated_at or "",
-            },
-        }
     )
