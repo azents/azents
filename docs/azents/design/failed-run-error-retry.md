@@ -54,19 +54,41 @@ This makes retry unsafe because lower layers can finalize a run before a retry c
 
 ## Target Architecture
 
-```text
-RunExecutor / CommandExecutor / SessionRunner run boundary
-  -> FailedRunAttempt boundary
-  -> retry state update on agent_runs.retry_state
-  -> live run.retry projection
-  -> wait until next_retry_at or run next attempt
-  -> on success: clear retry state and continue normal completion
-  -> on exhausted/stop: FailedRunErrorFinalizer
-       -> durable system_error with failed-run metadata
-       -> failed run marker where applicable
-       -> agent_runs.status = FAILED
-       -> RunComplete
-       -> live state clear
+```mermaid
+flowchart TD
+    Boundary["RunExecutor / CommandExecutor / SessionRunner run boundary"]
+    Attempt[FailedRunAttempt boundary]
+    RetryState["Update agent_runs.retry_state"]
+    LiveRetry["Publish live run.retry projection"]
+    RetryDecision{Retry available?}
+    Wait["Wait until next_retry_at if required"]
+    NextAttempt[Run next attempt]
+    Outcome{Attempt succeeds?}
+    Clear[Clear retry state]
+    Continue[Continue normal completion]
+    Finalizer[FailedRunErrorFinalizer]
+    SystemError["Append durable system_error<br/>with failed-run metadata"]
+    FailedMarker[Append failed run marker where applicable]
+    FailedStatus["Set agent_runs.status = FAILED"]
+    RunComplete[Append RunComplete]
+    LiveClear[Clear live state]
+
+    Boundary --> Attempt
+    Attempt --> RetryState
+    RetryState --> LiveRetry
+    LiveRetry --> RetryDecision
+    RetryDecision -->|yes| Wait
+    Wait --> NextAttempt
+    NextAttempt --> Outcome
+    Outcome -->|no| Attempt
+    Outcome -->|yes| Clear
+    Clear --> Continue
+    RetryDecision -->|exhausted or stopped| Finalizer
+    Finalizer --> SystemError
+    SystemError --> FailedMarker
+    FailedMarker --> FailedStatus
+    FailedStatus --> RunComplete
+    RunComplete --> LiveClear
 ```
 
 ### Component responsibilities
