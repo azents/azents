@@ -1,12 +1,32 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests"
   ],
+  "dependencyDashboard": true,
+  "dependencyDashboardLabels": [
+    "dependencies"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "reviewers": [
+    "hardtack"
+  ],
+  "timezone": "Asia/Seoul",
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "automerge": false,
   "vulnerabilityAlerts": {
     "enabled": true,
     "labels": [
       "security"
+    ],
+    "schedule": [
+      "at any time"
     ]
   },
   "osvVulnerabilityAlerts": true,
@@ -14,16 +34,61 @@
   "pre-commit": {
     "enabled": true
   },
-  "prHourlyLimit": 5,
-  "prConcurrentLimit": 10,
-  "prCreation": "status-success",
+  "prHourlyLimit": 3,
+  "prConcurrentLimit": 6,
+  "prCreation": "immediate",
   "packageRules": [
     {
-      "description": "Ignore patch version updates",
+      "description": "Require Dependency Dashboard approval before opening major update PRs",
       "matchUpdateTypes": [
-        "patch"
+        "major"
       ],
-      "enabled": false
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Group Python development and test tools",
+      "matchManagers": [
+        "pep621"
+      ],
+      "matchPackageNames": [
+        "pytest",
+        "pytest-asyncio",
+        "ruff",
+        "testcontainers",
+        "ty"
+      ],
+      "groupName": "Python development and test tools"
+    },
+    {
+      "description": "Group TypeScript development dependencies",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchDepTypes": [
+        "devDependencies"
+      ],
+      "groupName": "TypeScript development dependencies"
+    },
+    {
+      "description": "Update Turbo in the workspace and frontend Dockerfiles together",
+      "matchPackageNames": [
+        "turbo"
+      ],
+      "groupName": "Turbo"
+    },
+    {
+      "description": "Group GitHub Actions updates",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Group pre-commit hook updates",
+      "matchManagers": [
+        "pre-commit"
+      ],
+      "groupName": "pre-commit hooks"
     },
     {
       "description": "Disable boto3 updates until aioboto3 supports newer versions",
@@ -33,10 +98,17 @@
       "enabled": false
     },
     {
-      "description": "Disable Python version updates",
+      "description": "Disable Python runtime version updates while allowing digest pinning and refreshes",
       "matchDepNames": [
         "python",
         "cpython"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch",
+        "pin",
+        "replacement"
       ],
       "enabled": false
     },
@@ -48,7 +120,14 @@
       "allowedVersions": "/^24\\./"
     },
     {
-      "description": "Pin litellm until the prompt caching regression is resolved upstream.",
+      "description": "Keep Next.js at the last version verified with Admin Web gateway path-prefix routing",
+      "matchPackageNames": [
+        "next"
+      ],
+      "allowedVersions": "<=16.2.11"
+    },
+    {
+      "description": "Pin litellm until the prompt caching regression is resolved upstream",
       "matchPackageNames": [
         "litellm"
       ],
@@ -83,6 +162,9 @@
     "**/node_modules/**"
   ],
   "lockFileMaintenance": {
-    "enabled": true
+    "enabled": true,
+    "schedule": [
+      "before 5am on monday"
+    ]
   }
 }
