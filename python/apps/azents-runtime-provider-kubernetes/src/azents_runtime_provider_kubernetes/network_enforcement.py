@@ -583,7 +583,15 @@ def _subnet_of_same_family(
     candidate: ipaddress.IPv4Network | ipaddress.IPv6Network,
     container: ipaddress.IPv4Network | ipaddress.IPv6Network,
 ) -> bool:
-    return candidate.version == container.version and candidate.subnet_of(container)
+    if isinstance(candidate, ipaddress.IPv4Network) and isinstance(
+        container, ipaddress.IPv4Network
+    ):
+        return candidate.subnet_of(container)
+    if isinstance(candidate, ipaddress.IPv6Network) and isinstance(
+        container, ipaddress.IPv6Network
+    ):
+        return candidate.subnet_of(container)
+    return False
 
 
 def _canonical_hostname(value: str) -> bool:

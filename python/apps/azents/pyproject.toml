@@ -69,11 +69,11 @@ external_channel_ingress = "azents.cli.external_channel_ingress:app"
 
 [dependency-groups]
 dev = [
-    "ruff>=0.14.5",
-    "ty>=0.0.65",
-    "pytest>=9.0.3",
-    "pytest-asyncio>=1.3.0",
-    "testcontainers[postgres,redis]>=4.13.3",
+    "ruff>=0.16.4",
+    "ty>=0.0.74",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "testcontainers[postgres,redis]>=4.15.0",
     "types-croniter>=6.0.0",
     "pytest-alembic>=0.12.1",
 ]

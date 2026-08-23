@@ -31,9 +31,9 @@ packages = ["testenv"]
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.3",
-    "ruff>=0.15.0",
-    "ty>=0.0.65",
+    "pytest>=9.1.1",
+    "ruff>=0.16.4",
+    "ty>=0.0.74",
 ]
 
 [tool.ruff]
