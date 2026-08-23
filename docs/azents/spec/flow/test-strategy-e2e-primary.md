@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-22
-spec_version: 34
+last_verified_at: 2026-08-23
+spec_version: 35
 ---
 
 # E2E Primary Test Strategy
@@ -174,11 +174,13 @@ Always-on required CI does not depend on external credentials.
   one bounded migration container before product services start. Public API, Admin API,
   and Engine Worker then start concurrently; their ordinary launchers retain the
   current-revision check without competing to own an upgrade.
-- Pull-request required lanes reuse the base-main SHA snapshot for Server, Runtime
-  Runner, and Docker Runtime Provider images whose complete build inputs are unchanged.
+- Required lanes reuse the preceding immutable snapshot for Server, Runtime Runner,
+  and Docker Runtime Provider images whose complete build inputs are unchanged.
+  Pull requests use the base-main SHA, main pushes use the previous main SHA, and
+  manually dispatched measurements use the checked-out commit's first parent.
   Snapshot authentication, availability, pull, or local-tag failure falls back to the
-  existing current-worktree BuildKit build for the affected image. Main pushes and
-  changed image components always build the current worktree.
+  existing current-worktree BuildKit build for the affected image. Changed image
+  components always build the current worktree.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
