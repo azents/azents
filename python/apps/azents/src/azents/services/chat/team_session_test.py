@@ -101,6 +101,7 @@ from azents.services.session_working_folder_binding import (
     SessionWorkingFolderBindingService,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.turn_action import make_test_turn_action_capabilities
 
 from . import ChatSessionService
 from .data import (
@@ -435,7 +436,9 @@ def _service(
                 toolkit_state_repository=ToolkitStateRepository(),
             ),
             action_execution_repository=ActionExecutionRepository(),
-            vfs_projection_service=None,
+            turn_action_capabilities=make_test_turn_action_capabilities(
+                rdb_session_manager
+            ),
             external_channel_repository=ExternalChannelRepository(),
         ),
         session_git_worktree_service=(

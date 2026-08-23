@@ -1,31 +1,17 @@
 ---
-title: "Use Mermaid when relationships, topology, flow, temporal order, or ER semantics are the content; preserve literal examples and compact data shapes in clearer text forms."
+title: "Use Mermaid for explanatory diagrams of relationships, topology, flow, time, state, or ER structure; keep compact notation and literal shapes in text."
 ---
 
-# Mermaid for Semantic Diagrams
+# Mermaid for Diagrams, Text for Notation
 
-Use Mermaid when the reader must understand semantic connections or ordering, not merely because structured text contains arrows, branches, boxes, or tree characters.
+Choose the representation by the block's communicative role, not by graph complexity or the mere presence of arrows.
 
-- ALWAYS use Mermaid for architecture relationships, topology, process flow, sequences, and ER diagrams in `*.md` files
-- AVOID ASCII box-and-arrow diagrams that represent semantic relationships
-- KEEP literal UI, CLI, and output examples in fenced text when exact appearance is the content
-- USE the clearest of fenced text, tables, lists, or tree notation for compact record, schema, and data shapes and for directory trees
+- USE Mermaid when a block is an explanatory architecture, topology, process, sequence, state, or ER diagram
+- KEEP compact stage chains, precedence summaries, stacked branch lists, directory or file trees, UI/CLI/output examples, and record or data shapes in text, lists, tables, or tree notation
+- A simple relationship diagram may still be Mermaid; complexity is not a requirement
+- DO NOT expand compact notation into a one-node-per-label flowchart unless the visual layout adds meaning such as branching, grouping, concurrency, cycles, or distinct actors
 
-## Bad
+## Examples
 
-````markdown
-```
-┌──────────┐     ┌──────────┐
-│  Client  │ ──> │  Server  │
-└──────────┘     └──────────┘
-```
-````
-
-## Good
-
-````markdown
-```mermaid
-flowchart LR
-    Client --> Server
-```
-````
+- Diagram: a Client-to-Server architecture relationship belongs in Mermaid
+- Notation: `research → requirements → design → implementation` belongs in compact text

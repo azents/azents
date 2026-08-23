@@ -1,6 +1,8 @@
 """Runtime Provider inventory and authentication v1 Admin API tests."""
 
 import datetime
+from collections.abc import Sequence
+from dataclasses import dataclass
 from unittest.mock import AsyncMock, create_autospec
 
 import pytest
@@ -9,7 +11,7 @@ from azents_runtime_control.provider import (
     RuntimeProviderOperationalWarning,
     RuntimeProviderOperationalWarningSeverity,
 )
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException, params
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
 
@@ -66,6 +68,44 @@ from azents.services.runtime_recreation.service import (
     RuntimeRecreationUnavailable,
 )
 from azents.utils.fastapi.route import as_route_mounter
+
+
+@dataclass(frozen=True)
+class _MountedRoute:
+    """One route plus dependencies applied by the enclosing API mount."""
+
+    path: str
+    methods: set[str] | None
+    dependencies: Sequence[params.Depends]
+
+
+def _mounted_admin_runtime_provider_routes() -> list[_MountedRoute]:
+    """Capture effective Runtime Provider routes from the Admin API mounter."""
+    mounted_routes: list[_MountedRoute] = []
+
+    def capture(
+        router: APIRouter,
+        *,
+        prefix: str,
+        tag: str,
+        description: str | None = None,
+        dependencies: Sequence[params.Depends] | None = None,
+    ) -> None:
+        del tag, description
+        if prefix != "/runtime-provider/v1":
+            return
+        for route in router.routes:
+            if isinstance(route, APIRoute):
+                mounted_routes.append(
+                    _MountedRoute(
+                        path=f"{prefix}{route.path}",
+                        methods=route.methods,
+                        dependencies=dependencies or (),
+                    )
+                )
+
+    mount_admin(capture)
+    return mounted_routes
 
 
 def _projection(
@@ -152,7 +192,7 @@ def test_mounts_runtime_provider_inventory_and_authentication_routes() -> None:
     app = FastAPI()
     mount(as_route_mounter(app))
 
-    paths = {route.path for route in app.routes if isinstance(route, APIRoute)}
+    paths = set(app.openapi()["paths"])
 
     assert "/runtime-provider/v1/providers" in paths
     assert "/runtime-provider/v1/providers/{provider_id}" in paths
@@ -268,57 +308,49 @@ async def test_operational_diagnostics_returns_active_snapshot_or_unavailable() 
 
 def test_admin_mount_protects_binding_routes_with_system_admin() -> None:
     """All binding reads and mutations inherit System Admin protection."""
-    app = FastAPI()
-    mount_admin(as_route_mounter(app))
     binding_routes = [
         route
-        for route in app.routes
-        if isinstance(route, APIRoute)
-        and "/runtime-provider/v1/" in route.path
+        for route in _mounted_admin_runtime_provider_routes()
+        if "/runtime-provider/v1/" in route.path
         and "authentication-bindings" in route.path
     ]
 
     assert len(binding_routes) == 6
     for route in binding_routes:
         assert any(
-            dependency.call is get_system_admin
-            for dependency in route.dependant.dependencies
+            dependency.dependency is get_system_admin
+            for dependency in route.dependencies
         )
 
 
 def test_admin_mount_protects_all_recreation_routes_with_system_admin() -> None:
     """Every Platform recreation route inherits System Admin protection."""
-    app = FastAPI()
-    mount_admin(as_route_mounter(app))
     recreation_routes = [
         route
-        for route in app.routes
-        if isinstance(route, APIRoute)
-        and "/runtime-provider/v1/" in route.path
+        for route in _mounted_admin_runtime_provider_routes()
+        if "/runtime-provider/v1/" in route.path
         and "recreation-operations" in route.path
     ]
 
     assert len(recreation_routes) == 4
     for route in recreation_routes:
         assert any(
-            dependency.call is get_system_admin
-            for dependency in route.dependant.dependencies
+            dependency.dependency is get_system_admin
+            for dependency in route.dependencies
         )
 
 
 def test_admin_mount_protects_profile_delete_and_detail_routes() -> None:
     """Profile deletion impact, mutation, and detail inherit System Admin auth."""
-    app = FastAPI()
-    mount_admin(as_route_mounter(app))
     protected_routes = [
         route
-        for route in app.routes
-        if isinstance(route, APIRoute)
-        and (
+        for route in _mounted_admin_runtime_provider_routes()
+        if (
             route.path.endswith("/deletion-impact")
             or (
                 route.path.endswith("/{profile_id}")
                 and "profiles" in route.path
+                and route.methods is not None
                 and "DELETE" in route.methods
             )
             or "/workspaces/{handle}/runtime-profiles/{profile_id}" in route.path
@@ -328,8 +360,8 @@ def test_admin_mount_protects_profile_delete_and_detail_routes() -> None:
     assert len(protected_routes) == 5
     for route in protected_routes:
         assert any(
-            dependency.call is get_system_admin
-            for dependency in route.dependant.dependencies
+            dependency.dependency is get_system_admin
+            for dependency in route.dependencies
         )
 
 

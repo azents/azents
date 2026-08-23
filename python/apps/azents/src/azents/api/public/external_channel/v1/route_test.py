@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from azents.app import create_dummy_public_app
@@ -294,12 +293,9 @@ def test_oversized_body_is_rejected_before_service_admission() -> None:
 
 def test_callback_is_mounted_but_excluded_from_public_openapi() -> None:
     """Keep provider reachability outside generated authenticated clients."""
-    paths = {route.path for route in router.routes if isinstance(route, APIRoute)}
     app = create_dummy_public_app()
 
-    assert "/slack/events" in paths
-    assert any(
-        getattr(route, "path", None) == "/external-channel/v1/slack/events"
-        for route in app.routes
+    assert str(app.url_path_for("receive_slack_event")) == (
+        "/external-channel/v1/slack/events"
     )
     assert "/external-channel/v1/slack/events" not in app.openapi()["paths"]

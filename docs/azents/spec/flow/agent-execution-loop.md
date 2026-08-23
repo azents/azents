@@ -25,6 +25,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
   - python/apps/azents/src/azents/services/mailbox.py
+  - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
@@ -81,8 +82,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-20
-spec_version: 160
+last_verified_at: 2026-08-23
+spec_version: 161
 ---
 
 # Agent Execution Loop
@@ -105,8 +106,17 @@ Main steps:
    profile and attachment metadata outside a database session and then locks the same head for atomic
    preparation. After the Worker creates or claims the AgentRun, it ensures that run's immutable
    managed-file projection before calling input promotion or resolving a managed SkillAction.
-2. Preparation atomically updates the Session inference snapshot, applies Goal/Skill side effects, appends canonical events, associates run input, and deletes the source buffer. A changed FIFO head restarts preparation instead of applying a stale resolution.
-3. Worker executes buffer-keyed operation TurnActions such as `create_git_worktree` before the next model dispatch. The current Session owner generation admits the execution before buffer deletion; active state and progress remain in execution tables until one atomic terminal handover appends durable history and deletes live state.
+2. A closed TurnAction capability registry classifies inference requirements and
+   performs Goal/Skill semantic preparation. Preparation atomically updates the
+   Session inference snapshot, applies those side effects, appends canonical
+   events, associates run input, and deletes the source buffer. A changed FIFO
+   head restarts preparation instead of applying a stale resolution.
+3. Worker executes buffer-keyed operation TurnActions such as
+   `create_git_worktree` through a separate closed operation executor registry
+   before the next model dispatch. The current Session owner generation admits
+   the execution before buffer deletion; active state and progress remain in
+   execution tables until one atomic terminal handover appends durable history
+   and deletes live state.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
 5. `PreLowerFilterPipeline` cleans up event transcript into DB-mutating event transcript.
 6. The provider-selected lowerer converts the event transcript, client tools, hosted tools, and
@@ -1023,7 +1033,10 @@ wake-up entry and model-call turn boundaries inside an already-running run. `cre
 action execution is keyed by the source `input_buffer_id`; the preparation transaction stores the
 typed action payload, current Session owner generation, and pending execution before deleting the
 source buffer. Before invoking a side effect, the worker verifies that generation and admits the
-operation through the same shutdown barrier used by foreground tools. Execution publishes live
+operation through the same shutdown barrier used by foreground tools. The generic
+run executor retains fencing, cancellation, live projection callbacks, terminal
+handover, and context invalidation, while the closed operation executor registry
+performs exhaustive typed dispatch to the Workspace action owner. Execution publishes live
 projection updates while status or log entries change, creates the worktree through typed Runner Git
 operations, registers the created path as a session Project, refreshes catalog/Skill projection, and
 then invalidates the prepared context boundary.
@@ -1313,6 +1326,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-23** (spec_version 161) — Centralized closed TurnAction
+  policy/catalog/preparation and moved exhaustive operation dispatch into the
+  Worker operation executor registry without changing execution semantics.
 - **2026-08-20** (spec_version 160) — Clarified activation-time requested
   profile persistence, Session-owned resolved turn state, retry re-resolution,
   and first-child profile storage without run-owned physical snapshots.
