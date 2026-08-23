@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Azents inspected Runtime forward proxy"
 requires-python = ">=3.14"
 dependencies = [
-    "cryptography==48.0.1",
+    "cryptography==50.0.0",
     "mitmproxy==12.2.3",
 ]
 
