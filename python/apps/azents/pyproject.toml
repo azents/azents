@@ -40,7 +40,7 @@ dependencies = [
     # Kubernetes clients: lightkube for standard operations and
     # kubernetes_asyncio for exec WebSocket support
     "kubernetes-asyncio==36.1.0",
-    "lightkube==0.19.1",
+    "lightkube==0.22.0",
     # Local dependencies
     "az-common",
     "litellm==1.91.3",

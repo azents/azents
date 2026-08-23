@@ -28,7 +28,7 @@ from azentsadminclient.models.system_setting_validation_status import (
 )
 from testcontainers.core.container import DockerContainer
 
-from support.utils import authenticate_user, unique
+from support.utils import authenticate_user, decode_docker_exec_output, unique
 
 _APP_ID = "123"
 _CLIENT_ID = "Iv1.azents-test"
@@ -113,7 +113,7 @@ with urllib.request.urlopen(request, timeout=5) as response:
             json.dumps(payload) if payload is not None else "",
         ]
     )
-    output = result.output.decode(errors="replace")
+    output = decode_docker_exec_output(result.output)
     assert result.exit_code == 0, output
     parsed: object = json.loads(output)
     assert isinstance(parsed, dict)
