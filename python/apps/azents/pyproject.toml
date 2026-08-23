@@ -24,7 +24,7 @@ dependencies = [
     "cryptography==50.0.0",
     # Utilities
     "pytz==2026.2",
-    "tzdata==2026.2",
+    "tzdata==2026.3",
     # Monitoring
     "sentry-sdk[fastapi]==2.59.0",
     # CLI
