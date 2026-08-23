@@ -2,11 +2,7 @@ import type { ApiErrorProjection } from "@/trpc/api-error";
 import type { AutomaticSessionProjectsResponse } from "@azents/public-client";
 
 export type ProjectPreviewStatus =
-  | "unchecked"
-  | "available"
-  | "missing"
-  | "unavailable"
-  | "error";
+  "unchecked" | "available" | "missing" | "unavailable" | "error";
 
 export type AutomaticProjectRow = {
   path: string;

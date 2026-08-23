@@ -5,8 +5,7 @@ import type {
 } from "@azents/admin-client";
 
 export type RetentionApplicationScope =
-  | "new_archives_only"
-  | "recalculate_existing";
+  "new_archives_only" | "recalculate_existing";
 
 export type RetentionSettingsState =
   | { type: "LOADING" }

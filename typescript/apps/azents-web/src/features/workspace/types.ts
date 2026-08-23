@@ -6,9 +6,7 @@ import type { AgentResponse } from "@azents/public-client";
 
 /** Invitation form error/success translation key (workspace.dashboard namespace) */
 type InviteErrorKey =
-  | "inviteError"
-  | "inviteAlreadyMember"
-  | "inviteAlreadyInvited";
+  "inviteError" | "inviteAlreadyMember" | "inviteAlreadyInvited";
 type InviteSuccessKey = "inviteSuccess";
 
 /** Invitation form state */

@@ -58,12 +58,7 @@ import type {
 } from "@azents/public-client";
 
 export type AgentFormSection =
-  | "all"
-  | "profile"
-  | "model"
-  | "capabilities"
-  | "subagents"
-  | "admins";
+  "all" | "profile" | "model" | "capabilities" | "subagents" | "admins";
 
 interface AgentFormProps {
   handle: string;

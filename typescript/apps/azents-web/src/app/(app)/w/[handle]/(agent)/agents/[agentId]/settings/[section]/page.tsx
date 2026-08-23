@@ -9,12 +9,7 @@ import { trpc } from "@/trpc/server";
 import type { AgentFormSection } from "@/features/agents/components/AgentForm";
 
 type SettingsSection =
-  | AgentFormSection
-  | "memory"
-  | "runtime"
-  | "channels"
-  | "projects"
-  | "danger";
+  AgentFormSection | "memory" | "runtime" | "channels" | "projects" | "danger";
 
 function parseSection(value: string): SettingsSection | null {
   switch (value) {

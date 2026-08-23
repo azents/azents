@@ -6,8 +6,7 @@ export type SignupTokenListState =
   | { type: "LOADED"; tokens: SignupTokenResponse[] };
 
 export type SignupTokenCreateState =
-  | { type: "IDLE"; error: string | null }
-  | { type: "CREATING" };
+  { type: "IDLE"; error: string | null } | { type: "CREATING" };
 
 export interface CreatedSignupTokenState {
   email: string;

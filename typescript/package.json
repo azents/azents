@@ -1,7 +1,7 @@
 {
   "name": "azents-typescript",
   "private": true,
-  "packageManager": "pnpm@11.1.0",
+  "packageManager": "pnpm@11.22.0+sha512.1ff870c4c6133dfd88fb2afc46dd13d47f09c9794b438c6fdb47ca98caf3bc16381ee0be93a091b8e3824cf01f889f46d7d9e20910fb0be1ab0fb5baa80dd621",
   "engines": {
     "node": "^24"
   },
@@ -20,12 +20,12 @@
     "clean": "turbo run clean && rm -rf node_modules/.cache .turbo"
   },
   "devDependencies": {
-    "eslint-config-prettier": "^10.1.5",
-    "eslint-plugin-prettier": "^5.4.1",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "prettier": "^3.7.4",
-    "turbo": "2.9.14",
-    "typescript": "^6.0.0",
-    "typescript-eslint": "^8.51.0"
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.9.6",
+    "turbo": "2.10.10",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0"
   }
 }

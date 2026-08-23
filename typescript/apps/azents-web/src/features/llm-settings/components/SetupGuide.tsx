@@ -12,9 +12,7 @@ import { IconHelp } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 
 export type CredentialType =
-  | "api_key"
-  | "aws_credentials"
-  | "gcp_service_account";
+  "api_key" | "aws_credentials" | "gcp_service_account";
 
 export function SetupGuide({
   credType,

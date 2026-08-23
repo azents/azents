@@ -6,8 +6,7 @@ export interface CurrentWorkspaceProfile {
 }
 
 export type HumanSenderPresentation =
-  | { type: "AVAILABLE"; name: string }
-  | { type: "UNAVAILABLE" };
+  { type: "AVAILABLE"; name: string } | { type: "UNAVAILABLE" };
 
 export function humanSenderPresentation(
   senderUserId: string | null,

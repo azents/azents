@@ -22,10 +22,7 @@ import type { KimiOAuthDeviceState } from "../types";
 const KIMI_AUTH_URL = "https://auth.kimi.com";
 
 export type KimiOAuthConnectionStatus =
-  | "connected"
-  | "refresh_required"
-  | "temporarily_unavailable"
-  | "disabled";
+  "connected" | "refresh_required" | "temporarily_unavailable" | "disabled";
 
 export interface KimiOAuthConnectionCardProps {
   canManage: boolean;

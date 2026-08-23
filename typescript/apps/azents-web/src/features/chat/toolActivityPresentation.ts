@@ -19,8 +19,7 @@ export interface ProviderToolActivityCall {
 }
 
 export type ToolActivityCall =
-  | ClientToolActivityCall
-  | ProviderToolActivityCall;
+  ClientToolActivityCall | ProviderToolActivityCall;
 
 export type ActivityEventKind =
   | "reasoning"
@@ -68,8 +67,7 @@ export interface MessagePresentationItem {
 }
 
 export type ChatPresentationItem =
-  | ToolActivityPresentationItem
-  | MessagePresentationItem;
+  ToolActivityPresentationItem | MessagePresentationItem;
 
 interface TimelineEvent {
   id: string;

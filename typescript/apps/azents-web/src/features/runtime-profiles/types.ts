@@ -22,8 +22,7 @@ export type RuntimeProfileEditorState =
   | { type: "EDIT"; profile: WorkspaceRuntimeProfileResponse };
 
 export type RuntimeProfileMutationState =
-  | { type: "IDLE"; error: string | null }
-  | { type: "SUBMITTING" };
+  { type: "IDLE"; error: string | null } | { type: "SUBMITTING" };
 
 export type RuntimeProfileOperationState =
   | { type: "IDLE" }

@@ -20,8 +20,7 @@ export type AgentFormState =
 
 /** Mutation state */
 export type MutationState =
-  | { type: "IDLE"; error: string | null }
-  | { type: "SUBMITTING" };
+  { type: "IDLE"; error: string | null } | { type: "SUBMITTING" };
 
 /** Admin list state */
 export type AdminListState =

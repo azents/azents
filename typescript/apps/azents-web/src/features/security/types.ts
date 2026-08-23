@@ -31,5 +31,4 @@ export type ElevationState =
 
 /** Password management state */
 export type PasswordManageState =
-  | { type: "IDLE"; error: string | null }
-  | { type: "SAVING" };
+  { type: "IDLE"; error: string | null } | { type: "SAVING" };
