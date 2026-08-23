@@ -13,7 +13,7 @@ migration_source: "docs/azents/design/frontend-chat-wire-envelope.md"
 
 ## Overview
 
-After the events-unification stack (#3140-#3151) merged, broker wire format changed to envelope shape. nointern-web `ChatEvent` type definition and dispatch logic still target old wire, so chat UI breaks. This work is a **frontend hot-fix** to match the new wire.
+After the events-unification stack (#3140-#3151) merged, broker wire format changed to envelope shape. azents-web `ChatEvent` type definition and dispatch logic still target old wire, so chat UI breaks. This work is a **frontend hot-fix** to match the new wire.
 
 Related issue: #3153
 
@@ -117,10 +117,10 @@ type EngineEvent =
 
 ## Impacted Files
 
-- `typescript/apps/nointern-web/src/features/chat/types.ts` — update ChatEvent union, introduce ChatEnvelope
-- `typescript/apps/nointern-web/src/features/chat/hooks/useChatWebSocket.ts` — dispatch branch (envelope vs engine), update 22 cases
-- `typescript/apps/nointern-web/src/features/chat/hooks/toolCallMerge.ts` — inject output into FCI tool call with same call_id when FCO arrives
-- `typescript/apps/nointern-web/src/features/chat/hooks/useSubagentSession.ts` — subagent_stream_* → subagent_*
+- `typescript/apps/azents-web/src/features/chat/types.ts` — update ChatEvent union, introduce ChatEnvelope
+- `typescript/apps/azents-web/src/features/chat/hooks/useChatWebSocket.ts` — dispatch branch (envelope vs engine), update 22 cases
+- `typescript/apps/azents-web/src/features/chat/hooks/toolCallMerge.ts` — inject output into FCI tool call with same call_id when FCO arrives
+- `typescript/apps/azents-web/src/features/chat/hooks/useSubagentSession.ts` — subagent_stream_* → subagent_*
 
 ## Feasibility Verification
 
@@ -149,4 +149,4 @@ Single PR (work size ~150 LOC):
 
 ## testenv QA
 
-No nointern testenv scenario added because this is frontend-only change. nointern-web manual smoke (chat message + tool call) is sufficient.
+No azents testenv scenario added because this is frontend-only change. azents-web manual smoke (chat message + tool call) is sufficient.

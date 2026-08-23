@@ -127,7 +127,7 @@ class Session:
 ## Module Layout
 
 ```
-testenv/nointern/
+testenv/azents/
 ├── seed/                       # existing (Stage 1c)
 ├── live/                       # new (Stage 2)
 │   ├── __init__.py             # docstring only (no re-export, Stage 1c rule)
@@ -231,7 +231,7 @@ class ChatTimeout(ChatError):
 
 ## preflight Integration
 
-Add `LLMApiKeyAvailable` to `testenv/nointern/checks/config.py`:
+Add `LLMApiKeyAvailable` to `testenv/azents/checks/config.py`:
 
 ```python
 class LLMApiKeyAvailable(Check):
@@ -251,7 +251,7 @@ class LLMApiKeyAvailable(Check):
         return CheckResult(
             status=Status.WARN,
             message="no LLM API key set — live chat scenarios will not work",
-            fix_hint="export OPENAI_API_KEY=... in testenv/nointern/.env",
+            fix_hint="export OPENAI_API_KEY=... in testenv/azents/.env",
         )
 ```
 
@@ -261,8 +261,8 @@ Register in config section of `all_checks()`. Status.WARN does not block other c
 
 Use only packages already in existing testenv `pyproject.toml`:
 
-- `nointern-public-client` (editable) — ChatV1Api, SendCodeRequest, etc.
-- `nointern-admin-client` (editable) — not directly needed here (auth handled by seed.auth)
+- `azents-public-client` (editable) — ChatV1Api, SendCodeRequest, etc.
+- `azents-admin-client` (editable) — not directly needed here (auth handled by seed.auth)
 - `websockets` — **needs addition**. e2e uses it, so pin same version.
 
 **New addition**: `websockets==16.0` (refer to e2e version).
@@ -286,7 +286,7 @@ Executed immediately after draft. Verified with live ws call against actual devs
 ### Live Verification Command Log (Reproducible)
 
 ```bash
-cd testenv/nointern
+cd testenv/azents
 cp .env.example .env
 uv add websockets==16.0
 uv run devserver.py up --timeout 120
@@ -295,7 +295,7 @@ uv run python <<'PY'
 import json, uuid
 from seed import auth, workspace, llm, agent
 from seed.client import public_client
-from nointernpublicclient.api.chat_v1_api import ChatV1Api
+from azentspublicclient.api.chat_v1_api import ChatV1Api
 from websockets.sync.client import connect as ws_connect
 
 user = auth.create_user()
@@ -390,7 +390,7 @@ After text pipeline verification completes, continue with image input/output as 
 ## Out of Scope (Stage 3/4)
 
 - Tool execution + Sandbox + MCP toolkit (Stage 3)
-- Browser + nointern-web (Stage 4)
+- Browser + azents-web (Stage 4)
 - WebSocket concurrency/scale test
 - Token refresh (`refresh_token`) flow verification
 - Session list/delete/message list API — separate phase when needed
@@ -400,6 +400,6 @@ After text pipeline verification completes, continue with image input/output as 
 - Parent design: [`local-260406-local-fullstack-test-env.md`](./local-260406-local-fullstack-test-env.md)
 - Discussion: azents/azents#2378
 - Implementation issue: azents/azents#2376
-- e2e pattern: `python/apps/nointern-e2e/src/tests/utils.py` (`create_chat_session`)
-- Event types: `python/apps/nointern/src/nointern/broker/serialization.py`
-- Existing modules: `testenv/nointern/{seed,devserverlib,checks}`
+- e2e pattern: `python/apps/azents-e2e/src/tests/utils.py` (`create_chat_session`)
+- Event types: `python/apps/azents/src/azents/broker/serialization.py`
+- Existing modules: `testenv/azents/{seed,devserverlib,checks}`

@@ -13,11 +13,11 @@ historical_reconstruction: true
 
 # testenv Framework Redesign
 
-Discussion document: [`docs/nointern/adr/testenv-260414-testenv-runner-redesign.md`](../adr/testenv-260414-testenv-runner-redesign.md)
+Discussion document: [`docs/azents/adr/testenv-260414-testenv-runner-redesign.md`](../adr/testenv-260414-testenv-runner-redesign.md)
 
 ## Overview
 
-Redesign AI-agent QA platform `testenv/nointern/` to solve **three axes of problems** at once:
+Redesign AI-agent QA platform `testenv/azents/` to solve **three axes of problems** at once:
 
 1. **Reliability** — block false PASS (frontier LLM reward hacking / spec drift / sycophancy)
 2. **Reproducibility** — remove orphans, channel accumulation, token expiration, state contamination
@@ -76,7 +76,7 @@ flowchart TB
 ### Directory Structure
 
 ```
-testenv/nointern/
+testenv/azents/
 ├── testenv/                          # new Python package
 │   ├── __init__.py
 │   ├── cli.py                        # `testenv` CLI entry (Click/Typer)
@@ -206,9 +206,9 @@ idempotent: true
 verify: |
   python3 -c "..."
 reclaim: |                   # new — cleanup real residue even without state
-  nointern-db-debug.sh -c "DELETE FROM slack_installations WHERE slack_app_id = '$SHARED_TEST_APP_ID'"
+  azents-db-debug.sh -c "DELETE FROM slack_installations WHERE slack_app_id = '$SHARED_TEST_APP_ID'"
 teardown: |                  # new — push to finalizer stack after success
-  curl -X DELETE "$NI_URL/.../slack-installations/$INSTALLATION_ID"
+  curl -X DELETE "$AZ_URL/.../slack-installations/$INSTALLATION_ID"
 locks:                       # new — shared unique resource lock
   - slack-byoa-app
 llm_key_required: false
@@ -306,7 +306,7 @@ def fs_guard_hook(tool_name: str, tool_input: dict) -> dict:
     if tool_name in ("Write", "Edit", "MultiEdit"):
         path = tool_input.get("file_path", "")
         for protected in BLOCKED_PATHS:
-            if path.startswith(str(Path("testenv/nointern") / protected)):
+            if path.startswith(str(Path("testenv/azents") / protected)):
                 return {
                     "allow": False,
                     "reason": f"Write to spec path {protected} is forbidden. "
@@ -526,7 +526,7 @@ Meta QA: how to verify new framework itself.
 
 ### Phase 3: Migration (subagent parallel)
 
-**Scope**: every setup + every scenario category in `testenv/nointern/`.
+**Scope**: every setup + every scenario category in `testenv/azents/`.
 
 TC count by category:
 - `admin-api/` — 1
@@ -552,7 +552,7 @@ Subagent assignment by category:
 - Attempt false PASS reproduction + confirm blocking
 
 ### Phase 5: Full TC re-verification
-- Run all ~37 nointern TCs with new framework
+- Run all ~37 azents TCs with new framework
 - Attempt false PASS reproduction + confirm blocking
 - Confirm no regression for previously passing TCs
 - Prepare BYOA restoration work

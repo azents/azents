@@ -415,7 +415,7 @@ Rejected alternatives:
 
 - `docs/azents/adr/0026-slack-byoa.md`
 - `docs/azents/design/slack-byoa.md`
-- `docs/azents/design/nointern-slack-integration.md`
+- `docs/azents/design/azents-slack-integration.md`
 - `docs/azents/adr/0034-chat-input-buffer.md`
 - `docs/azents/adr/0047-chat-history-live-event-protocol.md`
 - `docs/azents/adr/0058-session-todo-toolkit-state-ui.md`

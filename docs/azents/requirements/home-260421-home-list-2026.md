@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/home-as-agent-list-2026-04-21.md"
 
 ## Problem
 
-Simplify nointern-web workspace IA one more time.
+Simplify azents-web workspace IA one more time.
 
 After agent-centric-nav implementation in `#2779`, "agent existence" was spread across 3 places in workspace:
 

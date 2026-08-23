@@ -258,13 +258,13 @@ For non-interactive setup, the workspace UI can create a provider token:
 ```bash
 azents-sandbox-provider start \
   --workspace ws_123 \
-  --token niprov_xxxxx
+  --token azprov_xxxxx
 ```
 
 or:
 
 ```bash
-AZ_PROVIDER_TOKEN=niprov_xxxxx azents-sandbox-provider start
+AZ_PROVIDER_TOKEN=azprov_xxxxx azents-sandbox-provider start
 ```
 
 ### 5.3 Provider credential scope

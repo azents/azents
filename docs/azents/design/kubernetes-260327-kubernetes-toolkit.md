@@ -51,7 +51,7 @@ A dedicated Toolkit for remotely connecting to customer Kubernetes clusters and 
 
 ### 4. Authentication method
 
-Customers provide credentials because NoIntern connects remotely to customer cluster.
+Customers provide credentials because Azents connects remotely to customer cluster.
 
 | Auth type | Target | What customer provides | Stored in credential |
 |-----------|------|-----------------|------------------|
@@ -86,7 +86,7 @@ For EKS/GKE, cluster endpoint and CA cert are automatically queried through API 
 sequenceDiagram
     participant Admin as Customer Admin
     participant Agent as Agent
-    participant NI as nointern Server
+    participant NI as azents Server
     participant Proxy as Egress Proxy
     participant K8s as Customer K8s API Server
 
@@ -422,7 +422,7 @@ def _create_eks_client(
             sts = session.client("sts")
             assumed = sts.assume_role(
                 RoleArn=credential.role_arn,
-                RoleSessionName="nointern-k8s",
+                RoleSessionName="azents-k8s",
             )["Credentials"]
             session = boto3.Session(
                 aws_access_key_id=assumed["AccessKeyId"],
@@ -631,7 +631,7 @@ configuration.proxy = context.mcp_proxy_url  # SSRF prevention proxy
 ```
 
 **Dependencies to add:**
-- `kubernetes` (Python package) — add to nointern pyproject.toml
+- `kubernetes` (Python package) — add to azents pyproject.toml
 - `boto3` (for EKS auth) — likely already dependency
 - `google-auth` (for GKE auth) — likely already dependency
 
@@ -652,7 +652,7 @@ configuration.proxy = context.mcp_proxy_url  # SSRF prevention proxy
 
 | Risk | Impact | Mitigation |
 |--------|------|------|
-| Customer cluster network access | nointern must reach customer API server | customer exposes API server via public or VPN/peering |
+| Customer cluster network access | azents must reach customer API server | customer exposes API server via public or VPN/peering |
 | Token expiration | EKS ~15 min, GKE ~1 hour | automatic refresh with refresh_api_key_hook |
 | DynamicClient does not support logs/exec | CoreV1Api separate use needed | use CoreV1Api only for logs/exec, DynamicClient for rest |
 | Large resource response | LLM context overflow | default limit parameter 50, response truncation |

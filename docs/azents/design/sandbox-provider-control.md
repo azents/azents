@@ -13,36 +13,36 @@ supporting_role: consolidation
 
 ## Problem / Background
 
-Current nointern sandbox control is split into two layers.
+Current azents sandbox control is split into two layers.
 
 - Commands/files/checkpoint operations inside sandbox have moved to the `SandboxControlRuntime.Connect` outbound gRPC stream and the `SandboxControlWorker` worker-facing service.
-- Sandbox lifecycle is still created, deleted, and observed directly by the NoIntern backend through `SessionSandboxClient` implementations for Kubernetes Pods or local Docker containers.
+- Sandbox lifecycle is still created, deleted, and observed directly by the Azents backend through `SessionSandboxClient` implementations for Kubernetes Pods or local Docker containers.
 
-This structure is sufficient to abstract K8s/Docker backends as one process-local client interface, but it is not enough for a model where the provider itself runs outside NoIntern. In particular, to split the K8s provider controller into an optional Helm component, or to later support a customer local Docker provider daemon attaching to NoIntern without an inbound port, the lifecycle plane must also be split into an outbound-first protocol.
+This structure is sufficient to abstract K8s/Docker backends as one process-local client interface, but it is not enough for a model where the provider itself runs outside Azents. In particular, to split the K8s provider controller into an optional Helm component, or to later support a customer local Docker provider daemon attaching to Azents without an inbound port, the lifecycle plane must also be split into an outbound-first protocol.
 
 This design is the Phase 2 design draft for #3914 SandboxProviderControl. The goal is not detailed local Docker implementation, but to define the protocol/abstraction/security contract shared by the K8s-first provider controller and downstream local Docker providers.
 
 Current paths referenced:
 
-- `docs/nointern/adr/sandbox-260506-sandbox-control-channel.md`
-- `docs/nointern/design/sandbox-260506-sandbox-control-channel.md`
-- `docs/nointern/spec/flow/sandbox-260521-sandbox-control.md`
-- `proto/nointern/sandbox_control/v1/sandbox_control.proto`
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_manager.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/control/registry.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/control/server.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_k8s.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_docker.py`
-- `docs/nointern/design/helm-260512-helm-packaging.md`
+- `docs/azents/adr/sandbox-260506-sandbox-control-channel.md`
+- `docs/azents/design/sandbox-260506-sandbox-control-channel.md`
+- `docs/azents/spec/flow/sandbox-260521-sandbox-control.md`
+- `proto/azents/sandbox_control/v1/sandbox_control.proto`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox_manager.py`
+- `python/apps/azents/src/azents/runtime/sandbox/control/registry.py`
+- `python/apps/azents/src/azents/runtime/sandbox/control/server.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox_k8s.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox_docker.py`
+- `docs/azents/design/helm-260512-helm-packaging.md`
 
 Feasibility check compared the draft with current code/docs/Helm chart after drafting. The conclusion is that implementation is possible, but the K8s-first phase must include not only a simple lifecycle wrapper, but also parity with existing `/home/sandbox` checkpoint persistence and sandbox-control auth token migration.
 
 ## Goals
 
-1. Define a `SandboxProviderControl` contract that can separate sandbox lifecycle provider from the NoIntern core worker process.
+1. Define a `SandboxProviderControl` contract that can separate sandbox lifecycle provider from the Azents core worker process.
 2. Fix the first implementation direction as a K8s-first out-of-process provider controller.
-3. Define an architecture boundary that can deploy the K8s provider controller as an optional component of the NoIntern Helm chart.
+3. Define an architecture boundary that can deploy the K8s provider controller as an optional component of the Azents Helm chart.
 4. Separate provider state authority along static/dynamic and system/user(workspace) axes.
 5. Separate active provider connection/liveness into Redis registry and runtime allocation into `sandbox_runtime_leases` active-lease table.
 6. Define the security contract that introduces required `SandboxControlAuthToken` for sandbox-control runtime registration.
@@ -61,12 +61,12 @@ Feasibility check compared the draft with current code/docs/Helm chart after dra
 
 ### Sandbox control plane
 
-`proto/nointern/sandbox_control/v1/sandbox_control.proto` defines two services.
+`proto/azents/sandbox_control/v1/sandbox_control.proto` defines two services.
 
-- `SandboxControlRuntime.Connect`: outbound stream opened from the client inside sandbox container to NoIntern
+- `SandboxControlRuntime.Connect`: outbound stream opened from the client inside sandbox container to Azents
 - `SandboxControlWorker`: service where worker/control plane requests exec/file/checkpoint operations
 
-`python/apps/nointern/src/nointern/runtime/sandbox/control/registry.py` records active sandbox-control connection in Redis keyed by `AgentRuntime.id`. The record includes `connection_id`, `generation`, `control_instance_id`, `registered_at`, `last_heartbeat_at`, and `state`.
+`python/apps/azents/src/azents/runtime/sandbox/control/registry.py` records active sandbox-control connection in Redis keyed by `AgentRuntime.id`. The record includes `connection_id`, `generation`, `control_instance_id`, `registered_at`, `last_heartbeat_at`, and `state`.
 
 ### Lifecycle backend
 
@@ -89,7 +89,7 @@ Current `sandbox-checkpoint-lifecycle` spec defines `/home/sandbox/**` as checkp
 | Topic | Decision | Rationale |
 |---|---|---|
 | First provider implementation | K8s-first | closest to verifying production primary backend and Helm optional component. |
-| Provider placement | out-of-process provider controller | separates NoIntern worker process from lifecycle provider failure domain. |
+| Provider placement | out-of-process provider controller | separates Azents worker process from lifecycle provider failure domain. |
 | Protocol form | provider opens outbound `ConnectProvider` bidi stream | does not require inbound exposure in private cluster/customer network. |
 | Provider source of truth | static+system is config/Helm, all other dynamic providers are DB | represents Helm-managed managed provider and workspace/user provider with one model while keeping authority separate. |
 | Active liveness | Redis registry | suitable for TTL/heartbeat-based ephemeral owner state. |
@@ -104,7 +104,7 @@ Current `sandbox-checkpoint-lifecycle` spec defines `/home/sandbox/**` as checkp
 
 ```mermaid
 flowchart LR
-    subgraph NoIntern[NoIntern control plane]
+    subgraph Azents[Azents control plane]
         Worker[Worker / runtime manager]
         ProviderSvc[SandboxProviderControl service]
         SandboxCtl[SandboxControl service]
@@ -140,7 +140,7 @@ The core separation is as follows.
 - SandboxProviderControl is the **lifecycle plane**. It handles provider registration, heartbeat, capacity, allocation, delete, and observe.
 - SandboxControl is the **runtime command/file/checkpoint plane**. It connects to the client inside sandbox container.
 - Provider controller creates sandbox Pod/container and injects `SANDBOX_CONTROL_*` env and the value corresponding to `SANDBOX_CONTROL_AUTH_TOKEN`.
-- NoIntern records runtime allocation lease in DB, and active provider stream owner is looked up from Redis registry.
+- Azents records runtime allocation lease in DB, and active provider stream owner is looked up from Redis registry.
 
 ## Protocol Sketch
 
@@ -260,7 +260,7 @@ K8s-first migration introduces required `SandboxControlAuthToken` for sandbox-co
 
 Contract:
 
-1. NoIntern issues a token that binds `agent_runtime_id`, `workspace_id`, `provider_id`, `generation`, and expiry at runtime allocation.
+1. Azents issues a token that binds `agent_runtime_id`, `workspace_id`, `provider_id`, `generation`, and expiry at runtime allocation.
 2. Token is delivered to provider controller as `RuntimeAllocateRequest.sandbox_control_auth_token`.
 3. Provider controller injects token into sandbox Pod/container.
 4. Client inside sandbox sends token as `RegisterRequest.auth_token` field.
@@ -271,7 +271,7 @@ Token is not hidden in gRPC metadata. It is explicit as proto field so codegen, 
 
 ### Trust boundaries
 
-- K8s provider controller starts as an optional component inside NoIntern deployment trust boundary.
+- K8s provider controller starts as an optional component inside Azents deployment trust boundary.
 - Dynamic workspace/local provider is an external trust boundary, and K8s-first design must first establish token/revocation/liveness contract.
 - provider-control credential and sandbox-control runtime auth token cannot substitute for each other.
 - Even if provider receives sandbox-control auth token, that token must be valid only for a specific runtime/generation registration.
@@ -286,7 +286,7 @@ Provider is classified along two axes.
 |---|---|---|---|
 | mutability | static | provider declared by deployment/config | Helm/config |
 | mutability | dynamic | provider created through UI/API/registration | DB |
-| ownership | system | NoIntern deployment or cluster-wide provider | Helm/config or DB |
+| ownership | system | Azents deployment or cluster-wide provider | Helm/config or DB |
 | ownership | user/workspace | provider supplied by a specific workspace/user | DB |
 
 According to accepted decision, **config/Helm is the source of truth for static + system provider**. DB is source of truth for all other dynamic providers. All providers use Redis registry for active connection/liveness.
@@ -365,7 +365,7 @@ Implications:
 
 ## K8s Provider Controller and Helm Optional Component
 
-K8s provider controller is the out-of-process component form of responsibilities currently held by `K8sSessionSandboxClient` inside NoIntern server.
+K8s provider controller is the out-of-process component form of responsibilities currently held by `K8sSessionSandboxClient` inside Azents server.
 
 Responsibilities:
 
@@ -380,7 +380,7 @@ Responsibilities:
 
 Relationship with Helm packaging:
 
-- `docs/nointern/design/helm-260512-helm-packaging.md` treats `server.sandboxControl` and `sandbox` component as default runtime core.
+- `docs/azents/design/helm-260512-helm-packaging.md` treats `server.sandboxControl` and `sandbox` component as default runtime core.
 - K8s provider controller must be a separate optional component in this structure.
 - Example values namespace should be chosen between `server.sandboxProviderController.enabled` and top-level `sandboxProviderController.enabled`. Which position better matches chart component boundary needs Helm source path review before implementation.
 - After cutover, if optional component is disabled, another active provider must exist. It does not fallback to legacy in-process K8s backend; if no active provider exists, sandbox allocation must fail as admin-visible misconfiguration.
@@ -398,7 +398,7 @@ Operational prerequisites:
 Local Docker provider is not direct implementation scope of this design. However, downstream implementation must follow these constraints.
 
 - Use the same `SandboxProviderControl.ConnectProvider` reverse stream.
-- Provider daemon connects outbound to NoIntern and must not require inbound port exposure.
+- Provider daemon connects outbound to Azents and must not require inbound port exposure.
 - Runtime container uses existing sandbox-control client contract.
 - `SandboxControlAuthToken` must be delivered as `RegisterRequest.auth_token`.
 - Local provider with provider-native `/home/sandbox/**` preservation may use per-runtime persistent directory/volume. This is not a required condition for K8s provider-control cutover.
@@ -459,8 +459,8 @@ After drafting, core assumptions were compared against the current repo. Actual 
 
 | Item | Result | Basis / action |
 |---|---|---|
-| Add `SandboxControlAuthToken` as `RegisterRequest` field | possible, breaking change | `RegisterRequest` currently has only `agent_runtime_id`, `agent_id`, `workspace_id`, `generation`. `nointern-sandbox-client` `Settings` and `build_register_message()` also use only same fields. Therefore `auth_token` addition must change proto, generated client/server, sandbox client env (`SANDBOX_CONTROL_AUTH_TOKEN`), and K8s/Docker launcher env injection together in one migration. |
-| Provider-control proto/codegen | possible | `python/libs/nointern-sandbox-control` already exists as shared gRPC proto package and has `grpcio-tools` dev dependency plus generated pb2 exclusion settings. New `sandbox_provider_control.proto` or adding service inside same proto package is possible. |
+| Add `SandboxControlAuthToken` as `RegisterRequest` field | possible, breaking change | `RegisterRequest` currently has only `agent_runtime_id`, `agent_id`, `workspace_id`, `generation`. `azents-sandbox-client` `Settings` and `build_register_message()` also use only same fields. Therefore `auth_token` addition must change proto, generated client/server, sandbox client env (`SANDBOX_CONTROL_AUTH_TOKEN`), and K8s/Docker launcher env injection together in one migration. |
+| Provider-control proto/codegen | possible | `python/libs/azents-sandbox-control` already exists as shared gRPC proto package and has `grpcio-tools` dev dependency plus generated pb2 exclusion settings. New `sandbox_provider_control.proto` or adding service inside same proto package is possible. |
 | Convert K8s lifecycle to provider | possible | `K8sSessionSandboxClient` already gathers Pod/NetworkPolicy creation, sandbox-control env injection, observe/list/delete responsibilities in one place, so migration target to provider controller is clear. K8s provider is not a new persistence backend but provider-controller port of existing built-in K8s Pod manager, so `/home/sandbox` durability keeps existing S3/RustFS checkpoint flow. |
 | Helm optional component | possible | Helm values already include `server.sandboxControl.enabled`, `sandbox`, and `snapshotter` components. K8s provider controller can be added as optional component between `sandbox` runtime layer and `server.sandboxControl`. Top-level `sandboxProviderController` values position looks more natural, but final position is fixed when chart template is implemented. |
 | NetworkPolicy / endpoint reachability | possible, extra egress needed | Current sandbox namespace NetworkPolicy allows sandbox Pod -> `sandbox-control:8020` egress. K8s provider controller must open outbound stream to provider-control endpoint, so egress policy and service endpoint for controller namespace/selector must be added. |
@@ -570,7 +570,7 @@ Evidence should record which provider identity, chart values/profile, sandbox im
 ### QA-5: Provider disconnect and stale lease recovery
 
 - What to check: Provider disconnect, reconnect, stale generation, and stale runtime lease do not produce duplicate active runtimes.
-- Why it matters: Reverse streams and external controllers fail independently from NoIntern workers.
+- Why it matters: Reverse streams and external controllers fail independently from Azents workers.
 - How to check: Kill/restart controller during or after allocation, inspect registry generation and `sandbox_runtime_leases` state.
 - Expected result: Stale connection is fenced; runtime is recovered, retried, or marked lost without duplicate ready owners.
 - Execution result: PASS — Phase 3~6 provider-control tests verify generation fencing, stale observation/result rejection, disconnect handling, and lease `LOST` behavior for allocation failure.

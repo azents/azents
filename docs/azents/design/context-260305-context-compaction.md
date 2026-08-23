@@ -535,7 +535,7 @@ from litellm.exceptions import ContextWindowExceededError
 
 ---
 
-### Phase 7: Frontend — nointern-web
+### Phase 7: Frontend — azents-web
 
 #### 7-1. Extend ChatEvent type
 
@@ -599,11 +599,11 @@ Add same key structure for ja-JP and fr-FR.
 
 ---
 
-### Phase 8: Admin UI — nointern-admin-web
+### Phase 8: Admin UI — azents-admin-web
 
 #### 8-1. Provider Model management page
 
-**File**: `typescript/apps/nointern-admin-web/src/features/provider-models/`
+**File**: `typescript/apps/azents-admin-web/src/features/provider-models/`
 
 Use existing admin API (`PATCH /llm-provider-models/{provider}/{model_identifier}`).
 
@@ -616,7 +616,7 @@ Use existing admin API (`PATCH /llm-provider-models/{provider}/{model_identifier
 
 - Add `GET /llm-provider-model/v1/llm-provider-models` — full list query endpoint.
 - Add `llmProviderModel.listAll` tRPC procedure.
-- Regenerate OpenAPI spec + nointern-admin-client.
+- Regenerate OpenAPI spec + azents-admin-client.
 
 ---
 
@@ -625,7 +625,7 @@ Use existing admin API (`PATCH /llm-provider-models/{provider}/{model_identifier
 ```mermaid
 graph TD
     P1[Phase 1: DB + types] --> P2[Phase 2: Context Window lookup]
-    P1 --> P7[Phase 7: nointern-web]
+    P1 --> P7[Phase 7: azents-web]
     P1 --> P8[Phase 8: admin-web]
     P2 --> P3[Phase 3: token estimation + Proactive trigger]
     P3 --> P4[Phase 4: Observation Masking]
@@ -637,8 +637,8 @@ graph TD
 - Phase 1~3: base infrastructure (sequential)
 - Phase 4~5: compaction core (sequential)
 - Phase 6: can be implemented independently after Phase 3
-- Phase 7 (nointern-web): type work possible after Phase 1, compaction UI after Phase 5
-- Phase 8 (nointern-admin-web): independently possible after Phase 1 (`max_input_tokens` override UI)
+- Phase 7 (azents-web): type work possible after Phase 1, compaction UI after Phase 5
+- Phase 8 (azents-admin-web): independently possible after Phase 1 (`max_input_tokens` override UI)
 
 ### Completion Status
 
@@ -648,8 +648,8 @@ graph TD
 - [x] Phase 4: Observation Masking
 - [x] Phase 5: LLM Summary Compaction
 - [x] Phase 6: Reactive Fallback
-- [x] Phase 7: Frontend — nointern-web
-- [x] Phase 8: Admin UI — nointern-admin-web
+- [x] Phase 7: Frontend — azents-web
+- [x] Phase 8: Admin UI — azents-admin-web
 
 ### Verification Plan
 

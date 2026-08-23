@@ -42,10 +42,10 @@ Runtime is Agent-scoped, not active-session-scoped. Runtime lookup must not depe
 
 - **Runtime Provider** owns lifecycle and backend resource: create/start/stop/restart/reset/observe. It also guarantees Agent Workspace persistence and reports workspace path.
 - **Runner** runs inside Runtime and executes bash/file operations. It reports readiness, health, generation, operation progress/final events.
-- **Control** is NoIntern runtime control plane. It receives Provider/Runner connections, manages durable state, routes commands/operations, and computes summary/actions.
+- **Control** is Azents runtime control plane. It receives Provider/Runner connections, manages durable state, routes commands/operations, and computes summary/actions.
 - **Agent Workspace** is durable file workspace inside Runtime. Path is Provider-reported absolute path metadata, not hardcoded `/home/sandbox`.
 
-Provider and Runner are external clients connecting outbound to Control. NoIntern server does not import Provider internals or reach into provider process directly.
+Provider and Runner are external clients connecting outbound to Control. Azents server does not import Provider internals or reach into provider process directly.
 
 ### 3. Store domain state durably in PostgreSQL
 
@@ -243,7 +243,7 @@ Agent Workspace absolute path reported by Provider is single source for:
 - file API path validation
 - UI file browser/path display
 
-NoIntern code and prompts must not hardcode `/home/sandbox` as Agent Workspace. Provider can report `/workspace/agent`, `/home/sandbox`, or another absolute path depending on implementation.
+Azents code and prompts must not hardcode `/home/sandbox` as Agent Workspace. Provider can report `/workspace/agent`, `/home/sandbox`, or another absolute path depending on implementation.
 
 Runner validates paths relative to Provider-reported Agent Workspace. If Runner reports path inconsistent with Provider/Control metadata, Control surfaces `workspace_path_mismatch` or `workspace_path_invalid`.
 
@@ -269,14 +269,14 @@ On Provider process restart, Docker Provider scans Docker API, labels, and host 
 
 ### 20. Delivery is part of the architecture
 
-Provider and Runner are external artifacts and must be independently built, pushed, deployed, and versioned. They are not implicit code inside `nointern-server` image.
+Provider and Runner are external artifacts and must be independently built, pushed, deployed, and versioned. They are not implicit code inside `azents-server` image.
 
 Initial images:
 
-- `nointern-server`
-- `nointern-runtime-runner`
-- `nointern-runtime-provider-kubernetes`
-- `nointern-runtime-provider-docker`
+- `azents-server`
+- `azents-runtime-runner`
+- `azents-runtime-provider-kubernetes`
+- `azents-runtime-provider-docker`
 
 ECR repositories are managed by Terraform/Terragrunt, not created by GitHub Actions. PR builds images and validates Helm templates; main merge pushes immutable `${github.sha}` tags to ECR.
 
@@ -284,7 +284,7 @@ Helm chart must expose values for Control/Provider registry, Coordination Store,
 
 Runtime Pods/PVCs are not rendered by Helm directly. Kubernetes Provider creates them dynamically.
 
-ArgoCD manages Provider as separate Application from server. Legacy `nointern-sandbox` path is replaced or disabled/pruned. Production done condition requires image push, GitOps values, ArgoCD root graph, Provider deployment, Runner image reference, and new Runtime path active without manual image push/kubectl.
+ArgoCD manages Provider as separate Application from server. Legacy `azents-sandbox` path is replaced or disabled/pruned. Production done condition requires image push, GitOps values, ArgoCD root graph, Provider deployment, Runner image reference, and new Runtime path active without manual image push/kubectl.
 
 ## Error Taxonomy
 

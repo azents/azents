@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Overview
 
-This document redefines NoIntern's existing per-conversation-session runtime/sandbox structure into agent-centered structure, and covers EFS removal, S3-based sandbox persistence, file exchange, file upload, external channel watch, and task delegation together.
+This document redefines Azents's existing per-conversation-session runtime/sandbox structure into agent-centered structure, and covers EFS removal, S3-based sandbox persistence, file exchange, file upload, external channel watch, and task delegation together.
 
 Core decisions are as follows.
 
@@ -26,7 +26,7 @@ High-cardinality spawned agent = sandbox disabled by default
 Heavy sandbox-needed work = task delegation to specialist agent
 ```
 
-External platforms such as Slack/Discord/GitHub/Jira already provide their own channel/thread/ticket/issue as conversation/work unit. NoIntern does not keep separate `ConversationSession` as common runtime domain, and routes external events to agent raw session through watches. Web UI directly accesses raw session.
+External platforms such as Slack/Discord/GitHub/Jira already provide their own channel/thread/ticket/issue as conversation/work unit. Azents does not keep separate `ConversationSession` as common runtime domain, and routes external events to agent raw session through watches. Web UI directly accesses raw session.
 
 ## User Scenarios
 
@@ -209,7 +209,7 @@ Files are divided into three types.
 
 ### Upload
 
-User upload is immediately stored in object storage. Run input includes attachment URI and metadata. Agent requiring sandbox materializes only needed attachments into `/home/sandbox/.nointern/attachments/{attachment_id}/` at run start.
+User upload is immediately stored in object storage. Run input includes attachment URI and metadata. Agent requiring sandbox materializes only needed attachments into `/home/sandbox/.azents/attachments/{attachment_id}/` at run start.
 
 ### File Download/Exchange
 

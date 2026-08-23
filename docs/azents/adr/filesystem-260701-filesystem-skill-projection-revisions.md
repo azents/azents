@@ -31,17 +31,17 @@ This ADR records how Skill source, projection, refresh, and runtime/session-loop
 
 ## Research notes
 
-### Legacy nointern Skill implementation baseline
+### Legacy azents Skill implementation baseline
 
-The old nointern Skill system was implemented in the builtin shell toolkit and removed by commit `451178990` (`chore(nointern): remove legacy skill 시스템`). The baseline files immediately before removal were:
+The old azents Skill system was implemented in the builtin shell toolkit and removed by commit `451178990` (`chore(azents): remove legacy skill 시스템`). The baseline files immediately before removal were:
 
-- `python/apps/nointern/src/nointern/runtime/tools/load_skill.py`
-- `python/apps/nointern/src/nointern/runtime/tools/shell.py`
-- `python/apps/nointern/src/nointern/runtime/tools/load_skill_test.py`
-- `python/apps/nointern/src/nointern/runtime/tools/skill_prompt_test.py`
-- `docs/nointern/design/shared-storage-and-skills.md`
+- `python/apps/azents/src/azents/runtime/tools/load_skill.py`
+- `python/apps/azents/src/azents/runtime/tools/shell.py`
+- `python/apps/azents/src/azents/runtime/tools/load_skill_test.py`
+- `python/apps/azents/src/azents/runtime/tools/skill_prompt_test.py`
+- `docs/azents/design/shared-storage-and-skills.md`
 
-The first implementation was added by `149e81f1e` (`shared-storage [5/8]: Phase 3 — 스킬 시스템`) and prompt injection was added by `015361a3d` (`feat(nointern): 스킬 목록 시스템 프롬프트 주입 + 사용 유도`). It loaded `SKILL.md` files from convention-based filesystem locations:
+The first implementation was added by `149e81f1e` (`shared-storage [5/8]: Phase 3 — 스킬 시스템`) and prompt injection was added by `015361a3d` (`feat(azents): 스킬 목록 시스템 프롬프트 주입 + 사용 유도`). It loaded `SKILL.md` files from convention-based filesystem locations:
 
 ```text
 /data/user/skills/{name}/SKILL.md
@@ -86,7 +86,7 @@ The main problems were:
 
 ### Prior redesign discussions
 
-The old menufans/nointern redesign discussions explored Workspace-level Skills, Manifest entries, `SkillScanner`, and sandbox filesystem synchronization. Relevant historical threads included:
+The old menufans/azents redesign discussions explored Workspace-level Skills, Manifest entries, `SkillScanner`, and sandbox filesystem synchronization. Relevant historical threads included:
 
 - menufans discussion #3011: SDK Workspace usage, Memory/Skills redesign, EFS removal;
 - menufans discussion #3027: Workspace-level Skill system;
@@ -277,7 +277,7 @@ If Project list changes are allowed while a run is active, their new projection 
 
 Skill prompt/index rendering must be deterministic for a given active projection revision.
 
-Azents should keep the legacy nointern Skill prompt wording as the baseline and adjust only the parts required by current path-based Skill resolution.
+Azents should keep the legacy azents Skill prompt wording as the baseline and adjust only the parts required by current path-based Skill resolution.
 
 Legacy baseline:
 
@@ -422,7 +422,7 @@ Skill discovery is provided by the deterministic `## Skills` prompt index and by
 
 Azents will implement Skill prompt rendering and `load_skill` as a dedicated `SkillToolkit`, not as additional behavior inside the shell/file toolkit.
 
-The legacy nointern implementation put Skill behavior in `BuiltinShellToolkit` because Shared Storage, file tools, memory, and Skills were all part of the same legacy builtin toolkit. In current Azents, Skill has its own lifecycle constraints:
+The legacy azents implementation put Skill behavior in `BuiltinShellToolkit` because Shared Storage, file tools, memory, and Skills were all part of the same legacy builtin toolkit. In current Azents, Skill has its own lifecycle constraints:
 
 - it reads from session-scoped Toolkit State projection, not from live runtime filesystem;
 - it participates in deterministic projection revision adoption at run/compaction boundaries;

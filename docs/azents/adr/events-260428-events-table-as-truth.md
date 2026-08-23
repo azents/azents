@@ -43,15 +43,15 @@ CREATE UNIQUE INDEX uq_events_session_external
 **Type ENUM (15)**:
 
 - SDK origin (`raw_data NOT NULL`): text_item, reasoning_item, function_call_item, function_call_output_item, web_search_call_item, image_generation_item, unknown_item
-- NoIntern formatted (`raw_data NULL`, formatter wraps user role): user_input, system_reminder, compaction
-- NoIntern meta (`raw_data NULL`, hidden from model): turn_complete, compaction_started, subagent_start, subagent_end, error
+- Azents formatted (`raw_data NULL`, formatter wraps user role): user_input, system_reminder, compaction
+- Azents meta (`raw_data NULL`, hidden from model): turn_complete, compaction_started, subagent_start, subagent_end, error
 
 **Cross-cutting decisions**:
 
-- **NointernSession is an EventStore adapter** — `get_items` derives from events, either passing through `raw_data` or using a formatter. `add_items` performs deduplicated INSERTs using `external_id ON CONFLICT DO NOTHING`.
+- **AzentsSession is an EventStore adapter** — `get_items` derives from events, either passing through `raw_data` or using a formatter. `add_items` performs deduplicated INSERTs using `external_id ON CONFLICT DO NOTHING`.
 - **Cross-model normalization belongs to SDK + LiteLLM** — remove the legacy `build_input_items` normalization layer such as `_is_reasoning_compatible` and `normalize_call_id`.
 - **Remove the Turn data model** — delete the `turn_id` column. Derive the current turn from the number of `turn_complete` rows in events plus one.
-- **dedup-by-id** — unify deduplication around SDK item ids (`raw_item.id` or `call_id`) and uuid7 hex ids assigned by the worker to NoIntern rows.
+- **dedup-by-id** — unify deduplication around SDK item ids (`raw_item.id` or `call_id`) and uuid7 hex ids assigned by the worker to Azents rows.
 - **Migration**: discard legacy events data. This is still development-stage data, so data loss is accepted.
 
 ## Considered Options
@@ -68,7 +68,7 @@ Reasons rejected:
 
 ### B. Make events the single store, which is this decision
 
-The `events` table is the truth, and `NointernSession` becomes a thin adapter.
+The `events` table is the truth, and `AzentsSession` becomes a thin adapter.
 
 Reasons accepted:
 
@@ -76,7 +76,7 @@ Reasons accepted:
 - SDK raw round-trip data is preserved through the `raw_data` column.
 - FE `list_messages` can read the `data` snapshot directly, with zero conversion cost at read time.
 - The persistent compaction model from legacy `_compact()` can be reused as-is.
-- `NointernSession` responsibility shrinks to a thin adapter over EventStore.
+- `AzentsSession` responsibility shrinks to a thin adapter over EventStore.
 
 ### C. New unified schema
 
@@ -102,7 +102,7 @@ Reasons rejected:
 
 - Single source of truth removes synchronization responsibility.
 - Domain metadata such as compaction, subagent boundaries, and observation masking becomes first-class in events.
-- `NointernSession` code is greatly reduced as an EventStore adapter.
+- `AzentsSession` code is greatly reduced as an EventStore adapter.
 - FE `list_messages` read cost decreases because it uses the `data` snapshot directly.
 - Reuses the proven legacy compaction model.
 
@@ -119,8 +119,8 @@ Reasons rejected:
 
 ## References
 
-- `docs/nointern/discussion/openai-sdk-events-redesign.md` — detailed design for this decision
-- `docs/nointern/discussion/18-pr-inventory.md` — inventory of the discarded stack, classified as PORT/ADAPT/DROP/REVIEW
+- `docs/azents/discussion/openai-sdk-events-redesign.md` — detailed design for this decision
+- `docs/azents/discussion/18-pr-inventory.md` — inventory of the discarded stack, classified as PORT/ADAPT/DROP/REVIEW
 - Discarded PRs: #3050, #3057-3098
 
 ## SDK Verification Quotes

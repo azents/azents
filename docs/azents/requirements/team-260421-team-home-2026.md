@@ -24,7 +24,7 @@ migration_source: "docs/azents/design/agent-team-home-2026-04-21.md"
 
 `home-as-agent-list` simply replaced Home with `AgentList` (cards + SegmentedControl), but the design team proposed a follow-up Home that emphasizes the **team view** nature of "Our Team Agents." Sidebar also exposes only **pinned + recent** instead of all agents, and Home takes the role of full directory.
 
-Design handle: `api.anthropic.com/v1/design/h/M1P3PGa_LxPQZVVCJmKvPg` — `NoIntern+Agent-Centric+Nav.html`. File structure:
+Design handle: `api.anthropic.com/v1/design/h/M1P3PGa_LxPQZVVCJmKvPg` — `Azents+Agent-Centric+Nav.html`. File structure:
 
 - `home.jsx` — TeamStatRow / AgentCard / SubagentRow / HomePage
 - `sidebar.jsx` — Sidebar (pinned + recent + "View all")

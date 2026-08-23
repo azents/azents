@@ -24,14 +24,14 @@ End-to-end implementation design for Slack BYOA (Bring Your Own App). Scaffoldin
 4. BYOA-only operation impossible without Platform App.
 
 **User scenario:**
-1. Agent owner directly creates Slack App (using manifest provided by nointern).
-2. Register Bot Token, Signing Secret, App ID in nointern.
-3. Configure Event URL provided by nointern in Slack App.
+1. Agent owner directly creates Slack App (using manifest provided by azents).
+2. Register Bot Token, Signing Secret, App ID in azents.
+3. Configure Event URL provided by azents in Slack App.
 4. Conversation with agent is possible in Slack.
 
 ## Discussion Points and Decisions
 
-Details: [`docs/nointern/adr/slack-260414-slack-byoa.md`](../adr/slack-260414-slack-byoa.md)
+Details: [`docs/azents/adr/slack-260414-slack-byoa.md`](../adr/slack-260414-slack-byoa.md)
 
 | # | Point | Decision | Core rationale |
 |---|--------|------|-----------|
@@ -51,7 +51,7 @@ Details: [`docs/nointern/adr/slack-260414-slack-byoa.md`](../adr/slack-260414-sl
 sequenceDiagram
     participant U as Slack User
     participant S as Slack API
-    participant N as nointern API
+    participant N as azents API
     participant B as Bolt App
     participant R as Redis Broker
     participant W as EngineWorker
@@ -188,7 +188,7 @@ async def _on_message(body, event):
     ...
 ```
 
-Apply same pattern to every handler (_on_message, _on_nointern_command, _on_agent_select, etc.).
+Apply same pattern to every handler (_on_message, _on_azents_command, _on_agent_select, etc.).
 
 ## Data Model
 

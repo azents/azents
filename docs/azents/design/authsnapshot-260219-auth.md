@@ -1,5 +1,5 @@
 ---
-title: "nointern-web Authentication System"
+title: "azents-web Authentication System"
 created: 2026-02-19
 updated: 2026-02-19
 implemented: 2026-02-19
@@ -11,16 +11,16 @@ historical_reconstruction: true
 tags: [documentation, historical-reconstruction]
 ---
 
-# nointern-web Authentication System
+# azents-web Authentication System
 
 ## Architecture Overview
 
-Next.js web serves as **BFF (Backend For Frontend)**. It safely manages tokens between browser and nointern API.
+Next.js web serves as **BFF (Backend For Frontend)**. It safely manages tokens between browser and azents API.
 
 ```mermaid
 flowchart LR
     Browser -->|tRPC<br/>cookie sent| NextJS[Next.js Server]
-    NextJS -->|@azents/public-client<br/>Bearer token| API[nointern API]
+    NextJS -->|@azents/public-client<br/>Bearer token| API[azents API]
 ```
 
 **Core principles**:
@@ -31,7 +31,7 @@ flowchart LR
 
 ### Differences from azents(web)
 
-| Item | azents (web) | nointern-web |
+| Item | azents (web) | azents-web |
 |------|----------------|-------------|
 | Token encryption | AES-256-GCM (COOKIE_SECRET required) | none (httpOnly is sufficient) |
 | Auth method | Google/Apple OAuth + email | email verification code only |
@@ -130,12 +130,12 @@ flowchart TD
     B --> C{Access Token state?}
     C -->|valid + more than 5 minutes left| D[Use existing token]
     C -->|near expiry or absent| E{Refresh Token exists?}
-    E -->|Yes| F[nointern API /refresh]
+    E -->|Yes| F[azents API /refresh]
     F --> G[Set new token cookies]
     G --> D
     E -->|No| H[return null — unauthenticated]
     D --> I[Set Authorization header]
-    I --> J[Call nointern API]
+    I --> J[Call azents API]
 ```
 
 ### Infinite Loop Prevention (Dual-client Pattern)
@@ -163,7 +163,7 @@ sequenceDiagram
     participant B as Browser
     participant T as tRPC Handler
     participant I as Request Interceptor
-    participant A as nointern API
+    participant A as azents API
 
     B->>T: HTTP request
     T->>T: createContext(resHeaders)
@@ -221,9 +221,9 @@ export default async function Page() {
 ```mermaid
 sequenceDiagram
     participant User as User
-    participant Web as nointern-web
+    participant Web as azents-web
     participant tRPC as tRPC Server
-    participant API as nointern API
+    participant API as azents API
     participant DB as PostgreSQL
 
     User->>Web: access /login
@@ -252,7 +252,7 @@ sequenceDiagram
 sequenceDiagram
     participant Browser as Browser
     participant tRPC as tRPC Server
-    participant API as nointern API
+    participant API as azents API
 
     Browser->>tRPC: auth.logout()
     tRPC->>API: POST /auth/v1/logout (Bearer token)
@@ -335,10 +335,10 @@ flowchart TD
 
 ### Security Level Comparison with azents(web)
 
-| Item | azents | nointern-web | Note |
+| Item | azents | azents-web | Note |
 |------|----------|-------------|------|
-| Cookie encryption | AES-256-GCM | none | nointern accepts token exposure risk as httpOnly is enough |
-| Refresh Token rotation | grace period method | replaced on every refresh | nointern follows server settings |
+| Cookie encryption | AES-256-GCM | none | azents accepts token exposure risk as httpOnly is enough |
+| Refresh Token rotation | grace period method | replaced on every refresh | azents follows server settings |
 | COOKIE_SECRET | required | unnecessary | lower operational burden |
 
 ## Backend API
@@ -417,7 +417,7 @@ client.interceptors.request.use(async (request) => {
 
 | Variable | Required | Description |
 |------|------|------|
-| `PUBLIC_API_URL` | O | nointern API server URL (default: `http://localhost:8010`) |
+| `PUBLIC_API_URL` | O | azents API server URL (default: `http://localhost:8010`) |
 | `NODE_ENV` | O | `development` / `production` / `test` |
 
 > Unlike azents(web), `COOKIE_SECRET` is unnecessary (no encryption used).

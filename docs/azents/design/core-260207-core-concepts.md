@@ -1,5 +1,5 @@
 ---
-title: "nointern Core Concepts"
+title: "azents Core Concepts"
 tags: [backend, architecture, historical-reconstruction]
 created: 2026-02-07
 updated: 2026-03-06
@@ -11,13 +11,13 @@ migration_source: "docs/azents/design/core-concepts.md"
 historical_reconstruction: true
 ---
 
-# nointern Core Concepts
+# azents Core Concepts
 
-This document defines nointern's core domain model and product architecture.
+This document defines azents's core domain model and product architecture.
 
 ## Overview
 
-nointern is an **Agent Builder SaaS** where users can **create AI agents only with a system prompt and tool set** and use them together as a team in messaging platforms such as Slack.
+azents is an **Agent Builder SaaS** where users can **create AI agents only with a system prompt and tool set** and use them together as a team in messaging platforms such as Slack.
 
 ### What users do
 
@@ -174,14 +174,14 @@ Top-level container for **company/organization**.
 
 | Item | Description |
 |------|------|
-| Definition | one organization using nointern |
+| Definition | one organization using azents |
 | Channel connections | 1:N (one Workspace can have multiple Slack/Discord connections) |
-| Reverse constraint | one channel connection (Slack Workspace, Discord Server, etc.) can connect to only one nointern Workspace |
+| Reverse constraint | one channel connection (Slack Workspace, Discord Server, etc.) can connect to only one azents Workspace |
 
 ### Example
 
 ```
-Acme Corp (nointern Workspace)
+Acme Corp (azents Workspace)
 ├── Slack
 │   ├── acme-hq.slack.com (HQ)
 │   ├── acme-japan.slack.com (Japan branch)
@@ -190,7 +190,7 @@ Acme Corp (nointern Workspace)
 │   └── Acme Community Server
 ├── KakaoTalk (future)
 └── Web
-    └── app.nointern.ai/acme
+    └── app.azents.ai/acme
 ```
 
 ### Attributes
@@ -511,7 +511,7 @@ graph TB
     end
 
     subgraph "Web"
-        WC[WebConnection<br/>app.nointern.ai]
+        WC[WebConnection<br/>app.azents.ai]
         WC --> WS1["Session 1 (Geonwoo) — ended"]
         WC --> WS2["Session 2 (Geonwoo) — ended"]
         WC --> WS3["Session 3 (Geonwoo) — active"]
@@ -937,7 +937,7 @@ class ChannelGateway(Protocol):
         ...
 
     async def resolve_workspace(self, event: Any) -> Workspace:
-        """Find and return nointern Workspace from event"""
+        """Find and return azents Workspace from event"""
         ...
 
     async def fetch_channel_context(self, external_channel_id: str, limit: int) -> list[ChannelMessage]:
@@ -1019,7 +1019,7 @@ This is the core security principle of the product.
 
 ### Architecture comparison
 
-| Item | Existing approach (skill-only) | nointern (platform-mediated) |
+| Item | Existing approach (skill-only) | azents (platform-mediated) |
 |------|----------------------|--------------------------|
 | Credential access | agent accesses directly | only platform accesses; agent cannot access |
 | Prompt Injection risk | credentials can leak | no credentials in context to leak |
@@ -1136,4 +1136,4 @@ graph TB
 
 ## Summary
 
-nointern's core model is intentionally simple at user-facing layer: **system prompt + tools = agent**. Internally, the system uses session-scoped context, platform-mediated credential isolation, channel gateway abstraction, memory tiers, and MCP-based tool execution to support team-safe agent usage without exposing credentials or requiring users to write workflows.
+azents's core model is intentionally simple at user-facing layer: **system prompt + tools = agent**. Internally, the system uses session-scoped context, platform-mediated credential isolation, channel gateway abstraction, memory tiers, and MCP-based tool execution to support team-safe agent usage without exposing credentials or requiring users to write workflows.

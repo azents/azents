@@ -23,9 +23,9 @@ Design document for blocker discovered during Stage 3 (#2401, `llm-tool-executio
 
 ### Problem
 
-`DockerAgentHomeClient` in `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_docker.py` creates only **single container** `agent-home-{agent_id}` per agent. However, `.exec` / `.write_file` / `.read_file` call `SandboxDaemonClient` at `http://{container_ip}:8081`, and this port is supposed to be listened by `nointern-sandbox-daemon`.
+`DockerAgentHomeClient` in `python/apps/azents/src/azents/runtime/sandbox/agent_home_docker.py` creates only **single container** `agent-home-{agent_id}` per agent. However, `.exec` / `.write_file` / `.read_file` call `SandboxDaemonClient` at `http://{container_ip}:8081`, and this port is supposed to be listened by `azents-sandbox-daemon`.
 
-Actual `supervisord.conf` in `docker/nointern/agent-runtime` image runs only `[program:mcp-proxy]` and there is no sandbox-daemon. Comment in `entrypoint.sh:5` says "sandbox-daemon: always start", but actual program does not exist; this is comment rot.
+Actual `supervisord.conf` in `docker/azents/agent-runtime` image runs only `[program:mcp-proxy]` and there is no sandbox-daemon. Comment in `entrypoint.sh:5` says "sandbox-daemon: always start", but actual program does not exist; this is comment rot.
 
 Result: in local docker backend, `exec` / `write_file` / `read_file` all do not work. Stage 3 testenv `live/sandbox.py` depends on this path, so Stage 3 Phase 2+ is blocked.
 
@@ -38,7 +38,7 @@ RuntimeError: Sandbox daemon exec failed: All connection attempts failed
 ### Current State Investigation
 
 - `DockerAgentHomeClient` has been unmaintained for 1 year. No unit/integration tests.
-- prod deployment in `infra/argocd/nointern-sandbox/` uses K8s backend — docker backend is local dev only.
+- prod deployment in `infra/argocd/azents-sandbox/` uses K8s backend — docker backend is local dev only.
 - `agent_home_factory.py` selects `DockerAgentHomeClient` only when `sandbox_config.backend == "docker"`. The only current user of this path is this Stage 3 testenv.
 
 **Verdict**: Since there are no users depending on current broken behavior, safe to change.
@@ -85,7 +85,7 @@ graph TB
     Daemon[sandbox-daemon-{id}<br/>sandbox-daemon<br/>network_mode: container:agent-home-{id}]
     McpProxy[mcp-proxy-{id}<br/>mcp-proxy<br/>optional, same pattern]
   end
-  HostFS[(Host bind mounts<br/>/tmp/nointern-testenv/<br/>agent-data/agents/{id}/)]
+  HostFS[(Host bind mounts<br/>/tmp/azents-testenv/<br/>agent-data/agents/{id}/)]
   DockerSock[/var/run/docker.sock]
   Worker[testenv / engine]
 
@@ -131,7 +131,7 @@ K8s features that Docker backend **does not reproduce**. These are docker-specif
 | # | K8s feature | Docker reproduction? | Description |
 |---|---|---|---|
 | 1 | `runtimeClassName: sandbox` (gVisor/kata) | ❌ give up | docker has no runtimeClass concept. If similar isolation is needed, manually specify `--runtime=runsc` (when gVisor installed), not provided by default |
-| 2 | custom `seccompProfile` | ⚠️ partial | supports `--security-opt seccomp=profile.json`. Current `agent_home_docker.py` uses `seccomp=unconfined`. Prod profile can be ported to `testenv/nointern/fixtures/` if needed, but excluded from initial implementation |
+| 2 | custom `seccompProfile` | ⚠️ partial | supports `--security-opt seccomp=profile.json`. Current `agent_home_docker.py` uses `seccomp=unconfined`. Prod profile can be ported to `testenv/azents/fixtures/` if needed, but excluded from initial implementation |
 | 3 | `NetworkPolicy` (CNI layer egress/ingress) | ❌ give up | k8s NetworkPolicy is implemented by CNI. docker approximates with bridge + manual iptables rules or mitmproxy-based domain filtering (`ENABLE_PROXY` env). Current code already uses proxy method, so domain filtering is reproduced |
 | 4 | `ServiceAccount` `pods/exec` RBAC | ❌ give up | docker has no SA concept. daemon execs through `docker.sock` → permission boundary is **docker daemon permission (root-equivalent)** and excessive. Security boundary mismatch — accepted for local dev premise |
 | 5 | Pod lifecycle (restartPolicy, probes) | ⚠️ approximate | can approximate with docker `HostConfig.RestartPolicy` + `Healthcheck`. Initial implementation does not restart `always` |
@@ -145,9 +145,9 @@ K8s features that Docker backend **does not reproduce**. These are docker-specif
 
 ## Implementation Design
 
-### 1. `nointern-sandbox-daemon` — add `DockerExecBackend`
+### 1. `azents-sandbox-daemon` — add `DockerExecBackend`
 
-**Files**: `python/apps/nointern-sandbox-daemon/src/nointern_sandbox_daemon/`
+**Files**: `python/apps/azents-sandbox-daemon/src/azents_sandbox_daemon/`
 - `executor.py` (modify) — add new `DockerExecBackend` class alongside existing `KubeExecBackend`
 - `config.py` (modify) — add `executor: Literal["kube", "docker"] = "kube"`, `target_container_name: str | None` env var
 - `__main__.py` (modify) — select backend by config
@@ -193,7 +193,7 @@ class DockerExecBackend(ExecBackend):
 
 ### 2. `agent_home_docker.py` — Sidecar refactor
 
-**File**: `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_docker.py`
+**File**: `python/apps/azents/src/azents/runtime/sandbox/agent_home_docker.py`
 
 **Main changes**:
 1. Add `sandbox_daemon_image: str` field to `__init__` (no default, injected by factory)
@@ -244,9 +244,9 @@ class DockerExecBackend(ExecBackend):
         "CpuQuota": 25_000,
     },
     "Labels": {
-        "managed-by": "nointern",
-        "nointern/agent-id": agent_id,
-        "nointern/role": "sandbox-daemon",
+        "managed-by": "azents",
+        "azents/agent-id": agent_id,
+        "azents/role": "sandbox-daemon",
     },
 }
 ```
@@ -263,25 +263,25 @@ case "docker":
     )
 ```
 
-Add `docker_sandbox_daemon_image: str` field to `AgentHomeConfig` or equivalent config. Default value is `"nointern-sandbox-daemon:testenv"`.
+Add `docker_sandbox_daemon_image: str` field to `AgentHomeConfig` or equivalent config. Default value is `"azents-sandbox-daemon:testenv"`.
 
-### 4. `docker/nointern/sandbox-daemon/Dockerfile` — add docker client
+### 4. `docker/azents/sandbox-daemon/Dockerfile` — add docker client
 
-Currently installs only `nointern-sandbox-daemon` package. Add `aiodocker` dependency (not new dependency because nointern main already uses it).
+Currently installs only `azents-sandbox-daemon` package. Add `aiodocker` dependency (not new dependency because azents main already uses it).
 
-### 5. `docker/nointern/agent-runtime/entrypoint.sh` — fix Comment rot
+### 5. `docker/azents/agent-runtime/entrypoint.sh` — fix Comment rot
 
 Remove comment in `entrypoint.sh:5` saying "sandbox-daemon: always start" and replace with "sandbox-daemon is separated into sidecar container".
 
 ### 6. Unit tests
 
-**File**: `python/apps/nointern-sandbox-daemon/src/nointern_sandbox_daemon/executor_test.py` (new)
+**File**: `python/apps/azents-sandbox-daemon/src/azents_sandbox_daemon/executor_test.py` (new)
 - pytest for `DockerExecBackend` — mock `aiodocker`
 - verify exit_code / stdout / stderr collection
 - timeout path
 - container not found error path
 
-**File**: `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_docker_test.py` (new)
+**File**: `python/apps/azents/src/azents/runtime/sandbox/agent_home_docker_test.py` (new)
 - verify sidecar lifecycle of `DockerAgentHomeClient` with fake docker client
 - verify order `_ensure_main_container` → `_ensure_daemon_sidecar`
 - verify reverse cleanup order in `delete_agent`
@@ -289,7 +289,7 @@ Remove comment in `entrypoint.sh:5` saying "sandbox-daemon: always start" and re
 
 ### 7. Live smoke (through testenv)
 
-Stage 3 Phase 2 `testenv/nointern/live/sandbox.py` serves as practical integration test. In Phase 4 PR of this design, run direct smoke through testenv:
+Stage 3 Phase 2 `testenv/azents/live/sandbox.py` serves as practical integration test. In Phase 4 PR of this design, run direct smoke through testenv:
 
 ```python
 sb = client.sandbox
@@ -405,7 +405,7 @@ Embed mini agent in main container and daemon calls it with gRPC.
 
 - Discussion: [#2410](https://github.com/azents/azents/discussions/2410) — 5 discussion points + decisions
 - Stage 3: [#2401](https://github.com/azents/azents/issues/2401), design PR #2407
-- K8s sidecar structure: `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_k8s.py:258-377`
-- Current problem code: `python/apps/nointern/src/nointern/runtime/sandbox/agent_home_docker.py`
-- Sandbox daemon: `python/apps/nointern-sandbox-daemon/src/nointern_sandbox_daemon/executor.py`
-- Comment rot: `docker/nointern/agent-runtime/entrypoint.sh:5`
+- K8s sidecar structure: `python/apps/azents/src/azents/runtime/sandbox/agent_home_k8s.py:258-377`
+- Current problem code: `python/apps/azents/src/azents/runtime/sandbox/agent_home_docker.py`
+- Sandbox daemon: `python/apps/azents-sandbox-daemon/src/azents_sandbox_daemon/executor.py`
+- Comment rot: `docker/azents/agent-runtime/entrypoint.sh:5`

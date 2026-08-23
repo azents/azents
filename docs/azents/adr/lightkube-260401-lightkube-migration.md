@@ -15,13 +15,13 @@ migration_source: "docs/azents/adr/0016-lightkube-migration.md"
 
 ## Background
 
-Type bugs have repeatedly appeared in the kubernetes_asyncio library (#2198, NOINTERN-SEVER-3N, NOINTERN-SEVER-1W, NOINTERN-SEVER-3F). The root cause is insufficient type safety in the library. We will solve this by migrating to lightkube.
+Type bugs have repeatedly appeared in the kubernetes_asyncio library (#2198, AZENTS-SEVER-3N, AZENTS-SEVER-1W, AZENTS-SEVER-3F). The root cause is insufficient type safety in the library. We will solve this by migrating to lightkube.
 
 ## Discussion Points and Decisions
 
 ### 1. Migration Scope
 
-**Background:** nointern uses kubernetes_asyncio in two places:
+**Background:** azents uses kubernetes_asyncio in two places:
 
 - `engine/tools/kubernetes.py` — Toolkit tools: list, get, logs, events, apply, delete, exec, api-resources
 - `runtime/sandbox/agent_home_k8s.py` — Agent Home Pod management, using 20+ models such as V1Pod and V1Container
@@ -141,7 +141,7 @@ B) **Inject auth through custom httpx Transport**
 - Replace `dyn.resources.get(api_version, kind)` with `create_namespaced_resource(group, version, kind, plural)` or `create_global_resource()`.
 - Problem: lightkube needs the plural name. Cache it from discovery API or keep a kind → plural mapping.
 - list/get/delete: `client.list(ResourceClass, namespace=...)`, `client.get(ResourceClass, name, namespace=...)`.
-- server_side_apply: `client.apply(obj, field_manager="nointern-toolkit")`.
+- server_side_apply: `client.apply(obj, field_manager="azents-toolkit")`.
 
 ## Alternatives Reviewed
 

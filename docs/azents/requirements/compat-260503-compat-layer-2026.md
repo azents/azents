@@ -22,9 +22,9 @@ migration_source: "docs/azents/design/provider-compat-layer-2026-05-03.md"
 
 ## Problem
 
-NoIntern runtime reuses same conversation history across multiple providers/models. However, each provider has different constraints for request payload, tool call id, reasoning item, media part, schema, and reasoning option. OpenAI Agents SDK provides Responses request shape and tool conversion, but handles little history compatibility across providers/models.
+Azents runtime reuses same conversation history across multiple providers/models. However, each provider has different constraints for request payload, tool call id, reasoning item, media part, schema, and reasoning option. OpenAI Agents SDK provides Responses request shape and tool conversion, but handles little history compatibility across providers/models.
 
-This design introduces OpenCode-level provider/model compatibility handling into NoIntern runtime. Core principles are twofold.
+This design introduces OpenCode-level provider/model compatibility handling into Azents runtime. Core principles are twofold.
 
 1. Canonical event history in DB is not contaminated with provider-specific workarounds.
 2. provider/model constraints are applied deterministically only to request payload immediately before LLM call.

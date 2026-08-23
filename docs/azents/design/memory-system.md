@@ -1,5 +1,5 @@
 ---
-title: "nointern Memory Design"
+title: "azents Memory Design"
 tags: [architecture, engine]
 created: 2026-03-22
 updated: 2026-04-26
@@ -9,7 +9,7 @@ document_type: supporting-secondary-design
 migration_source: "docs/azents/design/memory-system.md"
 ---
 
-# nointern Memory Design
+# azents Memory Design
 
 Provides a feature for agent to accumulate **domain expertise** beyond conversation.
 
@@ -22,7 +22,7 @@ When model judges during conversation that "this is important in future," it sto
 Design's **scope structure (agent/user)**, **file format (YAML frontmatter + Markdown)**, **MEMORIES.md index**, and **prompt injection rules** are implemented. However, items below differ from original design:
 
 - **URI scheme**: `/data/agent/memories/...` → adopted as **absolute paths** `/data/agent/memories/...`, `/data/user/{user_id}/memories/...`. `shared:///` notation in document body is not used in current prompts/code.
-- **Storage medium**: "S3 (RustFS)" → **EFS + sandbox-daemon File-API facade**. In K8s, PVC `agent-home-efs` subPath `agents/{agent_id}/data` is mounted at `/data` (`python/apps/nointern/src/nointern/runtime/sandbox/agent_home_k8s.py:463-474`). In Docker, host bind (`agent_home_docker.py:89`). Main container and sandbox-daemon container share same mount, and daemon serves same path as HTTP File-API.
+- **Storage medium**: "S3 (RustFS)" → **EFS + sandbox-daemon File-API facade**. In K8s, PVC `agent-home-efs` subPath `agents/{agent_id}/data` is mounted at `/data` (`python/apps/azents/src/azents/runtime/sandbox/agent_home_k8s.py:463-474`). In Docker, host bind (`agent_home_docker.py:89`). Main container and sandbox-daemon container share same mount, and daemon serves same path as HTTP File-API.
 - **FileApiClient**: `services/file_api_client.py`. Only `agent_id` is required parameter. Design-time resolve arguments such as `workspace_id / session_id / SharedScope` enum were not adopted.
 - **`collect_memory_prompt()` signature**: Unlike example in "Implementation Details" section below, actual implementation receives only three arguments `(ss, agent_id, user_id)` and directly queries absolute path strings with `ss.get(abs_path, agent_id=...)` (`engine/tools/shell.py:255-326`).
 - **DB model**: no memory-specific table. Only `RDBAgent.memory_enabled` flag exists.
@@ -39,7 +39,7 @@ Design intent in body (memory center of gravity, scope selection criteria, file 
 
 ## Difference from CC
 
-| Item | Claude Code | nointern |
+| Item | Claude Code | azents |
 |------|------------|---------|
 | **Storage** | local filesystem | EFS mount (`/data/agent`, `/data/user/{user_id}`) + sandbox-daemon File-API facade |
 | **User** | one user per project | N users per agent |
@@ -50,10 +50,10 @@ Design intent in body (memory center of gravity, scope selection criteria, file 
 
 ```
 CC:       user memory ████████████  |  project memory ████
-nointern: agent memory ████████████████  |  user memory ████
+azents: agent memory ████████████████  |  user memory ████
 ```
 
-nointern agent **receives one role and performs long-term mission**.
+azents agent **receives one role and performs long-term mission**.
 
 **Agent memory = role expertise (heavyweight)**
 

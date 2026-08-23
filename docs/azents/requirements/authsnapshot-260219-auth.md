@@ -1,5 +1,5 @@
 ---
-title: "nointern-web Authentication System Historical Requirements Reconstruction"
+title: "azents-web Authentication System Historical Requirements Reconstruction"
 created: 2026-02-19
 implemented: 2026-02-19
 tags: [documentation, historical-reconstruction, migration]
@@ -10,7 +10,7 @@ historical_reconstruction: true
 migration_source: "docs/azents/design/auth.md"
 ---
 
-# nointern-web Authentication System Historical Requirements Reconstruction
+# azents-web Authentication System Historical Requirements Reconstruction
 
 > This is a provenance-marked historical reconstruction, not newly approved product intent.
 > It contains only statements recoverable from the source document. Unknown intent remains explicitly unknown.
@@ -22,12 +22,12 @@ migration_source: "docs/azents/design/auth.md"
 
 ## Problem
 
-Next.js web serves as **BFF (Backend For Frontend)**. It safely manages tokens between browser and nointern API.
+Next.js web serves as **BFF (Backend For Frontend)**. It safely manages tokens between browser and azents API.
 
 ```mermaid
 flowchart LR
     Browser -->|tRPC<br/>cookie sent| NextJS[Next.js Server]
-    NextJS -->|@azents/public-client<br/>Bearer token| API[nointern API]
+    NextJS -->|@azents/public-client<br/>Bearer token| API[azents API]
 ```
 
 **Core principles**:

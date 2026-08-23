@@ -22,7 +22,7 @@ migration_source: "docs/azents/adr/0001-per-session-sandbox.md"
 
 ## Problem
 
-The current nointern sandbox uses a **per-agent** model: one `RDBAgent` maps to one persistent container shared by multiple sessions. This design was chosen for the product value of "the whole team talks to one agent," and lifecycle, hibernation, and snapshot infrastructure was built across Phases 1-3 (`docs/nointern/design/agent-home.md`, `phase3-snapshot-hibernation.md`).
+The current azents sandbox uses a **per-agent** model: one `RDBAgent` maps to one persistent container shared by multiple sessions. This design was chosen for the product value of "the whole team talks to one agent," and lifecycle, hibernation, and snapshot infrastructure was built across Phases 1-3 (`docs/azents/design/agent-home.md`, `phase3-snapshot-hibernation.md`).
 
 However, the following problems became clear:
 

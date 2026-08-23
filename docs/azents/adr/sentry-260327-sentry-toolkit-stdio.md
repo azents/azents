@@ -28,7 +28,7 @@ The following sections are copied only from explicit source Design text. No addi
 sequenceDiagram
     participant Admin as Admin
     participant Agent as Agent
-    participant NI as nointern server
+    participant NI as azents server
     participant Proxy as mcp-proxy sidecar
     participant MCP as @sentry/mcp-server (stdio)
 

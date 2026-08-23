@@ -873,7 +873,7 @@ Phase 5 and 6 are coupled — delta pass-through and WS protocol must change tog
 
 #### Frontend
 
-**`typescript/apps/nointern-web/`**:
+**`typescript/apps/azents-web/`**:
 - `features/chat/types.ts`:
   - discard `ChatMessageEvent`
   - new types such as `ContentDeltaEvent`, `TextItemEvent`, `FunctionCallItemEvent`
@@ -953,4 +953,4 @@ All Phases 1~6 were merged on 2026-03-18.
 
 - No meaningful drift from the body — `FunctionCallItem` in `engine/types.py` is implemented as single `tool_call` + `output: FunctionCallOutput | None`, and `WebSearchCallItem` / `GeneratedImage` / `Error` all exist as specified.
 - Only the three functions `durable()` / `update()` / `ephemeral()` exist in `engine/emit.py` (`internal()` removal confirmed).
-- Follow-up correction commit: immediately after Phase 5, `fix(nointern): reload history from DB each turn to prevent infinite tool loop` (`17473f084`) temporarily restored DB reload after an infinite tool loop regression caused by introducing in-memory history. This is a compromise point with the design principle of "keep in-memory, reload only on compaction".
+- Follow-up correction commit: immediately after Phase 5, `fix(azents): reload history from DB each turn to prevent infinite tool loop` (`17473f084`) temporarily restored DB reload after an infinite tool loop regression caused by introducing in-memory history. This is a compromise point with the design principle of "keep in-memory, reload only on compaction".

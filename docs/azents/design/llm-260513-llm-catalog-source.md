@@ -382,9 +382,9 @@ Normal runtime does not auto-run sync at startup. Use opt-in flags only when fix
 
 | Setting | Env var | Default | Meaning |
 | --- | --- | --- | --- |
-| `llm_catalog_sync_enabled` | `NI_LLM_CATALOG_SYNC_ENABLED` | `false` | whether catalog sync feature is available |
-| `llm_catalog_startup_sync_enabled` | `NI_LLM_CATALOG_STARTUP_SYNC_ENABLED` | `false` | whether fixture sync runs during app startup |
-| `llm_catalog_source_mode` | `NI_LLM_CATALOG_SOURCE_MODE` | `fixture` | startup sync allowed only in `fixture` mode |
+| `llm_catalog_sync_enabled` | `AZ_LLM_CATALOG_SYNC_ENABLED` | `false` | whether catalog sync feature is available |
+| `llm_catalog_startup_sync_enabled` | `AZ_LLM_CATALOG_STARTUP_SYNC_ENABLED` | `false` | whether fixture sync runs during app startup |
+| `llm_catalog_source_mode` | `AZ_LLM_CATALOG_SOURCE_MODE` | `fixture` | startup sync allowed only in `fixture` mode |
 
 FastAPI lifespan calls `_run_startup_llm_catalog_sync()` only when `startup_sync_enabled=true`. Helper must include safeguards:
 
@@ -532,9 +532,9 @@ Azents product behavior verification is E2E-primary. testenv QA is fallback/diag
 
 - Deterministic E2E does not call network live catalog. It materializes `models_dev_fixture` primary source and `openai_official`, `anthropic_official`, `google_official` supplement sources through package fixture adapter.
 - E2E server runs startup sync only with explicit opt-in:
-  - `NI_LLM_CATALOG_SYNC_ENABLED=true`
-  - `NI_LLM_CATALOG_STARTUP_SYNC_ENABLED=true`
-  - `NI_LLM_CATALOG_SOURCE_MODE=fixture`
+  - `AZ_LLM_CATALOG_SYNC_ENABLED=true`
+  - `AZ_LLM_CATALOG_STARTUP_SYNC_ENABLED=true`
+  - `AZ_LLM_CATALOG_SOURCE_MODE=fixture`
 - Startup sync fail-fast if mode is not fixture. If readiness passes, catalog fixture materialization should also be considered successful.
 - Agent/Toolkit E2E fixture does not create model through Admin write API. It references `openai/gpt-5.5` provider model materialized by startup sync.
 - Admin model lifecycle E2E verifies read-only synced catalog visibility, not create/update/delete.
@@ -574,7 +574,7 @@ If Admin model CRUD is removed, E2E can no longer depend on manual Admin seed. C
 
 #### How to check
 
-Run deterministic E2E from `testenv/azents/e2e`. Server env uses `NI_LLM_CATALOG_SYNC_ENABLED=true`, `NI_LLM_CATALOG_STARTUP_SYNC_ENABLED=true`, `NI_LLM_CATALOG_SOURCE_MODE=fixture`. If needed, confirm `openai-gpt-5-5` / `openai:gpt-5.5` mapping through admin read-only catalog API.
+Run deterministic E2E from `testenv/azents/e2e`. Server env uses `AZ_LLM_CATALOG_SYNC_ENABLED=true`, `AZ_LLM_CATALOG_STARTUP_SYNC_ENABLED=true`, `AZ_LLM_CATALOG_SOURCE_MODE=fixture`. If needed, confirm `openai-gpt-5-5` / `openai:gpt-5.5` mapping through admin read-only catalog API.
 
 #### Expected result
 

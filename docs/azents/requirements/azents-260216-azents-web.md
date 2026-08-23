@@ -1,22 +1,22 @@
 ---
-title: "nointern-web System Historical Requirements Reconstruction"
+title: "azents-web System Historical Requirements Reconstruction"
 created: 2026-02-16
 implemented: 2026-02-16
 tags: [documentation, historical-reconstruction, migration]
 document_role: primary
 document_type: requirements
-snapshot_id: nointern-260216
+snapshot_id: azents-260216
 historical_reconstruction: true
 migration_source: "docs/azents/design/design-system.md"
 ---
 
-# nointern-web System Historical Requirements Reconstruction
+# azents-web System Historical Requirements Reconstruction
 
 > This is a provenance-marked historical reconstruction, not newly approved product intent.
 > It contains only statements recoverable from the source document. Unknown intent remains explicitly unknown.
 
-- Snapshot: `nointern-260216`
-- Source: `docs/azents/design/nointern-260216-nointern-web.md`
+- Snapshot: `azents-260216`
+- Source: `docs/azents/design/azents-260216-azents-web.md`
 - Historical source date basis: `2026-02-16`
 - Requester confirmation of the historical reconstruction: not recorded; confirmation is required before treating this as approved intent.
 

@@ -28,7 +28,7 @@ Assumptions of parent design are below.
 
 - `1 Agent = 1 raw session`
 - External platforms such as Slack/Discord/GitHub/Jira already provide their own thread/channel/ticket/issue as work unit.
-- NoIntern does not create separate `ConversationSession` per external context; it appends external event to agent raw session event stream.
+- Azents does not create separate `ConversationSession` per external context; it appends external event to agent raw session event stream.
 - External response is not automatic reply routing. Agent explicitly specifies output tool target and executes it.
 
 ## Primary Actor
@@ -54,7 +54,7 @@ Unknown — the historical source does not state this explicitly.
 ## Non-goals
 
 - Existing `slack_sessions` / `discord_sessions` data backfill.
-- Migration preserving existing thread history as NoIntern session history.
+- Migration preserving existing thread history as Azents session history.
 - Completion of Personal agent DM-only/private access policy.
 - Merging Scheduler itself into `ExternalWatch` table.
 - Full removal of `ConversationSession` runtime ownership. This is scope of #3331/#3338.

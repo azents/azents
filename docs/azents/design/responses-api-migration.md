@@ -13,7 +13,7 @@ migration_source: "docs/azents/design/responses-api-migration.md"
 
 ## Background
 
-Current nointern runtime uses litellm Chat Completions API (`acompletion`). This API cannot do the following:
+Current azents runtime uses litellm Chat Completions API (`acompletion`). This API cannot do the following:
 
 - **OpenAI image generation**: `modalities=["text", "image"]` is Gemini-only. OpenAI supports only Responses API `tools=[{"type": "image_generation"}]`.
 - **Preserve reasoning tokens**: Chat Completions API does not include reasoning tokens in response, so reasoning context is lost in next turn.

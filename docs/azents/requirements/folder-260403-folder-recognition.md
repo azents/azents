@@ -28,7 +28,7 @@ However, Discussion #2246 decided:
 
 - **Privacy purpose of file isolation is discarded**: bwrap per-user mount prevents "B explicitly asking agent for A's file," but cannot prevent A's memory from being exposed in A session response in public channel.
 - **Privacy boundary = bot access control**: assume user memory sharing among people who can access bot (→ #2242)
-- **Keep user memory path**: `agents/{agent_id}/users/{nointern_user_id}/` structure remains for personalization, without isolation guarantee
+- **Keep user memory path**: `agents/{agent_id}/users/{azents_user_id}/` structure remains for personalization, without isolation guarantee
 
 → If bwrap per-user mount is removed, LLM can no longer know user folder location. This design solves that.
 

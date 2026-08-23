@@ -1,5 +1,5 @@
 ---
-title: "NoIntern Helm Packaging Design"
+title: "Azents Helm Packaging Design"
 created: 2026-05-12
 updated: 2026-05-12
 implemented: 2026-05-12
@@ -13,11 +13,11 @@ migration_source: "docs/azents/design/helm-packaging.md"
 historical_reconstruction: true
 ---
 
-# NoIntern Helm Packaging Design
+# Azents Helm Packaging Design
 
 ## Background and Problem Definition
 
-NoIntern production Kubernetes deployment is currently centered on ArgoCD app-of-apps and Kustomize overlays. This structure fits the current operating environment, but has high entry barrier for these purposes:
+Azents production Kubernetes deployment is currently centered on ArgoCD app-of-apps and Kustomize overlays. This structure fits the current operating environment, but has high entry barrier for these purposes:
 
 - Need an install unit to validate OSS deployment possibility.
 - Need to install on a home cluster and use it as a non-production test zone.
@@ -27,8 +27,8 @@ Based on GitHub Issue #3594 and Discussion #3608, this design assumes direction:
 
 ## Goals
 
-- Make NoIntern installable as one Helm chart.
-- Default install should be service-runtime profile where core NoIntern user flow actually works, not merely minimal installation-barrier profile.
+- Make Azents installable as one Helm chart.
+- Default install should be service-runtime profile where core Azents user flow actually works, not merely minimal installation-barrier profile.
 - Reflect component boundaries already separated in production in internal chart values structure.
 - Separate production-only coupling such as AWS/EKS, ALB, ExternalSecrets, ECR into values and optional features.
 - Include sandbox in default install as agent execution/runtime core, while keeping advanced prerequisite-heavy optimization components like snapshotter explicit opt-in.
@@ -36,7 +36,7 @@ Based on GitHub Issue #3594 and Discussion #3608, this design assumes direction:
 
 ## Non-goals
 
-- This design alone does not declare NoIntern complete public OSS product.
+- This design alone does not declare Azents complete public OSS product.
 - Do not immediately remove production Kustomize deployment.
 - Do not redesign application code configuration model. However, identify environment variable/Secret/ConfigMap surface required for chart value injection.
 - Do not automatically install sandbox/gVisor/snapshotter so it works in every home cluster.
@@ -46,7 +46,7 @@ Based on GitHub Issue #3594 and Discussion #3608, this design assumes direction:
 
 ### 1. Component boundary inside a single chart
 
-**Decision**: Provide single Helm chart `nointern`, but internally split into componentized umbrella-style structure.
+**Decision**: Provide single Helm chart `azents`, but internally split into componentized umbrella-style structure.
 
 - `server`: `apiserver`, `adminserver`, `worker`, `scheduler`, `sandbox-control`, `mcp-egress-proxy`
 - `web`: end-user web frontend
@@ -118,69 +118,69 @@ Current repo local/test infrastructure also uses RustFS, so bundled object stora
 
 ### ArgoCD app boundaries
 
-Current app-of-apps root deploys NoIntern as multiple ArgoCD Applications.
+Current app-of-apps root deploys Azents as multiple ArgoCD Applications.
 
 - `infra/argocd/root/base/kustomization.yaml`
-- `infra/argocd/root/base/resources/nointern-server.yaml`
-- `infra/argocd/root/base/resources/nointern-web.yaml`
-- `infra/argocd/root/base/resources/nointern-admin-web.yaml`
-- `infra/argocd/root/base/resources/nointern-discord-gateway.yaml`
-- `infra/argocd/root/base/resources/nointern-sandbox.yaml`
-- `infra/argocd/root/base/resources/nointern-snapshotter.yaml`
+- `infra/argocd/root/base/resources/azents-server.yaml`
+- `infra/argocd/root/base/resources/azents-web.yaml`
+- `infra/argocd/root/base/resources/azents-admin-web.yaml`
+- `infra/argocd/root/base/resources/azents-discord-gateway.yaml`
+- `infra/argocd/root/base/resources/azents-sandbox.yaml`
+- `infra/argocd/root/base/resources/azents-snapshotter.yaml`
 
 ### Current resources by component
 
 | Component | Current path | Nature |
 |---|---|---|
-| `server` | `infra/argocd/nointern-server/base/` | backend workload bundle containing `apiserver`, `adminserver`, `worker`, `scheduler`, `sandbox-control`, `mcp-egress-proxy` |
-| `web` | `infra/argocd/nointern-web/base/` | end-user web frontend |
-| `adminWeb` | `infra/argocd/nointern-admin-web/base/` | admin frontend |
-| `discordGateway` | `infra/argocd/nointern-discord-gateway/base/` | Discord integration gateway |
-| `sandbox` | `infra/argocd/nointern-sandbox/base/` | runtime layer such as sandbox namespace, NetworkPolicy, RuntimeClass, RBAC |
-| `snapshotter` | `infra/argocd/nointern-snapshotter/base/` | privileged DaemonSet based snapshot infra component |
+| `server` | `infra/argocd/azents-server/base/` | backend workload bundle containing `apiserver`, `adminserver`, `worker`, `scheduler`, `sandbox-control`, `mcp-egress-proxy` |
+| `web` | `infra/argocd/azents-web/base/` | end-user web frontend |
+| `adminWeb` | `infra/argocd/azents-admin-web/base/` | admin frontend |
+| `discordGateway` | `infra/argocd/azents-discord-gateway/base/` | Discord integration gateway |
+| `sandbox` | `infra/argocd/azents-sandbox/base/` | runtime layer such as sandbox namespace, NetworkPolicy, RuntimeClass, RBAC |
+| `snapshotter` | `infra/argocd/azents-snapshotter/base/` | privileged DaemonSet based snapshot infra component |
 
 ### Production overlay coupling
 
 Production overlay has following coupling.
 
 - Image registry/tag is coupled to component-specific ECR path and production tag.
-  - `infra/argocd/nointern-server/overlays/production/kustomization.yaml`
-  - `infra/argocd/nointern-web/overlays/production/kustomization.yaml`
-  - `infra/argocd/nointern-admin-web/overlays/production/kustomization.yaml`
-  - `infra/argocd/nointern-discord-gateway/overlays/production/kustomization.yaml`
-  - `infra/argocd/nointern-snapshotter/overlays/production/kustomization.yaml`
+  - `infra/argocd/azents-server/overlays/production/kustomization.yaml`
+  - `infra/argocd/azents-web/overlays/production/kustomization.yaml`
+  - `infra/argocd/azents-admin-web/overlays/production/kustomization.yaml`
+  - `infra/argocd/azents-discord-gateway/overlays/production/kustomization.yaml`
+  - `infra/argocd/azents-snapshotter/overlays/production/kustomization.yaml`
 - Ingress assumes ALB, ACM, external-dns, production host.
-  - `infra/argocd/nointern-server/overlays/production/base/resources/apiserver-ingress.yaml`
-  - `infra/argocd/nointern-web/overlays/production/base/resources/ingress.yaml`
-  - `infra/argocd/nointern-admin-web/overlays/production/base/resources/ingress.yaml`
+  - `infra/argocd/azents-server/overlays/production/base/resources/apiserver-ingress.yaml`
+  - `infra/argocd/azents-web/overlays/production/base/resources/ingress.yaml`
+  - `infra/argocd/azents-admin-web/overlays/production/base/resources/ingress.yaml`
 - Secret is currently ExternalSecret-first from base manifests, and production overlay fills AWS Parameter Store remote key.
-  - `infra/argocd/nointern-server/base/kustomization.yaml`
-  - `infra/argocd/nointern-web/base/kustomization.yaml`
-  - `infra/argocd/nointern-sandbox/base/kustomization.yaml`
-  - `infra/argocd/nointern-server/overlays/production/base/patches/auth-external-secret.yaml`
-  - `infra/argocd/nointern-server/overlays/production/base/patches/internal-api-hmac-external-secret.yaml`
-  - `infra/argocd/nointern-web/overlays/production/base/patches/sentry-external-secret.yaml`
-  - `infra/argocd/nointern-admin-web/overlays/production/base/resources/external-secret.yaml`
-  - `infra/argocd/nointern-discord-gateway/base/external-secret.yaml`
+  - `infra/argocd/azents-server/base/kustomization.yaml`
+  - `infra/argocd/azents-web/base/kustomization.yaml`
+  - `infra/argocd/azents-sandbox/base/kustomization.yaml`
+  - `infra/argocd/azents-server/overlays/production/base/patches/auth-external-secret.yaml`
+  - `infra/argocd/azents-server/overlays/production/base/patches/internal-api-hmac-external-secret.yaml`
+  - `infra/argocd/azents-web/overlays/production/base/patches/sentry-external-secret.yaml`
+  - `infra/argocd/azents-admin-web/overlays/production/base/resources/external-secret.yaml`
+  - `infra/argocd/azents-discord-gateway/base/external-secret.yaml`
 - AWS/EKS-specific resources exist.
-  - `infra/argocd/nointern-server/overlays/production/base/resources/role.yaml`
-  - `infra/argocd/nointern-server/overlays/production/base/resources/pod-identity-association.yaml`
-  - `infra/argocd/nointern-snapshotter/overlays/production/resources/role.yaml`
-  - `infra/argocd/nointern-snapshotter/overlays/production/resources/pod-identity-association.yaml`
+  - `infra/argocd/azents-server/overlays/production/base/resources/role.yaml`
+  - `infra/argocd/azents-server/overlays/production/base/resources/pod-identity-association.yaml`
+  - `infra/argocd/azents-snapshotter/overlays/production/resources/role.yaml`
+  - `infra/argocd/azents-snapshotter/overlays/production/resources/pod-identity-association.yaml`
 - Namespaces are also separated by component.
-  - `infra/argocd/root/base/resources/nointern-server.yaml`: `nointern-server`
-  - `infra/argocd/root/base/resources/nointern-sandbox.yaml`: `nointern-sandbox`
-  - sandbox NetworkPolicy in `nointern-sandbox` allows egress to `apiserver` and `sandbox-control` in `nointern-server` namespace.
+  - `infra/argocd/root/base/resources/azents-server.yaml`: `azents-server`
+  - `infra/argocd/root/base/resources/azents-sandbox.yaml`: `azents-sandbox`
+  - sandbox NetworkPolicy in `azents-sandbox` allows egress to `apiserver` and `sandbox-control` in `azents-server` namespace.
 
 ## Target State
 
 ### Chart distribution form
 
-Provide single chart `nointern`. Inside chart, use component-specific template partials and values namespace.
+Provide single chart `azents`. Inside chart, use component-specific template partials and values namespace.
 
 ```mermaid
 flowchart TD
-    Chart[nointern Helm chart]
+    Chart[azents Helm chart]
     Values[values.yaml]
     Server[server workloads]
     Web[web]
@@ -208,11 +208,11 @@ flowchart TD
 
 ### Default profile
 
-First default install enables following components based on “NoIntern is actually usable after install”.
+First default install enables following components based on “Azents is actually usable after install”.
 
 | Component | Default | Reason |
 |---|---:|---|
-| `server` | enabled | API/admin API/worker/scheduler/sandbox-control are central to NoIntern core behavior |
+| `server` | enabled | API/admin API/worker/scheduler/sandbox-control are central to Azents core behavior |
 | `web` | enabled | default UI for user access after install |
 | `adminWeb` | enabled | default UI for initial operational settings such as LLM model/provider model |
 | `discordGateway` | disabled | requires external Discord app/secret |
@@ -220,7 +220,7 @@ First default install enables following components based on “NoIntern is actua
 | `sandbox` | enabled | required runtime layer for normal Agent shell/file/project workspace path |
 | `snapshotter` | disabled | large prerequisites: privileged DaemonSet, containerd socket, node label |
 
-`mcpEgressProxy` is currently included in `nointern-server` deployment bundle, but chart first reviews exposing it as server sub-feature gate such as `server.mcpEgressProxy.enabled`. Whether separate top-level component is more appropriate needs checking current service discovery and call path before implementation.
+`mcpEgressProxy` is currently included in `azents-server` deployment bundle, but chart first reviews exposing it as server sub-feature gate such as `server.mcpEgressProxy.enabled`. Whether separate top-level component is more appropriate needs checking current service discovery and call path before implementation.
 
 ### Profile model
 
@@ -254,12 +254,12 @@ Chart does not force profile names as magic behavior. Chart repository also does
 
 ### Chart location and name
 
-New chart is infra code and lives under `infra/charts/nointern/`.
+New chart is infra code and lives under `infra/charts/azents/`.
 
 Expected structure:
 
 ```text
-infra/charts/nointern/
+infra/charts/azents/
   Chart.yaml
   Chart.lock
   values.yaml
@@ -380,7 +380,7 @@ First default strategy is `existingSecret` reference.
   - `existingSecret`: reference Kubernetes Secret created by user
   - `externalSecret`: create ExternalSecret in cluster with External Secrets Operator installed
 
-Secret key names must match existing Deployment env wiring. Before implementation, organize key mapping using `infra/argocd/nointern-server/overlays/production/base/patches/deployment-secrets.yaml` as source of truth.
+Secret key names must match existing Deployment env wiring. Before implementation, organize key mapping using `infra/argocd/azents-server/overlays/production/base/patches/deployment-secrets.yaml` as source of truth.
 
 This strategy is normalization direction for Helm target state. Current Kustomize base is ExternalSecret-first, so when writing chart, do not move existing ExternalSecret resources as default. Reconstruct default based on `existingSecret` env wiring.
 
@@ -414,7 +414,7 @@ database:
   external:
     host: null
     port: 5432
-    name: nointern
+    name: azents
     existingSecret: null
 
 redis:
@@ -433,7 +433,7 @@ objectStorage:
     existingSecret: null
 ```
 
-Bundled object storage supports only RustFS. MinIO is not included as default option because of license change issue. If RustFS chart dependency is not stably available as public Helm chart, implementation should first consider providing RustFS Deployment/Service/PVC/init Job as internal templates in nointern chart.
+Bundled object storage supports only RustFS. MinIO is not included as default option because of license change issue. If RustFS chart dependency is not stably available as public Helm chart, implementation should first consider providing RustFS Deployment/Service/PVC/init Job as internal templates in azents chart.
 
 external object storage mode must support two credential paths.
 
@@ -456,7 +456,7 @@ external object storage mode must support two credential paths.
 
 ### Namespace and sandbox-server contract
 
-Current production deployment places `nointern-server` and `nointern-sandbox` in separate namespaces. Before implementation, Helm chart must explicitly choose one of following.
+Current production deployment places `azents-server` and `azents-sandbox` in separate namespaces. Before implementation, Helm chart must explicitly choose one of following.
 
 1. **Keep multi-namespace**: closer to current production structure. Chart receives `server.namespace`, `sandbox.namespace` and must correctly render sandbox NetworkPolicy namespace selector and cross-namespace service address.
 2. **Simplify to single namespace**: easier home cluster install. But less production parity and requires re-review of sandbox isolation model.
@@ -465,8 +465,8 @@ Default direction of this design is keeping multi-namespace for production parit
 
 - sandbox Pod preStop hook must be able to call `apiserver` internal endpoint.
 - sandbox control client must be able to open outbound gRPC stream to `sandbox-control` service.
-- `nointern-server` and `nointern-sandbox` must share same `internal-api-hmac` value.
-- If NetworkPolicy is enabled, `nointern-sandbox` → `nointern-server` egress rule must render together.
+- `azents-server` and `azents-sandbox` must share same `internal-api-hmac` value.
+- If NetworkPolicy is enabled, `azents-sandbox` → `azents-server` egress rule must render together.
 
 ### Sandbox and snapshotter
 
@@ -494,11 +494,11 @@ These components are included in chart, but `NOTES.txt` and schema validation mu
 
 - Kubernetes cluster
 - Helm 3
-- Registry access that can pull NoIntern component images
+- Registry access that can pull Azents component images
 - PostgreSQL-compatible database or bundled PostgreSQL dependency
 - Redis/Valkey-compatible cache/queue endpoint or bundled Redis/Valkey dependency
 - S3-compatible object storage endpoint or bundled RustFS dependency
-- Auth/session/internal API secrets required by NoIntern
+- Auth/session/internal API secrets required by Azents
 - Cluster networking that allows sandbox-control and sandbox runtime layer to communicate
 - RuntimeClass or compatible runtime setting required for sandbox execution
 - Optional: Ingress controller, TLS Secret
@@ -516,7 +516,7 @@ These components are included in chart, but `NOTES.txt` and schema validation mu
 
 ### Step 1: chart authoring and home cluster verification
 
-- Write `infra/charts/nointern/` chart using Kustomize manifest as source reference.
+- Write `infra/charts/azents/` chart using Kustomize manifest as source reference.
 - Default install `server + web + adminWeb + sandbox + bundled PostgreSQL/Redis/RustFS` must render and pass Helm lint.
 - Verify actual install or dry-run with home cluster example values.
 
@@ -551,7 +551,7 @@ These components are included in chart, but `NOTES.txt` and schema validation mu
 
 ## Acceptance criteria
 
-- Single Helm chart exists at `infra/charts/nointern/`.
+- Single Helm chart exists at `infra/charts/azents/`.
 - Default `helm template` output includes service-runtime install centered on `server`, `web`, `adminWeb`, `sandbox`.
 - chart values contract can enable PostgreSQL, Redis/Valkey, RustFS dependencies.
 - Default values create `adminWeb`, `sandbox`, `server.sandboxControl` resources.
@@ -569,7 +569,7 @@ These components are included in chart, but `NOTES.txt` and schema validation mu
 ## Unresolved Decisions and User Confirmation Needed
 
 1. **Public image registry**: Need decide where OSS/home cluster users pull images from. Current production ECR cannot be default.
-2. **RustFS packaging method**: Need confirm before implementation whether to use public RustFS Helm chart as dependency or provide RustFS resources through nointern chart internal template.
+2. **RustFS packaging method**: Need confirm before implementation whether to use public RustFS Helm chart as dependency or provide RustFS resources through azents chart internal template.
 3. **Sandbox prerequisite fail-fast**: Since default install includes `sandbox`, need decide how much RuntimeClass/NetworkPolicy/node scheduling assumptions are validated fail-fast through Helm schema, NOTES, preflight.
 4. **`mcpEgressProxy` location**: Need check call path before implementation and decide whether to keep as server sub opt-in or promote to top-level component.
 5. **Secret key contract**: Need decide whether to fix existing Secret names and keys according to production env wiring, or convert to chart-specific normalized keys.
@@ -581,15 +581,15 @@ These components are included in chart, but `NOTES.txt` and schema validation mu
 
 | Verification item | Result | Basis |
 |---|---|---|
-| Single chart internal componentization possibility | possible | current ArgoCD root already separates boundaries as `nointern-server`, `nointern-web`, `nointern-admin-web`, `nointern-discord-gateway`, `nointern-sandbox`, `nointern-snapshotter` |
-| `server` multi-workload bundle | possible | `infra/argocd/nointern-server/base/kustomization.yaml` bundles `apiserver`, `adminserver`, `worker`, `scheduler`, `sandbox-control`, `mcp-egress-proxy` into one application |
+| Single chart internal componentization possibility | possible | current ArgoCD root already separates boundaries as `azents-server`, `azents-web`, `azents-admin-web`, `azents-discord-gateway`, `azents-sandbox`, `azents-snapshotter` |
+| `server` multi-workload bundle | possible | `infra/argocd/azents-server/base/kustomization.yaml` bundles `apiserver`, `adminserver`, `worker`, `scheduler`, `sandbox-control`, `mcp-egress-proxy` into one application |
 | Need `adminWeb` default-on | needed | LLM model/provider model catalog is operated through admin API and admin web path |
 | Need `sandbox` default-on | needed | workspace/agent default creation flow attaches shell environment, and worker determines sandbox tool exposure with this value |
 | `snapshotter` default-off possibility | possible | default snapshot backend is `none`, and snapshotter is rootfs snapshot/fast restore optimization layer |
 | `existingSecret` default strategy | possible | production Kustomize also injects Secret key to Deployment env, so Helm values can map Secret name/key contract |
 | bundled dependency | possible, implementation check needed | repo local/testenv infra uses PostgreSQL, Valkey, RustFS. RustFS public chart dependency needs implementation-stage check |
 | MinIO exclusion | possible | current repo uses RustFS as S3-compatible local/testenv storage, and MinIO remains only at client image/compatible endpoint level |
-| multi-namespace sandbox contract | possible, implementation care needed | current `nointern-sandbox` NetworkPolicy allows egress to `apiserver`/`sandbox-control` in `nointern-server` namespace, and both namespaces share `internal-api-hmac` Secret |
+| multi-namespace sandbox contract | possible, implementation care needed | current `azents-sandbox` NetworkPolicy allows egress to `apiserver`/`sandbox-control` in `azents-server` namespace, and both namespaces share `internal-api-hmac` Secret |
 | ambient AWS S3 credential | possible, production opt-in | production can access S3 through IAM Role/Pod Identity based ambient AWS session with endpoint/credential empty |
 
 ### Adjustments after verification
@@ -607,7 +607,7 @@ These components are included in chart, but `NOTES.txt` and schema validation mu
 
 Implementation PR performs following QA.
 
-1. `helm lint infra/charts/nointern`.
+1. `helm lint infra/charts/azents`.
 2. Run `helm template` with dependency-enabled values combination and confirm `server`, `web`, `adminWeb`, `sandbox`, bundled PostgreSQL/Redis/RustFS resources render.
 3. Run with external dependency values combination and confirm bundled dependencies are off and only external endpoint/`existingSecret` references render.
 4. Confirm opt-in rendering of `snapshotter`, `mcpEgressProxy`, `discordGateway`, `externalSecret` with advanced values.
@@ -615,7 +615,7 @@ Implementation PR performs following QA.
 
 ## testenv Impact
 
-- nointern testenv and local compose already use PostgreSQL, Valkey, RustFS, so dependency choice and direction match.
+- azents testenv and local compose already use PostgreSQL, Valkey, RustFS, so dependency choice and direction match.
 - Helm chart implementation does not change testenv seed/scenario itself.
 - Separate Kubernetes rendering verification is added to chart QA.
 - RustFS bundled template or dependency must match endpoint/bucket/credential structure used in testenv.
@@ -624,9 +624,9 @@ Implementation PR performs following QA.
 
 - Issue: https://github.com/azents/azents/issues/3594
 - Discussion: https://github.com/azents/azents/discussions/3608
-- NoIntern architecture spec: `docs/nointern/spec/domain/architecture.md`
-- NoIntern design overview: `docs/nointern/design/architecture.md`
-- Sandbox runtime: `docs/nointern/design/gvisor-260403-gvisor-byoc-sandbox.md`
-- Runtime profile: `docs/nointern/design/sandbox-runtime-profile.md`
-- Snapshot hibernation: `docs/nointern/design/phase3-snapshot-hibernation.md`
-- Discord integration: `docs/nointern/design/nointern-260310-nointern-discord-integration.md`
+- Azents architecture spec: `docs/azents/spec/domain/architecture.md`
+- Azents design overview: `docs/azents/design/architecture.md`
+- Sandbox runtime: `docs/azents/design/gvisor-260403-gvisor-byoc-sandbox.md`
+- Runtime profile: `docs/azents/design/sandbox-runtime-profile.md`
+- Snapshot hibernation: `docs/azents/design/phase3-snapshot-hibernation.md`
+- Discord integration: `docs/azents/design/azents-260310-azents-discord-integration.md`

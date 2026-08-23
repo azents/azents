@@ -279,7 +279,7 @@ Workspace manifest reflects runtime state based on DB.
 
 ## Infrastructure Changes
 
-- S3/RustFS bucket/prefix reuses existing nointern S3 settings.
+- S3/RustFS bucket/prefix reuses existing azents S3 settings.
 - sandbox pod must be able to access S3/RustFS endpoint with presigned URL.
 - sandbox image or checkpoint runner must be able to use `rsync`, `tar`, `zstd`.
 - OCI snapshot layer remains as short-term continuity layer, not long-term authority.

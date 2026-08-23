@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Background
 
-NoIntern currently stores OpenAI API key, Anthropic API key, Google Gemini API key, AWS Bedrock, and Google Vertex AI credential through workspace-level LLM provider integration and passes them to agent runtime. Issue #3194 covers feature that lets ChatGPT subscription users use GPT-family models with ChatGPT OAuth credential.
+Azents currently stores OpenAI API key, Anthropic API key, Google Gemini API key, AWS Bedrock, and Google Vertex AI credential through workspace-level LLM provider integration and passes them to agent runtime. Issue #3194 covers feature that lets ChatGPT subscription users use GPT-family models with ChatGPT OAuth credential.
 
 Discussion #3196 decided following direction.
 
@@ -31,11 +31,11 @@ Evidence:
 
 1. Backend credential model already separates `encrypted_credentials` and `config`. Adding ChatGPT OAuth secrets to `ProviderSecrets` discriminated union and extending `LLMProvider` enum is acceptable by storage model.
 2. Runtime already uses `OpenAIResponsesModel(AsyncOpenAI(...))` native path. ChatGPT OAuth provider can also configure access token, base URL, and default headers to connect to same Responses runtime family.
-3. nointern-web already has LLM settings screen and provider-specific form branching structure. Need to add account connection provider UI instead of API key input form.
+3. azents-web already has LLM settings screen and provider-specific form branching structure. Need to add account connection provider UI instead of API key input form.
 4. MCP OAuth flow provides internal patterns for callback URL, state, PKCE, token exchange, encrypted token storage. ChatGPT OAuth provider is workspace-level integration and does not reuse it as-is, but implementation structure can reference it.
 5. OpenCode docs distinguish `ChatGPT Plus/Pro` browser auth and `Manually enter API Key` in OpenAI provider. Device code UX is also already common in coding-agent provider connections, as seen in GitHub Copilot provider.
 
-Implementation after Phase 2 uses actual ChatGPT OAuth end-to-end behavior as acceptance criteria. After deployment, workspace owner must be able to connect with ChatGPT subscription account and immediately run NoIntern agent with connected credential.
+Implementation after Phase 2 uses actual ChatGPT OAuth end-to-end behavior as acceptance criteria. After deployment, workspace owner must be able to connect with ChatGPT subscription account and immediately run Azents agent with connected credential.
 
 - Browser callback is implemented as PKCE authorization code flow.
 - Device code is implemented based on `auth.openai.com/api/accounts/deviceauth/*` endpoint used by Codex.
@@ -46,8 +46,8 @@ Implementation after Phase 2 uses actual ChatGPT OAuth end-to-end behavior as ac
 
 Phase 3~7 implemented provider schema, callback/device API, runtime refresh/execution, frontend connection UX, and testenv QA scenarios. Current system behavior was promoted to Living Spec; detailed current spec is owned by following documents.
 
-- `docs/nointern/spec/domain/agent.md` — provider enum, secrets/config, runtime preflight, API surface
-- `docs/nointern/spec/flow/chatgpt-oauth.md` — callback/device/runtime refresh flow
+- `docs/azents/spec/domain/agent.md` — provider enum, secrets/config, runtime preflight, API surface
+- `docs/azents/spec/flow/chatgpt-oauth.md` — callback/device/runtime refresh flow
 
 This design document was moved to `design/` after implementation completed.
 
@@ -159,8 +159,8 @@ Both connection methods are primary flows.
 sequenceDiagram
     autonumber
     participant User as User
-    participant Web as NoIntern Web
-    participant API as NoIntern API
+    participant Web as Azents Web
+    participant API as Azents API
     participant ChatGPT as ChatGPT OAuth
     participant DB as PostgreSQL
 
@@ -190,8 +190,8 @@ Requirements:
 sequenceDiagram
     autonumber
     participant User as User
-    participant Web as NoIntern Web
-    participant API as NoIntern API
+    participant Web as Azents Web
+    participant API as Azents API
     participant ChatGPT as ChatGPT Device Auth
     participant DB as PostgreSQL
 
@@ -428,12 +428,12 @@ Expected changes:
 
 ## Related Code Paths
 
-- `python/apps/nointern/src/nointern/core/enums.py`
-- `python/apps/nointern/src/nointern/core/credentials.py`
-- `python/apps/nointern/src/nointern/engine/sdk/model_factory.py`
-- `python/apps/nointern/src/nointern/services/llm_provider_integration/`
-- `python/apps/nointern/src/nointern/api/public/llm_provider_integration/v1/`
-- `typescript/apps/nointern-web/src/features/llm-settings/`
-- `typescript/apps/nointern-web/src/trpc/routers/llm-provider-integration.ts`
-- `docs/nointern/design/llm-260221-llm-integration.md`
-- `docs/nointern/spec/flow/mcp-oauth.md`
+- `python/apps/azents/src/azents/core/enums.py`
+- `python/apps/azents/src/azents/core/credentials.py`
+- `python/apps/azents/src/azents/engine/sdk/model_factory.py`
+- `python/apps/azents/src/azents/services/llm_provider_integration/`
+- `python/apps/azents/src/azents/api/public/llm_provider_integration/v1/`
+- `typescript/apps/azents-web/src/features/llm-settings/`
+- `typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts`
+- `docs/azents/design/llm-260221-llm-integration.md`
+- `docs/azents/spec/flow/mcp-oauth.md`

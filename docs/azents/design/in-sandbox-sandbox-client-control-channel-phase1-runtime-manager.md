@@ -32,4 +32,4 @@ Before implementing control channel, change the authoritative sandbox manager AP
 
 - sandbox manager unit/integration tests
 - existing tests related to shell/workspace browser
-- nointern ruff/pyright/pytest
+- azents ruff/pyright/pytest

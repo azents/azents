@@ -1,7 +1,7 @@
 ---
 title: "Split testenv Setup Scenarios and Inject INDEX — Discussion Record"
 created: 2026-04-11
-tags: [testenv, nointern, harness, scenarios, historical-reconstruction, migration]
+tags: [testenv, azents, harness, scenarios, historical-reconstruction, migration]
 document_role: primary
 document_type: adr
 snapshot_id: testenv-260411
@@ -158,7 +158,7 @@ Rationale:
 - C injects only **what exists**, roughly 300 tokens, so the agent immediately recognizes that `llm-provider-bedrock` setup exists and reads details only when needed. This prevents judgment errors at minimal token cost.
 - The auto-gen script from decision 3 can also update the `<!-- SETUP-LIST:START -->` marker in AGENTS.md to prevent drift.
 
-**Trade-off:** AGENTS.md becomes longer. Currently `testenv/nointern/AGENTS.md` does not exist, so it must be created or a section added to README.md.
+**Trade-off:** AGENTS.md becomes longer. Currently `testenv/azents/AGENTS.md` does not exist, so it must be created or a section added to README.md.
 
 ---
 
@@ -170,7 +170,7 @@ Rationale:
 | 2 | Use frontmatter `idempotent: bool` + `verify:` shell command. Agent trusts state.json cache only after verify passes. |
 | 3 | Hybrid INDEX: manual top section for rules/FAQ, marker-based auto-generated lower table. |
 | 4 | CI lint only through `scripts/lint-scenarios.py`. No runtime guard. |
-| 5 | Put decision rules + setup id list in `testenv/nointern/AGENTS.md` with marker replacement. Read `scenarios/setup/INDEX.md` on demand for details. |
+| 5 | Put decision rules + setup id list in `testenv/azents/AGENTS.md` with marker replacement. Read `scenarios/setup/INDEX.md` on demand for details. |
 
 ## Philosophy: Consistency with Existing testenv Principles
 

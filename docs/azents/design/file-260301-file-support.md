@@ -339,7 +339,7 @@ Build foundational infrastructure required for file support. Extend only types/s
 
 #### 1-1. Engine type definitions
 
-**File:** `python/apps/nointern/src/nointern/engine/types.py`
+**File:** `python/apps/azents/src/azents/engine/types.py`
 
 Types to add:
 - `ImageURL`, `ImageBlob`, `ImageSource` — for LLM multipart image
@@ -355,8 +355,8 @@ Types to add:
 #### 1-2. DB migration
 
 **Files:**
-- `python/apps/nointern/src/nointern/rdb/models/message.py` — add columns
-- `python/apps/nointern/db-schemas/rdb/migrations/versions/` — Alembic migration
+- `python/apps/azents/src/azents/rdb/models/message.py` — add columns
+- `python/apps/azents/db-schemas/rdb/migrations/versions/` — Alembic migration
 
 Columns to add (messages table):
 - `attachments` JSONB nullable — `shared:///session/` URI list and file metadata `[{uri, media_type, size, name, thumbnail, text_preview}]`
@@ -366,7 +366,7 @@ Reference: follow migration pattern of `abd59068d224_add_metadata_to_messages.py
 
 #### 1-3. Store serialization
 
-**File:** `python/apps/nointern/src/nointern/repos/message/store.py`
+**File:** `python/apps/azents/src/azents/repos/message/store.py`
 
 - `_to_runtime_message()`: deserialize new JSONB columns → Message fields
 - `append()`: serialize Message fields → RDB model
@@ -374,49 +374,49 @@ Reference: follow migration pattern of `abd59068d224_add_metadata_to_messages.py
 
 #### 1-4. Event serialization
 
-**File:** `python/apps/nointern/src/nointern/broker/serialization.py`
+**File:** `python/apps/azents/src/azents/broker/serialization.py`
 
 - `serialize_event()`: serialize `attachments` of ToolCallEnd
 - `deserialize_event()`: deserialize
 
 #### 1-5. Broker message
 
-**File:** `python/apps/nointern/src/nointern/broker/types.py`
+**File:** `python/apps/azents/src/azents/broker/types.py`
 
 - Add `attachments: list[str]` field to `SessionMessage`
 
-**File:** `python/apps/nointern/src/nointern/broker/redis.py`
+**File:** `python/apps/azents/src/azents/broker/redis.py`
 
 - likely automatically reflected by encode/decode (json.dumps/loads). Verify whether separate change is needed.
 
 #### 1-6. File Gateway URI scheme
 
 **Files:**
-- `python/apps/nointern-file-gateway/src/nointern_file_gateway/path.py`
+- `python/apps/azents-file-gateway/src/azents_file_gateway/path.py`
   - parse single scheme `shared:///session/`
   - convert `shared:///session/` path to storage key in `resolve_storage_key()`
   - extract + pass scheme in `_resolve_key()`
 
-- `python/apps/nointern-file-gateway/src/nointern_file_gateway/routes.py`
+- `python/apps/azents-file-gateway/src/azents_file_gateway/routes.py`
   - handle `shared:///session/` URI path
 
-- `docker/nointern/agent-runtime/sharedfs`
+- `docker/azents/agent-runtime/sharedfs`
   - `_is_shared()`: recognize `shared:///session/` scheme
 
 #### Verification
 
 ```bash
 # after type/schema change
-cd python/apps/nointern && uv run ruff check --fix . && uv run ruff format . && uv run pyright
+cd python/apps/azents && uv run ruff check --fix . && uv run ruff format . && uv run pyright
 
 # DB migration
-cd python/apps/nointern && uv run alembic upgrade head
+cd python/apps/azents && uv run alembic upgrade head
 
 # File Gateway tests
-cd python/apps/nointern-file-gateway && uv run pytest
+cd python/apps/azents-file-gateway && uv run pytest
 
-# nointern tests
-cd python/apps/nointern && uv run pytest
+# azents tests
+cd python/apps/azents && uv run pytest
 ```
 
 ---
@@ -429,7 +429,7 @@ Enable engine to process tool result containing files and pass/receive images to
 
 #### 2-1. Engine tool result handling
 
-**File:** `python/apps/nointern/src/nointern/engine/engine.py`
+**File:** `python/apps/azents/src/azents/engine/engine.py`
 
 - Branch on tool handler return value `str | ToolResult`
 - If `ToolResult`, append attachment list to content in `[Attachments]` format
@@ -438,7 +438,7 @@ Enable engine to process tool result containing files and pass/receive images to
 
 #### 2-2. LLM multipart input
 
-**File:** `python/apps/nointern/src/nointern/runtime/llm.py`
+**File:** `python/apps/azents/src/azents/runtime/llm.py`
 
 - `_convert_messages()`: if `msg.images` exists, convert to OpenAI multipart content format
   - `ImageURL` → `{"type": "image_url", "image_url": {"url": ...}}`
@@ -447,7 +447,7 @@ Enable engine to process tool result containing files and pass/receive images to
 
 #### 2-3. LLM multipart output parsing
 
-**File:** `python/apps/nointern/src/nointern/runtime/llm.py`
+**File:** `python/apps/azents/src/azents/runtime/llm.py`
 
 - Extract image content from litellm response
 - Store in `CompletionResponse.images`, `StreamEnd.images`
@@ -455,7 +455,7 @@ Enable engine to process tool result containing files and pass/receive images to
 
 #### 2-4. Preserve MCP tool files
 
-**File:** `python/apps/nointern/src/nointern/engine/tools/mcp.py`
+**File:** `python/apps/azents/src/azents/engine/tools/mcp.py`
 
 - `_extract_text()` `ImageContent` handling: instead of placeholder, store in session storage → return `ToolResult`
 - Change MCP tool handler wrapper to return `str | ToolResult`
@@ -463,8 +463,8 @@ Enable engine to process tool result containing files and pass/receive images to
 #### Verification
 
 ```bash
-cd python/apps/nointern && uv run ruff check --fix . && uv run ruff format . && uv run pyright
-cd python/apps/nointern && uv run pytest
+cd python/apps/azents && uv run ruff check --fix . && uv run ruff format . && uv run pyright
+cd python/apps/azents && uv run pytest
 ```
 
 #### Verification points (manual)
@@ -483,7 +483,7 @@ When user attaches file, store it in session storage, and engine creates summary
 
 #### 3-1. File upload API
 
-**File:** `python/apps/nointern/src/nointern/api/public/chat/v1/__init__.py`
+**File:** `python/apps/azents/src/azents/api/public/chat/v1/__init__.py`
 
 - Add `POST /chat/v1/upload` endpoint
 - Receive FastAPI `UploadFile` → write directly to session storage
@@ -491,19 +491,19 @@ When user attaches file, store it in session storage, and engine creates summary
 - Return `shared:///session/uploads/{filename}` URI
 - Validate max 5 files per message when receiving WebSocket message
 
-**File:** `python/apps/nointern/src/nointern/api/public/chat/v1/data.py`
+**File:** `python/apps/azents/src/azents/api/public/chat/v1/data.py`
 
 - Add `attachments: list[str] | None` to `ChatMessageRequest`
 
 #### 3-2. WebSocket → broker delivery
 
-**File:** `python/apps/nointern/src/nointern/api/public/chat/v1/__init__.py`
+**File:** `python/apps/azents/src/azents/api/public/chat/v1/__init__.py`
 
 - Pass `request.attachments` → `SessionMessage.attachments` in `receive_loop()`
 
 #### 3-3. Engine upload file processing
 
-**File:** `python/apps/nointern/src/nointern/worker/engine.py` (or engine.py)
+**File:** `python/apps/azents/src/azents/worker/engine.py` (or engine.py)
 
 - If message has `attachments`:
   1. download file from session storage
@@ -516,17 +516,17 @@ When user attaches file, store it in session storage, and engine creates summary
 
 #### 3-4. Add dependency
 
-- `Pillow` — for thumbnail generation. Add to nointern app.
+- `Pillow` — for thumbnail generation. Add to azents app.
 
 #### Verification
 
 ```bash
-cd python/apps/nointern && uv run ruff check --fix . && uv run ruff format . && uv run pyright
-cd python/apps/nointern && uv run pytest
+cd python/apps/azents && uv run ruff check --fix . && uv run ruff format . && uv run pyright
+cd python/apps/azents && uv run pytest
 
 # Regenerate OpenAPI
-cd python/apps/nointern && uv run python src/cli/dump_openapi.py --target public
-cd typescript/packages/nointern-public-client && pnpm run generate
+cd python/apps/azents && uv run python src/cli/dump_openapi.py --target public
+cd typescript/packages/azents-public-client && pnpm run generate
 ```
 
 #### Verification points (manual/E2E)
@@ -546,7 +546,7 @@ Store files generated by LLM in session storage and deliver them to frontend thr
 
 #### 4-1. LLM response image → session storage
 
-**File:** `python/apps/nointern/src/nointern/engine/engine.py`
+**File:** `python/apps/azents/src/azents/engine/engine.py`
 
 - If `StreamEnd.images` exists, store directly in session storage
 - Insert `[Generated Images]` block + `shared:///session/` URI into content (for LLM history)
@@ -554,7 +554,7 @@ Store files generated by LLM in session storage and deliver them to frontend thr
 
 #### 4-2. Session data file list/download API
 
-**File:** `python/apps/nointern/src/nointern/api/public/chat/v1/__init__.py`
+**File:** `python/apps/azents/src/azents/api/public/chat/v1/__init__.py`
 
 - `GET /chat/v1/sessions/{sessionId}/workspace` — file list
 - `GET /chat/v1/sessions/{sessionId}/workspace/{filename}` — file download
@@ -564,13 +564,13 @@ Store files generated by LLM in session storage and deliver them to frontend thr
 
 ```bash
 # Backend
-cd python/apps/nointern && uv run ruff check --fix . && uv run ruff format . && uv run pyright
-cd python/apps/nointern && uv run pytest
-cd python/apps/nointern-file-gateway && uv run pytest
+cd python/apps/azents && uv run ruff check --fix . && uv run ruff format . && uv run pyright
+cd python/apps/azents && uv run pytest
+cd python/apps/azents-file-gateway && uv run pytest
 
 # Regenerate OpenAPI
-cd python/apps/nointern && uv run python src/cli/dump_openapi.py --target public
-cd typescript/packages/nointern-public-client && pnpm run generate
+cd python/apps/azents && uv run python src/cli/dump_openapi.py --target public
+cd typescript/packages/azents-public-client && pnpm run generate
 ```
 
 ---
@@ -583,7 +583,7 @@ Provide built-in tools that allow LLM to use files directly.
 
 #### 5-1. `read_image` built-in tool
 
-**File:** `python/apps/nointern/src/nointern/engine/tools/` (new file)
+**File:** `python/apps/azents/src/azents/engine/tools/` (new file)
 
 - `read_image(uri: str)` — insert `shared:///session/` image into LLM context
 - Validate size limit (per-model setting, default 5MB)
@@ -608,8 +608,8 @@ Content to add:
 #### Verification
 
 ```bash
-cd python/apps/nointern && uv run ruff check --fix . && uv run ruff format . && uv run pyright
-cd python/apps/nointern && uv run pytest
+cd python/apps/azents && uv run ruff check --fix . && uv run ruff format . && uv run pyright
+cd python/apps/azents && uv run pytest
 ```
 
 ---
@@ -622,7 +622,7 @@ Implement file upload, attachment display, thumbnail rendering.
 
 #### 6-1. File upload UI
 
-**File:** `typescript/apps/nointern-web/src/features/chat/`
+**File:** `typescript/apps/azents-web/src/features/chat/`
 
 - file attachment button + drag-and-drop
 - call `POST /chat/v1/upload` → receive `shared:///session/` URI
@@ -632,7 +632,7 @@ Implement file upload, attachment display, thumbnail rendering.
 
 #### 6-2. Attachment rendering
 
-**File:** `typescript/apps/nointern-web/src/features/chat/components/`
+**File:** `typescript/apps/azents-web/src/features/chat/components/`
 
 - Read message `attachments` field and show inline
 - Image: thumbnail + original download on click
@@ -647,7 +647,7 @@ Implement file upload, attachment display, thumbnail rendering.
 
 #### 6-4. i18n
 
-**File:** `typescript/apps/nointern-web/src/messages/*.json` (×4)
+**File:** `typescript/apps/azents-web/src/messages/*.json` (×4)
 
 - file upload related keys (upload button, progress, error, limit notice, etc.)
 - attachment related keys (download, file list, expiration display)
@@ -668,7 +668,7 @@ cd typescript && pnpm run format && pnpm run lint:fix && pnpm run typecheck
 
 #### 7-1. E2E tests
 
-**File:** `python/apps/nointern-e2e/`
+**File:** `python/apps/azents-e2e/`
 
 - file upload → message send → engine processing → response check
 - attachment generated by `present_file` → API query/download
@@ -724,8 +724,8 @@ graph TD
 | `repos/message/__init__.py` | 1 | exclude thumbnails from pagination |
 | `broker/types.py` | 1 | SessionMessage.attachments |
 | `broker/serialization.py` | 1 | new ToolCallEnd field |
-| `nointern-file-gateway/path.py` | 1 | parse `shared:///session/` scheme |
-| `nointern-file-gateway/routes.py` | 1, 4 | handle `shared:///session/` path |
+| `azents-file-gateway/path.py` | 1 | parse `shared:///session/` scheme |
+| `azents-file-gateway/routes.py` | 1, 4 | handle `shared:///session/` path |
 | `docker/.../sharedfs` | 1 | recognize `shared:///session/` scheme |
 | `engine/engine.py` | 2, 4 | ToolResult branch, session storage save |
 | `runtime/llm.py` | 2 | multipart content conversion, image parsing |
@@ -734,4 +734,4 @@ graph TD
 | `api/public/chat/v1/data.py` | 3 | ChatMessageRequest.attachments |
 | `worker/engine.py` | 3 | upload file processing + summary generation |
 | `engine/tools/` (new) | 5 | read_image built-in tool |
-| `nointern-web/features/chat/` | 6 | upload UI, attachment rendering, thumbnail |
+| `azents-web/features/chat/` | 6 | upload UI, attachment rendering, thumbnail |

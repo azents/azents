@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/account-linking.md"
 
 ## Problem
 
-Design feature that links external platform user IDs such as Slack/Discord with nointern user ID. After linking completes, bot can identify the user on mention and provide personalized responses plus per-user OAuth toolkit usage.
+Design feature that links external platform user IDs such as Slack/Discord with azents user ID. After linking completes, bot can identify the user on mention and provide personalized responses plus per-user OAuth toolkit usage.
 
 ## Primary Actor
 
@@ -30,17 +30,17 @@ Unknown — the historical source does not state this explicitly.
 
 ## Primary Scenario
 
-When user mentions nointern bot for first time in Slack/Discord, user receives account link nudge by DM and links account.
+When user mentions azents bot for first time in Slack/Discord, user receives account link nudge by DM and links account.
 
 ```mermaid
 sequenceDiagram
     actor U as User (Slack/Discord)
-    participant Bot as nointern bot
-    participant Server as Nointern Server
-    participant Web as Nointern Web
+    participant Bot as azents bot
+    participant Server as Azents Server
+    participant Web as Azents Web
     participant OAuth as Platform OAuth
 
-    U->>Bot: @nointern mention
+    U->>Bot: @azents mention
     Bot->>Server: message handling
     Server->>Server: resolve_user_id() → None
     Server->>Server: has_previous_sessions() → false
@@ -73,17 +73,17 @@ sequenceDiagram
 
 ## Supporting Scenarios
 
-When user mentions nointern bot for first time in Slack/Discord, user receives account link nudge by DM and links account.
+When user mentions azents bot for first time in Slack/Discord, user receives account link nudge by DM and links account.
 
 ```mermaid
 sequenceDiagram
     actor U as User (Slack/Discord)
-    participant Bot as nointern bot
-    participant Server as Nointern Server
-    participant Web as Nointern Web
+    participant Bot as azents bot
+    participant Server as Azents Server
+    participant Web as Azents Web
     participant OAuth as Platform OAuth
 
-    U->>Bot: @nointern mention
+    U->>Bot: @azents mention
     Bot->>Server: message handling
     Server->>Server: resolve_user_id() → None
     Server->>Server: has_previous_sessions() → false

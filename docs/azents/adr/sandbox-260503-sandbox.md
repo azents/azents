@@ -13,7 +13,7 @@ migration_source: "docs/azents/adr/0006-agent-centric-session-sandbox.md"
 
 ## Context
 
-NoIntern's existing runtime used `ConversationSession` as the conversation unit, broker routing key, sandbox lifecycle owner, and `/home/sandbox` owner at the same time. This tightly coupled Slack/Discord threads, Web chat, per-session sandboxes, EFS subPaths, and the file-api backing store.
+Azents's existing runtime used `ConversationSession` as the conversation unit, broker routing key, sandbox lifecycle owner, and `/home/sandbox` owner at the same time. This tightly coupled Slack/Discord threads, Web chat, per-session sandboxes, EFS subPaths, and the file-api backing store.
 
 To remove EFS and move to S3 checkpointing, sandboxes cannot be created at the high-cardinality conversation/thread level. Slack, Discord, GitHub, and Jira already provide external channel/thread/ticket/issue units for conversations and work, so there is little need to keep a separate shared ConversationSession domain as the internal runtime unit.
 
@@ -69,7 +69,7 @@ Rejected. To support shell writes as a first-class capability, the active canoni
 
 ## Status
 
-Accepted. The detailed design follows `docs/nointern/design/sandbox-260503-sandbox.md`.
+Accepted. The detailed design follows `docs/azents/design/sandbox-260503-sandbox.md`.
 
 ## Migration provenance
 

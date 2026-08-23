@@ -15,7 +15,7 @@ This document defines scenarios where multiple users interact with Bot simultane
 
 ## Background
 
-In nointern's session model, **session directly owns events (conversation history)**. Conversation history from external channels (such as Slack channel) is fetched from external platform API when needed and stored as session events.
+In azents's session model, **session directly owns events (conversation history)**. Conversation history from external channels (such as Slack channel) is fetched from external platform API when needed and stored as session events.
 
 ## Basic Rules
 
@@ -181,7 +181,7 @@ Attach metadata to every Slack message sent by Bot and use it for session tracki
 
 ```json
 {
-  "event_type": "nointern_response",
+  "event_type": "azents_response",
   "event_payload": {
     "session_id": "abc123",
     "thread_ts": "1234567890.123456"
@@ -223,7 +223,7 @@ Send control message to thread/DM on RunStarted. Delete on RunComplete/RunStoppe
 - Stop button click → `SessionStopRequest` → broker → engine `check_stop()` → `RunStopped`
 - **Button types**:
   - **Stop**: stop current run only. `SessionStopRequest` → broker → engine `check_stop()` → `RunStopped`
-  - **Stop & Clear Session**: stop run + delete session mapping. Next mention starts as new session (same effect as `/nointern reset`)
+  - **Stop & Clear Session**: stop run + delete session mapping. Next mention starts as new session (same effect as `/azents reset`)
 - **Only session owner can operate**: include `session_id` and `slack_user_id` in button `value`; if clicking user is not session owner, block and respond with "You cannot stop another user's session." alert
 - Delete with `chat.delete` on RunComplete/RunStopped
 - `actions` block structure allows adding other buttons/actions in future
@@ -266,7 +266,7 @@ class SessionMessage:
 ```
 
 - Each `InputMessage` has independent `text`, `user_id`, `metadata`
-- `user_id` is set only for session owner's message (nointern user_id; None if not linked)
+- `user_id` is set only for session owner's message (azents user_id; None if not linked)
 - History context message is delivered with `user_id = None`
 - **Framing is gateway responsibility**: gateway composes Slack API response into framed text and puts it in `InputMessage.text`
 - Engine stores and processes received messages as session events without changing them
@@ -645,7 +645,7 @@ Add button to `actions` block in `_post_control_message()`:
 **File:** `services/slack/handlers.py`
 
 Add `handle_stop_and_clear_action()`:
-- Stop behavior + delete session mapping (same as `/nointern reset`)
+- Stop behavior + delete session mapping (same as `/azents reset`)
 
 **File:** `services/slack/bolt.py`
 
@@ -722,7 +722,7 @@ async def chat_postMessage(
 
 ```python
 bot_metadata = {
-    "event_type": "nointern_response",
+    "event_type": "azents_response",
     "event_payload": {
         "session_id": session_id,
     },
@@ -905,7 +905,7 @@ async def collect_thread_history(
 Implementation details:
 - call `conversations.replies(channel, ts=thread_ts, limit=11, latest=latest, include_all_metadata=True)`
 - traverse from newest to oldest:
-  - if message metadata has `event_type == "nointern_response"` && `session_id == current_session_id` → stop
+  - if message metadata has `event_type == "azents_response"` && `session_id == current_session_id` → stop
   - exclude own session messages (already in DB)
   - collect other users' messages + bot responses
 - if 11 returned and traversal reached end without stop point → add `(Earlier messages were omitted)` framing
@@ -952,11 +952,11 @@ Same mechanism as Phase 5. Convert `messages[:-1]` to `UserInputEvent` and store
 ### Full modified file map
 
 ```
-python/apps/nointern/
+python/apps/azents/
 ├── typings/slack_sdk/web/
 │   ├── async_client.pyi              # Phase 4, 5, 6: add method stubs
 │   └── async_chat_stream.pyi         # Phase 4: stop() metadata
-├── src/nointern/
+├── src/azents/
 │   ├── broker/
 │   │   └── types.py                  # Phase 2: InputMessage, SessionMessage
 │   ├── repos/slack_session/

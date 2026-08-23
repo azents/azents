@@ -849,19 +849,19 @@ return GoogleAnalyticsToolkit(
 
 Add required imports:
 ```python
-from nointern.core.tools import (
+from azents.core.tools import (
     # add to existing imports
     McpStdioToolkitConfig,
     MCP_PROXY_PORT,
     ShellToolkitConfig,
 )
-from nointern.runtime.events import (
+from azents.runtime.events import (
     SandboxErrorEvent,
     SandboxInitializingEvent,
     SandboxReadyEvent,
 )
-from nointern.runtime.sandbox import SandboxDomainConfig
-from nointern.runtime.sandbox.agent_home_manager import AgentHomeSandboxManager
+from azents.runtime.sandbox import SandboxDomainConfig
+from azents.runtime.sandbox.agent_home_manager import AgentHomeSandboxManager
 ```
 
 Add parameter to function signature:

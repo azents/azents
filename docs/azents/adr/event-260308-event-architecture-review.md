@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/event-architecture-review.md"
 
 The following sections are copied only from explicit source Design text. No additional intent is inferred.
 
-### Explicit source section: Nointern Event Architecture Review Discussion
+### Explicit source section: Azents Event Architecture Review Discussion
 
 > Discussion record from 2026-03-08. Based on design in `unified-event-architecture.md`, discusses problems in current structure and improvement direction.
 

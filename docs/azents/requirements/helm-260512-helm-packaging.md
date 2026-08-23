@@ -1,5 +1,5 @@
 ---
-title: "NoIntern Helm Packaging Historical Requirements Reconstruction"
+title: "Azents Helm Packaging Historical Requirements Reconstruction"
 created: 2026-05-12
 implemented: 2026-05-12
 tags: [documentation, historical-reconstruction, migration]
@@ -10,7 +10,7 @@ historical_reconstruction: true
 migration_source: "docs/azents/design/helm-packaging.md"
 ---
 
-# NoIntern Helm Packaging Historical Requirements Reconstruction
+# Azents Helm Packaging Historical Requirements Reconstruction
 
 > This is a provenance-marked historical reconstruction, not newly approved product intent.
 > It contains only statements recoverable from the source document. Unknown intent remains explicitly unknown.
@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/helm-packaging.md"
 
 ## Problem
 
-NoIntern production Kubernetes deployment is currently centered on ArgoCD app-of-apps and Kustomize overlays. This structure fits the current operating environment, but has high entry barrier for these purposes:
+Azents production Kubernetes deployment is currently centered on ArgoCD app-of-apps and Kustomize overlays. This structure fits the current operating environment, but has high entry barrier for these purposes:
 
 - Need an install unit to validate OSS deployment possibility.
 - Need to install on a home cluster and use it as a non-production test zone.
@@ -38,7 +38,7 @@ Unknown — the historical source does not state this explicitly.
 
 Implementation PR performs following QA.
 
-1. `helm lint infra/charts/nointern`.
+1. `helm lint infra/charts/azents`.
 2. Run `helm template` with dependency-enabled values combination and confirm `server`, `web`, `adminWeb`, `sandbox`, bundled PostgreSQL/Redis/RustFS resources render.
 3. Run with external dependency values combination and confirm bundled dependencies are off and only external endpoint/`existingSecret` references render.
 4. Confirm opt-in rendering of `snapshotter`, `mcpEgressProxy`, `discordGateway`, `externalSecret` with advanced values.
@@ -48,7 +48,7 @@ Implementation PR performs following QA.
 
 Implementation PR performs following QA.
 
-1. `helm lint infra/charts/nointern`.
+1. `helm lint infra/charts/azents`.
 2. Run `helm template` with dependency-enabled values combination and confirm `server`, `web`, `adminWeb`, `sandbox`, bundled PostgreSQL/Redis/RustFS resources render.
 3. Run with external dependency values combination and confirm bundled dependencies are off and only external endpoint/`existingSecret` references render.
 4. Confirm opt-in rendering of `snapshotter`, `mcpEgressProxy`, `discordGateway`, `externalSecret` with advanced values.
@@ -56,8 +56,8 @@ Implementation PR performs following QA.
 
 ## Goals
 
-- Make NoIntern installable as one Helm chart.
-- Default install should be service-runtime profile where core NoIntern user flow actually works, not merely minimal installation-barrier profile.
+- Make Azents installable as one Helm chart.
+- Default install should be service-runtime profile where core Azents user flow actually works, not merely minimal installation-barrier profile.
 - Reflect component boundaries already separated in production in internal chart values structure.
 - Separate production-only coupling such as AWS/EKS, ALB, ExternalSecrets, ECR into values and optional features.
 - Include sandbox in default install as agent execution/runtime core, while keeping advanced prerequisite-heavy optimization components like snapshotter explicit opt-in.
@@ -65,7 +65,7 @@ Implementation PR performs following QA.
 
 ## Non-goals
 
-- This design alone does not declare NoIntern complete public OSS product.
+- This design alone does not declare Azents complete public OSS product.
 - Do not immediately remove production Kustomize deployment.
 - Do not redesign application code configuration model. However, identify environment variable/Secret/ConfigMap surface required for chart value injection.
 - Do not automatically install sandbox/gVisor/snapshotter so it works in every home cluster.

@@ -337,8 +337,8 @@ After unification:
 #### 1-1. DB migration
 
 **Files:**
-- `nointern/rdb/models/message.py` — add `raw_output` column
-- `nointern/rdb/migrations/versions/` — Alembic migration
+- `azents/rdb/models/message.py` — add `raw_output` column
+- `azents/rdb/migrations/versions/` — Alembic migration
 
 Add nullable `raw_output` JSONB column to `events` table.
 
@@ -353,7 +353,7 @@ Reference pattern: `20279d111590_add_model_column_to_events.py`
 
 #### 1-2. Extend StreamEnd
 
-**File:** `nointern/engine/types.py`
+**File:** `azents/engine/types.py`
 
 Add `raw_output_items` field to `StreamEnd`:
 
@@ -375,7 +375,7 @@ Provide empty list as default_factory so existing test code does not break.
 
 #### 1-3. LLM client — collect raw output
 
-**File:** `nointern/runtime/llm.py`
+**File:** `azents/runtime/llm.py`
 
 Change `stream()` method:
 - On `ResponseCompletedEvent`, store each item in `response.output` after `model_dump()` into `raw_output_items`.
@@ -389,7 +389,7 @@ Change `stream()` method:
 
 #### 1-4. Engine save logic
 
-**File:** `nointern/engine/engine.py`
+**File:** `azents/engine/engine.py`
 
 After receiving `StreamEnd` in `run()`:
 - Existing: construct reasoning_items + `AssistantTextEvent`/`AssistantToolCallEvent` → pass to store
@@ -404,7 +404,7 @@ Method for matching raw output item to SessionEvent:
 
 #### 1-5. EventStore save
 
-**File:** `nointern/repos/message/store.py`
+**File:** `azents/repos/message/store.py`
 
 Choose either adding optional `raw_output` field to `SessionEvent` type or passing raw_output as separate argument to `EventStore.append()`.
 
@@ -436,7 +436,7 @@ Include `raw_output` field in RDBEvent kwargs in `_event_to_rdb_kwargs()`.
 #### Verification
 
 - Existing tests pass (raw_output optional, so no impact on existing code)
-- After LLM call with nointern shell, check DB: `raw_output` column filled
+- After LLM call with azents shell, check DB: `raw_output` column filled
 - `uv run ruff check --fix . && uv run ruff format . && uv run pyright && uv run pytest`
 
 ---
@@ -449,14 +449,14 @@ Include `raw_output` field in RDBEvent kwargs in `_event_to_rdb_kwargs()`.
 
 #### 2-1. Inject raw_output when loading EventStore
 
-**File:** `nointern/repos/message/store.py`
+**File:** `azents/repos/message/store.py`
 
 Change `_to_session_event()`:
 - If `RDBEvent.raw_output` exists, inject into `raw_output` field of corresponding `SessionEvent`.
 
 #### 2-2. Refactor `_build_input_items`
 
-**File:** `nointern/runtime/llm.py`
+**File:** `azents/runtime/llm.py`
 
 Core change:
 
@@ -480,7 +480,7 @@ for event in events:
 
 #### 2-3. Existing workaround cleanup
 
-**File:** `nointern/runtime/llm.py`
+**File:** `azents/runtime/llm.py`
 
 - line 211: `if content:` → unnecessary in raw mode, but keep in normalized fallback path.
   - Do not delete because still needed for legacy data with raw_output NULL.
@@ -488,8 +488,8 @@ for event in events:
 #### 2-4. Tests
 
 **Files:**
-- `nointern/runtime/llm_test.py` — unit tests
-- `nointern/engine/engine_test.py` — integration tests
+- `azents/runtime/llm_test.py` — unit tests
+- `azents/engine/engine_test.py` — integration tests
 
 Tests to add:
 1. **Same-model round-trip**: event with raw_output → `_build_input_items` → returns original dict as-is
@@ -501,7 +501,7 @@ Tests to add:
 #### Verification
 
 - All tests pass
-- Actual LLM call with nointern shell: same-model multi-turn conversation → confirm no error
+- Actual LLM call with azents shell: same-model multi-turn conversation → confirm no error
 - GPT 5.2 reasoning + tool_call scenario: confirm existing `BadRequestError` does not reproduce
 
 ---
@@ -516,7 +516,7 @@ Tests to add:
 
 #### 3-1. Engine save logic change
 
-**File:** `nointern/engine/engine.py`
+**File:** `azents/engine/engine.py`
 
 Current:
 ```python
@@ -540,7 +540,7 @@ When OutputMessage + FunctionCall are in same response:
 
 #### 3-2. EventStore load compatibility
 
-**File:** `nointern/repos/message/store.py`
+**File:** `azents/repos/message/store.py`
 
 `_to_session_event()`:
 - row with single item in `tool_calls` → `AssistantToolCallEvent(tool_calls=[tc])`
@@ -549,7 +549,7 @@ When OutputMessage + FunctionCall are in same response:
 
 #### 3-3. Client API aggregation
 
-**File:** `nointern/repos/message/__init__.py`
+**File:** `azents/repos/message/__init__.py`
 
 When querying message list in REST API, aggregate consecutive assistant function_call rows into one `ChatMessage`:
 
@@ -601,13 +601,13 @@ Unified:
 
 #### 4-2. Change broker serialization
 
-**File:** `nointern/broker/serialization.py`
+**File:** `azents/broker/serialization.py`
 
 Change `serialize_event()` / `deserialize_event()` to unified model.
 
 #### 4-3. Clean engine event types
 
-**File:** `nointern/engine/engine.py`
+**File:** `azents/engine/engine.py`
 
 Replace or map existing `TextPartial`, `TextEnd`, `ToolCallStart`, `ToolCallEnd`, etc. to unified model.
 

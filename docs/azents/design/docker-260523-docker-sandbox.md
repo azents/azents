@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Overview
 
-`system-docker` provider is a system-level Docker provider for verifying provider-control runtime lifecycle in NoIntern devserver/testenv standalone mode without K8s. It reconstructs existing direct Docker sandbox backend as provider-control provider implementation, making local Docker container outbound-register to `sandbox-control` with existing `nointern-sandbox-client`.
+`system-docker` provider is a system-level Docker provider for verifying provider-control runtime lifecycle in Azents devserver/testenv standalone mode without K8s. It reconstructs existing direct Docker sandbox backend as provider-control provider implementation, making local Docker container outbound-register to `sandbox-control` with existing `azents-sandbox-client`.
 
 Source decision: [docker-260523/ADR](../adr/docker-260523-docker-sandbox.md)
 
@@ -38,7 +38,7 @@ Even when heartbeat/lease/runtime allocation issues occur in production K8s prov
 ## Non-goals
 
 - customer/user-local Docker provider daemon implementation.
-- `nointern-sandbox-provider login/start` UX.
+- `azents-sandbox-provider login/start` UX.
 - workspace-scoped provider credential, revoke UI, public TLS endpoint.
 - Docker isolation hardening/rootless Docker policy for customer machine.
 - provider-native hibernate/preserve_home implementation.
@@ -51,7 +51,7 @@ Even when heartbeat/lease/runtime allocation issues occur in production K8s prov
 
 Main contract:
 
-- container name: `nointern-agent-{runtime_id_prefix}`
+- container name: `azents-agent-{runtime_id_prefix}`
 - bind mount:
   - `{data_path}/agent-runtimes/{runtime_id}/home-sandbox -> /home/sandbox`
   - `{data_path}/agent-runtimes/{runtime_id}/tmp-agent -> /tmp/agent`
@@ -82,7 +82,7 @@ flowchart LR
     DockerBackend[DockerSandboxProvider]
     Docker[(Docker daemon)]
     Runtime[agent-runtime container]
-    RuntimeClient[nointern-sandbox-client]
+    RuntimeClient[azents-sandbox-client]
 
     Manager --> ProviderClient
     ProviderClient --> Control
@@ -99,8 +99,8 @@ flowchart LR
 
 | Name | Scope | Execution location | Purpose |
 |---|---|---|---|
-| `system-docker` | system | NoIntern devserver/testenv operator environment | provider-control reproduction without K8s and local dev sandbox |
-| customer local Docker provider | workspace | user local machine | register customer compute as NoIntern workspace provider |
+| `system-docker` | system | Azents devserver/testenv operator environment | provider-control reproduction without K8s and local dev sandbox |
+| customer local Docker provider | workspace | user local machine | register customer compute as Azents workspace provider |
 
 `system-docker` is registered as static system provider config. Default provider id is `system-docker`. Even if customer provider later uses user-visible name like `local-docker`, credential scope and provider id namespace must not collide.
 
@@ -129,8 +129,8 @@ Docker provider keeps mount/env/container labels from `DockerSessionSandboxClien
 
 Separate K8s entrypoint and Docker entrypoint.
 
-- existing: `python/apps/nointern/sandbox_provider_controller.py` → K8s provider controller
-- new: `python/apps/nointern/sandbox_docker_provider_controller.py` → system Docker provider controller
+- existing: `python/apps/azents/sandbox_provider_controller.py` → K8s provider controller
+- new: `python/apps/azents/sandbox_docker_provider_controller.py` → system Docker provider controller
 
 Common stream client and service are shared. Docker entrypoint has only Docker-specific settings.
 
@@ -164,7 +164,7 @@ No Public API change. `SandboxSetting.sandbox_provider_id` already supports prov
 
 ## Test Strategy
 
-E2E primary is path that starts actual services and Docker provider controller in testenv/nointern E2E. Unit/integration tests are only supporting verification for provider backend contract and container spec.
+E2E primary is path that starts actual services and Docker provider controller in testenv/azents E2E. Unit/integration tests are only supporting verification for provider backend contract and container spec.
 
 ### E2E Primary Verification Matrix
 
@@ -212,7 +212,7 @@ E2E evidence leaves following read-only snapshots.
 system Docker provider verification needs Docker daemon and agent-runtime image, so declare as testenv prerequisite. prerequisite checks following.
 
 - Docker daemon accessibility.
-- Whether `nointern-agent-runtime:local` or runtime image built by testenv exists.
+- Whether `azents-agent-runtime:local` or runtime image built by testenv exists.
 - Whether sandbox-control endpoint can be converted to host alias accessible inside Docker container.
 - Whether provider-control token, sandbox-control auth secret, static provider config match each other.
 
@@ -263,7 +263,7 @@ In testenv standalone, `system-docker` provider registers to provider-control an
 To reproduce and separate provider-control liveness problem without K8s, actual provider controller stream is required.
 
 #### How to check
-Start devserver with Docker provider-enabled fixture in `testenv/nointern/e2e` and query provider diagnostic API.
+Start devserver with Docker provider-enabled fixture in `testenv/azents/e2e` and query provider diagnostic API.
 
 #### Expected result
 provider id `system-docker` is active and heartbeat/capacity evidence exists.
@@ -341,7 +341,7 @@ TBD
 3. Add `sandbox_docker_provider_controller.py` entrypoint.
 4. Add testenv/devserver static provider config and process startup.
 5. Add E2E provider-control Docker scenario.
-6. Update `docs/nointern/spec/flow/sandbox-provider-control.md` according to implementation result.
+6. Update `docs/azents/spec/flow/sandbox-provider-control.md` according to implementation result.
 
 ## Alternatives Considered
 

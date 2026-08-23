@@ -18,7 +18,7 @@ historical_reconstruction: true
 After OpenAI events redesign stack (#3099–#3109) merge, the system is in transient state where two tables coexist:
 
 - **`events`** (legacy) — `RDBEvent` (`models/message.py`). row-per-message schema (role/content/tool_calls/raw_output/usage). `RDBEventStore` reads/writes it. Currently used by chat API + engine_adapter durable Emit pipeline.
-- **`events_v2`** (new) — `RDBEventV2` (`models/event_v2.py`). row-per-event schema (type/data/raw_data/external_id). `NointernSession.add_items` writes only on SDK Runner path. Nearly unused.
+- **`events_v2`** (new) — `RDBEventV2` (`models/event_v2.py`). row-per-event schema (type/data/raw_data/external_id). `AzentsSession.add_items` writes only on SDK Runner path. Nearly unused.
 
 Additionally, `SessionEvent` runtime type has impedance mismatch with events_v2 schema — `FunctionCallItem.output` is nested, so it does not map 1:1 to row-per-event in events_v2 (conversion layer needed).
 
@@ -68,7 +68,7 @@ B) **Allow data loss** — discard legacy events as-is, rename events_v2 → eve
 
 Rationale:
 - User explicitly said "data compatibility and migration are all unnecessary".
-- nointern is in internal service stage (operational data loss acceptable).
+- azents is in internal service stage (operational data loss acceptable).
 - Simple = fast ship + smaller bug surface.
 
 ### DP3: Stack split — phase unit
@@ -131,7 +131,7 @@ Verification point by phase:
 ```mermaid
 flowchart TD
     subgraph "Before (current stack)"
-        A1[SDK Runner] -->|add_items| B1[NointernSession]
+        A1[SDK Runner] -->|add_items| B1[AzentsSession]
         B1 -->|write events_v2| T1[(events_v2)]
         A1 -->|stream events| C1[engine_adapter]
         C1 -->|durable Emit| D1[Worker]
@@ -141,7 +141,7 @@ flowchart TD
     end
 
     subgraph "After (target)"
-        A2[SDK Runner] -->|add_items| B2[NointernSession]
+        A2[SDK Runner] -->|add_items| B2[AzentsSession]
         B2 -->|write events| T3[(events 'unified')]
         A2 -->|stream events| C2[engine_adapter]
         C2 -->|durable Emit| D2[Worker]
@@ -154,7 +154,7 @@ flowchart TD
 Core changes:
 - `RDBEventStore` (legacy events) → delete
 - `EventStoreV2` (events_v2 → final events) → single store
-- `NointernSession` and `EventStoreV2` write to same table — partial unique index `(session_id, external_id)` naturally dedups
+- `AzentsSession` and `EventStoreV2` write to same table — partial unique index `(session_id, external_id)` naturally dedups
 - `SessionEvent` ↔ events row 1:1 (no conversion, FunctionCallItem.output split)
 
 ## Data Model
@@ -177,7 +177,7 @@ CREATE INDEX ix_events_session_created ON events(session_id, created_at);
 CREATE UNIQUE INDEX uq_events_session_external ON events(session_id, external_id) WHERE external_id IS NOT NULL;
 ```
 
-CHECK constraint: `type ∈ SDK_ORIGIN ⇒ raw_data NOT NULL`, `type ∈ NOINTERN_ORIGIN ⇒ raw_data NULL`.
+CHECK constraint: `type ∈ SDK_ORIGIN ⇒ raw_data NOT NULL`, `type ∈ AZ_ORIGIN ⇒ raw_data NULL`.
 
 ### SessionEvent ↔ events row mapping (native 1:1)
 
@@ -326,7 +326,7 @@ def upgrade():
 | Assumption | Verification method | Result |
 |---|---|---|
 | events_v2 schema can represent every SessionEvent | DP1 mapping table | OK — 14 types 1:1 |
-| partial unique index guarantees dual-write dedup | same external_id in NointernSession.add_items + EventStoreV2.append | OK — index definition confirmed |
+| partial unique index guarantees dual-write dedup | same external_id in AzentsSession.add_items + EventStoreV2.append | OK — index definition confirmed |
 | page-level pairing of `FunctionCallOutputItem` preserves meaning of context masking | reimplement mask_observations + find_compaction_boundary | Phase 1 verification |
 | chat API response (ChatMessage) remains compatible after new type split | review services/chat/data.py | split ChatMessage too if needed (but SessionEvent based, so automatically compatible) |
 | compaction delete_count semantics are row-level | verify boundary_idx calculation in engine.py | OK — already calculated by SessionEvent, EventStoreV2 is row-level too |

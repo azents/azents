@@ -25,7 +25,7 @@ historical_reconstruction: true
 
 ## Overview
 
-Current nointern subagent has independent **LLM model**, **toolkit bindings**, and **system prompt** from the parent agent. This independence fits the "specialist subagent" pattern (DB analyst, code reviewer, etc.), but makes it hard to create a "**general subagent** — a subagent that inherits the parent's tools and model as-is and only performs a specific role."
+Current azents subagent has independent **LLM model**, **toolkit bindings**, and **system prompt** from the parent agent. This independence fits the "specialist subagent" pattern (DB analyst, code reviewer, etc.), but makes it hard to create a "**general subagent** — a subagent that inherits the parent's tools and model as-is and only performs a specific role."
 
 This design adds options for subagent to selectively **inherit** parent's toolkit and model. At the same time, tools that must remain parent-only (`memory`, `schedule`, `subagent` itself, etc.) are explicitly separated.
 
@@ -118,7 +118,7 @@ Rationale:
 Rationale:
 - Subagent's model should be "the same method regardless of which parent calls it". Junction-specific branching is excessive — model is property of subagent itself.
 - In DB, `llm_provider_model_id IS NULL` directly means "inherit", making intent clear.
-- Semantically isomorphic to Claude Agent SDK `model: "inherit"` (nointern RDB representation is NULL).
+- Semantically isomorphic to Claude Agent SDK `model: "inherit"` (azents RDB representation is NULL).
 - Do **not** add `model_inherit` column to `agent_subagents` junction. Toolkit inherit and model inherit are both agent row level (DP1 A, DP5 A), because they are properties decided by subagent's own nature.
 
 **DDL**:
@@ -699,7 +699,7 @@ Control model inherit with junction-level flag. Rejected in review #2976. NULL (
 
 ### Alternative 6: Sentinel `model_id = 'inherit'` (DP5 C)
 
-Breaks FK constraint and blurs schema meaning. Claude Agent SDK can do this because it is file-based config, but nointern uses RDB. Rejected.
+Breaks FK constraint and blurs schema meaning. Claude Agent SDK can do this because it is file-based config, but azents uses RDB. Rejected.
 
 ### Alternative 7: Code constants `MAIN_ONLY_TOOLKIT_TYPES`, `MAIN_ONLY_TOOL_NAMES` (DP4 B — initially adopted → changed to C)
 
@@ -718,7 +718,7 @@ Nested subagent delegation. Current A → B → A cycle prevention relies on ope
 - Claude Agent SDK: [`model: "inherit"` literal](https://platform.claude.com/docs/en/agent-sdk/subagents) — parent model inheritance through sentinel string
 - Claude Code [issue #30161](https://github.com/anthropics/claude-code/issues/30161) — `denyMainOnly`/`allowForSubagents` feature request (not implemented yet)
 - Mastra — `allowedWorkspaceTools` allowlist + auto-inherit (similar pattern)
-- Existing nointern documents:
+- Existing azents documents:
   - [`design/subagent-260306-subagent.md`](./subagent-260306-subagent.md) — integrated subagent tool adoption
   - [`spec/flow/subagent-delegation.md`](../spec/flow/subagent-delegation.md) — current runtime behavior
   - [`spec/domain/agent.md`](../spec/domain/agent.md) — agent domain

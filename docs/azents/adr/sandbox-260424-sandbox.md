@@ -13,7 +13,7 @@ migration_source: "docs/azents/adr/0001-per-session-sandbox.md"
 
 ## Context
 
-The current nointern sandbox uses a **per-agent** model: one `RDBAgent` maps to one persistent container shared by multiple sessions. This design was chosen for the product value of "the whole team talks to one agent," and lifecycle, hibernation, and snapshot infrastructure was built across Phases 1-3 (`docs/nointern/design/agent-home.md`, `phase3-snapshot-hibernation.md`).
+The current azents sandbox uses a **per-agent** model: one `RDBAgent` maps to one persistent container shared by multiple sessions. This design was chosen for the product value of "the whole team talks to one agent," and lifecycle, hibernation, and snapshot infrastructure was built across Phases 1-3 (`docs/azents/design/agent-home.md`, `phase3-snapshot-hibernation.md`).
 
 However, the following problems became clear:
 
@@ -63,7 +63,7 @@ For detailed implementation decisions (Discussion [#2971](https://github.com/aze
 
 Keep the session model and agent model side by side behind a flag and migrate gradually.
 
-**Rejected**: Maintaining dual code paths costs more than a big-bang cutover. At nointern's scale, an announced cutover is sufficient. Conversation context is preserved, so user impact is limited.
+**Rejected**: Maintaining dual code paths costs more than a big-bang cutover. At azents's scale, an announced cutover is sufficient. Conversation context is preserved, so user impact is limited.
 
 ### Keep the per-agent model and serialize session execution
 
@@ -96,10 +96,10 @@ Use an independent sandbox per user within the same agent.
 - Original issue: [#2837](https://github.com/azents/azents/issues/2837)
 - Design document: [sandbox-260424-sandbox.md](../design/sandbox-260424-sandbox.md)
 - Related infrastructure documents:
-  - `docs/nointern/design/agent-home.md` — previous per-agent design
-  - `docs/nointern/design/phase3-snapshot-hibernation.md` — infrastructure to reuse
-  - `docs/nointern/design/sandbox-daemon.md` — in-container daemon
-  - `docs/nointern/design/memory-system.md` + `shared-storage-and-skills.md` — memory/skills, persistent `/data` layer
+  - `docs/azents/design/agent-home.md` — previous per-agent design
+  - `docs/azents/design/phase3-snapshot-hibernation.md` — infrastructure to reuse
+  - `docs/azents/design/sandbox-daemon.md` — in-container daemon
+  - `docs/azents/design/memory-system.md` + `shared-storage-and-skills.md` — memory/skills, persistent `/data` layer
 - Telemetry integration: [Issue #2685](https://github.com/azents/azents/issues/2685), [PR #2762](https://github.com/azents/azents/pull/2762)
 
 ## Status

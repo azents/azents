@@ -31,7 +31,7 @@ migration_source: "docs/azents/design/llm-event-storage-redesign.md"
 
 ## Primary Actor
 
-**File:** `nointern/runtime/llm.py`
+**File:** `azents/runtime/llm.py`
 
 Core change:
 

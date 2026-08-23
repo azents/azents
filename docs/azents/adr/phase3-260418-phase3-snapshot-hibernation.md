@@ -67,7 +67,7 @@ No user message for 30 minutes
 
 **Rationale**:
 
-- NoIntern uses container isolation with bwrap inside the container; C requires replacing the entire isolation model.
+- Azents uses container isolation with bwrap inside the container; C requires replacing the entire isolation model.
 - AL2023 EKS defaults to cgroupv2, while CRIU needs cgroupv1 plus specific runc settings. This would require a custom AMI and has high restore failure/debugging risk.
 - Filesystem-only delivers about 80% of the value: installed packages, `/usr/local`, `/etc` changes, and shell history.
 - When process state is needed, tmux/screen wrappers or agent init scripts can cover it.
@@ -96,7 +96,7 @@ No user message for 30 minutes
 
 ### D3. Whether to include CRIU
 
-**Background**: Vercel Open Agents uses Firecracker microVM + native snapshots to fully restore process state. For NoIntern to provide equivalent UX, CRIU is the only option.
+**Background**: Vercel Open Agents uses Firecracker microVM + native snapshots to fully restore process state. For Azents to provide equivalent UX, CRIU is the only option.
 
 **Options**:
 
@@ -205,12 +205,12 @@ No user message for 30 minutes
 
 - Initial risk assessment incorrectly included "sandbox escape → DaemonSet path." In reality, a successful sandbox escape already means node root, so the DaemonSet is irrelevant in that scenario.
 - Actual threats:
-  1. nointern-server RCE → DS misuse, though the DS grants limited authority.
+  1. azents-server RCE → DS misuse, though the DS grants limited authority.
   2. DS code/dependency CVE — mitigated by dependency scanning and narrow API surface.
   3. Supply chain risk in DS image — mitigated by cosign + ArgoCD verify.
   4. Token leak / NetworkPolicy mistake — mitigated by explicit NetworkPolicy allow-list.
 - **Three core defenses**:
-  1. **NetworkPolicy** — DS API is reachable only from `namespace=nointern, serviceAccount=nointern-server`.
+  1. **NetworkPolicy** — DS API is reachable only from `namespace=azents, serviceAccount=azents-server`.
   2. **HMAC request signing** — HMAC-SHA256 over body + timestamp with 60-second replay window.
   3. **Narrow API** — only `POST /snapshot` and `POST /delete-snapshot`. No arbitrary `ctr` command exposure. Image refs are generated server-side and regex-validated.
 - Credential isolation: Agent containers should not contain credentials by policy, so snapshots are unlikely to contain credentials.
@@ -357,7 +357,7 @@ No user message for 30 minutes
 
 ### D15. Snapshot handling on base image upgrade
 
-**Background**: A snapshot is a self-contained OCI image produced by `ctr commit`, with agent diff accumulated over the base image from creation time. When `nointern_agent_runtime_image` is deployed with a new version:
+**Background**: A snapshot is a self-contained OCI image produced by `ctr commit`, with agent diff accumulated over the base image from creation time. When `azents_agent_runtime_image` is deployed with a new version:
 
 - Existing snapshot restore still works because old base layers remain in ECR and can be pulled.
 - But fresh Pods use the new base, while snapshot restore Pods use the old base, causing **drift between agents**.

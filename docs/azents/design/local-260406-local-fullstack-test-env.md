@@ -17,7 +17,7 @@ historical_reconstruction: true
 
 ## Overview
 
-Most NoIntern features can currently be verified only after deployment. Goal is to let an agent (Claude Code) directly set up environment locally, verify feature behavior, and reproduce bugs after implementing a new feature.
+Most Azents features can currently be verified only after deployment. Goal is to let an agent (Claude Code) directly set up environment locally, verify feature behavior, and reproduce bugs after implementing a new feature.
 
 This document covers **Stage 1 — Preflight check mechanism** of the whole vision.
 
@@ -37,7 +37,7 @@ Only deterministically verifiable items are covered.
 Assume agent A implemented new MCP toolkit type.
 
 1. Agent A completes code changes and wants to "verify behavior"
-2. Run `./testenv/nointern/preflight.py` → check all prerequisites
+2. Run `./testenv/azents/preflight.py` → check all prerequisites
 3. Resolve failed checks one by one using fix hints
 4. preflight passes → start devserver (stage after Stage 1)
 5. Create toolkit via API call → invoke actual tool through chat session (Stage 2/3)
@@ -67,7 +67,7 @@ This document is final design for **Stage 1a (Preflight check mechanism)**. Stag
 ```
 <repo root>/
 └── testenv/
-    └── nointern/
+    └── azents/
         ├── preflight.py              # entrypoint
         ├── README.md                 # usage + guide for adding checks
         └── checks/
@@ -83,7 +83,7 @@ This document is final design for **Stage 1a (Preflight check mechanism)**. Stag
 ```
 
 - `testenv/`: new top-level directory in repo root. Dedicated to test harness
-- `nointern/`: project scope. Can expand to `testenv/azents/` etc. in future
+- `azents/`: project scope. Can expand to `testenv/azents/` etc. in future
 
 ### Execution model
 
@@ -95,7 +95,7 @@ sequenceDiagram
     participant Checks as ALL_CHECKS
     participant Output as _output.Formatter
 
-    User->>Entry: python testenv/nointern/preflight.py
+    User->>Entry: python testenv/azents/preflight.py
     Entry->>Runner: Runner(ALL_CHECKS, formatter)
     Runner->>Runner: initialize RunContext
     loop each check (category order)
@@ -172,8 +172,8 @@ Check functions create result only through above factory methods. Do not directl
 @dataclass
 class RunContext:
     repo_root: Path                                  # determined by check 00, fixed afterward
-    nointern_dir: Path                               # repo_root / "python/apps/nointern"
-    env_file: Path                                   # nointern_dir / ".env"
+    azents_dir: Path                               # repo_root / "python/apps/azents"
+    env_file: Path                                   # azents_dir / ".env"
     env: dict[str, str] = field(default_factory=dict)
     previous_results: dict[str, CheckResult] = field(default_factory=dict)
 ```
@@ -205,7 +205,7 @@ To add new check:
 ### ALL_CHECKS registration
 
 ```python
-# testenv/nointern/checks/__init__.py
+# testenv/azents/checks/__init__.py
 from .system import (
     RepoRoot,
     DockerRunning,
@@ -252,14 +252,14 @@ For each category, specify id, what is verified, and fix hint on failure.
 
 | id | name | Verification method | fix hint |
 |---|---|---|---|
-| `repo-root` | Repo root detected | find `docker-compose.nointern.yaml` from current working directory or ancestors | Run from monorepo root |
+| `repo-root` | Repo root detected | find `docker-compose.azents.yaml` from current working directory or ancestors | Run from monorepo root |
 | `docker-running` | Docker daemon running | `docker info` subprocess, returncode 0 | Start Docker Desktop / `sudo systemctl start docker` |
 | `docker-compose-available` | docker compose plugin | `docker compose version` returncode 0 | Install docker compose v2 plugin |
 | `uv-installed` | uv installed | `shutil.which("uv")` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| `python-version` | Python 3.14+ | verify python exists satisfying `requires-python` in `python/apps/nointern/pyproject.toml` (`uv run python --version` or `python3.14 --version`) | Install Python 3.14 via pyenv/mise |
-| `python-deps-installed` | nointern deps installed | check `python/apps/nointern/.venv` exists + `uv run python -c "import nointern"` succeeds | `cd python/apps/nointern && uv sync` |
+| `python-version` | Python 3.14+ | verify python exists satisfying `requires-python` in `python/apps/azents/pyproject.toml` (`uv run python --version` or `python3.14 --version`) | Install Python 3.14 via pyenv/mise |
+| `python-deps-installed` | azents deps installed | check `python/apps/azents/.venv` exists + `uv run python -c "import azents"` succeeds | `cd python/apps/azents && uv sync` |
 
-**Note**: `python-version` checks **Python 3.14 required by nointern project**, not Python used by preflight itself (could be 2.x). Preflight itself uses only Python 3.8+ standard library.
+**Note**: `python-version` checks **Python 3.14 required by azents project**, not Python used by preflight itself (could be 2.x). Preflight itself uses only Python 3.8+ standard library.
 
 ### Ports (20)
 
@@ -273,26 +273,26 @@ For each category, specify id, what is verified, and fix hint on failure.
 
 | id | name | Verification method | fix hint |
 |---|---|---|---|
-| `env-file-exists` | .env file exists | file `python/apps/nointern/.env` exists | `cp .env.example .env && edit` |
-| `required-env-vars` | Required env vars set | all variables below exist + `NI_CREDENTIAL_ENCRYPTION_KEY` format verification | missing variable names + guide to `.env.example` |
+| `env-file-exists` | .env file exists | file `python/apps/azents/.env` exists | `cp .env.example .env && edit` |
+| `required-env-vars` | Required env vars set | all variables below exist + `AZ_CREDENTIAL_ENCRYPTION_KEY` format verification | missing variable names + guide to `.env.example` |
 
 **List checked by `required-env-vars`**:
 
 Existence only:
-- `NI_RDB_HOST`
-- `NI_RDB_PORT`
-- `NI_RDB_USER`
-- `NI_RDB_PASSWORD`
-- `NI_RDB_DB_NAME`
-- `NI_AUTH_JWT_SECRET_KEY`
-- `NI_REDIS_URL`
-- `NI_WORKSPACE_S3_BUCKET`
-- `NI_WORKSPACE_S3_ENDPOINT_URL`
-- `NI_AGENT_HOME_K8S_MCP_PROXY_IMAGE` (Settings required even if K8s unused)
-- `NI_AGENT_HOME_K8S_SANDBOX_DAEMON_IMAGE` (same)
+- `AZ_RDB_HOST`
+- `AZ_RDB_PORT`
+- `AZ_RDB_USER`
+- `AZ_RDB_PASSWORD`
+- `AZ_RDB_DB_NAME`
+- `AZ_AUTH_JWT_SECRET_KEY`
+- `AZ_REDIS_URL`
+- `AZ_WORKSPACE_S3_BUCKET`
+- `AZ_WORKSPACE_S3_ENDPOINT_URL`
+- `AZ_AGENT_HOME_K8S_MCP_PROXY_IMAGE` (Settings required even if K8s unused)
+- `AZ_AGENT_HOME_K8S_SANDBOX_DAEMON_IMAGE` (same)
 
 Format verification:
-- `NI_CREDENTIAL_ENCRYPTION_KEY`: exactly 32 bytes after base64 decoding
+- `AZ_CREDENTIAL_ENCRYPTION_KEY`: exactly 32 bytes after base64 decoding
 
 **.env loading timing**: runner parses `.env` immediately after check 30 (`env-file-exists`) passes and injects into `context.env` and `os.environ`. From check 31 onward, environment variables can be safely used.
 
@@ -302,10 +302,10 @@ Separately verifies container state and actual reachability.
 
 | id | name | Verification method | fix hint |
 |---|---|---|---|
-| `postgres-container-healthy` | Postgres container healthy | parse output of `docker compose -p nointern ps --format json db`, confirm `State=running` | `docker compose -f docker-compose.nointern.yaml up -d db` |
-| `postgres-connectable` | Postgres connectable | actually attempt `psycopg.connect()` via `uv run python -c "..."` in nointern project | verify auth info / port |
-| `valkey-reachable` | Valkey reachable | parse `NI_REDIS_URL` → TCP connection attempt (`socket`) | `docker compose up -d valkey` |
-| `rustfs-reachable` | RustFS reachable | `urllib.request.urlopen(".../minio/health/live")` from `NI_WORKSPACE_S3_ENDPOINT_URL` | `docker compose up -d rustfs` |
+| `postgres-container-healthy` | Postgres container healthy | parse output of `docker compose -p azents ps --format json db`, confirm `State=running` | `docker compose -f docker-compose.azents.yaml up -d db` |
+| `postgres-connectable` | Postgres connectable | actually attempt `psycopg.connect()` via `uv run python -c "..."` in azents project | verify auth info / port |
+| `valkey-reachable` | Valkey reachable | parse `AZ_REDIS_URL` → TCP connection attempt (`socket`) | `docker compose up -d valkey` |
+| `rustfs-reachable` | RustFS reachable | `urllib.request.urlopen(".../minio/health/live")` from `AZ_WORKSPACE_S3_ENDPOINT_URL` | `docker compose up -d rustfs` |
 
 **`postgres-connectable` implementation**:
 
@@ -317,25 +317,25 @@ def run(self, context: RunContext) -> CheckResult:
         'import psycopg, os, sys;'
         'try:'
         ' psycopg.connect('
-        '  host=os.environ["NI_RDB_HOST"],'
-        '  port=int(os.environ["NI_RDB_PORT"]),'
-        '  user=os.environ["NI_RDB_USER"],'
-        '  password=os.environ["NI_RDB_PASSWORD"],'
-        '  dbname=os.environ["NI_RDB_DB_NAME"]).close();'
+        '  host=os.environ["AZ_RDB_HOST"],'
+        '  port=int(os.environ["AZ_RDB_PORT"]),'
+        '  user=os.environ["AZ_RDB_USER"],'
+        '  password=os.environ["AZ_RDB_PASSWORD"],'
+        '  dbname=os.environ["AZ_RDB_DB_NAME"]).close();'
         ' print("ok")'
         'except Exception as e:'
         ' print(f"fail: {e}", file=sys.stderr); sys.exit(1)'
     )
     result = subprocess.run(
         ["uv", "run", "python", "-c", script],
-        cwd=context.nointern_dir,
+        cwd=context.azents_dir,
         capture_output=True,
         text=True,
     )
     if result.returncode != 0:
         return CheckResult.fail(
             message=result.stderr.strip() or "connection failed",
-            fix_hint="Verify NI_RDB_* env vars match docker-compose",
+            fix_hint="Verify AZ_RDB_* env vars match docker-compose",
         )
     return CheckResult.ok()
 ```
@@ -344,7 +344,7 @@ def run(self, context: RunContext) -> CheckResult:
 
 | id | name | Verification method | fix hint |
 |---|---|---|---|
-| `db-migration-current` | DB migration up to date | compare output of `uv run alembic -c db-schemas/rdb/alembic.ini current` and `heads` | `cd python/apps/nointern && uv run alembic upgrade head` |
+| `db-migration-current` | DB migration up to date | compare output of `uv run alembic -c db-schemas/rdb/alembic.ini current` and `heads` | `cd python/apps/azents && uv run alembic upgrade head` |
 
 **`depends_on`**: `["python-deps-installed", "postgres-connectable"]`
 
@@ -354,8 +354,8 @@ def run(self, context: RunContext) -> CheckResult:
 def run(checks: list[Check], formatter: Formatter) -> int:
     context = RunContext(
         repo_root=Path.cwd(),          # overridden by check 00
-        nointern_dir=Path.cwd() / "python/apps/nointern",
-        env_file=Path.cwd() / "python/apps/nointern/.env",
+        azents_dir=Path.cwd() / "python/apps/azents",
+        env_file=Path.cwd() / "python/apps/azents/.env",
     )
 
     current_category: str = ""
@@ -407,8 +407,8 @@ def _post_pass_hooks(check: Check, context: RunContext) -> None:
     if check.id == "repo-root":
         # reflect repo_root determined by check 00 into context
         context.repo_root = _detected_repo_root
-        context.nointern_dir = context.repo_root / "python/apps/nointern"
-        context.env_file = context.nointern_dir / ".env"
+        context.azents_dir = context.repo_root / "python/apps/azents"
+        context.env_file = context.azents_dir / ".env"
     elif check.id == "env-file-exists":
         # check 30 passed → load .env
         _load_env_file(context.env_file, context.env)
@@ -425,7 +425,7 @@ TTY auto-detection: `sys.stdout.isatty()` → if True ANSI color + Unicode symbo
 ### TTY example
 
 ```
-NoIntern Preflight
+Azents Preflight
 
 [system]
   ✓ Repo root detected                      /home/user/azents
@@ -433,7 +433,7 @@ NoIntern Preflight
   ✓ docker compose plugin                   v2.30.3
   ✓ uv installed                            v0.5.11
   ✓ Python 3.14+                            3.14.3
-  ✓ nointern deps installed
+  ✓ azents deps installed
 
 [ports]
   ✗ Devserver ports free
@@ -459,7 +459,7 @@ Result: 6 passed, 1 failed, 0 warned, 8 skipped
 ### Plain ASCII example (pipe/CI/log)
 
 ```
-NoIntern Preflight
+Azents Preflight
 
 [system]
   [PASS] Repo root detected                 /home/user/azents
@@ -502,7 +502,7 @@ Adding new check has 3 steps:
 
 1. **Define check class** (in appropriate `checks/*.py`):
     ```python
-    # testenv/nointern/checks/infra.py
+    # testenv/azents/checks/infra.py
     class MyNewCheck(Check):
         id = "my-new-check"
         name = "My new check"
@@ -541,10 +541,10 @@ If new category is needed (e.g., `build`, `network`):
 
 ## Infra Changes
 
-**No change.** This design only adds new directory (`testenv/nointern/`) and Python script to codebase, and does not touch following:
+**No change.** This design only adds new directory (`testenv/azents/`) and Python script to codebase, and does not touch following:
 
-- existing nointern python app
-- docker-compose.nointern.yaml
+- existing azents python app
+- docker-compose.azents.yaml
 - CI pipeline (`.github/workflows/`)
 - agent-runtime Dockerfile
 - Alembic migration
@@ -556,9 +556,9 @@ If new category is needed (e.g., `build`, `network`):
 | Item | Verification | Result |
 |---|---|---|
 | implementation with Python stdlib only | `subprocess`, `pathlib`, `socket`, `urllib.request`, `base64`, `dataclasses`, `enum`, `json` all stdlib | ✓ |
-| container filtering by docker compose project name | `name: nointern` field specified in compose file → can use `docker compose -p nointern ps --format json` | ✓ |
-| psycopg import for `postgres-connectable` | confirmed `psycopg` included in nointern project deps. usable after check 14 passes | ✓ |
-| Alembic current vs head comparison | confirmed `uv run alembic -c db-schemas/rdb/alembic.ini current/heads` works. env.py uses NI_* env vars so .env load needed | ✓ |
+| container filtering by docker compose project name | `name: azents` field specified in compose file → can use `docker compose -p azents ps --format json` | ✓ |
+| psycopg import for `postgres-connectable` | confirmed `psycopg` included in azents project deps. usable after check 14 passes | ✓ |
+| Alembic current vs head comparison | confirmed `uv run alembic -c db-schemas/rdb/alembic.ini current/heads` works. env.py uses AZ_* env vars so .env load needed | ✓ |
 | RustFS MinIO-compatible health endpoint | `rustfs-init` works with `mc` (MinIO client) → MinIO-compatible API. `/minio/health/live` likely. fallback to TCP port check if fails | ✓ (fallback secured) |
 | TTY detection | standard API `sys.stdout.isatty()` | ✓ |
 | .env parsing with stdlib only | simple KEY=VALUE format. only comments/quotes handling needed | ✓ |
@@ -572,7 +572,7 @@ If new category is needed (e.g., `build`, `network`):
 | RustFS does not support `/minio/health/live` | medium | medium | fallback to TCP port connection (docker-compose healthcheck also uses only TCP) |
 | `alembic heads` output format may differ by version | low | medium | extract revision hash with regex and compare both sides same way |
 | `uv run` automatically triggers venv creation → check 14 accidentally "passes" | medium | low | check 14 first verifies `.venv` directory exists. prefer direct `.venv/bin/python` over `uv run` |
-| `NI_WORKSPACE_S3_ENDPOINT_URL` set to `http://host.docker.internal:9000` is unreachable from host | medium | medium | treat as warn + guide "may not be host-access URL" |
+| `AZ_WORKSPACE_S3_ENDPOINT_URL` set to `http://host.docker.internal:9000` is unreachable from host | medium | medium | treat as warn + guide "may not be host-access URL" |
 | Python below 3.8 environment (stdlib dependency) | low | high | top of preflight checks `sys.version_info < (3, 8)` and early exits |
 | `devserver-ports-free` fails because another session running existing preflight | low | low | include `lsof -i :PORT` guidance in error message |
 
@@ -581,7 +581,7 @@ If new category is needed (e.g., `build`, `network`):
 Following need actual execution during implementation to confirm:
 
 - Actual RustFS `/minio/health/live` response
-- `docker compose -p nointern ps --format json` output schema (diff by docker compose v2 version)
+- `docker compose -p azents ps --format json` output schema (diff by docker compose v2 version)
 - Exact `uv run alembic current` output format
 
 → Verify in **Implementation Phase 2**.
@@ -593,17 +593,17 @@ Stage 1a is implemented in 4 phases. Commits are phase-level, but submit whole S
 ### Phase 1: Skeleton + common infra
 
 Files:
-- `testenv/nointern/preflight.py`
-- `testenv/nointern/checks/__init__.py` (empty `ALL_CHECKS`)
-- `testenv/nointern/checks/_base.py` (`Status`, `CheckResult`, `RunContext`, `Check`)
-- `testenv/nointern/checks/_runner.py` (`Runner`)
-- `testenv/nointern/checks/_output.py` (`Formatter`, TTY detection)
+- `testenv/azents/preflight.py`
+- `testenv/azents/checks/__init__.py` (empty `ALL_CHECKS`)
+- `testenv/azents/checks/_base.py` (`Status`, `CheckResult`, `RunContext`, `Check`)
+- `testenv/azents/checks/_runner.py` (`Runner`)
+- `testenv/azents/checks/_output.py` (`Formatter`, TTY detection)
 
-Artifact verification: `python testenv/nointern/preflight.py` → prints "No checks registered" or empty summary.
+Artifact verification: `python testenv/azents/preflight.py` → prints "No checks registered" or empty summary.
 
 ### Phase 2: one pipeline-verification check
 
-- Implement `RepoRoot` in `testenv/nointern/checks/system.py`
+- Implement `RepoRoot` in `testenv/azents/checks/system.py`
 - Add to `ALL_CHECKS`
 - Manually verify PASS case (run from repo root) and FAIL case (run from `/tmp`)
 - Verify both output formats (TTY/ASCII)
@@ -622,7 +622,7 @@ After adding each category, run in actual local environment and confirm behavior
 
 ### Phase 4: documentation
 
-- Write `testenv/nointern/README.md`:
+- Write `testenv/azents/README.md`:
   - usage (how to run, interpret output, common failure cases)
   - guide to adding new check (3 steps + example code)
   - check list table
@@ -661,7 +661,7 @@ After adding each category, run in actual local environment and confirm behavior
 ### 4. Makefile entrypoint
 
 - **Tried**: call with `make preflight`
-- **Rejected because**: project does not yet have Makefile convention. Introducing new Makefile creates separate convention. Single command (`./testenv/nointern/preflight.py`) is simpler. Consider Makefile or dispatcher later if more commands appear.
+- **Rejected because**: project does not yet have Makefile convention. Introducing new Makefile creates separate convention. Single command (`./testenv/azents/preflight.py`) is simpler. Consider Makefile or dispatcher later if more commands appear.
 
 ### 5. Stop on first failure (instead of category skip)
 
@@ -685,4 +685,4 @@ Next steps after Stage 1a completion (for reference, out of this document scope)
 
 **Stage 3 — tool execution + Sandbox**: agent-runtime image build automation, Agent Home container verification, MCP toolkit behavior confirmation, Sandbox isolation verification.
 
-**Stage 4 — browser**: local nointern-web execution, UI verification with Playwright MCP.
+**Stage 4 — browser**: local azents-web execution, UI verification with Playwright MCP.

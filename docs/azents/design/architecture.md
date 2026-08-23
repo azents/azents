@@ -1,5 +1,5 @@
 ---
-title: "nointern Architecture Design"
+title: "azents Architecture Design"
 tags: [backend, architecture]
 created: 2026-02-04
 updated: 2026-03-06
@@ -9,11 +9,11 @@ document_type: supporting-secondary-design
 migration_source: "docs/azents/design/architecture.md"
 ---
 
-# nointern Architecture Design
+# azents Architecture Design
 
 ## Overview
 
-nointern is an **Agent Builder SaaS** platform composed of these major systems:
+azents is an **Agent Builder SaaS** platform composed of these major systems:
 
 - **Web UI**: agent builder (system prompt, tool selection, test chat)
 - **API Server**: FastAPI-based layered architecture
@@ -430,8 +430,8 @@ graph TB
     end
 
     subgraph "Redis (Valkey)"
-        STREAM["Stream: nointern:incoming<br/>(consumer group: engine-workers)"]
-        PUBSUB["Pub/Sub: nointern:session:{id}:events"]
+        STREAM["Stream: azents:incoming<br/>(consumer group: engine-workers)"]
+        PUBSUB["Pub/Sub: azents:session:{id}:events"]
     end
 
     subgraph "Engine Worker"
@@ -474,10 +474,10 @@ graph TB
 
 **Redis usage pattern**:
 
-- **Incoming** (Redis Streams): `nointern:incoming` + consumer group `engine-workers`
+- **Incoming** (Redis Streams): `azents:incoming` + consumer group `engine-workers`
   - multiple workers competitively consume messages → horizontal scaling
   - XADD → XREADGROUP → XACK
-- **Outgoing** (Redis Pub/Sub): `nointern:session:{session_id}:events`
+- **Outgoing** (Redis Pub/Sub): `azents:session:{session_id}:events`
   - realtime event streaming (transient)
   - no loss because WebSocket subscribes before message transmission
   - multiple subscribers possible (multiple browser tabs)
@@ -1084,7 +1084,7 @@ sequenceDiagram
 
 ```mermaid
 graph LR
-    ENV[environment variables<br/>NI_*] --> Settings
+    ENV[environment variables<br/>AZ_*] --> Settings
     DOTENV[.env file] --> Settings
     Settings --> Config
     Config --> S3Config
@@ -1098,14 +1098,14 @@ graph LR
 ## File Structure
 
 ```
-nointern/
+azents/
 ├── apiserver.py           # Public API entrypoint (:8010)
 ├── adminserver.py         # Admin API entrypoint (:8011)
 ├── devserver.py           # all-in-one dev server (:8010 + :8011 + EngineWorker)
 ├── engineworker.py        # standalone engine worker entrypoint
 ├── pyproject.toml
 │
-└── src/nointern/
+└── src/azents/
     ├── __init__.py
     ├── app.py                 # FastAPI app factory functions
     │                          # - create_public_api_app(config, broker?)
@@ -1217,9 +1217,9 @@ A new Channel Gateway communicates with engine through `SessionBroker`. `run_wit
 
 ```python
 # gateway/slack.py
-from nointern.app import run_with_container
-from nointern.broker.redis import RedisBroker
-from nointern.core.config import Config, Settings
+from azents.app import run_with_container
+from azents.broker.redis import RedisBroker
+from azents.core.config import Config, Settings
 
 async def main() -> None:
     config = Config.from_settings(Settings())
@@ -1248,7 +1248,7 @@ Gateway sends user messages with `broker.send_message()` and subscribes to engin
 
 ```python
 # api/public/{domain}/__init__.py
-from nointern.utils.fastapi.route import RouteMounter
+from azents.utils.fastapi.route import RouteMounter
 from . import v1
 
 def mount(mounter: RouteMounter) -> None:
@@ -1256,7 +1256,7 @@ def mount(mounter: RouteMounter) -> None:
 
 # api/public/{domain}/v1/__init__.py
 from fastapi import APIRouter
-from nointern.utils.fastapi.route import RouteMounter
+from azents.utils.fastapi.route import RouteMounter
 
 router = APIRouter()
 

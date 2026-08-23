@@ -13,7 +13,7 @@ migration_source: "docs/azents/adr/0029-testenv-qa-fixtures.md"
 
 ## Context
 
-nointern `testenv/nointern/` is designed around `run-tc`, setup DAG, run-scoped state, and fresh-context verifier. This improved TC execution reliability, but recent QA showed that QA environment preparation cost and uncertainty are now larger problems than product runtime defects.
+azents `testenv/azents/` is designed around `run-tc`, setup DAG, run-scoped state, and fresh-context verifier. This improved TC execution reliability, but recent QA showed that QA environment preparation cost and uncertainty are now larger problems than product runtime defects.
 
 Representative symptoms:
 
@@ -27,10 +27,10 @@ The core goal of this decision is not preserving existing TCs. It is to **accura
 
 ## Decision
 
-Introduce a first-class QA fixture subsystem in `testenv/nointern`.
+Introduce a first-class QA fixture subsystem in `testenv/azents`.
 
 - Fixtures are the source of truth for long-lived, reusable QA environments.
-- Fixture state is stored as logical manifests in `testenv/nointern/.state/fixtures/<fixture-id>.json`.
+- Fixture state is stored as logical manifests in `testenv/azents/.state/fixtures/<fixture-id>.json`.
 - Fixture manifests do not store raw secrets. They store only resource ids, paths, URLs, fingerprints, status, and doctor results.
 - Provide `fixture up`, `fixture doctor`, and `fixture reset` as first-class commands independent from TC execution.
 - `qa run` validates a prepared fixture through fixture doctor, then runs only deterministic probes. It does not use the default LLM verifier or legacy bash fallback.
@@ -62,7 +62,7 @@ Extending existing `run-setup` and `runs/<run-id>/state.json` would be a smaller
 
 ### Integrate with pytest E2E fixtures
 
-Integrating with pytest fixtures in `python/apps/nointern-e2e` would use a familiar testing ecosystem. However, nointern testenv handles agent-as-runner, Slack/browser/devserver/live integration QA, which has a different purpose from containerized API E2E. Clear separation is better than integration.
+Integrating with pytest fixtures in `python/apps/azents-e2e` would use a familiar testing ecosystem. However, azents testenv handles agent-as-runner, Slack/browser/devserver/live integration QA, which has a different purpose from containerized API E2E. Clear separation is better than integration.
 
 ### Gradual improvement focused on preserving existing TCs
 

@@ -67,10 +67,10 @@ The engine does not need to structurally understand toolkit internal states such
 | Situation | tools | prompt |
 |------|-------|--------|
 | MCP connecting | [] | "Loading Slack tools..." |
-| MCP connected | [post_message, ...] | "Connected to Slack workspace 'nointern'." |
+| MCP connected | [post_message, ...] | "Connected to Slack workspace 'azents'." |
 | MCP connection failed | [] | "Slack MCP server connection failed: connection refused" |
 | OAuth authorization required | [request_authorization] | "Slack integration is required." |
-| OAuth authorization complete | [post_message, ...] | "Connected to Slack workspace 'nointern'." |
+| OAuth authorization complete | [post_message, ...] | "Connected to Slack workspace 'azents'." |
 | sidecar Pod preparing | [] | "Sandbox is preparing..." |
 
 ### Context Updates

@@ -1,5 +1,5 @@
 ---
-title: "nointern Daily Log Historical Decision Reconstruction"
+title: "azents Daily Log Historical Decision Reconstruction"
 created: 2026-03-22
 tags: [architecture, historical-reconstruction, migration]
 document_role: primary
@@ -9,7 +9,7 @@ historical_reconstruction: true
 migration_source: "docs/azents/design/daily-log.md"
 ---
 
-# nointern Daily Log Historical Decision Reconstruction
+# azents Daily Log Historical Decision Reconstruction
 
 - Snapshot: `daily-260322`
 - Status: historical reconstruction; not a newly accepted decision.

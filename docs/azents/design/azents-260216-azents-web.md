@@ -1,17 +1,17 @@
 ---
-title: "nointern-web Design System"
+title: "azents-web Design System"
 created: 2026-02-16
 updated: 2026-02-16
 implemented: 2026-02-16
 document_role: primary
 document_type: design
-snapshot_id: nointern-260216
+snapshot_id: azents-260216
 migration_source: "docs/azents/design/design-system.md"
 historical_reconstruction: true
 tags: [documentation, historical-reconstruction]
 ---
 
-# nointern-web Design System
+# azents-web Design System
 
 ## Design Philosophy: Editorial Minimalism
 

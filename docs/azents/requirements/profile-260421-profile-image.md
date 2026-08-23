@@ -24,7 +24,7 @@ migration_source: "docs/azents/design/agent-profile-image.md"
 
 Per-Agent profile image upload/serving feature. Reflect per-agent avatar in web UI display and Slack message sending.
 
-This feature is the first nointern feature to **store/serve user-uploaded files in S3**. Therefore, instead of avatar-specific implementation, it introduces a **generalized file upload framework** (`UploadService` + `UploadHandler`) that future chat attachments / workspace icons can share. Avatar is implemented as its first handler.
+This feature is the first azents feature to **store/serve user-uploaded files in S3**. Therefore, instead of avatar-specific implementation, it introduces a **generalized file upload framework** (`UploadService` + `UploadHandler`) that future chat attachments / workspace icons can share. Avatar is implemented as its first handler.
 
 - Related issue: [#2828](https://github.com/azents/azents/issues/2828)
 - Discussion: [#2830](https://github.com/azents/azents/discussions/2830)

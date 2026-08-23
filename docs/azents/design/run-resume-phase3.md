@@ -29,10 +29,10 @@ Phase 3 applies a **30-second timeout** after SIGTERM and forcibly stops engine.
 
 ## Target Files
 
-| File (relative to nointern) | Absolute path |
+| File (relative to azents) | Absolute path |
 |------|-----------|
-| `worker/engine.py` | `python/apps/nointern/src/nointern/worker/engine.py` |
-| `engine/engine.py` | `python/apps/nointern/src/nointern/engine/engine.py` |
+| `worker/engine.py` | `python/apps/azents/src/azents/worker/engine.py` |
+| `engine/engine.py` | `python/apps/azents/src/azents/engine/engine.py` |
 
 ---
 

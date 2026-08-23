@@ -59,13 +59,13 @@ User creates own GitHub App and directly enters credential. It is organization-o
 - **System context**: possible
 - **Rate limit**: 5,000 req/hr (default), up to 12,500 req/hr (depending on repo/user count)
 
-### 3. GitHub App — Platform (provided by NoIntern)
+### 3. GitHub App — Platform (provided by Azents)
 
-Install GitHub App provided by NoIntern with one click. User only provides `installation_id`, and server owns `app_id` and `private_key`.
+Install GitHub App provided by Azents with one click. User only provides `installation_id`, and server owns `app_id` and `private_key`.
 
 - **Credential**: `GitHubSecretsAppPlatform(type="github_app_platform", installation_id)`
-- **Server config (JWT)**: `NI_GITHUB_PLATFORM_APP_ID`, `NI_GITHUB_PLATFORM_PRIVATE_KEY`
-- **Server config (OAuth)**: `NI_GITHUB_PLATFORM_CLIENT_ID`, `NI_GITHUB_PLATFORM_CLIENT_SECRET`
+- **Server config (JWT)**: `AZ_GITHUB_PLATFORM_APP_ID`, `AZ_GITHUB_PLATFORM_PRIVATE_KEY`
+- **Server config (OAuth)**: `AZ_GITHUB_PLATFORM_CLIENT_ID`, `AZ_GITHUB_PLATFORM_CLIENT_SECRET`
 - **Token exchange**: same as BYOA (uses server PEM)
 - **Installation collection**: GitHub App OAuth + `GET /user/installations`
 - **Ownership verification**: check per-user accessible list in `github_user_installations` table
@@ -75,8 +75,8 @@ Install GitHub App provided by NoIntern with one click. User only provides `inst
 
 | Purpose | Config field | Environment variable |
 |------|-------------|---------|
-| JWT (issue installation token) | `platform_app_id` / `platform_private_key` | `NI_GITHUB_PLATFORM_APP_ID` / `..._PRIVATE_KEY` |
-| OAuth (list installations) | `platform_client_id` / `platform_client_secret` | `NI_GITHUB_PLATFORM_CLIENT_ID` / `..._CLIENT_SECRET` |
+| JWT (issue installation token) | `platform_app_id` / `platform_private_key` | `AZ_GITHUB_PLATFORM_APP_ID` / `..._PRIVATE_KEY` |
+| OAuth (list installations) | `platform_client_id` / `platform_client_secret` | `AZ_GITHUB_PLATFORM_CLIENT_ID` / `..._CLIENT_SECRET` |
 
 > GitHub App has App ID + Private Key (for JWT) and Client ID + Client Secret (for OAuth) separately.
 
@@ -87,34 +87,34 @@ Use built-in OAuth flow of GitHub App to retrieve only installations accessible 
 ```mermaid
 sequenceDiagram
     participant User
-    participant NoIntern as NoIntern UI
-    participant Server as NoIntern Server
+    participant Azents as Azents UI
+    participant Server as Azents Server
     participant GitHub
 
     Note over User,GitHub: 1. OAuth auth + installation list retrieval
-    User->>NoIntern: click "Connect GitHub"
-    NoIntern->>Server: GET /workspaces/{handle}/github/platform-oauth-url
-    Server-->>NoIntern: { oauth_url } (uses platform_client_id)
-    NoIntern->>GitHub: open OAuth popup
-    GitHub-->>NoIntern: callback?code=xxx (postMessage)
-    NoIntern->>Server: POST /workspaces/{handle}/github/platform-installations { code }
+    User->>Azents: click "Connect GitHub"
+    Azents->>Server: GET /workspaces/{handle}/github/platform-oauth-url
+    Server-->>Azents: { oauth_url } (uses platform_client_id)
+    Azents->>GitHub: open OAuth popup
+    GitHub-->>Azents: callback?code=xxx (postMessage)
+    Azents->>Server: POST /workspaces/{handle}/github/platform-installations { code }
     Server->>GitHub: exchange code → user-to-server token
     Server->>GitHub: GET /user/installations (per-user filtering)
     GitHub-->>Server: only installations accessible to user
     Server->>Server: sync to github_user_installations DB
-    Server-->>NoIntern: installations[] response
+    Server-->>Azents: installations[] response
 
     Note over User,GitHub: 2-A. New installation
-    NoIntern->>Server: GET /workspaces/{handle}/github/platform-install-url
-    Server-->>NoIntern: install_url
+    Azents->>Server: GET /workspaces/{handle}/github/platform-install-url
+    Server-->>Azents: install_url
     User->>GitHub: Install App → OAuth re-auth after completion
-    NoIntern->>Server: POST .../platform-installations { code } (refresh)
+    Azents->>Server: POST .../platform-installations { code } (refresh)
 
     Note over User,GitHub: 2-B. Select existing installation
-    User->>NoIntern: select installation
-    NoIntern->>Server: Toolkit create/update API (with installation_id)
+    User->>Azents: select installation
+    Azents->>Server: Toolkit create/update API (with installation_id)
     Server->>Server: verify ownership from github_user_installations
-    Server-->>NoIntern: success or 403
+    Server-->>Azents: success or 403
 ```
 
 #### Installation Ownership Verification

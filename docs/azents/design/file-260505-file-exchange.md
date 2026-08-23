@@ -28,7 +28,7 @@ Sandbox identity is tied to AgentRuntime, not AgentSession. AgentSession is even
 
 This document fixes two perspectives together.
 
-1. **Component perspective** — clarify what API, Exchange service, Agent runtime, sandbox daemon, and nointern-web are responsible for and not responsible for.
+1. **Component perspective** — clarify what API, Exchange service, Agent runtime, sandbox daemon, and azents-web are responsible for and not responsible for.
 2. **User flow perspective** — describe full UX step-by-step: user uploads file, Agent reads it, works in sandbox, and user downloads result.
 
 ## 2. Goals and Non-goals
@@ -42,7 +42,7 @@ This document fixes two perspectives together.
 - Agent with Sandbox imports exchange file into sandbox with `import_file` and exports sandbox result as exchange artifact with `present_file`.
 - Agent without Sandbox receives image upload as LLM image input, while non-image upload is metadata-only.
 - Keep `/home/sandbox/**` as durable workspace contract and place import cache under `/tmp/agent/**` shared mount.
-- Remove EFS and nointern-file-api infra in this stack. Actual backup/restore mechanism for `/home/sandbox` is handled in separate workspace durability issue.
+- Remove EFS and azents-file-api infra in this stack. Actual backup/restore mechanism for `/home/sandbox` is handled in separate workspace durability issue.
 
 ### Non-goals
 
@@ -74,7 +74,7 @@ This document fixes two perspectives together.
 
 ```mermaid
 flowchart LR
-    Web[Web client] -->|multipart upload| API[nointern API]
+    Web[Web client] -->|multipart upload| API[azents API]
     Slack[Slack event] -->|future ingest metadata| API
     Discord[Discord event] -->|future ingest metadata| API
     API -->|put object| S3[(Exchange object storage)]
@@ -98,8 +98,8 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant User as User
-    participant Web as nointern-web
-    participant API as nointern API
+    participant Web as azents-web
+    participant API as azents API
     participant S3 as Exchange Storage
     participant DB as RDB
     participant Engine as Agent runtime
@@ -169,7 +169,7 @@ sequenceDiagram
 
 | Component | Responsibility | Non-responsibility |
 |---|---|---|
-| nointern-web | Sends user-selected file to backend as multipart and sends returned exchange URI as chat message attachment. Attachment card converts exchange URI to same-origin download proxy. | Does not directly store S3 presigned URL. Does not create `/data/uploads` or sandbox filesystem path. |
+| azents-web | Sends user-selected file to backend as multipart and sends returned exchange URI as chat message attachment. Attachment card converts exchange URI to same-origin download proxy. | Does not directly store S3 presigned URL. Does not create `/data/uploads` or sandbox filesystem path. |
 | Chat API | Checks session/workspace permission and provides upload/list/download/delete HTTP contract. Upload/delete/download authorize through `exchange_files` metadata. | Does not reverse-engineer object key from URI string. Does not directly read/write sandbox filesystem. |
 | Exchange service | Coordinates object storage put/get/delete/presign/stream and `exchange_files` row creation in one service transaction boundary. | Does not decide sandbox internal path policy. Does not need to know meaning of `/home/sandbox` and `/tmp`. |
 | Agent runtime resolver | Resolves message attachment URI into Exchange metadata. Converts image to LLM image input and non-image to metadata-only context. | Does not directly inject non-image bytes into prompt. Does not automatically wake sandbox or import. |
@@ -221,7 +221,7 @@ Daemon core invariants:
 - **Daemon error is exposed as tool error.** `ENOENT`, permission denied, path policy violation are converted into English tool result understandable by LLM.
 - **Permission boundary is determined from DB metadata.** Daemon path accessibility and workspace/session permission are separate. Exchange file download/list/delete is always checked by API/Exchange service.
 
-Long term, consider architecture where in-sandbox client connects outbound to nointern control plane instead of sidecar server. This direction is covered by separate issue #3426 for external sandbox vendor, local machine connection, and full filesystem direct IO. This stack includes only EFS removal and shared mount transition.
+Long term, consider architecture where in-sandbox client connects outbound to azents control plane instead of sidecar server. This direction is covered by separate issue #3426 for external sandbox vendor, local machine connection, and full filesystem direct IO. This stack includes only EFS removal and shared mount transition.
 
 ### 4.6 User flow details
 
@@ -230,7 +230,7 @@ Long term, consider architecture where in-sandbox client connects outbound to no
 ```mermaid
 sequenceDiagram
     participant User as User
-    participant Web as nointern-web
+    participant Web as azents-web
     participant API as Chat API
     participant Exchange as Exchange service
     participant Runtime as Agent runtime
@@ -253,7 +253,7 @@ User-visible changes:
 
 - Attachment chip displays filename/size right after upload.
 - Image preview displays event attachment thumbnail.
-- Download link is nointern-web same-origin URL, not `exchange://...`.
+- Download link is azents-web same-origin URL, not `exchange://...`.
 
 #### Flow B — CSV upload, Agent without sandbox
 
@@ -285,7 +285,7 @@ sequenceDiagram
     participant Shell as shell/read/write tools
     participant Present as present_file
     participant Exchange as Exchange service
-    participant Web as nointern-web
+    participant Web as azents-web
 
     User->>Runtime: CSV attachment and analysis request
     Runtime->>Import: import_file(exchange://uploads/{file_id})
@@ -366,7 +366,7 @@ Initial model connects DB metadata and object storage key.
 | `expires_at` | timestamptz | object access expiration time |
 | `created_at` | timestamptz | creation time |
 
-Following nointern convention, boolean fields do not use `is_` prefix. Expiration is represented by `expires_at`; user-deleted file deletes metadata row after object deletion succeeds.
+Following azents convention, boolean fields do not use `is_` prefix. Expiration is represented by `expires_at`; user-deleted file deletes metadata row after object deletion succeeds.
 
 Association rules:
 
@@ -600,8 +600,8 @@ This decision stabilizes File API removal and Web upload/export path first in #3
 
 | Target | Current role | Change |
 |---|---|---|
-| `python/apps/nointern-file-api/` | EFS/POSIX backed File API | remove app or exclude deployment |
-| `nointern.services.file_api_client.FileApiClient` | `/data` file HTTP client | split into Exchange service and SandboxDaemonClient |
+| `python/apps/azents-file-api/` | EFS/POSIX backed File API | remove app or exclude deployment |
+| `azents.services.file_api_client.FileApiClient` | `/data` file HTTP client | split into Exchange service and SandboxDaemonClient |
 | `ACCESSIBLE_PATHS_MSG` | `/data/agent`, `/data/user`, `/platform` prompt | remove |
 | `GET /sessions/{id}/session-data` | list `/data/uploads/{session_id}` | replace with exchange file list |
 | `GET/DELETE /shared-data/{scope}` | `/data/agent`, `/data/user`, `/platform` browser | remove |
@@ -615,26 +615,26 @@ This decision stabilizes File API removal and Web upload/export path first in #3
 |---|---|
 | `SessionSandboxManager` | keep sandbox lifecycle, daemon client acquisition, state change notification |
 | `SandboxDaemonClient` | keep as canonical sandbox filesystem client |
-| `nointern.services.thumbnail.generate_thumbnail` | reuse for upload/artifact image thumbnail generation |
+| `azents.services.thumbnail.generate_thumbnail` | reuse for upload/artifact image thumbnail generation |
 | `session_storage.guess_media_type`, filename helper | reusable for MIME guessing and download filename sanitize |
 | `Attachment` event snapshot | keep with only URI scheme changed to exchange |
 | existing S3 service patterns | reuse `S3Service` presign/upload patterns in Exchange service |
-| nointern-web upload hook | keep fetch multipart flow, change only response URI |
+| azents-web upload hook | keep fetch multipart flow, change only response URI |
 | Kubernetes sandbox snapshot repository | keep AgentRuntime-based lookup, do not mix with Exchange prefix |
 
 ### 13.3 New components needed
 
 | Component | Suggested location | Role |
 |---|---|---|
-| Exchange model | `python/apps/nointern/src/nointern/rdb/models/exchange_file.py` | DB metadata |
-| Exchange repository | `python/apps/nointern/src/nointern/repos/exchange_file/` | metadata CRUD |
-| Exchange service | `python/apps/nointern/src/nointern/services/exchange_storage.py` | S3 put/get/presign + permission |
+| Exchange model | `python/apps/azents/src/azents/rdb/models/exchange_file.py` | DB metadata |
+| Exchange repository | `python/apps/azents/src/azents/repos/exchange_file/` | metadata CRUD |
+| Exchange service | `python/apps/azents/src/azents/services/exchange_storage.py` | S3 put/get/presign + permission |
 | Runtime resolver | near `engine/run/resolve.py` | attachment URI → LLM image/metadata conversion |
 | `import_file` tool | `engine/tools/import_file.py` | Exchange upload → sandbox file copy |
 | `present_file` rewrite | `engine/tools/present_file.py` | sandbox file → Exchange artifact export |
 | Memory prompt cleanup | `services/memory/` | remove `/data` guidance and use DB-backed memory prompt only |
 | API routes | `api/public/chat/v1` or dedicated exchange route | upload/download/list/delete |
-| Web download proxy | `typescript/apps/nointern-web/src/app/api/...` | cookie-authenticated browser download |
+| Web download proxy | `typescript/apps/azents-web/src/app/api/...` | cookie-authenticated browser download |
 
 ### 13.4 Verification result
 
@@ -726,8 +726,8 @@ This decision stabilizes File API removal and Web upload/export path first in #3
 
 ## 16. testenv Impact
 
-- `python/apps/nointern-e2e/src/tests/nointern/public/test_file_upload.py` assertions for `/data/uploads/` must change to exchange URI assertions.
-- If `nointern-file-api` is removed from nointern devserver compose, preflight and health checks must be cleaned together.
+- `python/apps/azents-e2e/src/tests/azents/public/test_file_upload.py` assertions for `/data/uploads/` must change to exchange URI assertions.
+- If `azents-file-api` is removed from azents devserver compose, preflight and health checks must be cleaned together.
 - Slack/Discord file-related QA should change expected value to unsupported in current scope or move to separate future scenario.
 - Seed helper must not INSERT exchange file metadata directly. Test scenarios should create state through user-facing upload API or tool path.
 
@@ -753,7 +753,7 @@ Rejected. Result shared with user must be intentionally saved by Agent to `/home
 
 Implementation PR must update these Living Specs together:
 
-- `docs/nointern/spec/domain/conversation.md`: attachment URI and event snapshot rules.
-- `docs/nointern/spec/domain/agent.md`: Agent sandbox workspace and Exchange Storage terminology.
-- `docs/nointern/spec/flow/agent-execution-loop.md`: runtime input attachment resolve and tool availability.
+- `docs/azents/spec/domain/conversation.md`: attachment URI and event snapshot rules.
+- `docs/azents/spec/domain/agent.md`: Agent sandbox workspace and Exchange Storage terminology.
+- `docs/azents/spec/flow/agent-execution-loop.md`: runtime input attachment resolve and tool availability.
 - Related design docs: supersede or archive File API/EFS/`/data` premises in existing `file-260301-file-support.md`, `sandbox-daemon.md`.

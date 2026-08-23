@@ -26,10 +26,10 @@ The following sections are copied only from explicit source Design text. No addi
 
 ```mermaid
 flowchart LR
-    Agent([Agent]) -->|up/down/status/logs| CLI[testenv/nointern/devserver.py]
+    Agent([Agent]) -->|up/down/status/logs| CLI[testenv/azents/devserver.py]
     CLI -->|docker compose up -d| Compose[testenv compose]
     CLI -->|uv run alembic upgrade head| Alembic[Alembic]
-    CLI -->|tmux new-session| Tmux[tmux: nointern-testenv-devserver]
+    CLI -->|tmux new-session| Tmux[tmux: azents-testenv-devserver]
     Tmux -->|uv run python src/cli/devserver.py| Devserver[devserver process]
     Devserver --> PublicAPI[:8010 Public API]
     Devserver --> AdminAPI[:8011 Admin API]

@@ -17,7 +17,7 @@ tags: [documentation, historical-reconstruction]
 ## Directory Structure
 
 ```
-testenv/nointern/
+testenv/azents/
 ├── scenarios/       # only TC-*.md (actual test scenarios)
 ├── setup/           # test prerequisite state (infrastructure separate from scenarios)
 ├── recipes/         # reusable pattern documents (reference separate from scenarios)

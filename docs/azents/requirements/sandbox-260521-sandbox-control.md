@@ -22,13 +22,13 @@ migration_source: "docs/azents/adr/0035-sandbox-provider-control.md"
 
 ## Problem
 
-[sandbox-260506/ADR](../adr/sandbox-260506-sandbox-control-channel.md) adopted a structure where an in-sandbox client opens an outbound `SandboxControlRuntime.Connect` gRPC stream to NoIntern, and the worker requests command/file/checkpoint operations through `SandboxControlWorker`. This decision separated command/file/checkpoint transport from Kubernetes Pod IP, Docker network discovery, and inbound sidecar daemon calls.
+[sandbox-260506/ADR](../adr/sandbox-260506-sandbox-control-channel.md) adopted a structure where an in-sandbox client opens an outbound `SandboxControlRuntime.Connect` gRPC stream to Azents, and the worker requests command/file/checkpoint operations through `SandboxControlWorker`. This decision separated command/file/checkpoint transport from Kubernetes Pod IP, Docker network discovery, and inbound sidecar daemon calls.
 
-However, the sandbox **lifecycle provider** still has NoIntern worker/control plane directly creating Kubernetes Pods or local Docker containers. This structure does not sufficiently express the following requirements:
+However, the sandbox **lifecycle provider** still has Azents worker/control plane directly creating Kubernetes Pods or local Docker containers. This structure does not sufficiently express the following requirements:
 
-1. Providers outside the NoIntern-managed Kubernetes cluster must be able to provide sandbox capacity.
-2. To support customer/local Docker providers long term, the provider must connect outbound to NoIntern without exposing inbound ports.
-3. K8s-based provider controller should be separated as an optional component in the NoIntern Helm chart so operational topology is explicit.
+1. Providers outside the Azents-managed Kubernetes cluster must be able to provide sandbox capacity.
+2. To support customer/local Docker providers long term, the provider must connect outbound to Azents without exposing inbound ports.
+3. K8s-based provider controller should be separated as an optional component in the Azents Helm chart so operational topology is explicit.
 4. Provider identity, active liveness, runtime allocation lease, and sandbox-control runtime registration auth must have separate state authorities.
 5. The durable contract preserved on hibernate/resume must clearly distinguish `/home/sandbox/**` from rootfs/S3 snapshot/container snapshot.
 

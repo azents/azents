@@ -15,7 +15,7 @@ migration_source: "docs/azents/design/run-resume-phase4.md"
 
 ### 1. `terminationGracePeriodSeconds: 60`
 
-**File**: `infra/argocd/nointern-server/base/worker-deployment.yaml`
+**File**: `infra/argocd/azents-server/base/worker-deployment.yaml`
 
 Change from K8s default 30 seconds to 60 seconds. This gives 30 seconds engine timeout after SIGTERM plus 30 seconds cleanup margin.
 
@@ -23,7 +23,7 @@ Spot instance reclamation provides 2-minute warning, so 60 seconds is enough.
 
 ### 2. Worker PodDisruptionBudget
 
-**File**: `infra/argocd/nointern-server/base/worker-pdb.yaml` (new)
+**File**: `infra/argocd/azents-server/base/worker-pdb.yaml` (new)
 
 Set `maxUnavailable: 25%`. During deploy, terminate sequentially to minimize concurrent multiple interruptions.
 
@@ -39,4 +39,4 @@ Logs already added in Phase 1-3:
 
 ### 4. Metrics (follow-up)
 
-Since nointern currently has no Prometheus metrics infrastructure (ServiceMonitor, PrometheusRule not configured), add metrics after monitoring infrastructure is set up. Metrics defined in design document (`engine_run_resumed_total`, `engine_run_llm_canceled_total`, `engine_run_tool_canceled_total`) will be added after infrastructure is ready.
+Since azents currently has no Prometheus metrics infrastructure (ServiceMonitor, PrometheusRule not configured), add metrics after monitoring infrastructure is set up. Metrics defined in design document (`engine_run_resumed_total`, `engine_run_llm_canceled_total`, `engine_run_tool_canceled_total`) will be added after infrastructure is ready.

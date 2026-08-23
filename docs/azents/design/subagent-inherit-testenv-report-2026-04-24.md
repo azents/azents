@@ -38,7 +38,7 @@ Records QA result performed in Phase 8 based on design document [`subagent-inher
 
 - `engine/tools/subagent.py::resolve_toolkit_source_agent_id` helper — returns `parent_agent_id` or `subagent_id` depending on subagent.`toolkit_inherit_mode`.
 - Test:
-  `src/nointern/engine/tools/subagent_inherit_test.py::TestResolveToolkitSourceAgentId::test_returns_parent_when_mode_all`
+  `src/azents/engine/tools/subagent_inherit_test.py::TestResolveToolkitSourceAgentId::test_returns_parent_when_mode_all`
   — confirms parent_agent_id is returned when mode=ALL.
 
 **Handler path verification**:
@@ -47,7 +47,7 @@ Records QA result performed in Phase 8 based on design document [`subagent-inher
 - `resolve_agent_tools` queries only DB-registered toolkit of that agent with `agent_toolkit_repository.list_by_agent(session, agent_id)` (`services/engine/run/resolve.py:449`).
 - Therefore, when mode=ALL, only parent's `agent_toolkits` are resolved and subagent's own toolkit is not queried.
 
-**Execution result**: `uv run pytest src/nointern/engine/tools/subagent_inherit_test.py -v` all pass (8/8).
+**Execution result**: `uv run pytest src/azents/engine/tools/subagent_inherit_test.py -v` all pass (8/8).
 
 **Recommended auxiliary verification (⚠️ MANUAL)**: After attaching GitHub toolkit to Parent, call mode=ALL subagent and confirm actual `github_*` tool call appears in LLM log following runbook §4 TC1.
 
@@ -132,18 +132,18 @@ Records QA result performed in Phase 8 based on design document [`subagent-inher
 ## 4. Regression Check
 
 ```
-$ cd python/apps/nointern && uv run pytest src/nointern/
+$ cd python/apps/azents && uv run pytest src/azents/
 ```
 
 Full pytest passed (except warnings). Main related test files:
 
-- `src/nointern/engine/tools/subagent_inherit_test.py` — **new** (8 tests)
-- `src/nointern/services/agent_runtime/resolve_test.py` — 5 tests (existing)
-- `src/nointern/services/agent/service_test.py` — 13 tests including 6 pair validation cases (existing)
+- `src/azents/engine/tools/subagent_inherit_test.py` — **new** (8 tests)
+- `src/azents/services/agent_runtime/resolve_test.py` — 5 tests (existing)
+- `src/azents/services/agent/service_test.py` — 13 tests including 6 pair validation cases (existing)
 
 ## 5. New Test File
 
-**`python/apps/nointern/src/nointern/engine/tools/subagent_inherit_test.py`**
+**`python/apps/azents/src/azents/engine/tools/subagent_inherit_test.py`**
 (new, 8 tests):
 
 - `TestResolveModelSourceAgentId` (2)

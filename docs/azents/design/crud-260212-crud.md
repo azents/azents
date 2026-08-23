@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Overview
 
-nointern user management consists of two layers:
+azents user management consists of two layers:
 - **User (global)**: unique user across the whole system (email-based)
 - **WorkspaceUser (membership)**: User's profile inside workspace
 
@@ -196,7 +196,7 @@ CREATE TABLE workspace_users (
 ## File Structure
 
 ```
-python/apps/nointern/src/nointern/
+python/apps/azents/src/azents/
 ├── rdb/models/
 │   ├── user.py                      # RDBUser model
 │   ├── user_email.py                # RDBUserEmail model

@@ -26,7 +26,7 @@ The Session Workspace Project contract keeps `/home/sandbox` as the Agent's long
 
 The initial design considered creating a dedicated persistent store for AGENTS.md as S3 objects. However, AGENTS.md is only the first example of long-lived state storage needs required by Toolkit runtime. Future memory, policy, audit, and tool-specific caches will have the same lifecycle and identity problems. If we create an AGENTS.md-only store, runtime state source of truth becomes unclear across `runtime_state` blob, S3 objects, and Toolkit internal memory.
 
-Also, in the current nointern runtime, Toolkit is already the execution boundary for tool bundle, prompt, credential, and runtime context. Introducing a separate arbitrary plugin runtime would require designing capability, isolation, versioning, and multi-tenant security together, which is too broad for the current need.
+Also, in the current azents runtime, Toolkit is already the execution boundary for tool bundle, prompt, credential, and runtime context. Introducing a separate arbitrary plugin runtime would require designing capability, isolation, versioning, and multi-tenant security together, which is too broad for the current need.
 
 ## Primary Actor
 

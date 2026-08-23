@@ -302,7 +302,7 @@ Block `/` command input during run:
 
 ```bash
 # Backend quality check
-cd python/apps/nointern && uv run pyright && uv run ruff check . && uv run pytest
+cd python/apps/azents && uv run pyright && uv run ruff check . && uv run pytest
 
 # WS manual test
 # 1. send message → confirm tool execution starts

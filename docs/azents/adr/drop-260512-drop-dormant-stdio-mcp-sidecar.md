@@ -15,7 +15,7 @@ migration_source: "docs/azents/adr/0029-drop-dormant-stdio-mcp-sidecar.md"
 
 ## Context
 
-nointern previously added a path that placed a per-agent `mcp-proxy` sidecar next to Agent Home to support stdio-only MCP servers.
+azents previously added a path that placed a per-agent `mcp-proxy` sidecar next to Agent Home to support stdio-only MCP servers.
 
 The core path included:
 
@@ -42,7 +42,7 @@ Remove the per-agent stdio MCP sidecar path.
 Specifically:
 
 1. **Reduce current support contract**
-   - nointern runtime no longer supports per-agent stdio MCP transport.
+   - azents runtime no longer supports per-agent stdio MCP transport.
    - Supported paths are reduced to:
      - remote HTTP / Streamable HTTP MCP
      - service-specific native integrations
@@ -66,7 +66,7 @@ Specifically:
 
 - Reduces dormant code and operational surface area.
 - Simplifies sandbox reuse conditions.
-- Removes management cost for `nointern-mcp-proxy` image/deployment/permissions/tests.
+- Removes management cost for `azents-mcp-proxy` image/deployment/permissions/tests.
 - Removes the independent failure axis of stdio-sidecar failure.
 
 ### Negative

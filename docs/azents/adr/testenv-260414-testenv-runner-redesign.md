@@ -17,7 +17,7 @@ migration_source: "docs/azents/adr/0027-testenv-runner-redesign.md"
 
 ## Background
 
-`testenv/nointern/` is an agent-as-runner QA platform (Discussions #2358, #2403, #2441). Claude Code acts as a QA engineer by reading TC Markdown files and executing them directly.
+`testenv/azents/` is an agent-as-runner QA platform (Discussions #2358, #2403, #2441). Claude Code acts as a QA engineer by reading TC Markdown files and executing them directly.
 
 Recent Slack BYOA testing for issue #2548 exposed problems across **three axes** at the same time.
 
@@ -313,7 +313,7 @@ Implementation:
 
 - Add a pluggable transport interface to the LLM call path; default implementation is live passthrough.
 - Reserve `_helpers/llm_cassette.py` location but do not implement record/replay logic yet.
-- Reserve `NI_LLM_CASSETTE_MODE` environment variable; default `live`, future `record` / `replay` possible.
+- Reserve `AZ_LLM_CASSETTE_MODE` environment variable; default `live`, future `record` / `replay` possible.
 - In the design document, comment exactly where to change when enabling VCR later.
 
 Rationale:

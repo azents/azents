@@ -33,7 +33,7 @@ Git diff, workspace edit/delete, and live sync were excluded from MVP scope and 
 
 ## Overview
 
-Enhanced File Browser is a feature for browsing `/home/sandbox`, the session workspace of a NoIntern chat session, from Web UI. Existing session data browser is a modal showing attachment/upload file storage, so this design drops existing browser UX and creates new session-workspace-specific API and panel UI.
+Enhanced File Browser is a feature for browsing `/home/sandbox`, the session workspace of a Azents chat session, from Web UI. Existing session data browser is a modal showing attachment/upload file storage, so this design drops existing browser UX and creates new session-workspace-specific API and panel UI.
 
 User scenario:
 
@@ -54,9 +54,9 @@ Implementation scope:
 | Term | Definition |
 |---|---|
 | Session workspace | sandbox filesystem view of a specific chat session. Logical root is always `/home/sandbox`, and source of truth of files seen by agent in shell and UI browser is same. |
-| Product workspace | existing NoIntern domain concept of workspace membership/handle/agent grouping. Different from session workspace in this document and not directly accepted in API request. |
+| Product workspace | existing Azents domain concept of workspace membership/handle/agent grouping. Different from session workspace in this document and not directly accepted in API request. |
 | Session data | attachment/upload file storage. Existing `session-data` API area and not source of truth for session workspace browser. |
-| Workspace panel | session workspace browsing UI attached next to nointern-web chat screen. On mobile, can be drawer/modal. |
+| Workspace panel | session workspace browsing UI attached next to azents-web chat screen. On mobile, can be drawer/modal. |
 
 Use explicit `session workspace` in public surface, code docs, operation names to avoid confusion with product workspace.
 
@@ -114,7 +114,7 @@ This policy avoids creating sandbox resources just by entering empty session, wh
 
 ### Decision 4. Frontend is a new feature slice
 
-Do not extend existing `SessionExplorer` modal; add new feature slice under `typescript/apps/nointern-web/src/features/chat/workspace/`.
+Do not extend existing `SessionExplorer` modal; add new feature slice under `typescript/apps/azents-web/src/features/chat/workspace/`.
 
 - Desktop: side panel next to chat layout.
 - Mobile: drawer or modal.
@@ -139,7 +139,7 @@ Readonly MVP completes file browser + preview before Git diff. Git diff needs re
 
 ```mermaid
 flowchart LR
-    Browser["nointern-web WorkspacePanel"] --> TRPC["chat session workspace tRPC router"]
+    Browser["azents-web WorkspacePanel"] --> TRPC["chat session workspace tRPC router"]
     TRPC --> PublicAPI["Public Session Workspace API"]
     PublicAPI --> WorkspaceService["WorkspaceFileService"]
     WorkspaceService --> SessionService["ChatSessionService"]
@@ -255,7 +255,7 @@ MVP public session workspace API:
 | `GET` | `/chat/v1/sessions/{session_id}/workspace/files?path=/home/sandbox/foo.ts` | query file or directory |
 | `GET` | `/chat/v1/sessions/{session_id}/workspace/download?path=/home/sandbox/foo.pdf` | download file |
 
-`GET /workspace` response is defined as discriminated union. Public API JSON uses snake_case by Python/Pydantic convention, and nointern-web tRPC boundary maps to camelCase for frontend ADT.
+`GET /workspace` response is defined as discriminated union. Public API JSON uses snake_case by Python/Pydantic convention, and azents-web tRPC boundary maps to camelCase for frontend ADT.
 
 ```json
 {
@@ -427,7 +427,7 @@ Headers:
 New feature slice:
 
 ```text
-typescript/apps/nointern-web/src/features/chat/workspace/
+typescript/apps/azents-web/src/features/chat/workspace/
   components/WorkspacePanel.tsx
   components/WorkspaceTabs.tsx
   components/SandboxActivationView.tsx
@@ -507,7 +507,7 @@ Storybook:
 - large/binary preview limit
 - mobile drawer/modal layout
 
-Current checkout did not show `nointern-web` Storybook setup, but Discussion mentioned main branch introduction. Implementation PR should check latest main Storybook setup and reuse it; if absent, split Storybook introduction itself into separate prerequisite.
+Current checkout did not show `azents-web` Storybook setup, but Discussion mentioned main branch introduction. Implementation PR should check latest main Storybook setup and reuse it; if absent, split Storybook introduction itself into separate prerequisite.
 
 ### Preview renderer contract
 
@@ -538,12 +538,12 @@ Removal candidates confirmed in current code:
 
 | File | Current role | Phase 1 treatment |
 |---|---|---|
-| `typescript/apps/nointern-web/src/features/chat/components/ChatInput.tsx` | folder icon, `onOpenExplorer` prop | remove folder icon and prop |
-| `typescript/apps/nointern-web/src/features/chat/components/ChatView.tsx` | `SessionExplorer` import/render, disclosure state | remove modal wiring, replace with new workspace panel toggle |
-| `typescript/apps/nointern-web/src/features/chat/components/SessionExplorer.tsx` | old modal UI | delete |
-| `typescript/apps/nointern-web/src/features/chat/hooks/useSessionExplorer.ts` | old tRPC list/delete hook | delete |
-| `typescript/apps/nointern-web/src/trpc/routers/chat.ts` | `listSessionFiles`, `deleteSessionFile` | replace with workspace router/procedures |
-| `typescript/apps/nointern-web/src/app/(app)/api/chat/session-data/.../route.ts` | attachment download proxy | can remain until separate migration after checking attachment feature impact |
+| `typescript/apps/azents-web/src/features/chat/components/ChatInput.tsx` | folder icon, `onOpenExplorer` prop | remove folder icon and prop |
+| `typescript/apps/azents-web/src/features/chat/components/ChatView.tsx` | `SessionExplorer` import/render, disclosure state | remove modal wiring, replace with new workspace panel toggle |
+| `typescript/apps/azents-web/src/features/chat/components/SessionExplorer.tsx` | old modal UI | delete |
+| `typescript/apps/azents-web/src/features/chat/hooks/useSessionExplorer.ts` | old tRPC list/delete hook | delete |
+| `typescript/apps/azents-web/src/trpc/routers/chat.ts` | `listSessionFiles`, `deleteSessionFile` | replace with workspace router/procedures |
+| `typescript/apps/azents-web/src/app/(app)/api/chat/session-data/.../route.ts` | attachment download proxy | can remain until separate migration after checking attachment feature impact |
 
 Caution:
 
@@ -555,11 +555,11 @@ Caution:
 | Item | Confirmed result | Judgment |
 |---|---|---|
 | old browser drop | `ChatView` imports/renders `SessionExplorer`, and `ChatInput` exposes folder button. `useSessionExplorer` and chat tRPC list/delete path are separated, so removable. | possible |
-| new public API | `python/apps/nointern/src/nointern/api/public/chat/v1/__init__.py` already has session-level route pattern and `_get_session_or_raise` access verification. | possible |
+| new public API | `python/apps/azents/src/azents/api/public/chat/v1/__init__.py` already has session-level route pattern and `_get_session_or_raise` access verification. | possible |
 | sandbox active/inactive decision | `SessionSandboxManager.get(session_id)` returns `None` on cache miss, and `get_or_allocate` owns start/resume/fresh allocation. | possible |
 | file list/read/stat | `SandboxDaemonClient` has `get`, `list`, `list_dirs`, `stat`. primitives needed for directory+file manifest exist. | possible |
 | readonly MVP | even if daemon has write/delete/edit primitives, do not expose in public session workspace API. Non-editable state is clear through endpoint absence and UI hiding, not capability flag. | possible |
-| frontend integration | `nointern-web` already uses tRPC router + feature component structure. new feature slice can be added at `features/chat/workspace/`. | possible |
+| frontend integration | `azents-web` already uses tRPC router + feature component structure. new feature slice can be added at `features/chat/workspace/`. | possible |
 | Storybook | Discussion mentioned main branch introduction, but current checkout did not show config file. Implementation needs check latest main or handle as separate prerequisite. | not blocker |
 | testenv live verification | no API yet, so live call verification impossible. Existing code path confirms primitive existence. Add E2E scenario in implementation phase. | not blocker |
 
@@ -585,9 +585,9 @@ Test principles:
 ## testenv Impact
 
 - New seed block is not required, but helper that creates session + active sandbox simplifies E2E.
-- docker-compose change is not needed in MVP. Use existing nointern sandbox daemon/runtime.
+- docker-compose change is not needed in MVP. Use existing azents sandbox daemon/runtime.
 - public client regeneration is needed after OpenAPI change.
-- nointern-web tRPC router must be replaced with workspace functions from generated public client.
+- azents-web tRPC router must be replaced with workspace functions from generated public client.
 
 ## Implementation Plan
 

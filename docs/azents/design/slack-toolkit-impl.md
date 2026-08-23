@@ -95,7 +95,7 @@ metadata["files"] = ", ".join(
 ### Phase 1 Verification
 
 ```bash
-cd /home/code/repos/azents/azents/python/apps/nointern
+cd /home/code/repos/azents/azents/python/apps/azents
 uv run ruff check --fix . && uv run ruff format .
 uv run pyright
 uv run pytest
@@ -103,7 +103,7 @@ uv run pytest
 
 Verify existing Slack integration behavior with E2E:
 ```bash
-cd /home/code/repos/azents/azents/python/apps/nointern-e2e
+cd /home/code/repos/azents/azents/python/apps/azents-e2e
 uv run pytest
 ```
 
@@ -257,7 +257,7 @@ async def resolve_agent_tools(
 ### Phase 2 Verification
 
 ```bash
-cd /home/code/repos/azents/azents/python/apps/nointern
+cd /home/code/repos/azents/azents/python/apps/azents
 uv run ruff check --fix . && uv run ruff format .
 uv run pyright
 uv run pytest

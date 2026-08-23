@@ -22,7 +22,7 @@ migration_source: "docs/azents/adr/0007-agent-file-exchange-storage.md"
 
 ## Problem
 
-NoIntern's existing file paths mixed File API, EFS, `/data/*`, `shared:///session/*`, and `/home/sandbox`. Web uploads were stored by the backend through the File API under `/data/uploads/{session_id}/...`, and Slack/Discord file bridges read and wrote files through the same File API layer. The LLM-facing file tool also accepted either File API or sandbox daemon injection and handled both through the same `FileStorage` protocol.
+Azents's existing file paths mixed File API, EFS, `/data/*`, `shared:///session/*`, and `/home/sandbox`. Web uploads were stored by the backend through the File API under `/data/uploads/{session_id}/...`, and Slack/Discord file bridges read and wrote files through the same File API layer. The LLM-facing file tool also accepted either File API or sandbox daemon injection and handled both through the same `FileStorage` protocol.
 
 However, in the agent-centric raw session and optional dedicated sandbox architecture, files have two different lifecycles.
 

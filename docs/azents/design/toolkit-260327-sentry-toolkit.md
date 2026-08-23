@@ -98,7 +98,7 @@ Official server provides 5 skill groups:
 sequenceDiagram
     participant User as User
     participant Agent as Agent
-    participant NI as nointern server
+    participant NI as azents server
     participant Sentry as mcp.sentry.dev/mcp
 
     Note over User: enable Sentry Toolkit

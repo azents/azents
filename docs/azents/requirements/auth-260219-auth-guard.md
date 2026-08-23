@@ -1,5 +1,5 @@
 ---
-title: "nointern-web Login Guard Historical Requirements Reconstruction"
+title: "azents-web Login Guard Historical Requirements Reconstruction"
 created: 2026-02-19
 implemented: 2026-02-19
 tags: [documentation, historical-reconstruction, migration]
@@ -10,7 +10,7 @@ historical_reconstruction: true
 migration_source: "docs/azents/design/auth-guard.md"
 ---
 
-# nointern-web Login Guard Historical Requirements Reconstruction
+# azents-web Login Guard Historical Requirements Reconstruction
 
 > This is a provenance-marked historical reconstruction, not newly approved product intent.
 > It contains only statements recoverable from the source document. Unknown intent remains explicitly unknown.
@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/auth-guard.md"
 
 ## Problem
 
-Access control pattern for pages requiring authentication. Applies azents(web) login guard pattern to nointern-web.
+Access control pattern for pages requiring authentication. Applies azents(web) login guard pattern to azents-web.
 
 ## Primary Actor
 

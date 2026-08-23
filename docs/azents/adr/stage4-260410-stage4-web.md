@@ -26,8 +26,8 @@ The following sections are copied only from explicit source Design text. No addi
 
 | ID | Decision |
 |---|---|
-| **P1** | Caller of Playwright MCP is **Claude Code (QA runner)**. Do not touch nointern engine/toolkit code. |
-| **P2** | Add only `devserver.py up --web`; do **not** add MCP server lifecycle such as `--playwright`. Enable Playwright plugin in `testenv/nointern/.claude/settings.json`. |
+| **P1** | Caller of Playwright MCP is **Claude Code (QA runner)**. Do not touch azents engine/toolkit code. |
+| **P2** | Add only `devserver.py up --web`; do **not** add MCP server lifecycle such as `--playwright`. Enable Playwright plugin in `testenv/azents/.claude/settings.json`. |
 | **P3** | Scenarios use **runbook .md format**. Browser tests minimize API bypass and verify directly through UI. |
 | **P4** | `seed/web.py` — storage state cache helper. Backend seed reuses existing helpers such as `seed/auth.py`. |
 | **P5** | No need for browser_* matchers in `live/matchers.py` — Claude Code judges snapshot directly in its own context with natural language. |
@@ -44,8 +44,8 @@ flowchart LR
     end
 
     subgraph Devserver["devserver.py up --web"]
-        Backend["nointern backend\n(public 8010, admin 8011)"]
-        Web["nointern-web\nNext.js dev (3003)"]
+        Backend["azents backend\n(public 8010, admin 8011)"]
+        Web["azents-web\nNext.js dev (3003)"]
     end
 
     PW -- "HTTP" --> Web
@@ -54,9 +54,9 @@ flowchart LR
 ```
 
 Core:
-- **Playwright caller is Claude Code itself**. There is no browser-related toolkit inside nointern.
-- nointern-web communicates with nointern backend as usual (no change).
-- testenv seeds only backend state (user, workspace, agent, model integration, ...) through nointern public/admin client. All UI manipulation is done directly by Claude Code through Playwright.
+- **Playwright caller is Claude Code itself**. There is no browser-related toolkit inside azents.
+- azents-web communicates with azents backend as usual (no change).
+- testenv seeds only backend state (user, workspace, agent, model integration, ...) through azents public/admin client. All UI manipulation is done directly by Claude Code through Playwright.
 
 ## Historical Unknowns
 

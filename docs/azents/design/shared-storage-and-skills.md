@@ -55,7 +55,7 @@ Provide four isolated scopes through single `shared:///` URI scheme.
 | **user** | `shared:///user/` | one per agent×user | read/write | permanent |
 | **session** | `shared:///session/` | one per session | read/write | session |
 
-- `platform`: built-in skills and common guides provided by NoIntern.
+- `platform`: built-in skills and common guides provided by Azents.
 - `agent`: agent knowledge, skills, settings (shared across sessions for all users).
 - `user`: per-user memory and preference (not visible to other users).
 - `session`: current session files (existing SessionDataStorage).
@@ -360,7 +360,7 @@ Use existing explorer UI as-is without separate page or component.
 Built-in skills are managed in codebase:
 
 ```
-python/apps/nointern/platform-skills/
+python/apps/azents/platform-skills/
 ├── skill-creator/
 │   └── SKILL.md
 └── (additional built-in skills)

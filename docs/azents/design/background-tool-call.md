@@ -652,7 +652,7 @@ wait_until(lambda: not any_pending_background(session))
 ## testenv Impact
 
 - **New seed block**: unnecessary. Existing agent/subagent seed covers this.
-- **New scenario document**: add `testenv/nointern/scenarios/background-tool-call.md` (4 scenarios above).
+- **New scenario document**: add `testenv/azents/scenarios/background-tool-call.md` (4 scenarios above).
 - **Existing scenario impact**: subagent blocking scenarios work with `run_in_background=False` (default) — existing scenarios should not break.
 - **docker-compose/preflight**: no impact.
 

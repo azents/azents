@@ -38,7 +38,7 @@ flowchart LR
   end
   TOK -->|MCP secret (existing)| MCP["GitHub MCP Toolkit"]
   TOK -->|expose_env() (new)| SHELL["Agent shell sandbox"]
-  SHELL -->|credential helper| HELPER["/usr/local/bin/<br/>nointern-git-credential"]
+  SHELL -->|credential helper| HELPER["/usr/local/bin/<br/>azents-git-credential"]
   HELPER -->|GH_TOKEN env| GIT["git push / fetch"]
   SHELL -->|GH_TOKEN env| GH["gh CLI"]
   MCP --> API[(api.github.com)]

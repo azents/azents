@@ -30,7 +30,7 @@ Separate sandbox-daemon from agent-runtime container and operate it as separate 
 - supervisord manages process lifecycle → K8s native healthcheck/restart not used.
 
 **Things not changed:**
-- `SandboxDaemonClient` HTTP interface (keep nointern server → daemon communication path).
+- `SandboxDaemonClient` HTTP interface (keep azents server → daemon communication path).
 - File API path routing (direct access to shared volume `/mnt/agent-data`).
 - Per-user isolation model (decided in separate discussion).
 

@@ -17,7 +17,7 @@ Design document for three-layer structure to use LLM models in workspace.
 
 ## Overview
 
-nointern platform integrates models from multiple LLM providers (OpenAI, Anthropic, etc.) to run AI agents. To support this, it adopts design separated into three layers: **model definition**, **provider mapping**, and **workspace-specific credentials**.
+azents platform integrates models from multiple LLM providers (OpenAI, Anthropic, etc.) to run AI agents. To support this, it adopts design separated into three layers: **model definition**, **provider mapping**, and **workspace-specific credentials**.
 
 ### Core Terms
 
@@ -131,7 +131,7 @@ Credentials are stored in two columns depending on security level:
 | AWS Bedrock | `AwsSecrets { secret_access_key }` | `AwsConfig { access_key_id, region, role_arn? }` |
 | Google Vertex AI | `GcpSecrets { service_account_json }` | `GcpConfig { project_id, region }` |
 
-Distinguish provider-specific schemas with discriminated union pattern (`type` field). Definition: `nointern/core/credentials.py`
+Distinguish provider-specific schemas with discriminated union pattern (`type` field). Definition: `azents/core/credentials.py`
 
 ## Management Owner
 
@@ -195,7 +195,7 @@ sequenceDiagram
     API-->>Client: Response (only config returned, no secrets)
 ```
 
-- **Encryption key**: environment variable `NI_CREDENTIAL_ENCRYPTION_KEY` (base64-encoded 32-byte Fernet key)
+- **Encryption key**: environment variable `AZ_CREDENTIAL_ENCRYPTION_KEY` (base64-encoded 32-byte Fernet key)
 - **Secrets storage**: stored as Fernet-encrypted string in DB `encrypted_credentials` column
 - **Config storage**: stored as plaintext JSONB in DB `config` column (nullable)
 - **Read**: Public API response does not include secrets, returns only config
@@ -227,7 +227,7 @@ For AWS Bedrock integration requiring cross-account access, if `AwsConfig.role_a
 
 - If `role_arn` is `None`, authenticate directly with Access Key (existing behavior).
 - If `role_arn` is set, litellm receives `aws_role_name` + `aws_session_name` kwargs and automatically performs STS AssumeRole.
-- Server automatically generates `aws_session_name` in `nointern-{workspace_id[:8]}` format.
+- Server automatically generates `aws_session_name` in `azents-{workspace_id[:8]}` format.
 - STS temporary credentials are issued by litellm on every call (no caching).
 
 ```mermaid

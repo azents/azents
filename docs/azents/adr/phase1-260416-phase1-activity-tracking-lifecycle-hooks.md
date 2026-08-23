@@ -32,7 +32,7 @@ This document is the output of Phase 1-1.5 from the autonomous `feature-design` 
 
 ## Current State Summary
 
-**Current activity tracking** (`python/apps/nointern/src/nointern/runtime/sandbox/agent_home_manager.py`):
+**Current activity tracking** (`python/apps/azents/src/azents/runtime/sandbox/agent_home_manager.py`):
 
 - `AgentHomeSandboxManager.get_or_allocate()` calls `AgentHomeClient.update_last_used(agent_id)` **on every call** at L99, L108, and L184.
 - `update_last_used` is implemented separately by `DockerAgentHomeClient` and `K8sAgentHomeClient`, using an in-memory dict or container label.
@@ -175,7 +175,7 @@ HAVING MAX(COALESCE(last_activity_at, updated_at, created_at)) < NOW() - :thresh
 
 **Rationale**:
 
-- NoIntern generally uses FastAPI DI + `deps.py`; this is consistent.
+- Azents generally uses FastAPI DI + `deps.py`; this is consistent.
 - Global registry makes test isolation difficult.
 - Client subclassing ties lifecycle logic to backends such as Docker/K8s and pollutes boundaries.
 

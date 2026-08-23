@@ -23,7 +23,7 @@ However, Discussion #2246 decided:
 
 - **Privacy purpose of file isolation is discarded**: bwrap per-user mount prevents "B explicitly asking agent for A's file," but cannot prevent A's memory from being exposed in A session response in public channel.
 - **Privacy boundary = bot access control**: assume user memory sharing among people who can access bot (→ #2242)
-- **Keep user memory path**: `agents/{agent_id}/users/{nointern_user_id}/` structure remains for personalization, without isolation guarantee
+- **Keep user memory path**: `agents/{agent_id}/users/{azents_user_id}/` structure remains for personalization, without isolation guarantee
 
 → If bwrap per-user mount is removed, LLM can no longer know user folder location. This design solves that.
 
@@ -122,7 +122,7 @@ _render_config_prompt(user_id="abc-123")
 
 ### Phase 1: bwrap-exec script change
 
-File: `docker/nointern/agent-runtime/bwrap-exec`
+File: `docker/azents/agent-runtime/bwrap-exec`
 
 Changes:
 - Header comment: change `--user-dir <path>` description to "mount to actual path instead of /data/user alias + inject USER_DIR env var".
@@ -136,7 +136,7 @@ Changes:
 
 ### Phase 2: shell.py changes
 
-File: `python/apps/nointern/src/nointern/engine/tools/shell.py`
+File: `python/apps/azents/src/azents/engine/tools/shell.py`
 
 **Change `_render_config_prompt()` parameter:**
 ```python
@@ -172,7 +172,7 @@ prompt = self._render_config_prompt(
 
 ### Phase 3: executor.py changes
 
-File: `python/apps/nointern-sandbox-daemon/src/nointern_sandbox_daemon/executor.py`
+File: `python/apps/azents-sandbox-daemon/src/azents_sandbox_daemon/executor.py`
 
 Changes:
 - Update `_build_bwrap_cmd()` comment: `--user-dir for mount` → `for USER_DIR env var injection`.
@@ -182,11 +182,11 @@ Keep interface (`user_id` parameter) unchanged.
 
 ### Phase 4: agent_home.py and other reference cleanup
 
-File: `python/apps/nointern/src/nointern/runtime/sandbox/agent_home.py`
+File: `python/apps/azents/src/azents/runtime/sandbox/agent_home.py`
 
 - Remove or update comment if `/data/user` path constant exists.
 
-File: `python/apps/nointern/src/nointern/services/file_api_client.py`
+File: `python/apps/azents/src/azents/services/file_api_client.py`
 
 - Check `/data/user` references and clean if needed (file-api already handles path based on user_id, so impact is minimal).
 

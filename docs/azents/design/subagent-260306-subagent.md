@@ -278,7 +278,7 @@ Do not set max_turns. Safety is composed of three mechanisms:
 
 ## Reference: Major Framework Comparison
 
-| Dimension | OpenAI SDK | Claude Code | CrewAI | nointern |
+| Dimension | OpenAI SDK | Claude Code | CrewAI | azents |
 |------|-----------|-------------|--------|----------|
 | Call method | Agent-as-Tool / Handoff | Task tool | Manager delegation | Agent-as-Tool |
 | Context delivery | full history (default) | task only (isolated) | role+goal | task only (isolated) |

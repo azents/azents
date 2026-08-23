@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Overview
 
-Integrate MCP (Model Context Protocol) server as nointern Toolkit so agent can use tools from external MCP servers.
+Integrate MCP (Model Context Protocol) server as azents Toolkit so agent can use tools from external MCP servers.
 
 ### Background
 

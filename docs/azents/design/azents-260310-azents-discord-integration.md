@@ -1,21 +1,21 @@
 ---
-title: "nointern Discord Integration Design"
+title: "azents Discord Integration Design"
 created: 2026-03-10
 updated: 2026-03-23
 implemented: 2026-03-23
 document_role: primary
 document_type: design
-snapshot_id: nointern-260310
-migration_source: "docs/azents/design/nointern-discord-integration.md"
+snapshot_id: azents-260310
+migration_source: "docs/azents/design/azents-discord-integration.md"
 historical_reconstruction: true
 tags: [documentation, historical-reconstruction]
 ---
 
-# nointern Discord Integration Design
+# azents Discord Integration Design
 
 ## Overview
 
-This design integrates nointern AI agents with Discord. The integration shares the same engine and broker layers as the Slack integration while reflecting Discord's Gateway-based event delivery model.
+This design integrates azents AI agents with Discord. The integration shares the same engine and broker layers as the Slack integration while reflecting Discord's Gateway-based event delivery model.
 
 **Core principles**:
 
@@ -33,13 +33,13 @@ flowchart TB
         PLAT_D[Platform Discord Bot]
     end
 
-    subgraph API["nointern-api (FastAPI)"]
+    subgraph API["azents-api (FastAPI)"]
         WS["/chat/v1 (WebSocket)"]
         SLACK_EP["/slack/v1 (HTTP callback)"]
         DISCORD_EP["/discord/v1 (OAuth callback)"]
     end
 
-    subgraph Gateway["nointern-discord-gateway"]
+    subgraph Gateway["azents-discord-gateway"]
         GW[Discord Gateway WebSocket]
     end
 
@@ -57,12 +57,12 @@ flowchart TB
     BROKER --> WORKER
 ```
 
-### nointern Platform Bot
+### azents Platform Bot
 
-- A single Discord Bot provided by nointern.
+- A single Discord Bot provided by azents.
 - Invited to a server through OAuth2.
 - Supports multiple agents through channel bindings.
-- Provides slash commands: `/nointern connect`, `/nointern reset`, and `/nointern link`.
+- Provides slash commands: `/azents connect`, `/azents reset`, and `/azents link`.
 
 > **Note**: Discord requires a Gateway WebSocket connection per bot token and does not support HTTP-based delivery for normal message events. Unlike Slack, Discord therefore does not support a BYOA (Bring Your Own App) model in this design.
 
@@ -123,13 +123,13 @@ erDiagram
 
 ### Table Descriptions
 
-**discord_installations** — Discord Bot installation unit. `discord_guild_id` is unique, so a single Discord server can be connected to only one nointern workspace.
+**discord_installations** — Discord Bot installation unit. `discord_guild_id` is unique, so a single Discord server can be connected to only one azents workspace.
 
-**discord_channel_bindings** — Mapping that binds an agent to a channel. Managed by the `/nointern connect` command.
+**discord_channel_bindings** — Mapping that binds an agent to a channel. Managed by the `/azents connect` command.
 
-**discord_user_links** — Mapping between a Discord user and a nointern user. The `installation_id` scopes the link to a workspace. If a link exists, session creation fills `user_id`; otherwise sessions are created with `user_id = NULL`.
+**discord_user_links** — Mapping between a Discord user and a azents user. The `installation_id` scopes the link to a workspace. If a link exists, session creation fills `user_id`; otherwise sessions are created with `user_id = NULL`.
 
-**discord_sessions** — Mapping between a Discord channel/thread and a nointern ConversationSession.
+**discord_sessions** — Mapping between a Discord channel/thread and a azents ConversationSession.
 
 **discord_bot_messages** — Tracks Discord message IDs sent by the bot. It depends on `discord_sessions` through a `discord_session_id` foreign key and is cascade-deleted when the session is deleted. It is used to identify the current session's bot responses while collecting thread history. This corresponds to Slack's `metadata.event_payload.session_id` approach.
 
@@ -155,7 +155,7 @@ Same pattern as Slack:
 
 ### Session Reset
 
-`/nointern reset` resets the session for the current context. It breaks the existing session mapping and creates a new session.
+`/azents reset` resets the session for the current context. It breaks the existing session mapping and creates a new session.
 
 ## Event Ingestion
 
@@ -165,7 +165,7 @@ Slack receives events through HTTP callbacks, but Discord delivers normal messag
 
 Therefore this design runs a separate Gateway process:
 
-- **`nointern-discord-gateway`** — Maintains a Discord Gateway WebSocket connection and receives events.
+- **`azents-discord-gateway`** — Maintains a Discord Gateway WebSocket connection and receives events.
 - Forwards received events to the Redis broker so the existing engine worker can process them.
 - Also receives interactions such as slash commands through the Gateway; no separate Interactions Endpoint is operated.
 
@@ -247,7 +247,7 @@ Slack inserts `metadata.event_payload.session_id` into bot response messages, so
 # Slack streaming.py — inserts session_id metadata into the bot response
 await client.chat_postMessage(
     ...,
-    metadata={"event_type": "nointern_response", "event_payload": {"session_id": session_id}},
+    metadata={"event_type": "azents_response", "event_payload": {"session_id": session_id}},
 )
 
 # Slack history.py — checks whether the bot response belongs to the current session
@@ -294,7 +294,7 @@ sequenceDiagram
 Unlike Slack, Discord requires a separate Gateway process:
 
 ```text
-nointern/
+azents/
 ├── api/public/
 │   ├── chat/v1/              ← existing WebSocket interface
 │   ├── slack/v1/             ← Slack HTTP callback
@@ -311,9 +311,9 @@ nointern/
 
 | Process | Role | Deploy Strategy |
 |----------|------|------------|
-| `nointern-api` | REST API + WebSocket + Slack callback + Discord OAuth | Rolling |
-| `nointern-worker` | EngineWorker | Rolling |
-| `nointern-discord-gateway` | Discord Gateway WebSocket, single instance | **Recreate** |
+| `azents-api` | REST API + WebSocket + Slack callback + Discord OAuth | Rolling |
+| `azents-worker` | EngineWorker | Rolling |
+| `azents-discord-gateway` | Discord Gateway WebSocket, single instance | **Recreate** |
 
 The Gateway runs as a single instance. If multiple instances connect to the Gateway with the same bot token, Discord can deliver duplicate events. During a Recreate deploy, Gateway Resume prevents event loss as long as reconnection happens within roughly 90 seconds.
 
@@ -339,7 +339,7 @@ sequenceDiagram
 
 ### Slash Commands
 
-- Commands: `/nointern connect`, `/nointern reset`, `/nointern link`.
+- Commands: `/azents connect`, `/azents reset`, `/azents link`.
 - The Gateway process automatically registers them per guild when the bot starts.
 
 ### File Handling
@@ -437,7 +437,7 @@ class DiscordConfig(BaseModel):
     client_secret: str       # OAuth2 client secret
 ```
 
-- Add `NI_DISCORD_BOT_TOKEN`, `NI_DISCORD_CLIENT_ID`, and `NI_DISCORD_CLIENT_SECRET` environment variables to `Settings`.
+- Add `AZ_DISCORD_BOT_TOKEN`, `AZ_DISCORD_CLIENT_ID`, and `AZ_DISCORD_CLIENT_SECRET` environment variables to `Settings`.
 - `Config.discord: DiscordConfig | None` — disable Discord features when not configured.
 
 #### 1.2 RDB Models
@@ -470,7 +470,7 @@ Create four tables plus indexes. Use the Slack migration (`61d68c3ce6fc`) as the
 #### Verification
 
 ```bash
-cd python/apps/nointern
+cd python/apps/azents
 uv run ruff check --fix . && uv run ruff format .
 uv run pyright
 uv run alembic -c db-schemas/rdb/alembic.ini upgrade head  # local DB
@@ -524,14 +524,14 @@ class DiscordGateway:
 
 #### 2.4 Dockerfile & Kubernetes
 
-- Reuse the existing nointern Docker image and change only the entrypoint.
+- Reuse the existing azents Docker image and change only the entrypoint.
 - Kubernetes Deployment: `replicas: 1`, `strategy: Recreate`.
 
 #### Verification
 
 ```bash
 # Check discord.py installation
-cd python/apps/nointern && uv sync
+cd python/apps/azents && uv sync
 # Run Gateway process locally (bot token required)
 uv run python src/cli/discord_gateway.py
 ```
@@ -651,26 +651,26 @@ Implement slash commands and interactive components.
 
 Register per guild when the Gateway starts:
 
-- `/nointern connect` — bind an agent
-- `/nointern reset` — reset a session
-- `/nointern link` — link a user
+- `/azents connect` — bind an agent
+- `/azents reset` — reset a session
+- `/azents link` — link a user
 
 Use discord.py's `app_commands` module:
 
 ```python
-@app_commands.command(name="nointern")
+@app_commands.command(name="azents")
 @app_commands.describe(action="Action to perform")
 @app_commands.choices(action=[
     app_commands.Choice(name="connect", value="connect"),
     app_commands.Choice(name="reset", value="reset"),
     app_commands.Choice(name="link", value="link"),
 ])
-async def nointern_command(interaction: discord.Interaction, action: str) -> None: ...
+async def azents_command(interaction: discord.Interaction, action: str) -> None: ...
 ```
 
 #### 4.2 Agent Selection UI
 
-When `/nointern connect` runs:
+When `/azents connect` runs:
 
 - Show the agent list using a Discord `Select` component.
 - Save the selected agent in `discord_channel_bindings`.
@@ -686,8 +686,8 @@ Include a Stop button with `discord.ui.Button` in the status embed:
 #### Verification
 
 ```bash
-# /nointern connect → select agent → verify binding
-# /nointern reset → verify session reset
+# /azents connect → select agent → verify binding
+# /azents reset → verify session reset
 # Stop button → verify run stop
 ```
 
@@ -716,7 +716,7 @@ Unlike Slack, Discord downloads do not require authentication because attachment
 **`services/discord/user_link.py`** — `DiscordUserLinkService`:
 
 - Same as Slack's `SlackUserLinkService`.
-- `/nointern link` → issue JWT token → web login → complete link.
+- `/azents link` → issue JWT token → web login → complete link.
 
 #### Verification
 
@@ -733,7 +733,7 @@ Unlike Slack, Discord downloads do not require authentication because attachment
 
 **`api/public/discord/v1/__init__.py`**:
 
-HTTP endpoint for the Discord Bot OAuth2 flow, mounted in nointern-api:
+HTTP endpoint for the Discord Bot OAuth2 flow, mounted in azents-api:
 
 - `GET /discord/v1/oauth-callback` — exchange OAuth code and create installation record.
 
@@ -760,7 +760,7 @@ Same as Slack user link API:
 #### Verification
 
 ```bash
-cd python/apps/nointern
+cd python/apps/azents
 uv run ruff check --fix . && uv run ruff format .
 uv run pyright
 uv run pytest
@@ -774,20 +774,20 @@ uv run pytest
 
 | Resource | Description |
 |---|---|
-| K8s Deployment (`nointern-discord-gateway`) | `replicas: 1`, `strategy: Recreate` |
+| K8s Deployment (`azents-discord-gateway`) | `replicas: 1`, `strategy: Recreate` |
 | K8s Service (not needed) | Gateway has no inbound HTTP |
-| Secret | `NI_DISCORD_BOT_TOKEN`, `NI_DISCORD_CLIENT_ID`, `NI_DISCORD_CLIENT_SECRET` |
+| Secret | `AZ_DISCORD_BOT_TOKEN`, `AZ_DISCORD_CLIENT_ID`, `AZ_DISCORD_CLIENT_SECRET` |
 | Discord Developer Portal | Create Bot, enable MESSAGE_CONTENT intent, configure OAuth2 redirect URL |
 
 #### CI/CD
 
-Reuse the existing nointern CI pipeline. The Gateway process uses the same Docker image and only changes the entrypoint:
+Reuse the existing azents CI pipeline. The Gateway process uses the same Docker image and only changes the entrypoint:
 
 ```yaml
 # K8s Deployment
 containers:
   - name: discord-gateway
-    image: nointern:latest
+    image: azents:latest
     command: ["uv", "run", "python", "src/cli/discord_gateway.py"]
 ```
 

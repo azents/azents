@@ -28,7 +28,7 @@ The following sections are copied only from explicit source Design text. No addi
 sequenceDiagram
     participant Admin as Customer Admin
     participant Agent as Agent
-    participant NI as nointern Server
+    participant NI as azents Server
     participant Proxy as Egress Proxy
     participant K8s as Customer K8s API Server
 

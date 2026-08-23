@@ -15,7 +15,7 @@ historical_reconstruction: true
 
 ## Problem Definition and Background
 
-nointern runtime assembles tool bundle, prompt, credential, and runtime context through Toolkits on every turn. In this structure, AGENTS.md loader needs two capabilities.
+azents runtime assembles tool bundle, prompt, credential, and runtime context through Toolkits on every turn. In this structure, AGENTS.md loader needs two capabilities.
 
 1. Observe file tool usage paths and decide which AGENTS.md instructions should be included in next turn prompt.
 2. Reliably reuse previously discovered instruction snapshots without reading sandbox filesystem every turn.
@@ -28,7 +28,7 @@ Decision basis:
 
 ## Goals
 
-- Add generalized `ToolkitStateStore` / typed `ToolkitStateHandle[T]` abstraction to nointern runtime.
+- Add generalized `ToolkitStateStore` / typed `ToolkitStateHandle[T]` abstraction to azents runtime.
 - Keep Python API generic + Pydantic model based, so Toolkit state payload can be loaded/saved type-safely.
 - Allow one Toolkit namespace to own multiple named states.
 - Define state identity as `scope + agent_runtime_id + optional session_id + toolkit_namespace + state_name`.
@@ -54,17 +54,17 @@ Decision basis:
 
 Related code paths:
 
-- `python/apps/nointern/src/nointern/core/tools.py`
+- `python/apps/azents/src/azents/core/tools.py`
   - defines `Toolkit`, `ToolkitState`, `TurnContext`, `ToolkitProvider`.
   - current Toolkit returns `tools` and `prompt` through `update_context()` every turn.
-- `python/apps/nointern/src/nointern/engine/sdk/agent.py`
+- `python/apps/azents/src/azents/engine/sdk/agent.py`
   - `DynamicAgent.get_all_tools()` calls each Toolkit's `update_context()` every turn.
   - `build_dynamic_instructions()` combines base prompt and Toolkit prompt.
-- `python/apps/nointern/src/nointern/engine/sdk/tool_converter.py`
-  - `_invoke_nointern_handler()` wraps nointern function tool call.
-- `python/apps/nointern/src/nointern/engine/tools/builtin.py`
+- `python/apps/azents/src/azents/engine/sdk/tool_converter.py`
+  - `_invoke_azents_handler()` wraps azents function tool call.
+- `python/apps/azents/src/azents/engine/tools/builtin.py`
   - location of builtin toolkit family. Keep `engine/tools/builtin.py` rename because builtin toolkit has broader responsibility than shell.
-- `python/apps/nointern/src/nointern/services/session_workspace_project/__init__.py`
+- `python/apps/azents/src/azents/services/session_workspace_project/__init__.py`
   - defines `/home/sandbox` root and Project direct child rule.
 
 Current structure has no official interface for Toolkit to update state before/after tool calls, and no common API for Toolkit to store durable named state per runtime scope.
@@ -396,7 +396,7 @@ If topology runs isolated subagent runtime or separate session, rows are separat
 - No Frontend change.
 - RDB migration required.
 - No S3 persistence permission added. Direct S3 store for AGENTS.md persistent state is rejected design.
-- Runtime DB access path follows existing nointern RDB repository/service convention.
+- Runtime DB access path follows existing azents RDB repository/service convention.
 - Project boundary source of truth is Session Workspace Project registry.
 
 ## Operational prerequisite, migration, rollout
@@ -435,7 +435,7 @@ Works on single worker, but breaks prompt continuity between turns in distribute
 
 ### tool output mutation
 
-Instruction channel and tool result channel become mixed. nointern consistently handles through system prompt assembly via `ToolkitState.prompt`.
+Instruction channel and tool result channel become mixed. azents consistently handles through system prompt assembly via `ToolkitState.prompt`.
 
 ### prohibit full content snapshot
 
@@ -470,7 +470,7 @@ Would require sandbox read every turn, increasing latency and inactive sandbox r
 
 ### E2E primary verification plan
 
-- Create Agent, Workspace, Session fixture in testenv/nointern E2E.
+- Create Agent, Workspace, Session fixture in testenv/azents E2E.
 - OpenAI-compatible mock/AIMock fixture returns deterministic tool call and verifies through actual WebSocket session → engine worker → sandbox runtime → tool execution path.
 - Observe unique token in next-turn model request journal or assistant response to confirm prompt reflection.
 - Prepare Project registry fixture with both loaded=true/false.
@@ -495,8 +495,8 @@ Would require sandbox read every turn, increasing latency and inactive sandbox r
 
 ### CI execution policy
 
-- QA pass/fail is judged by nointern E2E or testenv based agentic test result running actual services.
-- sandbox E2E follows existing nointern E2E CI policy.
+- QA pass/fail is judged by azents E2E or testenv based agentic test result running actual services.
+- sandbox E2E follows existing azents E2E CI policy.
 - inactive/hibernated snapshot test can be split into optional/live if environment prerequisites are absent.
 
 ## QA Checklist
@@ -521,11 +521,11 @@ Identity unique constraint and scope/session validation apply, root AGENTS state
 
 #### Execution result
 
-PASS — dedicated E2E QA verified actual nointern server/WebSocket/engine worker/sandbox-control/LLM Responses/tool execution path. Mock OpenAI Responses server created `/home/sandbox/AGENTS.md` with `write` tool call in first turn, and confirmed `ROOT_AGENTS_E2E_MARKER_3542` included in second turn model request payload.
+PASS — dedicated E2E QA verified actual azents server/WebSocket/engine worker/sandbox-control/LLM Responses/tool execution path. Mock OpenAI Responses server created `/home/sandbox/AGENTS.md` with `write` tool call in first turn, and confirmed `ROOT_AGENTS_E2E_MARKER_3542` included in second turn model request payload.
 
 #### Fixes applied
 
-After Phase 1 code review, fixed issue where disabled/failed Toolkit was included in hook dispatch target. `DynamicAgent.get_all_tools()` records only active bindings surviving `update_context()` into `NointernRunContext.toolkit_bindings`.
+After Phase 1 code review, fixed issue where disabled/failed Toolkit was included in hook dispatch target. `DynamicAgent.get_all_tools()` records only active bindings surviving `update_context()` into `AzentsRunContext.toolkit_bindings`.
 
 ### QA-2. Pydantic typed handle validates state schema
 
@@ -557,7 +557,7 @@ TBD
 
 #### What to check
 
-Verify Toolkit hook is called before/after nointern function tool calls such as `read_text`, `write`, `edit`, `grep`, `glob`.
+Verify Toolkit hook is called before/after azents function tool calls such as `read_text`, `write`, `edit`, `grep`, `glob`.
 
 #### Why it matters
 
@@ -565,7 +565,7 @@ If AGENTS loader accidentally attaches only to specific tool, instruction discov
 
 #### How to check
 
-In testenv/nointern E2E, have mock LLM return actual tool calls sequentially and let engine worker execute tools through WebSocket session. After each tool call, check next model request journal and hook log/metric.
+In testenv/azents E2E, have mock LLM return actual tool calls sequentially and let engine worker execute tools through WebSocket session. After each tool call, check next model request journal and hook log/metric.
 
 #### Expected result
 
@@ -617,7 +617,7 @@ General folders and Projects coexist in Session Workspace, so Project registry b
 
 #### How to check
 
-Prepare Project registry loaded=true, loaded=false in testenv/nointern E2E. Use mock LLM tool calls to access loaded Project internal file, loaded=false Project internal file, and unregistered folder file, then confirm only loaded Project chain is reflected in next turn model request journal or assistant response.
+Prepare Project registry loaded=true, loaded=false in testenv/azents E2E. Use mock LLM tool calls to access loaded Project internal file, loaded=false Project internal file, and unregistered folder file, then confirm only loaded Project chain is reflected in next turn model request journal or assistant response.
 
 #### Expected result
 
@@ -643,7 +643,7 @@ Stale instruction makes Agent behave differently from rules modified by user.
 
 #### How to check
 
-In testenv/nointern E2E, execute active `AGENTS.md` with mock LLM tool call sequence write → edit → delete. After each phase, check next turn model request journal, assistant response, `toolkit_states.state_json`.
+In testenv/azents E2E, execute active `AGENTS.md` with mock LLM tool call sequence write → edit → delete. After each phase, check next turn model request journal, assistant response, `toolkit_states.state_json`.
 
 #### Expected result
 
@@ -669,7 +669,7 @@ Lower-scope instruction specifies higher-scope instruction. If order is unstable
 
 #### How to check
 
-In testenv/nointern E2E, create root, Project root, nested directory `AGENTS.md`, then read nested target file. In next model request journal system prompt, verify prompt blocks appear in root → Project root → nested ancestor order.
+In testenv/azents E2E, create root, Project root, nested directory `AGENTS.md`, then read nested target file. In next model request journal system prompt, verify prompt blocks appear in root → Project root → nested ancestor order.
 
 #### Expected result
 

@@ -26,9 +26,9 @@ The following sections are copied only from explicit source Design text. No addi
 
 | Direction | Allowed | Rationale |
 |------|------|------|
-| 1 nointern user → Discord + Slack simultaneously | ✅ | natural multi-platform scenario |
-| 1 platform account → 1 nointern user (per installation) | ✅ | `(installation_id, platform_user_id)` unique constraint |
-| 1 platform account → N nointern users | ❌ | blocked by above unique constraint |
+| 1 azents user → Discord + Slack simultaneously | ✅ | natural multi-platform scenario |
+| 1 platform account → 1 azents user (per installation) | ✅ | `(installation_id, platform_user_id)` unique constraint |
+| 1 platform account → N azents users | ❌ | blocked by above unique constraint |
 
 ## Historical Unknowns
 

@@ -70,10 +70,12 @@ Design documents are accumulated records and are not listed individually in this
 | [Archived Session Retention and Durable Purge Historical Requirements Reconstruction](requirements/archived-260719-archived-retention-and-purge.md) | archived-260719 | 2026-07-19 | - |
 | [Keep Native Artifact Compatibility Keys Strict Historical Requirements Reconstruction](requirements/artifact-260716-artifact-compatibility-keys-strict.md) | artifact-260716 | 2026-07-16 | - |
 | [Atomically Activate the Resolved Run and Session Profile Historical Requirements Reconstruction](requirements/atomic-260710-atomic-profile-activation.md) | atomic-260710 | 2026-07-10 | - |
-| [nointern-web Login Guard Historical Requirements Reconstruction](requirements/auth-260219-auth-guard.md) | auth-260219 | 2026-02-19 | 2026-02-19 |
-| [nointern-web Authentication System Historical Requirements Reconstruction](requirements/authsnapshot-260219-auth.md) | authsnapshot-260219 | 2026-02-19 | 2026-02-19 |
+| [azents-web Login Guard Historical Requirements Reconstruction](requirements/auth-260219-auth-guard.md) | auth-260219 | 2026-02-19 | 2026-02-19 |
+| [azents-web Authentication System Historical Requirements Reconstruction](requirements/authsnapshot-260219-auth.md) | authsnapshot-260219 | 2026-02-19 | 2026-02-19 |
 | [Usage-based Auto Compaction and Token Estimation Redesign Historical Requirements Reconstruction](requirements/auto-260612-usage-auto-compaction.md) | auto-260612 | 2026-06-12 | - |
 | [AWS Toolkit — Managed MCP + Direct SigV4 Signing Historical Requirements Reconstruction](requirements/aws-260326-aws-toolkit.md) | aws-260326 | 2026-03-26 | 2026-03-26 |
+| [azents-web System Historical Requirements Reconstruction](requirements/azents-260216-azents-web.md) | azents-260216 | 2026-02-16 | 2026-02-16 |
+| [azents Discord Integration Historical Requirements Reconstruction](requirements/azents-260310-azents-discord-integration.md) | azents-260310 | 2026-03-10 | 2026-03-23 |
 | [Azents-Owned Git Worktree Ownership and Cleanup Historical Requirements Reconstruction](requirements/azents-260703-azents-git-worktree-ownership-and-cleanup.md) | azents-260703 | 2026-07-03 | - |
 | [Run-Scoped Azents Virtual Filesystem Historical Requirements Reconstruction](requirements/azents-260719-azents-vfs.md) | azents-260719 | 2026-07-19 | 2026-07-21 |
 | [Backend Project Browser Manifest Historical Requirements Reconstruction](requirements/backend-260703-backend-browser-manifest.md) | backend-260703 | 2026-07-03 | - |
@@ -82,6 +84,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Binding and Admission Ordering Requirements](requirements/binding-260731-admission-ordering.md) | binding-260731 | 2026-07-31 | 2026-07-31 |
 | [Per-Prompt Reasoning Effort Is a Run Boundary Historical Requirements Reconstruction](requirements/boundaries-260710-prompt-reasoning-effort-boundaries.md) | boundaries-260710 | 2026-07-10 | - |
 | [Sandbox Runtime / Workspace State Boundary Historical Requirements Reconstruction](requirements/boundary-260524-sandbox-boundary.md) | boundary-260524 | 2026-05-24 | - |
+| [Historical Document Branding Migration Requirements](requirements/branding-260823-historical-document-migration.md) | branding-260823 | 2026-08-23 | 2026-08-23 |
 | [Add Session Sandbox Workspace Browser API Historical Requirements Reconstruction](requirements/browser-260501-browser-api.md) | browser-260501 | 2026-05-01 | 2026-05-02 |
 | [Workspace Project Browser Surface Historical Requirements Reconstruction](requirements/browser-260703-browser-surface.md) | browser-260703 | 2026-07-03 | - |
 | [Built-in Tool Support Discussion Historical Requirements Reconstruction](requirements/builtin-260315-builtin-tools.md) | builtin-260315 | 2026-03-15 | 2026-03-15 |
@@ -128,12 +131,12 @@ Design documents are accumulated records and are not listed individually in this
 | [Sandbox Provider Control Distributed Recovery Historical Requirements Reconstruction](requirements/control-260524-sandbox-control-distributed-recovery.md) | control-260524 | 2026-05-24 | 2026-05-24 |
 | [Runtime Bounded Repair Fencing Requirements](requirements/control-260805-bounded-repair-fencing.md) | control-260805 | 2026-08-05 | 2026-08-05 |
 | [Provider Channel Participation Settings Requirements](requirements/conversation-260801-provider-channel-participation.md) | conversation-260801 | 2026-08-01 | 2026-08-02 |
-| [nointern Core Concepts Historical Requirements Reconstruction](requirements/core-260207-core-concepts.md) | core-260207 | 2026-02-07 | 2026-03-06 |
+| [azents Core Concepts Historical Requirements Reconstruction](requirements/core-260207-core-concepts.md) | core-260207 | 2026-02-07 | 2026-03-06 |
 | [Calculate OpenAI-Compatible Costs from SDK Usage Historical Requirements Reconstruction](requirements/costs-260716-openai-costs-from-sdk-usage.md) | costs-260716 | 2026-07-16 | - |
 | [Introduce credential provider model and admin password reset token Historical Requirements Reconstruction](requirements/credential-260618-credential-and-admin-password.md) | credential-260618 | 2026-06-18 | - |
 | [User & WorkspaceUser CRUD Document Historical Requirements Reconstruction](requirements/crud-260212-crud.md) | crud-260212 | 2026-02-12 | 2026-02-19 |
 | [Remove Percentage Rollout from Apply-Patch Custom Selection Historical Requirements Reconstruction](requirements/custom-260721-patch-custom-rollout.md) | custom-260721 | 2026-07-21 | - |
-| [nointern Daily Log Historical Requirements Reconstruction](requirements/daily-260322-daily-log.md) | daily-260322 | 2026-03-22 | 2026-03-22 |
+| [azents Daily Log Historical Requirements Reconstruction](requirements/daily-260322-daily-log.md) | daily-260322 | 2026-03-22 | 2026-03-22 |
 | [Declarative Improvements for Async Toolkit Loading State Historical Requirements Reconstruction](requirements/declarative-260331-declarative-toolkit-status.md) | declarative-260331 | 2026-03-31 | 2026-03-31 |
 | [Agent Decommission Test-Double Contracts Requirements](requirements/decommission-260804-test-double-contracts.md) | decommission-260804 | 2026-08-04 | 2026-08-05 |
 | [Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts Historical Requirements Reconstruction](requirements/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) | deterministic-260628 | 2026-06-28 | - |
@@ -207,14 +210,14 @@ Design documents are accumulated records and are not listed individually in this
 | [Group Chat Tool Activity in the Frontend Historical Requirements Reconstruction](requirements/group-260720-group-chat-activity-in-the-frontend.md) | group-260720 | 2026-07-20 | 2026-07-20 |
 | [gVisor + BYOC Sandbox Discussion Historical Requirements Reconstruction](requirements/gvisor-260403-gvisor-byoc-sandbox.md) | gvisor-260403 | 2026-04-03 | 2026-04-20 |
 | [Handle Message Edits as Transactional Preparation Historical Requirements Reconstruction](requirements/handle-260712-handle-message-edits-as-transactional-preparation.md) | handle-260712 | 2026-07-12 | - |
-| [NoIntern Helm Packaging Historical Requirements Reconstruction](requirements/helm-260512-helm-packaging.md) | helm-260512 | 2026-05-12 | 2026-05-12 |
+| [Azents Helm Packaging Historical Requirements Reconstruction](requirements/helm-260512-helm-packaging.md) | helm-260512 | 2026-05-12 | 2026-05-12 |
 | [Home-as-agent-list Reorganization Historical Requirements Reconstruction](requirements/home-260421-home-list-2026.md) | home-260421 | 2026-04-21 | 2026-04-21 |
 | [Runtime Hook System Historical Requirements Reconstruction](requirements/hook-260507-hook.md) | hook-260507 | 2026-05-07 | 2026-05-07 |
 | [Adopt Runtime Hook System Historical Requirements Reconstruction](requirements/hook-260518-hook.md) | hook-260518 | 2026-05-18 | - |
 | [Provider-hosted web search runs through normalized capability and Agent opt-in Historical Requirements Reconstruction](requirements/hosted-260617-hosted-web-search.md) | hosted-260617 | 2026-06-17 | - |
 | [Provider-Hosted Image Generation Restoration Historical Requirements Reconstruction](requirements/hosted-260717-hosted-image-generation.md) | hosted-260717 | 2026-07-17 | - |
 | [Define the OpenAI HTTP Migration by Semantic Parity Historical Requirements Reconstruction](requirements/http-260716-openai-http-migration-by-semantic-parity.md) | http-260716 | 2026-07-16 | - |
-| [nointern-web i18n Architecture Historical Requirements Reconstruction](requirements/i18n-260216-i18n.md) | i18n-260216 | 2026-02-16 | 2026-02-16 |
+| [azents-web i18n Architecture Historical Requirements Reconstruction](requirements/i18n-260216-i18n.md) | i18n-260216 | 2026-02-16 | 2026-02-16 |
 | [Idempotent Sandbox Lifecycle State Historical Requirements Reconstruction](requirements/idempotent-260524-idempotent-sandbox-lifecycle.md) | idempotent-260524 | 2026-05-24 | - |
 | [Model-Specific Image Generation Execution Historical Requirements Reconstruction](requirements/image-260718-image-generation.md) | image-260718 | 2026-07-18 | 2026-07-18 |
 | [Todo-Owned Slack Activity Indicator Requirements](requirements/indicator-260723-todo-owned-progress.md) | indicator-260723 | 2026-07-23 | - |
@@ -270,8 +273,6 @@ Design documents are accumulated records and are not listed individually in this
 | [Hierarchical Runtime Network Restriction Requirements](requirements/network-260812-hierarchical-runtime-network-restriction.md) | network-260812 | 2026-08-12 | 2026-08-13 |
 | [New Session Project Selection Historical Requirements Reconstruction](requirements/new-260629-new-selection.md) | new-260629 | 2026-06-29 | - |
 | [New Session Mixed Workspace Selection Historical Requirements Reconstruction](requirements/new-260705-new-mixed-selection.md) | new-260705 | 2026-07-05 | - |
-| [nointern-web System Historical Requirements Reconstruction](requirements/nointern-260216-nointern-web.md) | nointern-260216 | 2026-02-16 | 2026-02-16 |
-| [nointern Discord Integration Historical Requirements Reconstruction](requirements/nointern-260310-nointern-discord-integration.md) | nointern-260310 | 2026-03-10 | 2026-03-23 |
 | [Notion Toolkit Historical Requirements Reconstruction](requirements/notion-260321-notion-toolkit.md) | notion-260321 | 2026-03-21 | 2026-03-21 |
 | [AuthorizationRequestEvent OAuth URL → Web App Setup Page Migration Historical Requirements Reconstruction](requirements/oauth-260327-discord-oauth-button-url-fix.md) | oauth-260327 | 2026-03-27 | 2026-03-27 |
 | [xAI Grok OAuth Provider Historical Requirements Reconstruction](requirements/oauth-260710-xai-oauth.md) | oauth-260710 | 2026-07-10 | - |
@@ -380,7 +381,7 @@ Design documents are accumulated records and are not listed individually in this
 | [New signup is controlled by email-bound signup token redeem Historical Requirements Reconstruction](requirements/signup-260617-signup-token-registration.md) | signup-260617 | 2026-06-17 | 2026-06-17 |
 | [Simplified File Lifecycle Policy Historical Requirements Reconstruction](requirements/simplified-260627-simplified-file-lifecycle-policy.md) | simplified-260627 | 2026-06-27 | - |
 | [Treat Skill Actions as Model-Producing Preparation Historical Requirements Reconstruction](requirements/skill-260712-skill-actions-as-producing-preparation.md) | skill-260712 | 2026-07-12 | - |
-| [nointern Slack Integration Historical Requirements Reconstruction](requirements/slack-260310-nointern-slack-integration.md) | slack-260310 | 2026-03-10 | 2026-03-10 |
+| [azents Slack Integration Historical Requirements Reconstruction](requirements/slack-260310-azents-slack-integration.md) | slack-260310 | 2026-03-10 | 2026-03-10 |
 | [Slack Toolkit Historical Requirements Reconstruction](requirements/slack-260312-slack-toolkit.md) | slack-260312 | 2026-03-12 | 2026-03-23 |
 | [Slack BYOA Discussion — Discussion Points and Decisions Historical Requirements Reconstruction](requirements/slack-260414-slack-byoa.md) | slack-260414 | 2026-04-14 | 2026-04-12 |
 | [External Channel Agent Conversation Requirements](requirements/slack-260721-external-channel-conversation.md) | slack-260721 | 2026-07-21 | - |
@@ -467,10 +468,12 @@ Design documents are accumulated records and are not listed individually in this
 - [Archived Session Retention and Durable Purge](adr/archived-260719-archived-retention-and-purge.md)
 - [Keep Native Artifact Compatibility Keys Strict](adr/artifact-260716-artifact-compatibility-keys-strict.md)
 - [Atomically Activate the Resolved Run and Session Profile](adr/atomic-260710-atomic-profile-activation.md)
-- [nointern-web Login Guard Historical Decision Reconstruction](adr/auth-260219-auth-guard.md)
-- [nointern-web Authentication System Historical Decision Reconstruction](adr/authsnapshot-260219-auth.md)
+- [azents-web Login Guard Historical Decision Reconstruction](adr/auth-260219-auth-guard.md)
+- [azents-web Authentication System Historical Decision Reconstruction](adr/authsnapshot-260219-auth.md)
 - [Usage-based Auto Compaction and Token Estimation Redesign Historical Decision Reconstruction](adr/auto-260612-usage-auto-compaction.md)
 - [AWS Toolkit — Managed MCP + Direct SigV4 Signing Historical Decision Reconstruction](adr/aws-260326-aws-toolkit.md)
+- [azents-web System Historical Decision Reconstruction](adr/azents-260216-azents-web.md)
+- [azents Discord Integration Historical Decision Reconstruction](adr/azents-260310-azents-discord-integration.md)
 - [Azents-Owned Git Worktree Ownership and Cleanup](adr/azents-260703-azents-git-worktree-ownership-and-cleanup.md)
 - [Run-Scoped Azents Virtual Filesystem Historical Decision Reconstruction](adr/azents-260719-azents-vfs.md)
 - [Backend Project Browser Manifest](adr/backend-260703-backend-browser-manifest.md)
@@ -479,6 +482,7 @@ Design documents are accumulated records and are not listed individually in this
 - [External Channel Binding and Admission Ordering](adr/binding-260731-admission-ordering.md)
 - [Per-Prompt Reasoning Effort Is a Run Boundary](adr/boundaries-260710-prompt-reasoning-effort-boundaries.md)
 - [Sandbox Runtime / Workspace State Boundary Historical Decision Reconstruction](adr/boundary-260524-sandbox-boundary.md)
+- [Historical Document Branding Migration](adr/branding-260823-historical-document-migration.md)
 - [Add Session Sandbox Workspace Browser API](adr/browser-260501-browser-api.md)
 - [Workspace Project Browser Surface](adr/browser-260703-browser-surface.md)
 - [Built-in Tool Support Discussion](adr/builtin-260315-builtin-tools.md)
@@ -525,12 +529,12 @@ Design documents are accumulated records and are not listed individually in this
 - [Sandbox Provider Control Distributed Recovery Historical Decision Reconstruction](adr/control-260524-sandbox-control-distributed-recovery.md)
 - [Runtime Bounded Repair Fencing](adr/control-260805-bounded-repair-fencing.md)
 - [Provider Channel Participation Settings](adr/conversation-260801-provider-channel-participation.md)
-- [nointern Core Concepts Historical Decision Reconstruction](adr/core-260207-core-concepts.md)
+- [azents Core Concepts Historical Decision Reconstruction](adr/core-260207-core-concepts.md)
 - [Calculate OpenAI-Compatible Costs from SDK Usage](adr/costs-260716-openai-costs-from-sdk-usage.md)
 - [Introduce credential provider model and admin password reset token](adr/credential-260618-credential-and-admin-password.md)
 - [User & WorkspaceUser CRUD Document Historical Decision Reconstruction](adr/crud-260212-crud.md)
 - [Remove Percentage Rollout from Apply-Patch Custom Selection](adr/custom-260721-patch-custom-rollout.md)
-- [nointern Daily Log Historical Decision Reconstruction](adr/daily-260322-daily-log.md)
+- [azents Daily Log Historical Decision Reconstruction](adr/daily-260322-daily-log.md)
 - [Declarative Improvements for Async Toolkit Loading State](adr/declarative-260331-declarative-toolkit-status.md)
 - [Agent Decommission Test-Double Contracts](adr/decommission-260804-test-double-contracts.md)
 - [Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts](adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md)
@@ -604,14 +608,14 @@ Design documents are accumulated records and are not listed individually in this
 - [Group Chat Tool Activity in the Frontend](adr/group-260720-group-chat-activity-in-the-frontend.md)
 - [gVisor + BYOC Sandbox Discussion](adr/gvisor-260403-gvisor-byoc-sandbox.md)
 - [Handle Message Edits as Transactional Preparation](adr/handle-260712-handle-message-edits-as-transactional-preparation.md)
-- [NoIntern Helm Packaging Historical Decision Reconstruction](adr/helm-260512-helm-packaging.md)
+- [Azents Helm Packaging Historical Decision Reconstruction](adr/helm-260512-helm-packaging.md)
 - [Home-as-agent-list Reorganization Historical Decision Reconstruction](adr/home-260421-home-list-2026.md)
 - [Runtime Hook System Historical Decision Reconstruction](adr/hook-260507-hook.md)
 - [Adopt Runtime Hook System](adr/hook-260518-hook.md)
 - [Provider-hosted web search runs through normalized capability and Agent opt-in](adr/hosted-260617-hosted-web-search.md)
 - [Provider-Hosted Image Generation Restoration Historical Decision Reconstruction](adr/hosted-260717-hosted-image-generation.md)
 - [Define the OpenAI HTTP Migration by Semantic Parity](adr/http-260716-openai-http-migration-by-semantic-parity.md)
-- [nointern-web i18n Architecture Historical Decision Reconstruction](adr/i18n-260216-i18n.md)
+- [azents-web i18n Architecture Historical Decision Reconstruction](adr/i18n-260216-i18n.md)
 - [Idempotent Sandbox Lifecycle State Historical Decision Reconstruction](adr/idempotent-260524-idempotent-sandbox-lifecycle.md)
 - [Model-Specific Image Generation Execution Historical Decision Reconstruction](adr/image-260718-image-generation.md)
 - [Todo-Owned Slack Activity Indicator](adr/indicator-260723-todo-owned-progress.md)
@@ -667,8 +671,6 @@ Design documents are accumulated records and are not listed individually in this
 - [Hierarchical Runtime Network Restriction](adr/network-260812-hierarchical-runtime-network-restriction.md)
 - [New Session Project Selection](adr/new-260629-new-selection.md)
 - [New Session Mixed Workspace Selection](adr/new-260705-new-mixed-selection.md)
-- [nointern-web System Historical Decision Reconstruction](adr/nointern-260216-nointern-web.md)
-- [nointern Discord Integration Historical Decision Reconstruction](adr/nointern-260310-nointern-discord-integration.md)
 - [Notion Toolkit Historical Decision Reconstruction](adr/notion-260321-notion-toolkit.md)
 - [AuthorizationRequestEvent OAuth URL → Web App Setup Page Migration Historical Decision Reconstruction](adr/oauth-260327-discord-oauth-button-url-fix.md)
 - [xAI Grok OAuth Provider Historical Decision Reconstruction](adr/oauth-260710-xai-oauth.md)
@@ -777,7 +779,7 @@ Design documents are accumulated records and are not listed individually in this
 - [New signup is controlled by email-bound signup token redeem](adr/signup-260617-signup-token-registration.md)
 - [Simplified File Lifecycle Policy](adr/simplified-260627-simplified-file-lifecycle-policy.md)
 - [Treat Skill Actions as Model-Producing Preparation](adr/skill-260712-skill-actions-as-producing-preparation.md)
-- [nointern Slack Integration Historical Decision Reconstruction](adr/slack-260310-nointern-slack-integration.md)
+- [azents Slack Integration Historical Decision Reconstruction](adr/slack-260310-azents-slack-integration.md)
 - [Slack Toolkit Historical Decision Reconstruction](adr/slack-260312-slack-toolkit.md)
 - [Slack BYOA Discussion — Discussion Points and Decisions](adr/slack-260414-slack-byoa.md)
 - [External Channel Agent Conversation](adr/slack-260721-external-channel-conversation.md)

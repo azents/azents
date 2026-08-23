@@ -384,7 +384,7 @@ while True:
 
 #### 1-1. Extend TokenUsage
 
-**File:** `nointern/engine/types.py`
+**File:** `azents/engine/types.py`
 
 ```python
 @dataclasses.dataclass(frozen=True)
@@ -409,7 +409,7 @@ Existing code compatibility is preserved because optional fields are added after
 
 #### 1-2. Add TurnCompleteEvent
 
-**File:** `nointern/engine/types.py`
+**File:** `azents/engine/types.py`
 
 ```python
 @dataclasses.dataclass(frozen=True)
@@ -439,7 +439,7 @@ SessionEvent = (
 
 #### 1-3. Extend LLM client usage parsing
 
-**File:** `nointern/runtime/llm.py`
+**File:** `azents/runtime/llm.py`
 
 `_parse_response_usage()` reads not only detailed fields of usage but also `_hidden_params` of response object and fills `cost_usd` / `raw_hidden_params`. Anthropic top-level fields (`cache_read_input_tokens` / `cache_creation_input_tokens`) are used as fallback when `input_tokens_details` is empty.
 
@@ -451,7 +451,7 @@ SessionEvent = (
 
 #### 1-4. Filter TurnCompleteEvent in _build_input_items
 
-**File:** `nointern/runtime/llm.py`
+**File:** `azents/runtime/llm.py`
 
 Skip `TurnCompleteEvent` in `_build_input_items()` function.
 Since it is added to `SessionEvent` union, add case to match branch:
@@ -474,7 +474,7 @@ case TurnCompleteEvent():
 
 #### 2-1. Extend MessageRole enum
 
-**File:** `nointern/core/enums.py`
+**File:** `azents/core/enums.py`
 
 ```python
 class MessageRole(enum.StrEnum):
@@ -489,7 +489,7 @@ class MessageRole(enum.StrEnum):
 
 #### 2-2. Change RDBEvent model
 
-**File:** `nointern/rdb/models/message.py`
+**File:** `azents/rdb/models/message.py`
 
 Add nullable JSONB `usage` column:
 
@@ -501,7 +501,7 @@ usage: Mapped[dict[str, Any] | None] = mapped_column(
 
 #### 2-3. DB migration
 
-**File:** `nointern/db-schemas/rdb/migrations/versions/` — new Alembic migration
+**File:** `azents/db-schemas/rdb/migrations/versions/` — new Alembic migration
 
 2 steps:
 1. Add `turn_complete` value to `message_role` ENUM.
@@ -523,7 +523,7 @@ Reference pattern: `20279d111590_add_model_column_to_events.py`
 
 #### 2-4. EventStore save logic
 
-**File:** `nointern/repos/message/store.py`
+**File:** `azents/repos/message/store.py`
 
 Add `TurnCompleteEvent` case to `_event_to_rdb_kwargs()`:
 
@@ -564,7 +564,7 @@ def _serialize_usage(usage: TokenUsage | None) -> dict[str, Any] | None:
 
 #### 2-5. EventStore load logic
 
-**File:** `nointern/repos/message/store.py`
+**File:** `azents/repos/message/store.py`
 
 Add `TURN_COMPLETE` case to `_to_session_event()`:
 
@@ -595,7 +595,7 @@ def _deserialize_usage(raw: dict[str, Any] | None) -> TokenUsage | None:
 
 #### 2-6. Tests
 
-**File:** `nointern/repos/message/store_test.py` (existing or new)
+**File:** `azents/repos/message/store_test.py` (existing or new)
 
 Tests to add:
 1. **TurnCompleteEvent save/load round-trip**: with usage → DB → restore → same as original
@@ -616,7 +616,7 @@ Tests to add:
 
 #### 3-1. Change engine run()
 
-**File:** `nointern/engine/engine.py`
+**File:** `azents/engine/engine.py`
 
 Add additional storage of `TurnCompleteEvent` immediately after LLM response event storage in ReAct loop.
 
@@ -654,13 +654,13 @@ Store `TurnCompleteEvent` in both paths, so if one user message repeats tool cal
 
 #### 3-2. Add imports
 
-**File:** `nointern/engine/engine.py`
+**File:** `azents/engine/engine.py`
 
-Import `TurnCompleteEvent` from `nointern.runtime.types`.
+Import `TurnCompleteEvent` from `azents.runtime.types`.
 
 #### 3-3. WebSocket serialization
 
-**File:** `nointern/broker/serialization.py`
+**File:** `azents/broker/serialization.py`
 
 Do not deliver `TurnCompleteEvent` through WebSocket.
 `RunComplete` already delivers usage to client, so role overlaps.
@@ -670,7 +670,7 @@ No separate handling needed.
 
 #### 3-4. Update existing tests
 
-**File:** `nointern/engine/engine_test.py`
+**File:** `azents/engine/engine_test.py`
 
 Since `_FakeEventStore` `list()` return includes `TurnCompleteEvent`, existing test assertions must consider `TurnCompleteEvent`.
 
@@ -680,7 +680,7 @@ Updates:
 
 #### 3-5. Add new tests
 
-**File:** `nointern/engine/engine_test.py`
+**File:** `azents/engine/engine_test.py`
 
 Tests to add:
 1. **single turn**: user message → text response → confirm 1 TurnCompleteEvent stored
@@ -691,7 +691,7 @@ Tests to add:
 #### Verification
 
 - All tests pass.
-- After real LLM call with nointern shell, check DB:
+- After real LLM call with azents shell, check DB:
   `SELECT role, usage FROM events WHERE channel_id = '...' AND role = 'turn_complete'`
 - `uv run ruff check --fix . && uv run ruff format . && uv run pyright && uv run pytest`
 
@@ -709,7 +709,7 @@ Existing truncate API (`DELETE /sessions/{id}/messages/{message_id}/after`) can 
 
 #### 4-1. Add usage field to ChatMessage
 
-**File:** `nointern/repos/message/data.py`
+**File:** `azents/repos/message/data.py`
 
 ```python
 class ChatMessage(BaseModel):
@@ -735,7 +735,7 @@ class ChatMessage(BaseModel):
 
 #### 4-2. Include TurnCompleteEvent in MessageRepository
 
-**File:** `nointern/repos/message/__init__.py`
+**File:** `azents/repos/message/__init__.py`
 
 Map `usage` field to `ChatMessage` in `_build()` method:
 
@@ -767,7 +767,7 @@ def _is_empty(self, msg: ChatMessage) -> bool:
 
 #### 4-3. Truncate API — add turn boundary constraint
 
-**File:** `nointern/services/chat/__init__.py`
+**File:** `azents/services/chat/__init__.py`
 
 Change `truncate_session()`: verify message_id has `role=turn_complete`.
 
@@ -798,7 +798,7 @@ async def truncate_session(
 
 #### 4-4. Add error type
 
-**File:** `nointern/services/chat/data.py`
+**File:** `azents/services/chat/data.py`
 
 ```python
 @dataclasses.dataclass(frozen=True)
@@ -810,7 +810,7 @@ TruncateSessionError = SessionNotFound | SessionAccessDenied | MessageNotFound |
 
 #### 4-5. API route error handling
 
-**File:** `nointern/api/public/chat/v1/__init__.py`
+**File:** `azents/api/public/chat/v1/__init__.py`
 
 Handle `NotTurnBoundary` error in `truncate_session` endpoint:
 

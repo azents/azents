@@ -13,7 +13,7 @@ migration_source: "docs/azents/adr/0002-memory-filesystem-to-db.md"
 
 ## Context
 
-nointern's Memory system stores memories as Markdown files on the EFS filesystem: a `MEMORIES.md` index plus individual `{type}_{topic}.md` files. The model directly modifies those files through existing file tools such as write, edit, read, and delete.
+azents's Memory system stores memories as Markdown files on the EFS filesystem: a `MEMORIES.md` index plus individual `{type}_{topic}.md` files. The model directly modifies those files through existing file tools such as write, edit, read, and delete.
 
 This structure has the following problems:
 

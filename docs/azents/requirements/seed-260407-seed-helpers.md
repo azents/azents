@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/seed-helpers.md"
 
 ## Problem
 
-Stage 1a (preflight) and Stage 1b (devserver lifecycle) are complete, so an agent can start local infra + devserver to ready state in one line. However, DB is empty. Stage 1c provides seed building block library `testenv.nointern.seed` so an agent can **assemble different QA scenarios for each PR with short Python scripts**.
+Stage 1a (preflight) and Stage 1b (devserver lifecycle) are complete, so an agent can start local infra + devserver to ready state in one line. However, DB is empty. Stage 1c provides seed building block library `testenv.azents.seed` so an agent can **assemble different QA scenarios for each PR with short Python scripts**.
 
 ## Primary Actor
 
@@ -31,12 +31,12 @@ Unknown — the historical source does not state this explicitly.
 ## Primary Scenario
 
 ```python
-from testenv.nointern import seed
+from testenv.azents import seed
 
 ## Supporting Scenarios
 
 ```python
-from testenv.nointern import seed
+from testenv.azents import seed
 
 ## Goals
 

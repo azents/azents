@@ -78,7 +78,7 @@ The current Bolt app is created with `signing_secret=slack_config.signing_secret
 
 ### Problem
 
-The unique constraint `uq_slack_installations_workspace_id` allows only one installation per workspace. The original design says: multiple BYOA apps + Platform App can coexist in the same nointern workspace. In a "1 Agent = 1 App" model, each agent needs a separate installation.
+The unique constraint `uq_slack_installations_workspace_id` allows only one installation per workspace. The original design says: multiple BYOA apps + Platform App can coexist in the same azents workspace. In a "1 Agent = 1 App" model, each agent needs a separate installation.
 
 ### Options
 
@@ -102,7 +102,7 @@ The unique constraint `uq_slack_installations_workspace_id` allows only one inst
 
 1. Implements the intended "1 Agent = 1 App" model.
 2. Allows one Platform App + N BYOA apps in a workspace.
-3. Keep `slack_team_id` unique to prevent the same Slack workspace from being connected to multiple nointern workspaces.
+3. Keep `slack_team_id` unique to prevent the same Slack workspace from being connected to multiple azents workspaces.
 
 **Schema changes:**
 

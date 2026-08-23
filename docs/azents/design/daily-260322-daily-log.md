@@ -1,5 +1,5 @@
 ---
-title: "nointern Daily Log Design"
+title: "azents Daily Log Design"
 tags: [architecture, engine, historical-reconstruction]
 created: 2026-03-22
 updated: 2026-03-22
@@ -11,7 +11,7 @@ migration_source: "docs/azents/design/daily-log.md"
 historical_reconstruction: true
 ---
 
-# nointern Daily Log Design
+# azents Daily Log Design
 
 ## Purpose
 
@@ -203,7 +203,7 @@ Old daily logs are automatically deleted. Default is 7 days — if information o
 
 ## Comparison with OpenClaw
 
-| | OpenClaw | nointern |
+| | OpenClaw | azents |
 |--|---------|---------|
 | **Purpose** | Prevent context loss (structure before compaction) | Activity record (what agent did) |
 | **Trigger** | silent turn right before compaction | session idle 30 minutes (batch detection) |

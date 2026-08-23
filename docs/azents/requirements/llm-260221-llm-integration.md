@@ -22,7 +22,7 @@ migration_source: "docs/azents/design/llm-provider-integration.md"
 
 ## Problem
 
-nointern platform integrates models from multiple LLM providers (OpenAI, Anthropic, etc.) to run AI agents. To support this, it adopts design separated into three layers: **model definition**, **provider mapping**, and **workspace-specific credentials**.
+azents platform integrates models from multiple LLM providers (OpenAI, Anthropic, etc.) to run AI agents. To support this, it adopts design separated into three layers: **model definition**, **provider mapping**, and **workspace-specific credentials**.
 
 ## Primary Actor
 

@@ -24,13 +24,13 @@ Runtime-specific decisions covered by abstraction:
 | `securityContext` (seccomp, AppArmor, runAsNonRoot) | `SandboxRuntimeProfile` variant | `K8sAgentHomeClient._build_sandbox_security_context()` |
 | Snapshotter commit strategy (`--pause=true` / `--pause=false` / VM checkpoint) | `SnapshotStrategy` | `CtrSnapshotter._commit()` |
 
-nointern app uses full `SandboxRuntimeProfile`, and nointern-snapshotter uses only `SnapshotStrategy`. The two apps communicate by string wire (no shared library — code duplication is accepted).
+azents app uses full `SandboxRuntimeProfile`, and azents-snapshotter uses only `SnapshotStrategy`. The two apps communicate by string wire (no shared library — code duplication is accepted).
 
 ## 2. Type Structure
 
 ### 2.1 `SandboxRuntimeProfile` (discriminated union)
 
-`python/apps/nointern/src/nointern/runtime/sandbox/runtime_profile.py`
+`python/apps/azents/src/azents/runtime/sandbox/runtime_profile.py`
 
 ```python
 @dataclass(frozen=True, kw_only=True)
@@ -62,7 +62,7 @@ Each variant declares only fields meaningful to itself — gVisor is a userspace
 
 ### 2.2 `SnapshotStrategy` (duplicated on snapshotter side)
 
-Place same enum in `python/apps/nointern-snapshotter/src/nointern_snapshotter/config.py`. Value strings must match exactly on both sides:
+Place same enum in `python/apps/azents-snapshotter/src/azents_snapshotter/config.py`. Value strings must match exactly on both sides:
 
 | Enum | Wire value | Commit cmd |
 |---|---|---|
@@ -72,7 +72,7 @@ Place same enum in `python/apps/nointern-snapshotter/src/nointern_snapshotter/co
 
 ### 2.3 `SnapshotRef` (forward-compatible union)
 
-`python/apps/nointern/src/nointern/runtime/sandbox/agent_home_snapshot_ref.py`
+`python/apps/azents/src/azents/runtime/sandbox/agent_home_snapshot_ref.py`
 
 ```python
 @dataclass(frozen=True, kw_only=True)
@@ -93,20 +93,20 @@ Currently there is only one variant, but `kind` discriminator is included in wir
 ```mermaid
 flowchart TB
   NodePool["Karpenter NodePool<br/>(runtime invariant)"]
-  subgraph "nointern-server"
-    NIEnv["env: NI_AGENT_HOME_SANDBOX_RUNTIME<br/>NI_AGENT_HOME_K8S_RUNTIME_CLASS"]
+  subgraph "azents-server"
+    AZEnv["env: AZ_AGENT_HOME_SANDBOX_RUNTIME<br/>AZ_AGENT_HOME_K8S_RUNTIME_CLASS"]
     Config["Config.agent_home"]
     Profile["profile_for_name(...)"]
     K8sClient["K8sAgentHomeClient<br/>(runtime_class, profile)"]
   end
-  subgraph "nointern-snapshotter (DaemonSet)"
+  subgraph "azents-snapshotter (DaemonSet)"
     SSEnv["env: SNAPSHOTTER_SNAPSHOT_STRATEGY"]
     Settings["Settings.snapshot_strategy"]
     CtrSnap["CtrSnapshotter(snapshot_strategy)"]
   end
-  NodePool -->|Kustomize overlay| NIEnv
+  NodePool -->|Kustomize overlay| AZEnv
   NodePool -->|Kustomize overlay| SSEnv
-  NIEnv --> Config --> Profile --> K8sClient
+  AZEnv --> Config --> Profile --> K8sClient
   SSEnv --> Settings --> CtrSnap
 ```
 
@@ -114,18 +114,18 @@ Core premise — **one NodePool = one runtime**. To mix gVisor + Kata node group
 
 ## 4. Deployment Manifests
 
-### 4.1 nointern-server
+### 4.1 azents-server
 
-`infra/argocd/nointern-server/overlays/production/base/patches/env.env`
+`infra/argocd/azents-server/overlays/production/base/patches/env.env`
 
 ```
-NI_AGENT_HOME_SANDBOX_RUNTIME=gvisor
-NI_AGENT_HOME_K8S_RUNTIME_CLASS=sandbox
+AZ_AGENT_HOME_SANDBOX_RUNTIME=gvisor
+AZ_AGENT_HOME_K8S_RUNTIME_CLASS=sandbox
 ```
 
-### 4.2 nointern-snapshotter
+### 4.2 azents-snapshotter
 
-`infra/argocd/nointern-snapshotter/overlays/production/patches/daemonset-env.yaml`
+`infra/argocd/azents-snapshotter/overlays/production/patches/daemonset-env.yaml`
 
 ```yaml
 env:
@@ -146,13 +146,13 @@ When adding a new runtime (e.g. gVisor sub-platform like `gvisor-ptrace`, firecr
    - Restrict `snapshot_strategy` with Literal (reflect live test result)
    - Extend all `match profile:` use sites without missing any, verified by pyright
 3. **Synchronize `SnapshotStrategy` enum** — add enum on snapshotter side if needed
-   - Match wire string value exactly with nointern side
+   - Match wire string value exactly with azents side
    - Include regression test comparing string sets of enums on both sides in PR
 4. **Define/deploy RuntimeClass** — add k8s RuntimeClass resource, map to containerd runtime handler
 5. **Karpenter NodePool** — add runtime label/taint to node group (`azents.io/sandbox-runtime=<name>`)
 6. **DaemonSet overlay** — inject `SNAPSHOTTER_SNAPSHOT_STRATEGY` into snapshotter overlay for that NodePool
 7. **Security profile review** — decide whether seccomp / AppArmor profile is needed; if Localhost profile, pre-place on kubelet host
-8. **nointern-server env** — update `NI_AGENT_HOME_SANDBOX_RUNTIME` / `NI_AGENT_HOME_K8S_RUNTIME_CLASS` (roll out deployment gradually)
+8. **azents-server env** — update `AZ_AGENT_HOME_SANDBOX_RUNTIME` / `AZ_AGENT_HOME_K8S_RUNTIME_CLASS` (roll out deployment gradually)
 9. **Confirm Manager drift verification path** — verify live that base image ref comparison works with new runtime too (§8.4)
 
 ## 6. Regression Tests

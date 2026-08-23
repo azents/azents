@@ -1,5 +1,5 @@
 ---
-title: "nointern-web Login Guard Design"
+title: "azents-web Login Guard Design"
 created: 2026-02-19
 updated: 2026-02-19
 implemented: 2026-02-19
@@ -11,15 +11,15 @@ historical_reconstruction: true
 tags: [documentation, historical-reconstruction]
 ---
 
-# nointern-web Login Guard Design
+# azents-web Login Guard Design
 
 ## Overview
 
-Access control pattern for pages requiring authentication. Applies azents(web) login guard pattern to nointern-web.
+Access control pattern for pages requiring authentication. Applies azents(web) login guard pattern to azents-web.
 
 ## Authentication Model Differences
 
-| Item | azents (web) | nointern-web |
+| Item | azents (web) | azents-web |
 |------|----------------|-------------|
 | Auth method | JWT + `auth.me` endpoint | Stateless Bearer token (cookie) |
 | Token storage | encrypted cookie (AES-256-GCM) | httpOnly cookie (plaintext) |
@@ -27,7 +27,7 @@ Access control pattern for pages requiring authentication. Applies azents(web) l
 | User lookup | `auth.me` tRPC call | no dedicated endpoint |
 | UI library | MUI | Mantine v8 |
 
-Because nointern has no `auth.me` endpoint, server-side authentication state is judged by **cookie existence** (`ni-token` or `ni-refresh`).
+Because azents has no `auth.me` endpoint, server-side authentication state is judged by **cookie existence** (`ni-token` or `ni-refresh`).
 
 ## Architecture
 
@@ -142,7 +142,7 @@ sequenceDiagram
     participant C as Client
     participant T as tRPC Server
     participant I as Request Interceptor
-    participant A as nointern API
+    participant A as azents API
 
     C->>T: API call (e.g. workspace.list)
     T->>I: run request interceptor

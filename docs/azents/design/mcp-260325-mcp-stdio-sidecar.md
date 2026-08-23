@@ -17,7 +17,7 @@ historical_reconstruction: true
 
 ## Overview
 
-Add mcp-proxy sidecar to Agent Home Pod so nointern agents can use stdio-based MCP servers (mcp-server-gcp, mcp-server-ga4, etc.).
+Add mcp-proxy sidecar to Agent Home Pod so azents agents can use stdio-based MCP servers (mcp-server-gcp, mcp-server-ga4, etc.).
 
 **Problems solved:**
 - Existing MCP toolkit is HTTP(SSE/Streamable HTTP)-based and cannot directly support stdio MCP servers.

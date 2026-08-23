@@ -153,14 +153,14 @@ devserver creates DI container with `run_with_container(config)` and resolves wo
 Verification goal of TC-LCY-003: "Is agent home actually deleted after idle timeout?"
 
 Instead of original approach (DB backdate):
-1. Set idle threshold to 5 seconds with `NI_AGENT_HOME_IDLE_TIMEOUT_SECS=5`.
+1. Set idle threshold to 5 seconds with `AZ_AGENT_HOME_IDLE_TIMEOUT_SECS=5`.
 2. Promote cleanup loop interval (`_CLEANUP_INTERVAL_SECS`) to config and set to 2 seconds.
 3. TC handler: create session with chat (allocate agent home) → wait 7 seconds → verify container removed.
 
 ### 4.2 Config Change
 
 ```python
-# Settings (env: NI_AGENT_HOME_CLEANUP_INTERVAL_SECS)
+# Settings (env: AZ_AGENT_HOME_CLEANUP_INTERVAL_SECS)
 agent_home_cleanup_interval_secs: int = 60
 
 # AgentHomeConfig
@@ -175,8 +175,8 @@ Add `cleanup_interval_secs` parameter to `AgentHomeSandboxManager.__init__`, and
 ### 4.3 testenv .env settings
 
 ```env
-NI_AGENT_HOME_IDLE_TIMEOUT_SECS=5
-NI_AGENT_HOME_CLEANUP_INTERVAL_SECS=2
+AZ_AGENT_HOME_IDLE_TIMEOUT_SECS=5
+AZ_AGENT_HOME_CLEANUP_INTERVAL_SECS=2
 ```
 
 When TC handler runs, wait 7 seconds (idle 5s + cleanup 2s), then judge by container existence.
@@ -209,7 +209,7 @@ class InProcessRecordingHook:
 
 ### 5.2 DI Override
 
-When `NI_TESTENV_RECORDING_HOOKS=1`, override `get_lifecycle_hooks` dependency:
+When `AZ_TESTENV_RECORDING_HOOKS=1`, override `get_lifecycle_hooks` dependency:
 
 ```python
 # when creating testenv app
@@ -230,11 +230,11 @@ app.dependency_overrides[get_lifecycle_hooks] = get_lifecycle_hooks_with_recordi
 if config.runtime_env == RuntimeEnvironment.DEPLOYED:
     if config.testenv_recording_hooks:
         raise SystemExit(
-            "NI_TESTENV_RECORDING_HOOKS must not be set in production"
+            "AZ_TESTENV_RECORDING_HOOKS must not be set in production"
         )
     if config.testenv_api_enabled:
         raise SystemExit(
-            "NI_TESTENV_API_ENABLED must not be set in production"
+            "AZ_TESTENV_API_ENABLED must not be set in production"
         )
 ```
 
@@ -288,8 +288,8 @@ Container existence check: `docker ps --filter name=agent-home-{agent_id}` or te
 ```python
 class Settings:
     # Testenv-only flags
-    testenv_api_enabled: bool = False      # NI_TESTENV_API_ENABLED
-    testenv_recording_hooks: bool = False  # NI_TESTENV_RECORDING_HOOKS
+    testenv_api_enabled: bool = False      # AZ_TESTENV_API_ENABLED
+    testenv_recording_hooks: bool = False  # AZ_TESTENV_RECORDING_HOOKS
 
 class Config:
     testenv_api_enabled: bool = False
@@ -316,7 +316,7 @@ if config.testenv_api_enabled:
 ### 7.3 Module Structure
 
 ```
-nointern/api/testenv/
+azents/api/testenv/
 ├── __init__.py          # mount() function
 ├── broker/
 │   └── v1/__init__.py   # inject-resume endpoint

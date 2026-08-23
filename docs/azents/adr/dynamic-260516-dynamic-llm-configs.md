@@ -15,7 +15,7 @@ Related design document: [dynamic-llm-model-configs.md](../design/dynamic-llm-mo
 
 ## Context
 
-nointern Agent model selection has so far gone through static global `LLMModel` and provider-specific `LLMProviderModel` catalogs. Workspaces store credential information and provider settings in `LLMProviderIntegration`, but Agents directly reference `llm_provider_integration_id` and `llm_provider_model_id`.
+azents Agent model selection has so far gone through static global `LLMModel` and provider-specific `LLMProviderModel` catalogs. Workspaces store credential information and provider settings in `LLMProviderIntegration`, but Agents directly reference `llm_provider_integration_id` and `llm_provider_model_id`.
 
 [llm-260513/ADR](./llm-260513-llm-catalog-source.md) adopted a direction where human-managed Admin catalog CRUD is replaced by external/official catalog sync. However, the feature-design process concluded that current product requirements need a higher-level abstraction than simple catalog sync.
 
@@ -26,12 +26,12 @@ nointern Agent model selection has so far gone through static global `LLMModel` 
 
 ## Decision
 
-Move nointern Agent model selection to workspace-level **`ModelConfig` alias/preset**.
+Move azents Agent model selection to workspace-level **`ModelConfig` alias/preset**.
 
 Specifically:
 
 1. **Remove static catalog**
-   - Stop managing `LLMModel` and `LLMProviderModel` as static global/provider catalogs for nointern Agent model selection.
+   - Stop managing `LLMModel` and `LLMProviderModel` as static global/provider catalogs for azents Agent model selection.
    - Remove existing `llm_models`, `llm_provider_models`, catalog sync, Admin/public model catalog APIs, and frontend `llm-provider-model` router from this feature.
    - Do not reuse `llm_provider_models` as discovery cache. If cache is needed later, design a new table that Agents or ModelConfigs do not reference.
 
@@ -39,7 +39,7 @@ Specifically:
    - Agent settings UX first selects provider integration, then calls provider-specific dynamic model listing with that integration's credential/config.
    - Provider implementation decides listing source, such as models.dev, provider official API, AWS Bedrock API, Google Vertex AI API, or provider-specific hardcoded selector.
    - Listing results are ephemeral and are not Agent/ModelConfig FK targets.
-   - Listing adapters expose only normalized models that satisfy the nointern runtime contract. Models that fail normalization are excluded from user-visible lists and reported in skip summary.
+   - Listing adapters expose only normalized models that satisfy the azents runtime contract. Models that fail normalization are excluded from user-visible lists and reported in skip summary.
 
 3. **Introduce ModelConfig**
    - Workspace owns reusable `ModelConfig` records.
@@ -118,7 +118,7 @@ Specifically:
 
 - Pros: creation form changes are relatively small.
 - Cons: no workspace-level alias, default model, quota failover, or shared parameter preset.
-- Reason rejected: nointern's operational unit is workspace preset, not individual Agent model.
+- Reason rejected: azents's operational unit is workspace preset, not individual Agent model.
 
 ### 5. Use nested patch to update only some parameter override keys
 
