@@ -27,7 +27,6 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import (
     WebSocketBroadcast,
@@ -55,26 +54,10 @@ from azents.core.config import AuthConfig, Config
 from azents.core.deps import get_appctx, get_auth_config
 from azents.core.enums import AgentSessionKind, AgentSessionStatus
 from azents.core.redis import create_redis_client
-from azents.engine.events.action_messages import (
-    CleanupOrphanGitWorktreesAction,
-    CommandAction,
-    CreateGitWorktreeAction,
-    GoalAction,
-    SkillAction,
-)
+from azents.engine.events.action_messages import CommandAction, PublicTurnAction
 from azents.engine.events.types import FileOutputPart
 from azents.engine.run.commands import COMMAND_REGISTRY, list_registered_commands
 from azents.engine.run.input import InputMessage
-from azents.engine.tools.deps import (
-    get_skill_state_store,
-    get_vfs_projection_service,
-)
-from azents.engine.tools.skill import (
-    SkillStateStore,
-    load_skill_projection_for_actions,
-    skill_action_id,
-    skill_actions_from_snapshot,
-)
 from azents.repos.mailbox.data import MailboxItem
 from azents.services.agent_session_input import (
     AgentSessionInputError,
@@ -172,7 +155,12 @@ from azents.services.session_workspace_project import (
     ProjectPathConflict,
     SessionWorkspaceProjectService,
 )
-from azents.services.vfs import VfsProjectionService
+from azents.services.turn_action import (
+    TurnActionAdmissionError,
+    TurnActionCapabilityRegistry,
+    TurnActionCatalogContext,
+    TurnActionDefinition,
+)
 from azents.transport.chat import (
     chat_history_event_appended_dump,
     chat_mailbox_item_removed_dump,
@@ -1146,6 +1134,7 @@ async def create_input(
     broker: Annotated[SessionBroker, Depends(get_broker)],
     broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
     live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
+    turn_action_capabilities: Annotated[TurnActionCapabilityRegistry, Depends()],
     timezone: str | None = None,
 ) -> ChatWriteResponse:
     """Accept a composer input at the REST boundary."""
@@ -1159,6 +1148,7 @@ async def create_input(
         broker,
         broadcast,
         live_event_store,
+        turn_action_capabilities,
         request,
         session_id=session_id,
         user_id=current_user.user_id,
@@ -1483,39 +1473,24 @@ async def _write_turn_action_via_rest(
     broker: SessionBroker,
     broadcast: WebSocketBroadcast,
     live_event_store: LiveEventStore,
+    turn_action_capabilities: TurnActionCapabilityRegistry,
     request: ChatInputWriteRequest,
+    action: PublicTurnAction,
     *,
     session_id: str,
     user_id: str,
     tz: ZoneInfo,
 ) -> ChatWriteResponse:
     """Handle TurnAction writes as action_message input buffers."""
-    if request.action is None:
-        raise HTTPException(status_code=400, detail="Action is required.")
-    if request.inference_profile is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Run-producing input requires an inference profile.",
+    try:
+        inference_profile = turn_action_capabilities.validate_public_input(
+            action=action,
+            message=request.message,
+            attachments=request.attachments,
+            inference_profile=request.inference_profile,
         )
-    if request.attachments:
-        raise HTTPException(
-            status_code=400,
-            detail="This action does not support attachments.",
-        )
-    match request.action:
-        case GoalAction():
-            if not request.message.strip():
-                raise HTTPException(
-                    status_code=400, detail="Goal objective is required."
-                )
-        case (
-            SkillAction()
-            | CreateGitWorktreeAction()
-            | CleanupOrphanGitWorktreesAction()
-        ):
-            pass
-        case _:
-            raise HTTPException(status_code=400, detail="This action is not supported.")
+    except TurnActionAdmissionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     message = _create_chat_input_message(
         text=request.message,
         user_id=user_id,
@@ -1526,9 +1501,9 @@ async def _write_turn_action_via_rest(
     input_result = await agent_session_input_service.create_buffered_agent_action_input(
         agent_id=request.agent_id,
         agent_session_id=session_id,
-        action=request.action.model_dump(mode="json"),
+        action=action.model_dump(mode="json"),
         message=message,
-        inference_profile=request.inference_profile,
+        inference_profile=inference_profile,
         user_id=user_id,
         request_payload=request.model_dump(mode="json"),
         client_request_id=request.client_request_id,
@@ -1558,6 +1533,7 @@ async def _write_input_via_rest(
     broker: SessionBroker,
     broadcast: WebSocketBroadcast,
     live_event_store: LiveEventStore,
+    turn_action_capabilities: TurnActionCapabilityRegistry,
     request: ChatInputWriteRequest,
     *,
     session_id: str,
@@ -1565,73 +1541,67 @@ async def _write_input_via_rest(
     tz: ZoneInfo,
 ) -> ChatWriteResponse:
     """Dispatch one composer input by action category."""
-    match request.action:
-        case None:
-            if request.inference_profile is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Run-producing input requires an inference profile.",
-                )
-            message_request = ChatMessageWriteRequest(
-                agent_id=request.agent_id,
-                client_request_id=request.client_request_id,
-                message=request.message,
-                inference_profile=request.inference_profile,
-                attachments=request.attachments,
+    action = request.action
+    if action is None:
+        if request.inference_profile is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Run-producing input requires an inference profile.",
             )
-            return await _write_message_via_rest(
-                chat_service,
-                agent_session_input_service,
-                exchange_file_service,
-                model_file_service,
-                broker,
-                broadcast,
-                live_event_store,
-                message_request,
-                session_id=session_id,
-                user_id=user_id,
-                tz=tz,
+        message_request = ChatMessageWriteRequest(
+            agent_id=request.agent_id,
+            client_request_id=request.client_request_id,
+            message=request.message,
+            inference_profile=request.inference_profile,
+            attachments=request.attachments,
+        )
+        return await _write_message_via_rest(
+            chat_service,
+            agent_session_input_service,
+            exchange_file_service,
+            model_file_service,
+            broker,
+            broadcast,
+            live_event_store,
+            message_request,
+            session_id=session_id,
+            user_id=user_id,
+            tz=tz,
+        )
+    if isinstance(action, CommandAction):
+        if request.attachments:
+            raise HTTPException(
+                status_code=400,
+                detail="This action does not support attachments.",
             )
-        case CommandAction(name=name):
-            if request.attachments:
-                raise HTTPException(
-                    status_code=400,
-                    detail="This action does not support attachments.",
-                )
-            command_request = ChatCommandWriteRequest(
-                agent_id=request.agent_id,
-                client_request_id=request.client_request_id,
-                command=name,
-            )
-            return await _write_command_via_rest(
-                chat_service,
-                chat_write_service,
-                broker,
-                live_event_store,
-                command_request,
-                session_id=session_id,
-                user_id=user_id,
-                payload_override=request.model_dump(mode="json"),
-            )
-        case (
-            GoalAction()
-            | SkillAction()
-            | CreateGitWorktreeAction()
-            | CleanupOrphanGitWorktreesAction()
-        ):
-            return await _write_turn_action_via_rest(
-                chat_service,
-                agent_session_input_service,
-                broker,
-                broadcast,
-                live_event_store,
-                request,
-                session_id=session_id,
-                user_id=user_id,
-                tz=tz,
-            )
-        case _:
-            raise HTTPException(status_code=400, detail="This action is not supported.")
+        command_request = ChatCommandWriteRequest(
+            agent_id=request.agent_id,
+            client_request_id=request.client_request_id,
+            command=action.name,
+        )
+        return await _write_command_via_rest(
+            chat_service,
+            chat_write_service,
+            broker,
+            live_event_store,
+            command_request,
+            session_id=session_id,
+            user_id=user_id,
+            payload_override=request.model_dump(mode="json"),
+        )
+    return await _write_turn_action_via_rest(
+        chat_service,
+        agent_session_input_service,
+        broker,
+        broadcast,
+        live_event_store,
+        turn_action_capabilities,
+        request,
+        action,
+        session_id=session_id,
+        user_id=user_id,
+        tz=tz,
+    )
 
 
 @router.post("/sessions/{session_id}/retry-failed-run")
@@ -2313,11 +2283,7 @@ async def list_input_actions(
     session_id: str,
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
-    skill_store: Annotated[SkillStateStore, Depends(get_skill_state_store)],
-    vfs_projection_service: Annotated[
-        VfsProjectionService[AsyncSession] | None,
-        Depends(get_vfs_projection_service),
-    ],
+    turn_action_capabilities: Annotated[TurnActionCapabilityRegistry, Depends()],
 ) -> InputActionListResponse:
     """Return composer actions available for a session."""
     _validate_session_id(session_id)
@@ -2333,26 +2299,22 @@ async def list_input_actions(
     if session_result.success and live_result.success:
         agent_session = session_result.value
         snapshot = live_result.value
-        goal_hint = None
-        if (
+        goal_in_progress = bool(
             snapshot.goal is not None
             and snapshot.goal.objective
             and snapshot.goal.status in {"active", "paused", "blocked"}
-        ):
-            goal_hint = InputActionAvailabilityHintResponse(
-                state="warning",
-                message=(
-                    "A goal is already in progress. Manage it from the goal card."
+        )
+        turn_actions = await turn_action_capabilities.list_definitions(
+            TurnActionCatalogContext(
+                agent_id=agent_session.agent_id,
+                session_id=session_id,
+                workspace_id=agent_session.workspace_id,
+                run_state=snapshot.session_run_state,
+                active_run_id=(
+                    snapshot.run.run_id if snapshot.run is not None else None
                 ),
+                goal_in_progress=goal_in_progress,
             )
-        skill_snapshot = await load_skill_projection_for_actions(
-            skill_store,
-            vfs_projection_service=vfs_projection_service,
-            agent_id=agent_session.agent_id,
-            session_id=session_id,
-            workspace_id=agent_session.workspace_id,
-            run_state=snapshot.session_run_state,
-            active_run_id=snapshot.run.run_id if snapshot.run is not None else None,
         )
         return InputActionListResponse(
             items=[
@@ -2375,74 +2337,50 @@ async def list_input_actions(
                     )
                     for command in list_registered_commands()
                 ],
-                InputActionDefinitionResponse(
-                    id="goal",
-                    keyword="goal",
-                    label="Goal",
-                    description="Create a session goal.",
-                    action=GoalAction(),
-                    category="turn",
-                    message=InputActionMessagePolicyResponse(
-                        policy="required",
-                        placeholder="Describe the goal for this session.",
-                        max_length=4000,
-                    ),
-                    attachments=InputActionAttachmentPolicyResponse(
-                        policy="unsupported"
-                    ),
-                    availability_hint=goal_hint,
-                ),
-                InputActionDefinitionResponse(
-                    id="cleanup_orphan_git_worktrees",
-                    keyword="cleanup-worktrees",
-                    label="Clean up worktrees",
-                    description=(
-                        "Remove managed Git worktrees not connected to an "
-                        "active session. Local branches are preserved."
-                    ),
-                    action=CleanupOrphanGitWorktreesAction(),
-                    category="turn",
-                    message=InputActionMessagePolicyResponse(
-                        policy="optional",
-                        placeholder="Optional cleanup note.",
-                    ),
-                    attachments=InputActionAttachmentPolicyResponse(
-                        policy="unsupported"
-                    ),
-                    availability_hint=None,
-                ),
                 *[
-                    InputActionDefinitionResponse(
-                        id=skill_action_id(item.skill_path),
-                        keyword=item.slug,
-                        label=f"/{item.slug}",
-                        description=item.description,
-                        action=SkillAction(skill_path=item.skill_path),
-                        category="turn",
-                        message=InputActionMessagePolicyResponse(
-                            policy="optional",
-                            placeholder="Describe what to do with this skill.",
-                        ),
-                        attachments=InputActionAttachmentPolicyResponse(
-                            policy="unsupported"
-                        ),
-                        availability_hint=None,
-                        source_label=item.source_label,
-                        relative_hint=item.relative_hint,
-                    )
-                    for item in skill_actions_from_snapshot(skill_snapshot)
+                    _turn_action_definition_response(definition)
+                    for definition in turn_actions
                 ],
             ]
         )
-    else:
-        error = (
-            session_result.error if not session_result.success else live_result.error
-        )
-        match error:
-            case SessionNotFound() | SessionAccessDenied():
-                raise HTTPException(status_code=404, detail="Session not found.")
-            case _:
-                assert_never(error)
+    error = session_result.error if not session_result.success else live_result.error
+    match error:
+        case SessionNotFound() | SessionAccessDenied():
+            raise HTTPException(status_code=404, detail="Session not found.")
+        case _:
+            assert_never(error)
+
+
+def _turn_action_definition_response(
+    definition: TurnActionDefinition,
+) -> InputActionDefinitionResponse:
+    """Map one action-owned composer definition to the public response."""
+    return InputActionDefinitionResponse(
+        id=definition.id,
+        keyword=definition.keyword,
+        label=definition.label,
+        description=definition.description,
+        action=definition.action,
+        category="turn",
+        message=InputActionMessagePolicyResponse(
+            policy=definition.policy.message_policy,
+            placeholder=definition.message_placeholder,
+            max_length=definition.policy.message_max_length,
+        ),
+        attachments=InputActionAttachmentPolicyResponse(
+            policy=definition.policy.attachment_policy
+        ),
+        availability_hint=(
+            InputActionAvailabilityHintResponse(
+                state=definition.availability_hint.state,
+                message=definition.availability_hint.message,
+            )
+            if definition.availability_hint is not None
+            else None
+        ),
+        source_label=definition.source_label,
+        relative_hint=definition.relative_hint,
+    )
 
 
 @router.get(

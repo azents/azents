@@ -26,8 +26,8 @@ code_paths:
   - python/apps/azents/src/azents/worker/run/**
   - python/apps/azents/src/azents/services/team_session_cutover_replay.py
   - python/apps/azents/src/azents/cli/team_session_cutover.py
-last_verified_at: 2026-08-20
-spec_version: 30
+last_verified_at: 2026-08-23
+spec_version: 31
 ---
 
 # Run Resume
@@ -217,7 +217,9 @@ Operation TurnActions enter through durable `action_message` InputBuffers, but t
 `action_message` transcript event. Preparation claims a worktree action by committing an active
 `ActionExecution` keyed by `input_buffer_id`, with its typed action payload and current Session owner
 generation, then deletes the source buffer in the same transaction. The current worker verifies that
-generation and crosses the foreground admission barrier before invoking a Runner side effect.
+generation and crosses the foreground admission barrier before decoding and
+dispatching the typed payload through the closed Worker operation executor
+registry. Unsupported or non-operation payloads fail before a Runner side effect.
 
 `action_executions` and their ordered events are live state only. Normal completion, handled failure,
 user stop, shutdown timeout, and takeover recovery use one terminalization primitive: lock the active
@@ -322,6 +324,9 @@ run to observe `check_stop()` as true.
 
 ## Changelog
 
+- **2026-08-23** (spec_version 31) — Documented closed operation-action
+  decode/dispatch at the existing owner-generation and no-reexecution recovery
+  boundary.
 - **2026-08-20** (spec_version 30) — Corrected the active-run recovery source
   description to separate run-owned requested intent from Session-owned resolved
   inference state.

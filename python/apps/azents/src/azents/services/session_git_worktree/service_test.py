@@ -128,6 +128,7 @@ from azents.services.session_working_folder_binding import (
 )
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.turn_action import make_test_turn_action_capabilities
 from azents.testing.types import is_string_object_dict
 
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
@@ -910,7 +911,9 @@ def _input_service(
                 toolkit_state_repository=ToolkitStateRepository(),
             ),
             action_execution_repository=ActionExecutionRepository(),
-            vfs_projection_service=None,
+            turn_action_capabilities=make_test_turn_action_capabilities(
+                session_manager
+            ),
             external_channel_repository=ExternalChannelRepository(),
         ),
         session_manager=session_manager,
@@ -934,7 +937,7 @@ def _mailbox_service(
             toolkit_state_repository=ToolkitStateRepository(),
         ),
         action_execution_repository=ActionExecutionRepository(),
-        vfs_projection_service=None,
+        turn_action_capabilities=make_test_turn_action_capabilities(session_manager),
         external_channel_repository=ExternalChannelRepository(),
     )
 
@@ -995,7 +998,9 @@ async def _execute_first_setup_action(
             toolkit_state_repository=ToolkitStateRepository(),
         ),
         action_execution_repository=ActionExecutionRepository(),
-        vfs_projection_service=None,
+        turn_action_capabilities=make_test_turn_action_capabilities(
+            rdb_session_manager
+        ),
         external_channel_repository=ExternalChannelRepository(),
     ).flush_session_mailbox_items(
         session_id=session_id,
@@ -1041,7 +1046,9 @@ async def _execute_first_setup_action(
             toolkit_state_repository=ToolkitStateRepository(),
         ),
         action_execution_repository=ActionExecutionRepository(),
-        vfs_projection_service=None,
+        turn_action_capabilities=make_test_turn_action_capabilities(
+            rdb_session_manager
+        ),
         external_channel_repository=ExternalChannelRepository(),
     ).flush_session_mailbox_items(
         session_id=session_id,
