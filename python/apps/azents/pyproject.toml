@@ -14,7 +14,7 @@ dependencies = [
     "alembic-postgresql-enum==1.10.0",
     # Configuration
     "pydantic==2.13.4",
-    "pydantic-settings==2.14.2",
+    "pydantic-settings==2.15.0",
     # AWS
     "boto3==1.40.61",
     "aioboto3==15.5.0",
