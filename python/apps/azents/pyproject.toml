@@ -23,7 +23,7 @@ dependencies = [
     "pyjwt==2.13.0",
     "cryptography==50.0.0",
     # Utilities
-    "pytz==2026.2",
+    "pytz==2026.3.post1",
     "tzdata==2026.2",
     # Monitoring
     "sentry-sdk[fastapi]==2.59.0",
