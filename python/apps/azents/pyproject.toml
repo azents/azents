@@ -23,8 +23,8 @@ dependencies = [
     "pyjwt==2.13.0",
     "cryptography==50.0.0",
     # Utilities
-    "pytz==2026.2",
-    "tzdata==2026.2",
+    "pytz==2026.3.post1",
+    "tzdata==2026.3",
     # Monitoring
     "sentry-sdk[fastapi]==2.59.0",
     # CLI
@@ -32,9 +32,9 @@ dependencies = [
     # Template rendering
     "jinja2==3.1.6",
     # Type stubs
-    "types-pytz==2026.2.0.20260518",
+    "types-pytz==2026.3.1.20260727",
     "types-aioboto3[aioboto3,s3,ses]==15.5.0",
-    "boto3-stubs[rds]==1.43.0",
+    "boto3-stubs[rds]==1.43.72",
     # Docker API client
     "aiodocker==0.26.0",
     # Kubernetes clients: lightkube for standard operations and
