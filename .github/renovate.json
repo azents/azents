@@ -17,7 +17,7 @@
   ],
   "timezone": "Asia/Seoul",
   "schedule": [
-    "before 6am on monday"
+    "before 6am"
   ],
   "automerge": false,
   "vulnerabilityAlerts": {
