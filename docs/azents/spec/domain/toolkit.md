@@ -27,6 +27,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/run/input.py
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/services/agent_mailbox.py
+  - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
   - python/apps/azents/src/azents/services/subagent_coordination.py
   - python/apps/azents/src/azents/repos/subagent_coordination/**
@@ -57,8 +58,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-08-20
-spec_version: 96
+last_verified_at: 2026-08-23
+spec_version: 97
 ---
 
 # Toolkit
@@ -197,7 +198,14 @@ The Skill Toolkit combines managed entrypoints with the existing filesystem Skil
 
 The currently approved global release bundle contains `azents://skills/azents/skill-creator/SKILL.md`. It guides Agents to create or repair filesystem Skills through the Shell Runtime tools. It requires the standard `name` and non-empty `description` frontmatter fields, treats `summary` as non-discoverable metadata, validates the saved file before reporting success, and explains that runtime Skill projection refresh completes after the current run.
 
-Composer actions use a fresh non-persisted VFS preview while the Session is idle and the active AgentRun projection while it is running. A selected managed SkillAction stores only its exact URI. Run input preparation validates that URI against the projection ensured for the active run before emitting the durable `skill_loaded` event. Eligibility drift between an idle preview and run creation therefore produces the normal unavailable-Skill error rather than reading stale preview content.
+The Skill owner contributes zero or more definitions to the shared closed
+TurnAction composer catalog. Discovery uses a fresh non-persisted VFS preview
+while the Session is idle and the active AgentRun projection while it is running.
+A selected managed SkillAction stores only its exact URI. Run input preparation
+validates that URI through the same Skill-owned capability against the projection
+ensured for the active run before emitting the durable `skill_loaded` event.
+Eligibility drift between an idle preview and run creation therefore produces the
+normal unavailable-Skill error rather than reading stale preview content.
 
 `import_file` registers an `azents` resolver alongside `exchange` and `artifact`. The resolver validates the canonical URI, current run ownership, exact projection membership, Base64 content, decoded size, and SHA-256 hash before passing bytes to the existing Runtime materialization path. Ordinary Runtime `read`, `glob`, `grep`, `write`, and `edit` tools remain path-only and never resolve `azents://` directly. Only the materialized Runtime copy follows Runtime path retention rules; the source entry remains part of the retained immutable AgentRun projection.
 
@@ -857,6 +865,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-08-23** (spec_version 97) — Moved projection-dependent Skill composer
+  discovery and preparation behind the shared closed TurnAction capability
+  boundary while retaining VFS projection authority.
 - **2026-08-20** (spec_version 96) — Bounded the model-facing `list_agents`
   PostgreSQL projection by required-visible work plus recent inactive capacity,
   adopted the canonical two-field result, and preserved complete-tree targeting,

@@ -42,7 +42,7 @@ from azents.core.inference_profile import (
     SessionInferenceState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
-from azents.core.vfs import make_vfs_projection, make_vfs_source_revision
+from azents.core.vfs import VfsProjection, make_vfs_projection, make_vfs_source_revision
 from azents.engine.events.action_messages import (
     AgentRemoveGitWorktreeAction,
     GoalAction,
@@ -119,6 +119,10 @@ from azents.services.scheduled_task.service import (
     ScheduledTaskService,
 )
 from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.services.turn_action import (
+    TurnActionCapabilityRegistry,
+    TurnActionVfsProjectionService,
+)
 from azents.services.vfs import VfsResolvedFile
 from azents.testing.model_selection import (
     make_test_model_selection_dict,
@@ -134,7 +138,6 @@ from .mailbox import (
     MailboxService,
     PreparedMailboxFiles,
     TurnEffect,
-    VfsFileResolver,
     _buffer_requires_inference,
     build_external_channel_mailbox_payload,
     fold_turn_eligibility,
@@ -626,6 +629,19 @@ class _VfsService:
             entry=entry,
         )
 
+    async def projection_for_actions(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        running: bool,
+        active_run_id: str | None,
+    ) -> VfsProjection:
+        """Return the configured projection for catalog discovery."""
+        del agent_id, session_id, workspace_id, running, active_run_id
+        return self.projection
+
 
 async def _agent_id_for_session(
     rdb_session_manager: SessionManager[AsyncSession],
@@ -941,15 +957,16 @@ def _mailbox_item_service(
     exchange_file_service: ExchangeFileService | None = None,
     model_file_service: ModelFileService | None = None,
     event_transcript_repository: EventTranscriptRepository | None = None,
-    vfs_projection_service: VfsFileResolver | None = None,
+    vfs_projection_service: TurnActionVfsProjectionService | None = None,
 ) -> MailboxService:
     """Create MailboxService for tests."""
+    agent_session_repository = AgentSessionRepository()
     return MailboxService(
         session_manager=rdb_session_manager,
         mailbox_item_repository=MailboxRepository(),
         exchange_file_service=exchange_file_service or _ExchangeFileService(),
         model_file_service=model_file_service or _ModelFileService(),
-        agent_session_repository=AgentSessionRepository(),
+        agent_session_repository=agent_session_repository,
         event_transcript_repository=(
             event_transcript_repository or EventTranscriptRepository()
         ),
@@ -959,8 +976,27 @@ def _mailbox_item_service(
             toolkit_state_repository=ToolkitStateRepository(),
         ),
         action_execution_repository=ActionExecutionRepository(),
-        vfs_projection_service=vfs_projection_service,
+        turn_action_capabilities=_turn_action_capabilities(
+            rdb_session_manager,
+            agent_session_repository,
+            vfs_projection_service=vfs_projection_service,
+        ),
         external_channel_repository=ExternalChannelRepository(),
+    )
+
+
+def _turn_action_capabilities(
+    session_manager: SessionManager[AsyncSession],
+    agent_session_repository: AgentSessionRepository,
+    *,
+    vfs_projection_service: TurnActionVfsProjectionService | None = None,
+) -> TurnActionCapabilityRegistry:
+    """Create the closed TurnAction capability registry for tests."""
+    return TurnActionCapabilityRegistry(
+        agent_session_repository=agent_session_repository,
+        goal_store=GoalStateStore(session_manager=session_manager),
+        skill_store=SkillStateStore(session_manager=session_manager),
+        vfs_projection_service=vfs_projection_service,
     )
 
 
@@ -1085,7 +1121,10 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
             AsyncMock(spec=ActionExecutionRepository),
         ),
         external_channel_repository=cast(ExternalChannelRepository, object()),
-        vfs_projection_service=None,
+        turn_action_capabilities=_turn_action_capabilities(
+            cast(SessionManager[AsyncSession], _unit_session_manager),
+            cast(AgentSessionRepository, agent_session_repository),
+        ),
     )
 
     # Verify the pre-lock attachment preparation boundary directly.
@@ -1222,7 +1261,10 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
             AsyncMock(spec=ActionExecutionRepository),
         ),
         external_channel_repository=cast(ExternalChannelRepository, object()),
-        vfs_projection_service=None,
+        turn_action_capabilities=_turn_action_capabilities(
+            cast(SessionManager[AsyncSession], _unit_session_manager),
+            cast(AgentSessionRepository, agent_session_repository),
+        ),
     )
 
     # Verify deferred actions skip external preparation.
@@ -1258,7 +1300,10 @@ async def test_cancelled_promotion_discards_prepared_model_files() -> None:
         ),
         action_execution_repository=cast(ActionExecutionRepository, object()),
         external_channel_repository=cast(ExternalChannelRepository, object()),
-        vfs_projection_service=None,
+        turn_action_capabilities=_turn_action_capabilities(
+            cast(SessionManager[AsyncSession], object()),
+            cast(AgentSessionRepository, object()),
+        ),
     )
     prepared = PreparedMailboxFiles(
         attachments=[],
@@ -1939,12 +1984,13 @@ class TestMailboxService:
             file_parts=[],
             created_at=datetime.datetime.now(datetime.UTC),
         )
+        agent_session_repository = AgentSessionRepository()
         service = MailboxService(
             session_manager=rdb_session_manager,
             mailbox_item_repository=repository,
             exchange_file_service=_ExchangeFileService(),
             model_file_service=_ModelFileService(),
-            agent_session_repository=AgentSessionRepository(),
+            agent_session_repository=agent_session_repository,
             event_transcript_repository=EventTranscriptRepository(),
             agent_run_repository=AgentRunRepository(),
             scheduled_task_repository=ScheduledTaskRepository(),
@@ -1952,7 +1998,10 @@ class TestMailboxService:
                 toolkit_state_repository=ToolkitStateRepository(),
             ),
             action_execution_repository=ActionExecutionRepository(),
-            vfs_projection_service=None,
+            turn_action_capabilities=_turn_action_capabilities(
+                rdb_session_manager,
+                agent_session_repository,
+            ),
             external_channel_repository=ExternalChannelRepository(),
         )
         enqueue = MailboxEnqueue(
@@ -3564,11 +3613,15 @@ async def test_external_channel_message_projection() -> None:
     )
     context_outcome = await processor.process(preparation_context, context_buffer)
     invocation_outcome = await processor.process(preparation_context, invocation_buffer)
+    capabilities = _turn_action_capabilities(
+        cast(SessionManager[AsyncSession], object()),
+        cast(AgentSessionRepository, object()),
+    )
 
     assert context_outcome.turn_effect is TurnEffect.ELIGIBLE
     assert invocation_outcome.turn_effect is TurnEffect.ELIGIBLE
-    assert _buffer_requires_inference(context_buffer)
-    assert _buffer_requires_inference(invocation_buffer)
+    assert _buffer_requires_inference(context_buffer, capabilities)
+    assert _buffer_requires_inference(invocation_buffer, capabilities)
     assert [item.external_id for item in context_outcome.promoted] == [
         "external-channel:buffer-1:context-omitted",
         "external-channel:binding-1:C123:1.0:1",

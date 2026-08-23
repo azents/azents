@@ -12,12 +12,13 @@ code_paths:
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/worker/session/**
   - python/apps/azents/src/azents/services/mailbox.py
+  - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/rdb/models/mailbox_item.py
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-07-31
-spec_version: 14
+last_verified_at: 2026-08-23
+spec_version: 15
 ---
 
 # Goal Domain Spec
@@ -70,6 +71,14 @@ Creation and update rules:
 - Creating a new Goal is rejected while an unfinished Goal (`active`, `paused`, or `blocked`) exists.
 - Marking a Goal `complete` requires evidence that the objective is actually complete.
 - Marking a Goal `blocked` is allowed only when the agent cannot make meaningful progress.
+
+The Goal composer TurnAction is registered through the shared closed TurnAction
+capability policy. It remains composer-visible, requires a non-empty objective of
+at most 4,000 characters, rejects attachments, and requires an inference profile
+at public admission. Preparation is Goal-owned: it updates Goal state and emits
+the canonical `goal_updated` event followed by the normal user message. An empty
+objective or unfinished existing Goal becomes the deterministic handled
+`system_error` outcome rather than an operation execution.
 
 UI-only edit/delete/pause/resume mutations go through the public Chat API session Goal mutation. They
 update `toolkit_states`; they are not model tools. UI/API can move a Goal between `active` and
@@ -262,6 +271,9 @@ Primary checks:
 
 ## Changelog
 
+- **2026-08-23** (spec_version 15) — Documented the Goal TurnAction's shared
+  closed policy and Goal-owned preparation without changing its state or event
+  contract.
 - **2026-07-31** (spec_version 14) — Made `goal_continuation` Goal-only and
   removed metadata-based External Channel lowering and presentation.
 - **2026-07-28** (spec_version 13) — Reduced External Channel idle-continuation metadata to actionable active binding handles.

@@ -50,6 +50,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/chat_write.py
   - python/apps/azents/src/azents/services/mailbox.py
+  - python/apps/azents/src/azents/services/turn_action.py
   - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/services/agent_mailbox.py
@@ -104,8 +105,8 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-last_verified_at: 2026-08-21
-spec_version: 154
+last_verified_at: 2026-08-23
+spec_version: 155
 ---
 
 # Conversation & Events
@@ -503,6 +504,14 @@ Runtime context sharing affects shell/file operations; it must not make project 
 project prompt selection fall back to a parent, team-primary, or runtime session.
 
 ### ActionExecution and SessionGitWorktree
+
+The supported TurnAction set is a closed typed product contract. One service-layer
+capability registry owns the policy used by public composer discovery and REST
+admission, including visibility, message, attachment, and inference requirements.
+The same registry performs Goal and Skill preparation and hands operation-backed
+actions to Worker execution without changing their persisted discriminators.
+Internal working-folder and Agent-managed worktree actions are executable but are
+not public composer definitions.
 
 The legacy setup lifecycle tables are no longer part of the current conversation model. Setup work that affects a session is represented by
 operation TurnActions carried through FIFO `action_message` mailbox envelopes, and ordinary sessions have
@@ -1217,6 +1226,9 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-08-23** — v155. Centralized the closed TurnAction policy, public
+  catalog/admission, Goal and Skill preparation, and operation handoff while
+  preserving public schemas and durable action behavior.
 - **2026-08-21** — v154. Required managed root Session creation to acquire the
   Runtime FK-compatible lock before any Agent FK write, preserving final Agent
   authority fencing without a Runtime-to-Agent lock cycle.

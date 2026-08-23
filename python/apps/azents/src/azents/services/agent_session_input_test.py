@@ -91,6 +91,7 @@ from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.turn_action import make_test_turn_action_capabilities
 
 from .agent_session_input import (
     AgentSessionInputError,
@@ -405,7 +406,9 @@ def _mailbox_item_service(
             toolkit_state_repository=ToolkitStateRepository(),
         ),
         action_execution_repository=ActionExecutionRepository(),
-        vfs_projection_service=None,
+        turn_action_capabilities=make_test_turn_action_capabilities(
+            rdb_session_manager
+        ),
         external_channel_repository=ExternalChannelRepository(),
     )
 

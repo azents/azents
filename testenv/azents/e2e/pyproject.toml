@@ -5,15 +5,15 @@ description = "Azents E2E Tests"
 requires-python = ">=3.14"
 dependencies = [
     "requests==2.34.2",
-    "websockets==16.0",
+    "websockets==16.1.1",
     "boto3==1.40.61",
     "types-boto3[s3]==1.43.72",
     "pytest==9.1.1",
     "testcontainers[postgres]==4.15.0",
-    "docker==7.1.0",
+    "docker==7.2.0",
     "python-on-whales==0.81.0",
-    "selenium==4.46.0",
-    "redis==7.1.1",
+    "selenium==4.47.0",
+    "redis==7.4.1",
     # local dependencies
     "az-common",
     "azents-admin-client",
