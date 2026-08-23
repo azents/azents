@@ -52,7 +52,7 @@ dependencies = [
     "ptpython==3.0.32",
     "aiohttp==3.14.3",
     "python-frontmatter==1.3.0",
-    "google-auth==2.52.0",
+    "google-auth==2.56.3",
     "croniter==6.2.4",
     "google-analytics-data==0.22.0",
     "google-analytics-admin==0.29.0",
