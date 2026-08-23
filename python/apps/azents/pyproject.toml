@@ -44,7 +44,7 @@ dependencies = [
     # Local dependencies
     "az-common",
     "litellm==1.91.3",
-    "openai[realtime]==2.45.0",
+    "openai[realtime]==2.54.0",
     "Pillow==12.3.0",
     "redis==7.4.1",
     "mcp==1.29.0",
