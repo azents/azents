@@ -10,7 +10,7 @@ dependencies = [
     # Database
     "sqlalchemy[asyncio]==2.0.52",
     "psycopg[binary]==3.3.4",
-    "alembic==1.18.5",
+    "alembic==1.19.1",
     "alembic-postgresql-enum==1.10.0",
     # Configuration
     "pydantic==2.13.4",
@@ -26,7 +26,7 @@ dependencies = [
     "pytz==2026.3.post1",
     "tzdata==2026.3",
     # Monitoring
-    "sentry-sdk[fastapi]==2.59.0",
+    "sentry-sdk[fastapi]==2.68.0",
     # CLI
     "typer==0.26.8",
     # Template rendering
