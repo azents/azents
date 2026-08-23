@@ -374,7 +374,7 @@ requires-dist = [
     { name = "azents-runtime-control", editable = "../../python/libs/azents-runtime-control" },
     { name = "bcrypt", specifier = "==5.0.0" },
     { name = "boto3", specifier = "==1.40.61" },
-    { name = "boto3-stubs", extras = ["rds"], specifier = "==1.43.0" },
+    { name = "boto3-stubs", extras = ["rds"], specifier = "==1.43.72" },
     { name = "croniter", specifier = "==6.2.4" },
     { name = "cryptography", specifier = "==50.0.0" },
     { name = "discord-py", specifier = "==2.7.1" },
@@ -397,15 +397,15 @@ requires-dist = [
     { name = "pydantic-settings", specifier = "==2.14.2" },
     { name = "pyjwt", specifier = "==2.13.0" },
     { name = "python-frontmatter", specifier = "==1.3.0" },
-    { name = "pytz", specifier = "==2026.2" },
+    { name = "pytz", specifier = "==2026.3.post1" },
     { name = "redis", specifier = "==7.4.1" },
     { name = "sentry-sdk", extras = ["fastapi"], specifier = "==2.59.0" },
     { name = "slack-sdk", specifier = "==3.43.0" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = "==2.0.52" },
     { name = "typer", specifier = "==0.26.8" },
     { name = "types-aioboto3", extras = ["aioboto3", "s3", "ses"], specifier = "==15.5.0" },
-    { name = "types-pytz", specifier = "==2026.2.0.20260518" },
-    { name = "tzdata", specifier = "==2026.2" },
+    { name = "types-pytz", specifier = "==2026.3.1.20260727" },
+    { name = "tzdata", specifier = "==2026.3" },
     { name = "uvicorn", specifier = "==0.46.0" },
     { name = "websockets", specifier = "==15.0.1" },
 ]
@@ -604,15 +604,15 @@ wheels = [
 
 [[package]]
 name = "boto3-stubs"
-version = "1.43.0"
+version = "1.43.72"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore-stubs" },
     { name = "types-s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8a/9a/bf49a379539848db2394bad26d6947ee021995fe2c3b61a30dfb28972ed4/boto3_stubs-1.43.0.tar.gz", hash = "sha256:50cbd5e4329bc6e3956d66c9cfde75ba5fb056d246b85b95444b42d109b91695", size = 102648, upload-time = "2026-04-29T23:07:31.004Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/81/80/00837ff8a6286c0a2310d1a433d5cd5b776a8100b3c8a3eb8cb1bf03990e/boto3_stubs-1.43.72.tar.gz", hash = "sha256:caec1105abf0e78f9b2db5dd3c364ce10c283d5a128c69665db428c705d08f3f", size = 104381, upload-time = "2026-08-14T19:33:25.744Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4f/c0/b8d771c336b379a9deeb87e23ea45b795e07a0f406d89c0f068f64a6206b/boto3_stubs-1.43.0-py3-none-any.whl", hash = "sha256:d6484d916207175c0bb99dfbb0a2b36f4f586c15c5cccd6f14b303f0ac60faa2", size = 70647, upload-time = "2026-04-29T23:07:25.622Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/25/b9c7383eb7f1175e5631bb8832ca12d01714ec9214b738fe816a80cbeeee/boto3_stubs-1.43.72-py3-none-any.whl", hash = "sha256:e793a3f25eb3042e8495aa043b5912af67b3547248fe3656b8b95c01a5e42c15", size = 71363, upload-time = "2026-08-14T19:33:22.255Z" },
 ]
 
 [package.optional-dependencies]
@@ -2167,11 +2167,11 @@ wheels = [
 
 [[package]]
 name = "pytz"
-version = "2026.2"
+version = "2026.3.post1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ff/46/dd499ec9038423421951e4fad73051febaa13d2df82b4064f87af8b8c0c3/pytz-2026.2.tar.gz", hash = "sha256:0e60b47b29f21574376f218fe21abc009894a2321ea16c6754f3cad6eb7cdd6a", size = 320861, upload-time = "2026-05-04T01:35:29.667Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/48/fb042503b6ca6cd271261dc559fd6432f7d8c713153e9ec5c591af4dfc1c/pytz-2026.3.post1.tar.gz", hash = "sha256:2211d3fcf9a797d3405cac96ac7f61d80e6a644f72a3309607282fe8a2010c5d", size = 319745, upload-time = "2026-07-25T15:12:07.385Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ec/dd/96da98f892250475bdf2328112d7468abdd4acc7b902b6af23f4ed958ea0/pytz-2026.2-py2.py3-none-any.whl", hash = "sha256:04156e608bee23d3792fd45c94ae47fae1036688e75032eea2e3bf0323d1f126", size = 510141, upload-time = "2026-05-04T01:35:27.408Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/7b/39c34ca613b0b198cb866466651b26b045e2009864c5183c979a3b83f383/pytz-2026.3.post1-py2.py3-none-any.whl", hash = "sha256:dd95840dd199baea12d9cc096a1d452caa6596a1c1e4b5f3dbd1541855d5e815", size = 508283, upload-time = "2026-07-25T15:12:05.782Z" },
 ]
 
 [[package]]
@@ -2764,11 +2764,11 @@ wheels = [
 
 [[package]]
 name = "types-pytz"
-version = "2026.2.0.20260518"
+version = "2026.3.1.20260727"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9f/d9/9fa4019d2235bd374293e1fd4153879b28b6ae1d2bae98addd352c9713f2/types_pytz-2026.2.0.20260518.tar.gz", hash = "sha256:e5d254329e9c4e91f0781b22c43a4bb2d10bb044d97b24c4b05d45567b0eae16", size = 10871, upload-time = "2026-05-18T06:02:45.789Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b1/cf/eae96172a036b942e0ad0ec49512108b4ef4b97cd6c2aed5677540a597e7/types_pytz-2026.3.1.20260727.tar.gz", hash = "sha256:4364075b6867dd15b210bb8c1d29727d609917129b45600defe1d4b3eda5ecb9", size = 10914, upload-time = "2026-07-27T05:36:32.389Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/62/89/41e80670779a223d8bc8bc83019a619988cfa5c432cedac5cec23884fbc4/types_pytz-2026.2.0.20260518-py3-none-any.whl", hash = "sha256:3a12eaa38f476bd650902a9c9bb442f03f3c7dee2be5c5848bce61bd708d205a", size = 10125, upload-time = "2026-05-18T06:02:44.968Z" },
+    { url = "https://files.pythonhosted.org/packages/9c/24/a654176875944981c75516857cd8750600eeb9ff7fc07a2b82573619a57c/types_pytz-2026.3.1.20260727-py3-none-any.whl", hash = "sha256:42ac44e83645bfceb46597342c8fb8ec028a1407e2feae9c5c539986eab6b57a", size = 10132, upload-time = "2026-07-27T05:36:31.52Z" },
 ]
 
 [[package]]
@@ -2803,11 +2803,11 @@ wheels = [
 
 [[package]]
 name = "tzdata"
-version = "2026.2"
+version = "2026.3"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ba/19/1b9b0e29f30c6d35cb345486df41110984ea67ae69dddbc0e8a100999493/tzdata-2026.2.tar.gz", hash = "sha256:9173fde7d80d9018e02a662e168e5a2d04f87c41ea174b139fbef642eda62d10", size = 198254, upload-time = "2026-04-24T15:22:08.651Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/92/ff/5a28bdfd8c3ebec42564ac7d0e54ca3db65044a9314a97f9564fa7a1e926/tzdata-2026.3.tar.gz", hash = "sha256:4a1518b8993086a7982523e071643f3c0e5f213e75b21318e78bcabfff9d1415", size = 198674, upload-time = "2026-07-10T08:50:37.887Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ce/e4/dccd7f47c4b64213ac01ef921a1337ee6e30e8c6466046018326977efd95/tzdata-2026.2-py2.py3-none-any.whl", hash = "sha256:bbe9af844f658da81a5f95019480da3a89415801f6cc966806612cc7169bffe7", size = 349321, upload-time = "2026-04-24T15:22:05.876Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/6d/b53b99a9f2766d095985947a5782f1702cabb129a34f7a802d7197af832f/tzdata-2026.3-py2.py3-none-any.whl", hash = "sha256:dc096730c87af6cab1b171c9d532be840741ff5d459015e7f6947bd7d7e54931", size = 348168, upload-time = "2026-07-10T08:50:36.46Z" },
 ]
 
 [[package]]
