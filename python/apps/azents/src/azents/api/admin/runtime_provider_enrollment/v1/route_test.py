@@ -4,7 +4,6 @@ import datetime
 
 import pytest
 from fastapi import FastAPI, HTTPException
-from fastapi.routing import APIRoute
 
 from azents.api.admin.runtime_provider_enrollment.v1 import (
     issue_enrollment_grant,
@@ -73,7 +72,7 @@ def test_mounts_provider_enrollment_control_plane_routes() -> None:
     app = FastAPI()
     mount(as_route_mounter(app))
 
-    paths = {route.path for route in app.routes if isinstance(route, APIRoute)}
+    paths = set(app.openapi()["paths"])
 
     assert (
         "/runtime-provider-enrollment/v1/runtime-providers/"

@@ -4,7 +4,6 @@ import datetime
 
 import pytest
 from fastapi import FastAPI, HTTPException
-from fastapi.routing import APIRoute
 from starlette.requests import Request
 
 from azents.api.public.runtime_provider_enrollment.v1 import (
@@ -83,7 +82,7 @@ def test_mounts_operator_exchange_route() -> None:
     app = FastAPI()
     mount(as_route_mounter(app))
 
-    paths = {route.path for route in app.routes if isinstance(route, APIRoute)}
+    paths = set(app.openapi()["paths"])
 
     assert "/runtime-provider-enrollment/v1/credentials/exchange" in paths
 

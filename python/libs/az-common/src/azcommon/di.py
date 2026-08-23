@@ -23,7 +23,16 @@ from typing import (
 )
 
 from fastapi import Depends, params
-from fastapi.dependencies.models import Dependant
+from fastapi.dependencies.models import (
+    Dependant,
+    DependencyCacheKey,
+    _get_cache_key,
+    _get_oauth_scopes,
+    _is_async_gen_callable,
+    _is_coroutine_callable,
+    _is_gen_callable,
+    _UsesScopesCache,
+)
 from fastapi.dependencies.utils import (
     _solve_generator,
     get_dependant,
@@ -41,10 +50,7 @@ class Dependency(Protocol, Generic[P, R_co]):
     ) -> AsyncGenerator[R_co] | Generator[R_co] | Awaitable[R_co] | R_co: ...
 
 
-DependencyCache = MutableMapping[
-    tuple[Callable[..., Any] | None, tuple[str, ...], str],
-    Any,
-]
+DependencyCache = MutableMapping[DependencyCacheKey, Any]
 DependencyOverrides = MutableMapping[
     Dependency[..., Any],
     Dependency[..., Any],
@@ -77,9 +83,12 @@ async def solve_offline_dependencies(
     stack: AsyncExitStack,
     dependency_overrides_provider: DependencyOverridesProvider | None = None,
     dependency_cache: DependencyCache | None = None,
+    uses_scopes_cache: _UsesScopesCache | None = None,
 ) -> tuple[dict[str, Any], DependencyCache]:
     values: dict[str, Any] = {}
     dependency_cache = dependency_cache or {}
+    if uses_scopes_cache is None:
+        uses_scopes_cache = {}
     sub_dependant: Dependant
     for sub_dependant in dependant.dependencies:
         sub_dependant.call = cast(Callable[..., Any], sub_dependant.call)
@@ -99,6 +108,8 @@ async def solve_offline_dependencies(
                 path=use_path,
                 call=call,
                 name=sub_dependant.name,
+                parent_oauth_scopes=_get_oauth_scopes(dependant=sub_dependant),
+                scope=sub_dependant.scope,
             )
 
         solved_result = await solve_offline_dependencies(
@@ -106,14 +117,19 @@ async def solve_offline_dependencies(
             stack=stack,
             dependency_overrides_provider=dependency_overrides_provider,
             dependency_cache=dependency_cache,
+            uses_scopes_cache=uses_scopes_cache,
         )
         sub_values, sub_dependency_cache = solved_result
         dependency_cache.update(sub_dependency_cache)
+        sub_dependant_cache_key = _get_cache_key(
+            dependant=sub_dependant,
+            uses_scopes_cache=uses_scopes_cache,
+        )
         solved: Any
-        if sub_dependant.use_cache and sub_dependant.cache_key in dependency_cache:
-            solved = dependency_cache[sub_dependant.cache_key]
-        elif (
-            use_sub_dependant.is_gen_callable or use_sub_dependant.is_async_gen_callable
+        if sub_dependant.use_cache and sub_dependant_cache_key in dependency_cache:
+            solved = dependency_cache[sub_dependant_cache_key]
+        elif _is_gen_callable(use_sub_dependant.call) or _is_async_gen_callable(
+            use_sub_dependant.call
         ):
             # FastAPI's private helper resolves generator dependencies, but its
             # annotation does not express the awaited result precisely.
@@ -123,7 +139,7 @@ async def solve_offline_dependencies(
                     dependant=use_sub_dependant, stack=stack, sub_values=sub_values
                 ),
             )
-        elif use_sub_dependant.is_coroutine_callable:
+        elif _is_coroutine_callable(use_sub_dependant.call):
             async_call = cast(Callable[..., Awaitable[Any]], call)
             solved = await async_call(**sub_values)
         else:
@@ -131,8 +147,8 @@ async def solve_offline_dependencies(
             solved = await run_in_threadpool(sync_call, **sub_values)
         if sub_dependant.name is not None:
             values[sub_dependant.name] = solved
-        if sub_dependant.cache_key not in dependency_cache:
-            dependency_cache[sub_dependant.cache_key] = solved
+        if sub_dependant_cache_key not in dependency_cache:
+            dependency_cache[sub_dependant_cache_key] = solved
     return values, dependency_cache
 
 
