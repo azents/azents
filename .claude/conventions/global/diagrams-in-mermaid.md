@@ -1,14 +1,15 @@
 ---
-title: "Use Mermaid code blocks for all diagrams in markdown documents (architecture, flow, sequence) — never ASCII art."
+title: "Use Mermaid when relationships, topology, flow, temporal order, or ER semantics are the content; preserve literal examples and compact data shapes in clearer text forms."
 ---
 
-# Diagrams in Mermaid
+# Mermaid for Semantic Diagrams
 
-ASCII boxes look fine in a terminal but rot the moment fonts shift, columns drift, or someone renders the doc in a non-monospace context. Mermaid renders the same everywhere.
+Use Mermaid when the reader must understand semantic connections or ordering, not merely because structured text contains arrows, branches, boxes, or tree characters.
 
-- ALWAYS use Mermaid code blocks for architecture diagrams, flowcharts, sequence diagrams, ERDs in `*.md` files
-- KEEP directory trees as fenced text using tree characters such as `├──` and `└──`
-- AVOID ASCII art for diagrams (boxes drawn with `|`, `+`, `-`, `→`)
+- ALWAYS use Mermaid for architecture relationships, topology, process flow, sequences, and ER diagrams in `*.md` files
+- AVOID ASCII box-and-arrow diagrams that represent semantic relationships
+- KEEP literal UI, CLI, and output examples in fenced text when exact appearance is the content
+- USE the clearest of fenced text, tables, lists, or tree notation for compact record, schema, and data shapes and for directory trees
 
 ## Bad
 
