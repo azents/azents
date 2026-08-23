@@ -11,8 +11,7 @@ export type SubscriptionUsageResponse =
   | SubscriptionUsageUnavailableResponse;
 
 export type SubscriptionUsageSnapshot =
-  | SubscriptionUsageAvailableResponse
-  | SubscriptionUsageExternalResponse;
+  SubscriptionUsageAvailableResponse | SubscriptionUsageExternalResponse;
 
 export type SubscriptionUsageState =
   | { type: "IDLE" }

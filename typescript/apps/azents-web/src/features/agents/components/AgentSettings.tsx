@@ -27,12 +27,7 @@ import type {
 } from "@azents/public-client";
 
 type AgentSettingsSection =
-  | "all"
-  | "profile"
-  | "model"
-  | "capabilities"
-  | "subagents"
-  | "admins";
+  "all" | "profile" | "model" | "capabilities" | "subagents" | "admins";
 
 interface AgentSettingsProps {
   handle: string;

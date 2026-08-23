@@ -9,11 +9,7 @@ import { trpc } from "@/trpc/server";
 import type { AgentContextPageView } from "@/features/agents/AgentContextPage";
 
 type SessionPageView =
-  | "chat"
-  | "subagents"
-  | "channels"
-  | "scheduled-tasks"
-  | AgentContextPageView;
+  "chat" | "subagents" | "channels" | "scheduled-tasks" | AgentContextPageView;
 
 function parsePageView(value?: string | string[]): SessionPageView {
   const rawValue = Array.isArray(value) ? value[0] : value;

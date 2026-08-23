@@ -3,8 +3,7 @@ import type { ChatMessage } from "./types";
 export type ContinuationSource = "goal" | "external_channel";
 export type ContinuationIcon = "target" | "channel";
 export type ContinuationLabelKey =
-  | "goalContinuationIndicator"
-  | "externalChannelContinuationIndicator";
+  "goalContinuationIndicator" | "externalChannelContinuationIndicator";
 
 export interface ContinuationPresentation {
   source: ContinuationSource;

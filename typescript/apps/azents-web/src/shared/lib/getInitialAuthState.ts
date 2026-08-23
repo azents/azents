@@ -15,8 +15,7 @@ import { cache } from "react";
 import { COOKIE_NAMES } from "@/shared/lib/cookies";
 
 export type InitialAuthState =
-  | { status: "authenticated" }
-  | { status: "unauthenticated" };
+  { status: "authenticated" } | { status: "unauthenticated" };
 
 /**
  * Fetch authentication state (cached).

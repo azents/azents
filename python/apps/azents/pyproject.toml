@@ -5,12 +5,12 @@ description = "Azents Server"
 requires-python = ">=3.14"
 dependencies = [
     # FastAPI & Web
-    "fastapi[standard]==0.136.0",
+    "fastapi[standard]==0.136.3",
     "uvicorn==0.46.0",
     # Database
-    "sqlalchemy[asyncio]==2.0.44",
-    "psycopg[binary]==3.3.2",
-    "alembic==1.18.0",
+    "sqlalchemy[asyncio]==2.0.52",
+    "psycopg[binary]==3.3.4",
+    "alembic==1.18.5",
     "alembic-postgresql-enum==1.10.0",
     # Configuration
     "pydantic==2.13.4",
@@ -32,7 +32,7 @@ dependencies = [
     # Template rendering
     "jinja2==3.1.6",
     # Type stubs
-    "types-pytz==2026.2.0.20260506",
+    "types-pytz==2026.2.0.20260518",
     "types-aioboto3[aioboto3,s3,ses]==15.5.0",
     "boto3-stubs[rds]==1.43.0",
     # Docker API client
@@ -46,14 +46,14 @@ dependencies = [
     "litellm==1.91.3",
     "openai[realtime]==2.45.0",
     "Pillow==12.3.0",
-    "redis==7.4.0",
+    "redis==7.4.1",
     "mcp==1.28.1",
     "httpx==0.28.1",
     "ptpython==3.0.32",
     "aiohttp==3.14.3",
     "python-frontmatter==1.3.0",
     "google-auth==2.52.0",
-    "croniter==6.2.2",
+    "croniter==6.2.4",
     "google-analytics-data==0.22.0",
     "google-analytics-admin==0.29.0",
     "grpcio==1.83.0",

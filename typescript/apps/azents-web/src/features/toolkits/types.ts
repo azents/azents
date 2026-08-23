@@ -21,8 +21,7 @@ export type ToolkitConfigFormState =
 
 /** Mutation state */
 export type MutationState =
-  | { type: "IDLE"; error: string | null }
-  | { type: "SUBMITTING" };
+  { type: "IDLE"; error: string | null } | { type: "SUBMITTING" };
 
 /** Scope list state */
 export type ScopeListState =

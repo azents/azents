@@ -37,8 +37,7 @@ interface MessageMetadataVisibilityContextValue {
 }
 
 type MessageInferenceProfile =
-  | RequestedInferenceProfile
-  | AppliedInferenceProfile;
+  RequestedInferenceProfile | AppliedInferenceProfile;
 
 function profileModelDisplayName(
   profile: MessageInferenceProfile,

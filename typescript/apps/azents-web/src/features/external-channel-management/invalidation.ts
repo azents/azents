@@ -7,9 +7,7 @@ export type ExternalChannelSettingsMutation =
   | "removeBlock";
 
 export type ExternalChannelSettingsQuery =
-  | "connections"
-  | "agentAccess"
-  | "sessionChannels";
+  "connections" | "agentAccess" | "sessionChannels";
 
 export function externalChannelSettingsInvalidationPlan(
   mutation: ExternalChannelSettingsMutation,

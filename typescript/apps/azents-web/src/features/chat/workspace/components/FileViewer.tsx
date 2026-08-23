@@ -50,13 +50,7 @@ function formatFileSize(bytes: number): string {
 }
 
 type WorkspacePreviewKind =
-  | "CSV"
-  | "IMAGE"
-  | "JSON"
-  | "MARKDOWN"
-  | "PDF"
-  | "TEXT"
-  | "UNSUPPORTED";
+  "CSV" | "IMAGE" | "JSON" | "MARKDOWN" | "PDF" | "TEXT" | "UNSUPPORTED";
 
 function hasExtension(path: string, extensions: readonly string[]): boolean {
   const lowerPath = path.toLowerCase();

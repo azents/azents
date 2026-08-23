@@ -53,5 +53,4 @@ export type ScheduledTaskFormState =
     };
 
 export type ScheduledTaskActionError =
-  | { type: "CONFLICT" }
-  | { type: "ERROR"; message: string };
+  { type: "CONFLICT" } | { type: "ERROR"; message: string };

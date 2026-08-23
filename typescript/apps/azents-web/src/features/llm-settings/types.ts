@@ -30,8 +30,7 @@ export type FormModalState =
 
 /** Mutation state */
 export type MutationState =
-  | { type: "IDLE"; error: string | null }
-  | { type: "SUBMITTING" };
+  { type: "IDLE"; error: string | null } | { type: "SUBMITTING" };
 
 export type ApiKeySecrets = { type: "api_key"; api_key: string };
 export type AwsSecrets = {

@@ -11,8 +11,7 @@ export type WorkspacesListState =
 
 /** Workspace creation page state */
 export type WorkspaceCreateState =
-  | { type: "IDLE"; error: string | null }
-  | { type: "CREATING" };
+  { type: "IDLE"; error: string | null } | { type: "CREATING" };
 
 /** Received invitation item */
 export interface ReceivedInvitation {

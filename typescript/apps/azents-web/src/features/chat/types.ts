@@ -182,10 +182,7 @@ export interface ClientToolCallPayload {
 }
 
 export type ToolResultStatus =
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "interrupted";
+  "completed" | "failed" | "cancelled" | "interrupted";
 
 export interface ClientToolResultPayload {
   call_id: string;
@@ -214,12 +211,7 @@ export interface ProviderToolCallPayload {
   call_id: string;
   name: string;
   status:
-    | "running"
-    | "completed"
-    | "failed"
-    | "cancelled"
-    | "interrupted"
-    | null;
+    "running" | "completed" | "failed" | "cancelled" | "interrupted" | null;
   semantic: ProviderToolSemanticContent;
 }
 
@@ -280,17 +272,12 @@ export interface SystemReminderPayload {
 }
 
 export type FailedRunFinalizationReason =
-  | "retry_exhausted"
-  | "retry_stopped_by_user"
-  | "non_retryable";
+  "retry_exhausted" | "retry_stopped_by_user" | "non_retryable";
 
 export type FailedRunErrorKind = "model_provider" | "runtime";
 
 export type FailedRunRetryability =
-  | "unknown"
-  | "transient"
-  | "user_action_required"
-  | "non_retryable";
+  "unknown" | "transient" | "user_action_required" | "non_retryable";
 
 export interface FailedRunAttemptSummary {
   attemptNumber: number;
@@ -849,16 +836,11 @@ export type AgentListState =
 
 /** WebSocket connection status */
 export type ConnectionStatus =
-  | "disconnected"
-  | "connecting"
-  | "connected"
-  | "reconnecting";
+  "disconnected" | "connecting" | "connected" | "reconnecting";
 
 /** chat view status */
 export type ChatViewState =
-  | { type: "EMPTY" }
-  | { type: "LOADING_HISTORY" }
-  | { type: "READY" };
+  { type: "EMPTY" } | { type: "LOADING_HISTORY" } | { type: "READY" };
 
 /** chat timeline rendering mode */
 export type ChatTimelineState =
