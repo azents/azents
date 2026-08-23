@@ -12,7 +12,7 @@ dependencies = [
     "azents-admin-client",
     "azents-public-client",
     "pydantic==2.13.4",
-    "python-dotenv==1.2.2",
+    "python-dotenv==1.2.3",
     "python-frontmatter==1.3.0",
     "pyyaml==6.0.3",
     "typer==0.27.1",
