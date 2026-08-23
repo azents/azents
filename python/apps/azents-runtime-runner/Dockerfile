@@ -110,7 +110,7 @@ RUN pip install --no-cache-dir --break-system-packages \
 
 RUN playwright install-deps chromium
 
-RUN docker --version | grep -F "Docker version 28.5.2" \
+RUN docker --version | grep -F "Docker version 29.7.2" \
     && docker buildx version | grep -F "github.com/docker/buildx v0.29.1" \
     && docker compose version | grep -F "Docker Compose version v2.40.3" \
     && unshare --version \
