@@ -57,7 +57,7 @@ _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
 @dataclass(frozen=True)
 class _Workspace:
-    """chat input buffer E2E t t t resource t."""
+    """Resources provisioned for a chat input buffer E2E test."""
 
     token: str
     handle: str
@@ -76,7 +76,7 @@ class _PendingBuffer:
 
 
 def _headers(token: str) -> dict[str, str]:
-    """Bearer auth header t t."""
+    """Build a Bearer authentication header."""
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -85,7 +85,7 @@ def _setup_workspace(
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
 ) -> _Workspace:
-    """workspacet model selection t t API t t."""
+    """Provision a workspace and its model selection through public APIs."""
     uniq = unique()
     token, _, _ = authenticate_user(
         public_api_client,
@@ -184,7 +184,7 @@ def _create_agent(
 
 
 def _object_item(raw_item: object, *, label: str) -> dict[str, object]:
-    """JSON object t verifyt returnt."""
+    """Validate and return one JSON object."""
     try:
         return _JSON_OBJECT.validate_python(raw_item)
     except ValidationError as exc:
@@ -192,7 +192,7 @@ def _object_item(raw_item: object, *, label: str) -> dict[str, object]:
 
 
 def _object_items(raw_items: object, *, label: str) -> list[dict[str, object]]:
-    """JSON list[object] t verifyt returnt."""
+    """Validate and return a list of JSON objects."""
     try:
         return _JSON_OBJECT_LIST.validate_python(raw_items)
     except ValidationError as exc:
@@ -204,7 +204,7 @@ def _response_object(
     *,
     label: str,
 ) -> dict[str, object]:
-    """HTTP response body t JSON object t verifyt returnt."""
+    """Validate an HTTP response body as a JSON object."""
     try:
         return _JSON_OBJECT.validate_json(response.text)
     except ValidationError as exc:
@@ -218,7 +218,7 @@ def _post_json(
     path: str,
     payload: dict[str, object],
 ) -> dict[str, object]:
-    """Public REST JSON POST responset object t returnt."""
+    """POST JSON to the public REST API and return the response object."""
     response = requests.post(
         f"{server_url}{path}",
         headers={**_headers(token), "Content-Type": "application/json"},
@@ -237,7 +237,7 @@ def _write_new_session_message(
     message: str,
     client_request_id: str,
 ) -> dict[str, object]:
-    """t session t messaget REST write boundary t t."""
+    """Write a message through the new-session REST boundary."""
     session_response = requests.get(
         f"{server_url}/chat/v1/agents/{agent_id}/team-primary-session",
         headers={"Authorization": f"Bearer {token}"},
@@ -278,7 +278,7 @@ def _write_session_message(
     message: str,
     client_request_id: str,
 ) -> dict[str, object]:
-    """t session messaget REST write boundary t t."""
+    """Write a message to an existing session through REST."""
     return _post_json(
         server_url=server_url,
         token=token,
@@ -305,7 +305,7 @@ def _write_edit_message(
     message: str,
     client_request_id: str,
 ) -> dict[str, object]:
-    """user message t REST write boundary t t."""
+    """Edit a user message through the REST write boundary."""
     return _post_json(
         server_url=server_url,
         token=token,
@@ -329,7 +329,7 @@ def _stop_session_run(
     token: str,
     session_id: str,
 ) -> dict[str, object]:
-    """t session run t REST control boundary t t."""
+    """Stop a running session through the REST control boundary."""
     return _post_json(
         server_url=server_url,
         token=token,
@@ -347,7 +347,7 @@ def _write_command(
     command: str,
     client_request_id: str,
 ) -> dict[str, object]:
-    """t t REST write boundary t t."""
+    """Write a command through the REST write boundary."""
     return _post_json(
         server_url=server_url,
         token=token,
@@ -363,7 +363,7 @@ def _write_command(
 
 
 def _session_id_from_write(response: dict[str, object]) -> str:
-    """REST write responset session_id t t."""
+    """Extract the session ID from a REST write response."""
     session_id = response.get("session_id")
     if not isinstance(session_id, str):
         raise AssertionError(
@@ -373,7 +373,7 @@ def _session_id_from_write(response: dict[str, object]) -> str:
 
 
 def _accepted_write(response: dict[str, object]) -> dict[str, object]:
-    """REST write accepted object t t."""
+    """Extract the accepted item from a REST write response."""
     return _object_item(response.get("accepted"), label="write accepted")
 
 
@@ -383,7 +383,7 @@ def _list_history(
     token: str,
     session_id: str,
 ) -> dict[str, object]:
-    """REST history event page t fetcht."""
+    """Fetch one REST history event page."""
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/history",
         headers=_headers(token),
@@ -399,7 +399,7 @@ def _list_live(
     token: str,
     session_id: str,
 ) -> dict[str, object]:
-    """REST live event projection list t fetcht."""
+    """Fetch the REST live-event projection."""
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/live",
         headers=_headers(token),
@@ -415,7 +415,7 @@ def _assert_legacy_messages_get_removed(
     token: str,
     session_id: str,
 ) -> None:
-    """Legacy aggregate messages GET t public surface t t t verifyt."""
+    """Verify that the legacy aggregate messages endpoint is absent."""
     response = requests.get(
         f"{server_url}/chat/v1/sessions/{session_id}/messages",
         headers=_headers(token),
@@ -431,9 +431,9 @@ def _assert_split_rest_contract(
     history_payload: dict[str, object],
     live_payload: dict[str, object],
 ) -> None:
-    """History/live response shape t verifyt.
+    """Verify the split history and live response contracts.
 
-    Legacy aggregate bootstrap shape t t t t.
+    The legacy aggregate bootstrap shape must remain absent.
     """
     assert isinstance(history_payload.get("items"), list)
     assert isinstance(history_payload.get("has_more"), bool)
@@ -494,7 +494,7 @@ def _input_buffer_contents(payload: dict[str, object]) -> list[str]:
 
 
 def _run_marker_statuses(payload: dict[str, object]) -> list[str]:
-    """History response t run_marker status listt returnt."""
+    """Return run-marker statuses from a history response."""
     raw_items = payload.get("items")
     statuses: list[str] = []
     for raw_item in _object_items(raw_items, label="history items"):
@@ -508,7 +508,7 @@ def _run_marker_statuses(payload: dict[str, object]) -> list[str]:
 
 
 def _message_contents(payload: dict[str, object]) -> list[str]:
-    """History response t user/assistant event content listt returnt."""
+    """Return user and assistant message contents from history."""
     raw_items = payload.get("items")
     contents: list[str] = []
     for raw_item in _object_items(raw_items, label="history items"):
@@ -522,7 +522,7 @@ def _message_contents(payload: dict[str, object]) -> list[str]:
 
 
 def _find_user_message_id(payload: dict[str, object], content: str) -> str | None:
-    """History response t t user_message id t t."""
+    """Find a user-message ID by content in a history response."""
     raw_items = payload.get("items")
     for raw_item in _object_items(raw_items, label="history items"):
         if raw_item.get("kind") != "user_message":
@@ -545,7 +545,7 @@ def _wait_for_history_user_message_id(
     content: str,
     timeout: float = 120,
 ) -> str:
-    """REST history t t user_message t t t t."""
+    """Wait until REST history contains the requested user message."""
     deadline = time.monotonic() + timeout
     last_payload: dict[str, object] | None = None
     while time.monotonic() < deadline:
@@ -636,7 +636,7 @@ def _wait_for_running_rest_state(
     expected_message: str,
     timeout: float = 60,
 ) -> None:
-    """REST history/live t t messaget running run t t."""
+    """Wait until REST history and live state expose a running message."""
     deadline = time.monotonic() + timeout
     last_payload: dict[str, object] | None = None
     while time.monotonic() < deadline:
@@ -676,7 +676,7 @@ def _wait_for_rest_state(
     expected_pending: list[str] | None = None,
     timeout: float = 120,
 ) -> dict[str, object]:
-    """REST history/live t t statet t t polling t."""
+    """Poll REST history and live projections until the target state appears."""
     deadline = time.monotonic() + timeout
     last_payload: dict[str, object] | None = None
     while time.monotonic() < deadline:
@@ -797,12 +797,12 @@ def _delete_mailbox_item(
 
 
 def _reset_mock_openai(mock_openai_url: str) -> None:
-    """AIMock request journal t initializet."""
+    """Reset the AI mock request journal."""
     requests.delete(f"{mock_openai_url}/v1/_requests", timeout=10).raise_for_status()
 
 
 def _mock_openai_journal_text(mock_openai_url: str) -> str:
-    """AIMock journal t JSON stringt returnt."""
+    """Return the AI mock request journal as JSON text."""
     payload = requests.get(f"{mock_openai_url}/v1/_requests", timeout=10).json()
     return json.dumps(payload, ensure_ascii=False)
 
@@ -813,7 +813,7 @@ def _wait_for_mock_openai_journal_contains(
     *,
     timeout: float = 30,
 ) -> None:
-    """AIMock journal t t stringt t t t."""
+    """Wait until the AI mock journal contains the expected text."""
     deadline = time.monotonic() + timeout
     last_journal = ""
     while time.monotonic() < deadline:
@@ -827,7 +827,7 @@ def _wait_for_mock_openai_journal_contains(
 
 
 class TestChatInputBuffer:
-    """chat input buffer user patht E2E t verifyt."""
+    """Verify chat input buffer behavior through user-facing E2E paths."""
 
     def test_running_follow_ups_are_buffered_then_promoted_in_fifo_order(
         self,
@@ -1088,7 +1088,7 @@ class TestChatInputBuffer:
         azents_public_server_url: str,
         azents_engine_worker_container: DockerContainer,
     ) -> None:
-        """REST stop endpoint t running session t interrupted t t."""
+        """Verify that REST stop interrupts a running session."""
         release_file_path = f"/tmp/azents-input-buffer-stop-{unique()}"
         _set_release_file(
             azents_engine_worker_container,
@@ -1154,7 +1154,7 @@ class TestChatInputBuffer:
         azents_public_server_url: str,
         azents_engine_worker_container: object,
     ) -> None:
-        """edit/command REST write t accepted target t reload hint t returnt."""
+        """Verify that edit and command writes return targets and reload hints."""
         del azents_engine_worker_container
         workspace = _setup_workspace(
             public_api_client,
