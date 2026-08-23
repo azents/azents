@@ -21,13 +21,13 @@ Choose based on reviewability, dependencies, validation, and rollout boundaries:
 
 For phased work, use this sequence:
 
-```mermaid
-flowchart TD
-    Design[Approved Design baseline] --> Plan[Implementation plan]
-    Plan --> Phases[Implementation phases]
-    Phases --> Validation[Validation]
-    Validation --> Spec[Spec promotion]
-    Spec --> Cleanup[Plan cleanup]
+```text
+approved design baseline
+→ implementation plan
+→ implementation phases
+→ validation
+→ spec promotion
+→ plan cleanup
 ```
 
 Use a consistent `{feature-name} [n/N]: <phase>` title prefix. Store the

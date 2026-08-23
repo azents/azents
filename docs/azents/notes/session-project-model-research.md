@@ -152,34 +152,22 @@ Reference:
 
 Codex is mostly implicit and `cwd`/git-root driven:
 
-```mermaid
-flowchart TD
-    Cwd[cwd]
-    Root["Find Project root using .git or Project markers"]
-    Instructions["Load AGENTS.md from Project root to cwd"]
-    Config["Load .codex/config.toml if the Project is trusted"]
-    Roots[Apply sandbox and workspace roots]
-
-    Cwd --> Root
-    Root --> Instructions
-    Instructions --> Config
-    Config --> Roots
+```text
+cwd
+ -> find project root using .git / project markers
+ -> load AGENTS.md from root to cwd
+ -> load .codex/config.toml if project is trusted
+ -> apply sandbox/workspace roots
 ```
 
 Azents is currently explicit and session-registry driven:
 
-```mermaid
-flowchart TD
-    Session[AgentSession]
-    Projects[Registered Project rows]
-    Paths["/workspace/agent/&lt;project&gt; paths"]
-    Prompt[Prompt includes registered Projects]
-    Instructions["AGENTS.md appendix is scoped to registered Projects"]
-
-    Session --> Projects
-    Projects --> Paths
-    Paths --> Prompt
-    Prompt --> Instructions
+```text
+AgentSession
+ -> registered Project rows
+ -> /workspace/agent/<project> paths
+ -> prompt includes registered Projects
+ -> AGENTS.md appendix is scoped to registered Projects
 ```
 
 Key difference:
@@ -374,16 +362,11 @@ Git-specific functionality is desirable but should likely be modeled separately 
 
 Desired flow:
 
-```mermaid
-flowchart TD
-    Select[Select a GitHub repository or provide a URL]
-    Clone[Clone into the Runtime Workspace]
-    Register[Register as a Project]
-    Bind[Optionally add to the current Session or defaults]
-
-    Select --> Clone
-    Clone --> Register
-    Register --> Bind
+```text
+select GitHub repo or provide URL
+ -> clone into runtime workspace
+ -> register as Project
+ -> optionally add to current session and/or defaults
 ```
 
 Why it feels natural:
@@ -464,18 +447,11 @@ Cleanup should probably be blocked or require confirmation when:
 
 Possible policy:
 
-```mermaid
-flowchart TD
-    Archive[Archive Session]
-    Identify[Identify Session-owned materializations]
-    Safety{Worktree safe and clean?}
-    Clean[Clean automatically]
-    Preserve[Preserve or request confirmation]
-
-    Archive --> Identify
-    Identify --> Safety
-    Safety -->|yes| Clean
-    Safety -->|dirty or risky| Preserve
+```text
+Archive session
+ -> identify session-owned materializations
+ -> auto-clean only safe, clean worktrees
+ -> preserve or request confirmation for dirty/risky worktrees
 ```
 
 ### File browser git diff view

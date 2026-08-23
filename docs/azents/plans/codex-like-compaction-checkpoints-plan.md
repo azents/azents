@@ -14,20 +14,13 @@ tags: [backend, engine, plan]
 
 ## Stack Shape
 
-```mermaid
-flowchart TD
-    Main["main"]
-    Design["azents-codex-compaction-design"]
-    Plan["azents-codex-compaction-plan"]
-    Budget["azents-codex-compaction-runtime-budget"]
-    Prompt["azents-codex-compaction-prompt"]
-    Spec["azents-codex-compaction-spec-promotion"]
-
-    Main -->|base of| Design
-    Design -->|base of| Plan
-    Plan -->|base of| Budget
-    Budget -->|base of| Prompt
-    Prompt -->|base of| Spec
+```text
+main
+← azents-codex-compaction-design
+← azents-codex-compaction-plan
+← azents-codex-compaction-runtime-budget
+← azents-codex-compaction-prompt
+← azents-codex-compaction-spec-promotion
 ```
 
 ## Phase 1 — Design Document
