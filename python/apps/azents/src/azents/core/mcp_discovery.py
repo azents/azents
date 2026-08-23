@@ -106,7 +106,7 @@ async def discover_oauth_metadata(
 async def register_client(
     registration_endpoint: str,
     redirect_uri: str,
-    client_name: str = "Nointern",
+    client_name: str = "Azents",
     *,
     proxy_url: str | None = None,
 ) -> DcrRegistrationResult:

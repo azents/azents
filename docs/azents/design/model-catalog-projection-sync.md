@@ -70,7 +70,7 @@ Frontend state:
 
 Existing documentation:
 
-- `docs/azents/design/llm-260513-llm-catalog-source.md` is an older pre-ADR design that still references nointern-era static catalog tables and models.dev. This new design supersedes it for [catalog-260620/ADR](../adr/catalog-260620-catalog-projection-sync.md) implementation.
+- `docs/azents/design/llm-260513-llm-catalog-source.md` is an older pre-ADR design that still references Azents-era static catalog tables and models.dev. This new design supersedes it for [catalog-260620/ADR](../adr/catalog-260620-catalog-projection-sync.md) implementation.
 
 ## Target State
 
@@ -705,7 +705,7 @@ TBD — verification phase must fill this if failures are found.
 
 ## Superseded/Related Documents
 
-- Supersedes current implementation direction in `docs/azents/design/llm-260513-llm-catalog-source.md` where it conflicts with [catalog-260620/ADR](../adr/catalog-260620-catalog-projection-sync.md), especially models.dev source path and nointern-era static catalog table references.
+- Supersedes current implementation direction in `docs/azents/design/llm-260513-llm-catalog-source.md` where it conflicts with [catalog-260620/ADR](../adr/catalog-260620-catalog-projection-sync.md), especially models.dev source path and Azents-era static catalog table references.
 - Related current specs:
   - `docs/azents/spec/domain/agent.md`
   - `docs/azents/spec/flow/agent-execution-loop.md`

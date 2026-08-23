@@ -30,9 +30,9 @@ from .system import (
 )
 from .tunnel import TailscaleFunnelHealthy
 from .web import (
+    AzentsWebDepsInstalled,
+    AzentsWebPortFree,
     NodeInstalled,
-    NointernWebDepsInstalled,
-    NointernWebPortFree,
     PnpmInstalled,
 )
 
@@ -58,8 +58,8 @@ def all_checks() -> list[Check]:
         # Stage 4 — azents-web (system + ports + config)
         NodeInstalled(),
         PnpmInstalled(),
-        NointernWebPortFree(),
-        NointernWebDepsInstalled(),
+        AzentsWebPortFree(),
+        AzentsWebDepsInstalled(),
         # config
         EnvFileExists(),
         RequiredEnvVars(),

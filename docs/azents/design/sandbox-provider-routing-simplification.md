@@ -172,7 +172,7 @@ provider unavailable family failure is not grounds for checkpoint invalidation.
     "image_ref": "...",
     "sandbox_control_auth_token": "..."
   },
-  "reply_channel": "nointern:sandbox-provider-control:results:<request_id>"
+  "reply_channel": "azents:sandbox-provider-control:results:<request_id>"
 }
 ```
 
@@ -415,6 +415,6 @@ Rejected. active stream ownership is TTL/heartbeat-based ephemeral routing state
 
 ## Relationship with Existing Documents
 
-- Outbound provider-control decision in `docs/nointern/adr/sandbox-260521-sandbox-control.md` remains.
+- Outbound provider-control decision in `docs/azents/adr/sandbox-260521-sandbox-control.md` remains.
 - This document is follow-up design that supplements stateless replica routing problem exposed during implementation after [sandbox-260521/ADR](../adr/sandbox-260521-sandbox-control.md).
-- After implementation completes, current behavior is reflected in `docs/nointern/spec/flow/sandbox-260521-sandbox-control.md` and provider-control-related spec.
+- After implementation completes, current behavior is reflected in `docs/azents/spec/flow/sandbox-260521-sandbox-control.md` and provider-control-related spec.

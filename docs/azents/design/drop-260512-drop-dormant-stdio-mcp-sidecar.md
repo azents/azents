@@ -14,9 +14,9 @@ historical_reconstruction: true
 
 ## Overview
 
-nointern once introduced path with per-agent `mcp-proxy` sidecar next to Agent Home to support stdio-only MCP server. However, in current code, no **toolkit implementation that actually produces** this path is visible.
+Azents once introduced path with per-agent `mcp-proxy` sidecar next to Agent Home to support stdio-only MCP server. However, in current code, no **toolkit implementation that actually produces** this path is visible.
 
-More precisely, runtime / infra branch itself is still alive. `EngineWorker` still calls `initialize_stdio_sandbox()`, and sandbox layer also receives `stdio_configs` and keeps sidecar wiring. But under current `python/apps/nointern/src/nointern`, there is no `Toolkit.get_stdio_configs()` / `Toolkit.set_server_url()` override, and no actual `McpStdioToolkitConfig(...)` instance is used.
+More precisely, runtime / infra branch itself is still alive. `EngineWorker` still calls `initialize_stdio_sandbox()`, and sandbox layer also receives `stdio_configs` and keeps sidecar wiring. But under current `python/apps/azents/src/azents`, there is no `Toolkit.get_stdio_configs()` / `Toolkit.set_server_url()` override, and no actual `McpStdioToolkitConfig(...)` instance is used.
 
 Goal of this design is not **"whether to generalize and maintain stdio MCP support itself"**, but **to remove currently dormant per-agent stdio sidecar transport and simplify runtime contract to remote HTTP MCP + native integration**.
 
@@ -25,7 +25,7 @@ Goal of this design is not **"whether to generalize and maintain stdio MCP suppo
 1. Workspace manager attaches GitHub / Notion / Sentry / Raw MCP toolkit.
 2. runtime uses remote MCP HTTP or service-specific native SDK path as before.
 3. sandbox is responsible only for shell / file / project load lifecycle, and no longer handles MCP stdio subprocess orchestration.
-4. Operator no longer manages `nointern-mcp-proxy` image, sidecar RBAC, or Pod compatibility conditions.
+4. Operator no longer manages `azents-mcp-proxy` image, sidecar RBAC, or Pod compatibility conditions.
 
 ## Discussion Points and Decisions
 
@@ -120,52 +120,52 @@ Goal is to return sandbox to **shell / file / runtime lifecycle-only boundary**,
 
 ### Runtime
 
-- `python/apps/nointern/src/nointern/core/tools.py`
+- `python/apps/azents/src/azents/core/tools.py`
   - `McpStdioToolkitConfig`
   - `Toolkit.get_stdio_configs()`
   - `Toolkit.set_server_url()`
   - `MCP_PROXY_PORT`
-- `python/apps/nointern/src/nointern/worker/engine.py`
+- `python/apps/azents/src/azents/worker/engine.py`
   - `EngineWorker.initialize_stdio_sandbox()`
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox.py`
   - `ensure_ready(..., stdio_configs=...)` contract
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_factory.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox_factory.py`
   - config wiring when creating backend/client
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_manager.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox_manager.py`
   - `stdio_configs` cache/revalidation path
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_k8s.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox_k8s.py`
   - sidecar Pod spec, ConfigMap/Secret, reuse compatibility
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_docker.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox_docker.py`
   - `ENABLE_MCP_PROXY`, config/creds bind mount
-- `python/apps/nointern/src/nointern/core/config.py`
+- `python/apps/azents/src/azents/core/config.py`
   - `k8s_mcp_proxy_image` bootstrap/config validation
 
 ### Infra / CI
 
-- `docker/nointern/mcp-proxy/Dockerfile`
-- `docker/nointern/agent-runtime/supervisord.conf`
-- `docker/nointern/agent-runtime/entrypoint.sh`
+- `docker/azents/mcp-proxy/Dockerfile`
+- `docker/azents/agent-runtime/supervisord.conf`
+- `docker/azents/agent-runtime/entrypoint.sh`
 - `.github/workflows/docker.yaml`
-- `infra/terragrunt/_modules/nointern-server-infra/ecr.tf`
-- `infra/argocd/nointern-server/overlays/production/base/patches/env.env`
-- `infra/argocd/nointern-sandbox/base/worker-rbac.yaml`
-- `infra/argocd/nointern-sandbox/base/networkpolicy.yaml`
+- `infra/terragrunt/_modules/azents-server-infra/ecr.tf`
+- `infra/argocd/azents-server/overlays/production/base/patches/env.env`
+- `infra/argocd/azents-sandbox/base/worker-rbac.yaml`
+- `infra/argocd/azents-sandbox/base/networkpolicy.yaml`
 
 ### Docs / testenv
 
 - **Historical reference only**
-  - `docs/nointern/design/mcp-260325-mcp-stdio-sidecar.md`
-  - `docs/nointern/design/stdio-260328-stdio-mcp-integration.md`
-  - `docs/nointern/design/stdio-260326-stdio-mcp-ga4-integration.md`
+  - `docs/azents/design/mcp-260325-mcp-stdio-sidecar.md`
+  - `docs/azents/design/stdio-260328-stdio-mcp-integration.md`
+  - `docs/azents/design/stdio-260326-stdio-mcp-ga4-integration.md`
 - **Actual update targets**
-- `docs/nointern/spec/domain/toolkit.md`
-- `docs/nointern/spec/domain/conversation.md`
-- `testenv/nointern/setup/sandbox-daemon-image.md`
-- `testenv/nointern/setup_handlers/sandbox_daemon_image.py`
-- `testenv/nointern/checks/images.py`
-- `testenv/nointern/devserver.py`
-- `testenv/nointern/README.md`
-- `testenv/nointern/scenarios/INDEX.md`
+- `docs/azents/spec/domain/toolkit.md`
+- `docs/azents/spec/domain/conversation.md`
+- `testenv/azents/setup/sandbox-daemon-image.md`
+- `testenv/azents/setup_handlers/sandbox_daemon_image.py`
+- `testenv/azents/checks/images.py`
+- `testenv/azents/devserver.py`
+- `testenv/azents/README.md`
+- `testenv/azents/scenarios/INDEX.md`
 
 ## Data Model
 
@@ -242,7 +242,7 @@ However, if future plan to support stdio-only MCP returns, it must be discussed 
 
 ### Current
 
-- Separate `nointern-mcp-proxy` image build/deploy
+- Separate `azents-mcp-proxy` image build/deploy
 - sidecar image setting in production env
 - sidecar ConfigMap/Secret create permission in worker RBAC
 - sidecar ingress consideration in sandbox networkpolicy
@@ -283,11 +283,11 @@ No actual QA is added at design stage. Implementation PR needs following verific
 2. Attach remote HTTP MCP toolkit → `list_tools` / `call_tool` normal.
 3. Attach GA4 native toolkit → connection test / tool execution normal without sidecar.
 4. Existing lifecycle tests pass again after removing `mcp-proxy` mismatch condition from sandbox reuse path.
-5. local devserver/testenv setup passes preflight without `nointern-mcp-proxy` image.
+5. local devserver/testenv setup passes preflight without `azents-mcp-proxy` image.
 
 ## testenv Impact
 
-- Remove `nointern-mcp-proxy` image assumption from `sandbox-daemon-image` setup.
+- Remove `azents-mcp-proxy` image assumption from `sandbox-daemon-image` setup.
 - Clean build/preflight wiring in `devserver.py`, `checks/images.py`, `setup_handlers/sandbox_daemon_image.py` together.
 - Rewrite README / scenario catalog wording from "through mcp-proxy" to remote MCP or native toolkit basis.
 - If sidecar-only fixture/check remains, delete or redefine role.
@@ -309,7 +309,7 @@ No actual QA is added at design stage. Implementation PR needs following verific
 
 ### Phase 3 — Clean CI / testenv / docs
 
-- Remove `nointern-mcp-proxy` image build.
+- Remove `azents-mcp-proxy` image build.
 - Clean testenv setup / checks / README.
 - Update unit tests + living spec to post-implementation state.
 

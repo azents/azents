@@ -21,7 +21,7 @@ migration_source: "docs/azents/adr/0031-dynamic-llm-model-configs.md"
 
 ## Problem
 
-nointern Agent model selection has so far gone through static global `LLMModel` and provider-specific `LLMProviderModel` catalogs. Workspaces store credential information and provider settings in `LLMProviderIntegration`, but Agents directly reference `llm_provider_integration_id` and `llm_provider_model_id`.
+Azents Agent model selection has so far gone through static global `LLMModel` and provider-specific `LLMProviderModel` catalogs. Workspaces store credential information and provider settings in `LLMProviderIntegration`, but Agents directly reference `llm_provider_integration_id` and `llm_provider_model_id`.
 
 [llm-260513/ADR](../adr/llm-260513-llm-catalog-source.md) adopted a direction where human-managed Admin catalog CRUD is replaced by external/official catalog sync. However, the feature-design process concluded that current product requirements need a higher-level abstraction than simple catalog sync.
 

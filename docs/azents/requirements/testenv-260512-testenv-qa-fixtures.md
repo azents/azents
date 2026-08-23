@@ -21,7 +21,7 @@ migration_source: "docs/azents/adr/0029-testenv-qa-fixtures.md"
 
 ## Problem
 
-nointern `testenv/nointern/` is designed around `run-tc`, setup DAG, run-scoped state, and fresh-context verifier. This improved TC execution reliability, but recent QA showed that QA environment preparation cost and uncertainty are now larger problems than product runtime defects.
+Azents `testenv/azents/` is designed around `run-tc`, setup DAG, run-scoped state, and fresh-context verifier. This improved TC execution reliability, but recent QA showed that QA environment preparation cost and uncertainty are now larger problems than product runtime defects.
 
 Representative symptoms:
 

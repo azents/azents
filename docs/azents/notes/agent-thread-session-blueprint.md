@@ -6,11 +6,11 @@ tags: [architecture, product, engine, memory]
 
 # Agent Thread / Session Model Blueprint
 
-This document is a blueprint that organizes nointern agent conversation/session model before implementation design. It is neither current system spec nor accepted ADR. When design becomes concrete later, relevant contents will be promoted to `design/`, `adr/`, or `spec/`.
+This document is a blueprint that organizes the Azents agent conversation/session model before implementation design. It is neither current system spec nor accepted ADR. When design becomes concrete later, relevant contents will be promoted to `design/`, `adr/`, or `spec/`.
 
 ## 1. Core Product Model
 
-The basic conversation unit in nointern is **main work thread per agent**. This thread is not a simple chat room, but central point where agent remembers and performs assigned work.
+The basic conversation unit in Azents is **main work thread per agent**. This thread is not a simple chat room, but central point where agent remembers and performs assigned work.
 
 Main thread is needed for these reasons:
 
@@ -32,7 +32,7 @@ Comparing OpenCode, Claude Code, Hermes, and OpenClaw, all compaction preserves 
 | Hermes | End SQLite session and create continuation session with parent_session_id | Yes, but continuation, not fresh | Old session preserved |
 | OpenClaw | By default compaction in same transcript. Optional successor transcript | Optional | archive preserved |
 
-What matters in nointern is not "whether physical row/id changes," but **whether logical conversation continuity perceived by user and agent remains intact**. If compaction rotates physical session, continuation lineage and handoff semantics like Hermes/OpenClaw are needed. If treated as simple fresh session creation, pending input, memory, sandbox ownership, and external thread routing all become unstable.
+What matters in Azents is not "whether physical row/id changes," but **whether logical conversation continuity perceived by user and agent remains intact**. If compaction rotates physical session, continuation lineage and handoff semantics like Hermes/OpenClaw are needed. If treated as simple fresh session creation, pending input, memory, sandbox ownership, and external thread routing all become unstable.
 
 ## 3. Parallel Coding Work
 
@@ -149,7 +149,7 @@ Core principle:
 
 ## 8. Undecided Questions
 
-- Should current nointern `AgentSession` be viewed as main thread as-is, or should upper concept such as `AgentThread` be added and `AgentSession` redefined as execution/history epoch?
+- Should current Azents `AgentSession` be viewed as main thread as-is, or should upper concept such as `AgentThread` be added and `AgentSession` redefined as execution/history epoch?
 - Should compaction be handled as event/projection inside same `AgentSession`, or create continuation session lineage?
 - Should clear/new/reset mean preserving previous conversation as resumable and starting new main thread like Claude Code?
 - What should retention period and searchability scope be for Ephemeral investigation transcript?

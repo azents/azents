@@ -21,7 +21,7 @@ migration_source: "docs/azents/adr/0029-drop-dormant-stdio-mcp-sidecar.md"
 
 ## Problem
 
-nointern previously added a path that placed a per-agent `mcp-proxy` sidecar next to Agent Home to support stdio-only MCP servers.
+Azents previously added a path that placed a per-agent `mcp-proxy` sidecar next to Agent Home to support stdio-only MCP servers.
 
 The core path included:
 

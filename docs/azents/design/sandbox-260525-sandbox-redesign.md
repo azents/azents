@@ -38,7 +38,7 @@ Goal of this redesign is not to preserve legacy data and API, but to redefine sy
 - Separate active coordination needed for cross-Control routing, in-flight operations, and Worker resume into Runtime Coordination Store abstraction.
 - UI displays server-calculated summary/actions instead of defining Provider/Runner state combinations itself.
 - Treat Agent Workspace path as Runtime metadata and remove `/home/sandbox` hardcoding.
-- Split Kubernetes Provider and Docker Provider into external components, not NoIntern server internals.
+- Split Kubernetes Provider and Docker Provider into external components, not Azents server internals.
 - Remove legacy sandbox/session workspace/checkpoint by clean-state migration.
 
 ## Non-goals
@@ -68,7 +68,7 @@ Runner runs inside Runtime and connects to Control. Runner proves which Agent Ru
 
 ### Control
 
-Control is NoIntern Runtime control plane. It accepts Provider and Runner connections, durably manages Runtime state, and provides state/actions to API/Worker/UI.
+Control is Azents Runtime control plane. It accepts Provider and Runner connections, durably manages Runtime state, and provides state/actions to API/Worker/UI.
 
 ### Agent Workspace
 
@@ -117,7 +117,7 @@ flowchart LR
 
 Core topology:
 
-- Provider and Runner are both external clients connecting to Control. NoIntern does not outreach to Provider or Runner.
+- Provider and Runner are both external clients connecting to Control. Azents does not outreach to Provider or Runner.
 - Provider path and Runner path are separated. Provider path handles lifecycle/observe/event; Runner path handles in-runtime operation.
 - Control replica is stateless process that can be replaced anytime. Source of truth for Runtime state is PostgreSQL, not process memory.
 - Provider, Runner, and Worker requests for same Runtime may be attached to different Control replicas, so routing between Control replicas is required.
@@ -141,7 +141,7 @@ Query APIs do not create side effects. Runtime query, workspace query, and UI su
 
 ### Runtime Provider
 
-Provider does not import or share NoIntern server internal module, DB session, repository, or process-local manager. Provider communicates with Control only through Provider Protocol.
+Provider does not import or share Azents server internal module, DB session, repository, or process-local manager. Provider communicates with Control only through Provider Protocol.
 
 Provider responsibilities:
 
@@ -157,7 +157,7 @@ Provider non-responsibilities:
 - final Agent permission decision.
 - session/message storage.
 - Runner operation result storage.
-- direct access to NoIntern DB.
+- direct access to Azents DB.
 
 ### Runner
 
@@ -307,7 +307,7 @@ UI principles:
 
 ## Kubernetes Provider Design
 
-Kubernetes Provider is external component independent from NoIntern server. Whether it is deployed in same namespace or shares ServiceAccount is operator choice and does not change software boundary.
+Kubernetes Provider is external component independent from Azents server. Whether it is deployed in same namespace or shares ServiceAccount is operator choice and does not change software boundary.
 
 Kubernetes Provider allows replicas >= 2. Active owner is kept single through Kubernetes Lease-based leader election. Standby replica acquires Lease when leader is lost and reconnects to Control with new provider generation. Control generation fencing protects against stale event and split brain.
 
@@ -329,18 +329,18 @@ Docker Provider does not use S3 checkpoint/restore as canonical persistence. On 
 
 ## Deployment and Delivery Design
 
-New Runtime system separates artifact, registry, and GitOps deployment boundaries from legacy Sandbox system, not just code structure. Provider and Runner are external components and must be built, deployed, and versioned independently rather than implicitly bundled inside NoIntern server image.
+New Runtime system separates artifact, registry, and GitOps deployment boundaries from legacy Sandbox system, not just code structure. Provider and Runner are external components and must be built, deployed, and versioned independently rather than implicitly bundled inside Azents server image.
 
 ### Container images and ECR
 
 Initial production artifacts are split into images:
 
-- `nointern-server`: existing server image containing API/Worker/Scheduler/Control server code.
-- `nointern-runtime-runner`: Runner image executed inside Runtime. Kubernetes Provider and Docker Provider use this when creating Runtime.
-- `nointern-runtime-provider-kubernetes`: external Provider controller image managing Kubernetes backend resources.
-- `nointern-runtime-provider-docker`: local/dev/single-host Docker Provider image. Not default production multi-tenant Provider, but must be buildable as same protocol artifact.
+- `azents-server`: existing server image containing API/Worker/Scheduler/Control server code.
+- `azents-runtime-runner`: Runner image executed inside Runtime. Kubernetes Provider and Docker Provider use this when creating Runtime.
+- `azents-runtime-provider-kubernetes`: external Provider controller image managing Kubernetes backend resources.
+- `azents-runtime-provider-docker`: local/dev/single-host Docker Provider image. Not default production multi-tenant Provider, but must be buildable as same protocol artifact.
 
-ECR repositories are managed by Terraform/Terragrunt nointern infra. GitHub Actions workflow does not create ECR repository directly; it pushes image to already provisioned repository.
+ECR repositories are managed by Terraform/Terragrunt Azents infrastructure. GitHub Actions workflow does not create ECR repository directly; it pushes image to already provisioned repository.
 
 Image tag policy follows existing production server image policy:
 
@@ -361,7 +361,7 @@ Runtime system implementation must update GitHub Actions:
 
 ### Helm chart
 
-NoIntern Helm chart must have values contract that can deploy Runtime system. Use `infra/charts/nointern/` as canonical chart surface to avoid drift with existing chart.
+Azents Helm chart must have values contract that can deploy Runtime system. Use `infra/charts/azents/` as canonical chart surface to avoid drift with existing chart.
 
 Helm values must at least express:
 
@@ -385,14 +385,14 @@ Runtime-specific Pod/PVC is not rendered directly by Helm chart. Kubernetes Prov
 
 ### ArgoCD
 
-Production deployment must be included in ArgoCD GitOps path. Since Runtime Provider is independent component from NoIntern server, it should be managed as separate component/Application in ArgoCD by default.
+Production deployment must be included in ArgoCD GitOps path. Since Runtime Provider is independent component from Azents server, it should be managed as separate component/Application in ArgoCD by default.
 
 Recommended structure:
 
-- `nointern-server` Application deploys API/Worker/Scheduler/Control server.
-- `nointern-runtime-provider-kubernetes` Application deploys Kubernetes Provider.
-- `nointern-runtime-runner` is not directly deployed as Kubernetes workload when unnecessary; it is passed only as image reference in Provider values.
-- Existing `nointern-sandbox` ArgoCD path is replaced or deleted by new Runtime system.
+- `azents-server` Application deploys API/Worker/Scheduler/Control server.
+- `azents-runtime-provider-kubernetes` Application deploys Kubernetes Provider.
+- `azents-runtime-runner` is not directly deployed as Kubernetes workload when unnecessary; it is passed only as image reference in Provider values.
+- Existing `azents-sandbox` ArgoCD path is replaced or deleted by new Runtime system.
 
 ArgoCD values are managed as complete `valuesObject`. Since overlay patches are not deep-merged under existing chart rules, do not scatter runtime provider values as patch fragments.
 
@@ -404,11 +404,11 @@ Feature does not end at "code reached main". When all phase PRs merge, productio
 
 Deployment contract after final phase merge:
 
-- GitHub Actions pushes `nointern-server`, `nointern-runtime-runner`, `nointern-runtime-provider-kubernetes` images to ECR.
+- GitHub Actions pushes `azents-server`, `azents-runtime-runner`, `azents-runtime-provider-kubernetes` images to ECR.
 - GitOps manifest or Helm values points at image tag used in production.
 - ArgoCD root/application graph includes Kubernetes Runtime Provider Application.
-- Legacy `nointern-sandbox` provider-control deployment path is replaced or explicitly disabled/pruned.
-- NoIntern server production env uses Runtime Coordination Store, Runtime Provider registry, Runner auth settings instead of legacy sandbox control settings.
+- Legacy `azents-sandbox` provider-control deployment path is replaced or explicitly disabled/pruned.
+- Azents server production env uses Runtime Coordination Store, Runtime Provider registry, Runner auth settings instead of legacy sandbox control settings.
 - Kubernetes Provider is deployed in production namespace with replicas >= 2, PDB/HPA or equivalent availability settings, Lease leader election, required RBAC/ServiceAccount/Pod Identity.
 - Runtime Pod created by Kubernetes Provider uses Runner image from ECR and uses EBS-backed PVC per Runtime as Agent Workspace persistence.
 - Production UI/API uses Agent Workspace and Agent Runtime state summary/actions and does not depend on Session Workspace/Sandbox legacy branches.
@@ -425,15 +425,15 @@ Final cutover PR changes feature flag or config default to new Runtime path and 
 Runtime Provider deployment requires infra updates:
 
 - ECR repositories:
-  - `nointern-production-server/nointern-runtime-runner`
-  - `nointern-production-server/nointern-runtime-provider-kubernetes`
-  - optional `nointern-production-server/nointern-runtime-provider-docker`
+  - `azents-production-server/azents-runtime-runner`
+  - `azents-production-server/azents-runtime-provider-kubernetes`
+  - optional `azents-production-server/azents-runtime-provider-docker`
 - Kubernetes Provider ServiceAccount and Pod Identity/IRSA permissions:
   - required K8s resource permissions such as Pod, PVC, Secret or projected token, Lease, Event.
   - StorageClass access for EBS PVC managed by cluster storage policy.
 - Provider credential / Runner auth signing material:
   - injected through ExternalSecret or SSM Parameter Store.
-  - Provider must not have NoIntern DB credential.
+  - Provider must not have Azents DB credential.
 - Runtime Coordination Store endpoint:
   - Redis/Valkey endpoint and auth secret injected into server/Control.
 
@@ -494,8 +494,8 @@ On 2026-05-25, the draft was checked against actual code and operational constra
 | Docker host directory | Does local/dev Provider provide enough persistence/idempotency? | compare existing Docker provider controller and docker compose | possible. Stable single Docker host + per-Runtime host directory bind mount is enough for local/dev v1; add tests that stop/restart preserve directory and reset deletes. |
 | ECR repository contract | Can Provider/Runner image repos be managed by infra and referenced by workflow? | compare Terragrunt ECR output and docker workflow | possible. Existing infra module manages server/web/agent-runtime ECR. Add runner/provider repositories to same module. |
 | GitHub Actions image build | Can Runner/Provider images split PR build and main push? | compare workflows | possible. Existing docker workflow pattern supports server and agent-runtime build/push. Add image jobs and trigger scopes. |
-| Helm values contract | Can Provider/Runner image, secret, storage, RBAC be represented by chart values? | inspect `infra/charts/nointern` | possible but existing chart is sandbox-provider-controller-centered and image default coupled to server image. Add Runtime Provider component values. Production overlay must keep complete values object because ArgoCD `valuesObject` is not deep-merged. |
-| ArgoCD GitOps rollout | Can Provider be separate Application and sha tag update path be defined? | inspect ArgoCD overlay structure | possible. Existing `nointern-sandbox` handles provider-control path. Add new Runtime Provider Application and disable/prune legacy with cutover plan avoiding ownership/name collision. |
+| Helm values contract | Can Provider/Runner image, secret, storage, RBAC be represented by chart values? | inspect `infra/charts/azents` | possible but existing chart is sandbox-provider-controller-centered and image default coupled to server image. Add Runtime Provider component values. Production overlay must keep complete values object because ArgoCD `valuesObject` is not deep-merged. |
+| ArgoCD GitOps rollout | Can Provider be separate Application and sha tag update path be defined? | inspect ArgoCD overlay structure | possible. Existing `azents-sandbox` handles provider-control path. Add new Runtime Provider Application and disable/prune legacy with cutover plan avoiding ownership/name collision. |
 | Final merge deployment | After all phase PRs merge, can production converge without manual work? | trace GitHub Actions → ECR → ArgoCD | possible but mandatory delivery/cutover done condition. Runtime Provider/Runner images and production values tag must enter same automated path; final transition PR must include config default, production GitOps manifest, deploy workflow/update script changes. |
 
 Implementation constraints found by feasibility check do not alter design. Phase plan must reflect these principles:
@@ -639,7 +639,7 @@ Fixes applied: TBD
 
 ### QA-7. Provider external boundary
 
-What: confirm Kubernetes/Docker Provider does not import NoIntern server internal modules, DB sessions, repositories.
+What: confirm Kubernetes/Docker Provider does not import Azents server internal modules, DB sessions, repositories.
 
 Why: Provider must be external component to clarify rollout/failover/deployment boundary.
 

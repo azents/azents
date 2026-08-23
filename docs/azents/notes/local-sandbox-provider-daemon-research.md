@@ -1,7 +1,7 @@
 ---
 title: "Local sandbox provider daemon research"
 created: 2026-05-20
-tags: [nointern, sandbox, provider, docker, agent-runtime, research]
+tags: [azents, sandbox, provider, docker, agent-runtime, research]
 status: research-note
 ---
 
@@ -13,48 +13,48 @@ This note summarizes research for a customer-provided sandbox pool model.
 
 The target product experience is:
 
-1. A customer runs a NoIntern sandbox provider daemon on their own local machine.
-2. The daemon authenticates with NoIntern using a customer/workspace-scoped credential.
-3. After authentication, the daemon is automatically registered as a sandbox provider for the customer's NoIntern workspace.
-4. When an `AgentRuntime` needs a sandbox, NoIntern allocates it to that provider.
+1. A customer runs an Azents sandbox provider daemon on their own local machine.
+2. The daemon authenticates with Azents using a customer/workspace-scoped credential.
+3. After authentication, the daemon is automatically registered as a sandbox provider for the customer's Azents workspace.
+4. When an `AgentRuntime` needs a sandbox, Azents allocates it to that provider.
 5. The provider daemon starts a local Docker container for that runtime, mounts persistent per-runtime workspace volumes, and injects the existing sandbox-control client environment.
-6. The sandbox container's in-sandbox client opens the existing outbound `sandbox-control` gRPC stream back to NoIntern.
-7. NoIntern continues to use the existing command/file/checkpoint control plane.
+6. The sandbox container's in-sandbox client opens the existing outbound `sandbox-control` gRPC stream back to Azents.
+7. Azents continues to use the existing command/file/checkpoint control plane.
 
 The intended customer-facing command should be close to:
 
 ```bash
-nointern-sandbox-provider login
-nointern-sandbox-provider start
+azents-sandbox-provider login
+azents-sandbox-provider start
 ```
 
 or, for token-based automation:
 
 ```bash
-NOINTERN_PROVIDER_TOKEN=... nointern-sandbox-provider start
+AZ_PROVIDER_TOKEN=... azents-sandbox-provider start
 ```
 
-The daemon should then appear in the NoIntern workspace UI as an online sandbox provider with capacity and health information.
+The daemon should then appear in the Azents workspace UI as an online sandbox provider with capacity and health information.
 
 ## 2. Current architecture findings
 
-The current NoIntern sandbox implementation is already close to supporting this model because sandbox lifecycle and sandbox command/file control are separated.
+The current Azents sandbox implementation is already close to supporting this model because sandbox lifecycle and sandbox command/file control are separated.
 
 Relevant files:
 
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_manager.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_docker.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/session_sandbox_k8s.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/control/server.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/control/service.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/control/registry.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/control/router.py`
-- `python/apps/nointern/src/nointern/runtime/sandbox/control/worker_client.py`
-- `python/apps/nointern-sandbox-client/src/nointern_sandbox_client/*`
-- `proto/nointern/sandbox_control/v1/sandbox_control.proto`
-- `docs/nointern/adr/sandbox-260506-sandbox-control-channel.md`
-- `docs/nointern/design/sandbox-260506-sandbox-control-channel.md`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox_manager.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox_docker.py`
+- `python/apps/azents/src/azents/runtime/sandbox/session_sandbox_k8s.py`
+- `python/apps/azents/src/azents/runtime/sandbox/control/server.py`
+- `python/apps/azents/src/azents/runtime/sandbox/control/service.py`
+- `python/apps/azents/src/azents/runtime/sandbox/control/registry.py`
+- `python/apps/azents/src/azents/runtime/sandbox/control/router.py`
+- `python/apps/azents/src/azents/runtime/sandbox/control/worker_client.py`
+- `python/apps/azents-sandbox-client/src/azents_sandbox_client/*`
+- `proto/azents/sandbox_control/v1/sandbox_control.proto`
+- `docs/azents/adr/sandbox-260506-sandbox-control-channel.md`
+- `docs/azents/design/sandbox-260506-sandbox-control-channel.md`
 
 ### 2.1 Lifecycle and command/file transport are separate
 
@@ -97,13 +97,13 @@ SANDBOX_CONTROL_CONNECTION_ID
 SANDBOX_CONTROL_GENERATION
 ```
 
-Those variables are the key runtime contract for launching a sandbox container that can attach to NoIntern.
+Those variables are the key runtime contract for launching a sandbox container that can attach to Azents.
 
-A local customer provider daemon can reuse this exact contract while moving Docker control out of the NoIntern worker process and into a customer-owned daemon.
+A local customer provider daemon can reuse this exact contract while moving Docker control out of the Azents worker process and into a customer-owned daemon.
 
 ### 2.3 The in-sandbox client is already outbound-first
 
-`python/apps/nointern-sandbox-client` is a small process intended to run inside the sandbox. It reads `SANDBOX_CONTROL_*` settings, opens a gRPC stream to `sandbox-control`, and handles:
+`python/apps/azents-sandbox-client` is a small process intended to run inside the sandbox. It reads `SANDBOX_CONTROL_*` settings, opens a gRPC stream to `sandbox-control`, and handles:
 
 - shell exec via local subprocess
 - file read/write/stat/list/delete via local POSIX filesystem
@@ -119,7 +119,7 @@ For a customer local provider, this should evolve to use a TLS-authenticated pub
 
 ### 2.4 sandbox-control already supports the desired control plane
 
-`proto/nointern/sandbox_control/v1/sandbox_control.proto` defines two services:
+`proto/azents/sandbox_control/v1/sandbox_control.proto` defines two services:
 
 ```proto
 service SandboxControlRuntime {
@@ -139,7 +139,7 @@ service SandboxControlWorker {
 }
 ```
 
-The runtime-side `Connect` stream is opened by the sandbox container. The worker-side service is used by NoIntern to execute commands, read/write files, and create/restore checkpoints.
+The runtime-side `Connect` stream is opened by the sandbox container. The worker-side service is used by Azents to execute commands, read/write files, and create/restore checkpoints.
 
 The active connection registry is Redis-backed and keyed by `AgentRuntime.id`. It records:
 
@@ -157,39 +157,26 @@ The `generation` field fences stale connections. This is important for container
 
 The recommended direction is to keep the existing `sandbox-control` protocol and add a new provider lifecycle plane.
 
-```text
-Customer local machine
-┌──────────────────────────────────────────────┐
-│ nointern-sandbox-provider daemon              │
-│                                              │
-│  - authenticates with NoIntern                │
-│  - registers as workspace sandbox provider    │
-│  - receives allocation requests over outbound │
-│    provider-control stream                    │
-│  - manages local Docker containers            │
-│                                              │
-│  Docker                                      │
-│   └─ nointern-agent-runtime                  │
-│       └─ nointern-sandbox-client             │
-│           └─ outbound sandbox-control gRPC    │
-└──────────────────────────────────────────────┘
-                 │ outbound
-                 ▼
-NoIntern cloud
-┌──────────────────────────────────────────────┐
-│ Provider Control Service                      │
-│  - provider registration                      │
-│  - provider heartbeat/capacity                │
-│  - allocation/delete/observe routing          │
-│                                              │
-│ Sandbox Control Service                       │
-│  - existing runtime gRPC stream               │
-│  - exec/file/checkpoint routing               │
-│                                              │
-│ Sandbox lifecycle manager                     │
-│  - AgentRuntime lifecycle                     │
-│  - hibernate/checkpoint/restore               │
-└──────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Local["Customer local machine"]
+        Provider["azents-sandbox-provider daemon<br/>authentication and registration<br/>capacity and allocation stream"]
+        Docker["Local Docker"]
+        Runtime["azents-agent-runtime"]
+        Client["azents-sandbox-client"]
+        Provider --> Docker --> Runtime --> Client
+    end
+
+    subgraph Cloud["Azents cloud"]
+        ProviderControl["Provider Control Service<br/>registration, heartbeat, capacity<br/>allocation, deletion, observation"]
+        SandboxControl["Sandbox Control Service<br/>runtime gRPC stream<br/>exec, file, checkpoint routing"]
+        Lifecycle["Sandbox lifecycle manager<br/>AgentRuntime lifecycle<br/>hibernate, checkpoint, restore"]
+        ProviderControl --> Lifecycle
+        SandboxControl --> Lifecycle
+    end
+
+    Provider -->|"outbound provider-control"| ProviderControl
+    Client -->|"outbound sandbox-control gRPC"| SandboxControl
 ```
 
 There are two outbound connections:
@@ -199,9 +186,9 @@ There are two outbound connections:
 
 This avoids requiring customers to expose inbound ports from their local machine.
 
-## 4. Integration point in NoIntern
+## 4. Integration point in Azents
 
-The cleanest NoIntern integration is a new `SessionSandboxClient` implementation, for example:
+The cleanest Azents integration is a new `SessionSandboxClient` implementation, for example:
 
 ```python
 class ExternalProviderSessionSandboxClient(SessionSandboxClient):
@@ -229,7 +216,7 @@ Expected flow:
 2. `ExternalProviderSessionSandboxClient.ensure_ready(...)` asks provider-control to allocate the runtime to an online provider.
 3. Provider-control sends `AllocateRuntime` to the selected daemon.
 4. The daemon starts a Docker container and injects `SANDBOX_CONTROL_*` env vars.
-5. The container's `nointern-sandbox-client` registers to existing sandbox-control.
+5. The container's `azents-sandbox-client` registers to existing sandbox-control.
 6. `SessionSandboxManager` continues with existing `control_runtime.wait_ready(...)`.
 
 This keeps most of the existing manager/control path unchanged.
@@ -241,7 +228,7 @@ This keeps most of the existing manager/control path unchanged.
 The best customer experience is a device login flow:
 
 ```bash
-nointern-sandbox-provider login
+azents-sandbox-provider login
 ```
 
 The CLI prints:
@@ -259,7 +246,7 @@ The customer logs in, selects a workspace, and approves the local provider. The 
 Then:
 
 ```bash
-nointern-sandbox-provider start
+azents-sandbox-provider start
 ```
 
 After connecting, the provider appears in the workspace UI.
@@ -269,7 +256,7 @@ After connecting, the provider appears in the workspace UI.
 For non-interactive setup, the workspace UI can create a provider token:
 
 ```bash
-nointern-sandbox-provider start \
+azents-sandbox-provider start \
   --workspace ws_123 \
   --token niprov_xxxxx
 ```
@@ -277,7 +264,7 @@ nointern-sandbox-provider start \
 or:
 
 ```bash
-NOINTERN_PROVIDER_TOKEN=niprov_xxxxx nointern-sandbox-provider start
+AZ_PROVIDER_TOKEN=niprov_xxxxx azents-sandbox-provider start
 ```
 
 ### 5.3 Provider credential scope
@@ -305,7 +292,7 @@ deny:
 
 The local daemon should own local-machine concerns:
 
-- authenticate to NoIntern
+- authenticate to Azents
 - register provider identity and capacity
 - send heartbeat and health information
 - receive allocation/delete/observe requests
@@ -322,7 +309,7 @@ The local daemon should own local-machine concerns:
 Suggested local data layout:
 
 ```text
-~/.nointern/sandbox-provider/
+~/.azents/sandbox-provider/
   config.yaml
   provider.db
   runtimes/
@@ -339,8 +326,8 @@ Suggested local data layout:
 The daemon should mount:
 
 ```text
-~/.nointern/sandbox-provider/runtimes/{agent_runtime_id}/home-sandbox -> /home/sandbox
-~/.nointern/sandbox-provider/runtimes/{agent_runtime_id}/tmp-agent    -> /tmp/agent
+~/.azents/sandbox-provider/runtimes/{agent_runtime_id}/home-sandbox -> /home/sandbox
+~/.azents/sandbox-provider/runtimes/{agent_runtime_id}/tmp-agent    -> /tmp/agent
 ```
 
 ## 7. Provider-control API sketch
@@ -481,26 +468,26 @@ runtime_provider_lease
 
 There are two possible hibernate models.
 
-### 9.1 Recommended MVP: NoIntern-driven hibernate with provider volume preservation
+### 9.1 Recommended MVP: Azents-driven hibernate with provider volume preservation
 
-NoIntern remains the lifecycle state authority.
+Azents remains the lifecycle state authority.
 
 Hibernate flow:
 
-1. NoIntern detects idle runtime.
-2. NoIntern creates a checkpoint if configured.
-3. NoIntern sends `DeleteRuntime(preserve_volume=true)` to provider.
+1. Azents detects idle runtime.
+2. Azents creates a checkpoint if configured.
+3. Azents sends `DeleteRuntime(preserve_volume=true)` to provider.
 4. Provider stops/removes the container but keeps the per-runtime volume directory.
-5. NoIntern marks the runtime as hibernated.
+5. Azents marks the runtime as hibernated.
 
 Resume flow:
 
-1. NoIntern requests allocation for the same `agent_runtime_id`.
+1. Azents requests allocation for the same `agent_runtime_id`.
 2. Provider starts a new container with the same local volume mount.
 3. The in-sandbox client registers to sandbox-control.
-4. NoIntern waits for sandbox-control readiness.
+4. Azents waits for sandbox-control readiness.
 
-This gives the customer the practical behavior of local hibernate/resume while keeping NoIntern as the state authority.
+This gives the customer the practical behavior of local hibernate/resume while keeping Azents as the state authority.
 
 ### 9.2 Future: provider-initiated hibernate
 
@@ -512,16 +499,22 @@ Later, the provider may request hibernate because of local conditions:
 - user manually pauses the provider
 - daemon upgrade
 
-The safer pattern is provider-requested, NoIntern-approved hibernate:
+The safer pattern is provider-requested, Azents-approved hibernate:
 
-```text
-Provider -> NoIntern: RuntimeHibernateRequested(reason)
-NoIntern -> sandbox-control: CheckpointCreate if needed
-NoIntern -> Provider: StopRuntime(preserve_volume=true)
-NoIntern -> DB: mark hibernated
+```mermaid
+sequenceDiagram
+    participant Provider
+    participant Azents
+    participant SandboxControl as sandbox-control
+    participant DB
+
+    Provider->>Azents: RuntimeHibernateRequested(reason)
+    Azents->>SandboxControl: CheckpointCreate if needed
+    Azents->>Provider: StopRuntime(preserve_volume=true)
+    Azents->>DB: Mark runtime hibernated
 ```
 
-The provider should not unilaterally mutate durable runtime state in NoIntern.
+The provider should not unilaterally mutate durable runtime state in Azents.
 
 ## 10. Security prerequisites
 
@@ -596,7 +589,7 @@ Local sandbox providers:
 - Provider daemon creates Docker containers.
 - Provider daemon injects `SANDBOX_CONTROL_*` env vars.
 - Provider daemon mounts persistent per-runtime `/home/sandbox` and `/tmp/agent` directories.
-- Existing `nointern-sandbox-client` connects to sandbox-control.
+- Existing `azents-sandbox-client` connects to sandbox-control.
 - Verify shell exec and file read/write.
 
 ### Phase 4 — Hibernate/resume
@@ -621,7 +614,7 @@ Local sandbox providers:
 2. Should provider selection be workspace-level, agent-level, or runtime-level?
 3. Should provider-control be a new service or part of existing sandbox-control deployment?
 4. What auth mechanism should sandbox-control runtime registration use for public providers?
-5. How should NoIntern handle provider reconnect when containers are still running locally?
+5. How should Azents handle provider reconnect when containers are still running locally?
 6. Should a local provider support multiple workspaces, or should each daemon credential map to one workspace?
 7. How should image updates be coordinated with long-lived local volumes?
 8. What minimum Docker isolation profile is acceptable for a customer-provided provider?
@@ -637,7 +630,7 @@ existing sandbox-control protocol
 + new provider-control outbound stream
 + new ExternalProviderSessionSandboxClient lifecycle backend
 + local Docker provider daemon
-+ NoIntern-driven hibernate with provider volume preservation
++ Azents-driven hibernate with provider volume preservation
 ```
 
-This approach preserves the current AgentRuntime-centric lifecycle model and avoids rewriting command/file/checkpoint transport. It also matches the desired customer UX: a customer authenticates locally, starts a daemon, and the daemon automatically becomes available as sandbox capacity in the customer's NoIntern workspace.
+This approach preserves the current AgentRuntime-centric lifecycle model and avoids rewriting command/file/checkpoint transport. It also matches the desired customer UX: a customer authenticates locally, starts a daemon, and the daemon automatically becomes available as sandbox capacity in the customer's Azents workspace.

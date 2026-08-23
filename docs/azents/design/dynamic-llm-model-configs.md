@@ -13,7 +13,7 @@ supporting_role: consolidation
 
 ## 1. Problem / Background
 
-Current nointern Agent directly references workspace `LLMProviderIntegration` and global
+Current Azents Agent directly references workspace `LLMProviderIntegration` and global
 `LLMProviderModel`. Global `LLMProviderModel` stores provider-specific `model_identifier` and
 capabilities, and `LLMModel` stores provider-neutral model metadata. This structure creates the
 following pain points.
@@ -277,7 +277,7 @@ Remove the static catalog surface in this feature:
 - `llm_provider_models` static table and service/repository/public/admin API.
 - catalog sync jobs/services and catalog source/override surfaces whose only purpose is maintaining the
   static model catalog.
-- frontend `typescript/apps/nointern-web/src/trpc/routers/llm-provider-model.ts` and Agent form usage of
+- frontend `typescript/apps/azents-web/src/trpc/routers/llm-provider-model.ts` and Agent form usage of
   provider-wide static model options.
 
 ### 8.2 Dynamic model listing API
@@ -575,7 +575,7 @@ fixture, and later provider integrations do not auto-create additional defaults.
 
 ##### Execution result
 
-2026-05-17 verification evidence collected. `testenv/nointern/e2e` deterministic suite includes first-integration default
+2026-05-17 verification evidence collected. `testenv/azents/e2e` deterministic suite includes first-integration default
 ModelConfig creation through the public integration path and ModelConfig readiness coverage for normalized candidates and
 skip summaries. Backend `ModelListingService` tests cover success, main-only, and no-candidate deterministic variants.
 
@@ -699,7 +699,7 @@ Agent creation cannot proceed until an enabled provider integration and at least
 
 ##### Execution result
 
-2026-05-17 verification evidence collected for backend/API and frontend type safety. nointern-web typecheck/lint passed,
+2026-05-17 verification evidence collected for backend/API and frontend type safety. azents-web typecheck/lint passed,
 and backend/service tests cover missing config/integration rejection paths. Empty-workspace browser E2E evidence remains
 part of the broader frontend/manual verification gap rather than a completed assertion in this PR.
 
@@ -764,13 +764,13 @@ selection path remains.
 ##### Execution result
 
 2026-05-17 partial verification evidence collected for active API/frontend removal checks. Public/admin OpenAPI
-regeneration remained clean, nointern generated client typecheck passed, nointern-web lint/typecheck passed, and the
+regeneration remained clean, Azents generated client typecheck passed, azents-web lint/typecheck passed, and the
 static catalog audit reports the remaining inventory for cleanup/spec promotion. Targeted browser/component evidence for
 the ModelConfig selection UI remains outside this PR's completed evidence.
 
 ##### Fixes applied
 
-Phase 4 removed active static catalog route mounts and nointern-web static model router usage. Phase 5 added the audit
+Phase 4 removed active static catalog route mounts and azents-web static model router usage. Phase 5 added the audit
 helper used to inventory remaining static catalog references, and cleanup promoted it from a phase-specific helper to a
 durable static catalog audit script.
 
