@@ -111,8 +111,8 @@ RUN pip install --no-cache-dir --break-system-packages \
 RUN playwright install-deps chromium
 
 RUN docker --version | grep -F "Docker version 29.7.2" \
-    && docker buildx version | grep -F "github.com/docker/buildx v0.29.1" \
-    && docker compose version | grep -F "Docker Compose version v2.40.3" \
+    && docker buildx version | grep -F "github.com/docker/buildx v0.36.1" \
+    && docker compose version | grep -F "Docker Compose version v5.4.0" \
     && unshare --version \
     && test ! -e /var/run/azents-engine/docker.sock
 
