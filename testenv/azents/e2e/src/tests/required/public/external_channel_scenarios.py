@@ -105,6 +105,7 @@ from support.runtime_profiles import (
 )
 from support.utils import (
     authenticate_user,
+    decode_docker_exec_output,
     model_selection_from_first_candidate,
     unique,
     wait_until,
@@ -188,7 +189,7 @@ def _runtime_container(agent_id: str) -> Container:
 def _runtime_exec(container: Container, command: str) -> str:
     """Run one bounded command inside an Agent Runtime."""
     result = container.exec_run(["sh", "-lc", command])
-    output = result.output.decode(errors="replace")
+    output = decode_docker_exec_output(result.output)
     if result.exit_code != 0:
         raise AssertionError(
             f"Runtime command failed with exit {result.exit_code}: {command}\n{output}"

@@ -11,6 +11,7 @@ dependencies = [
     "pytest==9.1.1",
     "testcontainers[postgres]==4.15.0",
     "docker==7.2.0",
+    "cryptography==50.0.0",
     "python-on-whales==0.81.0",
     "selenium==4.47.0",
     "redis==7.4.1",
@@ -21,7 +22,7 @@ dependencies = [
     "azents-runtime-control",
     # type stubs
     "types-requests==2.33.0.20260712",
-    "types-docker==7.1.0.20260109",
+    "types-docker==7.2.0.20260813",
 ]
 
 [dependency-groups]

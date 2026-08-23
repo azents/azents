@@ -1,7 +1,7 @@
 name: azents
 services:
   db:
-    image: postgres:18-alpine
+    image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
     restart: unless-stopped
     ports:
       - "${AZENTS_DB_PORT:-5433}:5432"
@@ -19,7 +19,7 @@ services:
     volumes:
       - valkeydata:/data
   rustfs:
-    image: rustfs/rustfs:1.0.0-alpha.90
+    image: rustfs/rustfs:1.0.0-alpha.90@sha256:0725587f6fcca83c1898f321424327d6e6da5e01ea20382905dd258ed5af3be4
     restart: unless-stopped
     ports:
       # API
@@ -41,7 +41,7 @@ services:
       timeout: 5s
       retries: 5
   rustfs-init:
-    image: minio/mc:latest
+    image: minio/mc:latest@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
     depends_on:
       rustfs:
         condition: service_healthy

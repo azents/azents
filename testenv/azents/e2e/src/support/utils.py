@@ -2,7 +2,7 @@
 
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 
@@ -42,6 +42,12 @@ from support.runtime_profiles import (
 )
 
 T = TypeVar("T")
+
+
+def decode_docker_exec_output(output: bytes | Iterator[bytes]) -> str:
+    """Decode buffered or streamed Docker exec output."""
+    data = output if isinstance(output, bytes) else b"".join(output)
+    return data.decode(errors="replace")
 
 
 @dataclass(frozen=True)
