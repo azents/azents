@@ -1,7 +1,6 @@
 """Agent Runtime v1 public route tests."""
 
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
 
 from azents.api.public.agent_runtime.v1 import mount
 from azents.utils.fastapi.route import as_route_mounter
@@ -21,7 +20,7 @@ class TestRouteMount:
         """Mount lifecycle routes based on Agent ID."""
         app = _make_app()
 
-        paths = {route.path for route in app.routes if isinstance(route, APIRoute)}
+        paths = set(app.openapi()["paths"])
 
         assert (
             "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime" in paths

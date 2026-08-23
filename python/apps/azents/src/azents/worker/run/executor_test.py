@@ -156,6 +156,7 @@ from azents.services.session_git_worktree import (
     SessionGitWorktreeService,
 )
 from azents.services.session_title import SessionTitleService
+from azents.services.turn_action import TurnActionCapabilityRegistry
 from azents.services.vfs import VfsProjectionService
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -174,6 +175,7 @@ from azents.worker.run.executor import (
 )
 from azents.worker.run.finalizer import FailedRunFinalizationInput
 from azents.worker.run.results import RunExecutionResult
+from azents.worker.run.turn_action_executor import OperationActionExecutorRegistry
 from azents.worker.session.execution_snapshot import (
     CanonicalExecutionOwnerGenerationStaleError,
     CanonicalExecutionSnapshot,
@@ -1483,6 +1485,21 @@ def _executor(
         session_git_worktree_service=cast(
             SessionGitWorktreeService,
             session_git_worktree_service,
+        ),
+        operation_action_executor=OperationActionExecutorRegistry(
+            capabilities=TurnActionCapabilityRegistry(
+                agent_session_repository=cast(
+                    AgentSessionRepository,
+                    agent_session_repository,
+                ),
+                goal_store=cast(Any, object()),
+                skill_store=cast(Any, object()),
+                vfs_projection_service=None,
+            ),
+            session_git_worktree_service=cast(
+                SessionGitWorktreeService,
+                session_git_worktree_service,
+            ),
         ),
         session_title_service=cast(SessionTitleService, _SessionTitleService()),
         live_event_projector=cast(LiveEventProjector, live_event_projector),

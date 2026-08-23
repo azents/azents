@@ -205,12 +205,19 @@ def get_todo_toolkit_provider(
 
 
 def get_goal_toolkit_provider(
+    store: Annotated[GoalStateStore, Depends(get_goal_state_store)],
+) -> GoalToolkitProvider:
+    """GoalToolkitProvider dependency."""
+    return GoalToolkitProvider(store=store)
+
+
+def get_goal_state_store(
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ],
-) -> GoalToolkitProvider:
-    """GoalToolkitProvider dependency."""
-    return GoalToolkitProvider(store=GoalStateStore(session_manager=session_manager))
+) -> GoalStateStore:
+    """GoalStateStore dependency."""
+    return GoalStateStore(session_manager=session_manager)
 
 
 def get_external_channel_toolkit_provider(
