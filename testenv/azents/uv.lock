@@ -379,9 +379,9 @@ requires-dist = [
     { name = "cryptography", specifier = "==50.0.0" },
     { name = "discord-py", specifier = "==2.7.1" },
     { name = "fastapi", extras = ["standard"], specifier = "==0.136.3" },
-    { name = "google-analytics-admin", specifier = "==0.29.0" },
-    { name = "google-analytics-data", specifier = "==0.22.0" },
-    { name = "google-auth", specifier = "==2.52.0" },
+    { name = "google-analytics-admin", specifier = "==0.30.1" },
+    { name = "google-analytics-data", specifier = "==0.23.0" },
+    { name = "google-auth", specifier = "==2.56.3" },
     { name = "grpcio", specifier = "==1.83.0" },
     { name = "httpx", specifier = "==0.28.1" },
     { name = "jinja2", specifier = "==3.1.6" },
@@ -1074,7 +1074,7 @@ wheels = [
 
 [[package]]
 name = "google-analytics-admin"
-version = "0.29.0"
+version = "0.30.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -1083,14 +1083,14 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7b/46/ab47f088e09fba12e0a5753c927feb59e200aa42948fbf7da74975a9a067/google_analytics_admin-0.29.0.tar.gz", hash = "sha256:59e53aa082687269ea1dff0bb0bd60898b901849e20fd1e99d12d48dbba27541", size = 620157, upload-time = "2026-05-07T08:03:41.977Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ec/0b/dc92f543e8f93837d6c8f72f6052b48a81919a9676e4888852eb0f747fa6/google_analytics_admin-0.30.1.tar.gz", hash = "sha256:cc8b150217dbec45708867d9d81216e8a10e0f6d432e5e6ac66da2a83d4119b6", size = 614898, upload-time = "2026-06-25T23:39:24.837Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/ce/f006333037db435af0db18b00fb7d6a155927ca503c1d73c2a0e6f3bb8de/google_analytics_admin-0.29.0-py3-none-any.whl", hash = "sha256:48d8cf536d437bc1fa6ee4c31fa4cc26b6f7ac2684f4e9fb8337adac0701c8bb", size = 398743, upload-time = "2026-05-07T08:02:05.812Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/4f/cce055793fd9c08e8debe676db1e2c09ca117d90a6429ef4684d6a120066/google_analytics_admin-0.30.1-py3-none-any.whl", hash = "sha256:53c9d2f140111faa5cfaa463ca3b69fc9f11fbf968cb2421b76839926ef065d9", size = 399979, upload-time = "2026-06-25T23:38:49.823Z" },
 ]
 
 [[package]]
 name = "google-analytics-data"
-version = "0.22.0"
+version = "0.23.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -1099,9 +1099,9 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ba/46/06df55745208b0084264c57e1fbcc6e8ccd542a1a3f20d34c2cde89ba66a/google_analytics_data-0.22.0.tar.gz", hash = "sha256:16fb155d7d9896d34c786c9147f3ae4ab84f67b34dcc21e7199a54f0850286b9", size = 233436, upload-time = "2026-05-07T08:03:43.394Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/09/76553c6ec3e277d38486f7619d8bad631745fb6bdd486027e956dea8a8c7/google_analytics_data-0.23.0.tar.gz", hash = "sha256:8799b8829ca175e11385008aedb9f2f0aaf5c78c2b69f7570712ee46b190b08a", size = 232484, upload-time = "2026-06-03T14:52:16.145Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/4f/84e11dcf81a1c3209c14aa0150cfa478404f1ab3c099860a5faf344bfdf1/google_analytics_data-0.22.0-py3-none-any.whl", hash = "sha256:82e5d63deb71335806a942628c8f4c5c09f3a9df86d8ef6bf7504cd27047deef", size = 199904, upload-time = "2026-05-07T08:02:07.768Z" },
+    { url = "https://files.pythonhosted.org/packages/df/28/56dda8a3ba26c09a26592c1ae701f0092d9c0f8e620df073783dad733ddc/google_analytics_data-0.23.0-py3-none-any.whl", hash = "sha256:ba21edbe7f2aa61424651b11b06f81fa4ceed5db5581ef2ca2af0d189b77c0bd", size = 199547, upload-time = "2026-06-03T14:51:25.009Z" },
 ]
 
 [[package]]
@@ -1128,15 +1128,15 @@ grpc = [
 
 [[package]]
 name = "google-auth"
-version = "2.52.0"
+version = "2.56.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "pyasn1-modules" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d4/f8/80d2493cbedece1c623dc3e3cb1883300871af0dcdae254409522985ac23/google_auth-2.52.0.tar.gz", hash = "sha256:01f30e1a9e3638698d89464f5e603ce29d18e1c0e63ec31ac570aba4e164aaf5", size = 335027, upload-time = "2026-05-07T19:45:24.033Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/db/4c/fa42116a48bab3f7a143cf5042ecff7df9c8b73f8a376203cd534d1dc966/google_auth-2.56.3.tar.gz", hash = "sha256:40e229fc901f0a305b553050e5fce562d509bee0435be053abfa91582b51b90c", size = 367110, upload-time = "2026-08-06T06:24:01.36Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ee/fc/2cdc74252746f547f81ff3f02d4d4234a3f411b5de5b61af97e633a060b9/google_auth-2.52.0-py3-none-any.whl", hash = "sha256:aee92803ba0ff93a70a3b8a35c7b4797837751cd6380b63ff38372b98f3ed627", size = 245614, upload-time = "2026-05-07T19:45:21.914Z" },
+    { url = "https://files.pythonhosted.org/packages/bc/b3/6117b2f24065cd7e2c4f140e9a193e215f089ca8ba314cf91eb9d0b7fe0a/google_auth-2.56.3-py3-none-any.whl", hash = "sha256:8ec438808f813ad034535000261eed1067475d229d05bbf4216e78c3f2362e53", size = 259116, upload-time = "2026-08-06T06:22:51.788Z" },
 ]
 
 [[package]]
