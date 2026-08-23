@@ -39,7 +39,7 @@ dependencies = [
     "aiodocker==0.26.0",
     # Kubernetes clients: lightkube for standard operations and
     # kubernetes_asyncio for exec WebSocket support
-    "kubernetes-asyncio==35.0.1",
+    "kubernetes-asyncio==36.1.0",
     "lightkube==0.19.1",
     # Local dependencies
     "az-common",
