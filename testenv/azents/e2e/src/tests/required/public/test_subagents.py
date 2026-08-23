@@ -44,6 +44,7 @@ from support.runtime_profiles import (
 )
 from support.utils import (
     authenticate_user,
+    decode_docker_exec_output,
     model_selection_from_first_candidate,
     unique,
 )
@@ -510,7 +511,7 @@ def _set_release_file(
     )
     result = container.get_wrapped_container().exec_run(command)
     if result.exit_code != 0:
-        output = result.output.decode(errors="replace")
+        output = decode_docker_exec_output(result.output)
         raise AssertionError(
             f"failed to update release file {release_file_path}: {output}"
         )
