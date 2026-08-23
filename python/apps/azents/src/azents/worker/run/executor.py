@@ -144,7 +144,7 @@ from azents.repos.action_execution.data import (
 )
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
+from azents.repos.agent_execution import EventTranscriptRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
@@ -1329,10 +1329,8 @@ class RunExecutor:
                     wait_service=AgentWaitService(
                         session_manager=self.session_manager,
                         agent_session_repository=self.agent_session_repository,
-                        agent_run_repository=getattr(
-                            self.session_lifecycle,
-                            "agent_run_repository",
-                            AgentRunRepository(),
+                        agent_run_repository=(
+                            self.session_lifecycle.agent_run_repository
                         ),
                         mailbox_item_service=self.mailbox_item_service,
                     )

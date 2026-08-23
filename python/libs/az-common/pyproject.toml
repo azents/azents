@@ -17,7 +17,7 @@ dependencies = [
     "psycopg[binary]>=3.3.2",
     "sentry-sdk>=2.48.0",
     "temporalio>=1.21.1",
-    # uuid7 지원
+    # UUIDv7 support
     "uuid6>=2024.7.10",
 ]
 
