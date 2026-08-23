@@ -7,7 +7,7 @@ dependencies = [
     "requests==2.34.2",
     "websockets==16.0",
     "boto3==1.40.61",
-    "types-boto3[s3]==1.43.0",
+    "types-boto3[s3]==1.43.72",
     "pytest==9.1.1",
     "testcontainers[postgres]==4.15.0",
     "docker==7.1.0",
