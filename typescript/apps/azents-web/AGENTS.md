@@ -39,10 +39,13 @@ src/
 
 The landing page is always dark mode. Do **not** force this in `layout.tsx`; override at page level instead:
 
-```
-layout.tsx           → MantineProvider (default theme, no color scheme forced)
-  └── page.tsx       → MantineProvider forceColorScheme="dark" (landing only)
-  └── dashboard/     → default theme or future user preference
+```mermaid
+flowchart TD
+    Layout["layout.tsx<br/>MantineProvider<br/>default theme, no forced color scheme"]
+    Landing["page.tsx<br/>MantineProvider forceColorScheme=dark<br/>landing only"]
+    Dashboard["dashboard/<br/>default theme or future user preference"]
+    Layout --> Landing
+    Layout --> Dashboard
 ```
 
 Color mode utilities:

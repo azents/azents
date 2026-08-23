@@ -7,17 +7,17 @@ description: "Requirements-first workflow for new feature design, design documen
 
 Use this sequence:
 
-```text
-current-system research
-→ requirement interview
-→ confirmed Requirements
-→ system framing
-→ material-decision briefing
-→ ADR decisions
-→ complete Design
-→ authority and feasibility validation
-→ Design approval
-→ final Design
+```mermaid
+flowchart TD
+    Research[Current-system research] --> Interview[Requirement interview]
+    Interview --> Requirements[Confirmed Requirements]
+    Requirements --> Framing[System framing]
+    Framing --> Briefing[Material-decision briefing]
+    Briefing --> Decisions[ADR decisions]
+    Decisions --> CompleteDesign[Complete Design]
+    CompleteDesign --> Validation[Authority and feasibility validation]
+    Validation --> Approval[Design approval]
+    Approval --> FinalDesign[Final Design]
 ```
 
 Artifact responsibilities:

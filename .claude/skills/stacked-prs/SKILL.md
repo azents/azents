@@ -9,9 +9,11 @@ description: "Manage stacked PRs: rebase, merge, and retarget sequential PR bran
 
 A stacked PR series is a branch chain where each PR uses the previous branch as its base.
 
-```text
-main ← branch-A ← branch-B ← branch-C
-PR#1: A → main   PR#2: B → A   PR#3: C → B
+```mermaid
+flowchart RL
+    C["branch-C"] -->|PR #3 targets| B["branch-B"]
+    B -->|PR #2 targets| A["branch-A"]
+    A -->|PR #1 targets| Main["main"]
 ```
 
 Merge from the front of the stack only. If an earlier branch changes, rebase every later branch in order.

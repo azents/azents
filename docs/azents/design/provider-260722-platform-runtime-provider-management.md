@@ -489,11 +489,16 @@ The desired active revision is resent until the Provider acknowledges it. Admin 
 
 The policy resolver evaluates:
 
-```text
-accepted Provider contract
-→ active Platform defaults and constraints
-→ Agent override
-→ future Session override
+```mermaid
+flowchart TD
+    Contract[Accepted Provider contract]
+    Platform[Active Platform defaults and constraints]
+    Agent[Agent override]
+    Session[Future Session override]
+
+    Contract -->|constrained by| Platform
+    Platform -->|overridden by| Agent
+    Agent -->|overridden by| Session
 ```
 
 It rejects unsupported values and records the source of each effective field. Resolution occurs when creating a logical Runtime, provisioning a new incarnation, or requesting a supported live update.

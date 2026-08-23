@@ -17,19 +17,32 @@ implementation phase adds its own detailed phase plan under `docs/azents/plans/`
 
 ## Stack shape
 
-```text
-main
-  <- codex/azents-rename-contract
-  <- codex/azents-rename-impl-plan
-  <- codex/azents-rename-python-proto
-  <- codex/azents-rename-generated-clients
-  <- codex/azents-rename-typescript-ui
-  <- codex/azents-rename-dart
-  <- codex/azents-rename-nondurable-infra
-  <- codex/azents-rename-testenv-docs
-  <- codex/azents-rename-verification
-  <- codex/azents-rename-spec-promotion
-  <- codex/azents-rename-cleanup
+```mermaid
+flowchart TD
+    Main["main"]
+    Contract["codex/azents-rename-contract"]
+    Plan["codex/azents-rename-impl-plan"]
+    PythonProto["codex/azents-rename-python-proto"]
+    Clients["codex/azents-rename-generated-clients"]
+    TypeScript["codex/azents-rename-typescript-ui"]
+    Dart["codex/azents-rename-dart"]
+    Infra["codex/azents-rename-nondurable-infra"]
+    TestenvDocs["codex/azents-rename-testenv-docs"]
+    Verification["codex/azents-rename-verification"]
+    Spec["codex/azents-rename-spec-promotion"]
+    Cleanup["codex/azents-rename-cleanup"]
+
+    Main -->|base of| Contract
+    Contract -->|base of| Plan
+    Plan -->|base of| PythonProto
+    PythonProto -->|base of| Clients
+    Clients -->|base of| TypeScript
+    TypeScript -->|base of| Dart
+    Dart -->|base of| Infra
+    Infra -->|base of| TestenvDocs
+    TestenvDocs -->|base of| Verification
+    Verification -->|base of| Spec
+    Spec -->|base of| Cleanup
 ```
 
 Durable data resources are intentionally excluded until the final cutover
