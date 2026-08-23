@@ -1,31 +1,17 @@
 ---
-title: "Use Mermaid only when a non-trivial graph materially improves comprehension; keep compact chains, stacks, trees, and literal shapes in clearer text forms."
+title: "Use Mermaid for explanatory diagrams of relationships, topology, flow, time, state, or ER structure; keep compact notation and literal shapes in text."
 ---
 
-# Choose Diagram Form by Readability
+# Mermaid for Diagrams, Text for Notation
 
-Mermaid is not the default for every relationship. Use it when the visual graph does explanatory work that a smaller text form cannot do as clearly.
+Choose the representation by the block's communicative role, not by graph complexity or the mere presence of arrows.
 
-- USE Mermaid for non-trivial branching, cycles, fan-in or fan-out, multi-component topology, temporal interaction, and ER semantics when visual layout materially improves comprehension
-- KEEP compact linear workflows, precedence chains, stacked branch lists, annotated file or layout trees, and one-line relationships in fenced text, lists, or tables when those forms are more direct
-- DO NOT convert text or ASCII to Mermaid solely because it contains arrows, ordering, or semantic relationships
-- PREFER the representation with less syntax and visual bulk when both forms communicate the same information equally well
+- USE Mermaid when a block is an explanatory architecture, topology, process, sequence, state, or ER diagram
+- KEEP compact stage chains, precedence summaries, stacked branch lists, directory or file trees, UI/CLI/output examples, and record or data shapes in text, lists, tables, or tree notation
+- A simple relationship diagram may still be Mermaid; complexity is not a requirement
+- DO NOT expand compact notation into a one-node-per-label flowchart unless the visual layout adds meaning such as branching, grouping, concurrency, cycles, or distinct actors
 
-## Bad
+## Examples
 
-````markdown
-```mermaid
-flowchart TD
-    Research --> Requirements
-    Requirements --> Design
-    Design --> Implementation
-```
-````
-
-## Good
-
-````markdown
-```text
-research → requirements → design → implementation
-```
-````
+- Diagram: a Client-to-Server architecture relationship belongs in Mermaid
+- Notation: `research → requirements → design → implementation` belongs in compact text
