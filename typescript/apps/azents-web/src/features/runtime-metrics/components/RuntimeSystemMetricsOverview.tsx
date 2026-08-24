@@ -15,7 +15,9 @@ import {
   ThemeIcon,
 } from "@mantine/core";
 import { IconCpu, IconDatabase, IconServer2 } from "@tabler/icons-react";
-import { useFormatter, useLocale, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "next-intl";
+import { formatLocalizedDate } from "@/shared/lib/date-format";
+import { useLocale } from "@/shared/providers/locale";
 import {
   buildRuntimeMetricSparklineSegments,
   type RuntimeSystemMetricKey,
@@ -163,7 +165,7 @@ function MetricPanel({
 }): React.ReactElement {
   const t = useTranslations("runtimeMetrics");
   const format = useFormatter();
-  const locale = useLocale();
+  const { locale } = useLocale();
   const current = definition.current;
   const hasValue = current.used !== null;
   const percentage =
@@ -182,36 +184,61 @@ function MetricPanel({
   return (
     <Paper withBorder radius="md" p="md">
       <Stack gap="sm">
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Group gap="sm" wrap="nowrap">
+        <Group justify="space-between" align="flex-start" wrap="wrap">
+          <Group gap="sm" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
             <ThemeIcon color="blue" variant="light">
               {definition.icon}
             </ThemeIcon>
-            <Stack gap={0}>
+            <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
               <Text fw={650} size="sm">
                 {t(`metrics.${definition.key}`)}
               </Text>
               <Text c="dimmed" size="xs">
                 {current.measured_at
                   ? t("measuredAt", {
-                      value: format.dateTime(new Date(current.measured_at), {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      }),
+                      value: formatLocalizedDate(
+                        new Date(current.measured_at),
+                        locale,
+                        {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        },
+                      ),
                     })
                   : t("notMeasured")}
               </Text>
             </Stack>
           </Group>
-          <Badge color={statusColor(current.state)} size="sm" variant="light">
+          <Badge
+            color={statusColor(current.state)}
+            size="sm"
+            variant="light"
+            style={{ flexShrink: 0 }}
+          >
             {t(`states.${current.state}`)}
           </Badge>
         </Group>
         <Stack gap={0}>
-          <Text fw={700} size="xl">
+          <Text
+            fw={700}
+            size="xl"
+            style={{
+              fontFamily: "var(--font-geist-mono), monospace",
+              fontVariantNumeric: "tabular-nums",
+              overflowWrap: "anywhere",
+            }}
+          >
             {percentage === null ? value : `${percentage}%`}
           </Text>
-          <Text c="dimmed" size="xs">
+          <Text
+            c="dimmed"
+            size="xs"
+            style={{
+              fontFamily: "var(--font-geist-mono), monospace",
+              fontVariantNumeric: "tabular-nums",
+              overflowWrap: "anywhere",
+            }}
+          >
             {hasValue && total ? t("usedOfTotal", { used: value, total }) : " "}
           </Text>
         </Stack>
@@ -269,14 +296,14 @@ export function RuntimeSystemMetricsOverview({
 
   return (
     <Stack gap="sm">
-      <Group justify="space-between" align="flex-start" gap="sm">
-        <Stack gap={0}>
+      <Group justify="space-between" align="flex-start" gap="sm" wrap="wrap">
+        <Stack gap={0} style={{ flex: 1, minWidth: rem(180) }}>
           <Text fw={700}>{t("title")}</Text>
           <Text c="dimmed" size="xs">
             {t("description")}
           </Text>
         </Stack>
-        <Group gap="xs">
+        <Group gap="xs" justify="flex-end" wrap="wrap">
           {metrics.scope ? (
             <Badge color="blue" variant="light">
               {t("scope", { scope: t(`scopes.${metrics.scope}`) })}
@@ -287,7 +314,12 @@ export function RuntimeSystemMetricsOverview({
           </Badge>
         </Group>
       </Group>
-      <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+      <SimpleGrid
+        autoFlow="auto-fit"
+        minColWidth={rem(220)}
+        spacing="sm"
+        type="container"
+      >
         {definitions.map((definition) => (
           <MetricPanel
             key={definition.key}
