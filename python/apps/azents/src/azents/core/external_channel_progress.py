@@ -111,4 +111,4 @@ def checking_progress_title() -> str:
 
 def scheduled_task_checking_progress_title(title: str) -> str:
     """Return the initial Tracker title for one named Scheduled Task."""
-    return f"Agent is running scheduled task ‘{title}’…"
+    return f"Agent is running a scheduled task…\n{title}"

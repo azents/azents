@@ -299,9 +299,10 @@ Session title and Agent execution.
   Session URL.
 - The initial conversational Tracker states that the Agent is checking the message
   with one `task_card` carrying the `in_progress` state. A Scheduled Task run instead
-  states `Agent is running scheduled task ‘<title>’…` while keeping the objective out
-  of the initial status. Once Channel Work exists, one `plan` block carries the
-  Agent-authored title and complete ordered task list.
+  states `Agent is running a scheduled task…` on the first line and the task title on
+  the second line while keeping the objective out of the initial status. Once Channel
+  Work exists, one `plan` block carries the Agent-authored title and complete ordered
+  task list.
   Nested tasks use `task_id`, literal title, Slack status, and optional literal
   rich-text details/output plus labeled URL sources. They omit standalone
   `task_card` block types. The Plan sends no `plan_id`, is read-only, and requires
@@ -320,13 +321,13 @@ Session title and Agent execution.
 - Discord creates one joined-presence control and an initial compact Channel Work
   Embed containing `◉ Agent is checking your message` from the same accepted binding
   transaction. A Scheduled Task-owned Tracker instead contains
-  `◉ Agent is running scheduled task ‘<title>’…`. Later complete snapshots replace
-  that retained message's content with an empty string and its Embed with the current
-  bounded title, status summary, ordered checklist, prioritized context, and labeled
-  sources. Creation and update both send one `View session` link component derived
-  from the current canonical Workspace, Agent, and Session target. Update, delete,
-  replacement, and final-reply cleanup use the same Work-owned Tracker identity and
-  revision fence.
+  `◉ Agent is running a scheduled task…` followed by the task title on the next line.
+  Later complete snapshots replace that retained message's content with an empty
+  string and its Embed with the current bounded title, status summary, ordered
+  checklist, prioritized context, and labeled sources. Creation and update both send
+  one `View session` link component derived from the current canonical Workspace,
+  Agent, and Session target. Update, delete, replacement, and final-reply cleanup use
+  the same Work-owned Tracker identity and revision fence.
 - An eligible explicit mention in an existing connected Binding may create one
   idempotent version-3 settings control for that Binding. The control contains only
   provider-native `Conversation settings`, does not repeat joined presence or rewrite
