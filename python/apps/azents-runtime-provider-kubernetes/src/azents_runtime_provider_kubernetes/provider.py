@@ -2812,14 +2812,12 @@ def _engine_probe() -> Probe:
     return Probe(
         exec_action=ExecAction(
             command=(
-                "sh",
-                "-ec",
-                (
-                    'test "$(docker --host '
-                    f"unix://{_ENGINE_SOCKET_PATH} version "
-                    "--format '{{.Server.Version}}/{{.Server.APIVersion}}')\" "
-                    "= '28.5.2/1.51'"
-                ),
+                "docker",
+                "--host",
+                f"unix://{_ENGINE_SOCKET_PATH}",
+                "info",
+                "--format",
+                "{{.ServerVersion}}",
             )
         ),
         initial_delay_seconds=1,
