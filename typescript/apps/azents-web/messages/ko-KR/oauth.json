@@ -1,0 +1,6 @@
+{
+  "title": "인증",
+  "callbackSuccess": "인증이 완료되었습니다. 이 탭을 닫아도 됩니다.",
+  "callbackError": "인증에 실패했습니다. 다시 시도해주세요.",
+  "githubAppInstalled": "GitHub App이 설치되었습니다. 이 탭을 닫아도 됩니다."
+}

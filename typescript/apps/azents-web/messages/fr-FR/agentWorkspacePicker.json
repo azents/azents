@@ -1,0 +1,22 @@
+{
+  "projectPickerTitle": "Sélectionner un dossier Project",
+  "projectPickerDescription": "Le Runtime doit être en cours d’exécution pour choisir un dossier Agent Workspace.",
+  "projectPickerSelectCurrent": "Sélectionner le dossier actuel",
+  "projectPickerCurrentPath": "Chemin actuel",
+  "projectPickerNoDirectories": "Aucun sous-dossier.",
+  "projectPickerSelectDirectory": "Sélectionner le dossier",
+  "workspacePanel": {
+    "restoringRuntime": "Préparation du Runtime…",
+    "refresh": "Actualiser",
+    "controlUnavailableTitle": "Contrôle du Workspace indisponible",
+    "restartRuntime": "Redémarrer le Runtime",
+    "inactiveTitle": "Runtime inactif",
+    "inactiveDescription": "Démarrez le Runtime pour parcourir les dossiers Agent Workspace.",
+    "runtimeFreeTitle": "Aucun environnement géré",
+    "runtimeFreeDescription": "Cet agent peut continuer à utiliser le modèle et les capacités distantes, mais les fichiers et projets de l’espace de travail nécessitent un environnement géré.",
+    "addRuntime": "Ajouter un environnement",
+    "removingTitle": "Suppression de l’environnement en cours",
+    "removingDescription": "L’accès à l’espace de travail, aux projets, à Git et aux fichiers reste indisponible jusqu’à la fin de la suppression définitive."
+  },
+  "projectPickerStartRuntime": "Démarrer le Runtime"
+}

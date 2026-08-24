@@ -1,0 +1,12 @@
+{
+  "before": "Before",
+  "after": "After",
+  "timeSaved": "節約時間",
+  "learnMore": "詳しく見る",
+  "getStarted": "始める",
+  "light": "ライト",
+  "dark": "ダーク",
+  "system": "システム",
+  "unknownError": "不明なエラー",
+  "colorMode": "カラーモード"
+}

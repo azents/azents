@@ -12,8 +12,8 @@
     "lint": "eslint src .storybook --max-warnings 0 --cache --cache-strategy content",
     "lint:fix": "eslint src .storybook --max-warnings 0 --fix --cache --cache-strategy content",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write --cache 'src/**/*.{ts,tsx}' '.storybook/**/*.{ts,tsx}'",
-    "format:check": "prettier --check --cache 'src/**/*.{ts,tsx}' '.storybook/**/*.{ts,tsx}'"
+    "format": "prettier --write --cache 'src/**/*.{ts,tsx,mts}' '.storybook/**/*.{ts,tsx}' 'messages/**/*.json'",
+    "format:check": "prettier --check --cache 'src/**/*.{ts,tsx,mts}' '.storybook/**/*.{ts,tsx}' 'messages/**/*.json'"
   },
   "dependencies": {
     "@azents/public-client": "workspace:*",

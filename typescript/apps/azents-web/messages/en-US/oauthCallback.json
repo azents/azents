@@ -1,0 +1,19 @@
+{
+  "title": "Integration Setup",
+  "accountLinkTitle": "Account Linking",
+  "success": "{provider} has been successfully connected.",
+  "error": "Failed to connect {provider}.",
+  "accountLinkSuccess": "Your {provider} account has been successfully connected.",
+  "accountLinkError": "Failed to connect your {provider} account.",
+  "reasons": {
+    "not_configured": "The integration is not configured on the server.",
+    "invalid_state": "The authorization session has expired. Please try again.",
+    "oauth_failed": "Token exchange with the provider failed. Please try again.",
+    "deprecated": "This page is no longer available. Please use the link from the bot message to connect your account."
+  },
+  "goToSettings": "Go to workspace settings",
+  "goToProfile": "Go to profile",
+  "goToWorkspaces": "Go to workspaces",
+  "redirectingToSetup": "Redirecting to service authorization...",
+  "toolkitRedirectError": "Failed to redirect to service setup. Please try again from your workspace settings."
+}

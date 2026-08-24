@@ -1,0 +1,22 @@
+{
+  "projectPickerTitle": "Project フォルダーを選択",
+  "projectPickerDescription": "Agent Workspace のフォルダーを選択するには Runtime が実行中である必要があります。",
+  "projectPickerSelectCurrent": "現在のフォルダーを選択",
+  "projectPickerCurrentPath": "現在のパス",
+  "projectPickerNoDirectories": "子フォルダーはありません。",
+  "projectPickerSelectDirectory": "フォルダーを選択",
+  "workspacePanel": {
+    "restoringRuntime": "Runtime を準備中…",
+    "refresh": "更新",
+    "controlUnavailableTitle": "Workspace を操作できません",
+    "restartRuntime": "Runtime を再起動",
+    "inactiveTitle": "Runtime が停止しています",
+    "inactiveDescription": "Agent Workspace のフォルダーを参照するには Runtime を開始してください。",
+    "runtimeFreeTitle": "管理対象ランタイムがありません",
+    "runtimeFreeDescription": "モデルとリモート機能は引き続き利用できますが、エージェントワークスペースのファイルとプロジェクトには管理対象ランタイムが必要です。",
+    "addRuntime": "ランタイムを追加",
+    "removingTitle": "ランタイムを削除しています",
+    "removingDescription": "完全な削除が完了するまで、ワークスペース、プロジェクト、Git、ファイルへのアクセスは利用できません。"
+  },
+  "projectPickerStartRuntime": "Runtime を開始"
+}

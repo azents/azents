@@ -1,7 +1,7 @@
 import { Box, rem } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
+import koMessages from "@/i18n/ko-KR-messages";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import koMessages from "../../../../../messages/ko-KR.json";
 import { RuntimeConfigurationStatus } from "./RuntimeConfigurationStatus";
 import type { RuntimeConfigurationStateResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";

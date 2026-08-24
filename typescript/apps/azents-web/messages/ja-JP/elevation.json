@@ -1,0 +1,15 @@
+{
+  "title": "本人確認",
+  "description": "本人確認の方法を選択してください。",
+  "methodEmail": "メール認証コード",
+  "methodPassword": "パスワード",
+  "sendingCode": "認証コードを送信中...",
+  "emailCodeHeadline": "認証コードを入力",
+  "emailCodeDescription": "メールに6桁のコードを送信しました。",
+  "codeTimer": "残り時間 {time}",
+  "codeExpired": "認証コードの有効期限が切れました。再送信してください。",
+  "verify": "認証する",
+  "resendCode": "コードを再送信",
+  "passwordHeadline": "パスワードを入力",
+  "passwordDescription": "続行するにはパスワードを入力してください。"
+}

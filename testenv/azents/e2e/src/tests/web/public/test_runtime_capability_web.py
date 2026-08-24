@@ -104,6 +104,15 @@ def _click_button(driver: WebDriver, text: str) -> None:
     ).click()
 
 
+def _open_metrics_tab(driver: WebDriver) -> None:
+    """Open the Runtime system metrics tab."""
+    _wait(driver).until(
+        ec.element_to_be_clickable(
+            (By.XPATH, "//*[@role='tab' and @aria-label='Metrics']")
+        )
+    ).click()
+
+
 def _wait_for_runtime_metrics(
     driver: WebDriver,
     *,
@@ -320,6 +329,7 @@ def test_runtime_free_add_and_remove_progress(
         )
     )
     session_url = browser_driver.current_url
+    _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "System metrics", timeout_seconds=120)
     _assert_visible_text(browser_driver, "Scope: Container")
     _wait(browser_driver).until(
@@ -336,6 +346,7 @@ def test_runtime_free_add_and_remove_progress(
     )
     _assert_visible_text(browser_driver, "System metrics")
     browser_driver.get(session_url)
+    _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "System metrics")
     _wait(browser_driver).until(
         ec.visibility_of_element_located(
@@ -352,6 +363,7 @@ def test_runtime_free_add_and_remove_progress(
         )
     ).click()
     _click_button(browser_driver, "Stop runtime")
+    _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "Runtime stopped", timeout_seconds=120)
     _wait(browser_driver).until(
         ec.visibility_of_element_located(

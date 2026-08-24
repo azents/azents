@@ -1,0 +1,20 @@
+{
+  "headline": "Security",
+  "elevationRequired": "Please verify your identity to access security settings.",
+  "authMethods": "Authentication methods",
+  "methodEmail": "Email",
+  "methodPassword": "Password",
+  "enabled": "Enabled",
+  "disabled": "Not set",
+  "passwordSection": "Password",
+  "setPassword": "Password",
+  "newPassword": "New password",
+  "passwordPlaceholder": "At least 8 characters",
+  "confirmPassword": "Confirm password",
+  "confirmPasswordPlaceholder": "Re-enter password",
+  "setPasswordButton": "Set password",
+  "changePassword": "Change password",
+  "removePassword": "Remove password",
+  "passwordTooShort": "Password must be at least 8 characters.",
+  "passwordMismatch": "Passwords do not match."
+}

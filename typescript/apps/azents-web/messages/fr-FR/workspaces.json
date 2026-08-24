@@ -1,0 +1,38 @@
+{
+  "list": {
+    "headline": "Choisir un espace",
+    "description": "Sélectionnez un espace ou créez-en un nouveau",
+    "empty": "Vous n'appartenez encore a aucun espace",
+    "createNew": "Créer un nouvel espace"
+  },
+  "invitations": {
+    "sectionTitle": "Invitations reçues",
+    "empty": "Aucune invitation en attente",
+    "invitedAs": "Invité en tant que {role}",
+    "accept": "Accepter",
+    "decline": "Refuser",
+    "accepting": "Acceptation...",
+    "declining": "Refus...",
+    "roleMember": "membre",
+    "roleManager": "gestionnaire"
+  },
+  "create": {
+    "headline": "Créer un espace",
+    "description": "Configurez un nouvel espace de travail",
+    "sectionWorkspace": "Informations de l'espace",
+    "sectionOwner": "Votre profil",
+    "workspaceName": "Nom de l'espace",
+    "workspaceNamePlaceholder": "ex : Mon équipe",
+    "workspaceHandle": "Identifiant",
+    "workspaceHandlePlaceholder": "ex : mon-equipe",
+    "ownerName": "Votre nom",
+    "ownerNamePlaceholder": "Nom utilisé dans cet espace",
+    "submit": "Créer"
+  },
+  "errors": {
+    "nameRequired": "Veuillez saisir un nom",
+    "handleRequired": "Veuillez saisir un identifiant",
+    "handleFormat": "Seules les lettres minuscules, les chiffres et les tirets sont autorisés",
+    "generic": "Une erreur est survenue. Veuillez réessayer."
+  }
+}

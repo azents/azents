@@ -1,0 +1,22 @@
+{
+  "projectPickerTitle": "Select Project folder",
+  "projectPickerDescription": "The Runtime must be running to pick a folder from Agent Workspace.",
+  "projectPickerSelectCurrent": "Select current folder",
+  "projectPickerCurrentPath": "Current path",
+  "projectPickerNoDirectories": "No child folders.",
+  "projectPickerSelectDirectory": "Select folder",
+  "workspacePanel": {
+    "restoringRuntime": "Preparing Runtime…",
+    "refresh": "Refresh",
+    "controlUnavailableTitle": "Workspace control unavailable",
+    "restartRuntime": "Restart Runtime",
+    "inactiveTitle": "Runtime inactive",
+    "inactiveDescription": "Start the Runtime to browse Agent Workspace folders.",
+    "runtimeFreeTitle": "No managed Runtime",
+    "runtimeFreeDescription": "This agent can continue using model and remote capabilities, but Agent Workspace files and Projects require a managed Runtime.",
+    "addRuntime": "Add Runtime",
+    "removingTitle": "Runtime removal in progress",
+    "removingDescription": "Workspace, Project, Git, and file access remain unavailable until permanent removal completes."
+  },
+  "projectPickerStartRuntime": "Start Runtime"
+}

@@ -1,0 +1,40 @@
+{
+  "title": "Métriques système",
+  "description": "Utilisation visible par le Runner pendant la dernière heure.",
+  "loading": "Chargement des métriques du Runtime…",
+  "errorTitle": "Impossible de charger les métriques du Runtime",
+  "scope": "Portée : {scope}",
+  "scopes": {
+    "host": "Hôte",
+    "vm": "Machine virtuelle",
+    "container": "Conteneur"
+  },
+  "summaries": {
+    "fresh": "À jour",
+    "partial": "Partiellement disponible",
+    "stale": "Ancien",
+    "unavailable": "Indisponible",
+    "unsupported": "Non pris en charge",
+    "stopped": "Runtime arrêté",
+    "disconnected": "Runner déconnecté"
+  },
+  "metrics": {
+    "cpu": "CPU",
+    "memory": "Mémoire",
+    "disk": "Disque"
+  },
+  "states": {
+    "fresh": "À jour",
+    "stale": "Ancien",
+    "unavailable": "Indisponible",
+    "unsupported": "Non pris en charge",
+    "stopped": "Arrêté",
+    "disconnected": "Déconnecté"
+  },
+  "measuredAt": "Mesuré le {value}",
+  "notMeasured": "Aucune mesure",
+  "usedOfTotal": "{used} sur {total}",
+  "emptyTrend": "Aucun échantillon conservé",
+  "trendLabel": "Tendance d’utilisation sur la dernière heure",
+  "cpuUnit": "cœurs"
+}

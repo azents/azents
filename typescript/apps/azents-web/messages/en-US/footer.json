@@ -1,0 +1,14 @@
+{
+  "product": "Product",
+  "company": "Company",
+  "legal": "Legal",
+  "features": "Features",
+  "pricing": "Pricing (Coming soon)",
+  "docs": "Documentation",
+  "about": "About",
+  "blog": "Blog",
+  "careers": "Careers",
+  "privacy": "Privacy Policy",
+  "terms": "Terms of Service",
+  "copyright": "© {year} Azents. All rights reserved."
+}

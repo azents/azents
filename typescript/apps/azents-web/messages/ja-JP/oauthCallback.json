@@ -1,0 +1,19 @@
+{
+  "title": "連携設定",
+  "accountLinkTitle": "アカウント接続",
+  "success": "{provider}の連携が完了しました。",
+  "error": "{provider}の連携に失敗しました。",
+  "accountLinkSuccess": "{provider}アカウントが接続されました。",
+  "accountLinkError": "{provider}アカウントの接続に失敗しました。",
+  "reasons": {
+    "not_configured": "サーバーに連携設定がありません。",
+    "invalid_state": "認証セッションが期限切れです。再度お試しください。",
+    "oauth_failed": "トークン交換に失敗しました。再度お試しください。",
+    "deprecated": "このページは利用できません。ボットメッセージのリンクからアカウントを接続してください。"
+  },
+  "goToSettings": "ワークスペース設定へ",
+  "goToProfile": "プロフィールへ",
+  "goToWorkspaces": "ワークスペース一覧へ",
+  "redirectingToSetup": "サービス認証ページへ移動中...",
+  "toolkitRedirectError": "サービス設定ページへの移動に失敗しました。ワークスペース設定から再度お試しください。"
+}

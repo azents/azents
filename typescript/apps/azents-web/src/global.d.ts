@@ -1,10 +1,10 @@
 /**
  * next-intl type safety settings.
  *
- * Uses en-US.json as the reference type to validate useTranslations namespace
+ * Uses the composed en-US messages as the reference type to validate useTranslations namespace
  * and key at compile time.
  */
-import type en from "../messages/en-US.json";
+import type en from "./i18n/en-US-messages";
 
 type Messages = typeof en;
 

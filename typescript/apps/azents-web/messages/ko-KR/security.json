@@ -1,0 +1,20 @@
+{
+  "headline": "보안",
+  "elevationRequired": "보안 설정에 접근하려면 본인 확인이 필요합니다.",
+  "authMethods": "인증 방법",
+  "methodEmail": "이메일",
+  "methodPassword": "패스워드",
+  "enabled": "사용 중",
+  "disabled": "미설정",
+  "passwordSection": "패스워드",
+  "setPassword": "패스워드",
+  "newPassword": "새 패스워드",
+  "passwordPlaceholder": "8자 이상",
+  "confirmPassword": "패스워드 확인",
+  "confirmPasswordPlaceholder": "패스워드를 다시 입력하세요",
+  "setPasswordButton": "패스워드 설정",
+  "changePassword": "패스워드 변경",
+  "removePassword": "패스워드 삭제",
+  "passwordTooShort": "패스워드는 8자 이상이어야 합니다.",
+  "passwordMismatch": "패스워드가 일치하지 않습니다."
+}

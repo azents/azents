@@ -1,0 +1,12 @@
+{
+  "before": "Before",
+  "after": "After",
+  "timeSaved": "절약 시간",
+  "learnMore": "더 알아보기",
+  "getStarted": "시작하기",
+  "light": "라이트",
+  "dark": "다크",
+  "system": "시스템",
+  "unknownError": "알 수 없는 오류",
+  "colorMode": "색상 모드"
+}
