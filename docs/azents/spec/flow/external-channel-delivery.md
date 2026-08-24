@@ -38,8 +38,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-20
-spec_version: 48
+last_verified_at: 2026-08-24
+spec_version: 49
 ---
 
 # External Channel Delivery and Channel Work
@@ -297,9 +297,11 @@ Session title and Agent execution.
   mailbox, wake, or AgentRun. Later invocations on the binding do not repeat the
   joined-presence mutation, and Activity Tracker desired state never contains the
   Session URL.
-- The initial Tracker states that the Agent is checking the message with one
-  `task_card` carrying the `in_progress` state. Once Channel Work exists, one
-  `plan` block carries the Agent-authored title and complete ordered task list.
+- The initial conversational Tracker states that the Agent is checking the message
+  with one `task_card` carrying the `in_progress` state. A Scheduled Task run instead
+  states `Agent is running scheduled task ‘<title>’…` while keeping the objective out
+  of the initial status. Once Channel Work exists, one `plan` block carries the
+  Agent-authored title and complete ordered task list.
   Nested tasks use `task_id`, literal title, Slack status, and optional literal
   rich-text details/output plus labeled URL sources. They omit standalone
   `task_card` block types. The Plan sends no `plan_id`, is read-only, and requires
@@ -315,14 +317,16 @@ Session title and Agent execution.
   not-attempted replies leave deletion `not_attempted`.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
-- Discord creates one joined-presence control and an initial compact Channel Work Embed
-  containing `◉ Agent is checking your message` from the same accepted binding
-  transaction. Later complete snapshots replace that retained message's content with an
-  empty string and its Embed with the current bounded title, status summary, ordered
-  checklist, prioritized context, and labeled sources. Creation and update both send
-  one `View session` link component derived from the current canonical Workspace,
-  Agent, and Session target. Update, delete, replacement, and final-reply cleanup use
-  the same Work-owned Tracker identity and revision fence.
+- Discord creates one joined-presence control and an initial compact Channel Work
+  Embed containing `◉ Agent is checking your message` from the same accepted binding
+  transaction. A Scheduled Task-owned Tracker instead contains
+  `◉ Agent is running scheduled task ‘<title>’…`. Later complete snapshots replace
+  that retained message's content with an empty string and its Embed with the current
+  bounded title, status summary, ordered checklist, prioritized context, and labeled
+  sources. Creation and update both send one `View session` link component derived
+  from the current canonical Workspace, Agent, and Session target. Update, delete,
+  replacement, and final-reply cleanup use the same Work-owned Tracker identity and
+  revision fence.
 - An eligible explicit mention in an existing connected Binding may create one
   idempotent version-3 settings control for that Binding. The control contains only
   provider-native `Conversation settings`, does not repeat joined presence or rewrite

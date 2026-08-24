@@ -191,6 +191,41 @@ def _service() -> tuple[
 
 
 @pytest.mark.asyncio
+async def test_initial_tracker_uses_scheduled_task_activity_copy() -> None:
+    service, _, cycle_repository, provider_repository, action_service = _service()
+    cycle_repository.get_started.return_value = _cycle()
+    cycle_repository.claim_tracker_projection.return_value = _cycle(version=3)
+    plan = _plan(ExternalChannelDeliveryOperation.PROGRESS_CREATE)
+    provider_repository.prepare_binding_effect.return_value = plan
+    action_service.execute_binding_effect.return_value = ProviderMutationOutcome(
+        status="delivered",
+        provider_message_key="slack:tenant:channel:tracker",
+        error_kind=None,
+        error_summary=None,
+    )
+
+    outcome = await service.create_initial_tracker(
+        agent_id=_AGENT_ID,
+        session_id=_SESSION_ID,
+        cycle_id=_CYCLE_ID,
+    )
+
+    assert outcome is not None
+    _, kwargs = provider_repository.prepare_binding_effect.await_args
+    assert kwargs["slack_payload"]["text"] == (
+        "Agent is running scheduled task ‘Daily report’…"
+    )
+    assert kwargs["slack_payload"]["blocks"][0]["title"] == (
+        "Agent is running scheduled task ‘Daily report’…"
+    )
+    assert kwargs["discord_payload"]["embeds"][0]["description"] == (
+        "◉ Agent is running scheduled task ‘Daily report’…"
+    )
+    assert "Prepare the report." not in str(kwargs)
+    cycle_repository.settle_tracker_projection.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_registration_uses_exact_binding_and_returns_immediate_outcome() -> None:
     service, _, _, provider_repository, action_service = _service()
     plan = _plan(ExternalChannelDeliveryOperation.CONTROL_MESSAGE)
