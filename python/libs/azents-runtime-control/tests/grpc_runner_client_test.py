@@ -5,7 +5,13 @@ from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 
 import pytest
-from google.protobuf import timestamp_pb2
+from google.protobuf import (
+    descriptor_pb2,
+    descriptor_pool,
+    message_factory,
+    timestamp_pb2,
+)
+from google.protobuf.message import Message
 
 from azents_runtime_control.grpc_runner_client import (
     GrpcRunnerControlClient,
@@ -48,6 +54,46 @@ class _ObservedRunnerMessages(
             if len(self) >= expected:
                 return
             await self.changed.wait()
+
+
+def test_additive_metrics_payload_is_ignored_by_previous_runner_schema() -> None:
+    """An old protobuf parser skips metrics and continues with known messages."""
+    previous_message_type = _previous_runner_message_type()
+    metrics = runtime_runner_control_pb2.RunnerMessage(
+        connection_id="connection-1",
+        request_id="metrics-1",
+        generation=1,
+        system_metrics=runtime_runner_control_pb2.RunnerSystemMetrics(
+            runtime_id="runtime-1",
+            sequence=1,
+            scope=runtime_runner_control_pb2.RUNNER_SYSTEM_METRICS_SCOPE_CONTAINER,
+            cpu=runtime_runner_control_pb2.RunnerSystemMetricObservation(
+                availability=(
+                    runtime_runner_control_pb2.RUNNER_SYSTEM_METRIC_AVAILABILITY_AVAILABLE
+                ),
+                used=250,
+                total=1000,
+            ),
+        ),
+    )
+    heartbeat = runtime_runner_control_pb2.RunnerMessage(
+        connection_id="connection-1",
+        request_id="heartbeat-1",
+        generation=1,
+        heartbeat=runtime_runner_control_pb2.RunnerHeartbeat(
+            monotonic_sequence=7,
+        ),
+    )
+
+    recognized_payloads: list[str] = []
+    for current_message in (metrics, heartbeat):
+        previous_message = previous_message_type()
+        previous_message.ParseFromString(current_message.SerializeToString())
+        payload = previous_message.WhichOneof("payload")
+        if payload is not None:
+            recognized_payloads.append(payload)
+
+    assert recognized_payloads == ["heartbeat"]
 
 
 @pytest.mark.asyncio
@@ -794,6 +840,51 @@ async def test_grpc_client_maps_file_edit_request_and_success() -> None:
     assert event.final_success.WhichOneof("result") == "file_edit"
     assert event.final_success.file_edit.replacements == 3
     await client.close()
+
+
+def _previous_runner_message_type() -> type[Message]:
+    """Build the pre-metrics RunnerMessage schema used by an old server."""
+    file_descriptor = descriptor_pb2.FileDescriptorProto(
+        name="previous_runtime_runner_control.proto",
+        package="azents.runtime_control.compat",
+        syntax="proto3",
+    )
+    heartbeat = file_descriptor.message_type.add()
+    heartbeat.name = "RunnerHeartbeat"
+    heartbeat_sequence = heartbeat.field.add()
+    heartbeat_sequence.name = "monotonic_sequence"
+    heartbeat_sequence.number = 1
+    heartbeat_sequence.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+    heartbeat_sequence.type = descriptor_pb2.FieldDescriptorProto.TYPE_UINT64
+
+    runner_message = file_descriptor.message_type.add()
+    runner_message.name = "RunnerMessage"
+    payload = runner_message.oneof_decl.add()
+    payload.name = "payload"
+    for name, number, field_type in (
+        ("connection_id", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING),
+        ("request_id", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING),
+        ("generation", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64),
+    ):
+        field = runner_message.field.add()
+        field.name = name
+        field.number = number
+        field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+        field.type = field_type
+    heartbeat_field = runner_message.field.add()
+    heartbeat_field.name = "heartbeat"
+    heartbeat_field.number = 11
+    heartbeat_field.label = descriptor_pb2.FieldDescriptorProto.LABEL_OPTIONAL
+    heartbeat_field.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
+    heartbeat_field.type_name = ".azents.runtime_control.compat.RunnerHeartbeat"
+    heartbeat_field.oneof_index = 0
+
+    pool = descriptor_pool.DescriptorPool()
+    pool.Add(file_descriptor)
+    descriptor = pool.FindMessageTypeByName(
+        "azents.runtime_control.compat.RunnerMessage"
+    )
+    return message_factory.GetMessageClass(descriptor)
 
 
 def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:

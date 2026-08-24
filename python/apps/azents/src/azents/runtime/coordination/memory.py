@@ -16,7 +16,11 @@ from azents.runtime.coordination.data import (
     RuntimeReplyRecord,
     RuntimeRequestEnvelope,
     RuntimeRequestRecord,
+    RuntimeSystemMetricsSample,
 )
+
+_SYSTEM_METRICS_RETENTION = timedelta(hours=1)
+_SYSTEM_METRICS_MAX_SAMPLES = 60
 
 
 @dataclasses.dataclass(frozen=True)
@@ -25,6 +29,14 @@ class InMemoryRequestPending:
 
     consumer_id: str
     claimed_at: datetime
+
+
+@dataclasses.dataclass(frozen=True)
+class _InMemorySystemMetricsSeries:
+    """One generation-scoped bounded metrics series."""
+
+    samples: tuple[RuntimeSystemMetricsSample, ...]
+    expires_at: datetime
 
 
 class InMemoryRuntimeCoordinationStore:
@@ -47,6 +59,7 @@ class InMemoryRuntimeCoordinationStore:
             tuple[RuntimeConnectionKind, str], RuntimeConnectionRecord
         ] = {}
         self._connection_generations: dict[tuple[RuntimeConnectionKind, str], int] = {}
+        self._system_metrics: dict[tuple[str, int], _InMemorySystemMetricsSeries] = {}
 
     async def append_request(
         self,
@@ -403,6 +416,62 @@ class InMemoryRuntimeCoordinationStore:
                 return False
             self._connections.pop(key, None)
             return True
+
+    async def append_runner_system_metrics(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+        sample: RuntimeSystemMetricsSample,
+    ) -> bool:
+        """Atomically append a higher-sequence sample to the bounded series."""
+        async with self._lock:
+            key = (runtime_id, generation)
+            series = self._system_metrics.get(key)
+            if series is not None and series.expires_at <= sample.measured_at:
+                self._system_metrics.pop(key, None)
+                series = None
+            if series is not None and series.samples[-1].sequence >= sample.sequence:
+                return False
+            cutoff = sample.measured_at - _SYSTEM_METRICS_RETENTION
+            retained = (
+                [current for current in series.samples if current.measured_at >= cutoff]
+                if series is not None
+                else []
+            )
+            retained.append(sample)
+            self._system_metrics[key] = _InMemorySystemMetricsSeries(
+                samples=tuple(retained[-_SYSTEM_METRICS_MAX_SAMPLES:]),
+                expires_at=sample.measured_at + _SYSTEM_METRICS_RETENTION,
+            )
+            return True
+
+    async def read_runner_system_metrics(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+        current_time: datetime,
+    ) -> list[RuntimeSystemMetricsSample]:
+        """Read at most one hour and 60 samples for one Runner generation."""
+        async with self._lock:
+            key = (runtime_id, generation)
+            series = self._system_metrics.get(key)
+            if series is None:
+                return []
+            if series.expires_at <= current_time:
+                self._system_metrics.pop(key, None)
+                return []
+            cutoff = current_time - _SYSTEM_METRICS_RETENTION
+            retained = tuple(
+                sample for sample in series.samples if sample.measured_at >= cutoff
+            )
+            if retained != series.samples:
+                self._system_metrics[key] = dataclasses.replace(
+                    series,
+                    samples=retained,
+                )
+            return list(retained[-_SYSTEM_METRICS_MAX_SAMPLES:])
 
 
 def _read_after_cursor[RecordT](

@@ -111,6 +111,71 @@ RUNNER_TRANSFER_FAILURE_STREAM_FAILED: RunnerTransferFailure.ValueType  # 8
 RUNNER_TRANSFER_FAILURE_DESTINATION_FAILED: RunnerTransferFailure.ValueType  # 9
 Global___RunnerTransferFailure: _TypeAlias = RunnerTransferFailure
 
+class _RunnerSystemMetricsScope:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _RunnerSystemMetricsScopeEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RunnerSystemMetricsScope.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    RUNNER_SYSTEM_METRICS_SCOPE_UNSPECIFIED: _RunnerSystemMetricsScope.ValueType  # 0
+    RUNNER_SYSTEM_METRICS_SCOPE_HOST: _RunnerSystemMetricsScope.ValueType  # 1
+    RUNNER_SYSTEM_METRICS_SCOPE_VM: _RunnerSystemMetricsScope.ValueType  # 2
+    RUNNER_SYSTEM_METRICS_SCOPE_CONTAINER: _RunnerSystemMetricsScope.ValueType  # 3
+
+class RunnerSystemMetricsScope(
+    _RunnerSystemMetricsScope, metaclass=_RunnerSystemMetricsScopeEnumTypeWrapper
+): ...
+
+RUNNER_SYSTEM_METRICS_SCOPE_UNSPECIFIED: RunnerSystemMetricsScope.ValueType  # 0
+RUNNER_SYSTEM_METRICS_SCOPE_HOST: RunnerSystemMetricsScope.ValueType  # 1
+RUNNER_SYSTEM_METRICS_SCOPE_VM: RunnerSystemMetricsScope.ValueType  # 2
+RUNNER_SYSTEM_METRICS_SCOPE_CONTAINER: RunnerSystemMetricsScope.ValueType  # 3
+Global___RunnerSystemMetricsScope: _TypeAlias = RunnerSystemMetricsScope
+
+class _RunnerSystemMetricAvailability:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType
+
+class _RunnerSystemMetricAvailabilityEnumTypeWrapper(
+    _enum_type_wrapper._EnumTypeWrapper[_RunnerSystemMetricAvailability.ValueType],
+    _builtins.type,
+):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    RUNNER_SYSTEM_METRIC_AVAILABILITY_UNSPECIFIED: (
+        _RunnerSystemMetricAvailability.ValueType
+    )  # 0
+    RUNNER_SYSTEM_METRIC_AVAILABILITY_AVAILABLE: (
+        _RunnerSystemMetricAvailability.ValueType
+    )  # 1
+    RUNNER_SYSTEM_METRIC_AVAILABILITY_UNAVAILABLE: (
+        _RunnerSystemMetricAvailability.ValueType
+    )  # 2
+    RUNNER_SYSTEM_METRIC_AVAILABILITY_UNSUPPORTED: (
+        _RunnerSystemMetricAvailability.ValueType
+    )  # 3
+
+class RunnerSystemMetricAvailability(
+    _RunnerSystemMetricAvailability,
+    metaclass=_RunnerSystemMetricAvailabilityEnumTypeWrapper,
+): ...
+
+RUNNER_SYSTEM_METRIC_AVAILABILITY_UNSPECIFIED: (
+    RunnerSystemMetricAvailability.ValueType
+)  # 0
+RUNNER_SYSTEM_METRIC_AVAILABILITY_AVAILABLE: (
+    RunnerSystemMetricAvailability.ValueType
+)  # 1
+RUNNER_SYSTEM_METRIC_AVAILABILITY_UNAVAILABLE: (
+    RunnerSystemMetricAvailability.ValueType
+)  # 2
+RUNNER_SYSTEM_METRIC_AVAILABILITY_UNSUPPORTED: (
+    RunnerSystemMetricAvailability.ValueType
+)  # 3
+Global___RunnerSystemMetricAvailability: _TypeAlias = RunnerSystemMetricAvailability
+
 @_typing.final
 class RunnerMessage(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
@@ -124,6 +189,7 @@ class RunnerMessage(_message.Message):
     OPERATION_EVENT_FIELD_NUMBER: _builtins.int
     OPERATION_START_FIELD_NUMBER: _builtins.int
     TRANSFER_RESULT_FIELD_NUMBER: _builtins.int
+    SYSTEM_METRICS_FIELD_NUMBER: _builtins.int
     ERROR_FIELD_NUMBER: _builtins.int
     connection_id: _builtins.str
     request_id: _builtins.str
@@ -141,6 +207,8 @@ class RunnerMessage(_message.Message):
     @_builtins.property
     def transfer_result(self) -> Global___RunnerTransferResult: ...
     @_builtins.property
+    def system_metrics(self) -> Global___RunnerSystemMetrics: ...
+    @_builtins.property
     def error(self) -> Global___RunnerError: ...
     def __init__(
         self,
@@ -154,6 +222,7 @@ class RunnerMessage(_message.Message):
         operation_event: Global___RunnerOperationEvent | None = ...,
         operation_start: Global___RunnerOperationStart | None = ...,
         transfer_result: Global___RunnerTransferResult | None = ...,
+        system_metrics: Global___RunnerSystemMetrics | None = ...,
         error: Global___RunnerError | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
@@ -171,6 +240,8 @@ class RunnerMessage(_message.Message):
         b"register",
         "state_report",
         b"state_report",
+        "system_metrics",
+        b"system_metrics",
         "transfer_result",
         b"transfer_result",
     ]
@@ -196,6 +267,8 @@ class RunnerMessage(_message.Message):
         b"request_id",
         "state_report",
         b"state_report",
+        "system_metrics",
+        b"system_metrics",
         "transfer_result",
         b"transfer_result",
     ]
@@ -207,6 +280,7 @@ class RunnerMessage(_message.Message):
         "operation_event",
         "operation_start",
         "transfer_result",
+        "system_metrics",
         "error",
     ]
     _WhichOneofArgType_payload: _TypeAlias = _typing.Literal["payload", b"payload"]
@@ -979,6 +1053,107 @@ class RunnerStateReport(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___RunnerStateReport: _TypeAlias = RunnerStateReport
+
+@_typing.final
+class RunnerSystemMetricObservation(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    AVAILABILITY_FIELD_NUMBER: _builtins.int
+    USED_FIELD_NUMBER: _builtins.int
+    TOTAL_FIELD_NUMBER: _builtins.int
+    availability: Global___RunnerSystemMetricAvailability.ValueType
+    used: _builtins.int
+    total: _builtins.int
+    def __init__(
+        self,
+        *,
+        availability: Global___RunnerSystemMetricAvailability.ValueType = ...,
+        used: _builtins.int | None = ...,
+        total: _builtins.int | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "_total", b"_total", "_used", b"_used", "total", b"total", "used", b"used"
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "_total",
+        b"_total",
+        "_used",
+        b"_used",
+        "availability",
+        b"availability",
+        "total",
+        b"total",
+        "used",
+        b"used",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    _WhichOneofReturnType__total: _TypeAlias = _typing.Literal["total"]
+    _WhichOneofArgType__total: _TypeAlias = _typing.Literal["_total", b"_total"]
+    _WhichOneofReturnType__used: _TypeAlias = _typing.Literal["used"]
+    _WhichOneofArgType__used: _TypeAlias = _typing.Literal["_used", b"_used"]
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__total
+    ) -> _WhichOneofReturnType__total | None: ...
+    @_typing.overload
+    def WhichOneof(
+        self, oneof_group: _WhichOneofArgType__used
+    ) -> _WhichOneofReturnType__used | None: ...
+
+Global___RunnerSystemMetricObservation: _TypeAlias = RunnerSystemMetricObservation
+
+@_typing.final
+class RunnerSystemMetrics(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    RUNTIME_ID_FIELD_NUMBER: _builtins.int
+    SEQUENCE_FIELD_NUMBER: _builtins.int
+    SCOPE_FIELD_NUMBER: _builtins.int
+    CPU_FIELD_NUMBER: _builtins.int
+    MEMORY_FIELD_NUMBER: _builtins.int
+    DISK_FIELD_NUMBER: _builtins.int
+    runtime_id: _builtins.str
+    sequence: _builtins.int
+    scope: Global___RunnerSystemMetricsScope.ValueType
+    @_builtins.property
+    def cpu(self) -> Global___RunnerSystemMetricObservation: ...
+    @_builtins.property
+    def memory(self) -> Global___RunnerSystemMetricObservation: ...
+    @_builtins.property
+    def disk(self) -> Global___RunnerSystemMetricObservation: ...
+    def __init__(
+        self,
+        *,
+        runtime_id: _builtins.str = ...,
+        sequence: _builtins.int = ...,
+        scope: Global___RunnerSystemMetricsScope.ValueType = ...,
+        cpu: Global___RunnerSystemMetricObservation | None = ...,
+        memory: Global___RunnerSystemMetricObservation | None = ...,
+        disk: Global___RunnerSystemMetricObservation | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal[
+        "cpu", b"cpu", "disk", b"disk", "memory", b"memory"
+    ]
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "cpu",
+        b"cpu",
+        "disk",
+        b"disk",
+        "memory",
+        b"memory",
+        "runtime_id",
+        b"runtime_id",
+        "scope",
+        b"scope",
+        "sequence",
+        b"sequence",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RunnerSystemMetrics: _TypeAlias = RunnerSystemMetrics
 
 @_typing.final
 class RunnerOperationRequest(_message.Message):

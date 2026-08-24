@@ -3,6 +3,10 @@
 import datetime
 from typing import Literal
 
+from azents_runtime_control.system_metrics import (
+    RunnerSystemMetricAvailability,
+    RunnerSystemMetricsScope,
+)
 from pydantic import BaseModel, Field, field_validator
 from typing_extensions import Self
 
@@ -38,6 +42,14 @@ from azents.services.agent_runtime.lifecycle_data import (
     AgentRuntimeReadOutput,
     AgentRuntimeRemovalOutput,
     AgentRuntimeRemovalProgress,
+)
+from azents.services.agent_runtime_system_metrics.data import (
+    AgentRuntimeSystemMetricsOutput,
+    RuntimeSystemMetricCurrent,
+    RuntimeSystemMetricObservation,
+    RuntimeSystemMetricsSample,
+    RuntimeSystemMetricsSummary,
+    RuntimeSystemMetricState,
 )
 
 
@@ -510,6 +522,95 @@ class AgentRuntimeResponse(BaseModel):
                 data.actions,
                 from_attributes=True,
             ),
+        )
+
+
+class AgentRuntimeSystemMetricCurrentResponse(BaseModel):
+    """Current public projection for one Runtime metric."""
+
+    state: RuntimeSystemMetricState
+    measured_at: datetime.datetime | None
+    used: int | None
+    total: int | None
+    percentage: float | None
+
+    @classmethod
+    def convert_from(
+        cls,
+        data: RuntimeSystemMetricCurrent,
+    ) -> Self:
+        """Convert one current metric projection."""
+        return cls.model_validate(data, from_attributes=True)
+
+
+class AgentRuntimeSystemMetricObservationResponse(BaseModel):
+    """One normalized public observation in a retained sample."""
+
+    availability: RunnerSystemMetricAvailability
+    used: int | None
+    total: int | None
+
+    @classmethod
+    def convert_from(
+        cls,
+        data: RuntimeSystemMetricObservation,
+    ) -> Self:
+        """Convert one retained metric observation."""
+        return cls.model_validate(data, from_attributes=True)
+
+
+class AgentRuntimeSystemMetricsSampleResponse(BaseModel):
+    """One retained public Runtime metrics sample."""
+
+    measured_at: datetime.datetime
+    scope: RunnerSystemMetricsScope
+    cpu: AgentRuntimeSystemMetricObservationResponse
+    memory: AgentRuntimeSystemMetricObservationResponse
+    disk: AgentRuntimeSystemMetricObservationResponse
+
+    @classmethod
+    def convert_from(
+        cls,
+        data: RuntimeSystemMetricsSample,
+    ) -> Self:
+        """Convert one retained sample."""
+        return cls(
+            measured_at=data.measured_at,
+            scope=data.scope,
+            cpu=AgentRuntimeSystemMetricObservationResponse.convert_from(data.cpu),
+            memory=AgentRuntimeSystemMetricObservationResponse.convert_from(
+                data.memory
+            ),
+            disk=AgentRuntimeSystemMetricObservationResponse.convert_from(data.disk),
+        )
+
+
+class AgentRuntimeSystemMetricsResponse(BaseModel):
+    """Dedicated privacy-safe Runtime system-metrics overview."""
+
+    summary: RuntimeSystemMetricsSummary
+    scope: RunnerSystemMetricsScope | None
+    cpu: AgentRuntimeSystemMetricCurrentResponse
+    memory: AgentRuntimeSystemMetricCurrentResponse
+    disk: AgentRuntimeSystemMetricCurrentResponse
+    samples: list[AgentRuntimeSystemMetricsSampleResponse]
+
+    @classmethod
+    def convert_from(
+        cls,
+        data: AgentRuntimeSystemMetricsOutput,
+    ) -> Self:
+        """Convert the dedicated metrics read model."""
+        return cls(
+            summary=data.summary,
+            scope=data.scope,
+            cpu=AgentRuntimeSystemMetricCurrentResponse.convert_from(data.cpu),
+            memory=AgentRuntimeSystemMetricCurrentResponse.convert_from(data.memory),
+            disk=AgentRuntimeSystemMetricCurrentResponse.convert_from(data.disk),
+            samples=[
+                AgentRuntimeSystemMetricsSampleResponse.convert_from(sample)
+                for sample in data.samples
+            ],
         )
 
 

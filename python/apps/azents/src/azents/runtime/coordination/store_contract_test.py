@@ -9,6 +9,11 @@ from typing import cast
 
 import pytest
 import pytest_asyncio
+from azents_runtime_control.system_metrics import (
+    RunnerSystemMetricAvailability,
+    RunnerSystemMetricObservation,
+    RunnerSystemMetricsScope,
+)
 from redis.asyncio import Redis
 
 from azents.runtime.coordination.data import (
@@ -21,6 +26,7 @@ from azents.runtime.coordination.data import (
     RuntimeReplyEvent,
     RuntimeReplyEventType,
     RuntimeRequestEnvelope,
+    RuntimeSystemMetricsSample,
 )
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
@@ -543,6 +549,160 @@ async def test_append_reply_for_operation_rejects_late_final(
     assert replies[0].event.payload["message"] == "canceled"
 
 
+@pytest.mark.asyncio
+async def test_system_metrics_series_rejects_non_increasing_sequences(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Only a higher sequence appends to one generation-scoped series."""
+    measured_at = _now()
+    first = _metrics_sample(sequence=1, measured_at=measured_at)
+    second = _metrics_sample(
+        sequence=2,
+        measured_at=measured_at + timedelta(minutes=1),
+    )
+
+    assert await store.append_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=7,
+        sample=first,
+    )
+    assert not await store.append_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=7,
+        sample=first,
+    )
+    assert await store.append_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=7,
+        sample=second,
+    )
+    assert not await store.append_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=7,
+        sample=first,
+    )
+
+    series = await store.read_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=7,
+        current_time=second.measured_at,
+    )
+
+    assert [sample.sequence for sample in series] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_system_metrics_series_is_bounded_and_generation_scoped(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """The store retains at most 60 samples without crossing generations."""
+    start = _now()
+    for sequence in range(1, 62):
+        assert await store.append_runner_system_metrics(
+            runtime_id="runtime-1",
+            generation=7,
+            sample=_metrics_sample(
+                sequence=sequence,
+                measured_at=start + timedelta(minutes=sequence - 1),
+            ),
+        )
+    assert await store.append_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=8,
+        sample=_metrics_sample(sequence=1, measured_at=start + timedelta(hours=1)),
+    )
+
+    current = await store.read_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=7,
+        current_time=start + timedelta(hours=1),
+    )
+    replacement = await store.read_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=8,
+        current_time=start + timedelta(hours=1),
+    )
+
+    assert len(current) == 60
+    assert current[0].sequence == 2
+    assert current[-1].sequence == 61
+    assert [sample.sequence for sample in replacement] == [1]
+
+
+@pytest.mark.asyncio
+async def test_system_metrics_series_filters_and_expires_after_one_hour(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """A sample older than one hour is never returned."""
+    measured_at = _now()
+    assert await store.append_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=7,
+        sample=_metrics_sample(sequence=1, measured_at=measured_at),
+    )
+
+    series = await store.read_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=7,
+        current_time=measured_at + timedelta(hours=1, microseconds=1),
+    )
+
+    assert series == []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_system_metrics_append_preserves_highest_sequence(
+    store: RuntimeCoordinationStore,
+) -> None:
+    """Concurrent higher sequences cannot be replaced by a lower sequence."""
+    measured_at = _now()
+    results = await asyncio.gather(
+        store.append_runner_system_metrics(
+            runtime_id="runtime-1",
+            generation=7,
+            sample=_metrics_sample(sequence=2, measured_at=measured_at),
+        ),
+        store.append_runner_system_metrics(
+            runtime_id="runtime-1",
+            generation=7,
+            sample=_metrics_sample(
+                sequence=3,
+                measured_at=measured_at + timedelta(microseconds=1),
+            ),
+        ),
+    )
+    series = await store.read_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=7,
+        current_time=measured_at + timedelta(seconds=1),
+    )
+
+    assert any(results)
+    assert series[-1].sequence == 3
+    assert [sample.sequence for sample in series] == sorted(
+        {sample.sequence for sample in series}
+    )
+
+
+@pytest.mark.asyncio
+async def test_redis_system_metrics_append_refreshes_one_hour_ttl(
+    redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
+) -> None:
+    """Redis retains the bounded series for one hour from the last append."""
+    store, client = redis_store
+    assert await store.append_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=7,
+        sample=_metrics_sample(sequence=1, measured_at=_now()),
+    )
+
+    keys = await client.keys("*system-metrics*")
+
+    assert len(keys) == 1
+    ttl = await client.ttl(keys[0])
+    assert 0 < ttl <= 3600
+
+
 async def test_connection_registry_issues_generation_fences(
     store: RuntimeCoordinationStore,
 ) -> None:
@@ -854,6 +1014,31 @@ def _fake_connection_json(
             "expires_at": expires_at.isoformat(),
             "metadata": {"workspace_path": "/workspace/agent"},
         }
+    )
+
+
+def _metrics_sample(
+    *,
+    sequence: int,
+    measured_at: datetime,
+) -> RuntimeSystemMetricsSample:
+    available = RunnerSystemMetricObservation(
+        availability=RunnerSystemMetricAvailability.AVAILABLE,
+        used=sequence * 100,
+        total=1000,
+    )
+    unavailable = RunnerSystemMetricObservation(
+        availability=RunnerSystemMetricAvailability.UNAVAILABLE,
+        used=None,
+        total=None,
+    )
+    return RuntimeSystemMetricsSample(
+        sequence=sequence,
+        measured_at=measured_at,
+        scope=RunnerSystemMetricsScope.CONTAINER,
+        cpu=unavailable if sequence == 1 else available,
+        memory=available,
+        disk=available,
     )
 
 

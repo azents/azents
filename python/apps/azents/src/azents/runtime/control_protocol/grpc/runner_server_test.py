@@ -9,6 +9,9 @@ from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from azents_runtime_control.grpc_runner_client import (
+    runner_system_metrics_to_message,
+)
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
     runtime_runner_control_pb2,
@@ -19,6 +22,14 @@ from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerStat
 from azents_runtime_control.runner_transfer import RunnerTransferResult
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
+)
+from azents_runtime_control.system_metrics import (
+    RUNNER_SYSTEM_METRICS_CAPABILITY,
+    RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES,
+    RunnerSystemMetricAvailability,
+    RunnerSystemMetricObservation,
+    RunnerSystemMetricsReport,
+    RunnerSystemMetricsScope,
 )
 from google.protobuf import timestamp_pb2
 
@@ -442,6 +453,224 @@ async def test_runner_grpc_registers_and_acks_heartbeat() -> None:
     assert sink.reports[-1].runner_state is SharedRunnerState.UNKNOWN
     assert sink.reports[-1].diagnostic["reason"] == "runner_stream_closed"
     assert sink.registrations[0].runtime_configuration.configuration_sequence == 1
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_accepts_exact_limit_metrics_and_rejects_oversize() -> None:
+    """The 4 KiB boundary is accepted while a larger report is dropped."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    servicer = _servicer(service, store, FakeStateSink())
+    inbound = QueueIterator()
+    await inbound.put(_metrics_register_message())
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="metrics-limit",
+            generation=1,
+            system_metrics=_sized_system_metrics_message(
+                RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES,
+                sequence=1,
+            ),
+        )
+    )
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="metrics-oversize",
+            generation=1,
+            system_metrics=_sized_system_metrics_message(
+                RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES + 1,
+                sequence=2,
+            ),
+        )
+    )
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="heartbeat-after-metrics",
+            generation=1,
+            heartbeat=runtime_runner_control_pb2.RunnerHeartbeat(
+                monotonic_sequence=1,
+            ),
+        )
+    )
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    heartbeat_ack = await anext(stream)
+    series = await store.read_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=accepted.register_accepted.generation,
+        current_time=datetime.now(UTC),
+    )
+    await _close_stream(stream)
+
+    assert heartbeat_ack.request_id == "heartbeat-after-metrics"
+    assert [sample.sequence for sample in series] == [1]
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_drops_invalid_and_incapable_metrics_without_closing() -> (
+    None
+):
+    """Invalid and capability-mismatched reports do not affect heartbeats."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    servicer = _servicer(service, store, FakeStateSink())
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="metrics-invalid",
+            generation=1,
+            system_metrics=runtime_runner_control_pb2.RunnerSystemMetrics(
+                runtime_id="runtime-1",
+                sequence=0,
+            ),
+        )
+    )
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="metrics-incapable",
+            generation=1,
+            system_metrics=runner_system_metrics_to_message(
+                _system_metrics_report(sequence=1)
+            ),
+        )
+    )
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="heartbeat-after-rejections",
+            generation=1,
+            heartbeat=runtime_runner_control_pb2.RunnerHeartbeat(
+                monotonic_sequence=2,
+            ),
+        )
+    )
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    heartbeat_ack = await anext(stream)
+    series = await store.read_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=accepted.register_accepted.generation,
+        current_time=datetime.now(UTC),
+    )
+    await _close_stream(stream)
+
+    assert heartbeat_ack.request_id == "heartbeat-after-rejections"
+    assert series == []
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_drops_stale_and_wrong_runtime_metrics_without_closing() -> (
+    None
+):
+    """Generation and Runtime identity fencing are metrics-local failures."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    servicer = _servicer(service, store, FakeStateSink())
+    inbound = QueueIterator()
+    await inbound.put(_metrics_register_message())
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="metrics-stale",
+            generation=2,
+            system_metrics=runner_system_metrics_to_message(
+                _system_metrics_report(sequence=1)
+            ),
+        )
+    )
+    wrong_runtime = runner_system_metrics_to_message(_system_metrics_report(sequence=2))
+    wrong_runtime.runtime_id = "runtime-2"
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="metrics-wrong-runtime",
+            generation=1,
+            system_metrics=wrong_runtime,
+        )
+    )
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="heartbeat-after-fencing",
+            generation=1,
+            heartbeat=runtime_runner_control_pb2.RunnerHeartbeat(
+                monotonic_sequence=3,
+            ),
+        )
+    )
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    heartbeat_ack = await anext(stream)
+    series = await store.read_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=accepted.register_accepted.generation,
+        current_time=datetime.now(UTC),
+    )
+    await _close_stream(stream)
+
+    assert heartbeat_ack.request_id == "heartbeat-after-fencing"
+    assert series == []
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_isolates_metrics_store_failure_from_heartbeat() -> None:
+    """A metrics append exception drops only that sample."""
+
+    class _FailingMetricsStore(InMemoryRuntimeCoordinationStore):
+        async def append_runner_system_metrics(self, **kwargs: object) -> bool:
+            del kwargs
+            raise RuntimeError("metrics store unavailable")
+
+    store = _FailingMetricsStore()
+    service = RuntimeControlProtocolService(store)
+    servicer = RuntimeRunnerControlGrpcServicer(
+        control_protocol=service,
+        coordination_store=store,
+        state_sink=FakeStateSink(),
+        owner_replica_id="control-a",
+        consumer_id="runner-consumer-a",
+        runner_authenticator=FakeRunnerAuthenticator(),
+        transfer_result_sink=RecordingTransferResultSink(),
+        operation_block_ms=1,
+    )
+    inbound = QueueIterator()
+    await inbound.put(_metrics_register_message())
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="metrics-store-failure",
+            generation=1,
+            system_metrics=runner_system_metrics_to_message(
+                _system_metrics_report(sequence=1)
+            ),
+        )
+    )
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="heartbeat-after-store-failure",
+            generation=1,
+            heartbeat=runtime_runner_control_pb2.RunnerHeartbeat(
+                monotonic_sequence=4,
+            ),
+        )
+    )
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    await anext(stream)
+    heartbeat_ack = await anext(stream)
+    await _close_stream(stream)
+
+    assert heartbeat_ack.request_id == "heartbeat-after-store-failure"
 
 
 @pytest.mark.asyncio
@@ -1829,6 +2058,69 @@ def _register_message(
             runtime_configuration=_runtime_configuration_evidence_message(),
         ),
     )
+
+
+def _metrics_register_message() -> runtime_runner_control_pb2.RunnerMessage:
+    message = _register_message()
+    message.register.capabilities.append(RUNNER_SYSTEM_METRICS_CAPABILITY)
+    return message
+
+
+def _system_metrics_report(*, sequence: int) -> RunnerSystemMetricsReport:
+    return RunnerSystemMetricsReport(
+        runtime_id="runtime-1",
+        sequence=sequence,
+        scope=RunnerSystemMetricsScope.CONTAINER,
+        cpu=RunnerSystemMetricObservation(
+            availability=RunnerSystemMetricAvailability.AVAILABLE,
+            used=250,
+            total=1000,
+        ),
+        memory=RunnerSystemMetricObservation(
+            availability=RunnerSystemMetricAvailability.AVAILABLE,
+            used=1024,
+            total=4096,
+        ),
+        disk=RunnerSystemMetricObservation(
+            availability=RunnerSystemMetricAvailability.UNAVAILABLE,
+            used=None,
+            total=None,
+        ),
+    )
+
+
+def _sized_system_metrics_message(
+    target_size: int,
+    *,
+    sequence: int,
+) -> runtime_runner_control_pb2.RunnerSystemMetrics:
+    message = runner_system_metrics_to_message(
+        _system_metrics_report(sequence=sequence)
+    )
+    serialized = message.SerializeToString(deterministic=True)
+    unknown_tag = _encode_varint((99 << 3) | 2)
+    payload_size = target_size - len(serialized) - len(unknown_tag)
+    while True:
+        length_prefix = _encode_varint(payload_size)
+        adjusted = target_size - len(serialized) - len(unknown_tag) - len(length_prefix)
+        if adjusted == payload_size:
+            break
+        payload_size = adjusted
+    assert payload_size >= 0
+    message.ParseFromString(
+        serialized + unknown_tag + _encode_varint(payload_size) + (b"x" * payload_size)
+    )
+    assert message.ByteSize() == target_size
+    return message
+
+
+def _encode_varint(value: int) -> bytes:
+    encoded = bytearray()
+    while value > 0x7F:
+        encoded.append((value & 0x7F) | 0x80)
+        value >>= 7
+    encoded.append(value)
+    return bytes(encoded)
 
 
 def _transfer_envelope() -> RuntimeRequestEnvelope:

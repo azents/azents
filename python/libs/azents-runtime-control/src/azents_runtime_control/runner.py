@@ -20,6 +20,10 @@ from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
     validate_runtime_configuration_evidence,
 )
+from azents_runtime_control.system_metrics import (
+    CollectedRunnerSystemMetrics,
+    RunnerSystemMetricsReport,
+)
 
 JsonValue: TypeAlias = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -219,6 +223,15 @@ class RunnerControlClient(Protocol):
         """Persist one Runner state report."""
         ...
 
+    async def report_runner_system_metrics(
+        self,
+        report: RunnerSystemMetricsReport,
+        *,
+        generation: int,
+    ) -> None:
+        """Publish one informational system-metrics report."""
+        ...
+
     async def claim_next_runner_operation(
         self,
         *,
@@ -261,6 +274,14 @@ class RuntimeRunnerOperations(Protocol):
         ...
 
 
+class RunnerSystemMetricsCollector(Protocol):
+    """Collect normalized metrics from the Runner execution environment."""
+
+    def collect(self) -> CollectedRunnerSystemMetrics:
+        """Collect one independent CPU, memory, and disk observation."""
+        ...
+
+
 Clock: TypeAlias = Callable[[], datetime]
 Monotonic: TypeAlias = Callable[[], float]
 OwnerKey: TypeAlias = str | None
@@ -270,6 +291,7 @@ _DEFAULT_MAX_CONCURRENT_OPERATIONS = 50
 _DEFAULT_MAX_PENDING_OPERATIONS_PER_OWNER = 100
 _DEFAULT_MAX_PENDING_OPERATIONS = 1000
 _DEFAULT_MAX_CONCURRENT_CONTROL_OPERATIONS = 4
+_SYSTEM_METRICS_INTERVAL_SECONDS = 60.0
 _CONTROL_OPERATION_TYPES = frozenset({"process.terminate_session"})
 
 
@@ -297,6 +319,7 @@ class RunnerRunLoop:
         registration: RunnerRegistration,
         connection_id: str,
         consumer_id: str,
+        system_metrics_collector: RunnerSystemMetricsCollector | None,
         clock: Clock | None = None,
         monotonic: Monotonic | None = None,
         max_concurrent_operations_per_session: int = (
@@ -330,10 +353,13 @@ class RunnerRunLoop:
         self._registration = registration
         self._connection_id = connection_id
         self._consumer_id = consumer_id
+        self._system_metrics_collector = system_metrics_collector
         self._clock = clock or _utc_now
         self._monotonic = monotonic or time.monotonic
         self._accepted: RunnerRegistrationAccepted | None = None
         self._last_heartbeat_at: float | None = None
+        self._last_system_metrics_at: float | None = None
+        self._system_metrics_sequence = 0
         self._runtime_configuration = registration.runtime_configuration
         self._max_concurrent_operations_per_session = (
             max_concurrent_operations_per_session
@@ -380,12 +406,14 @@ class RunnerRunLoop:
             },
         )
         await self._report_state()
+        await self._report_system_metrics_if_due(accepted, force=True)
         return accepted
 
     async def run_once(self, *, block_ms: int = 500) -> bool:
         """Receive, admit, or schedule one unit of Runner work."""
         accepted = self._require_accepted()
         await self._heartbeat_if_due(accepted)
+        await self._report_system_metrics_if_due(accepted, force=False)
         await self._reap_finished_operations()
         has_pending = bool(
             self._pending_operation_count or self._pending_control_operations
@@ -704,6 +732,47 @@ class RunnerRunLoop:
                     self._runtime_configuration = evidence
                     await self._report_state()
         self._last_heartbeat_at = now
+
+    async def _report_system_metrics_if_due(
+        self,
+        accepted: RunnerRegistrationAccepted,
+        *,
+        force: bool,
+    ) -> None:
+        collector = self._system_metrics_collector
+        if collector is None:
+            return
+        now = self._monotonic()
+        if (
+            not force
+            and self._last_system_metrics_at is not None
+            and now - self._last_system_metrics_at < _SYSTEM_METRICS_INTERVAL_SECONDS
+        ):
+            return
+        self._last_system_metrics_at = now
+        try:
+            collected = collector.collect()
+        except Exception:
+            _LOGGER.exception(
+                "Runtime Runner system metrics collection failed",
+                extra={
+                    "runtime_id": accepted.runtime_id,
+                    "runner_generation": accepted.generation,
+                },
+            )
+            return
+        self._system_metrics_sequence += 1
+        await self._client.report_runner_system_metrics(
+            RunnerSystemMetricsReport(
+                runtime_id=accepted.runtime_id,
+                sequence=self._system_metrics_sequence,
+                scope=collected.scope,
+                cpu=collected.cpu,
+                memory=collected.memory,
+                disk=collected.disk,
+            ),
+            generation=accepted.generation,
+        )
 
     async def _reap_finished_operations(self) -> None:
         reaped_ordinary = self._reap_task_set(
