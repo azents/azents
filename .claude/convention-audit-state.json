@@ -1,15 +1,14 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-08-23T22:32:41Z",
+    "checked_at": "2026-08-24T22:40:23Z",
     "checked_ruleset_revisions": [
       "1e4953945f6a9596a55bdba94be8ebe2866574df610eeb8c3a2c34a5076db388",
       "2b591f0165b54d8002a93e0d82e87962d74f05a0099ea778ee9b4c1c9a786cce",
       "4a479f485555c3db64112b8892b6197298114771f2b1cf0078dcf192dd701a78",
       "6f64a6d2a170eb2b8238c8c3d3df974431c91026518e92a5344fe3b8310579f3",
-      "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
       "d9dfd01f3c4842450c9e23c3318946d7b5b764e41309d900ef221c6ae8a986a0"
     ],
-    "checked_through_commit": "fa1ecdcd88a31ddfacc7ef0ed2545b729033805d"
+    "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
   },
   "ranges": {
     ".::bucket-1-of-8": {
@@ -193,34 +192,34 @@
       "checked_through_commit": "fa1ecdcd88a31ddfacc7ef0ed2545b729033805d"
     },
     "infra/**::bucket-1-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-2-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-3-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-4-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-5-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-6-of-8": {
-      "checked_at": null,
-      "checked_ruleset_revision": null,
-      "checked_through_commit": null
+      "checked_at": "2026-08-24T22:40:23Z",
+      "checked_ruleset_revision": "75c5700262cf77e0536d14dd1eb4ee86d3295723d5122ee1dcb000fc839941ae",
+      "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "infra/**::bucket-7-of-8": {
       "checked_at": null,
