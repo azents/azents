@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import azentsadminclient
 import azentspublicclient
+from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
@@ -21,6 +22,9 @@ from azentspublicclient.models.create_workspace_request import CreateWorkspaceRe
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
+)
+from azentspublicclient.models.runtime_system_metrics_summary import (
+    RuntimeSystemMetricsSummary,
 )
 from azentspublicclient.models.secrets import Secrets
 from selenium.webdriver.common.by import By
@@ -81,9 +85,14 @@ def _login_main_web(
     _wait(driver).until(ec.url_contains("/workspaces"))
 
 
-def _assert_visible_text(driver: WebDriver, text: str) -> None:
+def _assert_visible_text(
+    driver: WebDriver,
+    text: str,
+    *,
+    timeout_seconds: int = 20,
+) -> None:
     """Wait for exact visible text."""
-    _wait(driver).until(
+    WebDriverWait(driver, timeout_seconds).until(
         ec.visibility_of_element_located((By.XPATH, f"//*[normalize-space()={text!r}]"))
     )
 
@@ -93,6 +102,37 @@ def _click_button(driver: WebDriver, text: str) -> None:
     _wait(driver).until(
         ec.element_to_be_clickable((By.XPATH, f"//button[normalize-space()={text!r}]"))
     ).click()
+
+
+def _wait_for_runtime_metrics(
+    driver: WebDriver,
+    *,
+    runtime_api: AgentRuntimeV1Api,
+    token: str,
+    handle: str,
+    agent_id: str,
+) -> None:
+    """Wait for the current Runner generation to publish usable metrics."""
+
+    def metrics_are_ready(_: WebDriver) -> bool:
+        metrics = runtime_api.agent_runtime_v1_get_agent_runtime_system_metrics(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=_headers(token),
+        )
+        return (
+            metrics.summary
+            in {
+                RuntimeSystemMetricsSummary.FRESH,
+                RuntimeSystemMetricsSummary.PARTIAL,
+            }
+            and metrics.scope is not None
+            and bool(metrics.samples)
+            and metrics.memory.used is not None
+            and metrics.disk.used is not None
+        )
+
+    WebDriverWait(driver, 120, poll_frequency=1).until(metrics_are_ready)
 
 
 def _create_workspace(
@@ -241,6 +281,90 @@ def test_runtime_free_add_and_remove_progress(
     _assert_visible_text(browser_driver, "Runtime was added.")
     _assert_visible_text(browser_driver, "Managed")
     _assert_visible_text(browser_driver, "Temporary Runtime controls")
+    _assert_visible_text(browser_driver, "Permanently remove managed Runtime")
+
+    _click_button(browser_driver, "Start")
+    _wait_for_runtime_metrics(
+        browser_driver,
+        runtime_api=AgentRuntimeV1Api(public_api_client),
+        token=workspace.token,
+        handle=workspace.handle,
+        agent_id=agent.id,
+    )
+    _assert_visible_text(browser_driver, "System metrics")
+    _assert_visible_text(browser_driver, "CPU")
+    _assert_visible_text(browser_driver, "Memory")
+    _assert_visible_text(browser_driver, "Disk")
+    _assert_visible_text(browser_driver, "Scope: Container", timeout_seconds=120)
+    _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                "[aria-label='Recent one-hour usage trend'] circle",
+            )
+        )
+    )
+
+    browser_driver.set_window_size(1440, 1000)
+    browser_driver.get(
+        f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/sessions/new"
+    )
+    message_input = _wait(browser_driver).until(
+        ec.element_to_be_clickable((By.NAME, "message"))
+    )
+    message_input.send_keys("Verify Runtime metrics", Keys.ENTER)
+    _wait(browser_driver).until(
+        lambda driver: (
+            "/sessions/" in driver.current_url
+            and not driver.current_url.endswith("/sessions/new")
+        )
+    )
+    session_url = browser_driver.current_url
+    _assert_visible_text(browser_driver, "System metrics", timeout_seconds=120)
+    _assert_visible_text(browser_driver, "Scope: Container")
+    _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                "[aria-label='Recent one-hour usage trend'] circle",
+            )
+        )
+    )
+
+    browser_driver.get(
+        f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"
+    )
+    _assert_visible_text(browser_driver, "System metrics")
+    browser_driver.get(session_url)
+    _assert_visible_text(browser_driver, "System metrics")
+    _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                "[aria-label='Recent one-hour usage trend'] circle",
+            )
+        )
+    )
+
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (By.XPATH, "//*[@role='tab' and normalize-space()='Settings']")
+        )
+    ).click()
+    _click_button(browser_driver, "Stop runtime")
+    _assert_visible_text(browser_driver, "Runtime stopped", timeout_seconds=120)
+    _wait(browser_driver).until(
+        ec.visibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                "[aria-label='Recent one-hour usage trend'] circle",
+            )
+        )
+    )
+
+    browser_driver.get(
+        f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"
+    )
     _assert_visible_text(browser_driver, "Permanently remove managed Runtime")
     _click_button(browser_driver, "Remove Runtime")
     _assert_visible_text(browser_driver, "Permanently remove Runtime?")

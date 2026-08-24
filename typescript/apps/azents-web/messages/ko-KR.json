@@ -3016,5 +3016,45 @@
       "conflict": "이 요청은 더 이상 처리할 수 없습니다. 만료되었거나 다른 곳에서 결정되었거나 연결이 해제된 채널의 요청일 수 있습니다.",
       "action": "결정을 저장하지 못했습니다. 다시 시도하세요."
     }
+  },
+  "runtimeMetrics": {
+    "title": "시스템 메트릭",
+    "description": "Runner에서 관측한 최근 1시간의 사용량입니다.",
+    "loading": "Runtime 메트릭을 불러오는 중…",
+    "errorTitle": "Runtime 메트릭을 불러오지 못했습니다",
+    "scope": "범위: {scope}",
+    "scopes": {
+      "host": "호스트",
+      "vm": "가상 머신",
+      "container": "컨테이너"
+    },
+    "summaries": {
+      "fresh": "최신",
+      "partial": "일부 사용 가능",
+      "stale": "오래됨",
+      "unavailable": "사용 불가",
+      "unsupported": "지원하지 않음",
+      "stopped": "Runtime 중지됨",
+      "disconnected": "Runner 연결 끊김"
+    },
+    "metrics": {
+      "cpu": "CPU",
+      "memory": "메모리",
+      "disk": "디스크"
+    },
+    "states": {
+      "fresh": "최신",
+      "stale": "오래됨",
+      "unavailable": "사용 불가",
+      "unsupported": "지원하지 않음",
+      "stopped": "중지됨",
+      "disconnected": "연결 끊김"
+    },
+    "measuredAt": "{value} 측정",
+    "notMeasured": "아직 측정값 없음",
+    "usedOfTotal": "{total} 중 {used}",
+    "emptyTrend": "보존된 샘플 없음",
+    "trendLabel": "최근 1시간 사용량 추이",
+    "cpuUnit": "코어"
   }
 }

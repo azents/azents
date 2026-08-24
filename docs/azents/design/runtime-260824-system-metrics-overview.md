@@ -2,6 +2,7 @@
 title: "Runtime System Metrics Overview Design"
 created: 2026-08-24
 updated: 2026-08-24
+implemented: 2026-08-24
 tags: [runtime, metrics, backend, frontend, observability]
 document_role: primary
 document_type: design

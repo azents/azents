@@ -69,6 +69,10 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
+  - typescript/apps/azents-web/src/features/runtime-metrics/**
+  - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
+  - typescript/apps/azents-web/src/trpc/routers/chat.ts
 api_routes:
   - /workspace/v1
   - /workspace-user/v1
@@ -95,12 +99,13 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
+  - /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-23
-spec_version: 70
+last_verified_at: 2026-08-24
+spec_version: 71
 ---
 
 # Workspace & Membership
@@ -229,6 +234,16 @@ and durable removal progress as source of truth and returns server-computed Work
 actions.
 
 UI renders server-calculated summary/actions. It does not recompute availability on frontend by combining Provider/Runner raw state. Frontend-side judgment is limited to API failure and network error.
+
+Managed Runtime surfaces also render the server-derived system-metrics overview. One
+Agent-authorized response supplies CPU, memory, disk, Runner-observable scope, freshness/lifecycle
+states, and a bounded one-hour series without Runtime, Runner, Provider, generation, hostname,
+path, mount, device, or process identifiers. The concrete-session Runtime/Workspace panel polls
+every 60 seconds only while the panel is visible; Agent Runtime settings polls while mounted.
+Lifecycle mutations invalidate both lifecycle and metrics queries. Both surfaces share the same
+localized responsive component, preserve unavailable samples and missed intervals as trend gaps,
+show explicit loading/error/unsupported/unavailable/stale/stopped/disconnected states, and never
+derive zero values or browser-owned history.
 
 The concrete-session Workspace panel requests the Project browser manifest only while the server-provided Agent Workspace state is `READY`. Manifest loading or failure does not replace lifecycle state and actions while the Agent Workspace is unavailable or transitioning.
 
@@ -715,6 +730,7 @@ stateDiagram-v2
 | `chat_v1_register_agent_project` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/register` | `[project-existing-directory]` |
 | `chat_v1_delete_agent_project` | DELETE `/chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` | `[project-registry-only-delete]` |
 | `chat_v1_cleanup_session_git_worktree` | POST `/chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` | `[worktree-cleanup-authority]`, `[worktree-cleanup-non-force]` |
+| `agent_runtime_v1_get_agent_runtime_system_metrics` | GET `/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics` | Existing Workspace membership and Agent access boundary; privacy-safe informational projection |
 | `external_channel_v1_list_multi_slack_connections` | GET `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi` | Workspace External Channel read permission |
 | `external_channel_v1_setup_multi_slack_connection` | POST `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi` | Workspace External Channel write permission; rollout gate |
 | `external_channel_v1_get_multi_slack_connection` | GET `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}` | Workspace boundary; disconnected history readable |
@@ -762,6 +778,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-24 (spec_version=71)** — Added the shared Agent Runtime system-metrics overview to
+  the visible chat Runtime/Workspace panel and mounted Runtime settings, with generated-client
+  polling, lifecycle invalidation, explicit states, and server-owned trend history.
 - **2026-08-23 (spec_version=70)** — Centralized Workspace TurnAction policy and
   Worker operation dispatch while preserving worktree admission, execution, and
   recovery behavior.
