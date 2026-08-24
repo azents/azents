@@ -363,6 +363,7 @@ def test_runtime_free_add_and_remove_progress(
         )
     ).click()
     _click_button(browser_driver, "Stop runtime")
+    _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "Runtime stopped", timeout_seconds=120)
     _wait(browser_driver).until(
         ec.visibility_of_element_located(
