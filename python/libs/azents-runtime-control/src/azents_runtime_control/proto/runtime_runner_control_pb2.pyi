@@ -1191,6 +1191,7 @@ class RunnerOperationRequest(_message.Message):
     GIT_INSPECT_WORKTREE_FIELD_NUMBER: _builtins.int
     GIT_DISCOVER_MANAGED_WORKTREES_FIELD_NUMBER: _builtins.int
     GIT_REMOVE_DISCOVERED_WORKTREE_FIELD_NUMBER: _builtins.int
+    FILE_READ_TEXT_FIELD_NUMBER: _builtins.int
     runtime_id: _builtins.str
     runner_generation: _builtins.int
     operation_type: _builtins.str
@@ -1257,6 +1258,8 @@ class RunnerOperationRequest(_message.Message):
     def git_remove_discovered_worktree(
         self,
     ) -> Global___GitRemoveDiscoveredWorktreeOperationPayload: ...
+    @_builtins.property
+    def file_read_text(self) -> Global___FileReadTextOperationPayload: ...
     def __init__(
         self,
         *,
@@ -1295,6 +1298,7 @@ class RunnerOperationRequest(_message.Message):
         | None = ...,
         git_remove_discovered_worktree: Global___GitRemoveDiscoveredWorktreeOperationPayload
         | None = ...,
+        file_read_text: Global___FileReadTextOperationPayload | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_owner_session_id",
@@ -1325,6 +1329,8 @@ class RunnerOperationRequest(_message.Message):
         b"file_move",
         "file_read",
         b"file_read",
+        "file_read_text",
+        b"file_read_text",
         "file_stat",
         b"file_stat",
         "file_write",
@@ -1388,6 +1394,8 @@ class RunnerOperationRequest(_message.Message):
         b"file_move",
         "file_read",
         b"file_read",
+        "file_read_text",
+        b"file_read_text",
         "file_stat",
         b"file_stat",
         "file_write",
@@ -1457,6 +1465,7 @@ class RunnerOperationRequest(_message.Message):
         "git_inspect_worktree",
         "git_discover_managed_worktrees",
         "git_remove_discovered_worktree",
+        "file_read_text",
     ]
     _WhichOneofArgType_payload: _TypeAlias = _typing.Literal["payload", b"payload"]
     @_typing.overload
@@ -1527,18 +1536,15 @@ class FileReadOperationPayload(_message.Message):
     PATH_FIELD_NUMBER: _builtins.int
     OFFSET_FIELD_NUMBER: _builtins.int
     MAX_BYTES_FIELD_NUMBER: _builtins.int
-    ENCODING_FIELD_NUMBER: _builtins.int
     path: _builtins.str
     offset: _builtins.int
     max_bytes: _builtins.int
-    encoding: _builtins.str
     def __init__(
         self,
         *,
         path: _builtins.str = ...,
         offset: _builtins.int = ...,
         max_bytes: _builtins.int | None = ...,
-        encoding: _builtins.str = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "_max_bytes", b"_max_bytes", "max_bytes", b"max_bytes"
@@ -1547,8 +1553,6 @@ class FileReadOperationPayload(_message.Message):
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
         "_max_bytes",
         b"_max_bytes",
-        "encoding",
-        b"encoding",
         "max_bytes",
         b"max_bytes",
         "offset",
@@ -1566,6 +1570,43 @@ class FileReadOperationPayload(_message.Message):
     ) -> _WhichOneofReturnType__max_bytes | None: ...
 
 Global___FileReadOperationPayload: _TypeAlias = FileReadOperationPayload
+
+@_typing.final
+class FileReadTextOperationPayload(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    PATH_FIELD_NUMBER: _builtins.int
+    CHARACTER_OFFSET_FIELD_NUMBER: _builtins.int
+    MAX_CHARACTERS_FIELD_NUMBER: _builtins.int
+    ENCODING_FIELD_NUMBER: _builtins.int
+    path: _builtins.str
+    character_offset: _builtins.int
+    max_characters: _builtins.int
+    encoding: _builtins.str
+    def __init__(
+        self,
+        *,
+        path: _builtins.str = ...,
+        character_offset: _builtins.int = ...,
+        max_characters: _builtins.int = ...,
+        encoding: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "character_offset",
+        b"character_offset",
+        "encoding",
+        b"encoding",
+        "max_characters",
+        b"max_characters",
+        "path",
+        b"path",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___FileReadTextOperationPayload: _TypeAlias = FileReadTextOperationPayload
 
 @_typing.final
 class FileWriteOperationPayload(_message.Message):
@@ -2574,6 +2615,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     GIT_INSPECT_WORKTREE_FIELD_NUMBER: _builtins.int
     GIT_DISCOVER_MANAGED_WORKTREES_FIELD_NUMBER: _builtins.int
     GIT_REMOVE_DISCOVERED_WORKTREE_FIELD_NUMBER: _builtins.int
+    FILE_READ_TEXT_FIELD_NUMBER: _builtins.int
     @_builtins.property
     def bash(self) -> Global___BashFinalSuccess: ...
     @_builtins.property
@@ -2622,6 +2664,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
     def git_remove_discovered_worktree(
         self,
     ) -> Global___GitRemoveDiscoveredWorktreeFinalSuccess: ...
+    @_builtins.property
+    def file_read_text(self) -> Global___FileReadTextFinalSuccess: ...
     def __init__(
         self,
         *,
@@ -2649,6 +2693,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         | None = ...,
         git_remove_discovered_worktree: Global___GitRemoveDiscoveredWorktreeFinalSuccess
         | None = ...,
+        file_read_text: Global___FileReadTextFinalSuccess | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
         "bash",
@@ -2675,6 +2720,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         b"file_move",
         "file_read",
         b"file_read",
+        "file_read_text",
+        b"file_read_text",
         "file_stat",
         b"file_stat",
         "file_write",
@@ -2724,6 +2771,8 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         b"file_move",
         "file_read",
         b"file_read",
+        "file_read_text",
+        b"file_read_text",
         "file_stat",
         b"file_stat",
         "file_write",
@@ -2771,6 +2820,7 @@ class RunnerOperationFinalSuccessPayload(_message.Message):
         "git_inspect_worktree",
         "git_discover_managed_worktrees",
         "git_remove_discovered_worktree",
+        "file_read_text",
     ]
     _WhichOneofArgType_result: _TypeAlias = _typing.Literal["result", b"result"]
     def WhichOneof(
@@ -2859,6 +2909,38 @@ class FileReadFinalSuccess(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___FileReadFinalSuccess: _TypeAlias = FileReadFinalSuccess
+
+@_typing.final
+class FileReadTextFinalSuccess(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    START_CHARACTER_FIELD_NUMBER: _builtins.int
+    END_CHARACTER_FIELD_NUMBER: _builtins.int
+    TRUNCATED_FIELD_NUMBER: _builtins.int
+    start_character: _builtins.int
+    end_character: _builtins.int
+    truncated: _builtins.bool
+    def __init__(
+        self,
+        *,
+        start_character: _builtins.int = ...,
+        end_character: _builtins.int = ...,
+        truncated: _builtins.bool = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "end_character",
+        b"end_character",
+        "start_character",
+        b"start_character",
+        "truncated",
+        b"truncated",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___FileReadTextFinalSuccess: _TypeAlias = FileReadTextFinalSuccess
 
 @_typing.final
 class FileWriteFinalSuccess(_message.Message):

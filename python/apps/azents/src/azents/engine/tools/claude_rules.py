@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 CLAUDE_RULES_TOOLKIT_NAMESPACE = "claude_rules"
 CLAUDE_RULES_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME = "claude_rules_appendix_dedupe"
 CLAUDE_RULES_DIR = ".claude/rules"
-MAX_CLAUDE_RULE_BYTES = 64 * 1024
+MAX_CLAUDE_RULE_CHARACTERS = 64 * 1024
 CLAUDE_RULE_PATH_CACHE_TTL_SECONDS = 5.0
 
 
@@ -644,11 +644,11 @@ async def _read_rule_file_with_counts(
         if not _is_under_root(real_path, root.owner_root):
             return _ClaudeRuleReadResult(rule=None, stat_count=1, read_count=0)
         read_count = 1
-        content = await file_storage.get_text(
+        result = await file_storage.get_text(
             path,
             agent_id=agent_id,
             offset=0,
-            max_bytes=MAX_CLAUDE_RULE_BYTES,
+            limit=MAX_CLAUDE_RULE_CHARACTERS,
             encoding="utf-8",
         )
     except FileNotFoundError:
@@ -660,8 +660,8 @@ async def _read_rule_file_with_counts(
     except UnicodeDecodeError:
         return _ClaudeRuleReadResult(rule=None, stat_count=1, read_count=1)
     rendered = truncate_claude_rule_content(
-        content,
-        truncated=_metadata_size(metadata) > MAX_CLAUDE_RULE_BYTES,
+        result.text,
+        truncated=result.truncated,
     )
     return _ClaudeRuleReadResult(
         rule=ClaudeRuleFile(path=path, real_path=real_path, content=rendered),
@@ -675,14 +675,6 @@ def _metadata_real_path(metadata: dict[str, object], path: str) -> str:
     if isinstance(value, str) and value.strip():
         return posixpath.normpath(value)
     return posixpath.normpath(path)
-
-
-def _metadata_size(metadata: dict[str, object]) -> int:
-    """Return a non-negative byte size from Runtime file metadata."""
-    value = metadata.get("size")
-    if isinstance(value, int) and value >= 0:
-        return value
-    return 0
 
 
 def truncate_claude_rule_content(content: str, *, truncated: bool) -> str:

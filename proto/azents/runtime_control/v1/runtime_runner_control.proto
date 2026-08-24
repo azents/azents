@@ -226,6 +226,7 @@ message RunnerOperationRequest {
     GitInspectWorktreeOperationPayload git_inspect_worktree = 41;
     GitDiscoverManagedWorktreesOperationPayload git_discover_managed_worktrees = 42;
     GitRemoveDiscoveredWorktreeOperationPayload git_remove_discovered_worktree = 43;
+    FileReadTextOperationPayload file_read_text = 44;
   }
 }
 
@@ -239,6 +240,13 @@ message FileReadOperationPayload {
   string path = 1;
   uint64 offset = 2;
   optional uint64 max_bytes = 3;
+  reserved 4;
+}
+
+message FileReadTextOperationPayload {
+  string path = 1;
+  uint64 character_offset = 2;
+  uint64 max_characters = 3;
   string encoding = 4;
 }
 
@@ -445,6 +453,7 @@ message RunnerOperationFinalSuccessPayload {
     GitInspectWorktreeFinalSuccess git_inspect_worktree = 20;
     GitDiscoverManagedWorktreesFinalSuccess git_discover_managed_worktrees = 21;
     GitRemoveDiscoveredWorktreeFinalSuccess git_remove_discovered_worktree = 22;
+    FileReadTextFinalSuccess file_read_text = 23;
   }
 }
 
@@ -463,6 +472,12 @@ message BashFinalSuccess {
 
 message FileReadFinalSuccess {
   uint64 bytes_read = 1;
+}
+
+message FileReadTextFinalSuccess {
+  uint64 start_character = 1;
+  uint64 end_character = 2;
+  bool truncated = 3;
 }
 
 message FileWriteFinalSuccess {

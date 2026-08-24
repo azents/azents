@@ -84,9 +84,12 @@ class RuntimeFileReadResult:
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileTextReadResult:
-    """Completed bounded UTF-8 file read operation result."""
+    """Completed decoded character-range operation result."""
 
     text: str
+    start_character: int
+    end_character: int
+    truncated: bool
     final_cursor: str
 
 
@@ -306,12 +309,12 @@ class RuntimeRunnerOperationClient(Protocol):
         runner_generation: int,
         owner_session_id: str | None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime,
     ) -> RuntimeFileTextReadResult:
-        """Run bounded decoded file read operation and return result."""
+        """Run decoded character-range operation and return result."""
         ...
 
     async def write_file(

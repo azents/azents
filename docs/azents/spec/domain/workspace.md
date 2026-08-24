@@ -105,7 +105,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-08-24
-spec_version: 71
+spec_version: 72
 ---
 
 # Workspace & Membership
@@ -274,7 +274,7 @@ target-generation, digest, source, and acknowledgement evidence without a proces
 projection. The UI renders the status supplied by the server and does not reconstruct physical
 security claims from raw Provider/Runner states.
 
-Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding; binary preview candidates return no text body and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, stat the regular file, and consume one verified Runtime transfer object in the API response adapter. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
+Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding and character-count truncation metadata; their byte size does not reject an otherwise bounded character preview. Binary preview candidates remain byte-size bounded, return no text body, and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, stat the regular file, and consume one verified Runtime transfer object in the API response adapter. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
 
 Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/reconcile and ordinary
 recreation do not delete Agent Workspace data. Only explicit `reset` and terminal delete may delete
@@ -778,6 +778,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-24 (spec_version=72)** — Made Agent Workspace text previews use
+  Runner-returned character truncation instead of rejecting text by byte size;
+  binary preview size limits remain byte-oriented.
 - **2026-08-24 (spec_version=71)** — Added the shared Agent Runtime system-metrics overview to
   the visible chat Runtime/Workspace panel and mounted Runtime settings, with generated-client
   polling, lifecycle invalidation, explicit states, and server-owned trend history.

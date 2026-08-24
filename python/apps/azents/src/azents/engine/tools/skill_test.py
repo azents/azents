@@ -194,18 +194,21 @@ class _SkillScanRunner:
         runner_generation: int,
         owner_session_id: str | None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime,
     ) -> RuntimeFileTextReadResult:
         """Return configured Skill content and record reads."""
         del runtime_id, runner_generation, owner_session_id, deadline_at
         self.read_calls.append(path)
-        data = self.files[path]
-        chunk = data[offset : offset + max_bytes]
+        text = self.files[path].decode(encoding)
+        chunk = text[character_offset : character_offset + max_characters]
         return RuntimeFileTextReadResult(
-            text=chunk.decode(encoding),
+            text=chunk,
+            start_character=character_offset,
+            end_character=character_offset + len(chunk),
+            truncated=character_offset + len(chunk) < len(text),
             final_cursor="cursor-read",
         )
 
