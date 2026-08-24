@@ -15,6 +15,7 @@ from azents.runtime.coordination.data import (
     RuntimeReplyRecord,
     RuntimeRequestEnvelope,
     RuntimeRequestRecord,
+    RuntimeSystemMetricsSample,
 )
 
 
@@ -209,4 +210,24 @@ class RuntimeCoordinationStore(Protocol):
         generation: int,
     ) -> bool:
         """Revoke a connection if generation fencing matches."""
+        ...
+
+    async def append_runner_system_metrics(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+        sample: RuntimeSystemMetricsSample,
+    ) -> bool:
+        """Atomically append a higher-sequence sample to the bounded series."""
+        ...
+
+    async def read_runner_system_metrics(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+        current_time: datetime,
+    ) -> list[RuntimeSystemMetricsSample]:
+        """Read at most one hour and 60 samples for one Runner generation."""
         ...

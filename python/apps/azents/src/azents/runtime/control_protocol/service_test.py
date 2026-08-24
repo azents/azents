@@ -11,6 +11,13 @@ from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEnvelope,
     RuntimeConfigurationEvidence,
 )
+from azents_runtime_control.system_metrics import (
+    RUNNER_SYSTEM_METRICS_CAPABILITY,
+    RunnerSystemMetricAvailability,
+    RunnerSystemMetricObservation,
+    RunnerSystemMetricsReport,
+    RunnerSystemMetricsScope,
+)
 
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
@@ -22,6 +29,7 @@ from azents.runtime.control_protocol.data import (
     RuntimeReplyAppendResult,
     RuntimeRunnerOperation,
     RuntimeRunnerRegistration,
+    RuntimeSystemMetricsAppendResult,
 )
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
@@ -33,6 +41,7 @@ from azents.runtime.coordination.data import (
     RuntimeOperationStatus,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
+    RuntimeSystemMetricsSample,
 )
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
@@ -88,6 +97,118 @@ async def test_register_provider_and_runner_issue_independent_generations() -> N
         )
         is True
     )
+
+
+@pytest.mark.asyncio
+async def test_runner_system_metrics_require_current_capable_generation() -> None:
+    """Metrics admission uses current generation and registration capability."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    accepted_at = _now()
+    report = _system_metrics_report(sequence=1)
+
+    missing = await service.append_runner_system_metrics(
+        report,
+        generation=1,
+        accepted_at=accepted_at,
+    )
+    incapable = await service.register_runner(
+        _runner_registration(),
+        registered_at=accepted_at,
+    )
+    capability_missing = await service.append_runner_system_metrics(
+        report,
+        generation=incapable.generation,
+        accepted_at=accepted_at,
+    )
+    capable = await service.register_runner(
+        dataclasses.replace(
+            _runner_registration(),
+            capabilities=RuntimeProtocolCapabilities(
+                (
+                    "bash",
+                    "files",
+                    "file.transfer.v1",
+                    RUNNER_SYSTEM_METRICS_CAPABILITY,
+                )
+            ),
+        ),
+        registered_at=accepted_at + timedelta(seconds=1),
+    )
+    stale = await service.append_runner_system_metrics(
+        report,
+        generation=incapable.generation,
+        accepted_at=accepted_at,
+    )
+    accepted = await service.append_runner_system_metrics(
+        report,
+        generation=capable.generation,
+        accepted_at=accepted_at,
+    )
+
+    assert missing is RuntimeSystemMetricsAppendResult.STALE_GENERATION
+    assert capability_missing is RuntimeSystemMetricsAppendResult.CAPABILITY_MISSING
+    assert stale is RuntimeSystemMetricsAppendResult.STALE_GENERATION
+    assert accepted is RuntimeSystemMetricsAppendResult.ACCEPTED
+    assert await store.read_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=capable.generation,
+        current_time=accepted_at,
+    ) == [
+        dataclasses.replace(
+            _stored_system_metrics_sample(sequence=1),
+            measured_at=accepted_at,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_system_metrics_reject_non_monotonic_sequence() -> None:
+    """Duplicate and lower sequences cannot replace an accepted metrics sample."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store)
+    now = _now()
+    capable = await service.register_runner(
+        dataclasses.replace(
+            _runner_registration(),
+            capabilities=RuntimeProtocolCapabilities(
+                (
+                    "bash",
+                    "files",
+                    "file.transfer.v1",
+                    RUNNER_SYSTEM_METRICS_CAPABILITY,
+                )
+            ),
+        ),
+        registered_at=now,
+    )
+
+    first = await service.append_runner_system_metrics(
+        _system_metrics_report(sequence=2),
+        generation=capable.generation,
+        accepted_at=now,
+    )
+    duplicate = await service.append_runner_system_metrics(
+        _system_metrics_report(sequence=2),
+        generation=capable.generation,
+        accepted_at=now + timedelta(seconds=1),
+    )
+    lower = await service.append_runner_system_metrics(
+        _system_metrics_report(sequence=1),
+        generation=capable.generation,
+        accepted_at=now + timedelta(seconds=2),
+    )
+
+    assert first is RuntimeSystemMetricsAppendResult.ACCEPTED
+    assert duplicate is RuntimeSystemMetricsAppendResult.SEQUENCE_REJECTED
+    assert lower is RuntimeSystemMetricsAppendResult.SEQUENCE_REJECTED
+    series = await store.read_runner_system_metrics(
+        runtime_id="runtime-1",
+        generation=capable.generation,
+        current_time=now + timedelta(seconds=2),
+    )
+    assert [sample.sequence for sample in series] == [2]
+    assert series[0].measured_at == now
 
 
 @pytest.mark.asyncio
@@ -664,6 +785,41 @@ def _runner_operation(*, generation: int, now: datetime) -> RuntimeRunnerOperati
         payload={"command": "pwd"},
         deadline_at=now + timedelta(seconds=30),
         body_stream_id=None,
+    )
+
+
+def _system_metrics_report(*, sequence: int) -> RunnerSystemMetricsReport:
+    return RunnerSystemMetricsReport(
+        runtime_id="runtime-1",
+        sequence=sequence,
+        scope=RunnerSystemMetricsScope.CONTAINER,
+        cpu=RunnerSystemMetricObservation(
+            availability=RunnerSystemMetricAvailability.AVAILABLE,
+            used=250,
+            total=1000,
+        ),
+        memory=RunnerSystemMetricObservation(
+            availability=RunnerSystemMetricAvailability.AVAILABLE,
+            used=1024,
+            total=4096,
+        ),
+        disk=RunnerSystemMetricObservation(
+            availability=RunnerSystemMetricAvailability.UNAVAILABLE,
+            used=None,
+            total=None,
+        ),
+    )
+
+
+def _stored_system_metrics_sample(*, sequence: int) -> RuntimeSystemMetricsSample:
+    report = _system_metrics_report(sequence=sequence)
+    return RuntimeSystemMetricsSample(
+        sequence=report.sequence,
+        measured_at=_now(),
+        scope=report.scope,
+        cpu=report.cpu,
+        memory=report.memory,
+        disk=report.disk,
     )
 
 

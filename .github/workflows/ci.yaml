@@ -27,9 +27,9 @@ jobs:
       python: ${{ github.event_name != 'pull_request' || steps.filter.outputs.python == 'true' }}
       python_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['python-e2e'] == 'true' }}
       web_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs['web-e2e'] == 'true' }}
-      e2e_server_image: ${{ github.event_name != 'pull_request' || steps.filter.outputs['e2e-server-image'] == 'true' }}
-      e2e_runtime_runner_image: ${{ github.event_name != 'pull_request' || steps.filter.outputs['e2e-runtime-runner-image'] == 'true' }}
-      e2e_runtime_provider_docker_image: ${{ github.event_name != 'pull_request' || steps.filter.outputs['e2e-runtime-provider-docker-image'] == 'true' }}
+      e2e_server_image: ${{ steps.filter.outputs['e2e-server-image'] == 'true' }}
+      e2e_runtime_runner_image: ${{ steps.filter.outputs['e2e-runtime-runner-image'] == 'true' }}
+      e2e_runtime_provider_docker_image: ${{ steps.filter.outputs['e2e-runtime-provider-docker-image'] == 'true' }}
       typescript: ${{ github.event_name != 'pull_request' || steps.filter.outputs.typescript == 'true' }}
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
       docker: ${{ github.event_name != 'pull_request' || steps.filter.outputs.docker == 'true' }}
@@ -42,6 +42,7 @@ jobs:
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
+          base: ${{ github.ref }}
           filters: |
             python:
               - '.github/workflows/**'
@@ -373,11 +374,40 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Resolve required E2E snapshot base
+        id: snapshot_base
+        if: matrix.suite == 'required'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          base_sha=''
+          case "$GITHUB_EVENT_NAME" in
+            pull_request)
+              base_sha="$PR_BASE_SHA"
+              ;;
+            push)
+              if [ "$GITHUB_REF" = 'refs/heads/main' ]; then
+                base_sha="$PUSH_BASE_SHA"
+              fi
+              ;;
+            workflow_dispatch)
+              base_sha="$(git rev-parse HEAD^)"
+              ;;
+          esac
+          if [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] \
+            && [ "$base_sha" != '0000000000000000000000000000000000000000' ]; then
+            printf 'base_sha=%s\n' "$base_sha" >> "$GITHUB_OUTPUT"
+          else
+            printf 'base_sha=\n' >> "$GITHUB_OUTPUT"
+          fi
       - name: Prepare unchanged required E2E snapshot images
         id: snapshot_images
-        if: github.event_name == 'pull_request' && matrix.suite == 'required'
+        if: steps.snapshot_base.outputs.base_sha != ''
         env:
-          AZENTS_E2E_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          AZENTS_E2E_BASE_SHA: ${{ steps.snapshot_base.outputs.base_sha }}
           AZENTS_E2E_SERVER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_server_image }}
           AZENTS_E2E_RUNTIME_RUNNER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_runner_image }}
           AZENTS_E2E_RUNTIME_PROVIDER_DOCKER_IMAGE_CHANGED: ${{ needs.changes.outputs.e2e_runtime_provider_docker_image }}

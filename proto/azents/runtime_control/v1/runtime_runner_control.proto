@@ -23,6 +23,7 @@ message RunnerMessage {
     RunnerOperationEvent operation_event = 21;
     RunnerOperationStart operation_start = 22;
     RunnerTransferResult transfer_result = 23;
+    RunnerSystemMetrics system_metrics = 24;
     RunnerError error = 40;
   }
 }
@@ -158,6 +159,35 @@ message RunnerStateReport {
   string workspace_path = 9;
   google.protobuf.Timestamp reported_at = 10;
   RuntimeConfigurationEvidence runtime_configuration = 11;
+}
+
+enum RunnerSystemMetricsScope {
+  RUNNER_SYSTEM_METRICS_SCOPE_UNSPECIFIED = 0;
+  RUNNER_SYSTEM_METRICS_SCOPE_HOST = 1;
+  RUNNER_SYSTEM_METRICS_SCOPE_VM = 2;
+  RUNNER_SYSTEM_METRICS_SCOPE_CONTAINER = 3;
+}
+
+enum RunnerSystemMetricAvailability {
+  RUNNER_SYSTEM_METRIC_AVAILABILITY_UNSPECIFIED = 0;
+  RUNNER_SYSTEM_METRIC_AVAILABILITY_AVAILABLE = 1;
+  RUNNER_SYSTEM_METRIC_AVAILABILITY_UNAVAILABLE = 2;
+  RUNNER_SYSTEM_METRIC_AVAILABILITY_UNSUPPORTED = 3;
+}
+
+message RunnerSystemMetricObservation {
+  RunnerSystemMetricAvailability availability = 1;
+  optional uint64 used = 2;
+  optional uint64 total = 3;
+}
+
+message RunnerSystemMetrics {
+  string runtime_id = 1;
+  uint64 sequence = 2;
+  RunnerSystemMetricsScope scope = 3;
+  RunnerSystemMetricObservation cpu = 4;
+  RunnerSystemMetricObservation memory = 5;
+  RunnerSystemMetricObservation disk = 6;
 }
 
 message RunnerOperationRequest {

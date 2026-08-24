@@ -130,6 +130,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.action_execution.data import ActionExecution
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, PendingSessionCommand
@@ -280,6 +281,7 @@ class _SessionLifecycle:
     ) -> None:
         self.order = order
         self.recoverable_run = recoverable_run
+        self.agent_run_repository = AgentRunRepository()
         self.heartbeat_session_ids: list[str] = []
         self.second_heartbeat = asyncio.Event()
         self.retry_states: list[FailedRunRetryState | None] = []

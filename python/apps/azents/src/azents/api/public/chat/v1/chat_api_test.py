@@ -260,6 +260,7 @@ class _WebSocket:
     def __init__(self) -> None:
         self.messages: asyncio.Queue[dict[str, object]] = asyncio.Queue()
         self.sent: list[dict[str, object]] = []
+        self.sent_event = asyncio.Event()
 
     async def receive_json(self) -> dict[str, object]:
         """Return the next queued client control frame."""
@@ -268,6 +269,21 @@ class _WebSocket:
     async def send_json(self, event: dict[str, object]) -> None:
         """Record one server control frame."""
         self.sent.append(event)
+        self.sent_event.set()
+
+
+class _ObservableSubscriptionRegistration(_SubscriptionRegistration):
+    """Subscription registration that exposes confirmation checks to tests."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.confirmation_checks: asyncio.Queue[bool] = asyncio.Queue()
+
+    def confirmed(self, generation: object) -> bool:
+        """Record and return one generation confirmation check."""
+        confirmed = super().confirmed(generation)
+        self.confirmation_checks.put_nowait(confirmed)
+        return confirmed
 
 
 class _FailingBroadcast(WebSocketBroadcast):
@@ -304,7 +320,7 @@ def test_public_session_hard_delete_route_is_absent() -> None:
 async def test_health_check_ack_requires_current_confirmed_generation() -> None:
     """A stale or unconfirmed send-loop generation cannot acknowledge health."""
     websocket = _WebSocket()
-    registration = _SubscriptionRegistration()
+    registration = _ObservableSubscriptionRegistration()
     generation = object()
     task = asyncio.create_task(
         _run_session_receive_loop(
@@ -318,15 +334,18 @@ async def test_health_check_ack_requires_current_confirmed_generation() -> None:
     await websocket.messages.put(
         {"type": "subscription_health_check", "request_id": "stale"}
     )
-    await asyncio.sleep(0)
+    stale_confirmed = await asyncio.wait_for(
+        registration.confirmation_checks.get(),
+        timeout=1,
+    )
+    assert stale_confirmed is False
     assert websocket.sent == []
 
     registration.confirm(generation)
     await websocket.messages.put(
         {"type": "subscription_health_check", "request_id": "current"}
     )
-    while not websocket.sent:
-        await asyncio.sleep(0)
+    await asyncio.wait_for(websocket.sent_event.wait(), timeout=1)
 
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
@@ -1880,11 +1899,9 @@ class TestAgentSessionRoutes:
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
                 chat_service=chat_service,
             )
-        except Exception as exc:
-            assert getattr(exc, "status_code", None) == 409
-            assert getattr(exc, "detail", None) == (
-                "Team primary session cannot be pinned."
-            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+            assert exc.detail == ("Team primary session cannot be pinned.")
         else:
             raise AssertionError("Expected HTTPException")
 
@@ -1942,11 +1959,9 @@ class TestAgentSessionRoutes:
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
                 chat_service=chat_service,
             )
-        except Exception as exc:
-            assert getattr(exc, "status_code", None) == 409
-            assert getattr(exc, "detail", None) == (
-                "Team primary session cannot be archived."
-            )
+        except HTTPException as exc:
+            assert exc.status_code == 409
+            assert exc.detail == ("Team primary session cannot be archived.")
         else:
             raise AssertionError("Expected HTTPException")
 
@@ -1962,9 +1977,9 @@ class TestAgentSessionRoutes:
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
                 chat_service=chat_service,
             )
-        except Exception as exc:
-            assert getattr(exc, "status_code", None) == 409
-            assert getattr(exc, "detail", None) == "Running session cannot be archived."
+        except HTTPException as exc:
+            assert exc.status_code == 409
+            assert exc.detail == "Running session cannot be archived."
         else:
             raise AssertionError("Expected HTTPException")
 
@@ -1979,8 +1994,8 @@ class TestAgentSessionRoutes:
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
                 chat_service=chat_service,
             )
-        except Exception as exc:
-            assert getattr(exc, "status_code", None) == 400
+        except HTTPException as exc:
+            assert exc.status_code == 400
         else:
             raise AssertionError("Expected HTTPException")
 
@@ -1996,8 +2011,8 @@ class TestAgentSessionRoutes:
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
                 chat_service=chat_service,
             )
-        except Exception as exc:
-            assert getattr(exc, "status_code", None) == 404
+        except HTTPException as exc:
+            assert exc.status_code == 404
         else:
             raise AssertionError("Expected HTTPException")
 
@@ -2098,8 +2113,8 @@ class TestGetSubagentTree:
                 CurrentUser(user_id="user-1", session_id="auth-session"),
                 service,
             )
-        except Exception as exc:
-            assert getattr(exc, "status_code", None) == 404
+        except HTTPException as exc:
+            assert exc.status_code == 404
         else:
             raise AssertionError("Expected HTTPException")
 
@@ -2170,8 +2185,8 @@ class TestStopSessionRun:
                 chat_write_service,
                 broker,
             )
-        except Exception as exc:
-            assert getattr(exc, "status_code", None) == 404
+        except HTTPException as exc:
+            assert exc.status_code == 404
         else:
             raise AssertionError("Expected HTTPException")
 

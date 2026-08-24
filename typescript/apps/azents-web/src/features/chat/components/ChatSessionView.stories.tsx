@@ -118,6 +118,7 @@ const subscriptionUsage: ComposerSubscriptionUsagePresentationProps = {
 
 const workspacePanel: WorkspacePanelContainerOutput = {
   state: { type: "LOADING" },
+  metricsState: { type: "LOADING" },
   projectState: {
     type: "READY",
     projects: [],

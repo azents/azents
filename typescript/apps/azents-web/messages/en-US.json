@@ -2275,6 +2275,7 @@
       "subtitle": "Agent Runtime files and projects",
       "openPanel": "Open agent workspace",
       "workspaceTab": "Agent Runtime",
+      "metricsTab": "Metrics",
       "settingsTab": "Settings",
       "settingsTitle": "Runtime settings",
       "settingsSubtitle": "Start, stop, and check the status of this runtime.",
@@ -3016,5 +3017,45 @@
       "conflict": "This request can no longer be completed. It may have expired, been decided elsewhere, or belong to a disconnected channel.",
       "action": "The decision could not be saved. Try again."
     }
+  },
+  "runtimeMetrics": {
+    "title": "System metrics",
+    "description": "Runner-visible usage over the most recent hour.",
+    "loading": "Loading Runtime metrics…",
+    "errorTitle": "Could not load Runtime metrics",
+    "scope": "Scope: {scope}",
+    "scopes": {
+      "host": "Host",
+      "vm": "Virtual machine",
+      "container": "Container"
+    },
+    "summaries": {
+      "fresh": "Fresh",
+      "partial": "Partially available",
+      "stale": "Stale",
+      "unavailable": "Unavailable",
+      "unsupported": "Unsupported",
+      "stopped": "Runtime stopped",
+      "disconnected": "Runner disconnected"
+    },
+    "metrics": {
+      "cpu": "CPU",
+      "memory": "Memory",
+      "disk": "Disk"
+    },
+    "states": {
+      "fresh": "Fresh",
+      "stale": "Stale",
+      "unavailable": "Unavailable",
+      "unsupported": "Unsupported",
+      "stopped": "Stopped",
+      "disconnected": "Disconnected"
+    },
+    "measuredAt": "Measured {value}",
+    "notMeasured": "No measurement yet",
+    "usedOfTotal": "{used} of {total}",
+    "emptyTrend": "No retained samples",
+    "trendLabel": "Recent one-hour usage trend",
+    "cpuUnit": "cores"
   }
 }

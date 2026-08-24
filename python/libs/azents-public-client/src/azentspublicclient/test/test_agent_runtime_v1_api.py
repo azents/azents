@@ -40,6 +40,13 @@ class TestAgentRuntimeV1Api(unittest.TestCase):
         """
         pass
 
+    def test_agent_runtime_v1_get_agent_runtime_system_metrics(self) -> None:
+        """Test case for agent_runtime_v1_get_agent_runtime_system_metrics
+
+        Get Agent Runtime System Metrics
+        """
+        pass
+
     def test_agent_runtime_v1_observe_agent_runtime(self) -> None:
         """Test case for agent_runtime_v1_observe_agent_runtime
 

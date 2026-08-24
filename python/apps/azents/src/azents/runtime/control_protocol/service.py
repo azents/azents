@@ -6,6 +6,10 @@ import secrets
 from datetime import datetime
 from typing import Protocol
 
+from azents_runtime_control.system_metrics import (
+    RUNNER_SYSTEM_METRICS_CAPABILITY,
+    RunnerSystemMetricsReport,
+)
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
@@ -23,6 +27,7 @@ from azents.runtime.control_protocol.data import (
     RuntimeRunnerOperation,
     RuntimeRunnerRegistration,
     RuntimeRunnerRegistrationAccepted,
+    RuntimeSystemMetricsAppendResult,
 )
 from azents.runtime.coordination.data import (
     JsonValue,
@@ -33,6 +38,7 @@ from azents.runtime.coordination.data import (
     RuntimeReplyEvent,
     RuntimeReplyRecord,
     RuntimeRequestEnvelope,
+    RuntimeSystemMetricsSample,
 )
 from azents.runtime.coordination.store import RuntimeCoordinationStore
 
@@ -253,6 +259,44 @@ class RuntimeControlProtocolService:
                     extra={"runtime_id": runtime_id, "generation": generation},
                 )
         return revoked
+
+    async def append_runner_system_metrics(
+        self,
+        report: RunnerSystemMetricsReport,
+        *,
+        generation: int,
+        accepted_at: datetime,
+    ) -> RuntimeSystemMetricsAppendResult:
+        """Append one current-generation capable Runner metrics report."""
+        connection = await self._store.get_connection(
+            kind=RuntimeConnectionKind.RUNNER,
+            subject_id=report.runtime_id,
+        )
+        if connection is None or connection.generation != generation:
+            return RuntimeSystemMetricsAppendResult.STALE_GENERATION
+        capabilities = connection.metadata.get("capabilities")
+        if (
+            not isinstance(capabilities, list)
+            or RUNNER_SYSTEM_METRICS_CAPABILITY not in capabilities
+        ):
+            return RuntimeSystemMetricsAppendResult.CAPABILITY_MISSING
+        appended = await self._store.append_runner_system_metrics(
+            runtime_id=report.runtime_id,
+            generation=generation,
+            sample=RuntimeSystemMetricsSample(
+                sequence=report.sequence,
+                measured_at=accepted_at,
+                scope=report.scope,
+                cpu=report.cpu,
+                memory=report.memory,
+                disk=report.disk,
+            ),
+        )
+        return (
+            RuntimeSystemMetricsAppendResult.ACCEPTED
+            if appended
+            else RuntimeSystemMetricsAppendResult.SEQUENCE_REJECTED
+        )
 
     async def dispatch_provider_command(
         self,

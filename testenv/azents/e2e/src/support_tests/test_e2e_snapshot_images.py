@@ -1,4 +1,4 @@
-"""Tests for required E2E base-snapshot image preparation."""
+"""Tests for required E2E predecessor-snapshot image preparation."""
 
 from __future__ import annotations
 
