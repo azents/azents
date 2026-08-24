@@ -3,10 +3,10 @@
 import { ColorSchemeScript } from "@mantine/core";
 import { NextIntlClientProvider } from "next-intl";
 import { useEffect, useState } from "react";
+import messages from "@/i18n/en-US-messages";
 import { ColorModeProvider } from "@/shared/providers/color-mode";
 import { LocaleProvider } from "@/shared/providers/locale";
 import { AppMantineProvider } from "@/shared/providers/mantine";
-import messages from "../../../messages/en-US.json";
 import type { ColorModePreference } from "@/shared/lib/color-mode";
 import type { ReactElement, ReactNode } from "react";
 

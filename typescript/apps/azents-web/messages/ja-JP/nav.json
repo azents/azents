@@ -1,0 +1,8 @@
+{
+  "features": "機能",
+  "useCases": "ユースケース",
+  "pricing": "料金",
+  "findWorkspace": "ログイン",
+  "createWorkspace": "ワークスペースを作成",
+  "startWithEmail": "メールで始める"
+}

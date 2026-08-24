@@ -1,0 +1,11 @@
+{
+  "headline": "내 프로필",
+  "nameLabel": "이름",
+  "namePlaceholder": "워크스페이스에서 사용할 이름",
+  "localeLabel": "언어",
+  "submit": "저장",
+  "updateSuccess": "프로필이 저장되었습니다",
+  "nameRequired": "이름을 입력해 주세요",
+  "connectedAccounts": "연결된 계정",
+  "noInstalledPlatforms": "이 워크스페이스에 연결된 채팅 플랫폼이 없습니다."
+}

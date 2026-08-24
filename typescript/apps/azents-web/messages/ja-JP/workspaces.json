@@ -1,0 +1,38 @@
+{
+  "list": {
+    "headline": "ワークスペースを選択",
+    "description": "ワークスペースを選ぶか、新しく作成してください",
+    "empty": "参加中のワークスペースがありません",
+    "createNew": "新しいワークスペースを作成"
+  },
+  "invitations": {
+    "sectionTitle": "招待されたワークスペース",
+    "empty": "招待はありません",
+    "invitedAs": "{role}として招待されました",
+    "accept": "承諾",
+    "decline": "辞退",
+    "accepting": "承諾中...",
+    "declining": "辞退中...",
+    "roleMember": "メンバー",
+    "roleManager": "マネージャー"
+  },
+  "create": {
+    "headline": "ワークスペースを作成",
+    "description": "新しいワークスペースを設定しましょう",
+    "sectionWorkspace": "ワークスペース情報",
+    "sectionOwner": "あなたのプロフィール",
+    "workspaceName": "ワークスペース名",
+    "workspaceNamePlaceholder": "例: チーム名",
+    "workspaceHandle": "ハンドル",
+    "workspaceHandlePlaceholder": "例: my-team",
+    "ownerName": "お名前",
+    "ownerNamePlaceholder": "ワークスペースで使用する名前",
+    "submit": "作成する"
+  },
+  "errors": {
+    "nameRequired": "名前を入力してください",
+    "handleRequired": "ハンドルを入力してください",
+    "handleFormat": "半角英小文字、数字、ハイフンのみ使用できます",
+    "generic": "エラーが発生しました。もう一度お試しください。"
+  }
+}

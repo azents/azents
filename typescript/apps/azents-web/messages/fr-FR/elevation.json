@@ -1,0 +1,15 @@
+{
+  "title": "Vérification d'identité",
+  "description": "Choisissez une méthode pour vérifier votre identité.",
+  "methodEmail": "Code de vérification par e-mail",
+  "methodPassword": "Mot de passe",
+  "sendingCode": "Envoi du code de vérification...",
+  "emailCodeHeadline": "Entrez le code de vérification",
+  "emailCodeDescription": "Nous avons envoyé un code à 6 chiffres à votre adresse e-mail.",
+  "codeTimer": "Temps restant : {time}",
+  "codeExpired": "Le code a expiré. Veuillez renvoyer.",
+  "verify": "Vérifier",
+  "resendCode": "Renvoyer le code",
+  "passwordHeadline": "Entrez votre mot de passe",
+  "passwordDescription": "Entrez votre mot de passe pour continuer."
+}

@@ -1,0 +1,19 @@
+{
+  "title": "연동 설정",
+  "accountLinkTitle": "계정 연결",
+  "success": "{provider} 연동이 완료되었습니다.",
+  "error": "{provider} 연동에 실패했습니다.",
+  "accountLinkSuccess": "{provider} 계정이 연결되었습니다.",
+  "accountLinkError": "{provider} 계정 연결에 실패했습니다.",
+  "reasons": {
+    "not_configured": "서버에 연동 설정이 되어있지 않습니다.",
+    "invalid_state": "인증 세션이 만료되었습니다. 다시 시도해주세요.",
+    "oauth_failed": "토큰 교환에 실패했습니다. 다시 시도해주세요.",
+    "deprecated": "이 페이지는 더 이상 사용할 수 없습니다. 봇 메시지의 링크를 사용하여 계정을 연결해 주세요."
+  },
+  "goToSettings": "워크스페이스 설정으로 이동",
+  "goToProfile": "프로필로 이동",
+  "goToWorkspaces": "워크스페이스 목록으로 이동",
+  "redirectingToSetup": "서비스 인증 페이지로 이동 중...",
+  "toolkitRedirectError": "서비스 설정 페이지로 이동하지 못했습니다. 워크스페이스 설정에서 다시 시도해 주세요."
+}

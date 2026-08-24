@@ -1,0 +1,20 @@
+{
+  "headline": "セキュリティ",
+  "elevationRequired": "セキュリティ設定にアクセスするには本人確認が必要です。",
+  "authMethods": "認証方法",
+  "methodEmail": "メール",
+  "methodPassword": "パスワード",
+  "enabled": "有効",
+  "disabled": "未設定",
+  "passwordSection": "パスワード",
+  "setPassword": "パスワード",
+  "newPassword": "新しいパスワード",
+  "passwordPlaceholder": "8文字以上",
+  "confirmPassword": "パスワード確認",
+  "confirmPasswordPlaceholder": "パスワードを再入力",
+  "setPasswordButton": "パスワードを設定",
+  "changePassword": "パスワードを変更",
+  "removePassword": "パスワードを削除",
+  "passwordTooShort": "パスワードは8文字以上で入力してください。",
+  "passwordMismatch": "パスワードが一致しません。"
+}

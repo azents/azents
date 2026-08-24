@@ -1,0 +1,38 @@
+{
+  "list": {
+    "headline": "Choose a workspace",
+    "description": "Select a workspace or create a new one",
+    "empty": "You don't belong to any workspaces yet",
+    "createNew": "Create new workspace"
+  },
+  "invitations": {
+    "sectionTitle": "Pending invitations",
+    "empty": "No pending invitations",
+    "invitedAs": "Invited as {role}",
+    "accept": "Accept",
+    "decline": "Decline",
+    "accepting": "Accepting...",
+    "declining": "Declining...",
+    "roleMember": "member",
+    "roleManager": "manager"
+  },
+  "create": {
+    "headline": "Create workspace",
+    "description": "Set up a new workspace",
+    "sectionWorkspace": "Workspace info",
+    "sectionOwner": "Your profile",
+    "workspaceName": "Workspace name",
+    "workspaceNamePlaceholder": "e.g. My Team",
+    "workspaceHandle": "Handle",
+    "workspaceHandlePlaceholder": "e.g. my-team",
+    "ownerName": "Your name",
+    "ownerNamePlaceholder": "Name to use in this workspace",
+    "submit": "Create"
+  },
+  "errors": {
+    "nameRequired": "Please enter a name",
+    "handleRequired": "Please enter a handle",
+    "handleFormat": "Only lowercase letters, numbers, and hyphens allowed",
+    "generic": "Something went wrong. Please try again."
+  }
+}

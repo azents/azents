@@ -1,0 +1,41 @@
+{
+  "sectionTag": "Cas d'usage",
+  "headline": "Encore un humain qui fait ça ?",
+  "subheadline": "Voilà ce qui change quand un agent prend le relais.",
+  "design": {
+    "title": "Design",
+    "agent": "Agent de recherche de références",
+    "tagline": "Recherche automatisée — les designers se concentrent sur la création",
+    "description": "Votre équipe design passe des heures sur Dribbble, Behance et les apps concurrentes. Azents crawle automatiquement et crée des moodboards en minutes.",
+    "before": "Un stagiaire capture 50+ pages manuellement en 2 heures",
+    "after": "50 résultats sélectionnés en 30 secondes",
+    "timeSaved": "8h / semaine"
+  },
+  "marketing": {
+    "title": "Marketing",
+    "agent": "Agent de veille communautaire",
+    "tagline": "Veille de marque en temps réel sur tous les canaux",
+    "description": "Après un lancement, qui surveille Reddit, X, ProductHunt et HackerNews ? Azents monitore en temps réel et remonte uniquement ce qui compte.",
+    "before": "Un stagiaire rafraîchit Reddit et X toute la journée en copiant les commentaires",
+    "after": "Dashboard de sentiment en temps réel + alertes instantanées",
+    "timeSaved": "4h / jour"
+  },
+  "operations": {
+    "title": "Opérations",
+    "agent": "Agent de comptes-rendus",
+    "tagline": "Compte-rendu généré automatiquement dès la fin de réunion",
+    "description": "Rédiger des notes, suivre les décisions, lister les actions — important mais pénible. Azents gère tout, de l'enregistrement à la documentation.",
+    "before": "30 minutes de rédaction après chaque réunion d'une heure",
+    "after": "Résumé, décisions et actions dans Notion instantanément",
+    "timeSaved": "3h / semaine"
+  },
+  "engineering": {
+    "title": "Ingénierie",
+    "agent": "Agent de revue de code",
+    "tagline": "Review automatique dès l'ouverture d'une PR",
+    "description": "Retards de review, docs obsolètes, boilerplate répétitif — Azents élimine les goulots d'étranglement de votre équipe technique.",
+    "before": "Les PRs s'empilent en attendant un reviewer senior",
+    "after": "Bugs, failles de sécurité, violations de style — première review instantanée",
+    "timeSaved": "Demi-journée / PR"
+  }
+}

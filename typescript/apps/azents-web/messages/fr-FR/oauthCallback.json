@@ -1,0 +1,19 @@
+{
+  "title": "Configuration de l'intégration",
+  "accountLinkTitle": "Liaison de compte",
+  "success": "{provider} a été connecté avec succès.",
+  "error": "La connexion à {provider} a échoué.",
+  "accountLinkSuccess": "Votre compte {provider} a été connecté avec succès.",
+  "accountLinkError": "La connexion de votre compte {provider} a échoué.",
+  "reasons": {
+    "not_configured": "L'intégration n'est pas configurée sur le serveur.",
+    "invalid_state": "La session d'autorisation a expiré. Veuillez réessayer.",
+    "oauth_failed": "L'échange de jeton a échoué. Veuillez réessayer.",
+    "deprecated": "Cette page n'est plus disponible. Veuillez utiliser le lien du message du bot pour connecter votre compte."
+  },
+  "goToSettings": "Paramètres de l'espace",
+  "goToProfile": "Aller au profil",
+  "goToWorkspaces": "Liste des espaces",
+  "redirectingToSetup": "Redirection vers l'autorisation du service...",
+  "toolkitRedirectError": "La redirection vers la configuration du service a échoué. Veuillez réessayer depuis les paramètres de l'espace."
+}

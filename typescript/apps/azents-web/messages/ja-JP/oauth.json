@@ -1,0 +1,6 @@
+{
+  "title": "認証",
+  "callbackSuccess": "認証が完了しました。このタブを閉じてください。",
+  "callbackError": "認証に失敗しました。再度お試しください。",
+  "githubAppInstalled": "GitHub Appがインストールされました。このタブを閉じても構いません。"
+}

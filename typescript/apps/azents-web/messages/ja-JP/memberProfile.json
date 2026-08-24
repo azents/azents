@@ -1,0 +1,11 @@
+{
+  "headline": "マイプロフィール",
+  "nameLabel": "名前",
+  "namePlaceholder": "ワークスペースで使用する名前",
+  "localeLabel": "言語",
+  "submit": "保存",
+  "updateSuccess": "プロフィールを保存しました",
+  "nameRequired": "名前を入力してください",
+  "connectedAccounts": "接続済みアカウント",
+  "noInstalledPlatforms": "このワークスペースに接続されたチャットプラットフォームがありません。"
+}

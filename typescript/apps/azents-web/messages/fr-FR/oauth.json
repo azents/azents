@@ -1,0 +1,6 @@
+{
+  "title": "Autorisation",
+  "callbackSuccess": "Autorisation terminée. Vous pouvez fermer cet onglet.",
+  "callbackError": "L'autorisation a échoué. Veuillez réessayer.",
+  "githubAppInstalled": "La GitHub App a été installée avec succès. Vous pouvez fermer cet onglet."
+}

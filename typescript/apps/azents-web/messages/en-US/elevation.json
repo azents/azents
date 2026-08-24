@@ -1,0 +1,15 @@
+{
+  "title": "Verify your identity",
+  "description": "Choose a method to verify your identity.",
+  "methodEmail": "Email verification code",
+  "methodPassword": "Password",
+  "sendingCode": "Sending verification code...",
+  "emailCodeHeadline": "Enter verification code",
+  "emailCodeDescription": "We sent a 6-digit code to your email.",
+  "codeTimer": "Time remaining: {time}",
+  "codeExpired": "Code has expired. Please resend.",
+  "verify": "Verify",
+  "resendCode": "Resend code",
+  "passwordHeadline": "Enter your password",
+  "passwordDescription": "Enter your account password to continue."
+}

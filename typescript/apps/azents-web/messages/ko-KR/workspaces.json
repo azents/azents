@@ -1,0 +1,38 @@
+{
+  "list": {
+    "headline": "워크스페이스 선택",
+    "description": "워크스페이스를 선택하거나 새로 만드세요",
+    "empty": "참여 중인 워크스페이스가 없습니다",
+    "createNew": "새 워크스페이스 만들기"
+  },
+  "invitations": {
+    "sectionTitle": "초대받은 워크스페이스",
+    "empty": "받은 초대가 없습니다",
+    "invitedAs": "{role}로 초대됨",
+    "accept": "수락",
+    "decline": "거절",
+    "accepting": "수락 중...",
+    "declining": "거절 중...",
+    "roleMember": "멤버",
+    "roleManager": "매니저"
+  },
+  "create": {
+    "headline": "워크스페이스 만들기",
+    "description": "새 워크스페이스를 설정하세요",
+    "sectionWorkspace": "워크스페이스 정보",
+    "sectionOwner": "내 프로필",
+    "workspaceName": "워크스페이스 이름",
+    "workspaceNamePlaceholder": "예: 우리 팀",
+    "workspaceHandle": "핸들",
+    "workspaceHandlePlaceholder": "예: our-team",
+    "ownerName": "이름",
+    "ownerNamePlaceholder": "워크스페이스에서 사용할 이름",
+    "submit": "만들기"
+  },
+  "errors": {
+    "nameRequired": "이름을 입력해 주세요",
+    "handleRequired": "핸들을 입력해 주세요",
+    "handleFormat": "영문 소문자, 숫자, 하이픈만 사용할 수 있어요",
+    "generic": "문제가 발생했어요. 다시 시도해 주세요."
+  }
+}

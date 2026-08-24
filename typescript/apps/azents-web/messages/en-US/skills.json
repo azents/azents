@@ -1,0 +1,9 @@
+{
+  "sectionTag": "Skills",
+  "headline": "Build once, the whole team uses it.",
+  "description": "Skills are reusable recipes for your agents. Anyone on the team can create one — no coding required.",
+  "noCode": "No-code skill builder",
+  "versionHistory": "Version history & rollback",
+  "analytics": "Per-skill usage analytics",
+  "starterLibrary": "30+ starter skills included"
+}

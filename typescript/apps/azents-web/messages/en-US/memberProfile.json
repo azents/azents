@@ -1,0 +1,11 @@
+{
+  "headline": "My Profile",
+  "nameLabel": "Name",
+  "namePlaceholder": "Name to use in this workspace",
+  "localeLabel": "Language",
+  "submit": "Save",
+  "updateSuccess": "Profile saved",
+  "nameRequired": "Please enter a name",
+  "connectedAccounts": "Connected Accounts",
+  "noInstalledPlatforms": "No chat platforms connected to this workspace."
+}

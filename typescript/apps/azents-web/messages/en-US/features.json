@@ -1,0 +1,28 @@
+{
+  "sectionTag": "Capabilities",
+  "headline": "Build the agents your team actually needs.",
+  "teamAgents": {
+    "title": "Built for Teams",
+    "description": "Agents that understand your team's context, projects, and preferences. Not a personal assistant — a shared teammate."
+  },
+  "uiBuilder": {
+    "title": "Visual Agent Builder",
+    "description": "Design agents with drag-and-drop. Define skills, set triggers, connect tools — zero engineering required."
+  },
+  "batteryIncluded": {
+    "title": "Ready-Made Skills",
+    "description": "30+ built-in skills from code review to meeting summaries. Start automating in minutes, not weeks."
+  },
+  "security": {
+    "title": "Privacy & Security",
+    "description": "SSO, audit logs, RBAC, and data isolation out of the box. Your data never leaves your team."
+  },
+  "automation": {
+    "title": "Always-On Automation",
+    "description": "Set it once, it runs 24/7. Monitoring, reporting, and acting — even while you sleep."
+  },
+  "multiAgent": {
+    "title": "Multi-Agent Collaboration",
+    "description": "Agents hand off tasks to each other. A code reviewer flags an issue, a doc writer updates the spec, a notifier pings the team."
+  }
+}

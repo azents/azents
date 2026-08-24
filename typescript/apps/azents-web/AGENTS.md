@@ -59,3 +59,11 @@ Color mode utilities:
 5. Add UI components under `components/`.
 6. Add a `[Name]Page.tsx` entry point.
 7. Import directly from `app/[name]/page.tsx`; do not use `index.ts` files. See `.claude/conventions/typescript/no-index-files.md`.
+
+## Localization Messages
+
+- Store messages in `messages/<locale>/<namespace>.json`.
+- Use one top-level next-intl namespace per file. The filename must match the namespace.
+- Add every namespace file to all supported locale directories and register it in the corresponding `src/i18n/<locale>-messages.ts` composition module.
+- Keep message keys structurally aligned across locales. Preserve established technical terms when a literal translation would be less natural or precise.
+- Run `pnpm --filter @azents/web test`, `typecheck`, and `lint` after changing localized messages. The message-file tests reject missing or extra namespace files and recursively mismatched keys.

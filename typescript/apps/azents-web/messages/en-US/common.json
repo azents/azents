@@ -1,0 +1,12 @@
+{
+  "before": "Before",
+  "after": "After",
+  "timeSaved": "Time saved",
+  "learnMore": "Learn more",
+  "getStarted": "Get started",
+  "light": "Light",
+  "dark": "Dark",
+  "system": "System",
+  "unknownError": "Unknown error",
+  "colorMode": "Color mode"
+}

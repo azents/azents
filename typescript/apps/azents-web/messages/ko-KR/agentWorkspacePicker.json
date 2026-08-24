@@ -1,0 +1,22 @@
+{
+  "projectPickerTitle": "프로젝트 폴더 선택",
+  "projectPickerDescription": "Agent Workspace 폴더를 선택하려면 Runtime이 실행 중이어야 합니다.",
+  "projectPickerSelectCurrent": "현재 폴더 선택",
+  "projectPickerCurrentPath": "현재 경로",
+  "projectPickerNoDirectories": "하위 폴더가 없습니다.",
+  "projectPickerSelectDirectory": "폴더 선택",
+  "workspacePanel": {
+    "restoringRuntime": "Runtime 준비 중…",
+    "refresh": "새로 고침",
+    "controlUnavailableTitle": "Workspace 제어를 사용할 수 없습니다",
+    "restartRuntime": "Runtime 재시작",
+    "inactiveTitle": "Runtime이 비활성 상태입니다",
+    "inactiveDescription": "Agent Workspace 폴더를 탐색하려면 Runtime을 시작하세요.",
+    "runtimeFreeTitle": "관리형 Runtime이 없습니다",
+    "runtimeFreeDescription": "모델과 원격 기능은 계속 사용할 수 있지만 Agent Workspace 파일과 Project에는 관리형 Runtime이 필요합니다.",
+    "addRuntime": "Runtime 추가",
+    "removingTitle": "Runtime 제거 진행 중",
+    "removingDescription": "영구 제거가 완료될 때까지 Workspace, Project, Git, 파일 접근을 사용할 수 없습니다."
+  },
+  "projectPickerStartRuntime": "Runtime 시작"
+}

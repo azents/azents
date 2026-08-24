@@ -7,6 +7,7 @@
 import { userV1Me } from "@azents/public-client";
 import { getRequestConfig } from "next-intl/server";
 import { cookies, headers } from "next/headers";
+import { loadMessages } from "@/i18n/message-loader";
 import { getAccessToken, isTokenExpiringSoon } from "@/shared/lib/cookies";
 import {
   DEFAULT_LOCALE,
@@ -15,8 +16,9 @@ import {
   resolveLocaleFromHeader,
 } from "@/shared/lib/locale";
 import { createApiClientWithAccessToken } from "@/trpc/context";
+import type { SupportedLocale } from "@/shared/lib/locale";
 
-async function resolveAccountLocale(): Promise<string | null> {
+async function resolveAccountLocale(): Promise<SupportedLocale | null> {
   const accessToken = await getAccessToken();
   if (accessToken === null || isTokenExpiringSoon(accessToken.expiresAt)) {
     return null;
@@ -41,8 +43,7 @@ export default getRequestConfig(async () => {
   if (accountLocale) {
     return {
       locale: accountLocale,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- next-intl dynamic import
-      messages: (await import(`../../messages/${accountLocale}.json`)).default,
+      messages: await loadMessages(accountLocale),
     };
   }
 
@@ -53,8 +54,7 @@ export default getRequestConfig(async () => {
   if (cookieLocale && isSupportedLocale(cookieLocale)) {
     return {
       locale: cookieLocale,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- next-intl dynamic import
-      messages: (await import(`../../messages/${cookieLocale}.json`)).default,
+      messages: await loadMessages(cookieLocale),
     };
   }
 
@@ -66,15 +66,13 @@ export default getRequestConfig(async () => {
   if (headerLocale) {
     return {
       locale: headerLocale,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- next-intl dynamic import
-      messages: (await import(`../../messages/${headerLocale}.json`)).default,
+      messages: await loadMessages(headerLocale),
     };
   }
 
   // 4. Default value.
   return {
     locale: DEFAULT_LOCALE,
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access -- next-intl dynamic import
-    messages: (await import(`../../messages/${DEFAULT_LOCALE}.json`)).default,
+    messages: await loadMessages(DEFAULT_LOCALE),
   };
 });

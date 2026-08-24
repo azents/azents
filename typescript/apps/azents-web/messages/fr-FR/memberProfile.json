@@ -1,0 +1,11 @@
+{
+  "headline": "Mon profil",
+  "nameLabel": "Nom",
+  "namePlaceholder": "Nom utilisé dans cet espace",
+  "localeLabel": "Langue",
+  "submit": "Enregistrer",
+  "updateSuccess": "Profil enregistré",
+  "nameRequired": "Veuillez saisir un nom",
+  "connectedAccounts": "Comptes connectés",
+  "noInstalledPlatforms": "Aucune plateforme de chat connectée à cet espace de travail."
+}
