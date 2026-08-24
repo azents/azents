@@ -1,4 +1,4 @@
-import { Box } from "@mantine/core";
+import { Box, rem } from "@mantine/core";
 import { WorkspacePanel } from "./WorkspacePanel";
 import type {
   AgentWorkspaceServerState,
@@ -6,6 +6,7 @@ import type {
   WorkspacePanelState,
   WorkspaceProjectPanelState,
 } from "../types";
+import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const noop = (): void => {};
@@ -247,6 +248,36 @@ const readyProjectState: WorkspaceProjectPanelState = {
   pendingDeleteProjectId: null,
 };
 
+const freshMetricsState: RuntimeSystemMetricsOverviewState = {
+  type: "READY",
+  metrics: {
+    summary: "fresh",
+    scope: "container",
+    cpu: {
+      state: "fresh",
+      measured_at: "2026-08-24T09:05:00Z",
+      used: 780,
+      total: 2_000,
+      percentage: 39,
+    },
+    memory: {
+      state: "fresh",
+      measured_at: "2026-08-24T09:05:00Z",
+      used: 1_610_612_736,
+      total: 4_294_967_296,
+      percentage: 37.5,
+    },
+    disk: {
+      state: "fresh",
+      measured_at: "2026-08-24T09:05:00Z",
+      used: 9_126_805_913,
+      total: 34_359_738_368,
+      percentage: 26.56,
+    },
+    samples: [],
+  },
+};
+
 const projectsState: WorkspacePanelState = {
   ...readyState,
   manifest: {
@@ -466,6 +497,29 @@ export const Settings = {
     state: readyState,
     defaultTab: "settings",
   },
+} satisfies Story;
+
+export const Metrics = {
+  args: {
+    state: readyState,
+    metricsState: freshMetricsState,
+    defaultTab: "metrics",
+  },
+} satisfies Story;
+
+export const MetricsMobile = {
+  args: {
+    state: readyState,
+    metricsState: freshMetricsState,
+    defaultTab: "metrics",
+  },
+  decorators: [
+    (Story) => (
+      <Box h="100dvh" w={rem(320)}>
+        <Story />
+      </Box>
+    ),
+  ],
 } satisfies Story;
 
 export const SettingsRuntimeInactive = {

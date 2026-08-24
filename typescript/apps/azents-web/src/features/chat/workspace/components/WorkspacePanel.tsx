@@ -21,6 +21,7 @@ import { useModals } from "@mantine/modals";
 import {
   IconAlertCircle,
   IconBrandGit,
+  IconChartHistogram,
   IconFolderOpen,
   IconPower,
   IconSettings,
@@ -28,7 +29,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RuntimeSystemMetricsOverview } from "@/features/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import { FileBrowser } from "./FileBrowser";
 import { FileInfo } from "./FileInfo";
@@ -50,7 +51,7 @@ import type {
 } from "./WorkspaceDirectoryPickerModal";
 import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
 
-type WorkspacePanelTab = "workspace" | "settings";
+type WorkspacePanelTab = "workspace" | "metrics" | "settings";
 
 const closedProjectRegistrationDialog: ProjectRegistrationDialogState = {
   type: "CLOSED",
@@ -139,7 +140,17 @@ export function WorkspacePanel({
 }: WorkspacePanelProps): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
   const modals = useModals();
+  const metricsTabAvailable =
+    state.type === "SERVER" || state.type === "REMOVING";
+  const [activeTab, setActiveTab] = useState<WorkspacePanelTab>(() =>
+    defaultTab === "metrics" && !metricsTabAvailable ? "workspace" : defaultTab,
+  );
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  useEffect(() => {
+    if (activeTab === "metrics" && !metricsTabAvailable) {
+      setActiveTab("workspace");
+    }
+  }, [activeTab, metricsTabAvailable]);
   const handleConfirmReset = (): void => {
     setResetConfirmOpen(false);
     onResetRuntime();
@@ -752,20 +763,49 @@ export function WorkspacePanel({
   return (
     <>
       <Tabs
-        defaultValue={defaultTab}
+        value={activeTab}
         keepMounted={false}
         h="100%"
         style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}
+        onChange={(value) => {
+          if (
+            value === "workspace" ||
+            value === "metrics" ||
+            value === "settings"
+          ) {
+            setActiveTab(value);
+          }
+        }}
       >
         <Tabs.List grow style={{ flexShrink: 0 }}>
           <Tabs.Tab
+            aria-label={t("workspaceTab")}
             value="workspace"
             leftSection={<IconFolderOpen size="1rem" />}
           >
-            {t("workspaceTab")}
+            <Text span inherit visibleFrom="xs">
+              {t("workspaceTab")}
+            </Text>
           </Tabs.Tab>
-          <Tabs.Tab value="settings" leftSection={<IconSettings size="1rem" />}>
-            {t("settingsTab")}
+          {metricsTabAvailable ? (
+            <Tabs.Tab
+              aria-label={t("metricsTab")}
+              value="metrics"
+              leftSection={<IconChartHistogram size="1rem" />}
+            >
+              <Text span inherit visibleFrom="xs">
+                {t("metricsTab")}
+              </Text>
+            </Tabs.Tab>
+          ) : null}
+          <Tabs.Tab
+            aria-label={t("settingsTab")}
+            value="settings"
+            leftSection={<IconSettings size="1rem" />}
+          >
+            <Text span inherit visibleFrom="xs">
+              {t("settingsTab")}
+            </Text>
           </Tabs.Tab>
         </Tabs.List>
 
@@ -778,23 +818,22 @@ export function WorkspacePanel({
             flexDirection: "column",
           }}
         >
-          {state.type === "SERVER" || state.type === "REMOVING" ? (
-            <Box p="md" pb={0} style={{ flexShrink: 0 }}>
-              <RuntimeSystemMetricsOverview state={metricsState} />
-            </Box>
-          ) : null}
           {renderWorkspacePanel()}
         </Tabs.Panel>
+        {metricsTabAvailable ? (
+          <Tabs.Panel
+            value="metrics"
+            p="md"
+            style={{ flex: 1, minHeight: 0, overflow: "auto" }}
+          >
+            <RuntimeSystemMetricsOverview state={metricsState} />
+          </Tabs.Panel>
+        ) : null}
         <Tabs.Panel
           value="settings"
           p="md"
           style={{ flex: 1, minHeight: 0, overflow: "auto" }}
         >
-          {state.type === "SERVER" || state.type === "REMOVING" ? (
-            <Box mb="md">
-              <RuntimeSystemMetricsOverview state={metricsState} />
-            </Box>
-          ) : null}
           {renderSettingsPanel()}
         </Tabs.Panel>
       </Tabs>

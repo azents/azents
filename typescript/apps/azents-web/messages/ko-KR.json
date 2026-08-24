@@ -2275,6 +2275,7 @@
       "subtitle": "Agent Workspace 파일과 Project",
       "openPanel": "Agent Workspace 열기",
       "workspaceTab": "Agent Runtime",
+      "metricsTab": "메트릭",
       "settingsTab": "설정",
       "settingsTitle": "Runtime 설정",
       "settingsSubtitle": "Runtime 시작, 종료 및 상태를 관리합니다.",
