@@ -1474,7 +1474,7 @@ class TestRuntimeToolkitUpdateContext:
 
         assert decision is not None
         assert runner_operations.file_operation_calls == [
-            ("read_text", "child-session"),
+            ("read", "child-session"),
             ("stat", "child-session"),
             ("read_text", "child-session"),
         ]

@@ -1,6 +1,7 @@
 """Runner operation handler tests."""
 
 import asyncio
+import base64
 import os
 import shutil
 import signal
@@ -258,6 +259,124 @@ async def test_file_write_read_and_list_stay_in_workspace(tmp_path: Path) -> Non
             "modified_at": modified_at,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_file_read_uses_bounded_range_without_full_file_load(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """file.read seeks to the requested range instead of loading the full file."""
+    path = tmp_path / "range.txt"
+    path.write_bytes(b"prefix-target-suffix")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    def reject_full_file_read(path: Path) -> bytes:
+        raise AssertionError(f"Unexpected full-file read: {path}")
+
+    monkeypatch.setattr(Path, "read_bytes", reject_full_file_read)
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read",
+            payload={
+                "path": "range.txt",
+                "offset": len(b"prefix-"),
+                "max_bytes": len(b"target"),
+            },
+        )
+    )
+
+    assert client.events[1].event_type is RuntimeRunnerEventType.FILE_CHUNK
+    data_base64 = client.events[1].payload["data_base64"]
+    assert isinstance(data_base64, str)
+    assert base64.b64decode(data_base64) == b"target"
+    assert client.events[-1].payload == {"bytes_read": len(b"target")}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation_type", ["file.read", "file.read_text"])
+async def test_file_read_rejects_non_positive_byte_limit(
+    tmp_path: Path,
+    operation_type: str,
+) -> None:
+    """Malformed byte limits cannot turn bounded reads into full-file reads."""
+    path = tmp_path / "range.txt"
+    path.write_bytes(b"content")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type=operation_type,
+            payload={
+                "path": "range.txt",
+                "offset": 0,
+                "max_bytes": -1,
+            },
+        )
+    )
+
+    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload["error_code"] in {
+        "INVALID_FILE_READ_RANGE",
+        "INVALID_FILE_READ_TEXT_RANGE",
+    }
+
+
+@pytest.mark.asyncio
+async def test_file_read_caps_requested_byte_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """file.read enforces its maximum byte range for oversized requests."""
+    path = tmp_path / "range.txt"
+    path.write_bytes(b"content")
+    observed_max_bytes: list[int] = []
+
+    def record_range(
+        path: Path,
+        *,
+        offset: int,
+        max_bytes: int,
+        cancellation: threading.Event,
+    ) -> bytes:
+        del path, offset, cancellation
+        observed_max_bytes.append(max_bytes)
+        return b""
+
+    monkeypatch.setattr(
+        "azents_runtime_runner.operations._read_file_range_bytes",
+        record_range,
+    )
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read",
+            payload={
+                "path": "range.txt",
+                "offset": 0,
+                "max_bytes": 16 * 1024 * 1024,
+            },
+        )
+    )
+
+    assert observed_max_bytes == [8 * 1024 * 1024]
 
 
 @pytest.mark.asyncio
@@ -756,7 +875,7 @@ async def test_file_operation_executor_never_exceeds_worker_bound(
         return b"ready"
 
     monkeypatch.setattr(
-        "azents_runtime_runner.operations._read_file_bytes",
+        "azents_runtime_runner.operations._read_file_range_bytes",
         blocking_read,
     )
     client = _FakeClient()

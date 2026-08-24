@@ -584,12 +584,21 @@ class RunnerOperations:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
         offset = _int_payload(operation.payload, "offset", default=0)
-        max_bytes = _optional_int_payload(operation.payload, "max_bytes")
-        if max_bytes is None:
-            max_bytes = _MAX_FILE_READ_BYTES
+        requested = _optional_int_payload(operation.payload, "max_bytes")
+        if offset < 0 or (requested is not None and requested <= 0):
+            await self._final_error(
+                operation,
+                "INVALID_FILE_READ_RANGE",
+                "File read offset must be non-negative and max_bytes must be positive",
+            )
+            return
+        max_bytes = min(
+            requested if requested is not None else _MAX_FILE_READ_BYTES,
+            _MAX_FILE_READ_BYTES,
+        )
         data = await self._run_file_operation(
             operation,
-            lambda cancellation: _read_file_bytes(
+            lambda cancellation: _read_file_range_bytes(
                 path,
                 offset=offset,
                 max_bytes=max_bytes,
@@ -612,6 +621,16 @@ class RunnerOperations:
             return
         offset = _int_payload(operation.payload, "offset", default=0)
         requested = _optional_int_payload(operation.payload, "max_bytes")
+        if offset < 0 or (requested is not None and requested <= 0):
+            await self._final_error(
+                operation,
+                "INVALID_FILE_READ_TEXT_RANGE",
+                (
+                    "Text read offset must be non-negative and "
+                    "max_bytes must be positive"
+                ),
+            )
+            return
         max_bytes = min(
             requested if requested is not None else _MAX_TEXT_READ_BYTES,
             _MAX_TEXT_READ_BYTES,
@@ -3085,19 +3104,6 @@ def _move_paths(
     return {"moved_entries": moved_entries}
 
 
-def _read_file_bytes(
-    path: Path,
-    *,
-    offset: int,
-    max_bytes: int,
-    cancellation: threading.Event,
-) -> bytes:
-    """Read bounded file bytes in a filesystem worker."""
-    if cancellation.is_set():
-        return b""
-    return path.read_bytes()[offset : offset + max_bytes]
-
-
 def _read_file_range_bytes(
     path: Path,
     *,
@@ -3108,6 +3114,8 @@ def _read_file_range_bytes(
     """Read one bounded byte range without reading the complete file."""
     if cancellation.is_set():
         return b""
+    if offset < 0 or max_bytes <= 0:
+        raise ValueError("File read range must be positive and non-negative")
     with path.open("rb") as source:
         source.seek(offset)
         return source.read(max_bytes)

@@ -30,6 +30,7 @@ class FakeSharedStorage:
         self._files = dict(files) if files else {}
         self._raise_permission_on_put = raise_permission_on_put
         self.put_calls: list[tuple[str, bytes]] = []
+        self.read_range_calls: list[tuple[str, int, int]] = []
 
     def add_file(self, path: str, data: bytes) -> None:
         """Add test data."""
@@ -66,6 +67,21 @@ class FakeSharedStorage:
         if path not in self._files:
             raise FileNotFoundError(f"File not found: {path}")
         return self._files[path][offset : offset + max_bytes].decode(encoding)
+
+    async def read_range(
+        self,
+        path: str,
+        *,
+        agent_id: str = "",
+        offset: int,
+        max_bytes: int,
+    ) -> bytes:
+        """Return one bounded byte range."""
+        del agent_id
+        if path not in self._files:
+            raise FileNotFoundError(f"File not found: {path}")
+        self.read_range_calls.append((path, offset, max_bytes))
+        return self._files[path][offset : offset + max_bytes]
 
     async def put(
         self,
