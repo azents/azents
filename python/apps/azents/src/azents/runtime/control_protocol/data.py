@@ -1,6 +1,7 @@
 """Agent Runtime control protocol data types."""
 
 import dataclasses
+import enum
 from datetime import datetime
 from typing import Protocol
 
@@ -191,3 +192,12 @@ class RuntimeProtocolStaleGeneration:
     target: RuntimeCoordinationTarget
     subject_id: str
     generation: int
+
+
+class RuntimeSystemMetricsAppendResult(enum.StrEnum):
+    """Admission result for one informational Runner metrics report."""
+
+    ACCEPTED = "accepted"
+    STALE_GENERATION = "stale_generation"
+    CAPABILITY_MISSING = "capability_missing"
+    SEQUENCE_REJECTED = "sequence_rejected"

@@ -51,6 +51,12 @@ from azents_runtime_control.runtime_configuration import (
     parse_configuration_sequence,
     serialize_configuration_sequence,
 )
+from azents_runtime_control.system_metrics import (
+    RunnerSystemMetricAvailability,
+    RunnerSystemMetricObservation,
+    RunnerSystemMetricsReport,
+    RunnerSystemMetricsScope,
+)
 
 if TYPE_CHECKING:
     from azents_runtime_control.proto.runtime_runner_control_pb2_grpc import (
@@ -228,6 +234,22 @@ class GrpcRunnerControlClient(RunnerControlClient):
                 request_id=f"state:{report.runtime_id}:{report.runner_generation}",
                 generation=report.runner_generation,
                 state_report=_state_report_message(report),
+            )
+        )
+
+    async def report_runner_system_metrics(
+        self,
+        report: RunnerSystemMetricsReport,
+        *,
+        generation: int,
+    ) -> None:
+        """Publish one informational system-metrics report."""
+        await self._send(
+            runtime_runner_control_pb2.RunnerMessage(
+                connection_id=self._require_connection_id(),
+                request_id=f"system-metrics:{report.sequence}",
+                generation=generation,
+                system_metrics=runner_system_metrics_to_message(report),
             )
         )
 
@@ -550,6 +572,119 @@ def runner_state_report_from_message(
             message.runtime_configuration
         ),
     )
+
+
+def runner_system_metrics_from_message(
+    message: runtime_runner_control_pb2.RunnerSystemMetrics,
+) -> RunnerSystemMetricsReport:
+    """Deserialize one validated Runner system-metrics report."""
+    return RunnerSystemMetricsReport(
+        runtime_id=message.runtime_id,
+        sequence=message.sequence,
+        scope=_system_metrics_scope_from_message(message.scope),
+        cpu=_system_metric_observation_from_message(message.cpu),
+        memory=_system_metric_observation_from_message(message.memory),
+        disk=_system_metric_observation_from_message(message.disk),
+    )
+
+
+def runner_system_metrics_to_message(
+    report: RunnerSystemMetricsReport,
+) -> runtime_runner_control_pb2.RunnerSystemMetrics:
+    """Serialize one Runner system-metrics report."""
+    return runtime_runner_control_pb2.RunnerSystemMetrics(
+        runtime_id=report.runtime_id,
+        sequence=report.sequence,
+        scope=_system_metrics_scope_to_message(report.scope),
+        cpu=_system_metric_observation_to_message(report.cpu),
+        memory=_system_metric_observation_to_message(report.memory),
+        disk=_system_metric_observation_to_message(report.disk),
+    )
+
+
+def _system_metrics_scope_from_message(
+    value: runtime_runner_control_pb2.RunnerSystemMetricsScope.ValueType,
+) -> RunnerSystemMetricsScope:
+    scopes = {
+        runtime_runner_control_pb2.RUNNER_SYSTEM_METRICS_SCOPE_HOST: (
+            RunnerSystemMetricsScope.HOST
+        ),
+        runtime_runner_control_pb2.RUNNER_SYSTEM_METRICS_SCOPE_VM: (
+            RunnerSystemMetricsScope.VM
+        ),
+        runtime_runner_control_pb2.RUNNER_SYSTEM_METRICS_SCOPE_CONTAINER: (
+            RunnerSystemMetricsScope.CONTAINER
+        ),
+    }
+    try:
+        return scopes[value]
+    except KeyError as exc:
+        raise ValueError("Runtime metrics scope is invalid") from exc
+
+
+def _system_metrics_scope_to_message(
+    scope: RunnerSystemMetricsScope,
+) -> runtime_runner_control_pb2.RunnerSystemMetricsScope.ValueType:
+    return {
+        RunnerSystemMetricsScope.HOST: (
+            runtime_runner_control_pb2.RUNNER_SYSTEM_METRICS_SCOPE_HOST
+        ),
+        RunnerSystemMetricsScope.VM: (
+            runtime_runner_control_pb2.RUNNER_SYSTEM_METRICS_SCOPE_VM
+        ),
+        RunnerSystemMetricsScope.CONTAINER: (
+            runtime_runner_control_pb2.RUNNER_SYSTEM_METRICS_SCOPE_CONTAINER
+        ),
+    }[scope]
+
+
+def _system_metric_observation_from_message(
+    message: runtime_runner_control_pb2.RunnerSystemMetricObservation,
+) -> RunnerSystemMetricObservation:
+    availabilities = {
+        runtime_runner_control_pb2.RUNNER_SYSTEM_METRIC_AVAILABILITY_AVAILABLE: (
+            RunnerSystemMetricAvailability.AVAILABLE
+        ),
+        runtime_runner_control_pb2.RUNNER_SYSTEM_METRIC_AVAILABILITY_UNAVAILABLE: (
+            RunnerSystemMetricAvailability.UNAVAILABLE
+        ),
+        runtime_runner_control_pb2.RUNNER_SYSTEM_METRIC_AVAILABILITY_UNSUPPORTED: (
+            RunnerSystemMetricAvailability.UNSUPPORTED
+        ),
+    }
+    try:
+        availability = availabilities[message.availability]
+    except KeyError as exc:
+        raise ValueError("Runtime metric availability is invalid") from exc
+    return RunnerSystemMetricObservation(
+        availability=availability,
+        used=message.used if message.HasField("used") else None,
+        total=message.total if message.HasField("total") else None,
+    )
+
+
+def _system_metric_observation_to_message(
+    observation: RunnerSystemMetricObservation,
+) -> runtime_runner_control_pb2.RunnerSystemMetricObservation:
+    availability = {
+        RunnerSystemMetricAvailability.AVAILABLE: (
+            runtime_runner_control_pb2.RUNNER_SYSTEM_METRIC_AVAILABILITY_AVAILABLE
+        ),
+        RunnerSystemMetricAvailability.UNAVAILABLE: (
+            runtime_runner_control_pb2.RUNNER_SYSTEM_METRIC_AVAILABILITY_UNAVAILABLE
+        ),
+        RunnerSystemMetricAvailability.UNSUPPORTED: (
+            runtime_runner_control_pb2.RUNNER_SYSTEM_METRIC_AVAILABILITY_UNSUPPORTED
+        ),
+    }[observation.availability]
+    message = runtime_runner_control_pb2.RunnerSystemMetricObservation(
+        availability=availability
+    )
+    if observation.used is not None:
+        message.used = observation.used
+    if observation.total is not None:
+        message.total = observation.total
+    return message
 
 
 def _runtime_configuration_evidence(

@@ -30,6 +30,13 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferResult,
 )
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
+from azents_runtime_control.system_metrics import (
+    CollectedRunnerSystemMetrics,
+    RunnerSystemMetricAvailability,
+    RunnerSystemMetricObservation,
+    RunnerSystemMetricsReport,
+    RunnerSystemMetricsScope,
+)
 
 
 class FakeRunnerControlClient(RunnerControlClient):
@@ -56,6 +63,7 @@ class FakeRunnerControlClient(RunnerControlClient):
         ) = None
         self.heartbeat_runtime_configuration: RuntimeConfigurationEvidence | None = None
         self.transfer_results: list[RunnerTransferResult] = []
+        self.system_metrics_reports: list[tuple[RunnerSystemMetricsReport, int]] = []
 
     def set_operation_handler(
         self,
@@ -121,6 +129,15 @@ class FakeRunnerControlClient(RunnerControlClient):
         """Record one Runner state report."""
         self.reports.append(report)
 
+    async def report_runner_system_metrics(
+        self,
+        report: RunnerSystemMetricsReport,
+        *,
+        generation: int,
+    ) -> None:
+        """Record one informational system-metrics report."""
+        self.system_metrics_reports.append((report, generation))
+
     async def claim_next_runner_operation(
         self,
         *,
@@ -184,6 +201,69 @@ class BlockingOperations(RuntimeRunnerOperations):
     def release(self, request_id: str) -> None:
         """Release one operation."""
         self._release_events.setdefault(request_id, asyncio.Event()).set()
+
+
+@dataclasses.dataclass
+class FakeSystemMetricsCollector:
+    """Return deterministic collected metrics and count attempts."""
+
+    attempts: int = 0
+
+    def collect(self) -> CollectedRunnerSystemMetrics:
+        """Return one partially available normalized sample."""
+        self.attempts += 1
+        return CollectedRunnerSystemMetrics(
+            scope=RunnerSystemMetricsScope.CONTAINER,
+            cpu=RunnerSystemMetricObservation(
+                availability=RunnerSystemMetricAvailability.UNAVAILABLE,
+                used=None,
+                total=None,
+            ),
+            memory=RunnerSystemMetricObservation(
+                availability=RunnerSystemMetricAvailability.AVAILABLE,
+                used=512,
+                total=1024,
+            ),
+            disk=RunnerSystemMetricObservation(
+                availability=RunnerSystemMetricAvailability.AVAILABLE,
+                used=1024,
+                total=2048,
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_system_metrics_report_immediately_then_every_sixty_seconds() -> None:
+    """Metrics use a generation-local sequence and fixed cadence."""
+    client = FakeRunnerControlClient()
+    collector = FakeSystemMetricsCollector()
+    monotonic_value = 100.0
+
+    def monotonic() -> float:
+        return monotonic_value
+
+    loop = _loop(
+        client,
+        BlockingOperations(),
+        monotonic=monotonic,
+        system_metrics_collector=collector,
+    )
+
+    await loop.start()
+    await loop.run_once(block_ms=0)
+    monotonic_value = 159.9
+    await loop.run_once(block_ms=0)
+    monotonic_value = 160.0
+    await loop.run_once(block_ms=0)
+
+    assert collector.attempts == 2
+    assert [
+        (report.sequence, generation)
+        for report, generation in client.system_metrics_reports
+    ] == [(1, 7), (2, 7)]
+    assert client.system_metrics_reports[0][0].cpu.availability is (
+        RunnerSystemMetricAvailability.UNAVAILABLE
+    )
 
 
 @pytest.mark.asyncio
@@ -706,6 +786,8 @@ def _loop(
     operations: RuntimeRunnerOperations,
     *,
     clock: Callable[[], datetime] | None = None,
+    monotonic: Callable[[], float] | None = None,
+    system_metrics_collector: FakeSystemMetricsCollector | None = None,
     max_concurrent_operations_per_session: int | None = None,
     max_concurrent_system_operations: int | None = None,
     max_concurrent_operations: int = 50,
@@ -719,8 +801,9 @@ def _loop(
         registration=_registration(),
         connection_id="connection-1",
         consumer_id="consumer-1",
+        system_metrics_collector=system_metrics_collector,
         clock=clock or (lambda: datetime(2026, 5, 25, tzinfo=UTC)),
-        monotonic=lambda: 100.0,
+        monotonic=monotonic or (lambda: 100.0),
         max_concurrent_operations_per_session=(
             max_concurrent_operations_per_session
             if max_concurrent_operations_per_session is not None

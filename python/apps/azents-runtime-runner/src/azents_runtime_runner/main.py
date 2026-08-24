@@ -28,6 +28,7 @@ from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
     parse_configuration_sequence,
 )
+from azents_runtime_control.system_metrics import RUNNER_SYSTEM_METRICS_CAPABILITY
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
@@ -36,6 +37,7 @@ from azents_runtime_control.transfer import (
 from azents_runtime_runner.execution import DirectExecutionBackend
 from azents_runtime_runner.network import prepare_runner_network_environment
 from azents_runtime_runner.operations import RunnerOperations
+from azents_runtime_runner.system_metrics import create_system_metrics_collector
 from azents_runtime_runner.transfer import RunnerTransferManager
 from azents_runtime_runner.trust import prepare_runner_trust_environment
 from azents_runtime_runner.workspace import Workspace
@@ -60,6 +62,7 @@ _CAPABILITIES = (
     "file.bulk_delete",
     "file.bulk_move",
     RUNNER_TRANSFER_CAPABILITY,
+    RUNNER_SYSTEM_METRICS_CAPABILITY,
 )
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
 _CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS = 5.0
@@ -212,6 +215,7 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 registration=registration,
                 connection_id=connection_id,
                 consumer_id=runner_id,
+                system_metrics_collector=create_system_metrics_collector(),
                 max_concurrent_operations_per_session=(
                     limit_config.max_concurrent_operations_per_session
                 ),
