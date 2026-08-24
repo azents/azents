@@ -1,9 +1,9 @@
 "use client";
 
+import { LineChart } from "@mantine/charts";
 import {
   Alert,
   Badge,
-  Box,
   Center,
   Group,
   Loader,
@@ -19,7 +19,7 @@ import { useFormatter, useTranslations } from "next-intl";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useLocale } from "@/shared/providers/locale";
 import {
-  buildRuntimeMetricSparklineSegments,
+  buildRuntimeMetricChartData,
   type RuntimeSystemMetricKey,
 } from "../presentation";
 import type { RuntimeSystemMetricsOverviewState } from "../types";
@@ -40,8 +40,9 @@ interface MetricDefinition {
   icon: React.ReactNode;
 }
 
-const SPARKLINE_WIDTH = 120;
-const SPARKLINE_HEIGHT = 28;
+const SPARKLINE_SERIES: LineChart.Series[] = [
+  { name: "value", color: "blue.6" },
+];
 
 function statusColor(
   state: RuntimeSystemMetricState | RuntimeSystemMetricsSummary,
@@ -100,13 +101,8 @@ function MetricSparkline({
   metric: RuntimeSystemMetricKey;
 }): React.ReactElement {
   const t = useTranslations("runtimeMetrics");
-  const segments = buildRuntimeMetricSparklineSegments(
-    metrics.samples,
-    metric,
-    SPARKLINE_WIDTH,
-    SPARKLINE_HEIGHT,
-  );
-  if (segments.length === 0) {
+  const data = buildRuntimeMetricChartData(metrics.samples, metric);
+  if (data.length === 0) {
     return (
       <Center h={rem(36)}>
         <Text c="dimmed" size="xs">
@@ -116,43 +112,32 @@ function MetricSparkline({
     );
   }
   return (
-    <Box
-      component="svg"
+    <LineChart
       aria-label={t("trendLabel")}
-      role="img"
-      viewBox={`0 0 ${SPARKLINE_WIDTH} ${SPARKLINE_HEIGHT}`}
-      w="100%"
+      connectNulls={false}
+      curveType="linear"
+      data={data}
+      dataKey="measuredAt"
+      dotProps={{ r: 1.5, strokeWidth: 0 }}
+      gridAxis="none"
       h={rem(36)}
-    >
-      {segments.map((segment, segmentIndex) => {
-        const points = segment
-          .map((point) => `${point.x},${point.y}`)
-          .join(" ");
-        return (
-          <g key={`${metric}-${segmentIndex}`}>
-            {segment.length > 1 ? (
-              <polyline
-                fill="none"
-                points={points}
-                stroke="var(--mantine-color-blue-6)"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-              />
-            ) : null}
-            {segment.map((point, pointIndex) => (
-              <circle
-                key={`${metric}-${segmentIndex}-${pointIndex}`}
-                cx={point.x}
-                cy={point.y}
-                fill="var(--mantine-color-blue-6)"
-                r="1.5"
-              />
-            ))}
-          </g>
-        );
-      })}
-    </Box>
+      lineChartProps={{
+        margin: { top: 2, right: 2, bottom: 2, left: 2 },
+      }}
+      role="img"
+      series={SPARKLINE_SERIES}
+      strokeWidth={2}
+      w="100%"
+      withTooltip={false}
+      withXAxis={false}
+      withYAxis={false}
+      xAxisProps={{
+        domain: ["dataMin", "dataMax"],
+        padding: { left: 2, right: 2 },
+        type: "number",
+      }}
+      yAxisProps={{ padding: { top: 2, bottom: 2 } }}
+    />
   );
 }
 

@@ -5,9 +5,9 @@ import type {
 
 export type RuntimeSystemMetricKey = "cpu" | "memory" | "disk";
 
-export interface RuntimeMetricSparklinePoint {
-  x: number;
-  y: number;
+export interface RuntimeMetricChartDatum {
+  measuredAt: number;
+  value: number | null;
 }
 
 const GAP_THRESHOLD_MS = 90_000;
@@ -41,65 +41,39 @@ function observationValue(
   return observation.used;
 }
 
-export function buildRuntimeMetricSparklineSegments(
+export function buildRuntimeMetricChartData(
   samples: AgentRuntimeSystemMetricsSampleResponse[],
   metric: RuntimeSystemMetricKey,
-  width: number,
-  height: number,
-): RuntimeMetricSparklinePoint[][] {
+): RuntimeMetricChartDatum[] {
   if (samples.length === 0) {
     return [];
   }
 
-  const measuredSamples = samples
-    .map((sample) => ({
-      measuredAt: Date.parse(sample.measured_at),
-      value: observationValue(observationForMetric(sample, metric)),
-    }))
-    .filter((sample) => Number.isFinite(sample.measuredAt));
-  if (measuredSamples.length === 0) {
-    return [];
-  }
-
-  const availableValues = measuredSamples.flatMap((sample) =>
-    sample.value === null ? [] : [sample.value],
-  );
-  if (availableValues.length === 0) {
-    return [];
-  }
-
-  const firstMeasuredAt = measuredSamples[0]?.measuredAt ?? 0;
-  const lastMeasuredAt =
-    measuredSamples[measuredSamples.length - 1]?.measuredAt ?? firstMeasuredAt;
-  const timeRange = Math.max(lastMeasuredAt - firstMeasuredAt, 1);
-  const minimumValue = Math.min(...availableValues);
-  const maximumValue = Math.max(...availableValues);
-  const valueRange = Math.max(maximumValue - minimumValue, 1);
-  const segments: RuntimeMetricSparklinePoint[][] = [];
-  let segment: RuntimeMetricSparklinePoint[] = [];
+  const data: RuntimeMetricChartDatum[] = [];
   let previousMeasuredAt: number | null = null;
+  let previousValue: number | null = null;
 
-  for (const sample of measuredSamples) {
-    if (
-      sample.value === null ||
-      (previousMeasuredAt !== null &&
-        sample.measuredAt - previousMeasuredAt > GAP_THRESHOLD_MS)
-    ) {
-      if (segment.length > 0) {
-        segments.push(segment);
-      }
-      segment = [];
+  for (const sample of samples) {
+    const measuredAt = Date.parse(sample.measured_at);
+    if (!Number.isFinite(measuredAt)) {
+      continue;
     }
-    if (sample.value !== null) {
-      segment.push({
-        x: ((sample.measuredAt - firstMeasuredAt) / timeRange) * width,
-        y: height - ((sample.value - minimumValue) / valueRange) * height,
+    const value = observationValue(observationForMetric(sample, metric));
+    if (
+      previousMeasuredAt !== null &&
+      previousValue !== null &&
+      value !== null &&
+      measuredAt - previousMeasuredAt > GAP_THRESHOLD_MS
+    ) {
+      data.push({
+        measuredAt: previousMeasuredAt + (measuredAt - previousMeasuredAt) / 2,
+        value: null,
       });
     }
-    previousMeasuredAt = sample.measuredAt;
+    data.push({ measuredAt, value });
+    previousMeasuredAt = measuredAt;
+    previousValue = value;
   }
-  if (segment.length > 0) {
-    segments.push(segment);
-  }
-  return segments;
+
+  return data.some((datum) => datum.value !== null) ? data : [];
 }

@@ -18,6 +18,7 @@ import { LocaleProvider } from "@/shared/providers/locale";
 import { AppMantineProvider } from "@/shared/providers/mantine";
 import type { Metadata, Viewport } from "next";
 
+import "@mantine/charts/styles.css";
 import "@mantine/core/styles.css";
 import "../globals.css";
 

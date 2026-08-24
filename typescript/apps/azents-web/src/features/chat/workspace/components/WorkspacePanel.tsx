@@ -783,9 +783,7 @@ export function WorkspacePanel({
             value="workspace"
             leftSection={<IconFolderOpen size="1rem" />}
           >
-            <Text span inherit visibleFrom="xs">
-              {t("workspaceTab")}
-            </Text>
+            {t("workspaceTab")}
           </Tabs.Tab>
           {metricsTabAvailable ? (
             <Tabs.Tab
@@ -793,9 +791,7 @@ export function WorkspacePanel({
               value="metrics"
               leftSection={<IconChartHistogram size="1rem" />}
             >
-              <Text span inherit visibleFrom="xs">
-                {t("metricsTab")}
-              </Text>
+              {t("metricsTab")}
             </Tabs.Tab>
           ) : null}
           <Tabs.Tab
@@ -803,9 +799,7 @@ export function WorkspacePanel({
             value="settings"
             leftSection={<IconSettings size="1rem" />}
           >
-            <Text span inherit visibleFrom="xs">
-              {t("settingsTab")}
-            </Text>
+            {t("settingsTab")}
           </Tabs.Tab>
         </Tabs.List>
 
