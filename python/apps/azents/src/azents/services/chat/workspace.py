@@ -548,12 +548,12 @@ class WorkspaceRunnerOperations(Protocol):
         runner_generation: int,
         owner_session_id: str | None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime,
     ) -> RuntimeFileTextReadResult:
-        """Read one bounded Workspace text preview."""
+        """Read one bounded Workspace character range."""
         ...
 
     async def stat_file(
@@ -1451,25 +1451,27 @@ class AgentWorkspaceFileService:
                     detail="Runtime file metadata did not include a file size."
                 )
             )
-        if size_bytes > limit:
-            return Failure(AgentWorkspaceFileTooLarge(size=size_bytes, limit=limit))
         media_type = _guess_media_type(path)
         if _is_text_preview_candidate(media_type):
             text_result = await self._runner_read_text_file(
                 runtime,
                 path,
-                max_bytes=limit,
+                max_characters=limit,
                 encoding="utf-8",
             )
             match text_result:
-                case Success(text):
-                    pass
+                case Success(result):
+                    text = result.text
+                    truncated = result.truncated
                 case Failure(error):
                     return Failure(error)
                 case _:
                     assert_never(text_result)
         else:
+            if size_bytes > limit:
+                return Failure(AgentWorkspaceFileTooLarge(size=size_bytes, limit=limit))
             text = None
+            truncated = False
         return Success(
             AgentWorkspaceFile(
                 type="FILE",
@@ -1477,7 +1479,7 @@ class AgentWorkspaceFileService:
                 media_type=media_type,
                 size=size_bytes,
                 text=text,
-                truncated=False,
+                truncated=truncated,
             )
         )
 
@@ -1531,22 +1533,22 @@ class AgentWorkspaceFileService:
         runtime: RuntimeOperationTarget,
         path: PurePosixPath,
         *,
-        max_bytes: int,
+        max_characters: int,
         encoding: str,
-    ) -> Result[str, AgentWorkspaceError]:
-        """Read bounded decoded preview text through the active Runtime Runner."""
+    ) -> Result[RuntimeFileTextReadResult, AgentWorkspaceError]:
+        """Read bounded decoded preview characters through the active Runner."""
         try:
             result = await self._runner_operations.read_text_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
                 path=path.as_posix(),
-                offset=0,
-                max_bytes=max_bytes,
+                character_offset=0,
+                max_characters=max_characters,
                 encoding=encoding,
                 deadline_at=_runner_file_operation_deadline(),
             )
-            return Success(result.text)
+            return Success(result)
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:

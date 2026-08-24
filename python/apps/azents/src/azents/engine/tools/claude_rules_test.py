@@ -38,6 +38,7 @@ from azents.engine.tools.runtime_instruction_context import (
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
+from azents.services.file_storage import TextReadResult
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 
@@ -134,9 +135,9 @@ class _CountingStorage(FakeSharedStorage):
         agent_id: str = "",
         user_id: str = "",
         offset: int,
-        max_bytes: int,
+        limit: int,
         encoding: str,
-    ) -> str:
+    ) -> TextReadResult:
         """Count and optionally block candidate content reads."""
         self.get_calls.append(path)
         if self.get_started_event is not None:
@@ -147,7 +148,7 @@ class _CountingStorage(FakeSharedStorage):
             path,
             agent_id=agent_id,
             offset=offset,
-            max_bytes=max_bytes,
+            limit=limit,
             encoding=encoding,
         )
 

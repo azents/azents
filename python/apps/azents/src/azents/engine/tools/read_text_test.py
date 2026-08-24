@@ -5,7 +5,7 @@ import json
 import pytest
 
 from azents.engine.run.types import FunctionTool, FunctionToolError
-from azents.engine.tools.read_text import _read_character_range, make_read_text_tool
+from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.testing import FakeSharedStorage
 
 # ---------------------------------------------------------------------------
@@ -207,9 +207,9 @@ class TestReadTextFromSessionData:
         assert isinstance(result, str)
         assert f"\n\n{expected}" in result
 
-    async def test_read_decodes_character_split_across_storage_chunks(self) -> None:
-        """A storage chunk boundary cannot create a UTF-8 decode failure."""
-        content = ("A" * (64 * 1024 - 1)) + "가B"
+    async def test_read_delegates_one_character_range_to_storage(self) -> None:
+        """The Tool delegates character calculations instead of reading bytes."""
+        content = "A가B"
         tool, storage = _make_tool(
             files={"/workspace/agent/chunked.txt": content.encode("utf-8")}
         )
@@ -218,7 +218,7 @@ class TestReadTextFromSessionData:
             json.dumps(
                 {
                     "path": "/workspace/agent/chunked.txt",
-                    "offset": 64 * 1024 - 1,
+                    "offset": 1,
                     "limit": 2,
                 }
             )
@@ -226,10 +226,10 @@ class TestReadTextFromSessionData:
 
         assert isinstance(result, str)
         assert "\n\n가B" in result
-        assert len(storage.read_range_calls) == 2
-        assert all(
-            max_bytes == 64 * 1024 for _, _, max_bytes in storage.read_range_calls
-        )
+        assert storage.get_text_calls == [
+            ("/workspace/agent/chunked.txt", 1, 2, "utf-8")
+        ]
+        assert storage.read_range_calls == []
 
 
 # ---------------------------------------------------------------------------
@@ -239,31 +239,6 @@ class TestReadTextFromSessionData:
 
 class TestReadTextErrors:
     """Error case tests."""
-
-    @pytest.mark.parametrize(
-        ("offset", "limit"),
-        [
-            (-1, 1),
-            (0, 0),
-        ],
-    )
-    async def test_character_range_helper_rejects_invalid_bounds(
-        self,
-        offset: int,
-        limit: int,
-    ) -> None:
-        """The lower-level character reader defends its own bounded contract."""
-        storage = FakeSharedStorage({"/workspace/agent/text.txt": b"text"})
-
-        with pytest.raises(ValueError, match="Character read range"):
-            await _read_character_range(
-                storage,
-                "/workspace/agent/text.txt",
-                agent_id="agent-1",
-                offset=offset,
-                limit=limit,
-                encoding="utf-8",
-            )
 
     async def test_unsupported_path(self) -> None:
         """Disallowed path raises FunctionToolError."""
@@ -289,42 +264,6 @@ class TestReadTextErrors:
         # When/Then: FunctionToolError
         with pytest.raises(FunctionToolError, match="cannot be decoded as utf-8"):
             await tool.handler(json.dumps({"path": "/workspace/agent/binary.dat"}))
-
-    async def test_invalid_source_while_locating_offset_reports_decode_error(
-        self,
-    ) -> None:
-        """Invalid bytes needed to locate an offset remain explicit errors."""
-        data = (b"A" * (64 * 1024)) + b"\xffB"
-        tool, _ = _make_tool(files={"/workspace/agent/invalid.txt": data})
-
-        with pytest.raises(FunctionToolError, match="cannot be decoded as utf-8"):
-            await tool.handler(
-                json.dumps(
-                    {
-                        "path": "/workspace/agent/invalid.txt",
-                        "offset": 64 * 1024,
-                        "limit": 1,
-                    }
-                )
-            )
-
-    async def test_invalid_unread_suffix_does_not_fail_bounded_range(self) -> None:
-        """Bytes beyond the requested range and continuation probe stay unread."""
-        tool, _ = _make_tool(files={"/workspace/agent/prefix.txt": b"AB\xff"})
-
-        result = await tool.handler(
-            json.dumps(
-                {
-                    "path": "/workspace/agent/prefix.txt",
-                    "offset": 0,
-                    "limit": 1,
-                }
-            )
-        )
-
-        assert isinstance(result, str)
-        assert "\n\nA\n" in result
-        assert "Use offset=1 to read more" in result
 
     async def test_unsupported_encoding_error_is_explicit(self) -> None:
         """Unknown encodings fail separately from invalid source bytes."""

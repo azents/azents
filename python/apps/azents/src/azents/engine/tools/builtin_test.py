@@ -378,6 +378,7 @@ class _FakeRunnerOperations:
         self.file_operation_calls: list[tuple[str, str | None]] = []
         self.read_calls: list[str] = []
         self.read_ranges: list[tuple[str, int, int | None]] = []
+        self.text_read_ranges: list[tuple[str, int, int]] = []
         self.stat_calls: list[str] = []
         self.stat_started_count = 0
         self.stat_started_event: asyncio.Event | None = None
@@ -565,22 +566,27 @@ class _FakeRunnerOperations:
         runner_generation: int,
         owner_session_id: str | None = None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime,
     ) -> RuntimeFileTextReadResult:
-        """Read one bounded decoded file range for the text tool."""
+        """Read one bounded decoded character range for the text tool."""
         del runtime_id, runner_generation, deadline_at
         self.file_operation_calls.append(("read_text", owner_session_id))
         self.read_calls.append(path)
-        self.read_ranges.append((path, offset, max_bytes))
+        self.text_read_ranges.append((path, character_offset, max_characters))
         if self.read_unavailable_message is not None:
             raise RuntimeRunnerOperationUnavailable(self.read_unavailable_message)
         if self.read_text_failure is not None:
             raise self.read_text_failure
+        text = self.files[path].decode(encoding)
+        chunk = text[character_offset : character_offset + max_characters]
         return RuntimeFileTextReadResult(
-            text=self.files[path][offset : offset + max_bytes].decode(encoding),
+            text=chunk,
+            start_character=character_offset,
+            end_character=character_offset + len(chunk),
+            truncated=character_offset + len(chunk) < len(text),
             final_cursor="0-1",
         )
 
@@ -1474,7 +1480,7 @@ class TestRuntimeToolkitUpdateContext:
 
         assert decision is not None
         assert runner_operations.file_operation_calls == [
-            ("read", "child-session"),
+            ("read_text", "child-session"),
             ("stat", "child-session"),
             ("read_text", "child-session"),
         ]
@@ -2066,6 +2072,32 @@ async def test_runtime_file_range_maps_runner_disconnect_to_storage_error() -> N
 
 
 @pytest.mark.asyncio
+async def test_runtime_text_storage_maps_runner_disconnect_to_storage_error() -> None:
+    """A disconnected Runner remains a controlled text-read failure."""
+    runner_operations = _FakeRunnerOperations(
+        {"/workspace/agent/report.txt": b"abcdef"}
+    )
+    runner_operations.read_unavailable_message = "runner disconnected"
+    storage = RuntimeRunnerFileStorage(
+        runner_operations=cast(Any, runner_operations),
+        agent_runtime_repo=_make_runtime_repo(),
+        agent_runtime_service=AsyncMock(),
+        session_manager=cast(Any, _make_mock_session_manager()),
+        runtime_agent_id="agent-1",
+        owner_session_id="session-1",
+    )
+
+    with pytest.raises(RuntimeStorageError, match="runner disconnected"):
+        await storage.get_text(
+            "/workspace/agent/report.txt",
+            agent_id="agent-1",
+            offset=0,
+            limit=3,
+            encoding="utf-8",
+        )
+
+
+@pytest.mark.asyncio
 async def test_runtime_text_storage_maps_runner_decode_error() -> None:
     """A Runner text decode failure remains a strict Unicode decode failure."""
     runner_operations = _FakeRunnerOperations({"/workspace/agent/report.txt": b"\xff"})
@@ -2087,8 +2119,37 @@ async def test_runtime_text_storage_maps_runner_decode_error() -> None:
             "/workspace/agent/report.txt",
             agent_id="agent-1",
             offset=0,
-            max_bytes=1,
+            limit=1,
             encoding="utf-8",
+        )
+
+
+@pytest.mark.asyncio
+async def test_runtime_text_storage_maps_unsupported_encoding() -> None:
+    """A Runner encoding rejection remains an explicit lookup failure."""
+    runner_operations = _FakeRunnerOperations(
+        {"/workspace/agent/report.txt": b"abcdef"}
+    )
+    runner_operations.read_text_failure = RuntimeRunnerOperationFailedError(
+        "Unsupported text encoding: missing-codec",
+        code="FILE_READ_TEXT_UNSUPPORTED_ENCODING",
+    )
+    storage = RuntimeRunnerFileStorage(
+        runner_operations=cast(Any, runner_operations),
+        agent_runtime_repo=_make_runtime_repo(),
+        agent_runtime_service=AsyncMock(),
+        session_manager=cast(Any, _make_mock_session_manager()),
+        runtime_agent_id="agent-1",
+        owner_session_id="session-1",
+    )
+
+    with pytest.raises(LookupError, match="missing-codec"):
+        await storage.get_text(
+            "/workspace/agent/report.txt",
+            agent_id="agent-1",
+            offset=0,
+            limit=3,
+            encoding="missing-codec",
         )
 
 

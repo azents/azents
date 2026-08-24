@@ -5,29 +5,18 @@ Used to inspect full content of truncated tool output or read text files
 uploaded by user.
 """
 
-import codecs
 import logging
-from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
-from azents.services.file_storage import RangedFileStorage
+from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 logger = logging.getLogger(__name__)
-_TEXT_READ_CHUNK_BYTES = 64 * 1024
 _MAX_TEXT_READ_CHARACTERS = 64 * 1024
-
-
-@dataclass(frozen=True)
-class _CharacterReadResult:
-    """One bounded character range and whether more text follows."""
-
-    text: str
-    truncated: bool
 
 
 class ReadTextInput(BaseModel):
@@ -56,7 +45,7 @@ class ReadTextInput(BaseModel):
 
 def make_read_text_tool(
     *,
-    session_storage: RangedFileStorage,
+    session_storage: FileStorage,
     agent_id: str,
 ) -> FunctionTool:
     """Create read_text tool.
@@ -71,8 +60,7 @@ def make_read_text_tool(
         abs_path = input.path
 
         try:
-            result = await _read_character_range(
-                session_storage,
+            result = await session_storage.get_text(
                 abs_path,
                 agent_id=agent_id,
                 offset=input.offset,
@@ -102,16 +90,18 @@ def make_read_text_tool(
                 f"Failed to read file: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
             ) from None
 
-        end = input.offset + len(result.text)
         parts = [
-            f"Content of {abs_path} (characters {input.offset}-{end}):",
+            (
+                f"Content of {abs_path} "
+                f"(characters {result.start_character}-{result.end_character}):"
+            ),
             "",
             result.text,
         ]
 
         if result.truncated:
             parts.append("")
-            parts.append(f"... (Use offset={end} to read more.)")
+            parts.append(f"... (Use offset={result.end_character} to read more.)")
 
         return "\n".join(parts)
 
@@ -125,64 +115,4 @@ def make_read_text_tool(
             "Supports character offset and limit, plus explicit text encoding "
             "(default utf-8) for reading large files in chunks."
         ),
-    )
-
-
-async def _read_character_range(
-    storage: RangedFileStorage,
-    path: str,
-    *,
-    agent_id: str,
-    offset: int,
-    limit: int,
-    encoding: str,
-) -> _CharacterReadResult:
-    """Read a character range with bounded byte chunks and strict decoding."""
-    if offset < 0 or limit <= 0:
-        raise ValueError("Character read range must be positive and non-negative")
-    decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
-    byte_offset = 0
-    character_position = 0
-    collected_count = 0
-    target_count = limit + 1
-    parts: list[str] = []
-
-    def append_decoded(decoded: str) -> None:
-        """Collect only the decoded characters inside the requested range."""
-        nonlocal character_position, collected_count
-        decoded_end = character_position + len(decoded)
-        if decoded_end > offset:
-            start = max(offset - character_position, 0)
-            remaining = target_count - collected_count
-            part = decoded[start : start + remaining]
-            parts.append(part)
-            collected_count += len(part)
-        character_position = decoded_end
-
-    while collected_count < target_count:
-        data = await storage.read_range(
-            path,
-            agent_id=agent_id,
-            offset=byte_offset,
-            max_bytes=_TEXT_READ_CHUNK_BYTES,
-        )
-        eof = len(data) < _TEXT_READ_CHUNK_BYTES
-        decoder_state = decoder.getstate()
-        try:
-            decoded = decoder.decode(data, final=eof)
-        except UnicodeDecodeError as exc:
-            decoder.setstate(decoder_state)
-            append_decoded(decoder.decode(data[: exc.start], final=False))
-            if collected_count >= target_count:
-                break
-            raise
-        append_decoded(decoded)
-        byte_offset += len(data)
-        if eof:
-            break
-
-    text = "".join(parts)
-    return _CharacterReadResult(
-        text=text[:limit],
-        truncated=len(text) > limit,
     )

@@ -34,7 +34,7 @@ from azents.services.file_storage import FileStorage
 logger = logging.getLogger(__name__)
 
 AGENTS_FILENAME = "AGENTS.md"
-MAX_AGENTS_BYTES = 64 * 1024
+MAX_AGENTS_CHARACTERS = 64 * 1024
 AGENTS_TOOLKIT_NAMESPACE = "builtin"
 AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME = "agents_md_appendix_dedupe"
 AGENTS_MISSING_CACHE_TTL_SECONDS = 5.0
@@ -219,14 +219,6 @@ def truncate_agents_content(content: str, *, truncated: bool) -> str:
     if truncated:
         return f"{content}\n\n... (truncated)"
     return content
-
-
-def _metadata_size(metadata: dict[str, object]) -> int:
-    """Return a non-negative byte size from Runtime file metadata."""
-    value = metadata.get("size")
-    if isinstance(value, int) and value >= 0:
-        return value
-    return 0
 
 
 class AgentsAppendixMixin:
@@ -434,11 +426,11 @@ class AgentsAppendixMixin:
                     cache_miss_count=1,
                 )
             read_count = 1
-            content = await file_storage.get_text(
+            result = await file_storage.get_text(
                 path,
                 agent_id=self._runtime_agent_id,
                 offset=0,
-                max_bytes=MAX_AGENTS_BYTES,
+                limit=MAX_AGENTS_CHARACTERS,
                 encoding="utf-8",
             )
         except FileNotFoundError:
@@ -460,8 +452,8 @@ class AgentsAppendixMixin:
             )
         return _AgentsFileReadResult(
             content=truncate_agents_content(
-                content,
-                truncated=_metadata_size(metadata) > MAX_AGENTS_BYTES,
+                result.text,
+                truncated=result.truncated,
             ),
             stat_count=1,
             read_count=1,

@@ -300,12 +300,8 @@ async def test_file_read_uses_bounded_range_without_full_file_load(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation_type", ["file.read", "file.read_text"])
-async def test_file_read_rejects_non_positive_byte_limit(
-    tmp_path: Path,
-    operation_type: str,
-) -> None:
-    """Malformed byte limits cannot turn bounded reads into full-file reads."""
+async def test_file_read_rejects_non_positive_byte_limit(tmp_path: Path) -> None:
+    """Malformed byte limits cannot turn binary reads into full-file reads."""
     path = tmp_path / "range.txt"
     path.write_bytes(b"content")
     client = _FakeClient()
@@ -317,7 +313,7 @@ async def test_file_read_rejects_non_positive_byte_limit(
 
     await operations.handle(
         _operation(
-            operation_type=operation_type,
+            operation_type="file.read",
             payload={
                 "path": "range.txt",
                 "offset": 0,
@@ -327,10 +323,45 @@ async def test_file_read_rejects_non_positive_byte_limit(
     )
 
     assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_ERROR
-    assert client.events[-1].payload["error_code"] in {
-        "INVALID_FILE_READ_RANGE",
-        "INVALID_FILE_READ_TEXT_RANGE",
-    }
+    assert client.events[-1].payload["error_code"] == "INVALID_FILE_READ_RANGE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("character_offset", "max_characters"),
+    [
+        (-1, 1),
+        (0, 0),
+    ],
+)
+async def test_file_read_text_rejects_invalid_character_range(
+    tmp_path: Path,
+    character_offset: int,
+    max_characters: int,
+) -> None:
+    """Text reads require a non-negative offset and positive character limit."""
+    path = tmp_path / "range.txt"
+    path.write_bytes(b"content")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read_text",
+            payload={
+                "path": "range.txt",
+                "character_offset": character_offset,
+                "max_characters": max_characters,
+            },
+        )
+    )
+
+    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload["error_code"] == ("INVALID_FILE_READ_TEXT_RANGE")
 
 
 @pytest.mark.asyncio
@@ -398,8 +429,8 @@ async def test_file_read_text_uses_requested_encoding_without_base64(
             operation_type="file.read_text",
             payload={
                 "path": "latin.txt",
-                "offset": 0,
-                "max_bytes": 16,
+                "character_offset": 0,
+                "max_characters": 16,
                 "encoding": "latin-1",
             },
         )
@@ -411,10 +442,167 @@ async def test_file_read_text_uses_requested_encoding_without_base64(
         RuntimeRunnerEventType.FINAL_SUCCESS,
     ]
     assert client.events[1].payload == {"text": "café"}
+    assert client.events[-1].payload == {
+        "start_character": 0,
+        "end_character": 4,
+        "truncated": False,
+    }
     assert all(
         event.event_type is not RuntimeRunnerEventType.FILE_CHUNK
         for event in client.events
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoding", ["missing-codec", "base64_codec"])
+async def test_file_read_text_rejects_unsupported_or_non_text_encoding(
+    tmp_path: Path,
+    encoding: str,
+) -> None:
+    """Text reads reject missing codecs and binary transform codecs alike."""
+    path = tmp_path / "content.txt"
+    path.write_bytes(b"QQ==")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read_text",
+            payload={
+                "path": "content.txt",
+                "character_offset": 0,
+                "max_characters": 16,
+                "encoding": encoding,
+            },
+        )
+    )
+
+    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload == {
+        "error_code": "FILE_READ_TEXT_UNSUPPORTED_ENCODING",
+        "error_message": f"Unsupported text encoding: {encoding}",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "offset", "limit", "expected"),
+    [
+        ("ABC", 1, 1, "B"),
+        ("가나다", 1, 1, "나"),
+        ("日本語", 1, 1, "本"),
+        ("😀😃😄", 1, 1, "😃"),
+        ("A가日😀Z", 1, 3, "가日😀"),
+    ],
+)
+async def test_file_read_text_uses_decoded_character_ranges(
+    tmp_path: Path,
+    content: str,
+    offset: int,
+    limit: int,
+    expected: str,
+) -> None:
+    """Text offsets and limits count decoded characters inside the Runner."""
+    path = tmp_path / "mixed.txt"
+    path.write_text(content, encoding="utf-8")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read_text",
+            payload={
+                "path": "mixed.txt",
+                "character_offset": offset,
+                "max_characters": limit,
+                "encoding": "utf-8",
+            },
+        )
+    )
+
+    assert client.events[1].payload == {"text": expected}
+    assert client.events[-1].payload == {
+        "start_character": offset,
+        "end_character": offset + len(expected),
+        "truncated": offset + len(expected) < len(content),
+    }
+
+
+@pytest.mark.asyncio
+async def test_file_read_text_decodes_character_split_across_chunks(
+    tmp_path: Path,
+) -> None:
+    """A byte chunk boundary cannot split one decoded character."""
+    content = ("A" * (64 * 1024 - 1)) + "가B"
+    path = tmp_path / "chunked.txt"
+    path.write_text(content, encoding="utf-8")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read_text",
+            payload={
+                "path": "chunked.txt",
+                "character_offset": 64 * 1024 - 1,
+                "max_characters": 2,
+                "encoding": "utf-8",
+            },
+        )
+    )
+
+    assert client.events[1].payload == {"text": "가B"}
+    assert client.events[-1].payload == {
+        "start_character": 64 * 1024 - 1,
+        "end_character": 64 * 1024 + 1,
+        "truncated": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_file_read_text_caps_requested_character_limit(tmp_path: Path) -> None:
+    """Runner caps text output by character count."""
+    path = tmp_path / "large.txt"
+    path.write_text("A" * (64 * 1024 + 2), encoding="utf-8")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read_text",
+            payload={
+                "path": "large.txt",
+                "character_offset": 0,
+                "max_characters": 1024 * 1024,
+                "encoding": "utf-8",
+            },
+        )
+    )
+
+    text = client.events[1].payload["text"]
+    assert isinstance(text, str)
+    assert len(text) == 64 * 1024
+    assert client.events[-1].payload == {
+        "start_character": 0,
+        "end_character": 64 * 1024,
+        "truncated": True,
+    }
 
 
 @pytest.mark.asyncio
@@ -432,14 +620,77 @@ async def test_file_read_text_reports_binary_decode_error(tmp_path: Path) -> Non
     await operations.handle(
         _operation(
             operation_type="file.read_text",
-            payload={"path": "binary.dat", "offset": 0, "max_bytes": 16},
+            payload={
+                "path": "binary.dat",
+                "character_offset": 0,
+                "max_characters": 16,
+            },
         )
     )
 
     assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
     assert client.events[-1].payload == {
         "error_code": "FILE_READ_TEXT_DECODE_ERROR",
-        "error_message": "File range cannot be decoded as utf-8",
+        "error_message": "File cannot be decoded as utf-8",
+    }
+
+
+@pytest.mark.asyncio
+async def test_file_read_text_reports_invalid_source_before_range(
+    tmp_path: Path,
+) -> None:
+    """Invalid source bytes needed to locate the range fail explicitly."""
+    path = tmp_path / "invalid.txt"
+    path.write_bytes(b"A\xffB")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read_text",
+            payload={
+                "path": "invalid.txt",
+                "character_offset": 1,
+                "max_characters": 1,
+            },
+        )
+    )
+
+    assert client.events[-1].payload["error_code"] == "FILE_READ_TEXT_DECODE_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_file_read_text_ignores_invalid_unread_suffix(tmp_path: Path) -> None:
+    """An invalid suffix after the continuation probe remains unread."""
+    path = tmp_path / "prefix.txt"
+    path.write_bytes(b"AB\xff")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read_text",
+            payload={
+                "path": "prefix.txt",
+                "character_offset": 0,
+                "max_characters": 1,
+            },
+        )
+    )
+
+    assert client.events[1].payload == {"text": "A"}
+    assert client.events[-1].payload == {
+        "start_character": 0,
+        "end_character": 1,
+        "truncated": True,
     }
 
 

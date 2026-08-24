@@ -23,14 +23,14 @@ Details of all living specs. Synchronized from frontmatter.
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-08-24 | 98 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-08-18 | 12 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-08-24 | 71 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-08-24 | 72 |
 
 ## Flow Specs
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-08-23 | 161 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-08-24 | 64 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-08-24 | 65 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-24 | 27 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |

@@ -38,7 +38,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-24
-spec_version: 64
+spec_version: 65
 ---
 
 # Agent Runtime Control
@@ -446,7 +446,7 @@ may retain narrower boundaries for their own actions, such as user-visible file 
 
 `file.read` accepts a path, non-negative byte offset, and positive bounded byte count capped at 8 MiB. Runner rejects malformed ranges, seeks to the requested offset, and reads only that range before emitting one Base64 `file_chunk`; it does not load the complete source file before slicing the response.
 
-`file.read_text` accepts a path, non-negative byte offset, positive bounded byte count capped at 64 KiB, and text encoding. The encoding defaults to UTF-8 when omitted. Runner rejects malformed ranges, strictly decodes only the requested range, and returns direct text in a Control text event; it never emits a Base64 `file_chunk` for this operation. Unknown encodings and invalid byte sequences return stable errors rather than replacement-decoded content.
+`file.read_text` accepts a path, non-negative decoded-character offset, positive bounded character count capped at 64 Ki characters, and text encoding. The encoding defaults to UTF-8 when omitted. Runner incrementally reads and strictly decodes bounded byte chunks while locating and collecting the requested character range, returns the actual start/end character cursors plus truncation metadata, and emits direct text in a Control text event; it never emits a Base64 `file_chunk` for this operation. Unknown encodings, malformed ranges, and invalid byte sequences required to reach or complete the requested range return stable errors rather than replacement-decoded content.
 
 `file.apply_patch` accepts one bounded UTF-8 V4A document plus an absolute Runtime `base_path`. The grammar requires `*** Begin Patch` and `*** End Patch`, supports only Add File, Update File, and Delete File operations, and permits each relative path at most once. Update hunks use exact unique logical-line context with optional anchors and an end-of-file assertion. The parser rejects malformed envelopes, unsupported operations, ambiguous or missing context, overlapping hunks, duplicate paths, invalid encodings, and mixed patch newlines before mutation.
 
@@ -656,6 +656,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-24** (spec_version 65) — Made `file.read_text` character-oriented
+  end to end, with Runner-owned incremental decoding, character cursors, and
+  explicit truncation metadata while preserving bounded byte-chunk I/O.
 - **2026-08-24** (spec_version 64) — Required ordinary `file.read` byte ranges
   to reject malformed or oversized requests and use bounded seek/read I/O
   instead of loading the complete source before slicing.

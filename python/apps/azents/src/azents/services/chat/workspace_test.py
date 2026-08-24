@@ -273,16 +273,21 @@ class _FakeRunnerOperations:
         runner_generation: int,
         owner_session_id: str | None = None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime.datetime,
     ) -> RuntimeFileTextReadResult:
-        """Return one bounded decoded preview range."""
+        """Return one bounded decoded preview character range."""
         del runtime_id, runner_generation, owner_session_id, deadline_at
-        self.text_read_calls.append((path, offset, max_bytes, encoding))
+        self.text_read_calls.append((path, character_offset, max_characters, encoding))
+        text = self.files[path].decode(encoding)
+        chunk = text[character_offset : character_offset + max_characters]
         return RuntimeFileTextReadResult(
-            text=self.files[path][offset : offset + max_bytes].decode(encoding),
+            text=chunk,
+            start_character=character_offset,
+            end_character=character_offset + len(chunk),
+            truncated=character_offset + len(chunk) < len(text),
             final_cursor="0-1",
         )
 
@@ -638,6 +643,31 @@ async def test_read_path_uses_stat_to_return_file_preview() -> None:
     assert runner_operations.text_read_calls == [(file_path, 0, 64 * 1024, "utf-8")]
     assert runner_operations.stat_calls == [("runtime-1", 1, file_path)]
     assert runner_operations.list_calls == []
+
+
+@pytest.mark.asyncio
+async def test_text_preview_uses_character_limit_not_file_byte_size() -> None:
+    """Multibyte text is bounded by decoded characters and reports truncation."""
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    file_path = (AGENT_WORKSPACE_ROOT / "large.txt").as_posix()
+    runner_operations.files[file_path] = ("가" * (64 * 1024 + 1)).encode()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.read_path("agent-1", "user-1", file_path)
+
+    assert isinstance(result, Success)
+    assert result.value.type == "FILE"
+    assert result.value.text is not None
+    assert len(result.value.text) == 64 * 1024
+    assert result.value.truncated is True
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,12 @@ from functools import lru_cache
 from typing import List
 
 from azents.engine.io.attachments import RuntimeAttachment
-from azents.services.file_storage import GrepFileMatch, GrepLineMatch, GrepResult
+from azents.services.file_storage import (
+    GrepFileMatch,
+    GrepLineMatch,
+    GrepResult,
+    TextReadResult,
+)
 from azents.services.session_storage import guess_media_type
 
 _MAX_BRACE_EXPANSIONS = 256
@@ -30,6 +35,7 @@ class FakeSharedStorage:
         self._files = dict(files) if files else {}
         self._raise_permission_on_put = raise_permission_on_put
         self.put_calls: list[tuple[str, bytes]] = []
+        self.get_text_calls: list[tuple[str, int, int, str]] = []
         self.read_range_calls: list[tuple[str, int, int]] = []
 
     def add_file(self, path: str, data: bytes) -> None:
@@ -60,13 +66,22 @@ class FakeSharedStorage:
         *,
         agent_id: str = "",
         offset: int,
-        max_bytes: int,
+        limit: int,
         encoding: str,
-    ) -> str:
-        """Return one bounded decoded byte range."""
+    ) -> TextReadResult:
+        """Return one bounded decoded character range."""
+        del agent_id
         if path not in self._files:
             raise FileNotFoundError(f"File not found: {path}")
-        return self._files[path][offset : offset + max_bytes].decode(encoding)
+        self.get_text_calls.append((path, offset, limit, encoding))
+        text = self._files[path].decode(encoding)
+        chunk = text[offset : offset + limit]
+        return TextReadResult(
+            text=chunk,
+            start_character=offset,
+            end_character=offset + len(chunk),
+            truncated=offset + len(chunk) < len(text),
+        )
 
     async def read_range(
         self,

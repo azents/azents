@@ -80,7 +80,8 @@ SKILL_TOOLKIT_NAMESPACE = "skill"
 SKILL_TOOLKIT_STATE_NAME = "projection"
 SKILL_STATE_SCHEMA_VERSION = 1
 SKILL_MARKDOWN_FILENAME = "SKILL.md"
-_SKILL_READ_MAX_BYTES = 512 * 1024
+_SKILL_READ_MAX_CHARACTERS = 512 * 1024
+_MANAGED_SKILL_MAX_BYTES = 512 * 1024
 _RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 10
 
 SkillSourceKind = Literal["agent", "project_agents", "project_claude", "azents"]
@@ -235,12 +236,12 @@ class SkillRuntimeFileReader(Protocol):
         runner_generation: int,
         owner_session_id: str | None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime.datetime,
     ) -> RuntimeFileTextReadResult:
-        """Read one bounded Skill entrypoint."""
+        """Read one bounded Skill character range."""
         ...
 
 
@@ -623,8 +624,8 @@ class SkillProjectionService:
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
                 path=skill_path,
-                offset=0,
-                max_bytes=_SKILL_READ_MAX_BYTES,
+                character_offset=0,
+                max_characters=_SKILL_READ_MAX_CHARACTERS,
                 encoding="utf-8",
                 deadline_at=_runner_file_operation_deadline(),
             )
@@ -903,9 +904,9 @@ def skill_item_from_vfs_entry(entry: VfsFileEntry) -> SkillProjectionItem:
     if parts is None:
         raise ValueError("VFS entry is not a managed Skill entrypoint")
     namespace, slug = parts
-    if entry.size_bytes > _SKILL_READ_MAX_BYTES:
+    if entry.size_bytes > _MANAGED_SKILL_MAX_BYTES:
         raise ValueError(
-            f"Managed SKILL.md exceeds {_SKILL_READ_MAX_BYTES} bytes: "
+            f"Managed SKILL.md exceeds {_MANAGED_SKILL_MAX_BYTES} bytes: "
             f"{entry.canonical_uri}"
         )
     try:
