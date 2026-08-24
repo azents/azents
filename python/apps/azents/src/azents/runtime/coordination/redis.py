@@ -8,6 +8,11 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
+from azents_runtime_control.system_metrics import (
+    RunnerSystemMetricAvailability,
+    RunnerSystemMetricObservation,
+    RunnerSystemMetricsScope,
+)
 from redis.asyncio import Redis
 from redis.exceptions import ResponseError
 
@@ -26,6 +31,7 @@ from azents.runtime.coordination.data import (
     RuntimeReplyRecord,
     RuntimeRequestEnvelope,
     RuntimeRequestRecord,
+    RuntimeSystemMetricsSample,
 )
 
 _BUSYGROUP_PREFIX = "BUSYGROUP"
@@ -56,6 +62,21 @@ end
 redis.call('DEL', KEYS[1])
 return 1
 """
+_APPEND_SYSTEM_METRICS_SCRIPT = """
+local last = redis.call('LINDEX', KEYS[1], -1)
+if last then
+  local decoded = cjson.decode(last)
+  if tonumber(decoded['sequence']) >= tonumber(ARGV[1]) then
+    return 0
+  end
+end
+redis.call('RPUSH', KEYS[1], ARGV[2])
+redis.call('LTRIM', KEYS[1], -tonumber(ARGV[3]), -1)
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[4]))
+return 1
+"""
+_SYSTEM_METRICS_RETENTION_SECONDS = 3600
+_SYSTEM_METRICS_MAX_SAMPLES = 60
 
 # Transition ACTIVE -> RUNNING when the stored status is still active.
 _TRY_START_OPERATION_SCRIPT = """
@@ -598,6 +619,53 @@ class RedisRuntimeCoordinationStore:
             generation=generation,
         )
 
+    async def append_runner_system_metrics(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+        sample: RuntimeSystemMetricsSample,
+    ) -> bool:
+        """Atomically append a higher-sequence sample to the bounded series."""
+        eval_script = cast(Any, self._redis).eval
+        result = await eval_script(
+            _APPEND_SYSTEM_METRICS_SCRIPT,
+            1,
+            self._system_metrics_key(runtime_id, generation),
+            sample.sequence,
+            _system_metrics_sample_to_json(sample),
+            _SYSTEM_METRICS_MAX_SAMPLES,
+            _SYSTEM_METRICS_RETENTION_SECONDS,
+        )
+        return bool(result)
+
+    async def read_runner_system_metrics(
+        self,
+        *,
+        runtime_id: str,
+        generation: int,
+        current_time: datetime,
+    ) -> list[RuntimeSystemMetricsSample]:
+        """Read at most one hour and 60 samples for one Runner generation."""
+        lrange = cast(Any, self._redis).lrange
+        raw_rows = cast(
+            list[object],
+            await lrange(
+                self._system_metrics_key(runtime_id, generation),
+                -_SYSTEM_METRICS_MAX_SAMPLES,
+                -1,
+            ),
+        )
+        cutoff = current_time - timedelta(seconds=_SYSTEM_METRICS_RETENTION_SECONDS)
+        return [
+            sample
+            for raw in raw_rows
+            if (
+                sample := _system_metrics_sample_from_json(_decode_text(raw))
+            ).measured_at
+            >= cutoff
+        ]
+
     async def _set_connection_if_generation(
         self,
         *,
@@ -688,6 +756,9 @@ class RedisRuntimeCoordinationStore:
         subject_id: str,
     ) -> str:
         return f"{self._key_prefix}:connection-generation:{kind.value}:{subject_id}"
+
+    def _system_metrics_key(self, runtime_id: str, generation: int) -> str:
+        return f"{self._key_prefix}:system-metrics:{runtime_id}:{generation}"
 
 
 def _request_record_from_xautoclaim(result: object) -> RuntimeRequestRecord | None:
@@ -934,7 +1005,62 @@ def _connection_from_json(raw: str) -> RuntimeConnectionRecord:
     )
 
 
+def _system_metrics_sample_to_json(sample: RuntimeSystemMetricsSample) -> str:
+    return _json_dumps(
+        {
+            "sequence": sample.sequence,
+            "measured_at": _datetime_to_json(sample.measured_at),
+            "scope": sample.scope.value,
+            "cpu": _system_metric_observation_to_json(sample.cpu),
+            "memory": _system_metric_observation_to_json(sample.memory),
+            "disk": _system_metric_observation_to_json(sample.disk),
+        }
+    )
+
+
+def _system_metrics_sample_from_json(raw: str) -> RuntimeSystemMetricsSample:
+    payload = _json_loads(raw)
+    return RuntimeSystemMetricsSample(
+        sequence=int(payload["sequence"]),
+        measured_at=_required_datetime(payload["measured_at"]),
+        scope=RunnerSystemMetricsScope(str(payload["scope"])),
+        cpu=_system_metric_observation_from_json(payload["cpu"]),
+        memory=_system_metric_observation_from_json(payload["memory"]),
+        disk=_system_metric_observation_from_json(payload["disk"]),
+    )
+
+
+def _system_metric_observation_to_json(
+    observation: RunnerSystemMetricObservation,
+) -> dict[str, object]:
+    return {
+        "availability": observation.availability.value,
+        "used": observation.used,
+        "total": observation.total,
+    }
+
+
+def _system_metric_observation_from_json(
+    value: object,
+) -> RunnerSystemMetricObservation:
+    if not isinstance(value, dict):
+        raise RuntimeError("Runtime system metric observation must be an object")
+    return RunnerSystemMetricObservation(
+        availability=RunnerSystemMetricAvailability(str(value["availability"])),
+        used=_optional_int(value.get("used")),
+        total=_optional_int(value.get("total")),
+    )
+
+
 def _optional_str(value: object) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise RuntimeError("Runtime coordination integer must be an integer")
+    return value

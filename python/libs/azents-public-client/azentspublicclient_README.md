@@ -77,6 +77,7 @@ Class | Method | HTTP request | Description
 ------------ | ------------- | ------------- | -------------
 *AgentRuntimeV1Api* | [**agent_runtime_v1_add_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_add_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add | Add Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_get_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_get_agent_runtime) | **GET** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime | Get Agent Runtime
+*AgentRuntimeV1Api* | [**agent_runtime_v1_get_agent_runtime_system_metrics**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_get_agent_runtime_system_metrics) | **GET** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics | Get Agent Runtime System Metrics
 *AgentRuntimeV1Api* | [**agent_runtime_v1_observe_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_observe_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/observe | Observe Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_remove_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_remove_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/remove | Remove Agent Runtime
 *AgentRuntimeV1Api* | [**agent_runtime_v1_reset_agent_runtime**](azentspublicclient/docs/AgentRuntimeV1Api.md#agent_runtime_v1_reset_agent_runtime) | **POST** /agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/reset | Reset Agent Runtime
@@ -353,6 +354,10 @@ Class | Method | HTTP request | Description
  - [AgentRuntimeRemovalStatus](azentspublicclient/docs/AgentRuntimeRemovalStatus.md)
  - [AgentRuntimeResponse](azentspublicclient/docs/AgentRuntimeResponse.md)
  - [AgentRuntimeSummaryResponse](azentspublicclient/docs/AgentRuntimeSummaryResponse.md)
+ - [AgentRuntimeSystemMetricCurrentResponse](azentspublicclient/docs/AgentRuntimeSystemMetricCurrentResponse.md)
+ - [AgentRuntimeSystemMetricObservationResponse](azentspublicclient/docs/AgentRuntimeSystemMetricObservationResponse.md)
+ - [AgentRuntimeSystemMetricsResponse](azentspublicclient/docs/AgentRuntimeSystemMetricsResponse.md)
+ - [AgentRuntimeSystemMetricsSampleResponse](azentspublicclient/docs/AgentRuntimeSystemMetricsSampleResponse.md)
  - [AgentSessionCreateRequest](azentspublicclient/docs/AgentSessionCreateRequest.md)
  - [AgentSessionListResponse](azentspublicclient/docs/AgentSessionListResponse.md)
  - [AgentSessionPageResponse](azentspublicclient/docs/AgentSessionPageResponse.md)
@@ -640,6 +645,8 @@ Class | Method | HTTP request | Description
  - [ResponseChatV1ReadAgentWorkspacePath](azentspublicclient/docs/ResponseChatV1ReadAgentWorkspacePath.md)
  - [ResponseLlmProviderIntegrationV1GetSubscriptionUsage](azentspublicclient/docs/ResponseLlmProviderIntegrationV1GetSubscriptionUsage.md)
  - [ResponseModeRequest](azentspublicclient/docs/ResponseModeRequest.md)
+ - [RunnerSystemMetricAvailability](azentspublicclient/docs/RunnerSystemMetricAvailability.md)
+ - [RunnerSystemMetricsScope](azentspublicclient/docs/RunnerSystemMetricsScope.md)
  - [RuntimeConfigurationNetworkResponse](azentspublicclient/docs/RuntimeConfigurationNetworkResponse.md)
  - [RuntimeConfigurationStateResponse](azentspublicclient/docs/RuntimeConfigurationStateResponse.md)
  - [RuntimeConfigurationStatus](azentspublicclient/docs/RuntimeConfigurationStatus.md)
@@ -672,6 +679,8 @@ Class | Method | HTTP request | Description
  - [RuntimeRecreationTargetKind](azentspublicclient/docs/RuntimeRecreationTargetKind.md)
  - [RuntimeRunnerState](azentspublicclient/docs/RuntimeRunnerState.md)
  - [RuntimeSummary](azentspublicclient/docs/RuntimeSummary.md)
+ - [RuntimeSystemMetricState](azentspublicclient/docs/RuntimeSystemMetricState.md)
+ - [RuntimeSystemMetricsSummary](azentspublicclient/docs/RuntimeSystemMetricsSummary.md)
  - [RuntimeTerminalDeleteAcknowledgementKind](azentspublicclient/docs/RuntimeTerminalDeleteAcknowledgementKind.md)
  - [ScheduledTaskCreateRequest](azentspublicclient/docs/ScheduledTaskCreateRequest.md)
  - [ScheduledTaskCurrentCycleEnvelope](azentspublicclient/docs/ScheduledTaskCurrentCycleEnvelope.md)

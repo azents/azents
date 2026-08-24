@@ -4,6 +4,11 @@ import dataclasses
 import enum
 from datetime import datetime
 
+from azents_runtime_control.system_metrics import (
+    RunnerSystemMetricObservation,
+    RunnerSystemMetricsScope,
+)
+
 type JsonScalar = str | int | float | bool | None
 type JsonValue = JsonScalar | list[JsonValue] | dict[str, JsonValue]
 
@@ -181,3 +186,22 @@ class RuntimeConnectionRecord:
     heartbeat_at: datetime
     expires_at: datetime
     metadata: dict[str, JsonValue]
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeSystemMetricsSample:
+    """One server-timestamped Runner system-metrics sample."""
+
+    sequence: int
+    measured_at: datetime
+    scope: RunnerSystemMetricsScope
+    cpu: RunnerSystemMetricObservation
+    memory: RunnerSystemMetricObservation
+    disk: RunnerSystemMetricObservation
+
+    def __post_init__(self) -> None:
+        """Validate store ordering and canonical time."""
+        if self.sequence <= 0:
+            raise ValueError("Runtime metrics sequence must be positive")
+        if self.measured_at.tzinfo is None:
+            raise ValueError("Runtime metrics measurement time must be timezone-aware")

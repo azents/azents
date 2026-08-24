@@ -112,6 +112,7 @@
     "subtitle": "Agent WorkspaceのファイルとProject",
     "openPanel": "Agent Workspaceを開く",
     "workspaceTab": "Agent Runtime",
+    "metricsTab": "メトリクス",
     "settingsTab": "設定",
     "settingsTitle": "Runtime 設定",
     "settingsSubtitle": "Runtime の起動、停止、状態を管理します。",

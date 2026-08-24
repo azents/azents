@@ -19,6 +19,10 @@ from azents.services.agent_runtime.lifecycle_data import (
     RuntimeProviderUnavailable,
 )
 from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.agent_runtime_system_metrics.service import (
+    AgentRuntimeSystemMetricsService,
+    get_agent_runtime_system_metrics_service,
+)
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
@@ -28,6 +32,7 @@ from .data import (
     AgentRuntimeLifecycleResponse,
     AgentRuntimeRemovalResponse,
     AgentRuntimeResponse,
+    AgentRuntimeSystemMetricsResponse,
     RemoveAgentRuntimeRequest,
     ResetAgentRuntimeRequest,
 )
@@ -52,6 +57,33 @@ async def get_agent_runtime(
     match result:
         case Success(value):
             return AgentRuntimeResponse.convert_from(value)
+        case Failure(error):
+            _raise_access_error(error)
+            assert_never(error)
+        case _:
+            assert_never(result)
+
+
+@router.get("/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics")
+async def get_agent_runtime_system_metrics(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[
+        AgentRuntimeSystemMetricsService,
+        Depends(get_agent_runtime_system_metrics_service),
+    ],
+    *,
+    agent_id: str,
+) -> AgentRuntimeSystemMetricsResponse:
+    """Get the Agent Runtime system-metrics overview."""
+    result = await service.get(
+        agent_id,
+        workspace_id=member.workspace_id,
+        workspace_user_id=member.workspace_user_id,
+        role=member.role,
+    )
+    match result:
+        case Success(value):
+            return AgentRuntimeSystemMetricsResponse.convert_from(value)
         case Failure(error):
             _raise_access_error(error)
             assert_never(error)

@@ -16,6 +16,7 @@ import metadata from "../../messages/ko-KR/metadata.json";
 import nav from "../../messages/ko-KR/nav.json";
 import oauth from "../../messages/ko-KR/oauth.json";
 import oauthCallback from "../../messages/ko-KR/oauthCallback.json";
+import runtimeMetrics from "../../messages/ko-KR/runtimeMetrics.json";
 import security from "../../messages/ko-KR/security.json";
 import skills from "../../messages/ko-KR/skills.json";
 import useCases from "../../messages/ko-KR/useCases.json";
@@ -43,6 +44,7 @@ const messages = composeMessages([
   ["nav", nav],
   ["oauth", oauth],
   ["oauthCallback", oauthCallback],
+  ["runtimeMetrics", runtimeMetrics],
   ["security", security],
   ["skills", skills],
   ["useCases", useCases],

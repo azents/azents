@@ -23,6 +23,7 @@ export const MESSAGE_NAMESPACES = [
   "nav",
   "oauth",
   "oauthCallback",
+  "runtimeMetrics",
   "security",
   "skills",
   "useCases",

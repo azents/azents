@@ -1263,6 +1263,63 @@
         }
       }
     },
+    "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/system-metrics": {
+      "get": {
+        "tags": [
+          "Agent Runtime v1"
+        ],
+        "summary": "Get Agent Runtime System Metrics",
+        "description": "Get the Agent Runtime system-metrics overview.",
+        "operationId": "agent_runtime_v1_get_agent_runtime_system_metrics",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRuntimeSystemMetricsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agent-runtime/v1/workspaces/{handle}/agents/{agent_id}/runtime/add": {
       "post": {
         "tags": [
@@ -15533,6 +15590,180 @@
         "title": "AgentRuntimeSummaryResponse",
         "description": "Agent Runtime summary response."
       },
+      "AgentRuntimeSystemMetricCurrentResponse": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/RuntimeSystemMetricState"
+          },
+          "measured_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measured At"
+          },
+          "used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "percentage": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "measured_at",
+          "used",
+          "total",
+          "percentage"
+        ],
+        "title": "AgentRuntimeSystemMetricCurrentResponse",
+        "description": "Current public projection for one Runtime metric."
+      },
+      "AgentRuntimeSystemMetricObservationResponse": {
+        "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/RunnerSystemMetricAvailability"
+          },
+          "used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "availability",
+          "used",
+          "total"
+        ],
+        "title": "AgentRuntimeSystemMetricObservationResponse",
+        "description": "One normalized public observation in a retained sample."
+      },
+      "AgentRuntimeSystemMetricsResponse": {
+        "properties": {
+          "summary": {
+            "$ref": "#/components/schemas/RuntimeSystemMetricsSummary"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunnerSystemMetricsScope"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cpu": {
+            "$ref": "#/components/schemas/AgentRuntimeSystemMetricCurrentResponse"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/AgentRuntimeSystemMetricCurrentResponse"
+          },
+          "disk": {
+            "$ref": "#/components/schemas/AgentRuntimeSystemMetricCurrentResponse"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/AgentRuntimeSystemMetricsSampleResponse"
+            },
+            "type": "array",
+            "title": "Samples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "summary",
+          "scope",
+          "cpu",
+          "memory",
+          "disk",
+          "samples"
+        ],
+        "title": "AgentRuntimeSystemMetricsResponse",
+        "description": "Dedicated privacy-safe Runtime system-metrics overview."
+      },
+      "AgentRuntimeSystemMetricsSampleResponse": {
+        "properties": {
+          "measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Measured At"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/RunnerSystemMetricsScope"
+          },
+          "cpu": {
+            "$ref": "#/components/schemas/AgentRuntimeSystemMetricObservationResponse"
+          },
+          "memory": {
+            "$ref": "#/components/schemas/AgentRuntimeSystemMetricObservationResponse"
+          },
+          "disk": {
+            "$ref": "#/components/schemas/AgentRuntimeSystemMetricObservationResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "measured_at",
+          "scope",
+          "cpu",
+          "memory",
+          "disk"
+        ],
+        "title": "AgentRuntimeSystemMetricsSampleResponse",
+        "description": "One retained public Runtime metrics sample."
+      },
       "AgentSessionCreateRequest": {
         "properties": {
           "existing_project_paths": {
@@ -25870,6 +26101,26 @@
         "title": "ResponseModeRequest",
         "description": "Required full-value response-mode request."
       },
+      "RunnerSystemMetricAvailability": {
+        "type": "string",
+        "enum": [
+          "available",
+          "unavailable",
+          "unsupported"
+        ],
+        "title": "RunnerSystemMetricAvailability",
+        "description": "Availability of one normalized metric observation."
+      },
+      "RunnerSystemMetricsScope": {
+        "type": "string",
+        "enum": [
+          "host",
+          "vm",
+          "container"
+        ],
+        "title": "RunnerSystemMetricsScope",
+        "description": "Physical execution environment visible to the Runner."
+      },
       "RuntimeConfigurationNetworkResponse": {
         "properties": {
           "mode": {
@@ -26919,6 +27170,33 @@
         ],
         "title": "RuntimeSummary",
         "description": "Server-computed Agent Runtime summary status."
+      },
+      "RuntimeSystemMetricState": {
+        "type": "string",
+        "enum": [
+          "fresh",
+          "stale",
+          "unavailable",
+          "unsupported",
+          "stopped",
+          "disconnected"
+        ],
+        "title": "RuntimeSystemMetricState",
+        "description": "Server-derived state of one current metric projection."
+      },
+      "RuntimeSystemMetricsSummary": {
+        "type": "string",
+        "enum": [
+          "fresh",
+          "partial",
+          "stale",
+          "unavailable",
+          "unsupported",
+          "stopped",
+          "disconnected"
+        ],
+        "title": "RuntimeSystemMetricsSummary",
+        "description": "Server-derived overall Runtime metrics summary."
       },
       "RuntimeTerminalDeleteAcknowledgementKind": {
         "type": "string",

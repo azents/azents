@@ -112,6 +112,7 @@
     "subtitle": "Fichiers Agent Workspace et projets",
     "openPanel": "Ouvrir l'agent workspace",
     "workspaceTab": "Agent Runtime",
+    "metricsTab": "Métriques",
     "settingsTab": "Paramètres",
     "settingsTitle": "Paramètres du runtime",
     "settingsSubtitle": "Démarrez, arrêtez et vérifiez l’état de ce runtime.",

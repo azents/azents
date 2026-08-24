@@ -112,6 +112,7 @@
     "subtitle": "Agent Runtime files and projects",
     "openPanel": "Open agent workspace",
     "workspaceTab": "Agent Runtime",
+    "metricsTab": "Metrics",
     "settingsTab": "Settings",
     "settingsTitle": "Runtime settings",
     "settingsSubtitle": "Start, stop, and check the status of this runtime.",

@@ -6,6 +6,7 @@
 import {
   agentRuntimeV1AddAgentRuntime,
   agentRuntimeV1GetAgentRuntime,
+  agentRuntimeV1GetAgentRuntimeSystemMetrics,
   agentRuntimeV1RemoveAgentRuntime,
   agentRuntimeV1ResetAgentRuntime,
   agentRuntimeV1RestartAgentRuntime,
@@ -1073,6 +1074,26 @@ export const chatRouter = router({
           403: "FORBIDDEN",
           404: "NOT_FOUND",
           409: "CONFLICT",
+        });
+      }
+    }),
+
+  getAgentRuntimeSystemMetrics: publicProcedure
+    .input(z.object({ handle: z.string().min(1), agentId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentRuntimeV1GetAgentRuntimeSystemMetrics({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          422: "BAD_REQUEST",
         });
       }
     }),

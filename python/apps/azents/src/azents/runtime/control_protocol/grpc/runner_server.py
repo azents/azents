@@ -16,6 +16,7 @@ from azents_runtime_control.grpc_runner_client import (
     runner_runtime_configuration_evidence_from_message,
     runner_runtime_configuration_evidence_to_message,
     runner_state_report_from_message,
+    runner_system_metrics_from_message,
     runner_transfer_result_from_message,
 )
 from azents_runtime_control.proto import (
@@ -29,6 +30,9 @@ from azents_runtime_control.runner_transfer import RunnerTransferDirection
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
 )
+from azents_runtime_control.system_metrics import (
+    RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES,
+)
 from google.protobuf import timestamp_pb2
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
@@ -36,6 +40,7 @@ from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
     RuntimeRunnerRegistration,
     RuntimeRunnerRegistrationAccepted,
+    RuntimeSystemMetricsAppendResult,
 )
 from azents.runtime.control_protocol.grpc.auth import (
     RuntimeRunnerCredentialAuthenticator,
@@ -326,6 +331,8 @@ class RuntimeRunnerControlGrpcServicer(
                         "request_id": message.request_id,
                     },
                 )
+                if payload == "system_metrics":
+                    continue
                 await outbound.put(
                     _error(message.request_id, "STALE_RUNNER_GENERATION")
                 )
@@ -400,6 +407,74 @@ class RuntimeRunnerControlGrpcServicer(
                         "active_operation_count": len(report.active_operation_ids),
                     },
                 )
+                continue
+            if payload == "system_metrics":
+                if (
+                    message.system_metrics.ByteSize()
+                    > RUNNER_SYSTEM_METRICS_MAX_MESSAGE_BYTES
+                ):
+                    _LOGGER.warning(
+                        "Runtime Runner system metrics rejected",
+                        extra={
+                            "runtime_id": runtime_id,
+                            "runner_generation": generation,
+                            "request_id": message.request_id,
+                            "reason": "message_too_large",
+                        },
+                    )
+                    continue
+                if message.system_metrics.runtime_id != runtime_id:
+                    _LOGGER.warning(
+                        "Runtime Runner system metrics rejected",
+                        extra={
+                            "runtime_id": runtime_id,
+                            "runner_generation": generation,
+                            "request_id": message.request_id,
+                            "reason": "runtime_identity_mismatch",
+                        },
+                    )
+                    continue
+                try:
+                    report = runner_system_metrics_from_message(message.system_metrics)
+                except ValueError:
+                    _LOGGER.warning(
+                        "Runtime Runner system metrics rejected",
+                        extra={
+                            "runtime_id": runtime_id,
+                            "runner_generation": generation,
+                            "request_id": message.request_id,
+                            "reason": "invalid_report",
+                        },
+                    )
+                    continue
+                try:
+                    result = await self._control_protocol.append_runner_system_metrics(
+                        report,
+                        generation=generation,
+                        accepted_at=datetime.now(UTC),
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    _LOGGER.exception(
+                        "Runtime Runner system metrics store append failed",
+                        extra={
+                            "runtime_id": runtime_id,
+                            "runner_generation": generation,
+                            "request_id": message.request_id,
+                        },
+                    )
+                    continue
+                if result is not RuntimeSystemMetricsAppendResult.ACCEPTED:
+                    _LOGGER.warning(
+                        "Runtime Runner system metrics rejected",
+                        extra={
+                            "runtime_id": runtime_id,
+                            "runner_generation": generation,
+                            "request_id": message.request_id,
+                            "reason": result.value,
+                        },
+                    )
                 continue
             if payload == "operation_event":
                 if message.operation_event.runtime_id != runtime_id:

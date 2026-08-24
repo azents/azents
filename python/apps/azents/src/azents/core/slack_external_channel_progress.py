@@ -7,13 +7,14 @@ from azents.core.enums import ExternalChannelWorkTaskStatus
 from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
     ExternalChannelWorkTask,
+    checking_progress_title,
+    scheduled_task_checking_progress_title,
 )
 from azents.core.external_channel_session_presence import (
     ExternalChannelSessionPresenceState,
     session_presence_sentence,
 )
 
-_CHECKING_TITLE = "Agent is checking your message"
 SLACK_FALLBACK_TEXT_MAX_LENGTH = 4_000
 _FALLBACK_LITERAL_TRANSLATION = str.maketrans(
     {
@@ -42,16 +43,48 @@ def render_slack_progress(
     desired_progress_revision: int,
 ) -> SlackProgressPresentation:
     """Render one complete desired snapshot for a Slack Tracker message."""
+    return _render_slack_progress(
+        progress,
+        work_id=work_id,
+        desired_progress_revision=desired_progress_revision,
+        checking_title=checking_progress_title(),
+    )
+
+
+def render_scheduled_task_slack_progress(
+    progress: ExternalChannelDesiredProgress,
+    *,
+    scheduled_task_title: str,
+    work_id: str,
+    desired_progress_revision: int,
+) -> SlackProgressPresentation:
+    """Render one Scheduled Task progress snapshot for a Slack Tracker."""
+    return _render_slack_progress(
+        progress,
+        work_id=work_id,
+        desired_progress_revision=desired_progress_revision,
+        checking_title=scheduled_task_checking_progress_title(scheduled_task_title),
+    )
+
+
+def _render_slack_progress(
+    progress: ExternalChannelDesiredProgress,
+    *,
+    work_id: str,
+    desired_progress_revision: int,
+    checking_title: str,
+) -> SlackProgressPresentation:
+    """Render one progress snapshot with its explicit checking context."""
     block_id = _block_id(work_id, desired_progress_revision)
     if progress.state == "checking":
         return SlackProgressPresentation(
-            text=_CHECKING_TITLE,
+            text=checking_title,
             blocks=[
                 {
                     "type": "task_card",
                     "block_id": block_id,
                     "task_id": "activity-status",
-                    "title": _CHECKING_TITLE,
+                    "title": checking_title,
                     "status": "in_progress",
                 }
             ],

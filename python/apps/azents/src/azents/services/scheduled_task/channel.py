@@ -21,7 +21,9 @@ from azents.core.external_channel_progress import (
     ExternalChannelWorkTask,
     checking_progress,
 )
-from azents.core.slack_external_channel_progress import render_slack_progress
+from azents.core.slack_external_channel_progress import (
+    render_scheduled_task_slack_progress,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
@@ -40,7 +42,7 @@ from azents.services.external_channel.channel_action import (
     RuntimeTargetResolver,
 )
 from azents.services.external_channel.discord_presentation import (
-    render_discord_progress,
+    render_scheduled_task_discord_progress,
 )
 from azents.services.external_channel.provider_effect import (
     ProviderEffectOutcome,
@@ -597,13 +599,15 @@ class ScheduledTaskChannelService:
             and current_part.provider_message_key is not None
             else ExternalChannelDeliveryOperation.PROGRESS_CREATE
         )
-        slack = render_slack_progress(
+        slack = render_scheduled_task_slack_progress(
             progress,
+            scheduled_task_title=record.state.title,
             work_id=record.state.cycle_id,
             desired_progress_revision=desired_revision,
         )
-        discord = render_discord_progress(
+        discord = render_scheduled_task_discord_progress(
             progress,
+            scheduled_task_title=record.state.title,
             work_id=record.state.cycle_id,
             desired_progress_revision=desired_revision,
         )

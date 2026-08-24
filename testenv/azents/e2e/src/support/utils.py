@@ -1,4 +1,4 @@
-"""test t."""
+"""Shared helpers for Azents E2E tests."""
 
 import time
 import uuid
@@ -90,14 +90,14 @@ def wait_until(
     interval: float = 0.1,
     message: str = "Condition not met within timeout",
 ) -> T:
-    """t t t t pending.
+    """Wait until a condition returns a truthy result.
 
-    :param condition: t t (True return t t)
-    :param timeout: t pending time (t)
-    :param interval: t t (t)
-    :param message: t t t message
-    :return: t t returnvalue
-    :raises TimeoutError: t t
+    :param condition: condition to evaluate
+    :param timeout: maximum wait time in seconds
+    :param interval: delay between attempts in seconds
+    :param message: timeout error message
+    :returns: the first truthy condition result
+    :raises TimeoutError: if the condition does not succeed before the timeout
     """
     start = time.time()
     last_error: Exception | None = None
@@ -117,7 +117,7 @@ def wait_until(
 
 
 def unique() -> str:
-    """testt t string create."""
+    """Create a short unique string for test resources."""
     return uuid.uuid4().hex[:8]
 
 
@@ -126,15 +126,12 @@ def authenticate_user(
     admin_api_client: azentsadminclient.ApiClient,
     email: str | None = None,
 ) -> tuple[str, str, str]:
-    """Signup token redeem t usert createt tokent return.
+    """Create or authenticate a user through the signup-token flow.
 
-    1. Admin APIt manual signup token create
-    2. Public APIt signup token redeem -> token t
-
-    :param public_api_client: Public API client
-    :param admin_api_client: Admin API client
-    :param email: email t (Nonet t create)
-    :return: (access_token, refresh_token, email) t
+    :param public_api_client: public API client
+    :param admin_api_client: admin API client
+    :param email: email address, or ``None`` to generate one
+    :returns: access token, refresh token, and email address
     """
     if email is None:
         email = f"test-{unique()}@example.com"
@@ -279,14 +276,12 @@ def create_chat_session(
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
 ) -> tuple[str, str]:
-    """chat sessiont createt (access_token, session_id)t returnt.
+    """Create a chat session and return its authentication details.
 
-    workspace/agent/LLM t settingst t WebSockett sessiont createt.
-
-    :param public_api_client: Public API client
-    :param admin_api_client: Admin API client
-    :param server_url: Public API server URL (http://host:port)
-    :return: (access_token, session_id) t
+    :param public_api_client: public API client
+    :param admin_api_client: admin API client
+    :param server_url: public API server URL
+    :returns: access token and session ID
     """
     token, session_id, _ = create_chat_session_with_agent(
         public_api_client,
@@ -301,12 +296,12 @@ def create_chat_session_with_agent(
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
 ) -> tuple[str, str, str]:
-    """chat sessiont createt (access_token, session_id, agent_id)t returnt.
+    """Create a chat session with its backing agent.
 
-    :param public_api_client: Public API client
-    :param admin_api_client: Admin API client
-    :param server_url: Public API server URL (http://host:port)
-    :return: (access_token, session_id, agent_id) t
+    :param public_api_client: public API client
+    :param admin_api_client: admin API client
+    :param server_url: public API server URL
+    :returns: access token, session ID, and agent ID
     """
     setup = create_agent_session_setup(
         public_api_client,
@@ -541,9 +536,9 @@ def create_second_user_token(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
 ) -> str:
-    """t usert autht access_tokent returnt.
+    """Authenticate a second user and return an access token.
 
-    :return: access_token
+    :returns: access token
     """
     uniq = unique()
     token, _, _ = authenticate_user(
@@ -563,13 +558,13 @@ def upload_file(
 ) -> http_requests.Response:
     """Upload a file through the Agent-scoped public API.
 
-    :param server_url: Public API server URL
+    :param server_url: public API server URL
     :param token: auth token
-    :param agent_id: Agent ID
-    :param filename: filet
-    :param content: file t
-    :param media_type: MIME t
-    :return: HTTP response
+    :param agent_id: agent ID
+    :param filename: file name
+    :param content: file content
+    :param media_type: MIME type
+    :returns: HTTP response
     """
     return http_requests.post(
         f"{server_url}/chat/v1/agents/{agent_id}/upload",

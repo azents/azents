@@ -1,4 +1,4 @@
-"""Prepare unchanged required E2E images from base-main snapshots."""
+"""Prepare unchanged required E2E images from immutable predecessor snapshots."""
 
 from __future__ import annotations
 
