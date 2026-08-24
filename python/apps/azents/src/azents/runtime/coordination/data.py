@@ -3,6 +3,7 @@
 import dataclasses
 import enum
 from datetime import datetime
+from typing import NamedTuple
 
 from azents_runtime_control.system_metrics import (
     RunnerSystemMetricObservation,
@@ -171,6 +172,13 @@ class RuntimeOperationMetadata:
             and self.transfer_direction is not None
         ):
             raise ValueError("Only transfer operations may have a transfer direction")
+
+
+class RuntimeOperationReplyAppend(NamedTuple):
+    """Atomic operation reply append result."""
+
+    cursor: str
+    metadata: RuntimeOperationMetadata
 
 
 @dataclasses.dataclass(frozen=True)

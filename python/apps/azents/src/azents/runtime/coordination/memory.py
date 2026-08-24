@@ -11,7 +11,9 @@ from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeConnectionRecord,
     RuntimeOperationMetadata,
+    RuntimeOperationReplyAppend,
     RuntimeOperationStatus,
+    RuntimeOperationTransferDirection,
     RuntimeReplyEvent,
     RuntimeReplyRecord,
     RuntimeRequestEnvelope,
@@ -37,6 +39,20 @@ class _InMemorySystemMetricsSeries:
 
     samples: tuple[RuntimeSystemMetricsSample, ...]
     expires_at: datetime
+
+
+@dataclasses.dataclass(frozen=True)
+class _RuntimeOperationIdentity:
+    """Immutable fields used by atomic operation creation."""
+
+    runtime_id: str
+    generation: int
+    operation_type: str
+    deadline_at: datetime | None
+    transfer_id: str | None
+    transfer_attempt_id: str | None
+    transfer_dispatch_id: str | None
+    transfer_direction: RuntimeOperationTransferDirection | None
 
 
 class InMemoryRuntimeCoordinationStore:
@@ -279,7 +295,7 @@ class InMemoryRuntimeCoordinationStore:
         event: RuntimeReplyEvent,
         *,
         operation_id: str,
-    ) -> tuple[str, RuntimeOperationMetadata] | None:
+    ) -> RuntimeOperationReplyAppend | None:
         """Append a reply and update operation metadata if not already final."""
         async with self._lock:
             metadata = self._operation_metadata.get(operation_id)
@@ -304,7 +320,7 @@ class InMemoryRuntimeCoordinationStore:
                     last_event_at=event.created_at,
                 )
             self._operation_metadata[operation_id] = updated
-            return cursor, updated
+            return RuntimeOperationReplyAppend(cursor=cursor, metadata=updated)
 
     async def heartbeat_operation(
         self,
@@ -491,24 +507,15 @@ def _read_after_cursor[RecordT](
 
 def _operation_identity(
     metadata: RuntimeOperationMetadata,
-) -> tuple[
-    str,
-    int,
-    str,
-    datetime | None,
-    str | None,
-    str | None,
-    str | None,
-    object | None,
-]:
+) -> _RuntimeOperationIdentity:
     """Return the immutable identity used by atomic operation creation."""
-    return (
-        metadata.runtime_id,
-        metadata.generation,
-        metadata.operation_type,
-        metadata.deadline_at,
-        metadata.transfer_id,
-        metadata.transfer_attempt_id,
-        metadata.transfer_dispatch_id,
-        metadata.transfer_direction,
+    return _RuntimeOperationIdentity(
+        runtime_id=metadata.runtime_id,
+        generation=metadata.generation,
+        operation_type=metadata.operation_type,
+        deadline_at=metadata.deadline_at,
+        transfer_id=metadata.transfer_id,
+        transfer_attempt_id=metadata.transfer_attempt_id,
+        transfer_dispatch_id=metadata.transfer_dispatch_id,
+        transfer_direction=metadata.transfer_direction,
     )

@@ -6,7 +6,7 @@ import inspect
 import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Any, cast
+from typing import Any
 
 from azents_runtime_control.system_metrics import (
     RunnerSystemMetricAvailability,
@@ -24,6 +24,7 @@ from azents.runtime.coordination.data import (
     RuntimeConnectionRecord,
     RuntimeCoordinationTarget,
     RuntimeOperationMetadata,
+    RuntimeOperationReplyAppend,
     RuntimeOperationStatus,
     RuntimeOperationTransferDirection,
     RuntimeReplyEvent,
@@ -77,6 +78,23 @@ return 1
 """
 _SYSTEM_METRICS_RETENTION_SECONDS = 3600
 _SYSTEM_METRICS_MAX_SAMPLES = 60
+
+
+@dataclasses.dataclass(frozen=True)
+class _RedisStreamPayload:
+    """Decoded Redis stream entry payload."""
+
+    cursor: str
+    payload: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _RedisStreamEntry:
+    """Decoded Redis stream entry fields."""
+
+    cursor: object
+    fields: Mapping[object, object]
+
 
 # Transition ACTIVE -> RUNNING when the stored status is still active.
 _TRY_START_OPERATION_SCRIPT = """
@@ -243,8 +261,7 @@ class RedisRuntimeCoordinationStore:
         await self._ensure_group(stream_key, consumer_group)
         await self._refresh_stream_ttl(stream_key)
         if reclaim_idle_seconds is not None:
-            xautoclaim = cast(Any, self._redis).xautoclaim
-            reclaimed = await xautoclaim(
+            reclaimed = await self._redis.xautoclaim(
                 stream_key,
                 consumer_group,
                 consumer_id,
@@ -264,18 +281,7 @@ class RedisRuntimeCoordinationStore:
             count=1,
             block=block,
         )
-        streams = cast(
-            list[tuple[object, list[tuple[object, Mapping[object, object]]]]], result
-        )
-        if not streams:
-            return None
-        _stream_name, entries = streams[0]
-        cursor, fields = entries[0]
-        payload = _payload_field(fields)
-        return RuntimeRequestRecord(
-            cursor=_decode_text(cursor),
-            envelope=_envelope_from_json(payload),
-        )
+        return _request_record_from_xreadgroup(result)
 
     async def ack_request(
         self,
@@ -320,10 +326,10 @@ class RedisRuntimeCoordinationStore:
         )
         return [
             RuntimeReplyRecord(
-                cursor=cursor,
-                event=_reply_event_from_json(payload),
+                cursor=row.cursor,
+                event=_reply_event_from_json(row.payload),
             )
-            for cursor, payload in rows
+            for row in rows
         ]
 
     async def append_body_chunk(
@@ -357,10 +363,10 @@ class RedisRuntimeCoordinationStore:
         )
         return [
             RuntimeBodyChunkRecord(
-                cursor=cursor,
-                chunk=_body_chunk_from_json(payload),
+                cursor=row.cursor,
+                chunk=_body_chunk_from_json(row.payload),
             )
-            for cursor, payload in rows
+            for row in rows
         ]
 
     async def put_operation(
@@ -458,7 +464,7 @@ class RedisRuntimeCoordinationStore:
         event: RuntimeReplyEvent,
         *,
         operation_id: str,
-    ) -> tuple[str, RuntimeOperationMetadata] | None:
+    ) -> RuntimeOperationReplyAppend | None:
         """Append a reply and update operation metadata if not already final."""
         operation_key = self._operation_key(operation_id)
         stream_key = self._stream_key("reply", stream_id)
@@ -487,7 +493,7 @@ class RedisRuntimeCoordinationStore:
         current = await self.get_operation(operation_id)
         if current is None:
             return None
-        return cursor, current
+        return RuntimeOperationReplyAppend(cursor=cursor, metadata=current)
 
     async def heartbeat_operation(
         self,
@@ -627,8 +633,7 @@ class RedisRuntimeCoordinationStore:
         sample: RuntimeSystemMetricsSample,
     ) -> bool:
         """Atomically append a higher-sequence sample to the bounded series."""
-        eval_script = cast(Any, self._redis).eval
-        result = await eval_script(
+        result = await self._eval(
             _APPEND_SYSTEM_METRICS_SCRIPT,
             1,
             self._system_metrics_key(runtime_id, generation),
@@ -647,14 +652,13 @@ class RedisRuntimeCoordinationStore:
         current_time: datetime,
     ) -> list[RuntimeSystemMetricsSample]:
         """Read at most one hour and 60 samples for one Runner generation."""
-        lrange = cast(Any, self._redis).lrange
-        raw_rows = cast(
-            list[object],
-            await lrange(
-                self._system_metrics_key(runtime_id, generation),
-                -_SYSTEM_METRICS_MAX_SAMPLES,
-                -1,
-            ),
+        result = self._redis.lrange(
+            self._system_metrics_key(runtime_id, generation),
+            -_SYSTEM_METRICS_MAX_SAMPLES,
+            -1,
+        )
+        raw_rows = _redis_sequence(
+            await result if inspect.isawaitable(result) else result
         )
         cutoff = current_time - timedelta(seconds=_SYSTEM_METRICS_RETENTION_SECONDS)
         return [
@@ -675,8 +679,7 @@ class RedisRuntimeCoordinationStore:
         record: RuntimeConnectionRecord,
         ttl_seconds: int,
     ) -> bool:
-        eval_script = cast(Any, self._redis).eval
-        result = await eval_script(
+        result = await self._eval(
             _GENERATION_FENCED_SET_CONNECTION_SCRIPT,
             1,
             self._connection_key(kind, subject_id),
@@ -693,8 +696,7 @@ class RedisRuntimeCoordinationStore:
         subject_id: str,
         generation: int,
     ) -> bool:
-        eval_script = cast(Any, self._redis).eval
-        result = await eval_script(
+        result = await self._eval(
             _GENERATION_FENCED_DELETE_CONNECTION_SCRIPT,
             1,
             self._connection_key(kind, subject_id),
@@ -720,17 +722,30 @@ class RedisRuntimeCoordinationStore:
         *,
         after_cursor: str | None,
         limit: int,
-    ) -> list[tuple[str, str]]:
+    ) -> list[_RedisStreamPayload]:
         if limit <= 0:
             return []
         min_cursor = "-" if after_cursor is None else f"({after_cursor}"
         rows = await self._redis.xrange(  # redis-py stub omits XRANGE
             key, min=min_cursor, max="+", count=limit
         )
-        entries = cast(list[tuple[object, Mapping[object, object]]], rows)
         return [
-            (_decode_text(cursor), _payload_field(fields)) for cursor, fields in entries
+            _RedisStreamPayload(
+                cursor=_decode_text(entry.cursor),
+                payload=_payload_field(entry.fields),
+            )
+            for entry in _redis_stream_entries(rows)
         ]
+
+    async def _eval(
+        self,
+        script: str,
+        key_count: int,
+        *values: str | float,
+    ) -> object:
+        """Run one Redis script across redis-py typing variants."""
+        result = self._redis.eval(script, key_count, *values)
+        return await result if inspect.isawaitable(result) else result
 
     async def _positive_ttl(self, key: str) -> int | None:
         ttl = int(await self._redis.ttl(key))
@@ -784,6 +799,41 @@ def _request_record_from_xautoclaim(result: object) -> RuntimeRequestRecord | No
         cursor=_decode_text(cursor),
         envelope=_envelope_from_json(payload),
     )
+
+
+def _request_record_from_xreadgroup(result: object) -> RuntimeRequestRecord | None:
+    groups = _redis_sequence(result)
+    if not groups:
+        return None
+    group = _redis_sequence(groups[0])
+    if len(group) != 2:
+        raise RuntimeError("Redis stream group response must contain two fields")
+    entries = _redis_stream_entries(group[1])
+    if not entries:
+        return None
+    entry = entries[0]
+    return RuntimeRequestRecord(
+        cursor=_decode_text(entry.cursor),
+        envelope=_envelope_from_json(_payload_field(entry.fields)),
+    )
+
+
+def _redis_stream_entries(
+    value: object,
+) -> list[_RedisStreamEntry]:
+    entries: list[_RedisStreamEntry] = []
+    for raw_entry in _redis_sequence(value):
+        entry = _redis_sequence(raw_entry)
+        if len(entry) != 2 or not isinstance(entry[1], Mapping):
+            raise RuntimeError("Redis stream entry response is invalid")
+        entries.append(_RedisStreamEntry(cursor=entry[0], fields=entry[1]))
+    return entries
+
+
+def _redis_sequence(value: object) -> list[object]:
+    if not isinstance(value, Sequence) or isinstance(value, (bytes, str)):
+        raise RuntimeError("Redis response must be a sequence")
+    return list(value)
 
 
 def _payload_field[KeyT](fields: Mapping[KeyT, object]) -> str:
@@ -856,7 +906,7 @@ def _envelope_from_json(raw: str) -> RuntimeRequestEnvelope:
         target=RuntimeCoordinationTarget(str(payload["target"])),
         generation=int(payload["generation"]),
         operation_type=str(payload["operation_type"]),
-        payload=cast(dict[str, JsonValue], payload["payload"]),
+        payload=_json_object(payload["payload"]),
         reply_stream_id=str(payload["reply_stream_id"]),
         deadline_at=_datetime_from_json(payload.get("deadline_at")),
         body_stream_id=_optional_str(payload.get("body_stream_id")),
@@ -884,7 +934,7 @@ def _reply_event_from_json(raw: str) -> RuntimeReplyEvent:
         runtime_id=str(payload["runtime_id"]),
         generation=int(payload["generation"]),
         event_type=RuntimeReplyEventType(str(payload["event_type"])),
-        payload=cast(dict[str, JsonValue], payload["payload"]),
+        payload=_json_object(payload["payload"]),
         created_at=_required_datetime(payload["created_at"]),
         final=bool(payload["final"]),
     )
@@ -1001,7 +1051,7 @@ def _connection_from_json(raw: str) -> RuntimeConnectionRecord:
         connected_at=_required_datetime(payload["connected_at"]),
         heartbeat_at=_required_datetime(payload["heartbeat_at"]),
         expires_at=_required_datetime(payload["expires_at"]),
-        metadata=cast(dict[str, JsonValue], payload["metadata"]),
+        metadata=_json_object(payload["metadata"]),
     )
 
 
@@ -1064,3 +1114,24 @@ def _optional_int(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise RuntimeError("Runtime coordination integer must be an integer")
     return value
+
+
+def _json_object(value: object) -> dict[str, JsonValue]:
+    if not isinstance(value, dict):
+        raise RuntimeError("Runtime coordination JSON value must be an object")
+    result: dict[str, JsonValue] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise RuntimeError("Runtime coordination JSON object keys must be strings")
+        result[key] = _json_value(item)
+    return result
+
+
+def _json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return _json_object(value)
+    raise RuntimeError("Runtime coordination JSON value is invalid")

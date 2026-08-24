@@ -613,9 +613,8 @@ class RuntimeControlProtocolService:
             )
             if appended is None:
                 return None
-            cursor, _metadata = appended
             return RuntimeReplyAppendResult(
-                cursor=cursor,
+                cursor=appended.cursor,
                 final=event.final,
                 operation_id=operation_id,
             )
