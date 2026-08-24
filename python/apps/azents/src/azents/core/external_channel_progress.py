@@ -102,3 +102,13 @@ def checking_progress() -> ExternalChannelDesiredProgress:
         title=None,
         tasks=[],
     )
+
+
+def checking_progress_title() -> str:
+    """Return the provider-neutral initial Tracker title for a user message."""
+    return "Agent is checking your message"
+
+
+def scheduled_task_checking_progress_title(title: str) -> str:
+    """Return the initial Tracker title for one named Scheduled Task."""
+    return f"Agent is running a scheduled task…\n{title}"
