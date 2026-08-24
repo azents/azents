@@ -26,7 +26,7 @@ Design documents are accumulated records and are not listed individually in this
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-23 | 97 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-23 | 70 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-24 | 71 |
 
 ## Living Specs — Flow
 
@@ -34,7 +34,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-23 | 161 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-18 | 63 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-13 | 26 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-24 | 27 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-16 | 34 |
@@ -340,7 +340,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Provider-Owned Runtime Process Containment Requirements](requirements/runtime-260808-provider-process-containment.md) | runtime-260808 | 2026-08-08 | 2026-08-09 |
 | [Docker Runtime Provider Development Availability Requirements](requirements/runtime-260810-docker-provider-development-availability.md) | runtime-260810 | 2026-08-10 | - |
 | [Untrusted Runtime Boundary Requirements](requirements/runtime-260811-untrusted-runtime-boundary.md) | runtime-260811 | 2026-08-11 | - |
-| [Runtime System Metrics Overview Requirements](requirements/runtime-260824-system-metrics-overview.md) | runtime-260824 | 2026-08-24 | - |
+| [Runtime System Metrics Overview Requirements](requirements/runtime-260824-system-metrics-overview.md) | runtime-260824 | 2026-08-24 | 2026-08-24 |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |

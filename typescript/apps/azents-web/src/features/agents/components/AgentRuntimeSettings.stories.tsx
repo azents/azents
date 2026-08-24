@@ -171,6 +171,7 @@ const meta = {
     handle: "engineering",
     agent,
     state: { type: "READY", runtime: runtimeFree, profiles: [profile] },
+    metricsState: { type: "LOADING" },
     selectedProfileId: profile.id,
     actionError: null,
     actionNotice: null,

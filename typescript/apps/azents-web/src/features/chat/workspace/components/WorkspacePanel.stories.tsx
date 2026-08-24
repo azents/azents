@@ -327,6 +327,7 @@ const meta = {
     ),
   ],
   args: {
+    metricsState: { type: "LOADING" },
     runtimeSettingsHref: "/w/engineering/agents/agent_01/settings/runtime",
     onStartRuntime: noop,
     onStopRuntime: noop,

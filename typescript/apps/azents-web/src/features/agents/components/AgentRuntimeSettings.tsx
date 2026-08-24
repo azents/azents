@@ -32,7 +32,9 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { RuntimeSystemMetricsOverview } from "@/features/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import type { AgentRuntimeSettingsState } from "../containers/useAgentRuntimeSettingsContainer";
+import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
 import type {
   AgentResponse,
   AgentRuntimeRemovalImpactResponse,
@@ -45,6 +47,7 @@ interface AgentRuntimeSettingsProps {
   handle: string;
   agent: AgentResponse;
   state: AgentRuntimeSettingsState;
+  metricsState: RuntimeSystemMetricsOverviewState;
   selectedProfileId: string | null;
   actionError: string | null;
   actionNotice: "added" | "profileUpdated" | null;
@@ -608,6 +611,7 @@ function RemovingView({
 
 export function AgentRuntimeSettings({
   state,
+  metricsState,
   selectedProfileId,
   actionError,
   actionNotice,
@@ -683,6 +687,10 @@ export function AgentRuntimeSettings({
             </Badge>
           </Group>
         </Paper>
+
+        {runtime.capability !== "none" ? (
+          <RuntimeSystemMetricsOverview state={metricsState} />
+        ) : null}
 
         {actionError ? (
           <Alert color="red" title={t("actionErrorTitle")}>

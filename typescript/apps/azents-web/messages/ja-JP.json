@@ -3016,5 +3016,45 @@
       "conflict": "この要求は処理できません。期限切れ、別の場所で決定済み、または切断されたチャンネルの要求である可能性があります。",
       "action": "決定を保存できませんでした。もう一度お試しください。"
     }
+  },
+  "runtimeMetrics": {
+    "title": "システムメトリクス",
+    "description": "Runner から見える直近1時間の使用状況です。",
+    "loading": "Runtime メトリクスを読み込んでいます…",
+    "errorTitle": "Runtime メトリクスを読み込めませんでした",
+    "scope": "スコープ: {scope}",
+    "scopes": {
+      "host": "ホスト",
+      "vm": "仮想マシン",
+      "container": "コンテナ"
+    },
+    "summaries": {
+      "fresh": "最新",
+      "partial": "一部利用可能",
+      "stale": "古いデータ",
+      "unavailable": "利用不可",
+      "unsupported": "未対応",
+      "stopped": "Runtime 停止中",
+      "disconnected": "Runner 切断中"
+    },
+    "metrics": {
+      "cpu": "CPU",
+      "memory": "メモリ",
+      "disk": "ディスク"
+    },
+    "states": {
+      "fresh": "最新",
+      "stale": "古いデータ",
+      "unavailable": "利用不可",
+      "unsupported": "未対応",
+      "stopped": "停止中",
+      "disconnected": "切断中"
+    },
+    "measuredAt": "{value} に計測",
+    "notMeasured": "まだ計測されていません",
+    "usedOfTotal": "{total} 中 {used}",
+    "emptyTrend": "保持されたサンプルはありません",
+    "trendLabel": "直近1時間の使用傾向",
+    "cpuUnit": "コア"
   }
 }

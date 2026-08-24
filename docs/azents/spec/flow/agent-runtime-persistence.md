@@ -6,6 +6,8 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation]
 code_paths:
+  - proto/azents/runtime_control/v1/**
+  - python/libs/azents-runtime-control/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_add.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
@@ -16,6 +18,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_runtime_removal/**
   - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/agent_runtime_system_metrics/**
+  - python/apps/azents/src/azents/api/public/agent_runtime/**
   - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
   - python/apps/azents/src/azents/services/runtime_profile_resolution/**
   - python/apps/azents/src/azents/services/runtime_recreation/**
@@ -25,9 +29,17 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
+  - python/apps/azents/specs/public/openapi.json
+  - python/libs/azents-public-client/**
+  - typescript/packages/azents-public-client/**
+  - typescript/apps/azents-web/src/features/runtime-metrics/**
+  - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
+  - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
+  - typescript/apps/azents-web/src/features/chat/workspace/**
+  - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-08-13
-spec_version: 26
+last_verified_at: 2026-08-24
+spec_version: 27
 ---
 
 # Agent Runtime Persistence
@@ -123,6 +135,48 @@ does not block deletion, and cannot authorize future create, start, restart, res
 S3/RustFS checkpoint objects are not the event persistence contract for Agent Runtime v1.
 Legacy checkpoint rows may remain for older data/model compatibility, but new Runtime lifecycle
 correctness must not depend on checkpoint commit/restore.
+
+## Runtime System Metrics
+
+The Runner optionally advertises `runtime.system-metrics.v1` and reports normalized CPU, memory,
+and root-filesystem disk observations for its observable `host`, `vm`, or `container` scope.
+Collection occurs immediately after registration and every 60 seconds for the accepted Runner
+connection. CPU needs two cumulative-counter observations, so the immediate sample may expose
+memory and disk while CPU is explicitly unavailable. Unsupported operating environments and
+bounded source failures remain per-metric `unsupported` or `unavailable` observations; they never
+become zero values or Provider-derived substitutes.
+
+Runtime Control accepts a sample only for the current authenticated Runner connection generation
+that advertised the capability. The report carries a positive generation-local sequence but no
+Runner timestamp, hostname, path, mount, device, process data, or diagnostic string. Control
+validates the closed scope and availability values, numeric invariants, and a 4 KiB serialized
+message limit, assigns the UTC acceptance time, and atomically rejects duplicate or lower
+sequences. Invalid, stale, capability-mismatched, or store-failed reports drop only that sample;
+they do not close the Runner stream, change lifecycle/configuration state, or interrupt operations.
+
+The Runtime Coordination Store retains one volatile series per Runtime and physical Runner
+connection generation. Redis and in-memory implementations enforce the same higher-sequence
+append, maximum 60 samples, one-hour expiry, and one-hour read filtering contract. A reconnect,
+restart, reset, or replacement selects only the new generation and starts with an empty current
+series. PostgreSQL, Providers, Agent Workspace storage, lifecycle reconciliation, and backup paths
+do not own or reconstruct metrics; Coordination Store loss produces an empty overview while
+ordinary Runtime behavior continues.
+
+The Agent-authorized Public API exposes one privacy-safe system-metrics response beside the
+lifecycle response. It selects only the permitted current or last-known disconnected generation
+and projects CPU, memory, and disk current state from the latest observation without falling back
+to an older available value. Available observations are `fresh` through three minutes inclusive
+and `stale` afterward. Capability absence, missing/current unavailable data, stopped lifecycle, and
+Runner disconnect remain explicit `unsupported`, `unavailable`, `stopped`, or `disconnected`
+states. Stopped and disconnected overlays preserve retained trend samples until expiry.
+
+azents-web consumes only the generated Public client through one tRPC query. The shared overview
+appears in the chat Runtime/Workspace panel and Agent Runtime settings, polls at a fixed 60-second
+interval only while its owning surface is visible or mounted, and is invalidated after lifecycle
+mutations. The browser renders server-retained samples with unavailable observations and missed
+intervals as true gaps; it does not accumulate, interpolate, or authorize history locally. Metrics
+are informational and cannot affect authorization, lifecycle, configuration, scheduling, billing,
+or destructive operations.
 
 ## Workspace Path Contract
 
@@ -307,9 +361,17 @@ Required checks:
   persisted.
 - Migration tests prove exact legacy effective-selection conversion and final absence of obsolete
   policy/override/snapshot schema.
+- Runtime metrics tests cover Runner collection and scheduling, generation/capability/sequence
+  admission, Redis/in-memory ring parity, Agent authorization and state projection, generated
+  clients, localized web presentation, and the real Docker Runtime browser journey without direct
+  database writes.
 
 ## Changelog
 
+- **2026-08-24 (spec_version=27)** — Added the optional Runner system-metrics capability,
+  generation-scoped volatile 60-sample series, privacy-safe Agent read projection, and shared
+  chat/settings overview while preserving Provider, PostgreSQL, lifecycle, and Agent Workspace
+  ownership.
 - **2026-08-13 (spec_version=26)** — Added Kubernetes Provider v3 hierarchical strict-network
   resources, logical-Runtime CA and public trust boundaries, mandatory host mappings, aggregate
   enforcement acknowledgement, mode-aware replacement, and PVC-preserving lifecycle evidence.

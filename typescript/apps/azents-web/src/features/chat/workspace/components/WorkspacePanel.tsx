@@ -29,6 +29,7 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
+import { RuntimeSystemMetricsOverview } from "@/features/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import { FileBrowser } from "./FileBrowser";
 import { FileInfo } from "./FileInfo";
 import { FileViewer } from "./FileViewer";
@@ -47,6 +48,7 @@ import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "./WorkspaceDirectoryPickerModal";
+import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
 
 type WorkspacePanelTab = "workspace" | "settings";
 
@@ -57,6 +59,7 @@ const closedProjectRegistrationDialog: ProjectRegistrationDialogState = {
 interface WorkspacePanelProps {
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
+  metricsState: RuntimeSystemMetricsOverviewState;
   defaultTab?: WorkspacePanelTab;
   runtimeSettingsHref: string;
   onStartRuntime: () => void;
@@ -97,6 +100,7 @@ interface WorkspacePanelProps {
 export function WorkspacePanel({
   state,
   projectState,
+  metricsState,
   defaultTab = "workspace",
   runtimeSettingsHref,
   onStartRuntime,
@@ -774,6 +778,11 @@ export function WorkspacePanel({
             flexDirection: "column",
           }}
         >
+          {state.type === "SERVER" || state.type === "REMOVING" ? (
+            <Box p="md" pb={0} style={{ flexShrink: 0 }}>
+              <RuntimeSystemMetricsOverview state={metricsState} />
+            </Box>
+          ) : null}
           {renderWorkspacePanel()}
         </Tabs.Panel>
         <Tabs.Panel
@@ -781,6 +790,11 @@ export function WorkspacePanel({
           p="md"
           style={{ flex: 1, minHeight: 0, overflow: "auto" }}
         >
+          {state.type === "SERVER" || state.type === "REMOVING" ? (
+            <Box mb="md">
+              <RuntimeSystemMetricsOverview state={metricsState} />
+            </Box>
+          ) : null}
           {renderSettingsPanel()}
         </Tabs.Panel>
       </Tabs>

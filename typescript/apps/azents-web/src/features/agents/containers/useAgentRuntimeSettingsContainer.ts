@@ -3,7 +3,9 @@
 /** Capability-aware Agent Runtime settings container. */
 
 import { useCallback, useMemo, useState } from "react";
+import { useRuntimeSystemMetricsContainer } from "@/features/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
 import { trpc } from "@/trpc/client";
+import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
 import type {
   AgentResponse,
   AgentRuntimeResponse,
@@ -30,6 +32,7 @@ export interface AgentRuntimeSettingsContainerOutput {
   handle: string;
   agent: AgentResponse;
   state: AgentRuntimeSettingsState;
+  metricsState: RuntimeSystemMetricsOverviewState;
   selectedProfileId: string | null;
   actionError: string | null;
   actionNotice: "added" | "profileUpdated" | null;
@@ -99,10 +102,21 @@ export function useAgentRuntimeSettingsContainer({
     handle,
     includeDisabled: true,
   });
+  const metrics = useRuntimeSystemMetricsContainer({
+    handle,
+    agentId: agent.id,
+    enabled:
+      runtimeQuery.data?.capability === "managed" ||
+      runtimeQuery.data?.capability === "removing",
+  });
 
   const invalidateRuntime = useCallback(async (): Promise<void> => {
     await Promise.all([
       utils.chat.getAgentRuntime.invalidate({ handle, agentId: agent.id }),
+      utils.chat.getAgentRuntimeSystemMetrics.invalidate({
+        handle,
+        agentId: agent.id,
+      }),
       utils.agent.get.invalidate({ handle, agentId: agent.id }),
       utils.agent.list.invalidate({ handle }),
       utils.chat.getAgentWorkspace.invalidate({ agentId: agent.id }),
@@ -115,6 +129,7 @@ export function useAgentRuntimeSettingsContainer({
     utils.agent.get,
     utils.agent.list,
     utils.chat.getAgentRuntime,
+    utils.chat.getAgentRuntimeSystemMetrics,
     utils.chat.getAgentWorkspace,
     utils.chat.listAgentProjects,
     utils.chat.readAgentWorkspacePath,
@@ -236,6 +251,7 @@ export function useAgentRuntimeSettingsContainer({
     handle,
     agent,
     state,
+    metricsState: metrics.state,
     selectedProfileId,
     actionError,
     actionNotice,

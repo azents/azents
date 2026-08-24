@@ -3,6 +3,7 @@
 /** Workspace panel container hook. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
+import { useRuntimeSystemMetricsContainer } from "@/features/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
 import { trpc } from "@/trpc/client";
 import {
   mapProjectBrowserManifest,
@@ -22,6 +23,7 @@ import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "../components/WorkspaceDirectoryPickerModal";
+import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
 import type { GitRefEntryResponse } from "@azents/public-client";
 
 const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;
@@ -36,6 +38,7 @@ interface UseWorkspacePanelContainerInput {
 export interface WorkspacePanelContainerOutput {
   state: WorkspacePanelState;
   projectState: WorkspaceProjectPanelState;
+  metricsState: RuntimeSystemMetricsOverviewState;
   runtimeSettingsHref: string;
   onStartRuntime: () => void;
   onStopRuntime: () => void;
@@ -215,6 +218,14 @@ export function useWorkspacePanelContainer({
   );
   const runtimeManaged = runtimeQuery.data?.capability === "managed";
   const runnerAvailable = runtimeQuery.data?.actions.use_runner === true;
+  const metrics = useRuntimeSystemMetricsContainer({
+    handle,
+    agentId,
+    enabled:
+      autoRefreshVisible &&
+      (runtimeQuery.data?.capability === "managed" ||
+        runtimeQuery.data?.capability === "removing"),
+  });
   const workspaceQuery = trpc.chat.getAgentWorkspace.useQuery(
     { agentId },
     {
@@ -477,6 +488,10 @@ export function useWorkspacePanelContainer({
           handle,
           agentId: variables.agentId,
         }),
+        utils.chat.getAgentRuntimeSystemMetrics.invalidate({
+          handle,
+          agentId: variables.agentId,
+        }),
         utils.chat.readAgentWorkspacePath.invalidate(),
       ]);
     },
@@ -500,6 +515,10 @@ export function useWorkspacePanelContainer({
           handle,
           agentId: variables.agentId,
         }),
+        utils.chat.getAgentRuntimeSystemMetrics.invalidate({
+          handle,
+          agentId: variables.agentId,
+        }),
         utils.chat.readAgentWorkspacePath.invalidate(),
       ]);
     },
@@ -518,6 +537,10 @@ export function useWorkspacePanelContainer({
           handle,
           agentId: variables.agentId,
         }),
+        utils.chat.getAgentRuntimeSystemMetrics.invalidate({
+          handle,
+          agentId: variables.agentId,
+        }),
         utils.chat.readAgentWorkspacePath.invalidate(),
       ]);
     },
@@ -533,6 +556,10 @@ export function useWorkspacePanelContainer({
           agentId: variables.agentId,
         }),
         utils.chat.getAgentRuntime.invalidate({
+          handle,
+          agentId: variables.agentId,
+        }),
+        utils.chat.getAgentRuntimeSystemMetrics.invalidate({
           handle,
           agentId: variables.agentId,
         }),
@@ -716,6 +743,7 @@ export function useWorkspacePanelContainer({
     void Promise.all([
       utils.chat.getAgentWorkspace.invalidate({ agentId }),
       utils.chat.getAgentRuntime.invalidate({ handle, agentId }),
+      utils.chat.getAgentRuntimeSystemMetrics.invalidate({ handle, agentId }),
       utils.chat.readAgentWorkspacePath.invalidate({ agentId }),
       utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
       utils.chat.getSessionProjectBrowserManifest.invalidate({
@@ -729,6 +757,7 @@ export function useWorkspacePanelContainer({
     sessionId,
     utils.chat.getAgentWorkspace,
     utils.chat.getAgentRuntime,
+    utils.chat.getAgentRuntimeSystemMetrics,
     utils.chat.getSessionProjectBrowserManifest,
     utils.chat.listAgentProjects,
     utils.chat.readAgentWorkspacePath,
@@ -1190,6 +1219,7 @@ export function useWorkspacePanelContainer({
   return {
     state,
     projectState,
+    metricsState: metrics.state,
     runtimeSettingsHref: `/w/${handle}/agents/${agentId}/settings/runtime`,
     onStartRuntime,
     onStopRuntime,
