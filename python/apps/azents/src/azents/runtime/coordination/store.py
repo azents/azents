@@ -10,6 +10,7 @@ from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeConnectionRecord,
     RuntimeOperationMetadata,
+    RuntimeOperationReplyAppend,
     RuntimeOperationStatus,
     RuntimeReplyEvent,
     RuntimeReplyRecord,
@@ -143,7 +144,7 @@ class RuntimeCoordinationStore(Protocol):
         event: RuntimeReplyEvent,
         *,
         operation_id: str,
-    ) -> tuple[str, RuntimeOperationMetadata] | None:
+    ) -> RuntimeOperationReplyAppend | None:
         """Append a reply and update operation metadata if not already final.
 
         Final events mark the operation final with the new cursor. Non-final
