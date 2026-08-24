@@ -9,13 +9,7 @@ COPY python/apps/azents-runtime-provider-kubernetes/uv.lock ./
 COPY python/libs/azents-runtime-control /workspace/python/libs/azents-runtime-control
 COPY python/apps/azents-runtime-provider-kubernetes/src ./src
 
-# Hotfix the stale probe contract in the deployed Provider image so it matches
-# the immutable Docker 29.7.2 engine image while the source-level fix follows.
-RUN sed -i "s/= '28.5.2\/1.51'/= '29.7.2\/1.55'/" \
-      src/azents_runtime_provider_kubernetes/provider.py \
-    && grep -F "= '29.7.2/1.55'" \
-      src/azents_runtime_provider_kubernetes/provider.py \
-    && uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev
 
 RUN useradd -m -s /bin/bash appuser
 USER appuser

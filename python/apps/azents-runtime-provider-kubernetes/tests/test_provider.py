@@ -2720,9 +2720,14 @@ async def test_dind_profile_exposes_private_engine_socket_directly() -> None:
     assert engine_mounts["runtime-shared-tmp"].read_only is False
     assert engine.args[-1] == "--group=azents-runner"
     assert engine.readiness_probe is not None
-    engine_probe = engine.readiness_probe.exec_action.command
-    assert engine_probe[:2] == ("sh", "-ec")
-    assert "28.5.2/1.51" in engine_probe[2]
+    assert engine.readiness_probe.exec_action.command == (
+        "docker",
+        "--host",
+        "unix:///var/run/azents-engine/docker.sock",
+        "info",
+        "--format",
+        "{{.ServerVersion}}",
+    )
     engine_storage = pod.spec.volumes[-1]
     assert isinstance(engine_storage, EmptyDirVolume)
     assert engine_storage.size_limit == "8589934592"
