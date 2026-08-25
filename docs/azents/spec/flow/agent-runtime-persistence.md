@@ -66,7 +66,10 @@ applied slot. Superseded desired or applied documents are not retained as produc
 there is no configuration archive or Profile tombstone.
 
 The Runtime Profile resolver reads the exact Agent selection, Workspace Profile, infrastructure
-Profile, Provider, and current capability as lock-free versioned snapshots. A ready desired
+Profile, Provider, and current capability as lock-free versioned snapshots. An explicit
+selection clear takes the Agent selection-version fence and atomically writes the managed
+Runtime's next `unconfigured/runtime_profile_required` desired slot, clearing desired
+Provider/Runner acknowledgement evidence while preserving any applied slot. A ready desired
 document records their scalar IDs, versions, digests, Agent selection version, source trace,
 resolved full configuration, target desired generation, canonical digest, and complete retained
 Profile v1 or Profile v2 document. These source identifiers are snapshot evidence rather than

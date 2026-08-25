@@ -427,6 +427,56 @@ class TestAgentServiceModelSelection:
         repository.replace_runtime_profile_selection.assert_not_awaited()
         repository.update_by_id.assert_not_awaited()
 
+    async def test_runtime_profile_clear_replaces_runtime_authority_atomically(
+        self,
+    ) -> None:
+        """Explicit null clears selection through the atomic Runtime transition."""
+        service = _make_service()
+        repository = cast(Any, service.repository)
+        selected_agent = _make_agent(
+            runtime_profile_id="profile-1",
+            runtime_capability=AgentRuntimeCapability.MANAGED,
+            shell_enabled=True,
+        )
+        cleared_agent = selected_agent.model_copy(
+            update={
+                "runtime_profile_id": None,
+                "runtime_profile_selection_version": 2,
+            }
+        )
+        repository.get_by_id.return_value = selected_agent
+        repository.lock_by_id.return_value = selected_agent
+        repository.update_by_id.return_value = Success(cleared_agent)
+        runtime_profile_repository = cast(Any, service.runtime_profile_repository)
+        clear_selection = (
+            runtime_profile_repository.clear_agent_runtime_profile_selection
+        )
+        clear_selection.return_value = True
+
+        result = await service.update_by_id(
+            "agent-1",
+            {
+                "runtime_profile_id": None,
+                "expected_runtime_profile_selection_version": 1,
+            },
+            workspace_id="ws-1",
+            workspace_user_id="wu-1",
+            role=WorkspaceUserRole.OWNER,
+        )
+
+        assert isinstance(result, Success)
+        assert result.value.runtime_profile_id is None
+        clear_selection.assert_awaited_once()
+        clear_session = clear_selection.await_args.args[0]
+        lock_session = repository.lock_by_id.await_args.args[0]
+        assert clear_session is lock_session
+        assert clear_selection.await_args.kwargs == {
+            "agent_id": "agent-1",
+            "expected_selection_version": 1,
+        }
+        repository.replace_runtime_profile_selection.assert_not_awaited()
+        runtime_profile_repository.enqueue_reconcile_task.assert_not_awaited()
+
 
 class TestAgentServiceAvatarMutation:
     """Agent avatar mutation ownership tests."""
