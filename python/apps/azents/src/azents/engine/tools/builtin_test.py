@@ -1941,7 +1941,6 @@ class TestRuntimeToolkitUpdateContext:
 
         second_task = asyncio.create_task(run_second())
         await second_started.wait()
-        await asyncio.sleep(0)
         assert runner_operations.stat_started_count == 1
 
         runner_operations.stat_continue_event.set()

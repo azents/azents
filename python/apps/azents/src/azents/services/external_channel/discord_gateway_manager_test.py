@@ -422,8 +422,13 @@ async def test_gateway_schedules_every_control_without_waiting_for_completion() 
     )
     repository = _Repository(admission=object(), control_plans=plans)
     release = asyncio.Event()
+    all_attempts_started = asyncio.Event()
+    attempted_plans: list[object] = []
 
-    async def attempt(_plan: object) -> None:
+    async def attempt(plan: object) -> None:
+        attempted_plans.append(plan)
+        if len(attempted_plans) == len(plans):
+            all_attempts_started.set()
         await release.wait()
 
     provider_control = MagicMock()
@@ -443,15 +448,12 @@ async def test_gateway_schedules_every_control_without_waiting_for_completion() 
         configuration_generation=2,
         event=_event(),
     )
-    await asyncio.sleep(0)
+    await all_attempts_started.wait()
 
-    assert [call.args[0] for call in provider_control.attempt.await_args_list] == list(
-        plans
-    )
+    assert attempted_plans == list(plans)
     assert len(service.control_tasks) == 2
     release.set()
     await asyncio.gather(*tuple(service.control_tasks))
-    await asyncio.sleep(0)
     assert service.control_tasks == set()
 
 
