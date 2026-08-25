@@ -74,7 +74,7 @@ class FileStorage(Protocol):
         self,
         path: str,
         data: bytes,
-        media_type: str = "",
+        media_type: str | None = None,
         *,
         agent_id: str,
     ) -> RuntimeAttachment: ...

@@ -61,8 +61,8 @@ class _ReadOnlyStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> bool:
         del path, agent_id, user_id
         raise PermissionError("read-only")
