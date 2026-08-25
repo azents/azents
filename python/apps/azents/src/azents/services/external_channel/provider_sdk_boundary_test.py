@@ -26,10 +26,6 @@ _DISCORD_ROUTE_LITERAL = re.compile(
     r"/(?:api/v\d+/)?(?:applications|channels|guilds|oauth2|users|gateway)(?:/|\b)"
 )
 _SECOND_DISCORD_SDKS = {"hikari", "nextcord", "disnake", "interactions"}
-_PRIVATE_DISCORD_HTTP_IMPORTS = {
-    "discord_sdk.py": {"handle_message_parameters"},
-}
-_PRIVATE_DISCORD_HTTP_FILES = {"discord_sdk.py"}
 
 
 def _runtime_files() -> list[Path]:
@@ -40,26 +36,16 @@ def _runtime_files() -> list[Path]:
     ]
 
 
-def test_private_discord_sdk_usage_remains_inside_the_pinned_http_adapter() -> None:
+def test_runtime_has_no_private_discord_sdk_imports_or_global_mutation() -> None:
     violations: list[str] = []
     for path in _runtime_files():
         source = path.read_text()
         tree = ast.parse(source, filename=str(path))
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Attribute)
-                and node.attr == "http"
-                and path.name not in _PRIVATE_DISCORD_HTTP_FILES
-            ):
-                violations.append(f"{path.name}:{node.lineno}:private HTTP client")
-            if isinstance(node, ast.ImportFrom) and node.module == "discord.http":
-                allowed_names = _PRIVATE_DISCORD_HTTP_IMPORTS.get(path.name, set())
-                for alias in node.names:
-                    if alias.name not in allowed_names:
-                        violations.append(
-                            f"{path.name}:{node.lineno}:discord.http.{alias.name}"
-                        )
-            if isinstance(node, ast.ImportFrom) and node.module == "discord.gateway":
+            if isinstance(node, ast.ImportFrom) and node.module in {
+                "discord.http",
+                "discord.gateway",
+            }:
                 violations.append(f"{path.name}:{node.lineno}:{node.module}")
             if isinstance(node, ast.Import):
                 for alias in node.names:

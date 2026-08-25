@@ -1,20 +1,21 @@
-"""Production-boundary tests for the pinned discord.py private HTTP adapter."""
+"""Production-boundary tests for the public discord.py adapter."""
 
-import inspect
-from dataclasses import dataclass, field
-from typing import Any
+from collections.abc import AsyncIterator
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import discord
-import discord.http
 import pytest
+from discord import app_commands
 
 from azents.services.external_channel import discord_sdk
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKCredentialsInvalid,
+    DiscordSDKMessage,
     DiscordSDKPermissionDenied,
     DiscordSDKRequestRejected,
+    DiscordSDKUnavailable,
 )
 
 
@@ -78,202 +79,70 @@ async def test_deferred_interaction_response_edits_original_via_public_webhook(
     assert call.kwargs["view"] is None
 
 
-@dataclass
-class _PrivateHTTP:
-    application_info: AsyncMock = field(default_factory=AsyncMock)
-    get_guild_commands: AsyncMock = field(default_factory=AsyncMock)
-    edit_guild_command: AsyncMock = field(default_factory=AsyncMock)
-    delete_guild_command: AsyncMock = field(default_factory=AsyncMock)
-    get_channel: AsyncMock = field(default_factory=AsyncMock)
-    get_message: AsyncMock = field(default_factory=AsyncMock)
-    logs_from: AsyncMock = field(default_factory=AsyncMock)
-    start_thread_with_message: AsyncMock = field(default_factory=AsyncMock)
-    edit_channel: AsyncMock = field(default_factory=AsyncMock)
-    send_message: AsyncMock = field(default_factory=AsyncMock)
-    edit_message: AsyncMock = field(default_factory=AsyncMock)
-    delete_message: AsyncMock = field(default_factory=AsyncMock)
-
-
-def _session(http: _PrivateHTTP) -> discord_sdk._DiscordPySession:
-    client = MagicMock()
-    client.http = http
-    client.application_id = 111
-    return discord_sdk._DiscordPySession(client)
-
-
-def _message(
-    *,
-    message_id: str = "400",
-    channel_id: str = "300",
-) -> dict[str, object]:
-    return {
-        "id": message_id,
-        "channel_id": channel_id,
-        "content": "hello",
-        "timestamp": "2026-08-09T00:00:00+00:00",
-        "author": {
-            "id": "500",
-            "username": "person",
-        },
-        "mentions": [],
-        "attachments": [],
-        "embeds": [],
-    }
-
-
 def _channel(
+    channel_type: type[discord.TextChannel] | type[discord.Thread],
     *,
-    channel_id: str = "300",
-    guild_id: str = "111",
-    channel_type: int = 0,
-    parent_id: str | None = None,
-    name: str = "general",
-) -> dict[str, object]:
-    return {
-        "id": channel_id,
-        "guild_id": guild_id,
-        "type": channel_type,
-        "parent_id": parent_id,
-        "name": name,
-    }
+    channel_id: int,
+    guild_id: int = 111,
+    parent_id: int | None = None,
+) -> MagicMock:
+    channel = MagicMock(spec=channel_type)
+    channel.id = channel_id
+    channel.guild.id = guild_id
+    if channel_type is discord.Thread:
+        channel.parent_id = parent_id
+    channel.fetch_message = AsyncMock()
+    channel.history = MagicMock()
+    return channel
 
 
-@pytest.mark.asyncio
-async def test_history_reuses_one_validated_private_channel_scope() -> None:
-    """History validates Thread ancestry once for adjacent private routes."""
-    http = _PrivateHTTP()
-    http.get_channel.return_value = _channel(
-        channel_type=11,
-        parent_id="200",
-        name="incident",
-    )
-    http.get_message.return_value = _message()
-    http.logs_from.return_value = [_message(message_id="399")]
-    session = _session(http)
-
-    exact = await session.fetch_message_projection(
-        guild_id="111",
-        source_channel_id="200",
-        channel_id="300",
-        message_id="400",
-    )
-    history = await session.fetch_history_projections(
-        guild_id="111",
-        source_channel_id="200",
-        channel_id="300",
-        before_message_id="400",
-        limit=100,
-    )
-
-    assert exact["thread"] == {"id": "300", "parent_id": "200"}
-    assert history[0]["thread"] == {"id": "300", "parent_id": "200"}
-    http.get_channel.assert_awaited_once_with(300)
-    http.get_message.assert_awaited_once_with(300, 400)
-    http.logs_from.assert_awaited_once_with(300, 100, before=400)
-
-
-@pytest.mark.asyncio
-async def test_private_message_mutations_reuse_validated_channel_scope() -> None:
-    """Message mutations validate one Guild channel across one SDK session."""
-    http = _PrivateHTTP()
-    http.get_channel.return_value = _channel()
-    http.send_message.return_value = _message(message_id="401")
-    http.edit_message.return_value = _message(message_id="401")
-    session = _session(http)
-
-    created = await session.create_message(
-        guild_id="111",
-        channel_id="300",
-        content="hello",
-        nonce="nonce-1",
-        components=None,
-        embeds=None,
-    )
-    updated = await session.update_message(
-        guild_id="111",
-        channel_id="300",
-        message_id="401",
-        content="updated",
-        components=[],
-        embeds=[],
-    )
-    await session.delete_message(
-        guild_id="111",
-        channel_id="300",
-        message_id="401",
-    )
-
-    assert created.message_id == "401"
-    assert updated.message_id == "401"
-    assert http.send_message.await_count == 1
-    assert http.send_message.await_args is not None
-    create_params = http.send_message.await_args.kwargs["params"]
-    assert create_params.payload["nonce"] == "nonce-1"
-    assert create_params.payload["enforce_nonce"] is True
-    assert http.edit_message.await_count == 1
-    http.delete_message.assert_awaited_once_with(300, 401)
-    http.get_channel.assert_awaited_once_with(300)
-    http.get_message.assert_not_awaited()
+def _session(channel: object) -> discord_sdk._DiscordPySession:
+    client = MagicMock(spec=discord.Client)
+    client.fetch_channel = AsyncMock(return_value=channel)
+    return discord_sdk._DiscordPySession(cast(discord.Client, client))
 
 
 @pytest.mark.asyncio
 async def test_native_forward_uses_exact_public_thread_message() -> None:
     """Forwarding uses public SDK objects and the exact created Message identity."""
-    http = _PrivateHTTP()
-    session = _session(http)
-    source = MagicMock(spec=discord.Thread)
-    source.id = 300
-    source.parent_id = 200
-    source.guild.id = 111
-    destination = MagicMock(spec=discord.TextChannel)
-    destination.id = 200
-    destination.guild.id = 111
+    source = _channel(discord.Thread, channel_id=300, parent_id=200)
+    destination = _channel(discord.TextChannel, channel_id=200)
     forwarded = MagicMock(spec=discord.Message)
     forwarded.id = 401
     forwarded.channel = destination
     forwarded.guild = destination.guild
     partial = source.get_partial_message.return_value
     partial.forward = AsyncMock(return_value=forwarded)
-    session._client.fetch_channel = AsyncMock(  # noqa: SLF001
-        side_effect=[source, destination]
-    )
+    client = MagicMock(spec=discord.Client)
+    client.fetch_channel = AsyncMock(side_effect=[source, destination])
+    session = discord_sdk._DiscordPySession(cast(discord.Client, client))
 
     result = await session.forward_message(
-        message=discord_sdk.DiscordSDKMessage("400", "300", "111"),
+        message=DiscordSDKMessage("400", "300", "111"),
         destination_channel_id="200",
     )
 
-    assert result == discord_sdk.DiscordSDKMessage("401", "200", "111")
-    assert session._client.fetch_channel.await_args_list == [  # noqa: SLF001
+    assert result == DiscordSDKMessage("401", "200", "111")
+    assert client.fetch_channel.await_args_list == [
         ((300,),),
         ((200,),),
     ]
     source.get_partial_message.assert_called_once_with(400)
     partial.forward.assert_awaited_once_with(destination)
-    http.get_channel.assert_not_awaited()
-    http.get_message.assert_not_awaited()
-    http.send_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio
 async def test_native_forward_rejects_a_non_parent_destination() -> None:
     """A caller cannot forward a Thread message to an unrelated channel."""
-    http = _PrivateHTTP()
-    session = _session(http)
-    source = MagicMock(spec=discord.Thread)
-    source.id = 300
-    source.parent_id = 200
-    source.guild.id = 111
-    destination = MagicMock(spec=discord.TextChannel)
-    destination.id = 999
-    destination.guild.id = 111
-    session._client.fetch_channel = AsyncMock(  # noqa: SLF001
-        side_effect=[source, destination]
-    )
+    source = _channel(discord.Thread, channel_id=300, parent_id=200)
+    destination = _channel(discord.TextChannel, channel_id=999)
+    client = MagicMock(spec=discord.Client)
+    client.fetch_channel = AsyncMock(side_effect=[source, destination])
+    session = discord_sdk._DiscordPySession(cast(discord.Client, client))
 
     with pytest.raises(DiscordSDKRequestRejected):
         await session.forward_message(
-            message=discord_sdk.DiscordSDKMessage("400", "300", "111"),
+            message=DiscordSDKMessage("400", "300", "111"),
             destination_channel_id="999",
         )
 
@@ -281,114 +150,25 @@ async def test_native_forward_rejects_a_non_parent_destination() -> None:
 
 
 @pytest.mark.asyncio
-async def test_private_thread_routes_validate_expected_identity() -> None:
-    """Thread operations retain Guild, parent, identity, and name validation."""
-    http = _PrivateHTTP()
-    thread: dict[str, object] = {
-        "id": "600",
-        "parent_id": "300",
-        "guild_id": "111",
-        "name": "Azents",
-        "type": 11,
-    }
-    http.start_thread_with_message.return_value = thread
-
-    async def get_channel(channel_id: int) -> dict[str, object]:
-        if channel_id == 300:
-            return _channel()
-        assert channel_id == 600
-        return thread
-
-    http.get_channel.side_effect = get_channel
-    http.edit_channel.return_value = {**thread, "name": "Updated"}
-    session = _session(http)
-
-    created = await session.create_thread(
-        guild_id="111",
-        parent_channel_id="300",
-        root_message_id="400",
-        name="Azents",
-        auto_archive_duration=60,
-    )
-    fetched = await session.fetch_thread(guild_id="111", channel_id="600")
-    updated = await session.update_thread_name(
-        guild_id="111",
-        channel_id="600",
-        name="Updated",
-    )
-
-    assert created.thread_id == fetched.thread_id == updated.thread_id == "600"
-    http.start_thread_with_message.assert_awaited_once_with(
-        300,
-        400,
-        name="Azents",
-        auto_archive_duration=60,
-    )
-    http.edit_channel.assert_awaited_once_with(600, name="Updated")
-    http.get_channel.assert_awaited_once_with(300)
-
-
-@pytest.mark.asyncio
-async def test_private_command_routes_reuse_list_scope() -> None:
-    """Command mutation uses the Application and Guild proven by the current list."""
-    http = _PrivateHTTP()
-    command = {
-        "id": "700",
-        "name": "azents",
-        "type": 1,
-        "description": "old",
-    }
-    http.get_guild_commands.return_value = [command]
-    http.edit_guild_command.return_value = {
-        **command,
-        "description": "Configure Azents settings.",
-    }
-    session = _session(http)
-
-    listed = await session.list_guild_commands(
-        application_id="111",
-        guild_id="222",
-    )
-    updated = await session.update_guild_command(
-        command_id="700",
-        name="azents",
-        command_type=1,
-        description="Configure Azents settings.",
-    )
-    await session.delete_guild_command(command_id="700")
-
-    assert listed[0].command_id == updated.command_id == "700"
-    http.get_guild_commands.assert_awaited_once_with(111, 222)
-    http.edit_guild_command.assert_awaited_once_with(
-        111,
-        222,
-        700,
-        {
-            "name": "azents",
-            "description": "Configure Azents settings.",
-        },
-    )
-    http.delete_guild_command.assert_awaited_once_with(111, 222, 700)
-
-
-@pytest.mark.asyncio
-async def test_private_command_update_rejects_changed_response_identity() -> None:
-    """A command mutation response cannot change the listed command identity."""
-    http = _PrivateHTTP()
-    command = {
-        "id": "700",
-        "name": "azents",
-        "type": 1,
-        "description": "old",
-    }
-    http.get_guild_commands.return_value = [command]
-    http.edit_guild_command.return_value = {
-        **command,
-        "id": "701",
-        "description": "Configure Azents settings.",
-    }
-    session = _session(http)
-    await session.list_guild_commands(application_id="111", guild_id="222")
+async def test_command_update_rejects_changed_response_identity() -> None:
+    """A public command edit cannot change the listed command identity."""
+    channel = _channel(discord.TextChannel, channel_id=300)
+    session = _session(channel)
+    command = MagicMock(spec=app_commands.AppCommand)
+    command.id = 700
+    command.type.value = 1
+    command.application_id = 100
+    command.guild_id = 111
+    command.edit = AsyncMock()
+    changed = MagicMock(spec=app_commands.AppCommand)
+    changed.id = 701
+    changed.type.value = 1
+    changed.application_id = 100
+    changed.guild_id = 111
+    changed.name = "azents"
+    changed.description = "Configure Azents settings."
+    command.edit.return_value = changed
+    session._commands["700"] = command  # noqa: SLF001
 
     with pytest.raises(DiscordSDKRequestRejected):
         await session.update_guild_command(
@@ -400,45 +180,105 @@ async def test_private_command_update_rejects_changed_response_identity() -> Non
 
 
 @pytest.mark.asyncio
-async def test_private_attachment_lookup_validates_current_message() -> None:
-    """Attachment metadata comes directly from one exact private Message response."""
-    http = _PrivateHTTP()
-    http.get_channel.return_value = _channel()
-    http.get_message.return_value = {
-        **_message(),
-        "attachments": [
-            {
-                "id": "800",
-                "filename": "report.txt",
-                "size": 12,
-                "content_type": "text/plain",
-                "url": "https://cdn.discordapp.com/attachments/1/2/report.txt",
-            }
-        ],
-    }
-    session = _session(http)
+async def test_command_list_rejects_changed_guild_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A listed command cannot change the guild route used by later mutations."""
+    client = MagicMock(spec=discord.Client)
+    client.application_id = 100
+    command = MagicMock(spec=app_commands.AppCommand)
+    command.id = 700
+    command.type.value = 1
+    command.application_id = 100
+    command.guild_id = None
+    command.name = "azents"
+    command.description = "Configure Azents settings."
+    tree = MagicMock(spec=app_commands.CommandTree)
+    tree.fetch_commands = AsyncMock(return_value=[command])
+    command_tree = MagicMock(return_value=tree)
+    monkeypatch.setattr(app_commands, "CommandTree", command_tree)
+    session = discord_sdk._DiscordPySession(cast(discord.Client, client))
 
-    attachment = await session.fetch_attachment(
-        guild_id="111",
-        channel_id="300",
-        message_id="400",
-        attachment_id="800",
-    )
+    with pytest.raises(DiscordSDKRequestRejected):
+        await session.list_guild_commands(
+            application_id="100",
+            guild_id="111",
+        )
 
-    assert attachment.filename == "report.txt"
-    http.get_channel.assert_awaited_once_with(300)
-    http.get_message.assert_awaited_once_with(300, 400)
+    assert session._commands == {}  # noqa: SLF001
 
 
 @pytest.mark.asyncio
-async def test_private_history_rejects_cross_channel_response() -> None:
-    """A private Message response cannot cross the requested channel boundary."""
-    http = _PrivateHTTP()
-    http.get_channel.return_value = _channel()
-    http.get_message.return_value = _message(channel_id="999")
-    session = _session(http)
+async def test_thread_projection_rejects_empty_name() -> None:
+    """Malformed provider Thread data cannot erase the required display name."""
+    thread = _channel(discord.Thread, channel_id=300, parent_id=200)
+    thread.name = ""
+    session = _session(thread)
 
     with pytest.raises(DiscordSDKRequestRejected):
+        await session.fetch_thread(
+            guild_id="111",
+            channel_id="300",
+        )
+
+
+@pytest.mark.asyncio
+async def test_message_update_rejects_changed_response_identity() -> None:
+    """A public Message edit cannot change the requested Message identity."""
+    channel = _channel(discord.TextChannel, channel_id=300)
+    session = _session(channel)
+    current = MagicMock(spec=discord.Message)
+    current.id = 400
+    current.channel = channel
+    current.guild = channel.guild
+    changed = MagicMock(spec=discord.Message)
+    changed.id = 401
+    changed.channel = channel
+    changed.guild = channel.guild
+    current.edit = AsyncMock(return_value=changed)
+    channel.fetch_message.return_value = current
+
+    with pytest.raises(DiscordSDKRequestRejected):
+        await session.update_message(
+            guild_id="111",
+            channel_id="300",
+            message_id="400",
+            content="updated",
+            components=None,
+            embeds=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_root_thread_rejects_changed_parent_identity() -> None:
+    """A public root-message response cannot return an unrelated Thread."""
+    channel = _channel(discord.TextChannel, channel_id=300)
+    session = _session(channel)
+    message = MagicMock(spec=discord.Message)
+    message.id = 400
+    message.channel = channel
+    message.guild = channel.guild
+    thread = _channel(discord.Thread, channel_id=600, parent_id=999)
+    thread.name = "Azents"
+    message.thread = thread
+    channel.fetch_message.return_value = message
+
+    with pytest.raises(DiscordSDKRequestRejected):
+        await session.fetch_root_thread(
+            guild_id="111",
+            parent_channel_id="300",
+            root_message_id="400",
+        )
+
+
+@pytest.mark.asyncio
+async def test_channel_invalid_data_maps_to_sdk_error() -> None:
+    """Malformed public channel data remains inside the adapter error contract."""
+    client = MagicMock(spec=discord.Client)
+    client.fetch_channel = AsyncMock(side_effect=discord.InvalidData("invalid channel"))
+    session = discord_sdk._DiscordPySession(cast(discord.Client, client))
+
+    with pytest.raises(DiscordSDKUnavailable):
         await session.fetch_message_projection(
             guild_id="111",
             source_channel_id="300",
@@ -448,116 +288,63 @@ async def test_private_history_rejects_cross_channel_response() -> None:
 
 
 @pytest.mark.asyncio
-async def test_private_message_mutation_rejects_cross_guild_channel() -> None:
-    """A channel from another Guild is rejected before message mutation."""
-    http = _PrivateHTTP()
-    http.get_channel.return_value = _channel(guild_id="222")
-    session = _session(http)
+@pytest.mark.parametrize(
+    "channel",
+    [
+        _channel(discord.TextChannel, channel_id=300),
+        _channel(discord.Thread, channel_id=300, parent_id=999),
+        _channel(discord.Thread, channel_id=300, guild_id=222, parent_id=200),
+    ],
+)
+async def test_message_history_rejects_invalid_channel_thread_relationships(
+    channel: MagicMock,
+) -> None:
+    """History cannot cross channel type, Thread parent, or Guild boundaries."""
+    session = _session(channel)
 
     with pytest.raises(DiscordSDKRequestRejected):
-        await session.create_message(
-            guild_id="111",
-            channel_id="300",
-            content="hello",
-            nonce="nonce-1",
-            components=None,
-            embeds=None,
-        )
-
-    http.send_message.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_private_history_rejects_unproven_thread_parent() -> None:
-    """History cannot synthesize Thread ancestry from caller-supplied IDs."""
-    http = _PrivateHTTP()
-    http.get_channel.return_value = _channel(
-        channel_type=11,
-        parent_id="999",
-        name="incident",
-    )
-    session = _session(http)
-
-    with pytest.raises(DiscordSDKRequestRejected):
-        await session.fetch_history_projections(
+        await session.fetch_message_projection(
             guild_id="111",
             source_channel_id="200",
             channel_id="300",
-            before_message_id="400",
-            limit=100,
+            message_id="400",
         )
 
-    http.logs_from.assert_not_awaited()
+    channel.fetch_message.assert_not_awaited()
 
 
-def test_private_http_signatures_match_pinned_discord_release() -> None:
-    """Pinned private methods retain the exact adapter call shapes."""
-    expected = {
-        "get_guild_commands": ("self", "application_id", "guild_id"),
-        "edit_guild_command": (
-            "self",
-            "application_id",
-            "guild_id",
-            "command_id",
-            "payload",
-        ),
-        "delete_guild_command": (
-            "self",
-            "application_id",
-            "guild_id",
-            "command_id",
-        ),
-        "get_channel": ("self", "channel_id"),
-        "edit_channel": ("self", "channel_id", "reason", "options"),
-        "get_message": ("self", "channel_id", "message_id"),
-        "logs_from": (
-            "self",
-            "channel_id",
-            "limit",
-            "before",
-            "after",
-            "around",
-        ),
-        "send_message": ("self", "channel_id", "params"),
-        "edit_message": ("self", "channel_id", "message_id", "params"),
-        "delete_message": ("self", "channel_id", "message_id", "reason"),
-        "start_thread_with_message": (
-            "self",
-            "channel_id",
-            "message_id",
-            "name",
-            "auto_archive_duration",
-            "rate_limit_per_user",
-            "reason",
-        ),
-    }
+@pytest.mark.asyncio
+async def test_history_projection_uses_validated_thread_parent() -> None:
+    """A valid Thread reaches history only after its actual parent is proven."""
+    channel = _channel(discord.Thread, channel_id=300, parent_id=200)
+    session = _session(channel)
+    message = MagicMock(spec=discord.Message)
+    message.id = 400
+    message.channel = channel
+    message.guild = channel.guild
+    message.content = "hello"
+    message.created_at.isoformat.return_value = "2026-08-09T00:00:00+00:00"
+    message.author.id = 500
+    message.author.name = "person"
+    message.author.bot = False
+    message.author.system = False
+    message.author.global_name = None
+    message.mentions = []
+    message.attachments = []
+    message.edited_at = None
+    message.embeds = []
 
-    for method_name, parameters in expected.items():
-        method: Any = getattr(discord.http.HTTPClient, method_name)
-        assert tuple(inspect.signature(method).parameters) == parameters
+    async def history(**_: object) -> AsyncIterator[discord.Message]:
+        yield cast(discord.Message, message)
 
-    assert tuple(
-        inspect.signature(discord.http.handle_message_parameters).parameters
-    ) == (
-        "content",
-        "username",
-        "avatar_url",
-        "tts",
-        "nonce",
-        "flags",
-        "file",
-        "files",
-        "embed",
-        "embeds",
-        "attachments",
-        "view",
-        "allowed_mentions",
-        "message_reference",
-        "stickers",
-        "previous_allowed_mentions",
-        "mention_author",
-        "thread_name",
-        "channel_payload",
-        "applied_tags",
-        "poll",
+    channel.history = history
+
+    projections = await session.fetch_history_projections(
+        guild_id="111",
+        source_channel_id="200",
+        channel_id="300",
+        before_message_id="401",
+        limit=100,
     )
+
+    assert projections[0]["thread"] == {"id": "300", "parent_id": "200"}
