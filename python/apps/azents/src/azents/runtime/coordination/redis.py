@@ -38,7 +38,11 @@ from azents.runtime.coordination.data import (
 _BUSYGROUP_PREFIX = "BUSYGROUP"
 _PAYLOAD_FIELD = "payload"
 _DEFAULT_STREAM_TTL_SECONDS = 60 * 60
-_DEFAULT_CONNECTION_GENERATION_TTL_SECONDS = 7 * 24 * 60 * 60
+_INCREMENT_PERSIST_CONNECTION_GENERATION_SCRIPT = """
+local generation = redis.call('INCR', KEYS[1])
+redis.call('PERSIST', KEYS[1])
+return generation
+"""
 _GENERATION_FENCED_SET_CONNECTION_SCRIPT = """
 local raw = redis.call('GET', KEYS[1])
 if not raw then
@@ -222,15 +226,11 @@ class RedisRuntimeCoordinationStore:
         *,
         key_prefix: str = "azents:agent-runtime:coordination",
         stream_ttl_seconds: int = _DEFAULT_STREAM_TTL_SECONDS,
-        connection_generation_ttl_seconds: int = (
-            _DEFAULT_CONNECTION_GENERATION_TTL_SECONDS
-        ),
     ) -> None:
         """Initialize the Redis coordination store."""
         self._redis = redis
         self._key_prefix = key_prefix
         self._stream_ttl_seconds = stream_ttl_seconds
-        self._connection_generation_ttl_seconds = connection_generation_ttl_seconds
 
     async def append_request(
         self,
@@ -543,12 +543,13 @@ class RedisRuntimeCoordinationStore:
         """Register a current connection and issue a new generation."""
         generation_key = self._connection_generation_key(kind, subject_id)
         generation = int(
-            await self._redis.incr(  # redis-py stub omits INCR
-                generation_key
+            _decode_text(
+                await self._eval(
+                    _INCREMENT_PERSIST_CONNECTION_GENERATION_SCRIPT,
+                    1,
+                    generation_key,
+                )
             )
-        )
-        await self._redis.expire(
-            generation_key, self._connection_generation_ttl_seconds
         )
         record = RuntimeConnectionRecord(
             kind=kind,

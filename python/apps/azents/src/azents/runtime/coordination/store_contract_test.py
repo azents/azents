@@ -97,6 +97,10 @@ class FakeRedisConnectionStore:
         *args: object,
     ) -> int:
         del numkeys
+        if "INCR" in script:
+            value = int(self.data.get(key, "0")) + 1
+            self.data[key] = str(value)
+            return value
         raw = self.data.get(key)
         if raw is None:
             return 0
@@ -124,7 +128,6 @@ async def redis_store(
             RedisRuntimeCoordinationStore(
                 client,
                 stream_ttl_seconds=3600,
-                connection_generation_ttl_seconds=604800,
             ),
             client,
         )
@@ -969,10 +972,10 @@ async def test_redis_empty_request_stream_created_by_group_has_ttl(
 
 
 @pytest.mark.asyncio
-async def test_redis_connection_generation_has_ttl(
+async def test_redis_connection_generation_is_persistent(
     redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
 ) -> None:
-    """TTL is set on connection generation counter."""
+    """Connection generation counters remain after current connections expire."""
     store, redis = redis_store
     connected_at = _now()
 
@@ -991,8 +994,48 @@ async def test_redis_connection_generation_has_ttl(
         await redis.ttl(
             "azents:agent-runtime:coordination:connection-generation:runner:runtime-1"
         )
-        > 0
+        == -1
     )
+
+
+@pytest.mark.asyncio
+async def test_redis_registration_removes_legacy_generation_counter_ttl(
+    redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
+) -> None:
+    """Registration increments a legacy counter and atomically removes its TTL."""
+    store, redis = redis_store
+    key = "azents:agent-runtime:coordination:connection-generation:provider:provider-1"
+    await redis.set(key, "41", ex=60)
+    assert await redis.ttl(key) > 0
+
+    connected_at = _now()
+    first = await store.register_connection(
+        kind=RuntimeConnectionKind.PROVIDER,
+        subject_id="provider-1",
+        connection_id="provider-a",
+        owner_replica_id="control-a",
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        ttl_seconds=60,
+        metadata={},
+    )
+
+    assert first.generation == 42
+    assert await redis.ttl(key) == -1
+
+    second = await store.register_connection(
+        kind=RuntimeConnectionKind.PROVIDER,
+        subject_id="provider-1",
+        connection_id="provider-b",
+        owner_replica_id="control-b",
+        connected_at=connected_at,
+        heartbeat_at=connected_at,
+        ttl_seconds=60,
+        metadata={},
+    )
+
+    assert second.generation == 43
+    assert await redis.ttl(key) == -1
 
 
 def _fake_connection_json(
