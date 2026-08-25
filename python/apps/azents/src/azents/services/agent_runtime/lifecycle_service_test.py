@@ -140,6 +140,55 @@ class TestAgentRuntimeLifecyclePresentation:
         assert actions.start is True
         assert actions.use_runner is False
 
+    def test_stopped_target_ignores_configuration_recreation_wait(self) -> None:
+        """A stopped Runtime adopts its desired configuration on the next start."""
+        runtime = _runtime(
+            desired_generation=3,
+            provider_observed_state=RuntimeProviderObservedState.STOPPED,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            runner_state=RuntimeRunnerState.DISCONNECTED,
+        )
+        configuration = AgentRuntimeConfigurationStatus(
+            status="waiting_for_recreation",
+            desired=None,
+            applied=None,
+        )
+
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=configuration,
+            removing=False,
+        )
+
+        assert lifecycle.convergence == "stable"
+        assert lifecycle.availability == "stopped"
+        assert lifecycle.reason_code is None
+
+    def test_stopping_target_ignores_configuration_recreation_wait(self) -> None:
+        """A cleanup-only Stop reports transition instead of configuration blocking."""
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.STOPPED,
+            desired_generation=3,
+            provider_observed_state=RuntimeProviderObservedState.RUNNING,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            runner_state=RuntimeRunnerState.READY,
+        )
+        configuration = AgentRuntimeConfigurationStatus(
+            status="waiting_for_recreation",
+            desired=None,
+            applied=None,
+        )
+
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=configuration,
+            removing=False,
+        )
+
+        assert lifecycle.convergence == "stopping"
+        assert lifecycle.availability == "transitioning"
+        assert lifecycle.reason_code == "runtime_stopping"
+
     def test_provider_disconnected_when_desired_running(self) -> None:
         """Running target while Provider is disconnected is blocked."""
         runtime = _runtime(desired_state=RuntimeDesiredState.RUNNING)
@@ -313,6 +362,30 @@ class TestAgentRuntimeLifecyclePresentation:
         assert actions.start is False
         assert actions.restart is False
         assert actions.reset is False
+
+    def test_running_target_preserves_configuration_recreation_block(self) -> None:
+        """A running target still requires explicit configuration recreation."""
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.RUNNING,
+            provider_observed_state=RuntimeProviderObservedState.RUNNING,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            runner_state=RuntimeRunnerState.READY,
+        )
+        configuration = AgentRuntimeConfigurationStatus(
+            status="waiting_for_recreation",
+            desired=None,
+            applied=None,
+        )
+
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=configuration,
+            removing=False,
+        )
+
+        assert lifecycle.convergence == "blocked"
+        assert lifecycle.availability == "configuration_blocked"
+        assert lifecycle.reason_code == "runtime_recreation_required"
 
     def test_blocked_configuration_rejects_creation_commands(self) -> None:
         """A blocked desired revision cannot create a new Runtime incarnation."""

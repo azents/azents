@@ -1370,11 +1370,16 @@ class AgentRuntimeService:
             convergence = "failed"
             availability = "failed"
             reason_code = "provider_failed"
-        elif configuration is not None and configuration.status in {
-            "profile_required",
-            "configuration_blocked",
-            "waiting_for_recreation",
-        }:
+        elif (
+            runtime.desired_state is RuntimeDesiredState.RUNNING
+            and configuration is not None
+            and configuration.status
+            in {
+                "profile_required",
+                "configuration_blocked",
+                "waiting_for_recreation",
+            }
+        ):
             convergence = "blocked"
             availability = "configuration_blocked"
             if configuration.status == "waiting_for_recreation":
