@@ -968,6 +968,233 @@ class TestAgentRuntimeRepository:
         )
         assert candidates == []
 
+    async def test_restart_completion_rearms_same_generation_as_start(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A successful Restart completion queues ordinary Start convergence."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "agent-runtime-restart-handoff-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "agent-runtime-restart-handoff",
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        command = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        dispatched = await repo.mark_lifecycle_dispatched(
+            rdb_session,
+            runtime.id,
+            command.desired_generation,
+        )
+        assert dispatched is not None
+        observed = await repo.record_provider_observed_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderObservedState.STOPPED,
+            2,
+            command.desired_generation,
+            failure=AgentRuntimeFailurePatch(
+                generation=command.desired_generation,
+                code="RESTART_UNCERTAIN",
+                message="Restart completion was uncertain.",
+            ),
+        )
+        assert observed is not None
+
+        handed_off = await repo.complete_restart_handoff(
+            rdb_session,
+            runtime.id,
+            provider_generation=2,
+            desired_generation=command.desired_generation,
+        )
+
+        assert handed_off is not None
+        assert handed_off.desired_generation == command.desired_generation
+        assert handed_off.last_lifecycle_command is RuntimeLifecycleCommandType.START
+        assert (
+            handed_off.last_lifecycle_dispatch_generation
+            == command.desired_generation - 1
+        )
+        assert handed_off.failure_generation is None
+        assert handed_off.failure_code is None
+        candidates = await repo.find_lifecycle_dispatch_candidates(
+            rdb_session,
+            limit=10,
+        )
+        assert [candidate.id for candidate in candidates] == [runtime.id]
+        duplicate = await repo.complete_restart_handoff(
+            rdb_session,
+            runtime.id,
+            provider_generation=2,
+            desired_generation=command.desired_generation,
+        )
+        assert duplicate is None
+
+    async def test_restart_completion_rejects_stale_provider_generation(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A replaced Provider stream cannot hand off the current Restart."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "agent-runtime-restart-stale-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "agent-runtime-restart-stale",
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        command = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        observed = await repo.record_provider_observed_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderObservedState.STOPPED,
+            2,
+            command.desired_generation,
+        )
+        assert observed is not None
+
+        handed_off = await repo.complete_restart_handoff(
+            rdb_session,
+            runtime.id,
+            provider_generation=1,
+            desired_generation=command.desired_generation,
+        )
+
+        assert handed_off is None
+        current = await repo.get_by_id(rdb_session, runtime.id)
+        assert current is not None
+        assert current.last_lifecycle_command is RuntimeLifecycleCommandType.RESTART
+
+    async def test_restart_completion_rejects_superseded_desired_generation(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A delayed Restart completion cannot rearm a newer lifecycle generation."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "agent-runtime-restart-superseded-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "agent-runtime-restart-superseded",
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        restart = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert restart is not None
+        stop = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.STOP,
+            RuntimeDesiredState.STOPPED,
+        )
+        assert stop is not None
+
+        handed_off = await repo.complete_restart_handoff(
+            rdb_session,
+            runtime.id,
+            provider_generation=0,
+            desired_generation=restart.desired_generation,
+        )
+
+        assert handed_off is None
+        current = await repo.get_by_id(rdb_session, runtime.id)
+        assert current is not None
+        assert current.desired_generation == stop.desired_generation
+        assert current.last_lifecycle_command is RuntimeLifecycleCommandType.STOP
+
+    async def test_claim_lifecycle_dispatch_retries_unfinished_restart(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A lost Restart completion is retried without duplicate immediate claims."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "agent-runtime-restart-retry-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "agent-runtime-restart-retry",
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        runtime = await repo.record_provider_connection_state(
+            rdb_session,
+            runtime.id,
+            RuntimeProviderConnectionState.CONNECTED,
+        )
+        assert runtime is not None
+        command = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        dispatched = await repo.mark_lifecycle_dispatched(
+            rdb_session,
+            runtime.id,
+            command.desired_generation,
+        )
+        assert dispatched is not None
+        await rdb_session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(
+                last_state_change_at=(
+                    datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=2)
+                )
+            )
+        )
+
+        candidates = await repo.find_lifecycle_dispatch_candidates(
+            rdb_session,
+            limit=10,
+            retry_delay=datetime.timedelta(minutes=1),
+        )
+        retry_claim = await repo.claim_lifecycle_dispatch(
+            rdb_session,
+            runtime.id,
+            command.desired_generation,
+            retry_delay=datetime.timedelta(minutes=1),
+        )
+        duplicate_claim = await repo.claim_lifecycle_dispatch(
+            rdb_session,
+            runtime.id,
+            command.desired_generation,
+            retry_delay=datetime.timedelta(minutes=1),
+        )
+
+        assert [candidate.id for candidate in candidates] == [runtime.id]
+        assert retry_claim is not None
+        assert duplicate_claim is None
+
     async def test_claim_lifecycle_dispatch_claims_generation_once(
         self, rdb_session: AsyncSession
     ) -> None:

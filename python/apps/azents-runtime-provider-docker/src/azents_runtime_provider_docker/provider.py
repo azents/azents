@@ -173,11 +173,18 @@ class DockerRuntimeProvider:
         self,
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
-        """Recreate the Runtime container while preserving workspace data."""
-        await self._ensure_container(command, replace=True)
+        """Delete the Runtime container and preserve workspace data."""
+        self._validate_command(command)
+        await self._remove_owned_container(command)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.RESTART,
-            report=await self.observe(command),
+            report=self._report(
+                command,
+                observed_state=RuntimeProviderObservedState.STOPPED,
+                reason="restart_container_removed",
+                provider_runtime_id=None,
+                diagnostic={},
+            ),
         )
 
     async def reset(
@@ -327,6 +334,24 @@ class DockerRuntimeProvider:
                 self._container_spec(command, profile=profile)
             )
         await self._docker.start_container(container_name)
+
+    async def _remove_owned_container(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> None:
+        container_name = _container_name(command.identity.runtime_id)
+        container = await self._docker.get_container(container_name)
+        if container is None:
+            return
+        labels = dict(container.labels)
+        if any(
+            labels.get(key) != value
+            for key, value in self._stable_labels(command).items()
+        ):
+            raise UnsupportedRuntimeConfiguration(
+                "Docker container name is owned by a different Runtime or Provider."
+            )
+        await self._docker.remove_container(container_name)
 
     def _container_spec(
         self,

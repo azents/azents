@@ -583,6 +583,60 @@ class AgentRuntimeRepository:
             desired_generation=next_generation,
         )
 
+    async def complete_restart_handoff(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+        *,
+        provider_generation: int,
+        desired_generation: int,
+    ) -> AgentRuntime | None:
+        """Rearm one completed Restart generation for ordinary Start convergence."""
+        result = await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
+                RDBAgentRuntime.desired_generation == desired_generation,
+                RDBAgentRuntime.last_lifecycle_command
+                == RuntimeLifecycleCommandType.RESTART,
+                RDBAgentRuntime.provider_generation == provider_generation,
+                RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
+            )
+            .values(
+                last_lifecycle_command=RuntimeLifecycleCommandType.START,
+                last_lifecycle_dispatch_generation=desired_generation - 1,
+                failure_generation=sa.case(
+                    (
+                        RDBAgentRuntime.failure_generation == desired_generation,
+                        None,
+                    ),
+                    else_=RDBAgentRuntime.failure_generation,
+                ),
+                failure_code=sa.case(
+                    (
+                        RDBAgentRuntime.failure_generation == desired_generation,
+                        None,
+                    ),
+                    else_=RDBAgentRuntime.failure_code,
+                ),
+                failure_message=sa.case(
+                    (
+                        RDBAgentRuntime.failure_generation == desired_generation,
+                        None,
+                    ),
+                    else_=RDBAgentRuntime.failure_message,
+                ),
+                last_state_change_at=sa.func.now(),
+            )
+            .returning(RDBAgentRuntime)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        await session.flush()
+        return self._build(rdb)
+
     async def request_terminal_delete(
         self,
         session: AsyncSession,
@@ -1103,6 +1157,18 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.failure_code != "START_TIMEOUT",
             ),
         )
+        unfinished_restart_retry = sa.and_(
+            RDBAgentRuntime.last_lifecycle_command
+            == RuntimeLifecycleCommandType.RESTART,
+            RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
+            RDBAgentRuntime.provider_connection_state
+            == RuntimeProviderConnectionState.CONNECTED,
+            RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
+            sa.or_(
+                RDBAgentRuntime.last_state_change_at.is_(None),
+                RDBAgentRuntime.last_state_change_at < retry_cutoff,
+            ),
+        )
         terminal_delete_retry = sa.and_(
             RDBAgentRuntime.terminal_delete_requested_generation
             == RDBAgentRuntime.desired_generation,
@@ -1123,6 +1189,7 @@ class AgentRuntimeRepository:
                 sa.or_(
                     undispatched_generation,
                     unready_start_retry,
+                    unfinished_restart_retry,
                     terminal_delete_retry,
                 ),
             )
@@ -1264,6 +1331,18 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.failure_code != "START_TIMEOUT",
             ),
         )
+        unfinished_restart_retry = sa.and_(
+            RDBAgentRuntime.last_lifecycle_command
+            == RuntimeLifecycleCommandType.RESTART,
+            RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
+            RDBAgentRuntime.provider_connection_state
+            == RuntimeProviderConnectionState.CONNECTED,
+            RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
+            sa.or_(
+                RDBAgentRuntime.last_state_change_at.is_(None),
+                RDBAgentRuntime.last_state_change_at < retry_cutoff,
+            ),
+        )
         terminal_delete_retry = sa.and_(
             RDBAgentRuntime.terminal_delete_requested_generation
             == RDBAgentRuntime.desired_generation,
@@ -1282,6 +1361,7 @@ class AgentRuntimeRepository:
                 sa.or_(
                     undispatched_generation,
                     unready_start_retry,
+                    unfinished_restart_retry,
                     terminal_delete_retry,
                 ),
             )

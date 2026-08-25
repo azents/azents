@@ -1555,41 +1555,37 @@ async def test_stop_allows_cleanup_of_removed_containment_runtime() -> None:
 
 
 @pytest.mark.asyncio
-async def test_restart_preserves_pvc_and_replaces_pod() -> None:
+async def test_restart_requests_execution_deletion_and_preserves_pvc() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
     await provider.start(_command(RuntimeLifecycleCommandType.START))
+    applied_pods = list(api.applied_pods)
 
     result = await provider.restart(_command(RuntimeLifecycleCommandType.RESTART))
 
-    assert result.report.observed_state is RuntimeProviderObservedState.STARTING
+    assert result.report.observed_state is RuntimeProviderObservedState.STOPPING
+    assert result.report.reason == "restart_deletion_requested"
     assert api.deleted_pods == ["azents-runtime-runtime-1"]
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
-    assert ("azents-runtime", "azents-runtime-runtime-1") in api.pods
+    assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
+    assert api.applied_pods == applied_pods
 
 
 @pytest.mark.asyncio
-async def test_restart_waits_for_asynchronous_pod_deletion_before_recreate() -> None:
-    """Restart never patches immutable fields on a terminating Pod."""
+async def test_restart_does_not_recreate_a_terminating_pod() -> None:
+    """Restart completes after deletion request without replacing the Pod."""
     api = FakeKubernetesApi()
     provider = _provider(api)
     await provider.start(_command(RuntimeLifecycleCommandType.START))
     api.defer_pod_deletion = True
+    applied_pods = list(api.applied_pods)
 
     result = await provider.restart(_command(RuntimeLifecycleCommandType.RESTART))
 
-    assert result.report.observed_state is RuntimeProviderObservedState.STARTING
+    assert result.report.observed_state is RuntimeProviderObservedState.STOPPING
     assert api.deleted_pods == ["azents-runtime-runtime-1"]
-    assert api.applied_pods == ["azents-runtime-runtime-1"]
-
-    api.pods.pop(("azents-runtime", "azents-runtime-runtime-1"))
-    api.defer_pod_deletion = False
-    await provider.restart(_command(RuntimeLifecycleCommandType.RESTART))
-
-    assert api.applied_pods == [
-        "azents-runtime-runtime-1",
-        "azents-runtime-runtime-1",
-    ]
+    assert api.applied_pods == applied_pods
+    assert ("azents-runtime", "azents-runtime-runtime-1") in api.pods
 
 
 @pytest.mark.asyncio

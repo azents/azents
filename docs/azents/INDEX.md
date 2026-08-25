@@ -341,6 +341,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Docker Runtime Provider Development Availability Requirements](requirements/runtime-260810-docker-provider-development-availability.md) | runtime-260810 | 2026-08-10 | - |
 | [Untrusted Runtime Boundary Requirements](requirements/runtime-260811-untrusted-runtime-boundary.md) | runtime-260811 | 2026-08-11 | - |
 | [Runtime System Metrics Overview Requirements](requirements/runtime-260824-system-metrics-overview.md) | runtime-260824 | 2026-08-24 | 2026-08-24 |
+| [Clear and Reliable Runtime Lifecycle Requirements](requirements/runtime-260825-reliable-lifecycle.md) | runtime-260825 | 2026-08-25 | - |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
@@ -741,6 +742,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Docker Runtime Provider Development Availability](adr/runtime-260810-docker-provider-development-availability.md)
 - [Untrusted Runtime Boundary](adr/runtime-260811-untrusted-runtime-boundary.md)
 - [Runtime System Metrics Overview](adr/runtime-260824-system-metrics-overview.md)
+- [Clear and Reliable Runtime Lifecycle](adr/runtime-260825-reliable-lifecycle.md)
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)
