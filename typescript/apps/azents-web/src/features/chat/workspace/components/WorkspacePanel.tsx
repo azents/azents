@@ -30,6 +30,7 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { RuntimeLifecycleStatus } from "@/features/runtime-lifecycle/components/RuntimeLifecycleStatus";
 import { RuntimeSystemMetricsOverview } from "@/features/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import { FileBrowser } from "./FileBrowser";
 import { FileInfo } from "./FileInfo";
@@ -89,6 +90,7 @@ interface WorkspacePanelProps {
   onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onRestartRuntimeForProjectPicker: () => void;
   onCloseProjectRegistration: () => void;
   onSetProjectRegistrationMode: (mode: ProjectRegistrationMode) => void;
   onSetProjectRegistrationStartingRef: (ref: string | null) => void;
@@ -130,6 +132,7 @@ export function WorkspacePanel({
   onSelectProjectPickerDirectory,
   onRefreshProjectPicker,
   onStartRuntimeForProjectPicker,
+  onRestartRuntimeForProjectPicker,
   onCloseProjectRegistration,
   onSetProjectRegistrationMode,
   onSetProjectRegistrationStartingRef,
@@ -145,12 +148,17 @@ export function WorkspacePanel({
   const [activeTab, setActiveTab] = useState<WorkspacePanelTab>(() =>
     defaultTab === "metrics" && !metricsTabAvailable ? "workspace" : defaultTab,
   );
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   useEffect(() => {
     if (activeTab === "metrics" && !metricsTabAvailable) {
       setActiveTab("workspace");
     }
   }, [activeTab, metricsTabAvailable]);
+  const handleConfirmRestart = (): void => {
+    setRestartConfirmOpen(false);
+    onRestartRuntime();
+  };
   const handleConfirmReset = (): void => {
     setResetConfirmOpen(false);
     onResetRuntime();
@@ -299,7 +307,7 @@ export function WorkspacePanel({
       return renderCapabilityView(state);
     }
 
-    const { actions, runtime } = state.server;
+    const { actions, lifecycle, runtime } = state.server;
     const canStopRuntime = actions.stop !== null;
 
     return (
@@ -316,6 +324,17 @@ export function WorkspacePanel({
             </Box>
 
             <RuntimeConfigurationStatus state={state.runtimeConfiguration} />
+            {lifecycle ? (
+              <RuntimeLifecycleStatus
+                lifecycle={lifecycle}
+                configurationStatus={
+                  state.runtimeConfiguration.type === "LOADED"
+                    ? state.runtimeConfiguration.configuration?.status
+                    : null
+                }
+                compact
+              />
+            ) : null}
 
             <Paper withBorder p="md" radius="md">
               <Group justify="space-between" align="center" gap="md">
@@ -391,12 +410,10 @@ export function WorkspacePanel({
       );
     }
 
-    const { runtime, workspace, actions } = state.server;
+    const { runtime, workspace, actions, lifecycle } = state.server;
     const isTransitioning =
-      runtime.type === "STARTING" ||
-      runtime.type === "RESETTING" ||
-      runtime.type === "STOPPING" ||
-      workspace.type === "CONNECTING";
+      lifecycle?.availability === "transitioning" ||
+      (lifecycle === null && workspace.type === "CONNECTING");
     const isInactive =
       runtime.type === "NOT_STARTED" || runtime.type === "HIBERNATED";
     const isRestoreFailed = runtime.type === "RESTORE_FAILED";
@@ -409,7 +426,10 @@ export function WorkspacePanel({
       <Box flex={1} mih={0} w="100%" style={{ overflow: "hidden" }}>
         {isTransitioning && (
           <Center h="100%" p="lg">
-            <Stack align="center" gap="sm">
+            <Stack align="center" gap="sm" maw={rem(520)} w="100%">
+              {lifecycle ? (
+                <RuntimeLifecycleStatus lifecycle={lifecycle} compact />
+              ) : null}
               <Loader size="sm" />
               <Text size="sm" c="dimmed" ta="center">
                 {t("restoringRuntime")}
@@ -430,7 +450,10 @@ export function WorkspacePanel({
         )}
         {!isTransitioning && isControlUnavailable && (
           <Center h="100%" p="lg">
-            <Stack align="center" gap="md" maw={rem(420)}>
+            <Stack align="center" gap="md" maw={rem(520)} w="100%">
+              {lifecycle ? (
+                <RuntimeLifecycleStatus lifecycle={lifecycle} compact />
+              ) : null}
               <Alert
                 color="red"
                 icon={<IconAlertCircle size="1rem" />}
@@ -450,7 +473,7 @@ export function WorkspacePanel({
                   </Button>
                   {actions.restart && (
                     <Button
-                      onClick={onRestartRuntime}
+                      onClick={() => setRestartConfirmOpen(true)}
                       loading={state.isStarting}
                       disabled={
                         state.isRefreshing ||
@@ -475,41 +498,45 @@ export function WorkspacePanel({
                     </Button>
                   )}
                 </Group>
-                <Button
-                  c="dimmed"
-                  size="xs"
-                  variant="transparent"
-                  onClick={() => setResetConfirmOpen(true)}
-                  loading={state.isResetting}
-                  disabled={state.isRefreshing || state.isStopping}
-                >
-                  {t("resetRuntime")}
-                </Button>
-                <Modal
-                  opened={resetConfirmOpen}
-                  onClose={() => setResetConfirmOpen(false)}
-                  title={t("resetRuntime")}
-                  centered
-                >
-                  <Stack gap="md">
-                    <Text size="sm">{t("resetRuntimeConfirm")}</Text>
-                    <Group justify="flex-end">
-                      <Button
-                        variant="default"
-                        onClick={() => setResetConfirmOpen(false)}
-                      >
-                        {t("cancel")}
-                      </Button>
-                      <Button
-                        color="red"
-                        onClick={handleConfirmReset}
-                        loading={state.isResetting}
-                      >
-                        {t("resetRuntime")}
-                      </Button>
-                    </Group>
-                  </Stack>
-                </Modal>
+                {actions.reset ? (
+                  <>
+                    <Button
+                      c="dimmed"
+                      size="xs"
+                      variant="transparent"
+                      onClick={() => setResetConfirmOpen(true)}
+                      loading={state.isResetting}
+                      disabled={state.isRefreshing || state.isStopping}
+                    >
+                      {t("resetRuntime")}
+                    </Button>
+                    <Modal
+                      opened={resetConfirmOpen}
+                      onClose={() => setResetConfirmOpen(false)}
+                      title={t("resetRuntime")}
+                      centered
+                    >
+                      <Stack gap="md">
+                        <Text size="sm">{t("resetRuntimeConfirm")}</Text>
+                        <Group justify="flex-end">
+                          <Button
+                            variant="default"
+                            onClick={() => setResetConfirmOpen(false)}
+                          >
+                            {t("cancel")}
+                          </Button>
+                          <Button
+                            color="red"
+                            onClick={handleConfirmReset}
+                            loading={state.isResetting}
+                          >
+                            {t("resetRuntime")}
+                          </Button>
+                        </Group>
+                      </Stack>
+                    </Modal>
+                  </>
+                ) : null}
               </Stack>
             </Stack>
           </Center>
@@ -531,52 +558,62 @@ export function WorkspacePanel({
               >
                 {runtime.detail || t("restoreFailedDescription")}
               </Alert>
-              {(actions.restart || actions.start) && (
+              {(actions.restart || actions.start || actions.reset) && (
                 <Stack align="center" gap="xs">
-                  <Button
-                    onClick={
-                      actions.restart ? onRestartRuntime : onStartRuntime
-                    }
-                    loading={state.isStarting}
-                    disabled={state.isStarting || state.isResetting}
-                  >
-                    {actions.restart ? t("restartRuntime") : t("retryRestore")}
-                  </Button>
-                  <Button
-                    c="dimmed"
-                    size="xs"
-                    variant="transparent"
-                    onClick={() => setResetConfirmOpen(true)}
-                    loading={state.isResetting}
-                    disabled={state.isStarting || state.isResetting}
-                  >
-                    {t("resetRuntime")}
-                  </Button>
-                  <Modal
-                    opened={resetConfirmOpen}
-                    onClose={() => setResetConfirmOpen(false)}
-                    title={t("resetRuntime")}
-                    centered
-                  >
-                    <Stack gap="md">
-                      <Text size="sm">{t("resetRuntimeConfirm")}</Text>
-                      <Group justify="flex-end">
-                        <Button
-                          variant="default"
-                          onClick={() => setResetConfirmOpen(false)}
-                        >
-                          {t("cancel")}
-                        </Button>
-                        <Button
-                          color="red"
-                          onClick={handleConfirmReset}
-                          loading={state.isResetting}
-                        >
-                          {t("resetRuntime")}
-                        </Button>
-                      </Group>
-                    </Stack>
-                  </Modal>
+                  {actions.restart || actions.start ? (
+                    <Button
+                      onClick={
+                        actions.restart
+                          ? () => setRestartConfirmOpen(true)
+                          : onStartRuntime
+                      }
+                      loading={state.isStarting}
+                      disabled={state.isStarting || state.isResetting}
+                    >
+                      {actions.restart
+                        ? t("restartRuntime")
+                        : t("retryRestore")}
+                    </Button>
+                  ) : null}
+                  {actions.reset ? (
+                    <>
+                      <Button
+                        c="dimmed"
+                        size="xs"
+                        variant="transparent"
+                        onClick={() => setResetConfirmOpen(true)}
+                        loading={state.isResetting}
+                        disabled={state.isStarting || state.isResetting}
+                      >
+                        {t("resetRuntime")}
+                      </Button>
+                      <Modal
+                        opened={resetConfirmOpen}
+                        onClose={() => setResetConfirmOpen(false)}
+                        title={t("resetRuntime")}
+                        centered
+                      >
+                        <Stack gap="md">
+                          <Text size="sm">{t("resetRuntimeConfirm")}</Text>
+                          <Group justify="flex-end">
+                            <Button
+                              variant="default"
+                              onClick={() => setResetConfirmOpen(false)}
+                            >
+                              {t("cancel")}
+                            </Button>
+                            <Button
+                              color="red"
+                              onClick={handleConfirmReset}
+                              loading={state.isResetting}
+                            >
+                              {t("resetRuntime")}
+                            </Button>
+                          </Group>
+                        </Stack>
+                      </Modal>
+                    </>
+                  ) : null}
                 </Stack>
               )}
             </Stack>
@@ -594,7 +631,11 @@ export function WorkspacePanel({
               </Alert>
               {(actions.restart || actions.start) && (
                 <Button
-                  onClick={actions.restart ? onRestartRuntime : onStartRuntime}
+                  onClick={
+                    actions.restart
+                      ? () => setRestartConfirmOpen(true)
+                      : onStartRuntime
+                  }
                   loading={state.isStarting}
                   disabled={state.isStarting || state.isResetting}
                 >
@@ -839,8 +880,31 @@ export function WorkspacePanel({
         onSelectDirectory={onSelectProjectPickerDirectory}
         onRefresh={onRefreshProjectPicker}
         onStartRuntime={onStartRuntimeForProjectPicker}
+        onRestartRuntime={onRestartRuntimeForProjectPicker}
         runtimeSettingsHref={runtimeSettingsHref}
       />
+      <Modal
+        centered
+        opened={restartConfirmOpen}
+        title={t("restartConfirmTitle")}
+        onClose={() => setRestartConfirmOpen(false)}
+      >
+        <Stack gap="md">
+          <Text size="sm">{t("restartConfirmDescription")}</Text>
+          <Alert color="blue">{t("restartPreservationNotice")}</Alert>
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => setRestartConfirmOpen(false)}
+            >
+              {t("cancel")}
+            </Button>
+            <Button onClick={handleConfirmRestart}>
+              {t("confirmRestart")}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
       <Modal
         centered
         opened={registrationDialog.type === "OPEN"}

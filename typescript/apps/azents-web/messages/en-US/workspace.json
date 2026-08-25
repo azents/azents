@@ -1187,8 +1187,13 @@
         "start": "Start",
         "stop": "Stop",
         "restart": "Restart",
+        "restartConfirmTitle": "Restart Runtime?",
+        "restartConfirmDescription": "The Runtime will be temporarily unavailable while its execution resource is replaced and normal startup converges.",
+        "restartPreservationNotice": "Agent Workspace files and preserved Runtime storage are retained.",
+        "confirmRestart": "Restart Runtime",
         "reset": "Reset",
         "resetConfirmTitle": "Reset Runtime state?",
+        "resetDestructiveTitle": "Agent Workspace data will be deleted",
         "resetConfirmDescription": "Reset discards current Runtime workspace files and preserved Runtime state, then prepares an empty Runtime. This cannot be undone.",
         "confirmReset": "Reset Runtime"
       },

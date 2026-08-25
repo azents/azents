@@ -22,4 +22,5 @@ export type ProjectDirectoryPickerState =
       entries: ProjectDirectoryPickerEntry[];
       isRefreshing: boolean;
       isStarting: boolean;
+      isRestarting: boolean;
     };

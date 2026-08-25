@@ -1187,8 +1187,13 @@
         "start": "起動",
         "stop": "停止",
         "restart": "再起動",
+        "restartConfirmTitle": "Runtime を再起動しますか？",
+        "restartConfirmDescription": "実行リソースを置き換えて通常の起動状態へ収束する間、Runtime は一時的に利用できません。",
+        "restartPreservationNotice": "Agent Workspace ファイルと保持された Runtime ストレージは維持されます。",
+        "confirmRestart": "Runtime を再起動",
         "reset": "リセット",
         "resetConfirmTitle": "ランタイム状態をリセットしますか？",
+        "resetDestructiveTitle": "Agent Workspace データが削除されます",
         "resetConfirmDescription": "現在のワークスペースファイルと保持されたランタイム状態を破棄し、空のランタイムを準備します。元に戻せません。",
         "confirmReset": "リセット"
       },

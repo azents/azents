@@ -57,6 +57,7 @@ export function AgentDraftChat(
     onSelectProjectPickerDirectory,
     onRefreshProjectPicker,
     onStartRuntimeForProjectPicker,
+    onRestartRuntimeForProjectPicker,
     onSessionScopeChange,
     onSendInput,
     addFiles,
@@ -185,6 +186,7 @@ export function AgentDraftChat(
         onRefresh={onRefreshProjectPicker}
         onSelectDirectory={onSelectProjectPickerDirectory}
         onStartRuntime={onStartRuntimeForProjectPicker}
+        onRestartRuntime={onRestartRuntimeForProjectPicker}
       />
     </Box>
   );

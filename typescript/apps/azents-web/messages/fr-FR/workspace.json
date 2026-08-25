@@ -1187,8 +1187,13 @@
         "start": "Démarrer",
         "stop": "Arrêter",
         "restart": "Redémarrer",
+        "restartConfirmTitle": "Redémarrer le Runtime ?",
+        "restartConfirmDescription": "Le Runtime sera temporairement indisponible pendant le remplacement de sa ressource d’exécution et le redémarrage normal.",
+        "restartPreservationNotice": "Les fichiers Agent Workspace et le stockage Runtime conservé sont préservés.",
+        "confirmRestart": "Redémarrer le Runtime",
         "reset": "Réinitialiser",
         "resetConfirmTitle": "Réinitialiser l’environnement ?",
+        "resetDestructiveTitle": "Les données Agent Workspace seront supprimées",
         "resetConfirmDescription": "La réinitialisation supprime les fichiers de l’espace de travail et l’état conservé, puis prépare un environnement vide. Cette action est irréversible.",
         "confirmReset": "Réinitialiser"
       },

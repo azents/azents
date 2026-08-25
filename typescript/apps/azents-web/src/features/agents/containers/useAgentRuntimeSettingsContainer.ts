@@ -3,6 +3,7 @@
 /** Capability-aware Agent Runtime settings container. */
 
 import { useCallback, useMemo, useState } from "react";
+import { shouldPollRuntimeLifecycle } from "@/features/runtime-lifecycle/runtimeLifecycle";
 import { useRuntimeSystemMetricsContainer } from "@/features/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
 import { trpc } from "@/trpc/client";
 import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
@@ -38,6 +39,7 @@ export interface AgentRuntimeSettingsContainerOutput {
   actionNotice: "added" | "profileUpdated" | null;
   addConfirmOpen: boolean;
   removeConfirmOpen: boolean;
+  restartConfirmOpen: boolean;
   resetConfirmOpen: boolean;
   removalAcknowledged: boolean;
   isAdding: boolean;
@@ -53,11 +55,13 @@ export interface AgentRuntimeSettingsContainerOutput {
   onCloseRemoveConfirm: () => void;
   onRemovalAcknowledgedChange: (acknowledged: boolean) => void;
   onConfirmRemove: () => void;
+  onOpenRestartConfirm: () => void;
+  onCloseRestartConfirm: () => void;
   onOpenResetConfirm: () => void;
   onCloseResetConfirm: () => void;
   onStart: () => void;
   onStop: () => void;
-  onRestart: () => void;
+  onConfirmRestart: () => void;
   onConfirmReset: () => void;
   onRefresh: () => void;
 }
@@ -80,6 +84,7 @@ export function useAgentRuntimeSettingsContainer({
   >(null);
   const [addConfirmOpen, setAddConfirmOpen] = useState(false);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false);
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [removalAcknowledged, setRemovalAcknowledged] = useState(false);
   const [lifecycleAction, setLifecycleAction] = useState<
@@ -91,8 +96,10 @@ export function useAgentRuntimeSettingsContainer({
     {
       refetchInterval: (query): number | false => {
         const runtime = query.state.data;
-        return runtime?.capability === "removing" ||
-          runtime?.configuration?.status === "waiting_for_recreation"
+        return shouldPollRuntimeLifecycle(runtime?.lifecycle, {
+          removing: runtime?.capability === "removing",
+          configurationStatus: runtime?.configuration?.status,
+        })
           ? RUNTIME_TRANSITION_REFETCH_INTERVAL_MS
           : false;
       },
@@ -168,6 +175,7 @@ export function useAgentRuntimeSettingsContainer({
 
   const lifecycleMutationOptions = {
     onSuccess: async (): Promise<void> => {
+      setRestartConfirmOpen(false);
       setResetConfirmOpen(false);
       setActionError(null);
       setLifecycleAction(null);
@@ -257,6 +265,7 @@ export function useAgentRuntimeSettingsContainer({
     actionNotice,
     addConfirmOpen,
     removeConfirmOpen,
+    restartConfirmOpen,
     resetConfirmOpen,
     removalAcknowledged,
     isAdding: addMutation.isPending,
@@ -338,6 +347,11 @@ export function useAgentRuntimeSettingsContainer({
         confirmed: true,
       });
     },
+    onOpenRestartConfirm: () => {
+      clearFeedback();
+      setRestartConfirmOpen(true);
+    },
+    onCloseRestartConfirm: () => setRestartConfirmOpen(false),
     onOpenResetConfirm: () => {
       clearFeedback();
       setResetConfirmOpen(true);
@@ -345,7 +359,7 @@ export function useAgentRuntimeSettingsContainer({
     onCloseResetConfirm: () => setResetConfirmOpen(false),
     onStart: () => runLifecycle("start"),
     onStop: () => runLifecycle("stop"),
-    onRestart: () => runLifecycle("restart"),
+    onConfirmRestart: () => runLifecycle("restart"),
     onConfirmReset: () => runLifecycle("reset"),
     onRefresh: () => {
       clearFeedback();

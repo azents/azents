@@ -2,6 +2,7 @@
 title: "Clear and Reliable Runtime Lifecycle Requirements"
 created: 2026-08-25
 updated: 2026-08-25
+implemented: 2026-08-25
 tags: [runtime, lifecycle, provider, runner, frontend, reliability]
 document_role: primary
 document_type: requirements

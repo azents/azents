@@ -35,6 +35,17 @@ class TestAgentWorkspaceResponse(unittest.TestCase):
         model = AgentWorkspaceResponse()
         if include_optional:
             return AgentWorkspaceResponse(
+                lifecycle = azentspublicclient.models.agent_runtime_lifecycle_presentation_response.AgentRuntimeLifecyclePresentationResponse(
+                    target = 'running', 
+                    convergence = 'stable', 
+                    provider = azentspublicclient.models.agent_runtime_lifecycle_provider_response.AgentRuntimeLifecycleProviderResponse(
+                        connection = 'connected', 
+                        resource = 'unknown', ), 
+                    runner = azentspublicclient.models.agent_runtime_lifecycle_runner_response.AgentRuntimeLifecycleRunnerResponse(
+                        state = 'unknown', ), 
+                    availability = 'ready', 
+                    reason_code = '', 
+                    desired_generation = 56, ),
                 runtime = azentspublicclient.models.agent_workspace_runtime_response.AgentWorkspaceRuntimeResponse(
                     type = 'NOT_STARTED', 
                     runtime_id = '', 
@@ -55,6 +66,17 @@ class TestAgentWorkspaceResponse(unittest.TestCase):
             )
         else:
             return AgentWorkspaceResponse(
+                lifecycle = azentspublicclient.models.agent_runtime_lifecycle_presentation_response.AgentRuntimeLifecyclePresentationResponse(
+                    target = 'running', 
+                    convergence = 'stable', 
+                    provider = azentspublicclient.models.agent_runtime_lifecycle_provider_response.AgentRuntimeLifecycleProviderResponse(
+                        connection = 'connected', 
+                        resource = 'unknown', ), 
+                    runner = azentspublicclient.models.agent_runtime_lifecycle_runner_response.AgentRuntimeLifecycleRunnerResponse(
+                        state = 'unknown', ), 
+                    availability = 'ready', 
+                    reason_code = '', 
+                    desired_generation = 56, ),
                 runtime = azentspublicclient.models.agent_workspace_runtime_response.AgentWorkspaceRuntimeResponse(
                     type = 'NOT_STARTED', 
                     runtime_id = '', 

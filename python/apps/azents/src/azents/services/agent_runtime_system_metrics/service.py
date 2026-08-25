@@ -13,7 +13,7 @@ from azents_runtime_control.system_metrics import (
 )
 from fastapi import Depends
 
-from azents.core.enums import RuntimeSummary, WorkspaceUserRole
+from azents.core.enums import WorkspaceUserRole
 from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeSystemMetricsSample,
@@ -129,7 +129,7 @@ class AgentRuntimeSystemMetricsService:
             )
 
         stopped = (
-            read.state is not None and read.state.summary is RuntimeSummary.STOPPED
+            read.lifecycle is not None and read.lifecycle.availability == "stopped"
         )
         latest = samples[-1] if samples else None
         cpu = _current_metric(

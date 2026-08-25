@@ -14816,40 +14816,6 @@
         "title": "AgentRuntimeActionErrorResponse",
         "description": "FastAPI envelope for a dedicated Runtime action error."
       },
-      "AgentRuntimeActionsResponse": {
-        "properties": {
-          "start": {
-            "type": "boolean",
-            "title": "Start"
-          },
-          "stop": {
-            "type": "boolean",
-            "title": "Stop"
-          },
-          "restart": {
-            "type": "boolean",
-            "title": "Restart"
-          },
-          "reset": {
-            "type": "boolean",
-            "title": "Reset"
-          },
-          "use_runner": {
-            "type": "boolean",
-            "title": "Use Runner"
-          }
-        },
-        "type": "object",
-        "required": [
-          "start",
-          "stop",
-          "restart",
-          "reset",
-          "use_runner"
-        ],
-        "title": "AgentRuntimeActionsResponse",
-        "description": "Agent Runtime action availability response."
-      },
       "AgentRuntimeAdditionResponse": {
         "properties": {
           "runtime": {
@@ -14913,37 +14879,97 @@
         "title": "AgentRuntimeConfigurationStatusResponse",
         "description": "Desired and applied Runtime configuration status."
       },
-      "AgentRuntimeFailureResponse": {
+      "AgentRuntimeLifecyclePresentationResponse": {
         "properties": {
-          "generation": {
+          "target": {
+            "$ref": "#/components/schemas/RuntimeDesiredState"
+          },
+          "convergence": {
+            "type": "string",
+            "enum": [
+              "stable",
+              "starting",
+              "stopping",
+              "resetting",
+              "recovering",
+              "blocked",
+              "failed"
+            ],
+            "title": "Convergence"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/AgentRuntimeLifecycleProviderResponse"
+          },
+          "runner": {
+            "$ref": "#/components/schemas/AgentRuntimeLifecycleRunnerResponse"
+          },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "stopped",
+              "transitioning",
+              "provider_disconnected",
+              "runner_unavailable",
+              "configuration_blocked",
+              "failed",
+              "removing"
+            ],
+            "title": "Availability"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "desired_generation": {
             "type": "integer",
-            "title": "Generation"
-          },
-          "code": {
-            "type": "string",
-            "title": "Code"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
+            "title": "Desired Generation"
           }
         },
         "type": "object",
         "required": [
-          "generation",
-          "code",
-          "message"
+          "target",
+          "convergence",
+          "provider",
+          "runner",
+          "availability",
+          "reason_code",
+          "desired_generation"
         ],
-        "title": "AgentRuntimeFailureResponse",
-        "description": "Agent Runtime failure response."
+        "title": "AgentRuntimeLifecyclePresentationResponse",
+        "description": "Server-authoritative Runtime lifecycle presentation."
+      },
+      "AgentRuntimeLifecycleProviderResponse": {
+        "properties": {
+          "connection": {
+            "$ref": "#/components/schemas/RuntimeProviderConnectionState"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/RuntimeProviderObservedState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "connection",
+          "resource"
+        ],
+        "title": "AgentRuntimeLifecycleProviderResponse",
+        "description": "Current Provider lifecycle facts."
       },
       "AgentRuntimeLifecycleResponse": {
         "properties": {
           "runtime": {
             "$ref": "#/components/schemas/AgentRuntimeRawStateResponse"
           },
-          "state": {
-            "$ref": "#/components/schemas/AgentRuntimeSummaryResponse"
+          "lifecycle": {
+            "$ref": "#/components/schemas/AgentRuntimeLifecyclePresentationResponse"
           },
           "configuration": {
             "$ref": "#/components/schemas/AgentRuntimeConfigurationStatusResponse"
@@ -14959,13 +14985,26 @@
         "type": "object",
         "required": [
           "runtime",
-          "state",
+          "lifecycle",
           "configuration",
           "command_type",
           "desired_generation"
         ],
         "title": "AgentRuntimeLifecycleResponse",
         "description": "Agent Runtime lifecycle command response."
+      },
+      "AgentRuntimeLifecycleRunnerResponse": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/RuntimeRunnerState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "AgentRuntimeLifecycleRunnerResponse",
+        "description": "Current Runner lifecycle fact."
       },
       "AgentRuntimePublicActionsResponse": {
         "properties": {
@@ -15519,10 +15558,10 @@
               }
             ]
           },
-          "state": {
+          "lifecycle": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/AgentRuntimeSummaryResponse"
+                "$ref": "#/components/schemas/AgentRuntimeLifecyclePresentationResponse"
               },
               {
                 "type": "null"
@@ -15555,40 +15594,12 @@
           "removal_impact",
           "removal",
           "runtime",
-          "state",
+          "lifecycle",
           "configuration",
           "actions"
         ],
         "title": "AgentRuntimeResponse",
         "description": "Unified capability-aware Agent Runtime response."
-      },
-      "AgentRuntimeSummaryResponse": {
-        "properties": {
-          "summary": {
-            "$ref": "#/components/schemas/RuntimeSummary"
-          },
-          "actions": {
-            "$ref": "#/components/schemas/AgentRuntimeActionsResponse"
-          },
-          "failure": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AgentRuntimeFailureResponse"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "summary",
-          "actions",
-          "failure"
-        ],
-        "title": "AgentRuntimeSummaryResponse",
-        "description": "Agent Runtime summary response."
       },
       "AgentRuntimeSystemMetricCurrentResponse": {
         "properties": {
@@ -17081,6 +17092,17 @@
       },
       "AgentWorkspaceResponse": {
         "properties": {
+          "lifecycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentRuntimeLifecyclePresentationResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shared Agent Runtime lifecycle presentation"
+          },
           "runtime": {
             "$ref": "#/components/schemas/AgentWorkspaceRuntimeResponse",
             "description": "Provider runtime status"
@@ -17113,6 +17135,7 @@
         },
         "type": "object",
         "required": [
+          "lifecycle",
           "runtime",
           "workspace",
           "actions"
@@ -27154,22 +27177,6 @@
         ],
         "title": "RuntimeRunnerState",
         "description": "Runtime Runner status."
-      },
-      "RuntimeSummary": {
-        "type": "string",
-        "enum": [
-          "stopped",
-          "starting",
-          "running",
-          "stopping",
-          "resetting",
-          "recovering",
-          "provider_disconnected",
-          "runner_unavailable",
-          "failed"
-        ],
-        "title": "RuntimeSummary",
-        "description": "Server-computed Agent Runtime summary status."
       },
       "RuntimeSystemMetricState": {
         "type": "string",

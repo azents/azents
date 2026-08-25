@@ -19,8 +19,7 @@ from azents.core.enums import (
 )
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeActions
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.control_protocol.runner_operations import (
@@ -43,10 +42,12 @@ from azents.runtime.transfer.workspace_download import (
     WorkspaceDownloadRequest,
 )
 from azents.services.agent_runtime.lifecycle_data import (
+    AgentRuntimeLifecycleSnapshot,
     RuntimeOperationAuthority,
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
 )
+from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.chat.workspace import AgentWorkspaceFileService
 from azents.services.runtime_storage_error import RuntimeStorageError
 
@@ -88,37 +89,47 @@ class _FakeWorkspaceUserRepository(WorkspaceUserRepository):
         return None
 
 
-class _FakeRuntimeRepository(AgentRuntimeRepository):
-    def __init__(self, runtime: AgentRuntime | None) -> None:
-        self._runtime = runtime
-
-    async def get_by_agent_id(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-    ) -> AgentRuntime | None:
-        del session, agent_id
-        return self._runtime
-
-    async def ensure_for_agent(
-        self,
-        session: AsyncSession,
-        agent_id: str,
-        *,
-        default_runtime_provider_id: str | None = None,
-    ) -> AgentRuntime:
-        del session, agent_id, default_runtime_provider_id
-        if self._runtime is None:
-            self._runtime = _make_agent_runtime()
-        return self._runtime
-
-
 class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
     """Resolve a target from the configured Runtime fixture."""
 
     def __init__(self, runtime: AgentRuntime | None) -> None:
         self.runtime = runtime
         self.resolve_calls: list[tuple[float, bool]] = []
+
+    async def get_lifecycle_snapshot(
+        self,
+        agent_id: str,
+    ) -> AgentRuntimeLifecycleSnapshot:
+        """Return the shared lifecycle fixture."""
+        del agent_id
+        runtime = self.runtime
+        if runtime is None:
+            return AgentRuntimeLifecycleSnapshot(
+                runtime=None,
+                lifecycle=None,
+                actions=AgentRuntimeActions(
+                    start=False,
+                    stop=False,
+                    restart=False,
+                    reset=False,
+                    use_runner=False,
+                ),
+            )
+        service = object.__new__(AgentRuntimeService)
+        configuration = None
+        return AgentRuntimeLifecycleSnapshot(
+            runtime=runtime,
+            lifecycle=service.calculate_lifecycle(
+                runtime,
+                configuration=configuration,
+                removing=False,
+            ),
+            actions=service._calculate_lifecycle_actions(
+                runtime,
+                configuration=configuration,
+                removing=False,
+            ),
+        )
 
     async def resolve_operation_target(
         self,
@@ -444,7 +455,6 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=target_resolver,
         session_manager=_session_manager,
     )
@@ -453,6 +463,9 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
 
     assert isinstance(result, Success)
     state = result.value
+    assert state.lifecycle is not None
+    assert state.lifecycle.availability == "ready"
+    assert state.lifecycle.convergence == "stable"
     assert state.runtime.type == "RUNNING"
     assert state.workspace.type == "READY"
     assert state.actions.stop is not None
@@ -478,7 +491,6 @@ async def test_get_workspace_exposes_restart_without_waiting_for_runner() -> Non
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=target_resolver,
         session_manager=_session_manager,
     )
@@ -486,6 +498,9 @@ async def test_get_workspace_exposes_restart_without_waiting_for_runner() -> Non
     result = await service.get_workspace("agent-1", "user-1")
 
     assert isinstance(result, Success)
+    assert result.value.lifecycle is not None
+    assert result.value.lifecycle.availability == "runner_unavailable"
+    assert result.value.lifecycle.reason_code == "runner_disconnected"
     assert result.value.runtime.type == "RUNNING"
     assert result.value.workspace.type == "CONTROL_UNAVAILABLE"
     assert result.value.actions.restart is not None
@@ -501,7 +516,6 @@ async def test_get_workspace_uses_agent_runtime_without_session_match() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -529,7 +543,6 @@ async def test_get_workspace_reports_missing_provider_workspace_path() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -555,7 +568,6 @@ async def test_get_workspace_reports_stopped_runtime_not_started() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -578,7 +590,6 @@ async def test_get_workspace_shows_starting_when_start_requested() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -603,7 +614,6 @@ async def test_get_workspace_error_exposes_restart_action() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=_FakeRunnerOperations(),
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -626,7 +636,6 @@ async def test_read_path_uses_stat_to_return_file_preview() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -656,7 +665,6 @@ async def test_text_preview_uses_character_limit_not_file_byte_size() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -680,7 +688,6 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
         runtime_workspace_download_service=cast(
@@ -720,7 +727,6 @@ async def test_read_path_uses_stat_to_return_directory_listing() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -769,7 +775,6 @@ async def test_read_path_marks_git_repository_directories() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -798,7 +803,6 @@ async def test_stat_path_returns_inspector_metadata() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -825,7 +829,6 @@ async def test_mkdir_path_calls_runner_with_normalized_path() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -847,7 +850,6 @@ async def test_delete_path_rejects_workspace_root() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -871,7 +873,6 @@ async def test_move_path_rejects_destination_outside_workspace_root() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -896,7 +897,6 @@ async def test_move_path_calls_runner_for_rename() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -927,7 +927,6 @@ async def test_bulk_delete_paths_calls_runner() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )
@@ -953,7 +952,6 @@ async def test_bulk_move_paths_calls_runner() -> None:
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
-        runtime_repository=_FakeRuntimeRepository(runtime),
         runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
         session_manager=_session_manager,
     )

@@ -1,0 +1,90 @@
+{
+  "title": "Cycle de vie du Runtime",
+  "description": "Cible, convergence et états Provider et Runner déterminés par le serveur.",
+  "generation": "Génération du cycle de vie {generation}",
+  "fields": {
+    "target": "Cible",
+    "convergence": "Convergence",
+    "providerResource": "Ressource Provider",
+    "providerConnection": "Connexion Provider",
+    "runner": "Runner",
+    "configuration": "Configuration"
+  },
+  "target": {
+    "running": "En exécution",
+    "stopped": "Arrêté"
+  },
+  "convergence": {
+    "stable": "Stable",
+    "starting": "Démarrage",
+    "stopping": "Arrêt",
+    "resetting": "Réinitialisation",
+    "recovering": "Récupération",
+    "blocked": "Bloqué",
+    "failed": "Échec"
+  },
+  "availability": {
+    "ready": "Disponible",
+    "stopped": "Arrêté",
+    "transitioning": "Transition en cours",
+    "provider_disconnected": "Provider déconnecté",
+    "runner_unavailable": "Runner indisponible",
+    "configuration_blocked": "Configuration bloquée",
+    "failed": "Échec",
+    "removing": "Suppression"
+  },
+  "providerConnection": {
+    "connected": "Connecté",
+    "disconnected": "Déconnecté"
+  },
+  "providerResource": {
+    "unknown": "Inconnu",
+    "stopped": "Arrêté",
+    "starting": "Démarrage",
+    "running": "En exécution",
+    "stopping": "Arrêt",
+    "recovering": "Récupération",
+    "resetting": "Réinitialisation",
+    "failed": "Échec"
+  },
+  "runner": {
+    "unknown": "Inconnu",
+    "disconnected": "Déconnecté",
+    "starting": "Démarrage",
+    "ready": "Prêt",
+    "degraded": "Dégradé",
+    "failed": "Échec"
+  },
+  "configuration": {
+    "profile_required": "Profile requis",
+    "configuration_blocked": "Bloquée",
+    "configured_not_created": "Prête à créer",
+    "waiting_for_recreation": "Recréation requise",
+    "applied": "Appliquée"
+  },
+  "reasons": {
+    "runtimeRemovalInProgress": "La suppression définitive du Runtime est en cours. Les actions restent indisponibles jusqu’à sa fin.",
+    "runtimeFailed": "La génération actuelle du cycle de vie a échoué. Consultez les actions de récupération disponibles.",
+    "providerFailed": "Le Provider a signalé l’échec de la ressource Runtime.",
+    "runtimeRecreationRequired": "La configuration souhaitée diffère de celle appliquée. Une recréation est nécessaire.",
+    "providerDisabled": "Le Runtime Provider sélectionné est désactivé.",
+    "providerWorkspaceUnavailable": "Le Runtime Provider sélectionné n’est pas disponible dans ce Workspace.",
+    "providerDisconnected": "La connexion Provider est indisponible et la transition demandée ne peut pas converger.",
+    "providerCapabilityUnavailable": "Le Provider ne fournit pas actuellement les capacités requises.",
+    "providerCapabilityInvalid": "Le rapport de capacités du Provider est invalide.",
+    "profileDocumentInvalid": "La configuration du Runtime Profile sélectionné est invalide.",
+    "profileIncompatible": "Le Runtime Profile sélectionné est incompatible avec le Provider.",
+    "runtimeConfigurationBlocked": "La configuration Runtime souhaitée est bloquée.",
+    "runtimeProfileRequired": "Sélectionnez un Runtime Profile disponible avant de créer des ressources.",
+    "runtimeResetting": "Le Runtime est réinitialisé et les données Agent Workspace sont supprimées.",
+    "runtimeRecovering": "Le Provider récupère la ressource Runtime.",
+    "runtimeStarting": "Le Runtime converge vers la cible en exécution.",
+    "runtimeStopping": "Le Runtime converge vers la cible arrêtée.",
+    "runnerUnknown": "L’état de préparation du Runner n’a pas encore été observé.",
+    "runnerDisconnected": "La ressource Runtime fonctionne, mais la connexion Runner est indisponible.",
+    "runnerStarting": "La ressource Runtime fonctionne pendant le démarrage du Runner.",
+    "runnerDegraded": "Le Runner a signalé une disponibilité dégradée.",
+    "runnerFailed": "Le Runner a signalé un échec.",
+    "unknown": "Le Runtime est indisponible pour une raison limitée signalée par le serveur."
+  }
+}

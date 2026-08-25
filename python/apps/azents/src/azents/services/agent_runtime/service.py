@@ -19,7 +19,6 @@ from azents.core.enums import (
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
-    RuntimeSummary,
     WorkspaceUserRole,
 )
 from azents.core.runtime_profile import RuntimeConfigurationStateStatus
@@ -33,7 +32,6 @@ from azents.repos.agent_runtime.data import (
     AgentRuntime,
     AgentRuntimeActions,
     AgentRuntimeFailureSummary,
-    AgentRuntimeSummaryState,
 )
 from azents.repos.agent_runtime_removal import AgentRuntimeRemovalRepository
 from azents.repos.agent_runtime_removal.data import AgentRuntimeRemovalOperation
@@ -79,6 +77,10 @@ from .lifecycle_data import (
     AgentRuntimeAdditionOutput,
     AgentRuntimeConfigurationStatus,
     AgentRuntimeLifecycleOutput,
+    AgentRuntimeLifecyclePresentation,
+    AgentRuntimeLifecycleProvider,
+    AgentRuntimeLifecycleRunner,
+    AgentRuntimeLifecycleSnapshot,
     AgentRuntimeOutput,
     AgentRuntimePublicActions,
     AgentRuntimeReadOutput,
@@ -86,6 +88,8 @@ from .lifecycle_data import (
     AgentRuntimeRemovalProgress,
     InvalidResetFinalDesiredState,
     ProviderDisconnected,
+    RuntimeAvailability,
+    RuntimeLifecycleConvergence,
     RuntimeNotFound,
     RuntimeOperationAuthority,
     RuntimeOperationTarget,
@@ -498,13 +502,18 @@ class AgentRuntimeService:
                     message=error.message,
                 )
             )
+        configuration = await self._configuration_status(resolution)
         return Success(
             AgentRuntimeLifecycleOutput(
                 runtime=resolution.runtime,
-                state=self.calculate_state(resolution.runtime),
+                lifecycle=self.calculate_lifecycle(
+                    resolution.runtime,
+                    configuration=configuration,
+                    removing=False,
+                ),
                 command_type=command.command_type,
                 desired_generation=command.desired_generation,
-                configuration=await self._configuration_status(resolution),
+                configuration=configuration,
             )
         )
 
@@ -936,13 +945,18 @@ class AgentRuntimeService:
             if existing is None:
                 return Failure(RuntimeNotFound(runtime_id=command.runtime.id))
             resolution = existing
+        configuration = await self._configuration_status(resolution)
         return Success(
             AgentRuntimeLifecycleOutput(
                 runtime=resolution.runtime,
-                state=self.calculate_state(resolution.runtime),
+                lifecycle=self.calculate_lifecycle(
+                    resolution.runtime,
+                    configuration=configuration,
+                    removing=False,
+                ),
                 command_type=command.command_type,
                 desired_generation=command.desired_generation,
-                configuration=await self._configuration_status(resolution),
+                configuration=configuration,
             )
         )
 
@@ -1032,16 +1046,28 @@ class AgentRuntimeService:
 
         runtime_profile = await self._runtime_profile_projection(agent)
 
-        state = self.calculate_state(runtime) if runtime is not None else None
         resolution = await self._get_existing_resolution(agent.id)
         configuration = (
             await self._configuration_status(resolution)
             if resolution is not None
             else None
         )
+        lifecycle = (
+            self.calculate_lifecycle(
+                runtime,
+                configuration=configuration,
+                removing=active_removal is not None,
+            )
+            if runtime is not None
+            else None
+        )
         physical_actions = (
-            state.actions
-            if state is not None
+            self._calculate_lifecycle_actions(
+                runtime,
+                configuration=configuration,
+                removing=active_removal is not None,
+            )
+            if runtime is not None
             and agent.runtime_capability is AgentRuntimeCapability.MANAGED
             else AgentRuntimeActions(
                 start=False,
@@ -1079,7 +1105,7 @@ class AgentRuntimeService:
                 else None
             ),
             runtime=runtime,
-            state=state,
+            lifecycle=lifecycle,
             configuration=configuration,
             actions=AgentRuntimePublicActions(
                 add=add_available,
@@ -1104,6 +1130,49 @@ class AgentRuntimeService:
                     and runtime is not None
                 ),
                 use_runner=(physical_actions.use_runner and profile_actions_available),
+            ),
+        )
+
+    async def get_lifecycle_snapshot(
+        self,
+        agent_id: str,
+    ) -> AgentRuntimeLifecycleSnapshot:
+        """Return the shared Runtime lifecycle snapshot without mutation."""
+        async with self.session_manager() as session:
+            runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
+            active_removal = await self.removal_repository.get_active_by_agent_id(
+                session,
+                agent_id,
+            )
+        resolution = await self._get_existing_resolution(agent_id)
+        configuration = (
+            await self._configuration_status(resolution)
+            if resolution is not None
+            else None
+        )
+        if runtime is None:
+            return AgentRuntimeLifecycleSnapshot(
+                runtime=None,
+                lifecycle=None,
+                actions=AgentRuntimeActions(
+                    start=False,
+                    stop=False,
+                    restart=False,
+                    reset=False,
+                    use_runner=False,
+                ),
+            )
+        return AgentRuntimeLifecycleSnapshot(
+            runtime=runtime,
+            lifecycle=self.calculate_lifecycle(
+                runtime,
+                configuration=configuration,
+                removing=active_removal is not None,
+            ),
+            actions=self._calculate_lifecycle_actions(
+                runtime,
+                configuration=configuration,
+                removing=active_removal is not None,
             ),
         )
 
@@ -1223,10 +1292,15 @@ class AgentRuntimeService:
         resolution: RuntimeProfileResolutionResult,
     ) -> AgentRuntimeOutput:
         """Combine Runtime raw state and configuration summary."""
+        configuration = await self._configuration_status(resolution)
         return AgentRuntimeOutput(
             runtime=resolution.runtime,
-            state=self.calculate_state(resolution.runtime),
-            configuration=await self._configuration_status(resolution),
+            lifecycle=self.calculate_lifecycle(
+                resolution.runtime,
+                configuration=configuration,
+                removing=False,
+            ),
+            configuration=configuration,
         )
 
     async def _configuration_status(
@@ -1275,53 +1349,99 @@ class AgentRuntimeService:
             message="The selected Runtime Profile cannot create a Runtime.",
         )
 
-    def calculate_state(self, runtime: AgentRuntime) -> AgentRuntimeSummaryState:
-        """Calculate summary/actions from Runtime raw axes."""
+    def calculate_lifecycle(
+        self,
+        runtime: AgentRuntime,
+        *,
+        configuration: AgentRuntimeConfigurationStatus | None,
+        removing: bool,
+    ) -> AgentRuntimeLifecyclePresentation:
+        """Compose one precedence-ordered lifecycle presentation."""
         current_failure = self._get_current_failure(runtime)
-        if current_failure is not None:
-            summary = RuntimeSummary.FAILED
-        elif runtime.provider_observed_state == RuntimeProviderObservedState.FAILED:
-            summary = RuntimeSummary.FAILED
+        if removing or runtime.terminal_delete_requested_generation is not None:
+            convergence = "stopping"
+            availability = "removing"
+            reason_code = "runtime_removal_in_progress"
+        elif current_failure is not None:
+            convergence = "failed"
+            availability = "failed"
+            reason_code = "runtime_failed"
+        elif runtime.provider_observed_state is RuntimeProviderObservedState.FAILED:
+            convergence = "failed"
+            availability = "failed"
+            reason_code = "provider_failed"
+        elif configuration is not None and configuration.status in {
+            "profile_required",
+            "configuration_blocked",
+            "waiting_for_recreation",
+        }:
+            convergence = "blocked"
+            availability = "configuration_blocked"
+            if configuration.status == "waiting_for_recreation":
+                reason_code = "runtime_recreation_required"
+            elif configuration.desired is not None:
+                reason_code = self._safe_configuration_reason_code(
+                    configuration.desired.reason_code
+                )
+            else:
+                reason_code = "runtime_profile_required"
         elif self._provider_action_blocked(runtime):
-            summary = RuntimeSummary.PROVIDER_DISCONNECTED
+            convergence = "blocked"
+            availability = "provider_disconnected"
+            reason_code = "provider_disconnected"
         else:
-            match runtime.provider_observed_state:
-                case RuntimeProviderObservedState.STARTING:
-                    summary = RuntimeSummary.STARTING
-                case RuntimeProviderObservedState.STOPPING:
-                    summary = RuntimeSummary.STOPPING
-                case RuntimeProviderObservedState.RESETTING:
-                    summary = RuntimeSummary.RESETTING
-                case RuntimeProviderObservedState.RECOVERING:
-                    summary = RuntimeSummary.RECOVERING
-                case RuntimeProviderObservedState.RUNNING:
-                    if runtime.runner_state in {
-                        RuntimeRunnerState.READY,
-                        RuntimeRunnerState.DEGRADED,
-                    }:
-                        summary = RuntimeSummary.RUNNING
-                    else:
-                        summary = RuntimeSummary.RUNNER_UNAVAILABLE
-                case RuntimeProviderObservedState.STOPPED:
-                    summary = (
-                        RuntimeSummary.STARTING
-                        if runtime.desired_state == RuntimeDesiredState.RUNNING
-                        else RuntimeSummary.STOPPED
-                    )
-                case RuntimeProviderObservedState.UNKNOWN:
-                    summary = (
-                        RuntimeSummary.STARTING
-                        if runtime.desired_state == RuntimeDesiredState.RUNNING
-                        else RuntimeSummary.STOPPED
-                    )
-                case _:
-                    assert_never(runtime.provider_observed_state)
+            convergence, availability, reason_code = self._lifecycle_convergence(
+                runtime
+            )
 
-        return AgentRuntimeSummaryState(
-            summary=summary,
-            actions=self._calculate_actions(runtime),
-            failure=current_failure,
+        return AgentRuntimeLifecyclePresentation(
+            target=runtime.desired_state,
+            convergence=convergence,
+            provider=AgentRuntimeLifecycleProvider(
+                connection=runtime.provider_connection_state,
+                resource=runtime.provider_observed_state,
+            ),
+            runner=AgentRuntimeLifecycleRunner(state=runtime.runner_state),
+            availability=availability,
+            reason_code=reason_code,
+            desired_generation=runtime.desired_generation,
         )
+
+    @staticmethod
+    def _lifecycle_convergence(
+        runtime: AgentRuntime,
+    ) -> tuple[RuntimeLifecycleConvergence, RuntimeAvailability, str | None]:
+        """Derive lifecycle status after higher-precedence checks."""
+        observed = runtime.provider_observed_state
+        if runtime.desired_state is RuntimeDesiredState.STOPPED:
+            if observed in {
+                RuntimeProviderObservedState.STOPPED,
+                RuntimeProviderObservedState.UNKNOWN,
+            }:
+                return "stable", "stopped", None
+            if observed is RuntimeProviderObservedState.RESETTING:
+                return "resetting", "transitioning", "runtime_resetting"
+            return "stopping", "transitioning", "runtime_stopping"
+        if observed is RuntimeProviderObservedState.RESETTING:
+            return "resetting", "transitioning", "runtime_resetting"
+        if observed is RuntimeProviderObservedState.RECOVERING:
+            return "recovering", "transitioning", "runtime_recovering"
+        if observed is not RuntimeProviderObservedState.RUNNING:
+            return "starting", "transitioning", "runtime_starting"
+        if runtime.runner_state is not RuntimeRunnerState.READY:
+            reason_by_state = {
+                RuntimeRunnerState.UNKNOWN: "runner_unknown",
+                RuntimeRunnerState.DISCONNECTED: "runner_disconnected",
+                RuntimeRunnerState.STARTING: "runner_starting",
+                RuntimeRunnerState.DEGRADED: "runner_degraded",
+                RuntimeRunnerState.FAILED: "runner_failed",
+            }
+            return (
+                "stable",
+                "runner_unavailable",
+                reason_by_state[runtime.runner_state],
+            )
+        return "stable", "ready", None
 
     def _calculate_actions(self, runtime: AgentRuntime) -> AgentRuntimeActions:
         """Calculate action availability from Runtime raw axes."""
@@ -1350,6 +1470,35 @@ class AgentRuntimeService:
             restart=desired_running or backend_running,
             reset=provider_connected,
             use_runner=use_runner,
+        )
+
+    def _calculate_lifecycle_actions(
+        self,
+        runtime: AgentRuntime,
+        *,
+        configuration: AgentRuntimeConfigurationStatus | None,
+        removing: bool,
+    ) -> AgentRuntimeActions:
+        """Apply shared removal and configuration guards to Runtime actions."""
+        if removing:
+            return AgentRuntimeActions(
+                start=False,
+                stop=False,
+                restart=False,
+                reset=False,
+                use_runner=False,
+            )
+        actions = self._calculate_actions(runtime)
+        creation_available = configuration is None or configuration.status not in {
+            "profile_required",
+            "configuration_blocked",
+        }
+        return AgentRuntimeActions(
+            start=actions.start and creation_available,
+            stop=actions.stop,
+            restart=actions.restart and creation_available,
+            reset=actions.reset and creation_available,
+            use_runner=actions.use_runner and creation_available,
         )
 
     def _provider_action_blocked(self, runtime: AgentRuntime) -> bool:

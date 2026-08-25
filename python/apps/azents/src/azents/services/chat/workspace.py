@@ -26,8 +26,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeActions
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileBulkDeleteResult,
@@ -62,6 +61,8 @@ from azents.runtime.transfer.workspace_download import (
     WorkspaceDownloadRequest,
 )
 from azents.services.agent_runtime.lifecycle_data import (
+    AgentRuntimeLifecyclePresentation,
+    AgentRuntimeLifecycleSnapshot,
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
 )
@@ -85,7 +86,6 @@ _API_RUNTIME_TRANSFER_COORDINATOR_DEP = Depends(
 _AGENT_REPOSITORY_DEP = Depends(AgentRepository)
 _WORKSPACE_USER_REPOSITORY_DEP = Depends(WorkspaceUserRepository)
 _RUNNER_OPERATION_CLIENT_DEP = Depends(get_runtime_runner_operation_client)
-_RUNTIME_REPOSITORY_DEP = Depends(AgentRuntimeRepository)
 _RUNTIME_TARGET_RESOLVER_DEP = Depends(AgentRuntimeService)
 _SESSION_MANAGER_DEP = Depends(get_session_manager)
 _RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 120
@@ -265,6 +265,7 @@ class AgentWorkspaceActions:
 class AgentWorkspaceState:
     """Workspace panel state. Express Runtime and workspace access separately."""
 
+    lifecycle: AgentRuntimeLifecyclePresentation | None
     runtime: AgentWorkspaceRuntime
     workspace: AgentWorkspaceAccessState
     actions: AgentWorkspaceActions
@@ -480,34 +481,15 @@ def _restart_action(agent_id: str) -> AgentWorkspaceAction:
 
 def _actions_for_runtime(
     agent_id: str,
-    runtime: AgentWorkspaceRuntime,
+    actions: AgentRuntimeActions,
 ) -> AgentWorkspaceActions:
-    """Return lifecycle action set matching Provider runtime state."""
-    match runtime.type:
-        case "NOT_STARTED":
-            return AgentWorkspaceActions(start=_start_action(agent_id))
-        case "RUNNING":
-            return AgentWorkspaceActions(
-                stop=_stop_action(agent_id),
-                restart=_restart_action(agent_id),
-                reset=_reset_action(agent_id),
-            )
-        case "HIBERNATED":
-            return AgentWorkspaceActions(
-                start=_start_action(agent_id),
-                reset=_reset_action(agent_id),
-            )
-        case "RESTORE_FAILED" | "LOST":
-            return AgentWorkspaceActions(
-                start=_start_action(agent_id),
-                stop=_stop_action(agent_id),
-                restart=_restart_action(agent_id),
-                reset=_reset_action(agent_id),
-            )
-        case "STARTING" | "RESETTING":
-            return AgentWorkspaceActions(stop=_stop_action(agent_id))
-        case "STOPPING":
-            return AgentWorkspaceActions()
+    """Return lifecycle routes from the shared server action authority."""
+    return AgentWorkspaceActions(
+        start=_start_action(agent_id) if actions.start else None,
+        stop=_stop_action(agent_id) if actions.stop else None,
+        restart=_restart_action(agent_id) if actions.restart else None,
+        reset=_reset_action(agent_id) if actions.reset else None,
+    )
 
 
 class WorkspaceRunnerOperations(Protocol):
@@ -632,7 +614,6 @@ class AgentWorkspaceFileService:
             _WORKSPACE_USER_REPOSITORY_DEP
         ),
         runner_operations: WorkspaceRunnerOperations = _RUNNER_OPERATION_CLIENT_DEP,
-        runtime_repository: AgentRuntimeRepository = _RUNTIME_REPOSITORY_DEP,
         runtime_target_resolver: RuntimeOperationTargetResolver = (
             _RUNTIME_TARGET_RESOLVER_DEP
         ),
@@ -644,7 +625,6 @@ class AgentWorkspaceFileService:
         self._agent_repository = agent_repository
         self._workspace_user_repository = workspace_user_repository
         self._runner_operations = runner_operations
-        self._runtime_repository = runtime_repository
         self._runtime_target_resolver = runtime_target_resolver
         self._session_manager = session_manager
         self._runtime_workspace_download_service = runtime_workspace_download_service
@@ -664,10 +644,10 @@ class AgentWorkspaceFileService:
             case _:
                 assert_never(access_result)
 
-        runtime = await self._get_runtime(agent.id)
+        snapshot = await self._runtime_target_resolver.get_lifecycle_snapshot(agent.id)
         return await self._workspace_panel_state(
             agent,
-            runtime=runtime,
+            snapshot=snapshot,
             user_id=user_id,
         )
 
@@ -693,23 +673,15 @@ class AgentWorkspaceFileService:
                 return Failure(NotWorkspaceMember())
             return Success(agent)
 
-    async def _get_runtime(
-        self,
-        agent_id: str,
-    ) -> AgentRuntime | None:
-        """Fetch AgentRuntime."""
-        async with self._session_manager() as session:
-            return await self._runtime_repository.get_by_agent_id(session, agent_id)
-
     async def _workspace_panel_state(
         self,
         agent: Agent,
         *,
-        runtime: AgentRuntime | None,
+        snapshot: AgentRuntimeLifecycleSnapshot,
         user_id: str,
     ) -> Result[AgentWorkspaceState, AgentWorkspaceError]:
         """Return Provider runtime and workspace access separately."""
-        runtime_panel = self._runtime_panel_state(runtime)
+        runtime_panel = self._runtime_panel_state(snapshot.runtime)
         workspace_state = await self._workspace_access_state(
             agent,
             runtime_panel=runtime_panel,
@@ -717,9 +689,10 @@ class AgentWorkspaceFileService:
         )
         return Success(
             AgentWorkspaceState(
+                lifecycle=snapshot.lifecycle,
                 runtime=runtime_panel,
                 workspace=workspace_state,
-                actions=_actions_for_runtime(agent.id, runtime_panel),
+                actions=_actions_for_runtime(agent.id, snapshot.actions),
             )
         )
 

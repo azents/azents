@@ -16,7 +16,7 @@ Name | Type | Description | Notes
 **removal_impact** | [**AgentRuntimeRemovalImpactResponse**](AgentRuntimeRemovalImpactResponse.md) |  | 
 **removal** | [**AgentRuntimeRemovalProgressResponse**](AgentRuntimeRemovalProgressResponse.md) |  | 
 **runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  | 
-**state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  | 
+**lifecycle** | [**AgentRuntimeLifecyclePresentationResponse**](AgentRuntimeLifecyclePresentationResponse.md) |  | 
 **configuration** | [**AgentRuntimeConfigurationStatusResponse**](AgentRuntimeConfigurationStatusResponse.md) |  | 
 **actions** | [**AgentRuntimePublicActionsResponse**](AgentRuntimePublicActionsResponse.md) |  | 
 

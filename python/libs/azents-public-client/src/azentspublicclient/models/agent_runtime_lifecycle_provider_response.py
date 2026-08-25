@@ -18,22 +18,20 @@ import re  # noqa: F401
 import json
 
 from pydantic import BaseModel, ConfigDict
-from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.agent_runtime_actions_response import AgentRuntimeActionsResponse
-from azentspublicclient.models.agent_runtime_failure_response import AgentRuntimeFailureResponse
-from azentspublicclient.models.runtime_summary import RuntimeSummary
+from typing import Any, ClassVar, Dict, List
+from azentspublicclient.models.runtime_provider_connection_state import RuntimeProviderConnectionState
+from azentspublicclient.models.runtime_provider_observed_state import RuntimeProviderObservedState
 from typing import Optional, Set
 from typing_extensions import Self
 
-class AgentRuntimeSummaryResponse(BaseModel):
+class AgentRuntimeLifecycleProviderResponse(BaseModel):
     """
-    Agent Runtime summary response.
+    Current Provider lifecycle facts.
     """ # noqa: E501
-    summary: RuntimeSummary
-    actions: AgentRuntimeActionsResponse
-    failure: Optional[AgentRuntimeFailureResponse]
+    connection: RuntimeProviderConnectionState
+    resource: RuntimeProviderObservedState
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["summary", "actions", "failure"]
+    __properties: ClassVar[List[str]] = ["connection", "resource"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -53,7 +51,7 @@ class AgentRuntimeSummaryResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of AgentRuntimeSummaryResponse from a JSON string"""
+        """Create an instance of AgentRuntimeLifecycleProviderResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -76,27 +74,16 @@ class AgentRuntimeSummaryResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of actions
-        if self.actions:
-            _dict['actions'] = self.actions.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of failure
-        if self.failure:
-            _dict['failure'] = self.failure.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if failure (nullable) is None
-        # and model_fields_set contains the field
-        if self.failure is None and "failure" in self.model_fields_set:
-            _dict['failure'] = None
-
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of AgentRuntimeSummaryResponse from a dict"""
+        """Create an instance of AgentRuntimeLifecycleProviderResponse from a dict"""
         if obj is None:
             return None
 
@@ -104,9 +91,8 @@ class AgentRuntimeSummaryResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "summary": obj.get("summary"),
-            "actions": AgentRuntimeActionsResponse.from_dict(obj["actions"]) if obj.get("actions") is not None else None,
-            "failure": AgentRuntimeFailureResponse.from_dict(obj["failure"]) if obj.get("failure") is not None else None
+            "connection": obj.get("connection"),
+            "resource": obj.get("resource")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

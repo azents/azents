@@ -52,6 +52,7 @@ interface AgentAutomaticProjectsProps {
   onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onRestartRuntimeForProjectPicker: () => void;
   onRemoveProject: (path: string) => void;
   onMoveProject: (path: string, direction: "up" | "down") => void;
   onSave: () => Promise<void>;
@@ -158,6 +159,7 @@ export function AgentAutomaticProjects({
   onSelectProjectPickerDirectory,
   onRefreshProjectPicker,
   onStartRuntimeForProjectPicker,
+  onRestartRuntimeForProjectPicker,
   onRemoveProject,
   onMoveProject,
   onSave,
@@ -430,6 +432,7 @@ export function AgentAutomaticProjects({
         onSelectDirectory={onSelectProjectPickerDirectory}
         onRefresh={onRefreshProjectPicker}
         onStartRuntime={onStartRuntimeForProjectPicker}
+        onRestartRuntime={onRestartRuntimeForProjectPicker}
       />
     </Box>
   );

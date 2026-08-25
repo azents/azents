@@ -95,6 +95,7 @@ export interface AgentDraftChatContainerOutput {
   onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onRestartRuntimeForProjectPicker: () => void;
   onSessionScopeChange: (scope: AgentDraftSessionScope) => void;
   onSendInput: (
     message: string,
@@ -730,6 +731,7 @@ export function useAgentDraftChatContainer(
     onSelectProjectPickerDirectory: projectPicker.selectDirectory,
     onRefreshProjectPicker: projectPicker.refresh,
     onStartRuntimeForProjectPicker: projectPicker.startRuntime,
+    onRestartRuntimeForProjectPicker: projectPicker.restartRuntime,
     onSessionScopeChange,
     onSendInput,
     onSendMessage,

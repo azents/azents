@@ -75,12 +75,13 @@ __all__ = [
     "AgentRunStatus",
     "AgentRuntimeActionErrorDetail",
     "AgentRuntimeActionErrorResponse",
-    "AgentRuntimeActionsResponse",
     "AgentRuntimeAdditionResponse",
     "AgentRuntimeCapability",
     "AgentRuntimeConfigurationStatusResponse",
-    "AgentRuntimeFailureResponse",
+    "AgentRuntimeLifecyclePresentationResponse",
+    "AgentRuntimeLifecycleProviderResponse",
     "AgentRuntimeLifecycleResponse",
+    "AgentRuntimeLifecycleRunnerResponse",
     "AgentRuntimePublicActionsResponse",
     "AgentRuntimeRawStateResponse",
     "AgentRuntimeRemovalImpactResponse",
@@ -89,7 +90,6 @@ __all__ = [
     "AgentRuntimeRemovalStage",
     "AgentRuntimeRemovalStatus",
     "AgentRuntimeResponse",
-    "AgentRuntimeSummaryResponse",
     "AgentRuntimeSystemMetricCurrentResponse",
     "AgentRuntimeSystemMetricObservationResponse",
     "AgentRuntimeSystemMetricsResponse",
@@ -414,7 +414,6 @@ __all__ = [
     "RuntimeRecreationOperationStatus",
     "RuntimeRecreationTargetKind",
     "RuntimeRunnerState",
-    "RuntimeSummary",
     "RuntimeSystemMetricState",
     "RuntimeSystemMetricsSummary",
     "RuntimeTerminalDeleteAcknowledgementKind",
@@ -581,12 +580,13 @@ from azentspublicclient.models.agent_run_phase import AgentRunPhase as AgentRunP
 from azentspublicclient.models.agent_run_status import AgentRunStatus as AgentRunStatus
 from azentspublicclient.models.agent_runtime_action_error_detail import AgentRuntimeActionErrorDetail as AgentRuntimeActionErrorDetail
 from azentspublicclient.models.agent_runtime_action_error_response import AgentRuntimeActionErrorResponse as AgentRuntimeActionErrorResponse
-from azentspublicclient.models.agent_runtime_actions_response import AgentRuntimeActionsResponse as AgentRuntimeActionsResponse
 from azentspublicclient.models.agent_runtime_addition_response import AgentRuntimeAdditionResponse as AgentRuntimeAdditionResponse
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability as AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_configuration_status_response import AgentRuntimeConfigurationStatusResponse as AgentRuntimeConfigurationStatusResponse
-from azentspublicclient.models.agent_runtime_failure_response import AgentRuntimeFailureResponse as AgentRuntimeFailureResponse
+from azentspublicclient.models.agent_runtime_lifecycle_presentation_response import AgentRuntimeLifecyclePresentationResponse as AgentRuntimeLifecyclePresentationResponse
+from azentspublicclient.models.agent_runtime_lifecycle_provider_response import AgentRuntimeLifecycleProviderResponse as AgentRuntimeLifecycleProviderResponse
 from azentspublicclient.models.agent_runtime_lifecycle_response import AgentRuntimeLifecycleResponse as AgentRuntimeLifecycleResponse
+from azentspublicclient.models.agent_runtime_lifecycle_runner_response import AgentRuntimeLifecycleRunnerResponse as AgentRuntimeLifecycleRunnerResponse
 from azentspublicclient.models.agent_runtime_public_actions_response import AgentRuntimePublicActionsResponse as AgentRuntimePublicActionsResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse as AgentRuntimeRawStateResponse
 from azentspublicclient.models.agent_runtime_removal_impact_response import AgentRuntimeRemovalImpactResponse as AgentRuntimeRemovalImpactResponse
@@ -595,7 +595,6 @@ from azentspublicclient.models.agent_runtime_removal_response import AgentRuntim
 from azentspublicclient.models.agent_runtime_removal_stage import AgentRuntimeRemovalStage as AgentRuntimeRemovalStage
 from azentspublicclient.models.agent_runtime_removal_status import AgentRuntimeRemovalStatus as AgentRuntimeRemovalStatus
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse as AgentRuntimeResponse
-from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse as AgentRuntimeSummaryResponse
 from azentspublicclient.models.agent_runtime_system_metric_current_response import AgentRuntimeSystemMetricCurrentResponse as AgentRuntimeSystemMetricCurrentResponse
 from azentspublicclient.models.agent_runtime_system_metric_observation_response import AgentRuntimeSystemMetricObservationResponse as AgentRuntimeSystemMetricObservationResponse
 from azentspublicclient.models.agent_runtime_system_metrics_response import AgentRuntimeSystemMetricsResponse as AgentRuntimeSystemMetricsResponse
@@ -920,7 +919,6 @@ from azentspublicclient.models.runtime_recreation_operation_response import Runt
 from azentspublicclient.models.runtime_recreation_operation_status import RuntimeRecreationOperationStatus as RuntimeRecreationOperationStatus
 from azentspublicclient.models.runtime_recreation_target_kind import RuntimeRecreationTargetKind as RuntimeRecreationTargetKind
 from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState as RuntimeRunnerState
-from azentspublicclient.models.runtime_summary import RuntimeSummary as RuntimeSummary
 from azentspublicclient.models.runtime_system_metric_state import RuntimeSystemMetricState as RuntimeSystemMetricState
 from azentspublicclient.models.runtime_system_metrics_summary import RuntimeSystemMetricsSummary as RuntimeSystemMetricsSummary
 from azentspublicclient.models.runtime_terminal_delete_acknowledgement_kind import RuntimeTerminalDeleteAcknowledgementKind as RuntimeTerminalDeleteAcknowledgementKind
