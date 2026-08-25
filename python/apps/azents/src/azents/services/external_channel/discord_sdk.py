@@ -6,6 +6,7 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
 
+import aiohttp
 import discord
 from discord.http import handle_message_parameters
 
@@ -277,6 +278,81 @@ class DiscordSDKClientFactory(Protocol):
     def open(self, *, bot_token: str) -> AbstractAsyncContextManager[DiscordSDKSession]:
         """Open one authenticated SDK session and close it after use."""
         ...
+
+
+class DiscordInteractionResponseClient(Protocol):
+    """Complete one deferred Discord interaction through its request-local token."""
+
+    async def edit_original(
+        self,
+        *,
+        application_id: str,
+        interaction_token: str,
+        response: dict[str, object],
+    ) -> None:
+        """Replace the original interaction response after deferred ACK."""
+        ...
+
+
+class DiscordPyInteractionResponseClient:
+    """Complete deferred interactions through the public webhook SDK."""
+
+    def __init__(self, session: aiohttp.ClientSession) -> None:
+        self.session = session
+
+    async def edit_original(
+        self,
+        *,
+        application_id: str,
+        interaction_token: str,
+        response: dict[str, object],
+    ) -> None:
+        """Replace one deferred original response without authenticating a Bot."""
+        data = response.get("data")
+        if not is_external_channel_projection(data):
+            raise DiscordSDKRequestRejected(
+                "Discord interaction response data is invalid."
+            )
+        content = data.get("content")
+        embeds = data.get("embeds")
+        components = data.get("components")
+        if content is not None and not isinstance(content, str):
+            raise DiscordSDKRequestRejected(
+                "Discord interaction response content is invalid."
+            )
+        if embeds is not None and (
+            not isinstance(embeds, list)
+            or not all(isinstance(item, dict) for item in embeds)
+        ):
+            raise DiscordSDKRequestRejected(
+                "Discord interaction response embeds are invalid."
+            )
+        if components is not None and components != []:
+            raise DiscordSDKRequestRejected(
+                "Deferred Discord interaction response components are unsupported."
+            )
+        try:
+            webhook = discord.Webhook.partial(
+                int(application_id),
+                interaction_token,
+                session=self.session,
+            )
+            await webhook.edit_message(
+                "@original",  # ty: ignore[invalid-argument-type] # Discord's documented original-response locator is not represented by discord.py's int-only annotation.
+                content=content,
+                embeds=(
+                    []
+                    if embeds is None
+                    else [
+                        discord.Embed.from_dict(item)
+                        for item in embeds
+                        if isinstance(item, dict)
+                    ]
+                ),
+                view=None,
+            )
+        except (TypeError, ValueError, discord.HTTPException, OSError) as error:
+            raise _sdk_error(error) from error
 
 
 class DiscordPyClientFactory:
@@ -944,6 +1020,30 @@ def get_discord_sdk_client_factory() -> DiscordSDKClientFactory:
             test_api_base_url.removesuffix("/api/v10")
         )
     return DiscordPyClientFactory()
+
+
+async def get_discord_interaction_response_client() -> AsyncIterator[
+    DiscordInteractionResponseClient
+]:
+    """Provide a short-lived public webhook client for deferred responses."""
+    from azents.services.external_channel.discord_endpoint import (  # noqa: PLC0415
+        discord_test_api_base_url,
+    )
+
+    test_api_base_url = discord_test_api_base_url()
+    if test_api_base_url is not None:
+        from azents.services.external_channel.discord_testenv import (  # noqa: PLC0415
+            DiscordTestenvInteractionResponseClient,
+        )
+
+        yield DiscordTestenvInteractionResponseClient(
+            test_api_base_url.removesuffix("/api/v10")
+        )
+        return
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=20.0)
+    ) as session:
+        yield DiscordPyInteractionResponseClient(session)
 
 
 def _http_command(payload: object) -> DiscordSDKCommand:

@@ -540,13 +540,14 @@ def _select_discord_setup_location(
             "channel_id": channel_id,
             "channel": {"id": channel_id, "type": 0},
             "member": {"user": {"id": user_id}},
+            "token": f"token-{interaction_id}",
             "message": {"id": f"message-{interaction_id}"},
             "data": {"custom_id": custom_id},
         },
         timeout=10,
     )
     response.raise_for_status()
-    assert response.json() == {"status": 200, "response_type": 7}
+    assert response.json() == {"status": 200, "response_type": 6}
 
 
 def _successful_session_paths(provider_state: dict[str, object]) -> list[str]:
@@ -5227,7 +5228,13 @@ def test_discord_message_command_selector_and_component_journey(
     )
     rendered = str(state)
     interactions = cast(list[dict[str, object]], state["interactions"])
-    assert [item["response_type"] for item in interactions] == [4, 7, 4, 7]
+    assert [item["response_type"] for item in interactions] == [4, 7, 4, 6]
+    assert [item.get("completed_response_type") for item in interactions] == [
+        None,
+        None,
+        None,
+        7,
+    ]
     operations = cast(list[dict[str, object]], state["operations"])[
         before_operation_count:
     ]

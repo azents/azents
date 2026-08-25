@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 import discord
 import discord.http
 import pytest
@@ -37,6 +38,44 @@ def test_http_auth_statuses_retain_credentials_permission_distinction(
 ) -> None:
     """HTTP authentication failures retain their provider classification."""
     assert isinstance(discord_sdk._sdk_error(_http_error(status)), expected)
+
+
+@pytest.mark.asyncio
+async def test_deferred_interaction_response_edits_original_via_public_webhook(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Complete deferred ACKs through the request-local interaction webhook."""
+    session = MagicMock(spec=aiohttp.ClientSession)
+    webhook = MagicMock(spec=discord.Webhook)
+    webhook.edit_message = AsyncMock()
+    partial = MagicMock(return_value=webhook)
+    monkeypatch.setattr(discord.Webhook, "partial", partial)
+    client = discord_sdk.DiscordPyInteractionResponseClient(session)
+
+    await client.edit_original(
+        application_id="100000000000000001",
+        interaction_token="request-local-token",
+        response={
+            "type": 7,
+            "data": {
+                "content": "Settings saved.",
+                "embeds": [{"title": "Settings saved"}],
+                "components": [],
+            },
+        },
+    )
+
+    partial.assert_called_once_with(
+        100000000000000001,
+        "request-local-token",
+        session=session,
+    )
+    call = webhook.edit_message.await_args
+    assert call is not None
+    assert call.args == ("@original",)
+    assert call.kwargs["content"] == "Settings saved."
+    assert len(call.kwargs["embeds"]) == 1
+    assert call.kwargs["view"] is None
 
 
 @dataclass
