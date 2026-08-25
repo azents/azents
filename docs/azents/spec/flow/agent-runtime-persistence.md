@@ -39,7 +39,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
 last_verified_at: 2026-08-25
-spec_version: 28
+spec_version: 29
 ---
 
 # Agent Runtime Persistence
@@ -236,8 +236,10 @@ Session bindings and deleted Project/worktree rows are never restored.
 ## Kubernetes Provider v3
 
 Kubernetes Provider v3 is an external process that talks to the Kubernetes API and Runtime Control
-gRPC. It uses Lease leader election so only the active leader issues lifecycle commands for a
-provider id.
+gRPC. It uses Kubernetes Lease leader election so only the active leader issues lifecycle commands
+for a provider id. Lease creation is conditional on absence, while renewal and expired-holder
+takeover use the exact observed `resourceVersion`; a `409 Conflict` means the process did not
+acquire leadership and must remain or become standby.
 
 Current Runtime Control admits protocol `agent-runtime-provider-kubernetes-v2` for retained legacy
 direct contracts and protocol `agent-runtime-provider-kubernetes-v3` for current strict contracts.
@@ -312,7 +314,10 @@ discarded and can retry only after a later periodic `OBSERVE`.
 The logical Runtime CA and Agent Workspace PVC survive stop, restart, recovery, and ordinary
 recreation. Proxy policy/artifact replacement retains the stable Service and CA identity. Reset and
 terminal delete remain the only PVC-destructive boundaries; terminal delete also removes every
-Provider-owned strict-network resource.
+Provider-owned strict-network resource. A terminal-delete acknowledgement is emitted only after
+the Provider observes the Runtime Pod, Workspace PVC, logical CA, and all owned strict-network and
+proxy resources absent. While Kubernetes deletion is still in progress, the Provider reports a
+non-acknowledged stopping observation and Control retries the same terminal delete.
 
 ## Docker Provider v1
 
@@ -373,6 +378,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-08-25 (spec_version=29)** — Fenced Kubernetes Lease creation/renewal/takeover with
+  absence or exact-resourceVersion optimistic concurrency and made terminal-delete acknowledgement
+  wait for observed absence of every Provider-owned Runtime resource.
 - **2026-08-24 (spec_version=27)** — Added the optional Runner system-metrics capability,
   generation-scoped volatile 60-sample series, privacy-safe Agent read projection, and shared
   chat/settings overview while preserving Provider, PostgreSQL, lifecycle, and Agent Workspace

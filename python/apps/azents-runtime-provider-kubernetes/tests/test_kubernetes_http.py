@@ -23,6 +23,9 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     KeyToPath,
     LabelSelector,
     LabelSelectorRequirement,
+    LeaseConflictError,
+    LeaseResource,
+    LeaseSpec,
     LocalObjectReference,
     NetworkPolicyEgressRule,
     NetworkPolicyIngressRule,
@@ -579,6 +582,56 @@ async def test_network_policy_replace_retries_one_conflict() -> None:
     assert second_replace["metadata"]["resourceVersion"] == "43"
 
 
+@pytest.mark.asyncio
+async def test_lease_create_posts_only_when_absent() -> None:
+    lease = _lease(resource_version=None)
+    api = RecordingKubernetesHttpApi(({},))
+
+    await api.apply_lease(lease)
+
+    assert len(api.requests) == 1
+    create = api.requests[0]
+    assert create.method == "POST"
+    assert create.path == (
+        "/apis/coordination.k8s.io/v1/namespaces/azents-runtime/leases"
+    )
+    assert create.json is not None
+    assert "resourceVersion" not in create.json["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_lease_replace_uses_observed_resource_version() -> None:
+    lease = _lease(resource_version="42")
+    api = RecordingKubernetesHttpApi(({},))
+
+    await api.apply_lease(lease)
+
+    assert len(api.requests) == 1
+    replace = api.requests[0]
+    assert replace.method == "PUT"
+    assert replace.path == (
+        "/apis/coordination.k8s.io/v1/namespaces/azents-runtime/leases/provider"
+    )
+    assert replace.json is not None
+    assert replace.json["metadata"]["resourceVersion"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_lease_conflict_is_exposed_to_leader_election() -> None:
+    lease = _lease(resource_version="42")
+    conflict = KubernetesApiRequestError(
+        method="PUT",
+        path="/leases/provider",
+        status=409,
+        reason="Conflict",
+        body="resource version changed",
+    )
+    api = RecordingKubernetesHttpApi((conflict,))
+
+    with pytest.raises(LeaseConflictError):
+        await api.apply_lease(lease)
+
+
 def test_core_resources_round_trip_without_secret_text_coercion() -> None:
     metadata = ObjectMeta(
         name="runtime-proxy",
@@ -814,6 +867,25 @@ def _network_policy() -> NetworkPolicyResource:
                 ),
             ),
         ),
+    )
+
+
+def _lease(*, resource_version: str | None) -> LeaseResource:
+    return LeaseResource(
+        metadata=ObjectMeta(
+            name="provider",
+            namespace="azents-runtime",
+            labels={"app.kubernetes.io/name": "azents-runtime-provider-kubernetes"},
+            annotations={},
+        ),
+        spec=LeaseSpec(
+            holder_identity="replica-a",
+            acquire_time=None,
+            renew_time=None,
+            lease_duration_seconds=30,
+            lease_transitions=0,
+        ),
+        resource_version=resource_version,
     )
 
 

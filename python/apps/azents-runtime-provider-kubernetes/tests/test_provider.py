@@ -94,6 +94,8 @@ class FakeKubernetesApi(KubernetesApi):
         self.watch_events: list[PodWatchEvent] = []
         self.fail_pod_deletion = False
         self.defer_pod_deletion = False
+        self.defer_pvc_deletion = False
+        self.defer_network_policy_deletion = False
         self._next_service_address = 20
 
     async def get_pod(self, name: str, namespace: str) -> PodResource | None:
@@ -169,7 +171,8 @@ class FakeKubernetesApi(KubernetesApi):
         """Delete a PVC when present."""
         self.deleted_pvcs.append(name)
         self.operations.append(("delete_pvc", name))
-        self.pvcs.pop((namespace, name), None)
+        if not self.defer_pvc_deletion:
+            self.pvcs.pop((namespace, name), None)
 
     async def list_pvcs(
         self,
@@ -329,7 +332,8 @@ class FakeKubernetesApi(KubernetesApi):
         """Delete a NetworkPolicy when present."""
         self.deleted_network_policies.append(name)
         self.operations.append(("delete_network_policy", name))
-        self.network_policies.pop((namespace, name), None)
+        if not self.defer_network_policy_deletion:
+            self.network_policies.pop((namespace, name), None)
 
     async def list_network_policies(
         self,
@@ -1642,6 +1646,65 @@ async def test_terminal_delete_removes_pod_and_pvc_idempotently() -> None:
     assert second.report.terminal_delete_acknowledged is True
     assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") not in api.pvcs
+
+
+@pytest.mark.asyncio
+async def test_terminal_delete_retries_until_pod_and_pvc_are_absent() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    api.defer_pod_deletion = True
+    api.defer_pvc_deletion = True
+
+    first = await provider.terminal_delete(
+        _command(RuntimeLifecycleCommandType.TERMINAL_DELETE)
+    )
+
+    assert first.report.terminal_delete_acknowledged is False
+    assert first.report.observed_state is RuntimeProviderObservedState.STOPPING
+    assert first.report.reason == "terminal_deletion_in_progress"
+    assert ("azents-runtime", "azents-runtime-runtime-1") in api.pods
+    assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
+
+    api.defer_pod_deletion = False
+    api.defer_pvc_deletion = False
+    second = await provider.terminal_delete(
+        _command(RuntimeLifecycleCommandType.TERMINAL_DELETE)
+    )
+
+    assert second.report.terminal_delete_acknowledged is True
+    assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
+    assert ("azents-runtime", "azents-runtime-runtime-1-workspace") not in api.pvcs
+
+
+@pytest.mark.asyncio
+async def test_terminal_delete_waits_for_strict_network_resource_absence() -> None:
+    api = FakeKubernetesApi()
+    _install_mandatory_services(api)
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.TERMINAL_DELETE,
+        runtime_configuration=_runtime_configuration(
+            schema_version=3,
+            network_mode="proxy_required",
+        ),
+    )
+    await provider.start(
+        dataclasses.replace(command, command_type=RuntimeLifecycleCommandType.START)
+    )
+    api.defer_network_policy_deletion = True
+
+    first = await provider.terminal_delete(command)
+
+    assert first.report.terminal_delete_acknowledged is False
+    assert first.report.reason == "terminal_deletion_in_progress"
+    assert api.network_policies
+
+    api.defer_network_policy_deletion = False
+    second = await provider.terminal_delete(command)
+
+    assert second.report.terminal_delete_acknowledged is True
+    assert api.network_policies == {}
 
 
 @pytest.mark.asyncio
