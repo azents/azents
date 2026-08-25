@@ -32,6 +32,7 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     KubernetesResourceQuantity,
     LabelSelector,
     LabelSelectorRequirement,
+    LeaseConflictError,
     LeaseResource,
     LeaseSpec,
     LocalObjectReference,
@@ -534,17 +535,30 @@ class KubernetesHttpApi(KubernetesApi):
         return None if data is None else _lease_resource(data)
 
     async def apply_lease(self, lease: LeaseResource) -> None:
-        await self._create_or_merge_patch(
-            (
-                f"/apis/coordination.k8s.io/v1/namespaces/"
-                f"{lease.metadata.namespace}/leases/{lease.metadata.name}"
-            ),
-            (
-                f"/apis/coordination.k8s.io/v1/namespaces/"
-                f"{lease.metadata.namespace}/leases"
-            ),
-            _lease_manifest(lease),
+        resource_path = (
+            f"/apis/coordination.k8s.io/v1/namespaces/"
+            f"{lease.metadata.namespace}/leases/{lease.metadata.name}"
         )
+        collection_path = (
+            f"/apis/coordination.k8s.io/v1/namespaces/{lease.metadata.namespace}/leases"
+        )
+        try:
+            if lease.resource_version is None:
+                await self._request_json(
+                    "POST",
+                    collection_path,
+                    json=_lease_manifest(lease),
+                )
+                return
+            await self._request_json(
+                "PUT",
+                resource_path,
+                json=_lease_manifest(lease),
+            )
+        except KubernetesApiRequestError as error:
+            if error.status == 409:
+                raise LeaseConflictError() from error
+            raise
 
     async def _create_or_merge_patch(
         self,
@@ -1119,10 +1133,13 @@ def _resource_claims(
 
 
 def _lease_manifest(lease: LeaseResource) -> JsonObject:
+    metadata = _metadata(lease.metadata)
+    if lease.resource_version is not None:
+        metadata["resourceVersion"] = lease.resource_version
     return {
         "apiVersion": "coordination.k8s.io/v1",
         "kind": "Lease",
-        "metadata": _metadata(lease.metadata),
+        "metadata": metadata,
         "spec": {
             "holderIdentity": lease.spec.holder_identity,
             "acquireTime": _datetime_string(lease.spec.acquire_time),

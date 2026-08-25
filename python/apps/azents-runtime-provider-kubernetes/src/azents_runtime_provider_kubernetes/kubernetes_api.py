@@ -8,6 +8,10 @@ from typing import Protocol
 type KubernetesResourceQuantity = str | int | float
 
 
+class LeaseConflictError(RuntimeError):
+    """Kubernetes Lease write lost optimistic concurrency."""
+
+
 @dataclasses.dataclass(frozen=True)
 class ContainerResourceClaim:
     """Container resource claim requirement."""
@@ -601,5 +605,8 @@ class KubernetesApi(Protocol):
         ...
 
     async def apply_lease(self, lease: LeaseResource) -> None:
-        """Create or update a Lease."""
+        """Create or replace a Lease using its observed resource version.
+
+        :raises LeaseConflictError: The Lease changed after it was observed.
+        """
         ...

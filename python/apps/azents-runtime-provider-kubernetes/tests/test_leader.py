@@ -1,5 +1,6 @@
 """Kubernetes leader election tests."""
 
+import dataclasses
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 
@@ -8,6 +9,7 @@ import pytest
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     ConfigMapResource,
     KubernetesApi,
+    LeaseConflictError,
     LeaseResource,
     LeaseSpec,
     NetworkPolicyResource,
@@ -29,6 +31,7 @@ class FakeKubernetesApi(KubernetesApi):
 
     def __init__(self) -> None:
         self.lease: LeaseResource | None = None
+        self.conflicting_lease: LeaseResource | None = None
 
     async def get_pod(self, name: str, namespace: str) -> PodResource | None:
         """Unused by leader tests."""
@@ -183,7 +186,17 @@ class FakeKubernetesApi(KubernetesApi):
 
     async def apply_lease(self, lease: LeaseResource) -> None:
         """Apply the fake Lease."""
-        self.lease = lease
+        if self.conflicting_lease is not None:
+            self.lease = self.conflicting_lease
+            self.conflicting_lease = None
+            raise LeaseConflictError()
+        if self.lease is None:
+            assert lease.resource_version is None
+            self.lease = dataclasses.replace(lease, resource_version="1")
+            return
+        if lease.resource_version != self.lease.resource_version:
+            raise LeaseConflictError()
+        self.lease = dataclasses.replace(lease, resource_version="2")
 
 
 def _elector(
@@ -205,6 +218,7 @@ def _lease(
     holder: str,
     renew_time: datetime,
     transitions: int = 0,
+    resource_version: str = "1",
 ) -> LeaseResource:
     return LeaseResource(
         metadata=ObjectMeta(
@@ -220,6 +234,7 @@ def _lease(
             lease_duration_seconds=30,
             lease_transitions=transitions,
         ),
+        resource_version=resource_version,
     )
 
 
@@ -279,3 +294,42 @@ async def test_renews_owned_lease_without_transition() -> None:
     assert api.lease.spec.holder_identity == "replica-a"
     assert api.lease.spec.lease_transitions == 0
     assert api.lease.spec.renew_time == now
+
+
+@pytest.mark.asyncio
+async def test_empty_lease_create_conflict_does_not_acquire_leadership() -> None:
+    api = FakeKubernetesApi()
+    now = datetime(2026, 5, 25, tzinfo=UTC)
+    api.conflicting_lease = _lease(holder="replica-b", renew_time=now)
+
+    result = await _elector(api).try_acquire(now=now)
+
+    assert not result.acquired
+    assert result.lease.spec.holder_identity == "replica-b"
+    assert api.lease is not None
+    assert api.lease.spec.holder_identity == "replica-b"
+
+
+@pytest.mark.asyncio
+async def test_expired_lease_update_conflict_does_not_take_over_newer_lease() -> None:
+    api = FakeKubernetesApi()
+    now = datetime(2026, 5, 25, tzinfo=UTC)
+    api.lease = _lease(
+        holder="replica-b",
+        renew_time=now - timedelta(seconds=31),
+        transitions=2,
+    )
+    api.conflicting_lease = _lease(
+        holder="replica-c",
+        renew_time=now,
+        transitions=3,
+        resource_version="2",
+    )
+
+    result = await _elector(api).try_acquire(now=now)
+
+    assert not result.acquired
+    assert result.lease.spec.holder_identity == "replica-c"
+    assert api.lease is not None
+    assert api.lease.spec.holder_identity == "replica-c"
+    assert api.lease.spec.lease_transitions == 3

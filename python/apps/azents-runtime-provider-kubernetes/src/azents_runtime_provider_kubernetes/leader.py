@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
     KubernetesApi,
+    LeaseConflictError,
     LeaseResource,
     LeaseSpec,
     ObjectMeta,
@@ -49,13 +50,30 @@ class KubernetesLeaderElector:
         )
         if lease is None:
             acquired = self._new_lease(now)
-            await self._api.apply_lease(acquired)
-            return LeaderElectionResult(acquired=True, lease=acquired)
+            return await self._apply_or_report_conflict(acquired)
         if not self._can_hold(lease, now=now):
             return LeaderElectionResult(acquired=False, lease=lease)
+        if lease.resource_version is None:
+            return LeaderElectionResult(acquired=False, lease=lease)
         next_lease = self._renewed_lease(lease, now)
-        await self._api.apply_lease(next_lease)
-        return LeaderElectionResult(acquired=True, lease=next_lease)
+        return await self._apply_or_report_conflict(next_lease)
+
+    async def _apply_or_report_conflict(
+        self,
+        lease: LeaseResource,
+    ) -> LeaderElectionResult:
+        try:
+            await self._api.apply_lease(lease)
+        except LeaseConflictError:
+            current = await self._api.get_lease(
+                self._config.lease_name,
+                self._config.namespace,
+            )
+            return LeaderElectionResult(
+                acquired=False,
+                lease=current if current is not None else lease,
+            )
+        return LeaderElectionResult(acquired=True, lease=lease)
 
     def _can_hold(self, lease: LeaseResource, *, now: datetime) -> bool:
         holder = lease.spec.holder_identity
