@@ -104,8 +104,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-24
-spec_version: 72
+last_verified_at: 2026-08-25
+spec_version: 73
 ---
 
 # Workspace & Membership
@@ -243,7 +243,9 @@ every 60 seconds only while the panel is visible; Agent Runtime settings polls w
 Lifecycle mutations invalidate both lifecycle and metrics queries. Both surfaces share the same
 localized responsive component, preserve unavailable samples and missed intervals as trend gaps,
 show explicit loading/error/unsupported/unavailable/stale/stopped/disconnected states, and never
-derive zero values or browser-owned history.
+derive zero values or browser-owned history. When a current percentage exists, the component pairs
+it with a 0–100 usage bar and a labeled locally scaled area trend. The trend has no persistent or
+active point markers, tooltip, or touch/hover visual state.
 
 The concrete-session Workspace panel requests the Project browser manifest only while the server-provided Agent Workspace state is `READY`. Manifest loading or failure does not replace lifecycle state and actions while the Agent Workspace is unavailable or transitioning.
 

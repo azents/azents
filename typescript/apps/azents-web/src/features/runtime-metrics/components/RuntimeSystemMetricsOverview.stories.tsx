@@ -67,6 +67,35 @@ const samples: AgentRuntimeSystemMetricsResponse["samples"] = [
   },
 ];
 
+const readableTrend: Array<{
+  measuredAt: string;
+  cpu: number;
+  memory: number;
+  disk: number;
+}> = [
+  { measuredAt: "2026-08-24T09:01:00Z", cpu: 23.1, memory: 42.4, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:02:00Z", cpu: 23.8, memory: 39.4, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:03:00Z", cpu: 24.9, memory: 40.1, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:04:00Z", cpu: 21.7, memory: 40, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:05:00Z", cpu: 22.2, memory: 39.8, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:06:00Z", cpu: 21.5, memory: 39.9, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:07:00Z", cpu: 17.3, memory: 39.9, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:08:00Z", cpu: 17.4, memory: 39.2, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:09:00Z", cpu: 17.2, memory: 39, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:10:00Z", cpu: 17.1, memory: 38.8, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:11:00Z", cpu: 17, memory: 38.8, disk: 71.7 },
+  { measuredAt: "2026-08-24T09:12:00Z", cpu: 17.5, memory: 38.8, disk: 71.7 },
+];
+
+const readableTrendSamples: AgentRuntimeSystemMetricsResponse["samples"] =
+  readableTrend.map((sample) => ({
+    measured_at: sample.measuredAt,
+    scope: "container",
+    cpu: { availability: "available", used: sample.cpu, total: 100 },
+    memory: { availability: "available", used: sample.memory, total: 100 },
+    disk: { availability: "available", used: sample.disk, total: 100 },
+  }));
+
 const freshMetrics: AgentRuntimeSystemMetricsResponse = {
   summary: "fresh",
   scope: "container",
@@ -94,6 +123,33 @@ const freshMetrics: AgentRuntimeSystemMetricsResponse = {
   samples,
 };
 
+const readableTrendMetrics: AgentRuntimeSystemMetricsResponse = {
+  summary: "fresh",
+  scope: "container",
+  cpu: {
+    state: "fresh",
+    measured_at: "2026-08-24T09:12:00Z",
+    used: 1_720,
+    total: 8_000,
+    percentage: 21.5,
+  },
+  memory: {
+    state: "fresh",
+    measured_at: "2026-08-24T09:12:00Z",
+    used: 13_421_772_800,
+    total: 33_608_843_264,
+    percentage: 39.9,
+  },
+  disk: {
+    state: "fresh",
+    measured_at: "2026-08-24T09:12:00Z",
+    used: 300_325_044_224,
+    total: 418_866_479_104,
+    percentage: 71.7,
+  },
+  samples: readableTrendSamples,
+};
+
 const meta = {
   component: RuntimeSystemMetricsOverview,
   decorators: [
@@ -113,6 +169,12 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Fresh = {} satisfies Story;
+
+export const ReadableTrends = {
+  args: {
+    state: { type: "READY", metrics: readableTrendMetrics },
+  },
+} satisfies Story;
 
 export const PartialFirstSample = {
   args: {
