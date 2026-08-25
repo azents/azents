@@ -935,7 +935,10 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             self.state.application_id,
             endpoint_url,
         )
-        self._json_response(200, {})
+        self._json_response(
+            200,
+            {"interactions_endpoint_url": endpoint_url},
+        )
 
     def do_POST(self) -> None:
         """Serve fake control, command, thread, and message mutations."""

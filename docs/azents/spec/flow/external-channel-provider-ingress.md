@@ -22,6 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
   - python/apps/azents/src/azents/services/external_channel/discord_interaction.py
   - python/apps/azents/src/azents/services/external_channel/discord_sdk.py
+  - python/apps/azents/src/azents/services/external_channel/discord_endpoint.py
   - python/apps/azents/src/azents/services/external_channel/discord_testenv.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
@@ -65,7 +66,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-25
-spec_version: 49
+spec_version: 50
 ---
 
 # External Channel Provider Ingress
@@ -252,7 +253,12 @@ The manager uses only the public high-level `discord.py` client API. `Client.sta
 owns Gateway discovery, Identify, heartbeat, reconnect, and in-process Resume. Azents
 does not inspect Gateway frames, opcodes, session IDs, sequence numbers, Resume URLs,
 raw payload dictionaries, or private SDK state, and it does not persist or inject an
-SDK Resume checkpoint across processes.
+SDK Resume checkpoint across processes. During login, `discord.py`'s public
+Application metadata must report the configured Interaction Endpoint origin and path
+with a selector matching the connection's retained selector hash. Missing or
+mismatched endpoint authority stops that client before Gateway connection and moves
+the fenced connection to `reconnect_required` with
+`interaction_endpoint_drift`; the raw selector remains process-local.
 
 Ingress consumes eligible target-Guild typed `Message` callbacks for normal
 conversation ingestion. Message identity derives from Guild, channel, thread, and
@@ -508,6 +514,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-25** (spec_version 50) — Added provider-authoritative Discord
+  Interaction Endpoint validation at Gateway login and reconnect-required
+  terminalization for absent or mismatched callback identity.
 - **2026-08-25** (spec_version 49) — Made signed Discord setup-location
   interactions claim and return a deferred update before process-local background
   setup application, exact/history replay, original-response completion, and cleanup

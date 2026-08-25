@@ -104,6 +104,8 @@ async def test_gateway_invalid_session_selects_resume_or_fresh_identify(
         await DiscordTestenvGatewayRunner("http://discord.test").run_connection(
             bot_token="redacted-token",
             target_guild_id="300",
+            interactions_callback_base_url="https://callbacks.example/",
+            interactions_callback_selector_hash="selector-hash",
             handle_event=AsyncMock(),
             handle_lifecycle=lifecycle,
         )
