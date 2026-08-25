@@ -743,6 +743,88 @@ class RuntimeProfileRepository:
             current_profile=None,
         )
 
+    async def clear_agent_runtime_profile_selection(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        expected_selection_version: int,
+    ) -> bool:
+        """Clear one selection and immediately replace managed Runtime authority."""
+        agent = await session.scalar(
+            sa.select(RDBAgent)
+            .where(
+                RDBAgent.id == agent_id,
+                RDBAgent.runtime_profile_selection_version
+                == expected_selection_version,
+            )
+            .with_for_update()
+        )
+        if agent is None:
+            return False
+
+        now = tznow()
+        agent.runtime_profile_id = None
+        agent.runtime_profile_selection_version += 1
+        agent.updated_at = now
+
+        if agent.runtime_capability is not AgentRuntimeCapability.MANAGED:
+            await session.flush()
+            return True
+
+        runtime = await session.scalar(
+            sa.select(RDBAgentRuntime)
+            .where(RDBAgentRuntime.agent_id == agent.id)
+            .with_for_update()
+        )
+        if runtime is None:
+            await session.flush()
+            return True
+
+        state = await session.scalar(
+            sa.select(RDBRuntimeConfigurationState)
+            .where(RDBRuntimeConfigurationState.runtime_id == runtime.id)
+            .with_for_update()
+        )
+        next_sequence = runtime.configuration_sequence + 1
+        runtime.configuration_sequence = next_sequence
+        runtime.updated_at = now
+        if state is None:
+            session.add(
+                RDBRuntimeConfigurationState(
+                    runtime_id=runtime.id,
+                    desired_sequence=next_sequence,
+                    desired_status=RuntimeConfigurationStateStatus.UNCONFIGURED,
+                    desired_target_generation=runtime.desired_generation,
+                    desired_digest=None,
+                    desired_document=None,
+                    desired_reason_code="runtime_profile_required",
+                    provider_reported_digest=None,
+                    runner_reported_digest=None,
+                    provider_acknowledged_at=None,
+                    runner_observed_at=None,
+                    applied_sequence=None,
+                    applied_target_generation=None,
+                    applied_digest=None,
+                    applied_document=None,
+                    applied_at=None,
+                )
+            )
+        else:
+            state.desired_sequence = next_sequence
+            state.desired_status = RuntimeConfigurationStateStatus.UNCONFIGURED
+            state.desired_target_generation = runtime.desired_generation
+            state.desired_digest = None
+            state.desired_document = None
+            state.desired_reason_code = "runtime_profile_required"
+            state.provider_reported_digest = None
+            state.runner_reported_digest = None
+            state.provider_acknowledged_at = None
+            state.runner_observed_at = None
+            state.updated_at = now
+        await session.flush()
+        return True
+
     async def get_configuration_state(
         self,
         session: AsyncSession,

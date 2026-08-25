@@ -714,7 +714,30 @@ class AgentService:
                 if "expected_runtime_profile_selection_version" not in update:
                     return Failure(RuntimeProfileSelectionVersionRequired())
                 runtime_profile_id = update["runtime_profile_id"]
-                if runtime_profile_id is not None:
+                if runtime_profile_id is None:
+                    profile_repository = self.runtime_profile_repository
+                    clear_selection = (
+                        profile_repository.clear_agent_runtime_profile_selection
+                    )
+                    cleared = await clear_selection(
+                        session,
+                        agent_id=agent_id,
+                        expected_selection_version=update[
+                            "expected_runtime_profile_selection_version"
+                        ],
+                    )
+                    if not cleared:
+                        current = await self.repository.get_by_id(session, agent_id)
+                        if current is None:
+                            return Failure(NotFound(agent_id=agent_id))
+                        return Failure(
+                            RuntimeProfileSelectionVersionConflict(
+                                current_version=(
+                                    current.runtime_profile_selection_version
+                                )
+                            )
+                        )
+                else:
                     try:
                         require_available = (
                             self.runtime_profile_service.require_available_agent_profile
@@ -726,30 +749,32 @@ class AgentService:
                         )
                     except RuntimeProfileWorkspaceUnavailable as error:
                         return Failure(RuntimeProfileSelectionInvalid(code=error.code))
-                selected = await self.repository.replace_runtime_profile_selection(
-                    session,
-                    agent_id=agent_id,
-                    expected_version=update[
-                        "expected_runtime_profile_selection_version"
-                    ],
-                    runtime_profile_id=runtime_profile_id,
-                )
-                if selected is None:
-                    current = await self.repository.get_by_id(session, agent_id)
-                    if current is None:
-                        return Failure(NotFound(agent_id=agent_id))
-                    return Failure(
-                        RuntimeProfileSelectionVersionConflict(
-                            current_version=(current.runtime_profile_selection_version)
-                        )
+                    selected = await self.repository.replace_runtime_profile_selection(
+                        session,
+                        agent_id=agent_id,
+                        expected_version=update[
+                            "expected_runtime_profile_selection_version"
+                        ],
+                        runtime_profile_id=runtime_profile_id,
                     )
-                await self.runtime_profile_repository.enqueue_reconcile_task(
-                    session,
-                    source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
-                    source_id=selected.id,
-                    source_version=str(selected.runtime_profile_selection_version),
-                    available_at=tznow(),
-                )
+                    if selected is None:
+                        current = await self.repository.get_by_id(session, agent_id)
+                        if current is None:
+                            return Failure(NotFound(agent_id=agent_id))
+                        return Failure(
+                            RuntimeProfileSelectionVersionConflict(
+                                current_version=(
+                                    current.runtime_profile_selection_version
+                                )
+                            )
+                        )
+                    await self.runtime_profile_repository.enqueue_reconcile_task(
+                        session,
+                        source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
+                        source_id=selected.id,
+                        source_version=str(selected.runtime_profile_selection_version),
+                        available_at=tznow(),
+                    )
             result = await self.repository.update_by_id(session, agent_id, repo_update)
         match result:
             case Success(value):
