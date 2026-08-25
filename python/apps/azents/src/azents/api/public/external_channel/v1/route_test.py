@@ -1,5 +1,6 @@
 """External Channel Slack callback route tests."""
 
+import datetime
 import logging
 from unittest.mock import AsyncMock
 
@@ -10,12 +11,17 @@ from fastapi.testclient import TestClient
 from azents.app import create_dummy_public_app
 from azents.services.external_channel.discord_http import (
     DiscordHTTPAdmissionResult,
-    DiscordHTTPAdmissionService,
+    DiscordHTTPIngressService,
+    DiscordSettingsComponentHandoff,
 )
 from azents.services.external_channel.discord_interaction import (
     MAX_DISCORD_INTERACTION_BODY_BYTES,
     DiscordInteractionEnvelope,
     DiscordInteractionUnauthorized,
+)
+from azents.services.external_channel.discord_settings import DiscordSettingsContext
+from azents.services.external_channel.discord_settings_scope import (
+    DiscordSettingsScope,
 )
 from azents.services.external_channel.http_admission import (
     SlackHTTPAdmissionResult,
@@ -54,7 +60,7 @@ def _client(service: AsyncMock) -> TestClient:
 
 def _discord_client(service: AsyncMock) -> TestClient:
     app = _ROUTE_APP
-    app.dependency_overrides[DiscordHTTPAdmissionService] = lambda: service
+    app.dependency_overrides[DiscordHTTPIngressService] = lambda: service
     return TestClient(app)
 
 
@@ -67,7 +73,7 @@ def test_discord_admission_returns_matching_initial_response(
     expected_response_type: int,
 ) -> None:
     """A successful durable admission receives its provider-native acknowledgement."""
-    service = AsyncMock(spec=DiscordHTTPAdmissionService)
+    service = AsyncMock(spec=DiscordHTTPIngressService)
     service.handle.return_value = DiscordHTTPAdmissionResult(
         envelope=DiscordInteractionEnvelope(
             interaction_id="interaction-1",
@@ -105,7 +111,7 @@ def test_discord_admission_returns_matching_initial_response(
 
 def test_discord_control_plans_run_after_provider_response() -> None:
     """Attempt every committed direct plan after returning the response."""
-    service = AsyncMock(spec=DiscordHTTPAdmissionService)
+    service = AsyncMock(spec=DiscordHTTPIngressService)
     first_plan = make_provider_effect_plan("discord-control-1")
     second_plan = make_provider_effect_plan("discord-control-2")
     service.handle.return_value = DiscordHTTPAdmissionResult(
@@ -151,11 +157,73 @@ def test_discord_control_plans_run_after_provider_response() -> None:
     }
 
 
+def test_discord_setup_handoff_runs_after_deferred_response() -> None:
+    """Schedule admitted setup processing behind the deferred component ACK."""
+    service = AsyncMock(spec=DiscordHTTPIngressService)
+    handoff = DiscordSettingsComponentHandoff(
+        interaction_id="interaction-row-1",
+        application_id="app-1",
+        interaction_token="request-local-token",
+        scope=DiscordSettingsScope(
+            action="setup_channel",
+            origin_interaction_id="origin-1",
+            setup_claim_id="claim-1",
+            claim_generation=1,
+            source_revision=1,
+            setting_id=None,
+            settings_generation=None,
+            binding_id=None,
+            binding_version=None,
+        ),
+        context=DiscordSettingsContext(
+            connection_id="connection-1",
+            guild_id="guild-1",
+            provider_parent_channel_id="channel-1",
+            provider_thread_resource_key=None,
+            principal_id="principal-1",
+        ),
+        received_at=datetime.datetime(2026, 8, 25, tzinfo=datetime.UTC),
+    )
+    service.handle.return_value = DiscordHTTPAdmissionResult(
+        envelope=DiscordInteractionEnvelope(
+            interaction_id="interaction-1",
+            interaction_type=3,
+            application_id="app-1",
+            guild_id="guild-1",
+            channel_id="channel-1",
+            provider_parent_channel_id="channel-1",
+            provider_thread_id=None,
+            actor_user_id="user-1",
+            command=None,
+            message_command_source=None,
+            component_custom_id="a:sc:origin-1:claim-1:1:1:signature",
+            selected_value=None,
+            modal_custom_id=None,
+        ),
+        admission=None,
+        response={"type": 6},
+        settings_component_handoff=handoff,
+    )
+
+    response = _discord_client(service).post(
+        "/external-channel/v1/discord/interactions/opaque-selector",
+        content=b'{"token":"request-local-only"}',
+        headers={
+            "X-Signature-Ed25519": "signature",
+            "X-Signature-Timestamp": "1784682000",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"type": 6}
+    service.run_settings_component_handoff.assert_awaited_once_with(handoff)
+
+
 def test_discord_authentication_failure_uses_one_safe_response(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Unknown selectors and invalid signatures remain indistinguishable."""
-    service = AsyncMock(spec=DiscordHTTPAdmissionService)
+    service = AsyncMock(spec=DiscordHTTPIngressService)
     service.handle.side_effect = DiscordInteractionUnauthorized(
         "private detail",
         failure_code="discord_interaction_signature_invalid",
@@ -185,7 +253,7 @@ def test_discord_authentication_failure_uses_one_safe_response(
 
 def test_oversized_discord_body_is_rejected_before_admission() -> None:
     """The Discord raw-body cap stops buffering before signature handling."""
-    service = AsyncMock(spec=DiscordHTTPAdmissionService)
+    service = AsyncMock(spec=DiscordHTTPIngressService)
 
     response = _discord_client(service).post(
         "/external-channel/v1/discord/interactions/opaque-selector",

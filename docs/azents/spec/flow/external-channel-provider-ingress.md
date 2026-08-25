@@ -21,6 +21,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
   - python/apps/azents/src/azents/services/external_channel/discord_interaction.py
+  - python/apps/azents/src/azents/services/external_channel/discord_sdk.py
+  - python/apps/azents/src/azents/services/external_channel/discord_testenv.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
   - python/apps/azents/src/azents/services/external_channel/discord_events.py
@@ -62,8 +64,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-22
-spec_version: 48
+last_verified_at: 2026-08-25
+spec_version: 49
 ---
 
 # External Channel Provider Ingress
@@ -163,6 +165,16 @@ retained.
    acknowledgement is returned. Message Commands materialize their selected source
    through the same canonical source-before-selection boundary; selector responses use
    signed compact component scope and return before any post-response control delivery.
+7. A valid signed setup-location component additionally claims its provider mutation
+   before returning Discord's deferred component-update acknowledgement. The callback
+   path does not resolve the setup/replay processor, authenticate the Bot SDK, validate
+   provider conversation history, or create Session state. A process-local background
+   handoff resolves an isolated dependency graph, revalidates and commits the setup
+   choice, continues the exact pending mention through the existing bounded
+   exact/history replay, replaces the deferred original interaction response through
+   its request-local token, and then attempts every returned cleanup control once.
+   Duplicate callbacks that do not win the durable mutation claim create no background
+   handoff.
 
 Unknown selectors, malformed bodies, invalid signatures, mismatched Application/Guild
 identity, and unsupported interaction types fail before durable interaction state. Discord
@@ -496,6 +508,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-25** (spec_version 49) — Made signed Discord setup-location
+  interactions claim and return a deferred update before process-local background
+  setup application, exact/history replay, original-response completion, and cleanup
+  delivery.
 - **2026-08-22** (spec_version 48) — Updated deterministic External Channel
   E2E source ownership to the reusable scenario module after collection was split
   into file-level CI partitions; product ingress behavior is unchanged.

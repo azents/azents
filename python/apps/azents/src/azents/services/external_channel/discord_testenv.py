@@ -61,6 +61,32 @@ class DiscordTestenvSDKClientFactory:
             yield session
 
 
+class DiscordTestenvInteractionResponseClient:
+    """Complete deferred responses through the deterministic provider fixture."""
+
+    def __init__(self, fixture_base_url: str) -> None:
+        self.fixture_base_url = fixture_base_url.rstrip("/")
+
+    async def edit_original(
+        self,
+        *,
+        application_id: str,
+        interaction_token: str,
+        response: dict[str, object],
+    ) -> None:
+        """Record one deferred interaction completion without retaining its token."""
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            result = await client.post(
+                f"{self.fixture_base_url}/__testenv/interaction-response",
+                json={
+                    "application_id": application_id,
+                    "interaction_token": interaction_token,
+                    "response": response,
+                },
+            )
+            result.raise_for_status()
+
+
 class _DiscordTestenvSDKSession:
     """Project bounded SDK-operation fixture responses into production DTOs."""
 

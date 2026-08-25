@@ -108,6 +108,8 @@ class FakeState:
             self.requests: list[dict[str, object]] = []
             self.interaction_configurations: list[dict[str, object]] = []
             self.interactions: list[dict[str, object]] = []
+            self._interaction_tokens: dict[str, str] = {}
+            self._interaction_completions: dict[str, dict[str, object]] = {}
             self._interaction_endpoint_url: str | None = None
             self._transient_component_custom_ids: dict[str, list[str]] = {
                 "selector": [],
@@ -214,6 +216,8 @@ class FakeState:
             self.requests = []
             self.interaction_configurations = []
             self.interactions = []
+            self._interaction_tokens = {}
+            self._interaction_completions = {}
             self._interaction_endpoint_url = None
             self._transient_component_custom_ids = {
                 "selector": [],
@@ -497,10 +501,13 @@ class FakeState:
         """Sign and send one interaction without retaining its body or signature."""
         interaction_id = payload.get("id")
         interaction_type = payload.get("type")
+        interaction_token = payload.get("token")
         if not isinstance(interaction_id, str) or not isinstance(interaction_type, int):
             raise ValueError("Interaction requires an ID and integer type.")
         with self.lock:
             endpoint_url = self._interaction_endpoint_url
+            if isinstance(interaction_token, str) and interaction_token:
+                self._interaction_tokens[interaction_token] = interaction_id
         if endpoint_url is None:
             raise ValueError("Discord interaction endpoint is not configured.")
         raw_body = json.dumps(payload, separators=(",", ":")).encode()
@@ -548,8 +555,47 @@ class FakeState:
                     evidence["has_content"] = isinstance(
                         data_object.get("content"), str
                     )
+            completion = self._interaction_completions.pop(interaction_id, None)
+            if completion is not None:
+                evidence.update(completion)
             self.interactions.append(evidence)
         return response_status, response_payload
+
+    def complete_interaction_response(
+        self,
+        *,
+        application_id: str,
+        interaction_token: str,
+        response: dict[str, object],
+    ) -> None:
+        """Record one deferred completion without retaining its request-local token."""
+        with self.lock:
+            if application_id != self.application_id:
+                raise ValueError("Discord interaction Application identity mismatch.")
+            interaction_id = self._interaction_tokens.pop(interaction_token, None)
+            if interaction_id is None:
+                raise ValueError("Discord interaction token is unavailable.")
+            self._capture_transient_component_custom_ids(response)
+            completion: dict[str, object] = {}
+            response_type = response.get("type")
+            if isinstance(response_type, int):
+                completion["completed_response_type"] = response_type
+            data = response.get("data")
+            if isinstance(data, dict):
+                data_object = cast(dict[str, object], data)
+                completion["completed_has_content"] = isinstance(
+                    data_object.get("content"), str
+                )
+                components = data_object.get("components")
+                if isinstance(components, list):
+                    completion["completed_component_count"] = len(
+                        cast(list[object], components)
+                    )
+            for evidence in reversed(self.interactions):
+                if evidence.get("interaction_id") == interaction_id:
+                    evidence.update(completion)
+                    return
+            self._interaction_completions[interaction_id] = completion
 
     def consume_transient_component_custom_id(self, scope: str) -> str | None:
         """Consume one request-local component ID without adding it to evidence."""
@@ -948,6 +994,30 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     ),
                 },
             )
+            return
+        if parsed.path == "/__testenv/interaction-response":
+            try:
+                body = self._json_body()
+                application_id = body.get("application_id")
+                interaction_token = body.get("interaction_token")
+                response = body.get("response")
+                if (
+                    not isinstance(application_id, str)
+                    or not isinstance(interaction_token, str)
+                    or not isinstance(response, dict)
+                ):
+                    raise ValueError(
+                        "Deferred interaction response request is invalid."
+                    )
+                self.state.complete_interaction_response(
+                    application_id=application_id,
+                    interaction_token=interaction_token,
+                    response=cast(dict[str, object], response),
+                )
+            except ValueError as error:
+                self._json_response(400, {"message": str(error)})
+                return
+            self._json_response(200, {"status": "ok"})
             return
         if parsed.path == "/__testenv/sdk":
             try:

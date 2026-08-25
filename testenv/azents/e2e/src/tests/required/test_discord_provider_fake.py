@@ -94,6 +94,27 @@ class _SettingsInteractionHandler(_SignedInteractionHandler):
         self.wfile.write(response)
 
 
+class _DeferredInteractionHandler(_SignedInteractionHandler):
+    """Return one deferred component update for background completion tests."""
+
+    def do_POST(self) -> None:
+        """Verify the signed request and acknowledge before background work."""
+        length = int(self.headers["Content-Length"])
+        body = self.rfile.read(length)
+        signature = bytes.fromhex(self.headers["X-Signature-Ed25519"])
+        timestamp = self.headers["X-Signature-Timestamp"].encode()
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(_DISCORD_VERIFY_KEY)).verify(
+            signature, timestamp + body
+        )
+        self.received_bodies.append(body)
+        response = b'{"type":6}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+
 @pytest.fixture
 def discord_fake_urls() -> Generator[tuple[str, str], None, None]:
     """Run one isolated SDK-facing/provider-gap fake with fresh global state."""
@@ -1174,6 +1195,82 @@ def test_discord_fake_records_multipart_file_sizes_without_file_bodies(
     assert "Private visible content" not in rendered
     assert "private-report.csv" not in rendered
     assert "private-discord-file-content" not in rendered
+
+
+def test_discord_fake_records_deferred_interaction_completion_without_token(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Expose ACK/completion ordering while discarding transient response data."""
+    discord_fake_url, _ = discord_fake_urls
+    _DeferredInteractionHandler.received_bodies = []
+    callback_server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        _DeferredInteractionHandler,
+    )
+    callback_thread = threading.Thread(
+        target=callback_server.serve_forever,
+        daemon=True,
+    )
+    callback_thread.start()
+    try:
+        host = callback_server.server_address[0]
+        port = callback_server.server_address[1]
+        _configure_interaction_endpoint(
+            discord_fake_url,
+            f"http://{host}:{port}/callback",
+        ).raise_for_status()
+        delivered = requests.post(
+            f"{discord_fake_url}/__testenv/interactions",
+            json={
+                "id": "700000000000000003",
+                "type": 3,
+                "application_id": STATE.application_id,
+                "guild_id": STATE.guild_id,
+                "channel_id": "400000000000000001",
+                "token": "private-interaction-token",
+                "member": {"user": {"id": "600000000000000001"}},
+                "data": {"custom_id": "a:sc:claim:1:1:signature"},
+            },
+            timeout=5,
+        )
+        delivered.raise_for_status()
+        completed = requests.post(
+            f"{discord_fake_url}/__testenv/interaction-response",
+            json={
+                "application_id": STATE.application_id,
+                "interaction_token": "private-interaction-token",
+                "response": {
+                    "type": 7,
+                    "data": {
+                        "content": "Private completion content.",
+                        "components": [],
+                    },
+                },
+            },
+            timeout=5,
+        )
+        completed.raise_for_status()
+    finally:
+        callback_server.shutdown()
+        callback_server.server_close()
+        callback_thread.join(timeout=5)
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    rendered = str(evidence)
+    assert delivered.json() == {"status": 200, "response_type": 6}
+    assert evidence["interactions"] == [
+        {
+            "interaction_id": "700000000000000003",
+            "interaction_type": 3,
+            "response_status": 200,
+            "response_type": 6,
+            "completed_response_type": 7,
+            "completed_has_content": True,
+            "completed_component_count": 0,
+        }
+    ]
+    assert "private-interaction-token" not in rendered
+    assert "Private completion content." not in rendered
 
 
 def test_discord_fake_container_uses_the_azents_server_image(

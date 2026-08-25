@@ -2,12 +2,17 @@
 
 import datetime
 import hashlib
-from dataclasses import dataclass
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import Annotated
 
+from azcommon import di
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
@@ -15,7 +20,10 @@ from azents.core.enums import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.external_channel.data import ExternalChannelInteractionAdmission
+from azents.repos.external_channel.data import (
+    ExternalChannelConnectionConfiguration,
+    ExternalChannelInteractionAdmission,
+)
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.scheduled_task.data import ScheduledTask
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
@@ -25,19 +33,26 @@ from azents.services.external_channel.discord_interaction import (
     DiscordInteractionInvalidPayload,
     DiscordInteractionUnauthorized,
     discord_interaction_admission_inputs,
+    discord_interaction_token,
     discord_message_command_source_event,
     parse_discord_interaction,
     validate_discord_command_capability,
     verify_discord_interaction_signature,
+)
+from azents.services.external_channel.discord_sdk import (
+    DiscordInteractionResponseClient,
+    get_discord_interaction_response_client,
 )
 from azents.services.external_channel.discord_selector import (
     DiscordSelectorResponseService,
 )
 from azents.services.external_channel.discord_settings import (
     DiscordSettingsContext,
+    DiscordSettingsResponse,
     DiscordSettingsResponseService,
 )
 from azents.services.external_channel.discord_settings_scope import (
+    DiscordSettingsScope,
     parse_discord_settings_custom_id,
 )
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
@@ -57,6 +72,18 @@ from azents.services.scheduled_task.control import (
 
 
 @dataclass(frozen=True)
+class DiscordSettingsComponentHandoff:
+    """One admitted setup component completed after Discord acknowledgement."""
+
+    interaction_id: str
+    application_id: str
+    interaction_token: str = field(repr=False)
+    scope: DiscordSettingsScope = field(repr=False)
+    context: DiscordSettingsContext = field(repr=False)
+    received_at: datetime.datetime
+
+
+@dataclass(frozen=True)
 class DiscordHTTPAdmissionResult:
     """Verified Discord interaction result before provider acknowledgement."""
 
@@ -65,11 +92,26 @@ class DiscordHTTPAdmissionResult:
     response: dict[str, object] | None = None
     control_plans: tuple[ProviderEffectPlan, ...] = ()
     control_delivery_connection_id: str | None = None
+    settings_component_handoff: DiscordSettingsComponentHandoff | None = field(
+        default=None,
+        repr=False,
+    )
 
     @property
     def ping(self) -> bool:
         """Return whether the interaction is Discord's endpoint verification PING."""
         return self.envelope.interaction_type == 1
+
+
+@dataclass(frozen=True)
+class DiscordAuthenticatedInteraction:
+    """One authenticated and durably admitted Discord interaction."""
+
+    configuration: ExternalChannelConnectionConfiguration
+    envelope: DiscordInteractionEnvelope
+    admission: ExternalChannelInteractionAdmission | None
+    command_role: DiscordGuildCommandRole | None
+    interaction_token: str | None = field(repr=False)
 
 
 @dataclass
@@ -108,6 +150,10 @@ class DiscordHTTPAdmissionService:
         ScheduledTaskChannelService,
         Depends(get_scheduled_task_channel_service),
     ]
+    interaction_response_client: Annotated[
+        DiscordInteractionResponseClient,
+        Depends(get_discord_interaction_response_client),
+    ]
 
     async def handle(
         self,
@@ -119,66 +165,39 @@ class DiscordHTTPAdmissionService:
         received_at: datetime.datetime,
     ) -> DiscordHTTPAdmissionResult:
         """Verify and dispatch one selector-scoped Discord interaction."""
-        selector_hash = hashlib.sha256(selector.encode()).hexdigest()
-        async with self.session_manager() as session:
-            configuration = (
-                await self.repository.get_discord_http_configuration_by_selector_hash(
-                    session,
-                    selector_hash=selector_hash,
-                )
-            )
-        if configuration is None or configuration.capabilities is None:
-            raise DiscordInteractionUnauthorized(
-                "Discord interaction could not be authenticated.",
-                failure_code="discord_callback_configuration_missing",
-            )
-        public_key = configuration.capabilities.get("interaction_public_key")
-        if not isinstance(public_key, str):
-            raise DiscordInteractionUnauthorized(
-                "Discord interaction could not be authenticated.",
-                failure_code="discord_callback_public_key_missing",
-            )
-        verify_discord_interaction_signature(
+        authenticated = await _authenticate_discord_interaction(
+            selector=selector,
             raw_body=raw_body,
             timestamp=timestamp,
             signature=signature,
-            public_key=public_key,
+            received_at=received_at,
+            session_manager=self.session_manager,
+            repository=self.repository,
+            admission_service=self.admission_service,
         )
-        envelope = parse_discord_interaction(raw_body)
-        if envelope.application_id != configuration.provider_app_id:
-            raise DiscordInteractionUnauthorized(
-                "Discord interaction could not be authenticated.",
-                failure_code="discord_interaction_application_mismatch",
+        if authenticated.admission is None:
+            return DiscordHTTPAdmissionResult(
+                envelope=authenticated.envelope,
+                admission=None,
             )
-        if envelope.interaction_type == 1:
-            return DiscordHTTPAdmissionResult(envelope=envelope, admission=None)
-        if configuration.status not in {
-            ExternalChannelConnectionStatus.ACTIVE,
-            ExternalChannelConnectionStatus.DEGRADED,
-        }:
-            raise DiscordInteractionUnauthorized(
-                "Discord interaction callback is not active.",
-                failure_code="discord_interaction_not_active",
-            )
-        if envelope.guild_id != configuration.provider_tenant_id:
-            raise DiscordInteractionUnauthorized(
-                "Discord interaction could not be authenticated.",
-                failure_code="discord_interaction_guild_mismatch",
-            )
-        command_role = validate_discord_command_capability(
-            capabilities=configuration.capabilities,
-            envelope=envelope,
-        )
-        inputs = discord_interaction_admission_inputs(
-            connection_id=configuration.id,
-            envelope=envelope,
-            command_role=command_role,
+        return await self.dispatch_authenticated(
+            authenticated=authenticated,
             received_at=received_at,
         )
-        admission = await self.admission_service.admit_interaction(
-            create=inputs.create,
-            principal=inputs.principal,
-        )
+
+    async def dispatch_authenticated(
+        self,
+        *,
+        authenticated: DiscordAuthenticatedInteraction,
+        received_at: datetime.datetime,
+    ) -> DiscordHTTPAdmissionResult:
+        """Dispatch one interaction after authentication and durable admission."""
+        configuration = authenticated.configuration
+        envelope = authenticated.envelope
+        admission = authenticated.admission
+        command_role = authenticated.command_role
+        if admission is None:
+            raise AssertionError("Discord authenticated dispatch requires admission.")
         principal_id = admission.interaction.principal_id
         if not isinstance(principal_id, str) or not principal_id:
             raise RuntimeError("Discord interaction principal is unavailable.")
@@ -271,14 +290,9 @@ class DiscordHTTPAdmissionService:
         if claim is None or not claim.claimed:
             return DiscordHTTPAdmissionResult(envelope=envelope, admission=admission)
         try:
-            response = await self.settings_response_service.component_response(
-                interaction_id=admission.interaction.id,
-                scope=parse_discord_settings_custom_id(
-                    custom_id=custom_id,
-                    secret=self.settings_response_service.config.auth.jwt.secret_key,
-                ),
-                context=context,
-                now=received_at,
+            scope = parse_discord_settings_custom_id(
+                custom_id=custom_id,
+                secret=self.settings_response_service.config.auth.jwt.secret_key,
             )
         except ValueError:
             await self.admission_service.finish_interaction_provider_mutation(
@@ -298,19 +312,11 @@ class DiscordHTTPAdmissionService:
                     },
                 },
             )
-        except Exception:
-            await self.admission_service.finish_interaction_provider_mutation(
-                interaction_id=admission.interaction.id,
-                status=ExternalChannelInteractionStatus.FAILED,
-                error_kind="settings_component_failed",
-                error_summary="Discord settings component could not be processed.",
-            )
-            raise
-        await self.admission_service.finish_interaction_provider_mutation(
+        response = await self._complete_settings_component(
             interaction_id=admission.interaction.id,
-            status=ExternalChannelInteractionStatus.COMPLETED,
-            error_kind=None,
-            error_summary=None,
+            scope=scope,
+            context=context,
+            received_at=received_at,
         )
         return DiscordHTTPAdmissionResult(
             envelope=envelope,
@@ -321,6 +327,62 @@ class DiscordHTTPAdmissionService:
                 context.connection_id if response.cleanup_plans else None
             ),
         )
+
+    async def run_settings_component_handoff(
+        self,
+        handoff: DiscordSettingsComponentHandoff,
+    ) -> None:
+        """Complete one setup mutation after its deferred provider response."""
+        response = await self._complete_settings_component(
+            interaction_id=handoff.interaction_id,
+            scope=handoff.scope,
+            context=handoff.context,
+            received_at=handoff.received_at,
+        )
+        try:
+            await self.interaction_response_client.edit_original(
+                application_id=handoff.application_id,
+                interaction_token=handoff.interaction_token,
+                response=response.response,
+            )
+        finally:
+            for plan in response.cleanup_plans:
+                await self.attempt_control_delivery(
+                    connection_id=handoff.context.connection_id,
+                    plan=plan,
+                )
+
+    async def _complete_settings_component(
+        self,
+        *,
+        interaction_id: str,
+        scope: DiscordSettingsScope,
+        context: DiscordSettingsContext,
+        received_at: datetime.datetime,
+    ) -> DiscordSettingsResponse:
+        """Run one claimed settings mutation and terminalize its admission."""
+        try:
+            response = await self.settings_response_service.component_response(
+                interaction_id=interaction_id,
+                scope=scope,
+                context=context,
+                now=received_at,
+            )
+        except Exception:
+            await self.admission_service.finish_interaction_provider_mutation(
+                interaction_id=interaction_id,
+                status=ExternalChannelInteractionStatus.FAILED,
+                error_kind="settings_component_failed",
+                error_summary="Discord settings component could not be processed.",
+            )
+            raise
+        await self.admission_service.finish_interaction_provider_mutation(
+            interaction_id=interaction_id,
+            status=ExternalChannelInteractionStatus.COMPLETED,
+            error_kind=None,
+            error_summary=None,
+        )
+        return response
 
     async def _selector_component_result(
         self,
@@ -678,6 +740,240 @@ class DiscordHTTPAdmissionService:
             connection_id=connection_id,
             plan=plan,
         )
+
+
+@dataclass(frozen=True)
+class DiscordHTTPDispatcherResolver:
+    """Resolve the heavy interaction dispatcher after callback classification."""
+
+    container: Annotated[di.Container, Depends(di.get_container)]
+
+    @asynccontextmanager
+    async def open(self) -> AsyncIterator[DiscordHTTPAdmissionService]:
+        """Open one isolated dispatcher dependency graph."""
+        async with self.container.copy() as container:
+            yield await container.solve(DiscordHTTPAdmissionService)
+
+
+@dataclass
+class DiscordHTTPIngressService:
+    """Acknowledge setup controls before resolving the heavy replay graph."""
+
+    session_manager: Annotated[
+        SessionManager[AsyncSession],
+        Depends(get_session_manager),
+    ]
+    repository: Annotated[
+        ExternalChannelRepository,
+        Depends(ExternalChannelRepository.create),
+    ]
+    admission_service: Annotated[
+        ExternalChannelAdmissionService,
+        Depends(ExternalChannelAdmissionService),
+    ]
+    config: Annotated[Config, Depends(get_config)]
+    dispatcher_resolver: Annotated[
+        DiscordHTTPDispatcherResolver,
+        Depends(DiscordHTTPDispatcherResolver),
+    ]
+
+    async def handle(
+        self,
+        *,
+        selector: str,
+        raw_body: bytes,
+        timestamp: str | None,
+        signature: str | None,
+        received_at: datetime.datetime,
+    ) -> DiscordHTTPAdmissionResult:
+        """Authenticate once and defer only slow setup component processing."""
+        authenticated = await _authenticate_discord_interaction(
+            selector=selector,
+            raw_body=raw_body,
+            timestamp=timestamp,
+            signature=signature,
+            received_at=received_at,
+            session_manager=self.session_manager,
+            repository=self.repository,
+            admission_service=self.admission_service,
+        )
+        envelope = authenticated.envelope
+        admission = authenticated.admission
+        if admission is None:
+            return DiscordHTTPAdmissionResult(envelope=envelope, admission=None)
+        custom_id = envelope.component_custom_id
+        scope = (
+            None
+            if custom_id is None or not custom_id.startswith("a:")
+            else _optional_discord_settings_scope(
+                custom_id=custom_id,
+                secret=self.config.auth.jwt.secret_key,
+            )
+        )
+        if scope is not None and scope.action in {"setup_channel", "setup_threads"}:
+            principal_id = admission.interaction.principal_id
+            if not isinstance(principal_id, str) or not principal_id:
+                raise RuntimeError("Discord interaction principal is unavailable.")
+            if authenticated.interaction_token is None:
+                raise DiscordInteractionInvalidPayload(
+                    "Discord setup interaction token is unavailable."
+                )
+            context = _settings_context(
+                envelope=envelope,
+                connection_id=authenticated.configuration.id,
+                principal_id=principal_id,
+            )
+            claim = await self.admission_service.begin_interaction_provider_mutation(
+                interaction_id=admission.interaction.id,
+                now=received_at,
+            )
+            if claim is None or not claim.claimed:
+                return DiscordHTTPAdmissionResult(
+                    envelope=envelope,
+                    admission=admission,
+                )
+            return DiscordHTTPAdmissionResult(
+                envelope=envelope,
+                admission=admission,
+                response={"type": 6},
+                settings_component_handoff=DiscordSettingsComponentHandoff(
+                    interaction_id=admission.interaction.id,
+                    application_id=envelope.application_id,
+                    interaction_token=authenticated.interaction_token,
+                    scope=scope,
+                    context=context,
+                    received_at=received_at,
+                ),
+            )
+        async with self.dispatcher_resolver.open() as dispatcher:
+            return await dispatcher.dispatch_authenticated(
+                authenticated=authenticated,
+                received_at=received_at,
+            )
+
+    async def run_settings_component_handoff(
+        self,
+        handoff: DiscordSettingsComponentHandoff,
+    ) -> None:
+        """Resolve and run the replay graph after Discord acknowledgement."""
+        async with self.dispatcher_resolver.open() as dispatcher:
+            await dispatcher.run_settings_component_handoff(handoff)
+
+    async def attempt_control_delivery(
+        self,
+        *,
+        connection_id: str,
+        plan: ProviderEffectPlan,
+    ) -> None:
+        """Resolve provider delivery dependencies only after acknowledgement."""
+        async with self.dispatcher_resolver.open() as dispatcher:
+            await dispatcher.attempt_control_delivery(
+                connection_id=connection_id,
+                plan=plan,
+            )
+
+
+async def _authenticate_discord_interaction(
+    *,
+    selector: str,
+    raw_body: bytes,
+    timestamp: str | None,
+    signature: str | None,
+    received_at: datetime.datetime,
+    session_manager: SessionManager[AsyncSession],
+    repository: ExternalChannelRepository,
+    admission_service: ExternalChannelAdmissionService,
+) -> DiscordAuthenticatedInteraction:
+    """Authenticate and durably admit one Discord callback without dispatch work."""
+    selector_hash = hashlib.sha256(selector.encode()).hexdigest()
+    async with session_manager() as session:
+        configuration = (
+            await repository.get_discord_http_configuration_by_selector_hash(
+                session,
+                selector_hash=selector_hash,
+            )
+        )
+    if configuration is None or configuration.capabilities is None:
+        raise DiscordInteractionUnauthorized(
+            "Discord interaction could not be authenticated.",
+            failure_code="discord_callback_configuration_missing",
+        )
+    public_key = configuration.capabilities.get("interaction_public_key")
+    if not isinstance(public_key, str):
+        raise DiscordInteractionUnauthorized(
+            "Discord interaction could not be authenticated.",
+            failure_code="discord_callback_public_key_missing",
+        )
+    verify_discord_interaction_signature(
+        raw_body=raw_body,
+        timestamp=timestamp,
+        signature=signature,
+        public_key=public_key,
+    )
+    envelope = parse_discord_interaction(raw_body)
+    interaction_token = discord_interaction_token(raw_body)
+    if envelope.application_id != configuration.provider_app_id:
+        raise DiscordInteractionUnauthorized(
+            "Discord interaction could not be authenticated.",
+            failure_code="discord_interaction_application_mismatch",
+        )
+    if envelope.interaction_type == 1:
+        return DiscordAuthenticatedInteraction(
+            configuration=configuration,
+            envelope=envelope,
+            admission=None,
+            command_role=None,
+            interaction_token=None,
+        )
+    if configuration.status not in {
+        ExternalChannelConnectionStatus.ACTIVE,
+        ExternalChannelConnectionStatus.DEGRADED,
+    }:
+        raise DiscordInteractionUnauthorized(
+            "Discord interaction callback is not active.",
+            failure_code="discord_interaction_not_active",
+        )
+    if envelope.guild_id != configuration.provider_tenant_id:
+        raise DiscordInteractionUnauthorized(
+            "Discord interaction could not be authenticated.",
+            failure_code="discord_interaction_guild_mismatch",
+        )
+    command_role = validate_discord_command_capability(
+        capabilities=configuration.capabilities,
+        envelope=envelope,
+    )
+    inputs = discord_interaction_admission_inputs(
+        connection_id=configuration.id,
+        envelope=envelope,
+        command_role=command_role,
+        received_at=received_at,
+    )
+    admission = await admission_service.admit_interaction(
+        create=inputs.create,
+        principal=inputs.principal,
+    )
+    return DiscordAuthenticatedInteraction(
+        configuration=configuration,
+        envelope=envelope,
+        admission=admission,
+        command_role=command_role,
+        interaction_token=interaction_token,
+    )
+
+
+def _optional_discord_settings_scope(
+    *,
+    custom_id: str,
+    secret: str,
+) -> DiscordSettingsScope | None:
+    """Return a valid signed settings scope or defer rejection to the dispatcher."""
+    try:
+        return parse_discord_settings_custom_id(
+            custom_id=custom_id,
+            secret=secret,
+        )
+    except ValueError:
+        return None
 
 
 def _settings_context(

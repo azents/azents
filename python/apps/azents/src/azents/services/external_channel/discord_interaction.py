@@ -362,6 +362,24 @@ def parse_discord_interaction(raw_body: bytes) -> DiscordInteractionEnvelope:
     )
 
 
+def discord_interaction_token(raw_body: bytes) -> str | None:
+    """Return one bounded request-local interaction token after verification."""
+    try:
+        payload: object = json.loads(raw_body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise DiscordInteractionInvalidPayload(
+            "Discord interaction is not valid JSON."
+        ) from error
+    if not is_external_channel_projection(payload):
+        raise DiscordInteractionInvalidPayload("Discord interaction must be an object.")
+    token = payload.get("token")
+    if token is None:
+        return None
+    if not isinstance(token, str) or not token or len(token) > 512:
+        raise DiscordInteractionInvalidPayload("Discord interaction token is invalid.")
+    return token
+
+
 def _actor_user_id(payload: dict[str, object]) -> str | None:
     """Extract one authenticated Discord actor without retaining profile details."""
     member = payload.get("member")
