@@ -97,6 +97,10 @@ class FakeRedisConnectionStore:
         *args: object,
     ) -> int:
         del numkeys
+        if "INCR" in script:
+            value = int(self.data.get(key, "0")) + 1
+            self.data[key] = str(value)
+            return value
         raw = self.data.get(key)
         if raw is None:
             return 0
@@ -995,19 +999,15 @@ async def test_redis_connection_generation_is_persistent(
 
 
 @pytest.mark.asyncio
-async def test_redis_registration_does_not_reset_expired_counter() -> None:
-    """Generation stays monotonic if an expiry policy deletes its counter."""
+async def test_redis_registration_removes_legacy_generation_counter_ttl(
+    redis_store: tuple[RedisRuntimeCoordinationStore, Redis],
+) -> None:
+    """Registration increments a legacy counter and atomically removes its TTL."""
+    store, redis = redis_store
+    key = "azents:agent-runtime:coordination:connection-generation:provider:provider-1"
+    await redis.set(key, "41", ex=60)
+    assert await redis.ttl(key) > 0
 
-    class _CounterExpiryRedis(FakeRedisConnectionStore):
-        """Simulate the old generation-counter expiry behavior."""
-
-        async def expire(self, key: str, seconds: int) -> bool:
-            del seconds
-            if "connection-generation" in key:
-                self.data.pop(key, None)
-            return True
-
-    store = RedisRuntimeCoordinationStore(cast(Redis, _CounterExpiryRedis()))
     connected_at = _now()
     first = await store.register_connection(
         kind=RuntimeConnectionKind.PROVIDER,
@@ -1019,6 +1019,10 @@ async def test_redis_registration_does_not_reset_expired_counter() -> None:
         ttl_seconds=60,
         metadata={},
     )
+
+    assert first.generation == 42
+    assert await redis.ttl(key) == -1
+
     second = await store.register_connection(
         kind=RuntimeConnectionKind.PROVIDER,
         subject_id="provider-1",
@@ -1030,8 +1034,8 @@ async def test_redis_registration_does_not_reset_expired_counter() -> None:
         metadata={},
     )
 
-    assert first.generation == 1
-    assert second.generation == 2
+    assert second.generation == 43
+    assert await redis.ttl(key) == -1
 
 
 def _fake_connection_json(

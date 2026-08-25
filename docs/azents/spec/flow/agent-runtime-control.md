@@ -38,7 +38,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-25
-spec_version: 66
+spec_version: 67
 ---
 
 # Agent Runtime Control
@@ -214,7 +214,9 @@ Each Provider- or Runner-subject connection generation counter remains persisten
 within the selected coordination-store instance and is separate from the
 short-lived current-connection TTL. Redis does not expire these counters, and
 the in-memory implementation retains them for its process lifetime, so a
-reconnect cannot reuse a lower generation after a long offline period.
+reconnect cannot reuse a lower generation after a long offline period. Each
+Redis allocation atomically increments the counter and removes a legacy expiry
+that an earlier deployment may have left on the key.
 
 Generation fencing is enforced before volatile stream messages mutate durable state. Control rejects
 or closes Provider/Runner streams whose inbound message generation differs from the accepted

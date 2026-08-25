@@ -38,6 +38,11 @@ from azents.runtime.coordination.data import (
 _BUSYGROUP_PREFIX = "BUSYGROUP"
 _PAYLOAD_FIELD = "payload"
 _DEFAULT_STREAM_TTL_SECONDS = 60 * 60
+_INCREMENT_PERSIST_CONNECTION_GENERATION_SCRIPT = """
+local generation = redis.call('INCR', KEYS[1])
+redis.call('PERSIST', KEYS[1])
+return generation
+"""
 _GENERATION_FENCED_SET_CONNECTION_SCRIPT = """
 local raw = redis.call('GET', KEYS[1])
 if not raw then
@@ -538,8 +543,12 @@ class RedisRuntimeCoordinationStore:
         """Register a current connection and issue a new generation."""
         generation_key = self._connection_generation_key(kind, subject_id)
         generation = int(
-            await self._redis.incr(  # redis-py stub omits INCR
-                generation_key
+            _decode_text(
+                await self._eval(
+                    _INCREMENT_PERSIST_CONNECTION_GENERATION_SCRIPT,
+                    1,
+                    generation_key,
+                )
             )
         )
         record = RuntimeConnectionRecord(
