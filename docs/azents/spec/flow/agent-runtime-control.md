@@ -37,8 +37,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-24
-spec_version: 65
+last_verified_at: 2026-08-25
+spec_version: 66
 ---
 
 # Agent Runtime Control
@@ -209,6 +209,12 @@ The store owns:
 - operation metadata, heartbeat/progress/final events
 - generation fencing data used to reject stale provider/runner messages
 - request claim cursors and stream metadata used to acknowledge delivered Provider/Runner requests
+
+Each Provider- or Runner-subject connection generation counter remains persistent
+within the selected coordination-store instance and is separate from the
+short-lived current-connection TTL. Redis does not expire these counters, and
+the in-memory implementation retains them for its process lifetime, so a
+reconnect cannot reuse a lower generation after a long offline period.
 
 Generation fencing is enforced before volatile stream messages mutate durable state. Control rejects
 or closes Provider/Runner streams whose inbound message generation differs from the accepted
