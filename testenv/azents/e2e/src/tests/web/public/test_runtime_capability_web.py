@@ -309,7 +309,7 @@ def test_runtime_free_add_and_remove_progress(
         ec.visibility_of_element_located(
             (
                 By.CSS_SELECTOR,
-                "[aria-label='Recent one-hour usage trend'] circle",
+                "[role='img'][aria-label='Recent one-hour usage trend']",
             )
         )
     )
@@ -336,7 +336,7 @@ def test_runtime_free_add_and_remove_progress(
         ec.visibility_of_element_located(
             (
                 By.CSS_SELECTOR,
-                "[aria-label='Recent one-hour usage trend'] circle",
+                "[role='img'][aria-label='Recent one-hour usage trend']",
             )
         )
     )
@@ -352,7 +352,7 @@ def test_runtime_free_add_and_remove_progress(
         ec.visibility_of_element_located(
             (
                 By.CSS_SELECTOR,
-                "[aria-label='Recent one-hour usage trend'] circle",
+                "[role='img'][aria-label='Recent one-hour usage trend']",
             )
         )
     )
@@ -369,7 +369,7 @@ def test_runtime_free_add_and_remove_progress(
         ec.visibility_of_element_located(
             (
                 By.CSS_SELECTOR,
-                "[aria-label='Recent one-hour usage trend'] circle",
+                "[role='img'][aria-label='Recent one-hour usage trend']",
             )
         )
     )
