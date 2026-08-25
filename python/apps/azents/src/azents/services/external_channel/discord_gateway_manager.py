@@ -185,12 +185,22 @@ class DiscordGatewayManagerService:
                 raise DiscordGatewayCredentialError(
                     "Discord Guild identity is unavailable."
                 )
+            callback_base_url = (
+                None
+                if self.config is None
+                else self.config.external_channel_discord_callback_url
+            )
+            callback_selector_hash = configuration.http_callback_selector_hash
+            if not callback_base_url or not callback_selector_hash:
+                raise DiscordGatewayTerminalError("interaction_endpoint_drift")
             await self._run_connection_with_lease(
                 connection_id=connection_id,
                 lease=lease,
                 bot_token=credentials.bot_token,
                 provider_app_id=configuration.provider_app_id,
                 target_guild_id=configuration.provider_tenant_id,
+                interactions_callback_base_url=callback_base_url,
+                interactions_callback_selector_hash=callback_selector_hash,
                 connected_bot_user_id=configuration.provider_bot_user_id,
                 configuration_generation=configuration.configuration_generation,
                 shutdown_event=shutdown_event,
@@ -242,6 +252,8 @@ class DiscordGatewayManagerService:
         bot_token: str,
         provider_app_id: str | None,
         target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None,
         configuration_generation: int,
         shutdown_event: asyncio.Event,
@@ -250,6 +262,10 @@ class DiscordGatewayManagerService:
             self.gateway_client.run_connection(
                 bot_token=bot_token,
                 target_guild_id=target_guild_id,
+                interactions_callback_base_url=interactions_callback_base_url,
+                interactions_callback_selector_hash=(
+                    interactions_callback_selector_hash
+                ),
                 connected_bot_user_id=connected_bot_user_id,
                 handle_event=lambda event: self._admit_gateway_event(
                     connection_id=connection_id,

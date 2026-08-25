@@ -397,11 +397,17 @@ class DiscordTestenvGatewayRunner:
         *,
         bot_token: str,
         target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
     ) -> None:
-        del bot_token
+        del (
+            bot_token,
+            interactions_callback_base_url,
+            interactions_callback_selector_hash,
+        )
         resumed = False
         channel_names: dict[str, str] = {}
         managed_roles: dict[str, str] = {}

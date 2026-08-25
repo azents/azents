@@ -6,6 +6,9 @@ from typing import Literal, Protocol, TypeGuard
 
 import discord
 
+from azents.services.external_channel.discord_endpoint import (
+    discord_interactions_endpoint_matches,
+)
 from azents.services.external_channel.discord_events import (
     DiscordGatewayMessageEvent,
     project_discord_sdk_gateway_message,
@@ -58,6 +61,8 @@ class DiscordGatewayRunner(Protocol):
         *,
         bot_token: str,
         target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
@@ -73,6 +78,8 @@ class _DiscordLibraryClient(discord.Client):
         self,
         *,
         target_guild_id: int,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
@@ -87,11 +94,26 @@ class _DiscordLibraryClient(discord.Client):
             chunk_guilds_at_startup=False,
         )
         self.target_guild_id = target_guild_id
+        self.interactions_callback_base_url = interactions_callback_base_url
+        self.interactions_callback_selector_hash = interactions_callback_selector_hash
         self.connected_bot_user_id = connected_bot_user_id
         self.handle_event = handle_event
         self.handle_lifecycle = handle_lifecycle
         self.event_lock = asyncio.Lock()
         self.event_error: Exception | None = None
+
+    async def setup_hook(self) -> None:
+        """Reject a logged-in Application whose HTTP callback authority drifted."""
+        application = self.application
+        endpoint_url = (
+            None if application is None else application.interactions_endpoint_url
+        )
+        if not discord_interactions_endpoint_matches(
+            endpoint_url=endpoint_url,
+            callback_base_url=self.interactions_callback_base_url,
+            selector_hash=self.interactions_callback_selector_hash,
+        ):
+            raise DiscordGatewayTerminalError("interaction_endpoint_drift")
 
     async def on_message(self, message: discord.Message) -> None:
         """Admit one typed message-create callback."""
@@ -170,6 +192,8 @@ class DiscordGatewayClient:
         *,
         bot_token: str,
         target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
@@ -179,6 +203,8 @@ class DiscordGatewayClient:
             raise DiscordGatewayError("Discord Guild identity is invalid.")
         client = _DiscordLibraryClient(
             target_guild_id=int(target_guild_id),
+            interactions_callback_base_url=interactions_callback_base_url,
+            interactions_callback_selector_hash=(interactions_callback_selector_hash),
             connected_bot_user_id=connected_bot_user_id,
             handle_event=handle_event,
             handle_lifecycle=handle_lifecycle,

@@ -4,6 +4,7 @@ import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -193,6 +194,10 @@ class _StaleAuthorityRepository(_Repository):
 class _OwnedRepository(_Repository):
     """Return one owned Discord connection for manager lifecycle tests."""
 
+    def __init__(self, *, callback_selector_hash: str | None = "selector-hash") -> None:
+        super().__init__()
+        self.callback_selector_hash = callback_selector_hash
+
     async def claim_discord_gateway_lease(
         self,
         _session: object,
@@ -210,6 +215,7 @@ class _OwnedRepository(_Repository):
             provider_app_id="app-1",
             provider_tenant_id="300",
             provider_bot_user_id="900",
+            http_callback_selector_hash=self.callback_selector_hash,
             configuration_generation=2,
         )
 
@@ -240,11 +246,17 @@ class _EventRunner:
         *,
         bot_token: str,
         target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
         connected_bot_user_id: str | None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
     ) -> None:
-        del connected_bot_user_id
+        del (
+            connected_bot_user_id,
+            interactions_callback_base_url,
+            interactions_callback_selector_hash,
+        )
         self.bot_token = bot_token
         self.target_guild_id = target_guild_id
         await handle_lifecycle("ready")
@@ -311,6 +323,17 @@ def _service(
     provider_control: object | None = None,
     config: Config | None = None,
 ) -> DiscordGatewayManagerService:
+    resolved_config = config
+    if resolved_config is None:
+        resolved_config = cast(
+            Config,
+            SimpleNamespace(
+                external_channel_discord_callback_url=("https://callbacks.example/"),
+                external_channel_conversation=SimpleNamespace(
+                    quiesce=SimpleNamespace(discord_gateway=False)
+                ),
+            ),
+        )
     return DiscordGatewayManagerService(
         session_manager=sessions,
         repository=repository,  # ty: ignore[invalid-argument-type] — test fake exposes only the lease-fenced repository surface exercised by this manager.
@@ -327,7 +350,7 @@ def _service(
         ),
         manager_id="manager-1",
         gateway_client=(gateway_client if gateway_client is not None else MagicMock()),  # ty: ignore[invalid-argument-type] — test fixture supplies the public runner methods exercised by the manager.
-        config=config,
+        config=resolved_config,
     )
 
 
@@ -586,6 +609,30 @@ async def test_library_intent_rejection_terminalizes_connection() -> None:
 
 
 @pytest.mark.asyncio
+async def test_missing_callback_authority_terminalizes_connection() -> None:
+    """An active row without callback identity requires explicit reconnection."""
+    repository = _OwnedRepository(callback_selector_hash=None)
+    credentials_codec = MagicMock()
+    credentials_codec.decrypt.return_value = DiscordConnectionCredentials(
+        bot_token="test-token"
+    )
+    service = _service(
+        repository=repository,
+        sessions=_SessionManager(),
+        credentials_codec=credentials_codec,
+        gateway_client=_BlockingRunner(),
+    )
+
+    await service._run_owned_connection(
+        connection_id="connection-1",
+        shutdown_event=asyncio.Event(),
+    )
+
+    assert repository.reconnect_calls[0]["reason"] == "interaction_endpoint_drift"
+    assert repository.release_calls == []
+
+
+@pytest.mark.asyncio
 async def test_sdk_terminal_close_terminalizes_connection() -> None:
     repository = _OwnedRepository()
     credentials_codec = MagicMock()
@@ -625,6 +672,8 @@ async def test_manager_passes_typed_lifecycle_and_event_handlers_to_sdk() -> Non
             bot_token="test-token",
             provider_app_id="app-1",
             target_guild_id="300",
+            interactions_callback_base_url="https://callbacks.example/",
+            interactions_callback_selector_hash="selector-hash",
             connected_bot_user_id="900",
             configuration_generation=2,
             shutdown_event=asyncio.Event(),
@@ -654,6 +703,8 @@ async def test_active_sdk_lifecycle_renews_gateway_lease() -> None:
             bot_token="test-token",
             provider_app_id="app-1",
             target_guild_id="300",
+            interactions_callback_base_url="https://callbacks.example/",
+            interactions_callback_selector_hash="selector-hash",
             connected_bot_user_id="900",
             configuration_generation=2,
             shutdown_event=shutdown,

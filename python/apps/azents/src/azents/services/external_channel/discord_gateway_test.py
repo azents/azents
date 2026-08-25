@@ -1,5 +1,8 @@
 """Tests for the high-level discord.py Gateway integration boundary."""
 
+import hashlib
+from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -14,6 +17,10 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayTerminalError,
     _DiscordLibraryClient,
 )
+
+_CALLBACK_BASE_URL = "https://callbacks.example/"
+_CALLBACK_SELECTOR = "opaque-selector"
+_CALLBACK_SELECTOR_HASH = hashlib.sha256(_CALLBACK_SELECTOR.encode()).hexdigest()
 
 
 def _guild(*, guild_id: int = 300) -> MagicMock:
@@ -62,6 +69,8 @@ def _library_client(
 ) -> _DiscordLibraryClient:
     return _DiscordLibraryClient(
         target_guild_id=300,
+        interactions_callback_base_url=_CALLBACK_BASE_URL,
+        interactions_callback_selector_hash=_CALLBACK_SELECTOR_HASH,
         connected_bot_user_id="900",
         handle_event=handle_event or AsyncMock(),
         handle_lifecycle=handle_lifecycle or AsyncMock(),
@@ -77,6 +86,38 @@ def test_library_client_requests_required_intents() -> None:
     assert client.intents.guild_messages is True
     assert client.intents.message_content is True
     assert client.intents.members is False
+
+
+@pytest.mark.asyncio
+async def test_setup_hook_accepts_exact_interaction_endpoint() -> None:
+    """Gateway login accepts only the current callback selector authority."""
+    client = _library_client()
+    client._application = cast(
+        discord.AppInfo,
+        SimpleNamespace(
+            interactions_endpoint_url=(
+                f"{_CALLBACK_BASE_URL}external-channel/v1/discord/interactions/"
+                f"{_CALLBACK_SELECTOR}"
+            )
+        ),
+    )
+
+    await client.setup_hook()
+
+
+@pytest.mark.asyncio
+async def test_setup_hook_rejects_missing_interaction_endpoint() -> None:
+    """Provider callback removal becomes a terminal reconnect requirement."""
+    client = _library_client()
+    client._application = cast(
+        discord.AppInfo,
+        SimpleNamespace(interactions_endpoint_url=None),
+    )
+
+    with pytest.raises(DiscordGatewayTerminalError) as raised:
+        await client.setup_hook()
+
+    assert raised.value.reason == "interaction_endpoint_drift"
 
 
 @pytest.mark.asyncio
@@ -179,6 +220,8 @@ async def test_runner_uses_public_start_with_sdk_reconnect(
         await DiscordGatewayClient().run_connection(
             bot_token="redacted-token",
             target_guild_id="300",
+            interactions_callback_base_url=_CALLBACK_BASE_URL,
+            interactions_callback_selector_hash=_CALLBACK_SELECTOR_HASH,
             handle_event=AsyncMock(),
             handle_lifecycle=AsyncMock(),
         )
@@ -215,6 +258,8 @@ async def test_runner_wraps_uncontrolled_callback_failure(
         await DiscordGatewayClient().run_connection(
             bot_token="redacted-token",
             target_guild_id="300",
+            interactions_callback_base_url=_CALLBACK_BASE_URL,
+            interactions_callback_selector_hash=_CALLBACK_SELECTOR_HASH,
             handle_event=AsyncMock(),
             handle_lifecycle=AsyncMock(),
         )
@@ -248,6 +293,8 @@ async def test_runner_preserves_controlled_callback_failure(
         await DiscordGatewayClient().run_connection(
             bot_token="redacted-token",
             target_guild_id="300",
+            interactions_callback_base_url=_CALLBACK_BASE_URL,
+            interactions_callback_selector_hash=_CALLBACK_SELECTOR_HASH,
             handle_event=AsyncMock(),
             handle_lifecycle=AsyncMock(),
         )
@@ -278,6 +325,8 @@ async def test_runner_classifies_public_login_failure(
         await DiscordGatewayClient().run_connection(
             bot_token="redacted-token",
             target_guild_id="300",
+            interactions_callback_base_url=_CALLBACK_BASE_URL,
+            interactions_callback_selector_hash=_CALLBACK_SELECTOR_HASH,
             handle_event=AsyncMock(),
             handle_lifecycle=AsyncMock(),
         )
@@ -308,6 +357,8 @@ async def test_runner_preserves_terminal_reason(
         await DiscordGatewayClient().run_connection(
             bot_token="redacted-token",
             target_guild_id="300",
+            interactions_callback_base_url=_CALLBACK_BASE_URL,
+            interactions_callback_selector_hash=_CALLBACK_SELECTOR_HASH,
             handle_event=AsyncMock(),
             handle_lifecycle=AsyncMock(),
         )
@@ -321,6 +372,8 @@ async def test_runner_rejects_non_numeric_guild_identity() -> None:
         await DiscordGatewayClient().run_connection(
             bot_token="redacted-token",
             target_guild_id="not-a-snowflake",
+            interactions_callback_base_url=_CALLBACK_BASE_URL,
+            interactions_callback_selector_hash=_CALLBACK_SELECTOR_HASH,
             handle_event=AsyncMock(),
             handle_lifecycle=AsyncMock(),
         )
