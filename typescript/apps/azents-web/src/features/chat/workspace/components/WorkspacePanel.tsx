@@ -23,6 +23,7 @@ import {
   IconBrandGit,
   IconChartHistogram,
   IconFolderOpen,
+  IconPlayerPlay,
   IconPower,
   IconSettings,
   IconTerminal2,
@@ -308,7 +309,14 @@ export function WorkspacePanel({
     }
 
     const { actions, lifecycle, runtime } = state.server;
+    const canStartRuntime = actions.start !== null;
     const canStopRuntime = actions.stop !== null;
+    const lifecycleControl = canStopRuntime
+      ? "stop"
+      : canStartRuntime
+        ? "start"
+        : null;
+    const starting = lifecycleControl === "start";
 
     return (
       <Stack gap="md">
@@ -339,33 +347,52 @@ export function WorkspacePanel({
             <Paper withBorder p="md" radius="md">
               <Group justify="space-between" align="center" gap="md">
                 <Group gap="sm" miw={0} wrap="nowrap">
-                  <Box c="red" style={{ display: "inline-flex" }}>
-                    <IconPower size="1rem" />
+                  <Box
+                    c={starting ? "blue" : "red"}
+                    style={{ display: "inline-flex" }}
+                  >
+                    {starting ? (
+                      <IconPlayerPlay size="1rem" />
+                    ) : (
+                      <IconPower size="1rem" />
+                    )}
                   </Box>
                   <Box miw={0}>
                     <Text size="sm" fw={600}>
-                      {t("stopRuntime")}
+                      {t(starting ? "startRuntime" : "stopRuntime")}
                     </Text>
                     <Text size="xs" c="dimmed">
-                      {t("stopRuntimeDescription")}
+                      {t(
+                        starting
+                          ? "inactiveDescription"
+                          : "stopRuntimeDescription",
+                      )}
                     </Text>
                   </Box>
                 </Group>
                 <Button
-                  color="red"
+                  color={starting ? "blue" : "red"}
                   variant="light"
-                  loading={state.isStopping}
+                  loading={starting ? state.isStarting : state.isStopping}
                   disabled={
-                    !canStopRuntime || state.isStarting || state.isResetting
+                    lifecycleControl === null ||
+                    state.isStarting ||
+                    state.isResetting
                   }
-                  onClick={onStopRuntime}
+                  onClick={starting ? onStartRuntime : onStopRuntime}
                 >
-                  {state.isStopping ? t("stoppingRuntime") : t("stopRuntime")}
+                  {starting
+                    ? state.isStarting
+                      ? t("startingRuntime")
+                      : t("startRuntime")
+                    : state.isStopping
+                      ? t("stoppingRuntime")
+                      : t("stopRuntime")}
                 </Button>
               </Group>
             </Paper>
 
-            {!canStopRuntime && (
+            {lifecycleControl === null && (
               <Text size="xs" c="dimmed">
                 {runtime.type === "NOT_STARTED" || runtime.type === "HIBERNATED"
                   ? t("runtimeNotRunningHint")

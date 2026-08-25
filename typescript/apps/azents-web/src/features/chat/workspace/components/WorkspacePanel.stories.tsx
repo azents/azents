@@ -589,6 +589,14 @@ export const SettingsRuntimeInactive = {
   args: {
     state: {
       ...readyState,
+      runtimeConfiguration: {
+        type: "LOADED",
+        configuration: {
+          status: "waiting_for_recreation",
+          desired: null,
+          applied: null,
+        },
+      },
       server: {
         lifecycle: stoppedLifecycle,
         runtime: {
