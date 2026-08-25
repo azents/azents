@@ -1,6 +1,6 @@
 [suite]
 name = "required"
-lanes = 3
+lanes = 4
 timeout_minutes = 45
 cache_write_repositories = [
   "azents-server",

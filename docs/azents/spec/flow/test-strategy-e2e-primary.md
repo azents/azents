@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-23
-spec_version: 35
+last_verified_at: 2026-08-25
+spec_version: 36
 ---
 
 # E2E Primary Test Strategy
@@ -157,7 +157,7 @@ Always-on required CI does not depend on external credentials.
   one `suite.toml`, and every test below that directory uses the same substrate.
 - One planner discovers enabled suite directories and creates a dynamic matrix.
   It balances files only within a suite using the latest successful `main` timing
-  baseline, with a deterministic source-based fallback. Required uses three lanes;
+  baseline, with a deterministic source-based fallback. Required uses four lanes;
   Web uses one lane. Lanes are parallel partitions, not additional profiles.
   Large scenario families may expose multiple natural collection files backed by
   one reusable scenario module. When such a split replaces an existing collection
@@ -315,6 +315,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-25** (spec_version 36) — Increased the required E2E suite from three
+  parallel lanes to four while preserving one execution profile, deterministic
+  file coverage, timeout policy, and single-lane cache-write ownership.
 - **2026-08-22** (spec_version 34) — Split deterministic External Channel
   collection into natural scenario files for file-level required-lane balancing
   and added historical per-test timing projection for the first post-split plan.
