@@ -38,8 +38,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-08-24
-spec_version: 27
+last_verified_at: 2026-08-25
+spec_version: 28
 ---
 
 # Agent Runtime Persistence
@@ -175,8 +175,10 @@ appears in the chat Runtime/Workspace panel and Agent Runtime settings, polls at
 interval only while its owning surface is visible or mounted, and is invalidated after lifecycle
 mutations. The browser renders server-retained samples with unavailable observations and missed
 intervals as true gaps; it does not accumulate, interpolate, or authorize history locally. Metrics
-are informational and cannot affect authorization, lifecycle, configuration, scheduling, billing,
-or destructive operations.
+with a current percentage pair a 0–100 usage bar with a labeled locally scaled area trend. The
+trend has no persistent or active point markers, tooltip, or touch/hover visual state. Metrics are
+informational and cannot affect authorization, lifecycle, configuration, scheduling, billing, or
+destructive operations.
 
 ## Workspace Path Contract
 

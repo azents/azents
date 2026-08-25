@@ -1,6 +1,6 @@
 "use client";
 
-import { LineChart } from "@mantine/charts";
+import { AreaChart } from "@mantine/charts";
 import {
   Alert,
   Badge,
@@ -8,6 +8,7 @@ import {
   Group,
   Loader,
   Paper,
+  Progress,
   rem,
   SimpleGrid,
   Stack,
@@ -40,9 +41,34 @@ interface MetricDefinition {
   icon: React.ReactNode;
 }
 
-const SPARKLINE_SERIES: LineChart.Series[] = [
+const SPARKLINE_SERIES: AreaChart.Series[] = [
   { name: "value", color: "blue.6" },
 ];
+
+interface ReadableTrendScale {
+  domain: [number, number];
+  ticks: [number, number, number];
+}
+
+function buildReadableTrendScale(
+  data: ReturnType<typeof buildRuntimeMetricChartData>,
+): ReadableTrendScale {
+  const values = data.flatMap((datum) =>
+    datum.value === null ? [] : [datum.value],
+  );
+  const minimum = Math.min(...values);
+  const maximum = Math.max(...values);
+  const padding = Math.max((maximum - minimum) * 0.25, 2);
+  const lower = Math.floor(minimum - padding);
+  const upper = Math.ceil(maximum + padding);
+  const boundedLower = minimum >= 0 ? Math.max(0, lower) : lower;
+  const boundedUpper = maximum <= 100 ? Math.min(100, upper) : upper;
+  const midpoint = boundedLower + (boundedUpper - boundedLower) / 2;
+  return {
+    domain: [boundedLower, boundedUpper],
+    ticks: [boundedLower, midpoint, boundedUpper],
+  };
+}
 
 function statusColor(
   state: RuntimeSystemMetricState | RuntimeSystemMetricsSummary,
@@ -93,51 +119,92 @@ function formatMetricValue(
     : formatBytes(value, locale);
 }
 
-function MetricSparkline({
+function MetricTrend({
+  currentPercentage,
   metrics,
   metric,
 }: {
+  currentPercentage: number | null;
   metrics: AgentRuntimeSystemMetricsResponse;
   metric: RuntimeSystemMetricKey;
 }): React.ReactElement {
   const t = useTranslations("runtimeMetrics");
+  const format = useFormatter();
   const data = buildRuntimeMetricChartData(metrics.samples, metric);
+  let trend: React.ReactElement;
   if (data.length === 0) {
-    return (
-      <Center h={rem(36)}>
+    trend = (
+      <Center h={rem(88)}>
         <Text c="dimmed" size="xs">
           {t("emptyTrend")}
         </Text>
       </Center>
     );
+  } else {
+    const readableScale = buildReadableTrendScale(data);
+    trend = (
+      <AreaChart
+        aria-label={t("trendLabel")}
+        areaChartProps={{
+          margin: { top: 10, right: 4, bottom: 10, left: 4 },
+        }}
+        areaProps={{
+          activeDot: false,
+          dot: false,
+          isAnimationActive: false,
+        }}
+        connectNulls={false}
+        curveType="linear"
+        data={data}
+        dataKey="measuredAt"
+        fillOpacity={0.2}
+        gridAxis="x"
+        gridProps={{ horizontal: true, vertical: false }}
+        h={rem(88)}
+        role="img"
+        series={SPARKLINE_SERIES}
+        strokeWidth={2}
+        style={{ pointerEvents: "none" }}
+        w="100%"
+        withDots={false}
+        withGradient
+        withTooltip={false}
+        withXAxis={false}
+        withYAxis
+        xAxisProps={{
+          domain: ["dataMin", "dataMax"],
+          padding: { left: 2, right: 2 },
+          type: "number",
+        }}
+        yAxisProps={{
+          allowDataOverflow: true,
+          axisLine: false,
+          domain: readableScale.domain,
+          interval: 0,
+          tickFormatter: (value: number) =>
+            format.number(value, { maximumFractionDigits: 1 }),
+          tickLine: false,
+          tickMargin: 6,
+          ticks: readableScale.ticks,
+          width: 40,
+        }}
+      />
+    );
   }
+
   return (
-    <LineChart
-      aria-label={t("trendLabel")}
-      connectNulls={false}
-      curveType="linear"
-      data={data}
-      dataKey="measuredAt"
-      dotProps={{ r: 1.5, strokeWidth: 0 }}
-      gridAxis="none"
-      h={rem(36)}
-      lineChartProps={{
-        margin: { top: 2, right: 2, bottom: 2, left: 2 },
-      }}
-      role="img"
-      series={SPARKLINE_SERIES}
-      strokeWidth={2}
-      w="100%"
-      withTooltip={false}
-      withXAxis={false}
-      withYAxis={false}
-      xAxisProps={{
-        domain: ["dataMin", "dataMax"],
-        padding: { left: 2, right: 2 },
-        type: "number",
-      }}
-      yAxisProps={{ padding: { top: 2, bottom: 2 } }}
-    />
+    <Stack gap="xs">
+      {currentPercentage === null ? null : (
+        <Progress
+          aria-label={`${t(`metrics.${metric}`)} ${currentPercentage}%`}
+          color="blue"
+          radius="xl"
+          size="sm"
+          value={currentPercentage}
+        />
+      )}
+      {trend}
+    </Stack>
   );
 }
 
@@ -227,7 +294,11 @@ function MetricPanel({
             {hasValue && total ? t("usedOfTotal", { used: value, total }) : " "}
           </Text>
         </Stack>
-        <MetricSparkline metric={definition.key} metrics={metrics} />
+        <MetricTrend
+          currentPercentage={current.percentage}
+          metric={definition.key}
+          metrics={metrics}
+        />
       </Stack>
     </Paper>
   );
