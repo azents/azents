@@ -1,7 +1,7 @@
 {
   "change_checkpoint": {
-    "checked_at": "2026-08-25T22:12:22Z",
-    "checked_through_commit": "2b4b1d8ae4fa3861b96f7034be39a439db046160"
+    "checked_at": "2026-08-26T22:13:38Z",
+    "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
   },
   "ranges": {
     ".claude/**::bucket-1-of-32": {
@@ -715,74 +715,74 @@
       "checked_through_commit": "2b4b1d8ae4fa3861b96f7034be39a439db046160"
     },
     "python/libs/azents-public-client/**::bucket-8-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "3a0a3843621743f95081d72c1c4c8fd31a7d3eb21c76e72fad9395ff6722e2c4",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "489ecabb3078e8e0db82391d9a66990caa25f329eed2e2f202cca8d400393ab0",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-public-client/**::bucket-9-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "3d6f94288c22c31364f23a9aa077f515790d7d5b332a8a13986ac6d11d57c3d8",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "9ef3ef878175c75788f868f899c4aeec353f89f53cdfd11eabd738c3d62c1ba2",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-1-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "6a46a5ce35c878418be2cd284e3b963a2f2aad35448bf3bc6fc67bdda75af5ee",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "c2cf98bcf489eb9a409c4d368dc7e32f85b794ab436bafa5a2e507356783d6a6",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-10-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "b5f66c0ac2d5553283cf3aa2fba0f08188e4635cf7b50f3e68bbcba077916d11",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "7070deb446fad64b7dc8efdd2aadfb44eeb4045d749920c6135b84904a0e125d",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-12-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "80f8fa46fe0080e8b2c4230d52d9310c802f4ac52617780740fdd72fd3c4c651",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "82f80c86af2be510ed9a8728d99b12b69b941e94c0afea475416e3867adf5b79",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-13-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "2f25e825cc550aa2b638e6229ab0d2f596a0e7c11744086e5dacf1a88b680018",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "7e1bd42297018990e7c9f6be48f277f6c1ab0114ee5f5a0faebf3705bc75436e",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-16-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "d9e82f26c68af6a7e3cab732237e7f6214911e964ddad56cbed0cc91ddb7f4f1",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "ee9d2aa2bb7c3bf8674ea9c31ed71e9cb3f7caa7fa2774346bc3bbeb1f97c66a",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-17-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "28ecefd00dbfd81b2790280424538e6d891d660b05a77a34e71dc101a84a818f",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "fc3ad5af973f6cec1e8037ce81aa869319b2108c738c9fd2ffc0666dab81e299",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-18-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "b68446d76d0a149aae624f82d125d57bc90372a60e0aa8b16da3baaaaed16634",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "f94ce0efd68e4a59566fe4f95623edab7e8812435d7b7a7d616f4a1672c5bd4b",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-19-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "7284810c77da23518817a462de141e63f89b475eccdceca9f02c42a26b7d6cfa",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "21115eb65e586b56cbd62f6d30ec915315b8ccfe7c8788aff4c0349fb33dc7fe",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-2-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "f9104722033d528c96f4a8e3252df199db413efca9745fc80f31474eefcb8ed4",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "1e0ed5faa3191b1af6ad5775b6dbbf9d3e7aaccaa78203a3ed907d4ae15f0ceb",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-20-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "582c8ba165b6d08e45dbbb749c131c79c810e6f7edc01954bd0b4c1b63627b69",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "01f1cacf9c0cb363fd2b231690475ae837fd8ffa64828ec798b694a5c68e65ca",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-22-of-32": {
-      "checked_at": "2026-08-18T16:22:30Z",
-      "checked_scope_revision": "38243b36e14065d61bccc0fa49ddab9259fbe45dd37e0cfdf38d5639ada1da7a",
-      "checked_through_commit": "69edb3678cee21e6bb021d8304860287cd484c40"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "09fce1f83782e92a2a626564948648e797a03e533320dee932f58bcbd59dc4b7",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-23-of-32": {
-      "checked_at": "2026-08-18T16:34:52Z",
-      "checked_scope_revision": "877db84bede53f0a526f61424174a024f0765cd61f438217e71987fcbcfd805a",
-      "checked_through_commit": "8ac04db42529187dac9f3d32d4b0f209cfda7ba5"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "4af56045eb53e15451cd37d32128a1c8a5b825fdf4353ec59c69214b5b37f6f7",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-24-of-32": {
       "checked_at": "2026-08-24T22:10:02Z",
@@ -790,29 +790,29 @@
       "checked_through_commit": "bd13ca9777de247db52579f92fcbb3b73ead5892"
     },
     "python/libs/azents-runtime-control/**::bucket-25-of-32": {
-      "checked_at": "2026-08-18T16:34:52Z",
-      "checked_scope_revision": "319aa59dbeec30f0c8e09ab897d3c51f44e0e9c6606fd58849c1eeda49efee95",
-      "checked_through_commit": "8ac04db42529187dac9f3d32d4b0f209cfda7ba5"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "3b997d7c597e5ef9771301c8939f5f2b3d30aa1b44b37e7eb256402decdeaaa5",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-27-of-32": {
-      "checked_at": "2026-08-18T16:34:52Z",
-      "checked_scope_revision": "acd1e68b0f89f23007fa65dee3cb43bebce96cba5fe1ec4b9f2c4e45540c35e7",
-      "checked_through_commit": "8ac04db42529187dac9f3d32d4b0f209cfda7ba5"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "133318764d129a7cc02b5ed1d81e2bf6dc3714de5bd137c3b49444f97debbcc4",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-29-of-32": {
-      "checked_at": "2026-08-18T16:34:52Z",
-      "checked_scope_revision": "c3e2b973817f546b122f28c862d4a4801c2117b305889ee85405f47737e3219b",
-      "checked_through_commit": "8ac04db42529187dac9f3d32d4b0f209cfda7ba5"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "b950585396c7957d03c8846a4f1c3b8e20a66386be2c89cc355c90f412803287",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-30-of-32": {
-      "checked_at": "2026-08-18T16:34:52Z",
-      "checked_scope_revision": "711f65b19eebdf842c136fa97903ad820531a1eaf5100580dd81215fba80c8b1",
-      "checked_through_commit": "8ac04db42529187dac9f3d32d4b0f209cfda7ba5"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "46ef29809a267c1a61142268ca69acbf8e4d81268c5b00e7f6631e7339e4cb2a",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-31-of-32": {
-      "checked_at": "2026-08-18T16:34:52Z",
-      "checked_scope_revision": "ccadd014a271d281d6ceba2dbd15f61a1d05705c5c7b6d038afad4c1535bd78f",
-      "checked_through_commit": "8ac04db42529187dac9f3d32d4b0f209cfda7ba5"
+      "checked_at": "2026-08-26T22:13:38Z",
+      "checked_scope_revision": "c3e5752af99ad1774b1a3673cdde8093eeb86d2e814ec154a2715bde36de45fc",
+      "checked_through_commit": "cafe115ba6ed1803d43998a059bd38ccf7174dea"
     },
     "python/libs/azents-runtime-control/**::bucket-4-of-32": {
       "checked_at": "2026-08-18T16:34:52Z",
