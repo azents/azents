@@ -32,8 +32,8 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { RuntimeLifecycleStatus } from "@/features/runtime-lifecycle/components/RuntimeLifecycleStatus";
 import { RuntimeSystemMetricsOverview } from "@/features/runtime-metrics/components/RuntimeSystemMetricsOverview";
+import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
 import type { AgentRuntimeSettingsState } from "../containers/useAgentRuntimeSettingsContainer";
 import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
 import type {

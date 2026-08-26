@@ -3,11 +3,11 @@
 /** Workspace panel container hook. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
+import { useRuntimeSystemMetricsContainer } from "@/features/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
 import {
   shouldPollAgentWorkspaceLifecycle,
   shouldPollRuntimeLifecycle,
-} from "@/features/runtime-lifecycle/runtimeLifecycle";
-import { useRuntimeSystemMetricsContainer } from "@/features/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
+} from "@/shared/lib/runtimeLifecycle";
 import { trpc } from "@/trpc/client";
 import {
   mapProjectBrowserManifest,

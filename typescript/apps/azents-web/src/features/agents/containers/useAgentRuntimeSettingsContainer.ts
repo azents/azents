@@ -3,8 +3,8 @@
 /** Capability-aware Agent Runtime settings container. */
 
 import { useCallback, useMemo, useState } from "react";
-import { shouldPollRuntimeLifecycle } from "@/features/runtime-lifecycle/runtimeLifecycle";
 import { useRuntimeSystemMetricsContainer } from "@/features/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
+import { shouldPollRuntimeLifecycle } from "@/shared/lib/runtimeLifecycle";
 import { trpc } from "@/trpc/client";
 import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
 import type {

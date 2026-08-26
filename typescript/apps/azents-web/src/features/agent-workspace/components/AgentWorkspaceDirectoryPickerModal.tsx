@@ -26,7 +26,7 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useState } from "react";
-import { RuntimeLifecycleStatus } from "@/features/runtime-lifecycle/components/RuntimeLifecycleStatus";
+import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,

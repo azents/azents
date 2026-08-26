@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   shouldPollAgentWorkspaceLifecycle,
   shouldPollRuntimeLifecycle,
-} from "@/features/runtime-lifecycle/runtimeLifecycle";
+} from "@/shared/lib/runtimeLifecycle";
 import { trpc } from "@/trpc/client";
 import type {
   ProjectDirectoryPickerEntry,
