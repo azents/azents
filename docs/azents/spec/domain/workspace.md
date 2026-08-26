@@ -105,8 +105,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-25
-spec_version: 74
+last_verified_at: 2026-08-26
+spec_version: 75
 ---
 
 # Workspace & Membership
@@ -238,9 +238,10 @@ direct Runner state, overall availability, one bounded reason code, and desired 
 
 Workspace retains its separate Runtime and access unions only for file-browser layout. Lifecycle
 actions come from the same `AgentRuntimeService` authority used by Runtime Settings. The UI renders
-the server lifecycle and actions; it does not consume a public single-summary projection or
-recompute availability and operation completion from Provider/Runner raw state. Frontend-side
-judgment is limited to API failure and network error.
+one user-impact lifecycle status, separate execution-environment, Runtime-connection, and
+host-control facts, and only actions that the server currently authorizes. It does not consume a
+public single-summary projection or recompute availability and operation completion from
+Provider/Runner raw state. Frontend-side judgment is limited to API failure and network error.
 
 Managed Runtime surfaces also render the server-derived system-metrics overview. One
 Agent-authorized response supplies CPU, memory, disk, Runner-observable scope, freshness/lifecycle
@@ -267,27 +268,30 @@ presentation and expose Start or Restart only when the corresponding server acti
 | capability `removing` | `removing` | `UNAVAILABLE`; Runtime access is revoked while irreversible removal remains pending, with progress and no add/cancel action |
 | stopped target and resource | `stopped` | `UNAVAILABLE`; expose Start only when the server action is available |
 | starting, stopping, resetting, or recovering convergence | `transitioning` | `UNAVAILABLE` or `CONNECTING`; show convergence and do not expose `READY` early |
-| Provider command authority disconnected | `provider_disconnected` | `UNAVAILABLE`; show the direct Provider facts, bounded reason, and only server-authorized recovery actions |
-| desired configuration unavailable or waiting for recreation | `configuration_blocked` | `UNAVAILABLE`; preserve direct Provider/Runner facts and block actions that require current configuration |
+| no ready Runner and Provider command authority disconnected | `provider_disconnected` | `UNAVAILABLE`; explain that host controls are unavailable and show only server-authorized recovery actions |
+| no ready Runner and desired configuration unavailable | `configuration_blocked` | `UNAVAILABLE`; explain the configuration impact and block actions that require a usable desired configuration |
 | Provider resource running without a ready Runner | `runner_unavailable` | `UNAVAILABLE`; show the direct Runner fact, bounded reason, and only server-authorized actions |
 | current-generation Runtime or Provider failure | `failed` | `UNAVAILABLE`; show the bounded lifecycle reason and only server-authorized actions |
-| running resource and ready current Runner | `ready` | `READY` only when the current Runner-reported Agent Workspace path and exact Runner operation target are also valid |
+| ready current-generation Runner serving an applied configuration | `ready` | `READY` when the current Runner-reported Agent Workspace path and exact applied operation target are valid, including while Provider host control is disconnected or a future desired selection is blocked or waiting for recreation |
 
 Runtime-dependent file, browser, Project, directory-validation, and worktree operations resolve one
 shared exact operation target. The resolver may request start/wait when the explicit operation
-allows it, then requires a ready desired current configuration state, an applied state with the same
-configuration sequence, the exact configuration digest, desired and Runner generations,
-Provider/Runner authority, and a valid current Runner-reported Agent Workspace path. Missing or
-invalid Runner evidence produces `RUNNER_WORKSPACE_PATH_MISSING` or
-`RUNNER_WORKSPACE_PATH_INVALID`. A transient Provider or Runner disconnect waits within the
-caller's bounded timeout while preserving the initially selected configuration sequence and
-desired generation; supersession, timeout, or authority drift fails closed, and the server does not
-invent a fallback path. The read-only Workspace summary itself remains non-starting.
+allows it; that host transition requires a usable desired configuration and Provider authority.
+For an already-ready Runner, the target instead freezes the applied configuration sequence,
+digest, and target generation plus the Runner generation and current Runner-reported Agent
+Workspace path. Provider disconnection, Provider resource observation mismatch, or an unapplied
+future desired configuration does not fence that current target. Missing or invalid Runner
+evidence produces `RUNNER_WORKSPACE_PATH_MISSING` or `RUNNER_WORKSPACE_PATH_INVALID`. Runner loss,
+terminal deletion, capability-version change, serving-authority supersession, timeout, or authority
+drift fails closed, and the server does not invent a fallback path. The read-only Workspace summary
+itself remains non-starting.
 
-The Runtime response includes desired and applied current configuration-state status, sequence,
-target-generation, digest, source, and acknowledgement evidence without a process-containment
-projection. The UI renders the status supplied by the server and does not reconstruct physical
-security claims from raw Provider/Runner states.
+The Runtime response includes desired and applied current configuration-state status and evidence
+without a process-containment projection. The UI keeps selected and applied Runtime Profile,
+execution Profile, and effective network values visible for verification, while omitting sequence,
+target-generation, digest, raw reason code, missing-capability identifiers, and acknowledgement
+details from the normal product surface. It renders the status supplied by the server and does not
+reconstruct physical security claims from raw Provider/Runner states.
 
 Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding and character-count truncation metadata; their byte size does not reject an otherwise bounded character preview. Binary preview candidates remain byte-size bounded, return no text body, and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, stat the regular file, and consume one verified Runtime transfer object in the API response adapter. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
 
@@ -350,10 +354,11 @@ Deletion never selects a fallback Workspace default, Provider default, or other 
 managed Agents remain managed but unconfigured and expose `profile_required` until an authorized
 Agent manager explicitly selects a replacement. Already running Runtimes keep their current
 Provider binding and applied configuration, and Agent Workspace storage is neither reset nor
-deleted. Profile-dependent create, start, restart, reset, recreate, and Runner operations remain
-unavailable; stop, observation, and terminal Runtime removal remain available where their normal
-lifecycle authority permits them. Selecting and applying a replacement is the only recovery path
-and preserves Workspace storage.
+deleted. Profile-dependent create, start, restart, reset, and recreate operations remain
+unavailable. A ready current-generation Runner may continue ordinary operations from the retained
+applied configuration; stop, observation, and terminal Runtime removal remain available where
+their normal lifecycle authority permits them. Selecting and applying a replacement remains the
+recovery path for future host lifecycle work and preserves Workspace storage.
 
 Parent Profile changes enqueue authoritative current desired-configuration-state reconciliation
 for affected Agents. Kubernetes CIDR-only and proxy-owned policy/artifact changes may be adopted in
@@ -796,6 +801,11 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-26 (spec_version=75)** — Kept Agent Workspace and Project access ready from
+  current Runner/applied evidence when Provider host control disconnects or a future
+  selected configuration cannot yet apply, separated user-facing host and connection
+  facts, hid implementation-only diagnostics, and rendered only currently authorized
+  lifecycle actions.
 - **2026-08-25 (spec_version=74)** — Replaced the removed public Runtime summary
   contract with the shared server-authoritative lifecycle presentation in Workspace,
   aligned Workspace and directory-picker polling and action gates with that authority,

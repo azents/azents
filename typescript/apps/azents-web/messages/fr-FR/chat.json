@@ -115,30 +115,17 @@
     "metricsTab": "Métriques",
     "settingsTab": "Paramètres",
     "settingsTitle": "Paramètres du runtime",
-    "settingsSubtitle": "Démarrez, arrêtez et vérifiez l’état de ce runtime.",
+    "settingsSubtitle": "Consultez l’état, les paramètres et les contrôles actuellement disponibles pour ce Runtime.",
     "configurationTitle": "État du runtime",
     "configurationLoading": "Chargement de la configuration du runtime…",
-    "configurationTechnicalDetails": "Détails techniques",
-    "configurationCurrent": "Configuration actuelle",
-    "configurationDesired": "Nouvelle configuration",
-    "configurationApplied": "Configuration actuellement appliquée",
-    "configurationNoDesired": "Aucune configuration souhaitée n’a été résolue.",
-    "configurationNoApplied": "Aucune configuration n’a été appliquée à un runtime.",
-    "configurationEvidence": {
-      "sequence": "Séquence de configuration",
-      "profile": "Profil du runtime",
-      "infrastructure": "Infrastructure",
-      "generation": "Génération",
-      "digest": "Empreinte"
-    },
+    "configurationDesired": "Paramètres sélectionnés",
+    "configurationApplied": "Paramètres actuellement appliqués",
     "configurationNetworkTitle": "Réseau effectif",
     "configurationNetworkMode": "Mode : {mode}",
     "configurationNetworkProtocol": "Portée des protocoles externes : {protocol}",
     "configurationNetworkDomains": "Autorité de domaine : {mode}",
     "configurationNetworkHttpsInspected": "Le trafic HTTPS est inspecté avec la configuration de confiance du Runtime.",
     "configurationNetworkHttpsNotInspected": "Le trafic HTTPS n’est pas inspecté par le proxy Runtime géré.",
-    "configurationNetworkRecreationRequired": "Recréez le Runtime pour appliquer cette configuration réseau.",
-    "configurationNetworkBlocked": "Cette configuration réseau est actuellement bloquée.",
     "configurationNetworkModes": {
       "direct": "Réseau direct",
       "proxy_required": "Proxy HTTP inspecté obligatoire",
@@ -156,28 +143,28 @@
     "configurationStatus": {
       "profile_required": {
         "label": "Configuration requise",
-        "description": "Choisissez un environnement avant d’utiliser le runtime."
+        "description": "Choisissez un Runtime Profile avant de démarrer le Runtime."
       },
       "configuration_blocked": {
-        "label": "Vérification requise",
-        "description": "La configuration du runtime sélectionnée n’est pas disponible actuellement. Vérifiez les paramètres."
+        "label": "Attention requise",
+        "description": "Les paramètres sélectionnés ne peuvent pas être appliqués. Vérifiez les paramètres du Runtime et choisissez une option disponible."
       },
       "configured_not_created": {
         "label": "Prêt à démarrer",
-        "description": "La configuration est terminée. Elle sera appliquée au démarrage du runtime."
+        "description": "Les paramètres sélectionnés seront appliqués au démarrage du Runtime."
       },
       "waiting_for_recreation": {
-        "label": "Mise à jour requise",
-        "description": "Recréez le runtime pour appliquer la nouvelle configuration."
+        "label": "Redémarrage requis",
+        "description": "Le Runtime utilise encore les paramètres actuellement appliqués. Redémarrez-le pour appliquer les paramètres sélectionnés."
       },
       "applied": {
-        "label": "Opérationnel",
-        "description": "Le runtime utilise la dernière configuration et est prêt à l’emploi."
+        "label": "Appliqués",
+        "description": "Le Runtime utilise les paramètres sélectionnés."
       }
     },
-    "stopRuntimeDescription": "Arrêtez le pod du runtime en cours sans supprimer les fichiers de l’espace de travail.",
+    "stopRuntimeDescription": "Arrêtez le Runtime sans supprimer les fichiers Agent Workspace.",
     "runtimeNotRunningHint": "Le runtime n’est pas en cours d’exécution, il n’y a donc rien à arrêter.",
-    "runtimeControlUnavailableHint": "Le contrôle du runtime est actuellement indisponible.",
+    "runtimeControlUnavailableHint": "Aucune action sur l’hôte n’est actuellement disponible.",
     "noSession": "Démarrez d'abord l'agent workspace.",
     "loadingWorkspace": "Chargement de l'agent workspace…",
     "inactiveTitle": "Le runtime n'est pas en cours d'exécution",
@@ -185,8 +172,8 @@
     "restoreFailedTitle": "La restauration du runtime a échoué",
     "restoreFailedDescription": "Impossible de restaurer l'état précédent de l'Agent Workspace.",
     "runtimeFailedTitle": "Le runtime a échoué",
-    "runtimeFailedDescription": "Le provider runtime a signalé un échec.",
-    "controlUnavailableTitle": "La connexion runtime control est indisponible",
+    "runtimeFailedDescription": "L’environnement d’exécution géré a signalé un problème.",
+    "controlUnavailableTitle": "Connexion au Runtime indisponible",
     "retryRestore": "Réessayer la restauration",
     "cancel": "Annuler",
     "browserPath": "Chemin",
@@ -239,7 +226,7 @@
     "resetRuntimeConfirm": "Cette action supprimera les fichiers de l'agent workspace et l'état runtime conservé, puis démarrera un runtime vide. Elle est irréversible.",
     "restartRuntime": "Redémarrer le Runtime",
     "restartConfirmTitle": "Redémarrer le Runtime ?",
-    "restartConfirmDescription": "Le Runtime sera temporairement indisponible pendant le remplacement de sa ressource d’exécution et le redémarrage normal.",
+    "restartConfirmDescription": "Le Runtime sera temporairement indisponible pendant son redémarrage.",
     "restartPreservationNotice": "Les fichiers Agent Workspace et le stockage Runtime conservé sont préservés.",
     "confirmRestart": "Redémarrer le Runtime",
     "startRuntime": "Démarrer le runtime",
@@ -289,15 +276,6 @@
       "unavailable": "Indisponible",
       "error": "Erreur"
     },
-    "configurationReasons": {
-      "sourceMismatch": "Les références enregistrées ne forment pas un chemin fournisseur unique et exact.",
-      "profileDisabled": "Un profil d’exécution ou un profil fournisseur sélectionné est désactivé.",
-      "providerUnavailable": "Le fournisseur d’exécution exact est désactivé, déconnecté ou indisponible pour cet espace de travail.",
-      "capabilityUnavailable": "Les capacités actuelles du fournisseur ne permettent pas de satisfaire le profil sélectionné.",
-      "profileInvalid": "Le document du profil sélectionné est invalide.",
-      "unknown": "La configuration d’exécution souhaitée n’a pas pu être résolue."
-    },
-    "configurationMissingCapabilities": "Capacités manquantes : {capabilities}",
     "runtimeFreeTitle": "Aucun environnement géré",
     "runtimeFreeDescription": "Cet agent peut continuer à utiliser le modèle et les capacités distantes, mais les fichiers et projets de l’espace de travail nécessitent un environnement géré.",
     "addRuntime": "Ajouter un environnement",
@@ -310,7 +288,13 @@
       "deleting_runtime": "Suppression physique",
       "finalizing": "Finalisation",
       "completed": "Suppression terminée"
-    }
+    },
+    "configurationConfiguredValues": "Vérifier les paramètres",
+    "configurationProfile": "Runtime Profile",
+    "configurationExecutionProfile": "Infrastructure Profile",
+    "configurationValueUnavailable": "Non sélectionné",
+    "resettingRuntime": "Réinitialisation du Runtime…",
+    "recoveringRuntime": "Récupération du Runtime…"
   },
   "toolCall": {
     "preparing": "Rédaction de la commande...",

@@ -49,8 +49,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_profiles.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-08-25
-spec_version: 68
+last_verified_at: 2026-08-26
+spec_version: 69
 ---
 
 # Agent Runtime Control
@@ -217,11 +217,13 @@ The presentation contains:
 - one bounded safe reason code or `null`; and
 - desired generation as the freshness identity.
 
-Presentation precedence is terminal removal, current-generation or Provider
-failure, blocked desired configuration, Provider disconnection that blocks
-convergence, desired/observed convergence, Provider-running Runner unavailability,
-then ready or stopped stability. Higher-precedence availability never rewrites the
-direct Provider or Runner facts.
+Presentation precedence is terminal removal, a stopped desired target, a ready
+current-generation Runner, current-generation failure, blocked desired configuration,
+Provider disconnection that blocks convergence, desired/observed convergence, and
+Runner unavailability. A ready Runner therefore remains available when Provider host
+control disconnects or a future desired configuration is blocked or waiting for
+recreation. Higher-precedence availability never rewrites the direct Provider or
+Runner facts.
 
 The Agent Runtime response and Agent Workspace bootstrap response expose the same
 lifecycle presentation composed by `AgentRuntimeService`. Workspace keeps its
@@ -229,12 +231,16 @@ separate Runtime/access union only for file-browser layout and obtains lifecycle
 actions from the same server authority. The public single-summary projection is not
 part of the current API.
 
-Runtime Settings and Workspace render the shared target, convergence, Provider,
-Runner, configuration, availability, and bounded reason. They poll while
-convergence is non-stable, permanent removal is active, or configuration is waiting
-for recreation. Frontend code may handle API failure and network failure locally,
-but it must not recompute Runtime availability or operation completion from raw
-Provider/Runner fields.
+Runtime Settings and Workspace render one user-impact status plus separate execution
+environment, Runtime connection, and host-control facts. Selected and applied Runtime
+Profile, execution Profile, and network values remain available for verification, while
+configuration sequence, generation, digest, raw reason code, and capability identifiers
+remain outside the normal product surface. The UI renders only lifecycle actions that
+the server currently authorizes and suppresses duplicate actions during an in-flight
+transition. It polls while convergence is non-stable, permanent removal is active, or
+configuration is waiting for recreation. Frontend code may handle API failure and
+network failure locally, but it must not recompute Runtime availability or operation
+completion from raw Provider/Runner fields.
 
 Restart requires explicit confirmation that Agent Workspace storage is preserved
 and the Runtime will be temporarily unavailable. Reset uses a distinct destructive
@@ -641,15 +647,16 @@ reports a bounded reason. Stop and terminal delete remain available where needed
 authority or complete decommissioning and may use retained applied evidence for cleanup.
 
 Every explicit Runtime-backed tool or TurnAction resolves one bounded immutable operation target.
-The resolver may request start when that operation permits it, then requires the exact desired and
-applied configuration sequence and digest, desired generation, accepted Runner generation, Provider
-connection and observation, qualified durable Runner readiness, and current Runner-reported Agent
-Workspace path. Protocol `BUSY` reports retain availability by normalizing to durable `READY`.
-Callers use the prompt-selected sequence/digest/generation when available. A transient Provider or
-Runner disconnection keeps the initially selected sequence and desired generation and waits within
-the caller's bounded operation timeout. Dispatch and operation qualification still require current
-Provider and Runner authority. Supersession, current-generation failure, timeout, cancellation, or
-authority drift fails closed rather than retargeting the operation to another Runtime incarnation.
+The resolver may request start when that operation permits it. Starting or replacing compute still
+requires a ready desired configuration and Provider host authority. Once a current-generation
+Runner is ready, operation qualification instead uses the applied sequence, digest, and target
+generation that the Runner is serving, its positive Runner generation, and its current reported
+Agent Workspace path. Provider connection/resource observation and a pending, blocked, or
+unavailable future desired selection do not fence that existing data-plane target. Protocol `BUSY`
+reports retain availability by normalizing to durable `READY`. Callers preserve the exact selected
+applied or desired authority as appropriate. Runner loss, terminal deletion, capability-version
+change, supersession of the serving applied generation, timeout, cancellation, or authority drift
+fails closed rather than retargeting the operation to another Runtime incarnation.
 
 Desired/applied mismatch never authorizes implicit recreation. Kubernetes CIDR-only or proxy-owned
 policy/artifact changes may adopt in place through exact aggregate Provider and ordinary Runner
@@ -671,8 +678,9 @@ Owner-only exact-version Workspace Runtime Profile deletion clears matching Work
 Agent selections without fallback. Each affected managed Runtime receives a higher-sequence
 `unconfigured/runtime_profile_required` desired slot while its applied slot, Provider binding,
 running workload, and Agent Workspace remain intact. Profile-dependent lifecycle and Runner work
-remain unavailable until explicit replacement selection. Stop, observation where applicable, and
-terminal removal retain their ordinary authority.
+that require a new incarnation remain unavailable until explicit replacement selection. A ready
+Runner serving the retained applied slot remains usable for ordinary Runtime operations. Stop,
+observation where applicable, and terminal removal retain their ordinary Provider authority.
 
 ## Delivery
 
@@ -729,6 +737,11 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-26** (spec_version 69) — Made current-generation ready Runner evidence the
+  data-plane availability authority independently of Provider host-control connectivity
+  and future desired-configuration status, retained Provider authority for lifecycle
+  mutation, and simplified Runtime UI to user-impact status, actionable facts, selected
+  versus applied settings, and server-authorized actions.
 - **2026-08-25** (spec_version 68) — Replaced the public single-summary Runtime
   projection with one server-computed lifecycle presentation shared by Runtime and
   Workspace APIs, added authoritative UI polling and Restart/Reset confirmation

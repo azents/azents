@@ -1,6 +1,7 @@
 """Agent Runtime explicit-operation target resolver tests."""
 
 import asyncio
+import dataclasses
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -30,6 +31,7 @@ from azents.services.runtime_storage_error import RuntimeStorageError
 from .service import AgentRuntimeService
 
 _DIGEST = "a" * 64
+_NEXT_DIGEST = "b" * 64
 
 
 def _runtime(
@@ -81,6 +83,8 @@ def _revision(
     *,
     revision_id: str = "revision-2",
     desired_generation: int = 2,
+    sequence: int | None = None,
+    digest: str = _DIGEST,
     qualified: bool = True,
 ) -> RuntimeConfigurationSlot:
     """Build one desired configuration slot with optional physical evidence."""
@@ -100,14 +104,14 @@ def _revision(
         resolved_configuration={},
     )
     return RuntimeConfigurationSlot(
-        sequence=desired_generation,
+        sequence=desired_generation if sequence is None else sequence,
         status=RuntimeConfigurationStateStatus.READY,
         target_generation=desired_generation,
-        digest=_DIGEST,
+        digest=digest,
         document=document,
         reason_code=None,
-        provider_reported_digest=_DIGEST if qualified else None,
-        runner_reported_digest=_DIGEST if qualified else None,
+        provider_reported_digest=digest if qualified else None,
+        runner_reported_digest=digest if qualified else None,
         provider_acknowledged_at=now if qualified else None,
         runner_observed_at=now if qualified else None,
     )
@@ -117,17 +121,19 @@ def _resolution(
     *,
     runtime: AgentRuntime | None = None,
     revision: RuntimeConfigurationSlot | None = None,
+    applied_revision: RuntimeConfigurationSlot | None = None,
     applied: bool = True,
 ) -> RuntimeProfileResolutionResult:
     """Combine one Runtime and desired/applied revision snapshot."""
     runtime = runtime or _runtime()
     revision = revision or _revision(desired_generation=runtime.desired_generation)
+    applied_source = applied_revision or revision
     applied_slot = (
         RuntimeConfigurationAppliedSlot(
-            sequence=revision.sequence,
-            target_generation=revision.target_generation,
-            digest=revision.digest or _DIGEST,
-            document=revision.document
+            sequence=applied_source.sequence,
+            target_generation=applied_source.target_generation,
+            digest=applied_source.digest or _DIGEST,
+            document=applied_source.document
             or RuntimeConfigurationDocument(
                 schema_version=1,
                 source_trace={},
@@ -371,6 +377,8 @@ async def test_resolve_operation_target_rejects_superseded_revision() -> None:
 async def test_resolve_operation_target_rejects_current_generation_failure() -> None:
     """Current lifecycle failure terminates the explicit wait immediately."""
     failed_runtime = _runtime(
+        runner_state=RuntimeRunnerState.DISCONNECTED,
+        workspace_path=None,
         failure_generation=2,
         failure_code="CONTAINMENT_UNAVAILABLE",
         failure_message="Containment backend is unavailable.",
@@ -381,32 +389,98 @@ async def test_resolve_operation_target_rejects_current_generation_failure() -> 
         await service.resolve_operation_target("agent-1")
 
 
-async def test_resolve_operation_target_waits_for_provider_reconnection() -> None:
-    """A transient Provider gap can recover without changing target identity."""
+async def test_resolve_operation_target_uses_ready_runner_without_provider() -> None:
+    """Provider control loss does not block an already-ready Runner."""
     disconnected = _runtime(
         provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED
     )
+    service = _OperationTargetService([_resolution(runtime=disconnected)])
+
+    target = await service.resolve_operation_target(
+        "agent-1",
+        wait_timeout_seconds=0.0,
+    )
+
+    assert target.desired_generation == 2
+    assert target.configuration_sequence == 2
+    assert service.ensure_runtime_calls == 1
+
+
+async def test_resolve_operation_target_uses_current_applied_configuration() -> None:
+    """Selected settings do not fence a ready Runner using applied settings."""
+    runtime = _runtime(
+        provider_observed_state=RuntimeProviderObservedState.UNKNOWN,
+        provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+    )
+    applied_revision = _revision(
+        desired_generation=2,
+        sequence=2,
+        digest=_DIGEST,
+    )
+    desired_revision = _revision(
+        desired_generation=2,
+        sequence=3,
+        digest=_NEXT_DIGEST,
+        qualified=False,
+    )
     service = _OperationTargetService(
         [
-            _resolution(runtime=disconnected),
-            _resolution(),
+            _resolution(
+                runtime=runtime,
+                revision=desired_revision,
+                applied_revision=applied_revision,
+            )
         ]
     )
 
     target = await service.resolve_operation_target(
         "agent-1",
-        wait_timeout_seconds=1.0,
-        poll_interval_seconds=0.0,
+        expected_authority=RuntimeOperationAuthority(
+            configuration_sequence=2,
+            configuration_digest=_DIGEST,
+            desired_generation=2,
+        ),
+        wait_timeout_seconds=0.0,
     )
 
-    assert target.desired_generation == 2
     assert target.configuration_sequence == 2
+    assert target.configuration_digest == _DIGEST
+
+
+async def test_resolve_operation_target_uses_applied_when_selected_is_blocked() -> None:
+    """A blocked future selection does not fence the connected current Runtime."""
+    applied_revision = _revision(sequence=2, digest=_DIGEST)
+    desired_revision = dataclasses.replace(
+        _revision(sequence=3, digest=_NEXT_DIGEST, qualified=False),
+        status=RuntimeConfigurationStateStatus.BLOCKED,
+        digest=None,
+        document=None,
+        reason_code="provider_disabled",
+    )
+    service = _OperationTargetService(
+        [
+            _resolution(
+                revision=desired_revision,
+                applied_revision=applied_revision,
+            )
+        ]
+    )
+
+    target = await service.resolve_operation_target(
+        "agent-1",
+        wait_timeout_seconds=0.0,
+    )
+
+    assert target.configuration_sequence == 2
+    assert target.configuration_digest == _DIGEST
 
 
 async def test_resolve_operation_target_reports_provider_timeout() -> None:
-    """A Provider that stays disconnected fails after the bounded wait."""
+    """A disconnected Provider remains a useful timeout diagnostic before readiness."""
     disconnected = _runtime(
-        provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED
+        provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+        runner_state=RuntimeRunnerState.STARTING,
+        workspace_path=None,
     )
     service = _OperationTargetService([_resolution(runtime=disconnected)])
 
@@ -418,26 +492,21 @@ async def test_resolve_operation_target_reports_provider_timeout() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "runtime",
-    [
-        _runtime(provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED),
-        _runtime(
-            failure_generation=2,
-            failure_code="CONTAINMENT_UNAVAILABLE",
-        ),
-    ],
-)
-def test_qualified_operation_target_rejects_nonoperational_authority(
-    runtime: AgentRuntime,
-) -> None:
-    """Shared qualification keeps API availability aligned with resolver gates."""
+def test_qualified_operation_target_accepts_ready_runner_with_host_failure() -> None:
+    """Runner readiness remains the current data-plane usability criterion."""
+    runtime = _runtime(
+        provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+        provider_observed_state=RuntimeProviderObservedState.FAILED,
+        failure_generation=2,
+        failure_code="CONTAINMENT_UNAVAILABLE",
+    )
+
     assert (
         AgentRuntimeService._qualified_operation_target(
             _resolution(runtime=runtime),
             runtime_capability_version=4,
         )
-        is None
+        is not None
     )
 
 

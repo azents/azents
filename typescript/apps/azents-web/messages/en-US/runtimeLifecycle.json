@@ -1,90 +1,69 @@
 {
-  "title": "Runtime lifecycle",
-  "description": "Server-authoritative target, convergence, Provider, and Runner status.",
-  "generation": "Lifecycle generation {generation}",
+  "title": "Runtime status",
+  "description": "Check whether the Runtime is available and whether its managed execution environment can be controlled.",
   "fields": {
-    "target": "Target",
-    "convergence": "Convergence",
-    "providerResource": "Provider resource",
-    "providerConnection": "Provider connection",
-    "runner": "Runner",
-    "configuration": "Configuration"
+    "executionEnvironment": "Execution environment",
+    "runtimeConnection": "Runtime connection",
+    "hostControls": "Host controls"
   },
-  "target": {
-    "running": "Running",
-    "stopped": "Stopped"
-  },
-  "convergence": {
-    "stable": "Stable",
+  "status": {
+    "ready": "Ready",
+    "stopped": "Stopped",
     "starting": "Starting",
     "stopping": "Stopping",
     "resetting": "Resetting",
     "recovering": "Recovering",
-    "blocked": "Blocked",
-    "failed": "Failed"
-  },
-  "availability": {
-    "ready": "Ready",
-    "stopped": "Stopped",
-    "transitioning": "Transitioning",
-    "provider_disconnected": "Provider disconnected",
-    "runner_unavailable": "Runner unavailable",
-    "configuration_blocked": "Configuration blocked",
-    "failed": "Failed",
+    "providerDisconnected": "Host controls unavailable",
+    "runnerUnavailable": "Connection unavailable",
+    "configurationBlocked": "Setup required",
+    "failed": "Needs attention",
     "removing": "Removing"
   },
-  "providerConnection": {
-    "connected": "Connected",
-    "disconnected": "Disconnected"
-  },
-  "providerResource": {
-    "unknown": "Unknown",
+  "executionEnvironment": {
+    "unknown": "Status unavailable",
     "stopped": "Stopped",
     "starting": "Starting",
     "running": "Running",
     "stopping": "Stopping",
     "recovering": "Recovering",
     "resetting": "Resetting",
-    "failed": "Failed"
+    "failed": "Needs attention"
   },
-  "runner": {
-    "unknown": "Unknown",
+  "runtimeConnection": {
+    "unknown": "Checking connection",
     "disconnected": "Disconnected",
-    "starting": "Starting",
-    "ready": "Ready",
-    "degraded": "Degraded",
-    "failed": "Failed"
+    "starting": "Connecting",
+    "ready": "Connected",
+    "degraded": "Limited",
+    "failed": "Unavailable"
   },
-  "configuration": {
-    "profile_required": "Profile required",
-    "configuration_blocked": "Blocked",
-    "configured_not_created": "Ready for creation",
-    "waiting_for_recreation": "Recreation required",
-    "applied": "Applied"
+  "hostControls": {
+    "connected": "Available",
+    "disconnected": "Unavailable"
   },
   "reasons": {
-    "runtimeRemovalInProgress": "Permanent Runtime removal is in progress. Lifecycle actions remain unavailable until it completes.",
-    "runtimeFailed": "The current lifecycle generation failed. Review the available recovery actions.",
-    "providerFailed": "The Provider reported that the Runtime resource failed.",
-    "runtimeRecreationRequired": "The desired configuration differs from the applied Runtime. Recreation is required.",
-    "providerDisabled": "The selected Runtime Provider is disabled.",
-    "providerWorkspaceUnavailable": "The selected Runtime Provider is unavailable to this Workspace.",
-    "providerDisconnected": "The Provider connection is unavailable, so the requested transition cannot currently converge.",
-    "providerCapabilityUnavailable": "The Provider does not currently expose the required capabilities.",
-    "providerCapabilityInvalid": "The Provider capability report is invalid.",
-    "profileDocumentInvalid": "The selected Runtime Profile configuration is invalid.",
-    "profileIncompatible": "The selected Runtime Profile is incompatible with the Provider.",
-    "runtimeConfigurationBlocked": "The desired Runtime configuration is blocked.",
-    "runtimeProfileRequired": "Choose an available Runtime Profile before creating Runtime resources.",
-    "runtimeResetting": "The Runtime is resetting. Agent Workspace data is being cleared.",
-    "runtimeRecovering": "The Provider is recovering the Runtime resource.",
-    "runtimeStarting": "The Runtime is converging toward the running target.",
-    "runtimeStopping": "The Runtime is converging toward the stopped target.",
-    "runnerUnknown": "Runner readiness has not been observed yet.",
-    "runnerDisconnected": "The Runtime resource is running, but the Runner connection is unavailable.",
-    "runnerStarting": "The Runtime resource is running while the Runner starts.",
-    "runnerDegraded": "The Runner reported degraded availability.",
-    "runnerFailed": "The Runner reported a failure.",
-    "unknown": "The Runtime is unavailable for a bounded server-reported reason."
+    "runtimeRemovalInProgress": "The Runtime is being permanently removed. Runtime access and controls will remain unavailable until removal finishes.",
+    "runtimeFailed": "The Runtime could not reach the requested state. Use an available recovery action or try again.",
+    "providerFailed": "The managed execution environment reported a failure. Restart it if that action is available.",
+    "runtimeRecreationRequired": "The selected settings differ from the currently applied settings. Restart the Runtime to apply them.",
+    "providerDisabled": "The selected execution environment is unavailable. Choose another Runtime Profile.",
+    "providerWorkspaceUnavailable": "This Workspace cannot currently use the selected execution environment.",
+    "providerDisconnected": "Host controls are temporarily unavailable. The Runtime can still be used while its connection remains active.",
+    "providerCapabilityUnavailable": "The selected execution environment does not support all required settings.",
+    "providerCapabilityInvalid": "The execution environment reported settings that cannot be used.",
+    "profileDocumentInvalid": "The selected Runtime Profile contains invalid settings.",
+    "profileIncompatible": "The selected Runtime Profile cannot be used with this execution environment.",
+    "runtimeConfigurationBlocked": "The selected Runtime settings cannot currently be applied. Review the Runtime Profile.",
+    "runtimeProfileRequired": "Choose an available Runtime Profile before starting the Runtime.",
+    "runtimeResetting": "The Runtime is being reset. Agent Workspace files are being deleted.",
+    "runtimeRecovering": "The execution environment is recovering. The Runtime connection will return when recovery finishes.",
+    "runtimeStarting": "The Runtime is starting. It will become available after the connection is established.",
+    "runtimeStopping": "The Runtime is stopping. Agent Workspace files are preserved.",
+    "runnerUnknown": "Checking the Runtime connection.",
+    "runnerDisconnected": "The execution environment is running, but the Runtime connection is unavailable. Restart it if that action is available.",
+    "runnerStarting": "The execution environment is running while the Runtime connection starts.",
+    "runnerDegraded": "The Runtime connection is limited. Some operations may be unavailable.",
+    "runnerFailed": "The Runtime connection failed. Restart the Runtime if that action is available.",
+    "unknown": "The Runtime is temporarily unavailable. Refresh the status or use an available recovery action."
   }
 }

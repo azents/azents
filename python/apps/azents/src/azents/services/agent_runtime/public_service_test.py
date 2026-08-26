@@ -344,7 +344,7 @@ async def test_existing_runtime_actions_require_available_profile(
     assert result.value.actions.start is False
     assert result.value.actions.restart is False
     assert result.value.actions.reset is False
-    assert result.value.actions.use_runner is False
+    assert result.value.actions.use_runner is True
     assert result.value.actions.stop is True
     assert result.value.actions.observe is True
     fixture.ensure_for_agent.assert_not_awaited()

@@ -10,24 +10,12 @@ import {
   Text,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import type {
-  AgentRuntimeLifecyclePresentationResponse,
-  RuntimeConfigurationStatus,
-} from "@azents/public-client";
+import type { AgentRuntimeLifecyclePresentationResponse } from "@azents/public-client";
 
 interface RuntimeLifecycleStatusProps {
   lifecycle: AgentRuntimeLifecyclePresentationResponse;
-  configurationStatus?: RuntimeConfigurationStatus | null;
   compact?: boolean;
 }
-
-type LifecycleFieldKey =
-  | "target"
-  | "convergence"
-  | "providerResource"
-  | "providerConnection"
-  | "runner"
-  | "configuration";
 
 function availabilityColor(
   availability: AgentRuntimeLifecyclePresentationResponse["availability"],
@@ -49,9 +37,51 @@ function availabilityColor(
   }
 }
 
+function statusKey(
+  lifecycle: AgentRuntimeLifecyclePresentationResponse,
+):
+  | "ready"
+  | "stopped"
+  | "starting"
+  | "stopping"
+  | "resetting"
+  | "recovering"
+  | "providerDisconnected"
+  | "runnerUnavailable"
+  | "configurationBlocked"
+  | "failed"
+  | "removing" {
+  switch (lifecycle.availability) {
+    case "ready":
+      return "ready";
+    case "stopped":
+      return "stopped";
+    case "transitioning":
+      switch (lifecycle.convergence) {
+        case "stopping":
+          return "stopping";
+        case "resetting":
+          return "resetting";
+        case "recovering":
+          return "recovering";
+        default:
+          return "starting";
+      }
+    case "provider_disconnected":
+      return "providerDisconnected";
+    case "runner_unavailable":
+      return "runnerUnavailable";
+    case "configuration_blocked":
+      return "configurationBlocked";
+    case "failed":
+      return "failed";
+    case "removing":
+      return "removing";
+  }
+}
+
 export function RuntimeLifecycleStatus({
   lifecycle,
-  configurationStatus,
   compact = false,
 }: RuntimeLifecycleStatusProps): React.ReactElement {
   const t = useTranslations("runtimeLifecycle");
@@ -107,19 +137,20 @@ export function RuntimeLifecycleStatus({
         return t("reasons.unknown");
     }
   })();
-  const facts: (readonly [LifecycleFieldKey, string])[] = [
-    ["target", t(`target.${lifecycle.target}`)],
-    ["convergence", t(`convergence.${lifecycle.convergence}`)],
-    ["providerResource", t(`providerResource.${lifecycle.provider.resource}`)],
+  const facts: (readonly [string, string])[] = [
     [
-      "providerConnection",
-      t(`providerConnection.${lifecycle.provider.connection}`),
+      t("fields.executionEnvironment"),
+      t(`executionEnvironment.${lifecycle.provider.resource}`),
     ],
-    ["runner", t(`runner.${lifecycle.runner.state}`)],
+    [
+      t("fields.runtimeConnection"),
+      t(`runtimeConnection.${lifecycle.runner.state}`),
+    ],
+    [
+      t("fields.hostControls"),
+      t(`hostControls.${lifecycle.provider.connection}`),
+    ],
   ];
-  if (configurationStatus) {
-    facts.push(["configuration", t(`configuration.${configurationStatus}`)]);
-  }
 
   return (
     <Paper withBorder radius="lg" p={compact ? "md" : "lg"}>
@@ -137,14 +168,14 @@ export function RuntimeLifecycleStatus({
             color={availabilityColor(lifecycle.availability)}
             variant="light"
           >
-            {t(`availability.${lifecycle.availability}`)}
+            {t(`status.${statusKey(lifecycle)}`)}
           </Badge>
         </Group>
-        <SimpleGrid cols={{ base: 2, sm: compact ? 3 : 6 }} spacing="sm">
-          {facts.map(([key, value]) => (
-            <Stack key={key} gap={2}>
+        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+          {facts.map(([label, value]) => (
+            <Stack key={label} gap={2}>
               <Text c="dimmed" size="xs">
-                {t(`fields.${key}`)}
+                {label}
               </Text>
               <Text fw={600} size="sm">
                 {value}
@@ -156,11 +187,6 @@ export function RuntimeLifecycleStatus({
           <Alert color={availabilityColor(lifecycle.availability)}>
             {reason}
           </Alert>
-        ) : null}
-        {!compact ? (
-          <Text c="dimmed" size="xs">
-            {t("generation", { generation: lifecycle.desired_generation })}
-          </Text>
         ) : null}
       </Stack>
     </Paper>

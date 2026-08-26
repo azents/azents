@@ -584,7 +584,7 @@ class AgentRuntimeService:
         expected_authority: RuntimeOperationAuthority | None = None,
         start_if_stopped: bool = True,
     ) -> RuntimeOperationTarget:
-        """Wait for the exact desired configuration and qualified Runner."""
+        """Wait for one current-generation ready Runner operation target."""
         capability_version = await self._require_runtime_operation_capability(agent_id)
         deadline = time.monotonic() + max(wait_timeout_seconds, 0.0)
         last_resolution: RuntimeProfileResolutionResult | None = None
@@ -610,15 +610,15 @@ class AgentRuntimeService:
                     "Runtime configuration changed since the operation context "
                     "was assembled."
                 )
-            blocked = self.configuration_blocking_error(resolution)
-            if blocked is not None:
-                raise RuntimeStorageError(
-                    f"Runtime Profile is unavailable: {blocked.code}"
-                )
             runtime = resolution.runtime
             if runtime.desired_state is not RuntimeDesiredState.RUNNING:
                 if not start_if_stopped:
                     raise RuntimeStorageError("Runtime is not running.")
+                blocked = self.configuration_blocking_error(resolution)
+                if blocked is not None:
+                    raise RuntimeStorageError(
+                        f"Runtime Profile is unavailable: {blocked.code}"
+                    )
                 try:
                     await self._require_runtime_operation_capability(
                         agent_id,
@@ -657,6 +657,21 @@ class AgentRuntimeService:
                 raise RuntimeStorageError(
                     "Runtime configuration changed while waiting for the operation."
                 )
+            target = self._qualified_operation_target(
+                resolution,
+                runtime_capability_version=capability_version,
+            )
+            if target is not None:
+                await self._require_runtime_operation_capability(
+                    agent_id,
+                    expected_version=capability_version,
+                )
+                return target
+            blocked = self.configuration_blocking_error(resolution)
+            if blocked is not None:
+                raise RuntimeStorageError(
+                    f"Runtime Profile is unavailable: {blocked.code}"
+                )
             if (
                 runtime.failure_generation == runtime.desired_generation
                 and runtime.failure_code is not None
@@ -669,16 +684,6 @@ class AgentRuntimeService:
                 if detail:
                     message = f"{message}: {detail}"
                 raise RuntimeStorageError(message)
-            target = self._qualified_operation_target(
-                resolution,
-                runtime_capability_version=capability_version,
-            )
-            if target is not None:
-                await self._require_runtime_operation_capability(
-                    agent_id,
-                    expected_version=capability_version,
-                )
-                return target
             remaining_wait_seconds = deadline - time.monotonic()
             if remaining_wait_seconds <= 0:
                 break
@@ -722,17 +727,17 @@ class AgentRuntimeService:
         if not AgentRuntimeService._operation_target_evidence_ready(resolution):
             return None
         runtime = resolution.runtime
-        desired = resolution.desired
+        applied = resolution.applied
         workspace_path = runtime.workspace_path
+        assert applied is not None
         assert workspace_path is not None
-        assert desired.digest is not None
         return RuntimeOperationTarget(
             id=runtime.id,
             runtime_capability_version=runtime_capability_version,
-            desired_generation=runtime.desired_generation,
+            desired_generation=applied.target_generation,
             runner_generation=runtime.runner_generation,
-            configuration_sequence=desired.sequence,
-            configuration_digest=desired.digest,
+            configuration_sequence=applied.sequence,
+            configuration_digest=applied.digest,
             workspace_path=workspace_path,
         )
 
@@ -742,28 +747,12 @@ class AgentRuntimeService:
     ) -> bool:
         """Return whether current Runtime evidence can support an operation."""
         runtime = resolution.runtime
-        desired = resolution.desired
         applied = resolution.applied
         if (
             applied is None
-            or desired.status is not RuntimeConfigurationStateStatus.READY
-            or desired.document is None
-            or applied.sequence != desired.sequence
-            or desired.target_generation != runtime.desired_generation
-            or desired.provider_reported_digest != desired.digest
-            or desired.runner_reported_digest != desired.digest
-            or desired.provider_acknowledged_at is None
-            or desired.runner_observed_at is None
+            or applied.target_generation != runtime.desired_generation
             or runtime.desired_state is not RuntimeDesiredState.RUNNING
-            or runtime.provider_observed_state
-            is not RuntimeProviderObservedState.RUNNING
-            or runtime.provider_observed_generation != runtime.desired_generation
-            or runtime.provider_connection_state
-            is not RuntimeProviderConnectionState.CONNECTED
-            or (
-                runtime.failure_generation == runtime.desired_generation
-                and runtime.failure_code is not None
-            )
+            or runtime.terminal_delete_requested_generation is not None
             or runtime.runner_state is not RuntimeRunnerState.READY
             or runtime.runner_generation <= 0
             or runtime.workspace_path is None
@@ -800,13 +789,20 @@ class AgentRuntimeService:
         resolution: RuntimeProfileResolutionResult,
         expected_authority: RuntimeOperationAuthority,
     ) -> bool:
-        """Check that a resolution still matches the prompt-selected authority."""
-        runtime = resolution.runtime
+        """Check that a resolution still matches the operation-selected authority."""
         desired = resolution.desired
+        applied = resolution.applied
+        if (
+            applied is not None
+            and applied.sequence == expected_authority.configuration_sequence
+            and applied.digest == expected_authority.configuration_digest
+            and applied.target_generation == expected_authority.desired_generation
+        ):
+            return True
         return (
             desired.sequence == expected_authority.configuration_sequence
             and desired.digest == expected_authority.configuration_digest
-            and runtime.desired_generation == expected_authority.desired_generation
+            and desired.target_generation == expected_authority.desired_generation
         )
 
     async def request_terminal_delete_for_agent(
@@ -1129,7 +1125,7 @@ class AgentRuntimeService:
                     agent.runtime_capability is AgentRuntimeCapability.MANAGED
                     and runtime is not None
                 ),
-                use_runner=(physical_actions.use_runner and profile_actions_available),
+                use_runner=physical_actions.use_runner,
             ),
         )
 
@@ -1313,7 +1309,14 @@ class AgentRuntimeService:
             status = "profile_required"
         elif desired.status is RuntimeConfigurationStateStatus.BLOCKED:
             status = "configuration_blocked"
-        elif applied is None:
+        elif applied is None or (
+            resolution.runtime.runner_state is not RuntimeRunnerState.READY
+            and resolution.runtime.provider_observed_state
+            in {
+                RuntimeProviderObservedState.STOPPED,
+                RuntimeProviderObservedState.UNKNOWN,
+            }
+        ):
             status = "configured_not_created"
         elif applied.sequence != desired.sequence:
             status = "waiting_for_recreation"
@@ -1362,6 +1365,14 @@ class AgentRuntimeService:
             convergence = "stopping"
             availability = "removing"
             reason_code = "runtime_removal_in_progress"
+        elif runtime.desired_state is RuntimeDesiredState.STOPPED:
+            convergence, availability, reason_code = self._lifecycle_convergence(
+                runtime
+            )
+        elif runtime.runner_state is RuntimeRunnerState.READY:
+            convergence = "stable"
+            availability = "ready"
+            reason_code = None
         elif current_failure is not None:
             convergence = "failed"
             availability = "failed"
@@ -1377,14 +1388,11 @@ class AgentRuntimeService:
             in {
                 "profile_required",
                 "configuration_blocked",
-                "waiting_for_recreation",
             }
         ):
             convergence = "blocked"
             availability = "configuration_blocked"
-            if configuration.status == "waiting_for_recreation":
-                reason_code = "runtime_recreation_required"
-            elif configuration.desired is not None:
+            if configuration.desired is not None:
                 reason_code = self._safe_configuration_reason_code(
                     configuration.desired.reason_code
                 )
@@ -1458,23 +1466,36 @@ class AgentRuntimeService:
                 reset=False,
                 use_runner=False,
             )
-        backend_running = (
-            runtime.provider_observed_state == RuntimeProviderObservedState.RUNNING
-        )
         desired_running = runtime.desired_state == RuntimeDesiredState.RUNNING
         provider_connected = (
             runtime.provider_connection_state
             == RuntimeProviderConnectionState.CONNECTED
         )
-        use_runner = (
-            backend_running and runtime.runner_state == RuntimeRunnerState.READY
-        )
+        runner_ready = runtime.runner_state is RuntimeRunnerState.READY
+        stopped_or_absent = runtime.provider_observed_state in {
+            RuntimeProviderObservedState.STOPPED,
+            RuntimeProviderObservedState.UNKNOWN,
+        }
         return AgentRuntimeActions(
-            start=not desired_running or self._get_current_failure(runtime) is not None,
-            stop=desired_running or backend_running,
-            restart=desired_running or backend_running,
+            start=(
+                provider_connected
+                and (
+                    (not desired_running and stopped_or_absent)
+                    or self._get_current_failure(runtime) is not None
+                )
+            ),
+            stop=provider_connected and desired_running,
+            restart=(
+                provider_connected
+                and desired_running
+                and runtime.provider_observed_state
+                in {
+                    RuntimeProviderObservedState.RUNNING,
+                    RuntimeProviderObservedState.FAILED,
+                }
+            ),
             reset=provider_connected,
-            use_runner=use_runner,
+            use_runner=runner_ready,
         )
 
     def _calculate_lifecycle_actions(
@@ -1503,7 +1524,7 @@ class AgentRuntimeService:
             stop=actions.stop,
             restart=actions.restart and creation_available,
             reset=actions.reset and creation_available,
-            use_runner=actions.use_runner and creation_available,
+            use_runner=actions.use_runner,
         )
 
     def _provider_action_blocked(self, runtime: AgentRuntime) -> bool:

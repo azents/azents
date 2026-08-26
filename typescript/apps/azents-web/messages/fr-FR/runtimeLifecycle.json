@@ -1,90 +1,69 @@
 {
-  "title": "Cycle de vie du Runtime",
-  "description": "Cible, convergence et états Provider et Runner déterminés par le serveur.",
-  "generation": "Génération du cycle de vie {generation}",
+  "title": "État du Runtime",
+  "description": "Vérifiez si le Runtime est disponible et si son environnement d’exécution géré peut être contrôlé.",
   "fields": {
-    "target": "Cible",
-    "convergence": "Convergence",
-    "providerResource": "Ressource Provider",
-    "providerConnection": "Connexion Provider",
-    "runner": "Runner",
-    "configuration": "Configuration"
+    "executionEnvironment": "Environnement d’exécution",
+    "runtimeConnection": "Connexion au Runtime",
+    "hostControls": "Contrôles de l’hôte"
   },
-  "target": {
-    "running": "En exécution",
-    "stopped": "Arrêté"
-  },
-  "convergence": {
-    "stable": "Stable",
-    "starting": "Démarrage",
-    "stopping": "Arrêt",
-    "resetting": "Réinitialisation",
-    "recovering": "Récupération",
-    "blocked": "Bloqué",
-    "failed": "Échec"
-  },
-  "availability": {
+  "status": {
     "ready": "Disponible",
     "stopped": "Arrêté",
-    "transitioning": "Transition en cours",
-    "provider_disconnected": "Provider déconnecté",
-    "runner_unavailable": "Runner indisponible",
-    "configuration_blocked": "Configuration bloquée",
-    "failed": "Échec",
+    "starting": "Démarrage",
+    "stopping": "Arrêt",
+    "resetting": "Réinitialisation",
+    "recovering": "Récupération",
+    "providerDisconnected": "Contrôles de l’hôte indisponibles",
+    "runnerUnavailable": "Connexion indisponible",
+    "configurationBlocked": "Configuration requise",
+    "failed": "Attention requise",
     "removing": "Suppression"
   },
-  "providerConnection": {
-    "connected": "Connecté",
-    "disconnected": "Déconnecté"
-  },
-  "providerResource": {
-    "unknown": "Inconnu",
+  "executionEnvironment": {
+    "unknown": "État indisponible",
     "stopped": "Arrêté",
     "starting": "Démarrage",
-    "running": "En exécution",
+    "running": "En cours d’exécution",
     "stopping": "Arrêt",
     "recovering": "Récupération",
     "resetting": "Réinitialisation",
-    "failed": "Échec"
+    "failed": "Attention requise"
   },
-  "runner": {
-    "unknown": "Inconnu",
+  "runtimeConnection": {
+    "unknown": "Vérification de la connexion",
     "disconnected": "Déconnecté",
-    "starting": "Démarrage",
-    "ready": "Prêt",
-    "degraded": "Dégradé",
-    "failed": "Échec"
+    "starting": "Connexion",
+    "ready": "Connecté",
+    "degraded": "Limitée",
+    "failed": "Indisponible"
   },
-  "configuration": {
-    "profile_required": "Profile requis",
-    "configuration_blocked": "Bloquée",
-    "configured_not_created": "Prête à créer",
-    "waiting_for_recreation": "Recréation requise",
-    "applied": "Appliquée"
+  "hostControls": {
+    "connected": "Disponibles",
+    "disconnected": "Indisponibles"
   },
   "reasons": {
-    "runtimeRemovalInProgress": "La suppression définitive du Runtime est en cours. Les actions restent indisponibles jusqu’à sa fin.",
-    "runtimeFailed": "La génération actuelle du cycle de vie a échoué. Consultez les actions de récupération disponibles.",
-    "providerFailed": "Le Provider a signalé l’échec de la ressource Runtime.",
-    "runtimeRecreationRequired": "La configuration souhaitée diffère de celle appliquée. Une recréation est nécessaire.",
-    "providerDisabled": "Le Runtime Provider sélectionné est désactivé.",
-    "providerWorkspaceUnavailable": "Le Runtime Provider sélectionné n’est pas disponible dans ce Workspace.",
-    "providerDisconnected": "La connexion Provider est indisponible et la transition demandée ne peut pas converger.",
-    "providerCapabilityUnavailable": "Le Provider ne fournit pas actuellement les capacités requises.",
-    "providerCapabilityInvalid": "Le rapport de capacités du Provider est invalide.",
-    "profileDocumentInvalid": "La configuration du Runtime Profile sélectionné est invalide.",
-    "profileIncompatible": "Le Runtime Profile sélectionné est incompatible avec le Provider.",
-    "runtimeConfigurationBlocked": "La configuration Runtime souhaitée est bloquée.",
-    "runtimeProfileRequired": "Sélectionnez un Runtime Profile disponible avant de créer des ressources.",
-    "runtimeResetting": "Le Runtime est réinitialisé et les données Agent Workspace sont supprimées.",
-    "runtimeRecovering": "Le Provider récupère la ressource Runtime.",
-    "runtimeStarting": "Le Runtime converge vers la cible en exécution.",
-    "runtimeStopping": "Le Runtime converge vers la cible arrêtée.",
-    "runnerUnknown": "L’état de préparation du Runner n’a pas encore été observé.",
-    "runnerDisconnected": "La ressource Runtime fonctionne, mais la connexion Runner est indisponible.",
-    "runnerStarting": "La ressource Runtime fonctionne pendant le démarrage du Runner.",
-    "runnerDegraded": "Le Runner a signalé une disponibilité dégradée.",
-    "runnerFailed": "Le Runner a signalé un échec.",
-    "unknown": "Le Runtime est indisponible pour une raison limitée signalée par le serveur."
+    "runtimeRemovalInProgress": "Le Runtime est en cours de suppression définitive. L’accès et les contrôles resteront indisponibles jusqu’à la fin.",
+    "runtimeFailed": "Le Runtime n’a pas atteint l’état demandé. Utilisez une action de récupération disponible ou réessayez.",
+    "providerFailed": "L’environnement d’exécution géré a signalé un problème. Redémarrez-le si cette action est disponible.",
+    "runtimeRecreationRequired": "Les paramètres sélectionnés diffèrent de ceux actuellement appliqués. Redémarrez le Runtime pour les appliquer.",
+    "providerDisabled": "L’environnement d’exécution sélectionné est indisponible. Choisissez un autre Runtime Profile.",
+    "providerWorkspaceUnavailable": "Ce Workspace ne peut pas utiliser l’environnement d’exécution sélectionné pour le moment.",
+    "providerDisconnected": "Les contrôles de l’hôte sont temporairement indisponibles. Le Runtime reste utilisable tant que sa connexion est active.",
+    "providerCapabilityUnavailable": "L’environnement d’exécution sélectionné ne prend pas en charge tous les paramètres requis.",
+    "providerCapabilityInvalid": "L’environnement d’exécution a signalé des paramètres inutilisables.",
+    "profileDocumentInvalid": "Le Runtime Profile sélectionné contient des paramètres non valides.",
+    "profileIncompatible": "Le Runtime Profile sélectionné ne peut pas être utilisé avec cet environnement d’exécution.",
+    "runtimeConfigurationBlocked": "Les paramètres sélectionnés ne peuvent pas être appliqués actuellement. Vérifiez le Runtime Profile.",
+    "runtimeProfileRequired": "Choisissez un Runtime Profile disponible avant de démarrer le Runtime.",
+    "runtimeResetting": "Le Runtime est en cours de réinitialisation. Les fichiers Agent Workspace sont supprimés.",
+    "runtimeRecovering": "L’environnement d’exécution est en cours de récupération. La connexion reviendra ensuite.",
+    "runtimeStarting": "Le Runtime démarre. Il sera disponible une fois la connexion établie.",
+    "runtimeStopping": "Le Runtime s’arrête. Les fichiers Agent Workspace sont conservés.",
+    "runnerUnknown": "Vérification de la connexion au Runtime.",
+    "runnerDisconnected": "L’environnement d’exécution fonctionne, mais la connexion au Runtime est indisponible. Redémarrez-le si cette action est disponible.",
+    "runnerStarting": "L’environnement d’exécution fonctionne pendant la préparation de la connexion au Runtime.",
+    "runnerDegraded": "La connexion au Runtime est limitée. Certaines opérations peuvent être indisponibles.",
+    "runnerFailed": "La connexion au Runtime a échoué. Redémarrez le Runtime si cette action est disponible.",
+    "unknown": "Le Runtime est temporairement indisponible. Actualisez son état ou utilisez une action de récupération disponible."
   }
 }

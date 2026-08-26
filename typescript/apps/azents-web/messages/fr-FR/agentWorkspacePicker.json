@@ -11,7 +11,7 @@
     "controlUnavailableTitle": "Contrôle du Workspace indisponible",
     "restartRuntime": "Redémarrer le Runtime",
     "restartConfirmTitle": "Redémarrer le Runtime ?",
-    "restartConfirmDescription": "Le Runtime sera temporairement indisponible pendant le remplacement de sa ressource d’exécution et le redémarrage normal.",
+    "restartConfirmDescription": "Le Runtime sera temporairement indisponible pendant son redémarrage.",
     "restartPreservationNotice": "Les fichiers Agent Workspace et le stockage Runtime conservé sont préservés.",
     "confirmRestart": "Redémarrer le Runtime",
     "cancel": "Annuler",

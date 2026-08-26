@@ -24,7 +24,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionProductMode,
+    RuntimeDesiredState,
     RuntimeProviderObservedState,
+    RuntimeRunnerState,
 )
 from azents.core.runtime_capabilities import (
     RuntimeCapability,
@@ -1146,7 +1148,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
     async def _load_runtime_behavior_prompt(
         self,
     ) -> tuple[str, RuntimeOperationAuthority | None]:
-        """Render desired Profile behavior without consulting Runner readiness."""
+        """Render behavior for the configuration serving Runtime operations."""
         async with self.session_manager() as session:
             runtime = await self.agent_runtime_repo.get_by_agent_id(
                 session,
@@ -1162,19 +1164,32 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         if state is None:
             return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, None)
         desired = state.desired
+        applied = state.applied
+        operation_configuration = desired
+        if (
+            applied is not None
+            and applied.target_generation == runtime.desired_generation
+            and runtime.desired_state is RuntimeDesiredState.RUNNING
+            and runtime.runner_state is RuntimeRunnerState.READY
+            and runtime.runner_generation > 0
+            and runtime.workspace_path is not None
+        ):
+            operation_configuration = applied
         expected_authority = RuntimeOperationAuthority(
-            configuration_sequence=desired.sequence,
-            configuration_digest=desired.digest or "",
-            desired_generation=desired.target_generation,
+            configuration_sequence=operation_configuration.sequence,
+            configuration_digest=operation_configuration.digest or "",
+            desired_generation=operation_configuration.target_generation,
         )
         if (
-            desired.status is not RuntimeConfigurationStateStatus.READY
-            or desired.document is None
-            or desired.digest is None
-            or desired.document.resolved_configuration is None
+            operation_configuration is desired
+            and desired.status is not RuntimeConfigurationStateStatus.READY
+        ) or (
+            operation_configuration.document is None
+            or operation_configuration.digest is None
+            or operation_configuration.document.resolved_configuration is None
         ):
             return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
-        effective_profile = desired.document.resolved_configuration.get(
+        effective_profile = operation_configuration.document.resolved_configuration.get(
             "effective_profile"
         )
         if not isinstance(effective_profile, dict):

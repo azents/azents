@@ -388,15 +388,15 @@ def test_runtime_free_add_and_remove_progress(
         AgentWorkspaceDirectoryResponse,
     )
 
-    _assert_visible_text(browser_driver, "Runtime lifecycle")
+    _assert_visible_text(browser_driver, "Runtime status")
+    _assert_visible_text(browser_driver, "Execution environment")
+    _assert_visible_text(browser_driver, "Runtime connection")
+    _assert_visible_text(browser_driver, "Host controls")
     _click_button(browser_driver, "Restart")
     _assert_visible_text(browser_driver, "Restart Runtime?")
     _assert_visible_text(
         browser_driver,
-        (
-            "The Runtime will be temporarily unavailable while its execution "
-            "resource is replaced and normal startup converges."
-        ),
+        "The Runtime will be temporarily unavailable while it restarts.",
     )
     _assert_visible_text(
         browser_driver,
@@ -476,7 +476,10 @@ def test_runtime_free_add_and_remove_progress(
             (By.XPATH, "//*[@role='tab' and normalize-space()='Settings']")
         )
     ).click()
-    _assert_visible_text(browser_driver, "Runtime lifecycle")
+    _assert_visible_text(browser_driver, "Runtime status")
+    _assert_visible_text(browser_driver, "Execution environment")
+    _assert_visible_text(browser_driver, "Runtime connection")
+    _assert_visible_text(browser_driver, "Host controls")
     _click_button(browser_driver, "Stop runtime")
     _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "Runtime stopped", timeout_seconds=120)
