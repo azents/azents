@@ -391,6 +391,9 @@ class _DiscordPySession:
 
     def __init__(self, client: discord.Client) -> None:
         self._client = client
+        # This private boundary is intentional: high-level public operations can add
+        # resource prefetches, while the pinned HTTP client reuses the authenticated
+        # session and rate-limit state and preserves nonce/no-replay delivery semantics.
         self._http = client.http
         self._commands: dict[str, DiscordSDKCommand] = {}
         self._command_application_id: int | None = None
