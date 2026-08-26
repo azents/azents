@@ -779,26 +779,11 @@ class AgentWorkspaceFileService:
         user_id: str,
     ) -> AgentWorkspaceAccessState:
         """Return workspace access state owned by Runner."""
-        if runtime_panel.type in {"STARTING", "RESETTING"}:
-            return AgentWorkspaceAccessConnecting(type="CONNECTING")
-        if runtime_panel.type != "RUNNING":
+        runtime_id = runtime_panel.runtime_id
+        if runtime_id is None:
             return AgentWorkspaceAccessUnavailable(
                 type="UNAVAILABLE",
                 reason="RUNTIME_NOT_RUNNING",
-            )
-        runtime_id = runtime_panel.runtime_id
-        if runtime_id is None:
-            return AgentWorkspaceControlUnavailable(
-                type="CONTROL_UNAVAILABLE",
-                detail="Agent runtime id is unavailable.",
-                retry_after_ms=1000,
-            )
-        try:
-            workspace_root = agent_workspace_root(runtime_panel.workspace_path)
-        except AgentWorkspacePathUnavailable:
-            return AgentWorkspaceAccessUnavailable(
-                type="UNAVAILABLE",
-                reason="WORKSPACE_PATH_UNAVAILABLE",
             )
         try:
             runtime = await self._runtime_target_resolver.resolve_operation_target(
@@ -807,6 +792,18 @@ class AgentWorkspaceFileService:
                 start_if_stopped=False,
             )
         except RuntimeStorageError as error:
+            if runtime_panel.type in {"STARTING", "RESETTING"}:
+                return AgentWorkspaceAccessConnecting(type="CONNECTING")
+            if runtime_panel.type != "RUNNING":
+                return AgentWorkspaceAccessUnavailable(
+                    type="UNAVAILABLE",
+                    reason="RUNTIME_NOT_RUNNING",
+                )
+            if runtime_panel.workspace_path is None:
+                return AgentWorkspaceAccessUnavailable(
+                    type="UNAVAILABLE",
+                    reason="WORKSPACE_PATH_UNAVAILABLE",
+                )
             return AgentWorkspaceControlUnavailable(
                 type="CONTROL_UNAVAILABLE",
                 detail=str(error),
@@ -817,6 +814,13 @@ class AgentWorkspaceFileService:
                 type="CONTROL_UNAVAILABLE",
                 detail="Runtime changed while workspace access was being prepared.",
                 retry_after_ms=1000,
+            )
+        try:
+            workspace_root = agent_workspace_root(runtime.workspace_path)
+        except AgentWorkspacePathUnavailable:
+            return AgentWorkspaceAccessUnavailable(
+                type="UNAVAILABLE",
+                reason="WORKSPACE_PATH_UNAVAILABLE",
             )
         ready = await self._ready_access(
             runtime,

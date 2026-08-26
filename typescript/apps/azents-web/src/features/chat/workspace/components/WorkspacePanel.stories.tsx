@@ -66,6 +66,16 @@ const startingLifecycle: AgentRuntimeLifecyclePresentationResponse = {
   desired_generation: 6,
 };
 
+const restartReadyLifecycle: AgentRuntimeLifecyclePresentationResponse = {
+  target: "running",
+  convergence: "stable",
+  provider: { connection: "connected", resource: "starting" },
+  runner: { state: "ready" },
+  availability: "ready",
+  reason_code: null,
+  desired_generation: 6,
+};
+
 const recoveringLifecycle: AgentRuntimeLifecyclePresentationResponse = {
   target: "running",
   convergence: "recovering",
@@ -562,6 +572,29 @@ export const Settings = {
   },
 } satisfies Story;
 
+export const SettingsMobile = {
+  args: {
+    state: {
+      ...readyState,
+      server: {
+        ...readyState.server,
+        actions: {
+          ...readyState.server.actions,
+          restart: restartAction,
+        },
+      },
+    },
+    defaultTab: "settings",
+  },
+  decorators: [
+    (Story) => (
+      <Box h="100dvh" w={rem(320)}>
+        <Story />
+      </Box>
+    ),
+  ],
+} satisfies Story;
+
 export const Metrics = {
   args: {
     state: readyState,
@@ -709,6 +742,29 @@ export const RuntimeStarting = {
       manifest: null,
       selectedEntry: null,
       inspectorState: { type: "IDLE" },
+    },
+  },
+} satisfies Story;
+
+export const RuntimeRestartRefreshing = {
+  args: {
+    state: {
+      ...readyState,
+      server: {
+        lifecycle: restartReadyLifecycle,
+        runtime: {
+          type: "STARTING",
+          runtime_id: "runtime-1",
+          detail: null,
+        },
+        workspace: readyState.server.workspace,
+        actions: {
+          start: null,
+          stop: stopAction,
+          restart: null,
+          reset: resetAction,
+        },
+      },
     },
   },
 } satisfies Story;

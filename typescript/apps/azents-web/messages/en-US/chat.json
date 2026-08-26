@@ -116,6 +116,8 @@
     "settingsTab": "Settings",
     "settingsTitle": "Runtime settings",
     "settingsSubtitle": "Review status, settings, and the controls currently available for this Runtime.",
+    "hostControlsTitle": "Host controls",
+    "hostControlsDescription": "Start, stop, restart, or reset the Runtime when Provider authority is available.",
     "configurationTitle": "Runtime status",
     "configurationLoading": "Loading runtime configuration…",
     "configurationDesired": "Selected settings",

@@ -116,6 +116,8 @@
     "settingsTab": "設定",
     "settingsTitle": "Runtime 設定",
     "settingsSubtitle": "Runtime の状態と設定を確認し、現在利用できる操作を実行します。",
+    "hostControlsTitle": "ホスト操作",
+    "hostControlsDescription": "Provider 権限が利用できる場合に Runtime の開始、停止、再起動、リセットを実行します。",
     "configurationTitle": "ランタイムの状態",
     "configurationLoading": "ランタイム構成を読み込んでいます…",
     "configurationDesired": "選択した設定",

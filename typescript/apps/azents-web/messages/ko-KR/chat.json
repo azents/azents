@@ -116,6 +116,8 @@
     "settingsTab": "설정",
     "settingsTitle": "Runtime 설정",
     "settingsSubtitle": "Runtime 상태와 설정을 확인하고 현재 가능한 작업을 실행합니다.",
+    "hostControlsTitle": "호스트 제어",
+    "hostControlsDescription": "Provider 권한이 있을 때 Runtime을 시작, 정지, 재시작하거나 초기화합니다.",
     "configurationTitle": "런타임 상태",
     "configurationLoading": "런타임 구성을 불러오는 중…",
     "configurationDesired": "선택한 설정",

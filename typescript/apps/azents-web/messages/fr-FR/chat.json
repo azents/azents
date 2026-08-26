@@ -116,6 +116,8 @@
     "settingsTab": "Paramètres",
     "settingsTitle": "Paramètres du runtime",
     "settingsSubtitle": "Consultez l’état, les paramètres et les contrôles actuellement disponibles pour ce Runtime.",
+    "hostControlsTitle": "Contrôles de l’hôte",
+    "hostControlsDescription": "Démarrez, arrêtez, redémarrez ou réinitialisez le Runtime lorsque l’autorité du Provider est disponible.",
     "configurationTitle": "État du runtime",
     "configurationLoading": "Chargement de la configuration du runtime…",
     "configurationDesired": "Paramètres sélectionnés",
