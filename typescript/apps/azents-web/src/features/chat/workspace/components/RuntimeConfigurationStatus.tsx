@@ -21,14 +21,6 @@ interface RuntimeConfigurationStatusProps {
   state: RuntimeConfigurationState;
 }
 
-type ConfigurationReason =
-  | "sourceMismatch"
-  | "profileDisabled"
-  | "providerUnavailable"
-  | "capabilityUnavailable"
-  | "profileInvalid"
-  | "unknown";
-
 type ConfigurationNetworkDomainMode = "unrestricted" | "allowlist";
 
 function configurationNetworkDomainMode(
@@ -43,78 +35,6 @@ function configurationNetworkDomainMode(
   }
 }
 
-function configurationReason(reasonCode: string | null): ConfigurationReason {
-  switch (reasonCode) {
-    case "workspace_profile_provider_mismatch":
-    case "infrastructure_profile_provider_mismatch":
-    case "workspace_profile_infrastructure_mismatch":
-      return "sourceMismatch";
-    case "workspace_profile_disabled":
-    case "infrastructure_profile_disabled":
-      return "profileDisabled";
-    case "provider_scope_unsupported":
-    case "provider_not_active":
-    case "provider_disabled":
-    case "provider_workspace_unavailable":
-    case "provider_disconnected":
-      return "providerUnavailable";
-    case "provider_capability_unavailable":
-    case "provider_capability_invalid":
-    case "profile_incompatible":
-      return "capabilityUnavailable";
-    case "profile_document_invalid":
-      return "profileInvalid";
-    default:
-      return "unknown";
-  }
-}
-
-function stateEvidence(
-  configurationState: RuntimeConfigurationStateResponse,
-): Array<{
-  label:
-    | "configurationEvidence.sequence"
-    | "configurationEvidence.profile"
-    | "configurationEvidence.infrastructure"
-    | "configurationEvidence.generation"
-    | "configurationEvidence.digest";
-  value: string;
-}> {
-  const profile =
-    configurationState.workspace_runtime_profile_id !== null &&
-    configurationState.workspace_runtime_profile_version !== null
-      ? `${configurationState.workspace_runtime_profile_id} · v${configurationState.workspace_runtime_profile_version}`
-      : "—";
-  const infrastructure =
-    configurationState.infrastructure_profile_id !== null &&
-    configurationState.infrastructure_profile_version !== null
-      ? `${configurationState.infrastructure_profile_id} · v${configurationState.infrastructure_profile_version}`
-      : "—";
-
-  return [
-    {
-      label: "configurationEvidence.sequence",
-      value: configurationState.sequence.toString(),
-    },
-    {
-      label: "configurationEvidence.profile",
-      value: profile,
-    },
-    {
-      label: "configurationEvidence.infrastructure",
-      value: infrastructure,
-    },
-    {
-      label: "configurationEvidence.generation",
-      value: configurationState.target_generation.toString(),
-    },
-    {
-      label: "configurationEvidence.digest",
-      value: configurationState.digest ?? "—",
-    },
-  ];
-}
-
 function NetworkSummary({
   network,
 }: {
@@ -127,57 +47,36 @@ function NetworkSummary({
       : configurationNetworkDomainMode(network.domain_mode);
 
   return (
-    <Alert
-      color={
-        network.enforcement_status === "configuration_blocked"
-          ? "red"
-          : network.mode === "no_network"
-            ? "gray"
-            : "blue"
-      }
-      title={t("configurationNetworkTitle")}
-    >
-      <Stack gap={2}>
+    <Stack gap={2}>
+      <Text size="xs">
+        {t("configurationNetworkMode", {
+          mode: t(`configurationNetworkModes.${network.mode}`),
+        })}
+      </Text>
+      <Text size="xs">
+        {t("configurationNetworkProtocol", {
+          protocol: t(
+            `configurationNetworkProtocols.${network.protocol_summary}`,
+          ),
+        })}
+      </Text>
+      {domainMode !== null ? (
         <Text size="xs">
-          {t("configurationNetworkMode", {
-            mode: t(`configurationNetworkModes.${network.mode}`),
+          {t("configurationNetworkDomains", {
+            mode: t(`configurationNetworkDomainModes.${domainMode}`),
           })}
         </Text>
-        <Text size="xs">
-          {t("configurationNetworkProtocol", {
-            protocol: t(
-              `configurationNetworkProtocols.${network.protocol_summary}`,
-            ),
-          })}
-        </Text>
-        {domainMode !== null && (
-          <Text size="xs">
-            {t("configurationNetworkDomains", {
-              mode: t(`configurationNetworkDomainModes.${domainMode}`),
-            })}
-          </Text>
-        )}
-        <Text size="xs">
-          {network.https_inspection
-            ? t("configurationNetworkHttpsInspected")
-            : t("configurationNetworkHttpsNotInspected")}
-        </Text>
-        {network.enforcement_status === "waiting_for_recreation" && (
-          <Text size="xs" fw={600}>
-            {t("configurationNetworkRecreationRequired")}
-          </Text>
-        )}
-        {network.enforcement_status === "configuration_blocked" && (
-          <Text size="xs" fw={600}>
-            {t("configurationNetworkBlocked")}
-          </Text>
-        )}
-      </Stack>
-    </Alert>
+      ) : null}
+      <Text size="xs">
+        {network.https_inspection
+          ? t("configurationNetworkHttpsInspected")
+          : t("configurationNetworkHttpsNotInspected")}
+      </Text>
+    </Stack>
   );
 }
 
-function StatePanel({
+function ConfiguredValues({
   title,
   configurationState,
 }: {
@@ -185,6 +84,18 @@ function StatePanel({
   configurationState: RuntimeConfigurationStateResponse;
 }): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
+  const runtimeProfile =
+    configurationState.workspace_runtime_profile_id === null
+      ? t("configurationValueUnavailable")
+      : configurationState.workspace_runtime_profile_version === null
+        ? configurationState.workspace_runtime_profile_id
+        : `${configurationState.workspace_runtime_profile_id} · v${configurationState.workspace_runtime_profile_version}`;
+  const executionProfile =
+    configurationState.infrastructure_profile_id === null
+      ? t("configurationValueUnavailable")
+      : configurationState.infrastructure_profile_version === null
+        ? configurationState.infrastructure_profile_id
+        : `${configurationState.infrastructure_profile_id} · v${configurationState.infrastructure_profile_version}`;
 
   return (
     <Paper withBorder p="sm" radius="md">
@@ -192,59 +103,26 @@ function StatePanel({
         <Text size="sm" fw={600}>
           {title}
         </Text>
-        {configurationState.network !== null && (
-          <NetworkSummary network={configurationState.network} />
-        )}
-        {stateEvidence(configurationState).map((item) => (
-          <Stack key={item.label} gap={0}>
-            <Text size="xs" fw={500}>
-              {t(item.label)}
+        <Stack gap={0}>
+          <Text c="dimmed" size="xs">
+            {t("configurationProfile")}
+          </Text>
+          <Text size="sm">{runtimeProfile}</Text>
+        </Stack>
+        <Stack gap={0}>
+          <Text c="dimmed" size="xs">
+            {t("configurationExecutionProfile")}
+          </Text>
+          <Text size="sm">{executionProfile}</Text>
+        </Stack>
+        {configurationState.network !== null ? (
+          <Stack gap={2}>
+            <Text c="dimmed" size="xs">
+              {t("configurationNetworkTitle")}
             </Text>
-            <Text
-              size="xs"
-              ff="monospace"
-              style={{
-                overflowWrap: "anywhere",
-                wordBreak: "break-word",
-              }}
-            >
-              {item.value}
-            </Text>
+            <NetworkSummary network={configurationState.network} />
           </Stack>
-        ))}
-        {configurationState.reason_code !== null && (
-          <Alert color="red" p="xs">
-            <Stack gap="xs">
-              <Text size="xs">
-                {t(
-                  `configurationReasons.${configurationReason(
-                    configurationState.reason_code,
-                  )}`,
-                )}
-              </Text>
-              <Text
-                size="xs"
-                ff="monospace"
-                style={{ overflowWrap: "anywhere" }}
-              >
-                {configurationState.reason_code}
-              </Text>
-              {configurationState.missing_capabilities !== null &&
-                configurationState.missing_capabilities.length > 0 && (
-                  <Text
-                    size="xs"
-                    ff="monospace"
-                    style={{ overflowWrap: "anywhere" }}
-                  >
-                    {t("configurationMissingCapabilities", {
-                      capabilities:
-                        configurationState.missing_capabilities.join(", "),
-                    })}
-                  </Text>
-                )}
-            </Stack>
-          </Alert>
-        )}
+        ) : null}
       </Stack>
     </Paper>
   );
@@ -274,7 +152,7 @@ export function RuntimeConfigurationStatus({
   if (configuration === null) {
     return null;
   }
-  const hasTechnicalDetails =
+  const hasConfiguredValues =
     configuration.desired !== null || configuration.applied !== null;
 
   return (
@@ -293,44 +171,43 @@ export function RuntimeConfigurationStatus({
             {t(`configurationStatus.${configuration.status}.description`)}
           </Text>
         </Stack>
-
-        {hasTechnicalDetails && (
+        {hasConfiguredValues ? (
           <Accordion variant="contained" radius="md">
-            <Accordion.Item value="technical-details">
+            <Accordion.Item value="configured-values">
               <Accordion.Control>
                 <Text size="sm" fw={600}>
-                  {t("configurationTechnicalDetails")}
+                  {t("configurationConfiguredValues")}
                 </Text>
               </Accordion.Control>
               <Accordion.Panel>
                 <Stack gap="sm">
                   {configuration.status === "applied" &&
                   configuration.applied !== null ? (
-                    <StatePanel
-                      title={t("configurationCurrent")}
+                    <ConfiguredValues
+                      title={t("configurationApplied")}
                       configurationState={configuration.applied}
                     />
                   ) : (
                     <>
-                      {configuration.desired !== null && (
-                        <StatePanel
+                      {configuration.desired !== null ? (
+                        <ConfiguredValues
                           title={t("configurationDesired")}
                           configurationState={configuration.desired}
                         />
-                      )}
-                      {configuration.applied !== null && (
-                        <StatePanel
+                      ) : null}
+                      {configuration.applied !== null ? (
+                        <ConfiguredValues
                           title={t("configurationApplied")}
                           configurationState={configuration.applied}
                         />
-                      )}
+                      ) : null}
                     </>
                   )}
                 </Stack>
               </Accordion.Panel>
             </Accordion.Item>
           </Accordion>
-        )}
+        ) : null}
       </Stack>
     </Paper>
   );

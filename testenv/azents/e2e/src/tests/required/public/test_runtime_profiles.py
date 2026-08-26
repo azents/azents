@@ -32,6 +32,9 @@ from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
+from azentspublicclient.models.runtime_provider_connection_state import (
+    RuntimeProviderConnectionState,
+)
 from azentspublicclient.models.runtime_recreation_create_request import (
     RuntimeRecreationCreateRequest,
 )
@@ -300,6 +303,9 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
             and configuration.applied is None
             and runtime.workspace_path is None
             and runtime.last_lifecycle_command is None
+            and lifecycle.provider.connection
+            is RuntimeProviderConnectionState.CONNECTED
+            and current.actions.start
         )
 
     wait_until(
@@ -826,8 +832,8 @@ def run_owner_deletes_runtime_profile_in_web_and_running_runtime_is_retained(
     assert runtime_after.runtime.id == prior_runtime_id
     assert runtime_after.runtime.workspace_path == prior_workspace_path
     assert runtime_after.lifecycle is not None
-    assert runtime_after.lifecycle.availability == "configuration_blocked"
-    assert runtime_after.lifecycle.convergence == "blocked"
+    assert runtime_after.lifecycle.availability == "ready"
+    assert runtime_after.lifecycle.convergence == "stable"
     assert runtime_after.configuration is not None
     assert runtime_after.configuration.status == "profile_required"
     assert runtime_after.configuration.desired is not None
@@ -842,6 +848,6 @@ def run_owner_deletes_runtime_profile_in_web_and_running_runtime_is_retained(
     assert runtime_after.actions.start is False
     assert runtime_after.actions.restart is False
     assert runtime_after.actions.reset is False
-    assert runtime_after.actions.use_runner is False
+    assert runtime_after.actions.use_runner is True
     assert runtime_after.actions.stop is True
     assert runtime_after.actions.observe is True

@@ -178,7 +178,7 @@ class AgentRuntimeRemovalOutput(BaseModel):
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeOperationAuthority:
-    """Expected desired Runtime configuration for one explicit operation."""
+    """Expected active Runtime configuration for one explicit operation."""
 
     configuration_sequence: int
     configuration_digest: str

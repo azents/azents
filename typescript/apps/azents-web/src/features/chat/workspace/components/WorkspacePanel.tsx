@@ -25,6 +25,7 @@ import {
   IconFolderOpen,
   IconPlayerPlay,
   IconPower,
+  IconRefresh,
   IconSettings,
   IconTerminal2,
 } from "@tabler/icons-react";
@@ -311,6 +312,7 @@ export function WorkspacePanel({
     const { actions, lifecycle, runtime } = state.server;
     const canStartRuntime = actions.start !== null;
     const canStopRuntime = actions.stop !== null;
+    const canRestartRuntime = actions.restart !== null;
     const lifecycleControl = canStopRuntime
       ? "stop"
       : canStartRuntime
@@ -333,72 +335,83 @@ export function WorkspacePanel({
 
             <RuntimeConfigurationStatus state={state.runtimeConfiguration} />
             {lifecycle ? (
-              <RuntimeLifecycleStatus
-                lifecycle={lifecycle}
-                configurationStatus={
-                  state.runtimeConfiguration.type === "LOADED"
-                    ? state.runtimeConfiguration.configuration?.status
-                    : null
-                }
-                compact
-              />
+              <RuntimeLifecycleStatus lifecycle={lifecycle} compact />
             ) : null}
 
-            <Paper withBorder p="md" radius="md">
-              <Group justify="space-between" align="center" gap="md">
-                <Group gap="sm" miw={0} wrap="nowrap">
-                  <Box
-                    c={starting ? "blue" : "red"}
-                    style={{ display: "inline-flex" }}
-                  >
-                    {starting ? (
-                      <IconPlayerPlay size="1rem" />
-                    ) : (
-                      <IconPower size="1rem" />
-                    )}
-                  </Box>
-                  <Box miw={0}>
-                    <Text size="sm" fw={600}>
-                      {t(starting ? "startRuntime" : "stopRuntime")}
-                    </Text>
-                    <Text size="xs" c="dimmed">
-                      {t(
-                        starting
-                          ? "inactiveDescription"
-                          : "stopRuntimeDescription",
+            {lifecycleControl ? (
+              <Paper withBorder p="md" radius="md">
+                <Group justify="space-between" align="center" gap="md">
+                  <Group gap="sm" miw={0} wrap="nowrap">
+                    <Box
+                      c={starting ? "blue" : "red"}
+                      style={{ display: "inline-flex" }}
+                    >
+                      {starting ? (
+                        <IconPlayerPlay size="1rem" />
+                      ) : (
+                        <IconPower size="1rem" />
                       )}
-                    </Text>
-                  </Box>
+                    </Box>
+                    <Box miw={0}>
+                      <Text size="sm" fw={600}>
+                        {t(starting ? "startRuntime" : "stopRuntime")}
+                      </Text>
+                      <Text size="xs" c="dimmed">
+                        {t(
+                          starting
+                            ? "inactiveDescription"
+                            : "stopRuntimeDescription",
+                        )}
+                      </Text>
+                    </Box>
+                  </Group>
+                  <Group gap="xs">
+                    {canRestartRuntime ? (
+                      <Button
+                        leftSection={<IconRefresh size="1rem" />}
+                        variant="default"
+                        disabled={
+                          state.isStarting ||
+                          state.isStopping ||
+                          state.isResetting
+                        }
+                        onClick={() => setRestartConfirmOpen(true)}
+                      >
+                        {t("restartRuntime")}
+                      </Button>
+                    ) : null}
+                    <Button
+                      color={starting ? "blue" : "red"}
+                      variant="light"
+                      loading={starting ? state.isStarting : state.isStopping}
+                      disabled={
+                        state.isStarting ||
+                        state.isStopping ||
+                        state.isResetting
+                      }
+                      onClick={starting ? onStartRuntime : onStopRuntime}
+                    >
+                      {starting
+                        ? state.isStarting
+                          ? t("startingRuntime")
+                          : t("startRuntime")
+                        : state.isStopping
+                          ? t("stoppingRuntime")
+                          : t("stopRuntime")}
+                    </Button>
+                  </Group>
                 </Group>
-                <Button
-                  color={starting ? "blue" : "red"}
-                  variant="light"
-                  loading={starting ? state.isStarting : state.isStopping}
-                  disabled={
-                    lifecycleControl === null ||
-                    state.isStarting ||
-                    state.isResetting
-                  }
-                  onClick={starting ? onStartRuntime : onStopRuntime}
-                >
-                  {starting
-                    ? state.isStarting
-                      ? t("startingRuntime")
-                      : t("startRuntime")
-                    : state.isStopping
-                      ? t("stoppingRuntime")
-                      : t("stopRuntime")}
-                </Button>
-              </Group>
-            </Paper>
+              </Paper>
+            ) : null}
 
-            {lifecycleControl === null && (
+            {lifecycleControl === null &&
+            (lifecycle === null || lifecycle.convergence === "stable") ? (
               <Text size="xs" c="dimmed">
                 {runtime.type === "NOT_STARTED" || runtime.type === "HIBERNATED"
                   ? t("runtimeNotRunningHint")
                   : t("runtimeControlUnavailableHint")}
               </Text>
-            )}
+            ) : null}
           </Stack>
         </Paper>
       </Stack>
@@ -448,6 +461,14 @@ export function WorkspacePanel({
     const isControlUnavailable =
       workspace.type === "CONTROL_UNAVAILABLE" ||
       workspace.type === "READ_FAILED";
+    const transitionMessage =
+      lifecycle?.convergence === "stopping"
+        ? "stoppingRuntime"
+        : lifecycle?.convergence === "resetting"
+          ? "resettingRuntime"
+          : lifecycle?.convergence === "recovering"
+            ? "recoveringRuntime"
+            : "startingRuntime";
 
     return (
       <Box flex={1} mih={0} w="100%" style={{ overflow: "hidden" }}>
@@ -459,7 +480,7 @@ export function WorkspacePanel({
               ) : null}
               <Loader size="sm" />
               <Text size="sm" c="dimmed" ta="center">
-                {t("restoringRuntime")}
+                {t(transitionMessage)}
               </Text>
               {actions.stop && (
                 <Button

@@ -1,90 +1,69 @@
 {
-  "title": "Runtime ライフサイクル",
-  "description": "サーバーが判定した目標、収束状態、Provider、Runner の状態です。",
-  "generation": "ライフサイクル generation {generation}",
+  "title": "Runtime の状態",
+  "description": "Runtime の利用可否と、管理対象の実行環境を操作できるかを確認します。",
   "fields": {
-    "target": "目標",
-    "convergence": "収束状態",
-    "providerResource": "Provider リソース",
-    "providerConnection": "Provider 接続",
-    "runner": "Runner",
-    "configuration": "構成"
+    "executionEnvironment": "実行環境",
+    "runtimeConnection": "Runtime 接続",
+    "hostControls": "ホスト操作"
   },
-  "target": {
-    "running": "実行",
-    "stopped": "停止"
-  },
-  "convergence": {
-    "stable": "安定",
+  "status": {
+    "ready": "利用可能",
+    "stopped": "停止",
     "starting": "起動中",
     "stopping": "停止中",
     "resetting": "リセット中",
     "recovering": "復旧中",
-    "blocked": "ブロック",
-    "failed": "失敗"
-  },
-  "availability": {
-    "ready": "利用可能",
-    "stopped": "停止",
-    "transitioning": "移行中",
-    "provider_disconnected": "Provider 切断",
-    "runner_unavailable": "Runner 利用不可",
-    "configuration_blocked": "構成ブロック",
-    "failed": "失敗",
+    "providerDisconnected": "ホスト操作を利用できません",
+    "runnerUnavailable": "接続を利用できません",
+    "configurationBlocked": "設定が必要です",
+    "failed": "確認が必要です",
     "removing": "削除中"
   },
-  "providerConnection": {
-    "connected": "接続済み",
-    "disconnected": "切断"
-  },
-  "providerResource": {
-    "unknown": "不明",
+  "executionEnvironment": {
+    "unknown": "状態を確認できません",
     "stopped": "停止",
     "starting": "起動中",
     "running": "実行中",
     "stopping": "停止中",
     "recovering": "復旧中",
     "resetting": "リセット中",
-    "failed": "失敗"
+    "failed": "確認が必要です"
   },
-  "runner": {
-    "unknown": "不明",
+  "runtimeConnection": {
+    "unknown": "接続を確認中",
     "disconnected": "切断",
-    "starting": "起動中",
-    "ready": "準備完了",
-    "degraded": "縮退",
-    "failed": "失敗"
+    "starting": "接続中",
+    "ready": "接続済み",
+    "degraded": "一部制限",
+    "failed": "利用不可"
   },
-  "configuration": {
-    "profile_required": "Profile が必要",
-    "configuration_blocked": "ブロック",
-    "configured_not_created": "作成準備完了",
-    "waiting_for_recreation": "再作成が必要",
-    "applied": "適用済み"
+  "hostControls": {
+    "connected": "利用可能",
+    "disconnected": "利用不可"
   },
   "reasons": {
-    "runtimeRemovalInProgress": "Runtime の完全削除を実行中です。完了するまでライフサイクル操作は利用できません。",
-    "runtimeFailed": "現在のライフサイクル generation が失敗しました。利用可能な復旧操作を確認してください。",
-    "providerFailed": "Provider が Runtime リソースの失敗を報告しました。",
-    "runtimeRecreationRequired": "要求構成と適用済み構成が異なるため、再作成が必要です。",
-    "providerDisabled": "選択した Runtime Provider は無効です。",
-    "providerWorkspaceUnavailable": "選択した Runtime Provider はこの Workspace で利用できません。",
-    "providerDisconnected": "Provider 接続を利用できないため、要求した移行は現在収束できません。",
-    "providerCapabilityUnavailable": "Provider は現在、必要な機能を提供していません。",
-    "providerCapabilityInvalid": "Provider の機能レポートが無効です。",
-    "profileDocumentInvalid": "選択した Runtime Profile の構成が無効です。",
-    "profileIncompatible": "選択した Runtime Profile は Provider と互換性がありません。",
-    "runtimeConfigurationBlocked": "要求された Runtime 構成はブロックされています。",
-    "runtimeProfileRequired": "Runtime リソースを作成する前に利用可能な Runtime Profile を選択してください。",
-    "runtimeResetting": "Runtime をリセットしています。Agent Workspace データは削除されます。",
-    "runtimeRecovering": "Provider が Runtime リソースを復旧しています。",
-    "runtimeStarting": "Runtime は実行目標へ収束中です。",
-    "runtimeStopping": "Runtime は停止目標へ収束中です。",
-    "runnerUnknown": "Runner の準備状態はまだ観測されていません。",
-    "runnerDisconnected": "Runtime リソースは実行中ですが、Runner 接続を利用できません。",
-    "runnerStarting": "Runtime リソースの実行中に Runner が起動しています。",
-    "runnerDegraded": "Runner が縮退状態を報告しました。",
-    "runnerFailed": "Runner が失敗を報告しました。",
-    "unknown": "サーバーが限定された理由により Runtime を利用できないと判断しました。"
+    "runtimeRemovalInProgress": "Runtime を完全に削除しています。完了するまで Runtime へのアクセスと操作は利用できません。",
+    "runtimeFailed": "Runtime は要求された状態に到達できませんでした。利用可能な復旧操作を実行するか、もう一度お試しください。",
+    "providerFailed": "管理対象の実行環境で問題が発生しました。再起動を利用できる場合は実行してください。",
+    "runtimeRecreationRequired": "選択した設定と現在適用中の設定が異なります。適用するには Runtime を再起動してください。",
+    "providerDisabled": "選択した実行環境は利用できません。別の Runtime Profile を選択してください。",
+    "providerWorkspaceUnavailable": "この Workspace では現在、選択した実行環境を利用できません。",
+    "providerDisconnected": "ホスト操作は一時的に利用できません。Runtime 接続が維持されている間は引き続き利用できます。",
+    "providerCapabilityUnavailable": "選択した実行環境は必要な設定をすべてサポートしていません。",
+    "providerCapabilityInvalid": "実行環境から利用できない設定情報が報告されました。",
+    "profileDocumentInvalid": "選択した Runtime Profile に無効な設定があります。",
+    "profileIncompatible": "選択した Runtime Profile はこの実行環境では利用できません。",
+    "runtimeConfigurationBlocked": "選択した Runtime 設定は現在適用できません。Runtime Profile を確認してください。",
+    "runtimeProfileRequired": "Runtime を起動する前に、利用可能な Runtime Profile を選択してください。",
+    "runtimeResetting": "Runtime をリセットしています。Agent Workspace のファイルは削除されます。",
+    "runtimeRecovering": "実行環境を復旧しています。完了すると Runtime 接続が戻ります。",
+    "runtimeStarting": "Runtime を起動しています。接続が確立すると利用できます。",
+    "runtimeStopping": "Runtime を停止しています。Agent Workspace のファイルは保持されます。",
+    "runnerUnknown": "Runtime 接続を確認しています。",
+    "runnerDisconnected": "実行環境は動作していますが、Runtime 接続を利用できません。再起動を利用できる場合は実行してください。",
+    "runnerStarting": "実行環境は動作しており、Runtime 接続を準備しています。",
+    "runnerDegraded": "Runtime 接続が制限されています。一部の操作を利用できない場合があります。",
+    "runnerFailed": "Runtime 接続に失敗しました。再起動を利用できる場合は Runtime を再起動してください。",
+    "unknown": "Runtime は一時的に利用できません。状態を更新するか、利用可能な復旧操作を実行してください。"
   }
 }

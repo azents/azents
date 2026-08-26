@@ -32,6 +32,9 @@ from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
+from azentspublicclient.models.runtime_provider_connection_state import (
+    RuntimeProviderConnectionState,
+)
 from azentspublicclient.models.runtime_system_metrics_summary import (
     RuntimeSystemMetricsSummary,
 )
@@ -184,6 +187,33 @@ def _wait_for_runtime_ready(
     WebDriverWait(driver, 120, poll_frequency=1).until(runtime_is_ready)
 
 
+def _wait_for_runtime_start_authorized(
+    driver: WebDriver,
+    *,
+    runtime_api: AgentRuntimeV1Api,
+    token: str,
+    handle: str,
+    agent_id: str,
+) -> None:
+    """Wait for Provider observation to authorize managed host creation."""
+
+    def runtime_start_is_authorized(_: WebDriver) -> bool:
+        runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=_headers(token),
+        )
+        lifecycle = runtime.lifecycle
+        return (
+            lifecycle is not None
+            and lifecycle.provider.connection
+            is RuntimeProviderConnectionState.CONNECTED
+            and runtime.actions.start
+        )
+
+    WebDriverWait(driver, 120, poll_frequency=1).until(runtime_start_is_authorized)
+
+
 def _create_workspace(
     *,
     public_api_client: azentspublicclient.ApiClient,
@@ -333,6 +363,14 @@ def test_runtime_free_add_and_remove_progress(
     _assert_visible_text(browser_driver, "Permanently remove managed Runtime")
 
     runtime_api = AgentRuntimeV1Api(public_api_client)
+    _wait_for_runtime_start_authorized(
+        browser_driver,
+        runtime_api=runtime_api,
+        token=workspace.token,
+        handle=workspace.handle,
+        agent_id=agent.id,
+    )
+    browser_driver.refresh()
     _click_button(browser_driver, "Start")
     _wait_for_runtime_metrics(
         browser_driver,
@@ -388,15 +426,15 @@ def test_runtime_free_add_and_remove_progress(
         AgentWorkspaceDirectoryResponse,
     )
 
-    _assert_visible_text(browser_driver, "Runtime lifecycle")
+    _assert_visible_text(browser_driver, "Runtime status")
+    _assert_visible_text(browser_driver, "Execution environment")
+    _assert_visible_text(browser_driver, "Runtime connection")
+    _assert_visible_text(browser_driver, "Host controls")
     _click_button(browser_driver, "Restart")
     _assert_visible_text(browser_driver, "Restart Runtime?")
     _assert_visible_text(
         browser_driver,
-        (
-            "The Runtime will be temporarily unavailable while its execution "
-            "resource is replaced and normal startup converges."
-        ),
+        "The Runtime will be temporarily unavailable while it restarts.",
     )
     _assert_visible_text(
         browser_driver,
@@ -476,7 +514,10 @@ def test_runtime_free_add_and_remove_progress(
             (By.XPATH, "//*[@role='tab' and normalize-space()='Settings']")
         )
     ).click()
-    _assert_visible_text(browser_driver, "Runtime lifecycle")
+    _assert_visible_text(browser_driver, "Runtime status")
+    _assert_visible_text(browser_driver, "Execution environment")
+    _assert_visible_text(browser_driver, "Runtime connection")
+    _assert_visible_text(browser_driver, "Host controls")
     _click_button(browser_driver, "Stop runtime")
     _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "Runtime stopped", timeout_seconds=120)

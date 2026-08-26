@@ -315,43 +315,51 @@ function LifecycleControls({
             </Text>
           </Stack>
           <Group gap="sm">
-            <Button
-              disabled={!runtime.actions.start || busy}
-              leftSection={<IconPlayerPlay size={rem(16)} />}
-              loading={lifecycleAction === "start"}
-              variant="light"
-              onClick={onStart}
-            >
-              {t("lifecycle.start")}
-            </Button>
-            <Button
-              disabled={!runtime.actions.stop || busy}
-              leftSection={<IconSquare size={rem(16)} />}
-              loading={lifecycleAction === "stop"}
-              variant="light"
-              onClick={onStop}
-            >
-              {t("lifecycle.stop")}
-            </Button>
-            <Button
-              disabled={!runtime.actions.restart || busy}
-              leftSection={<IconRotateClockwise size={rem(16)} />}
-              loading={lifecycleAction === "restart"}
-              variant="light"
-              onClick={onOpenRestartConfirm}
-            >
-              {t("lifecycle.restart")}
-            </Button>
-            <Button
-              color="red"
-              disabled={!runtime.actions.reset || busy}
-              leftSection={<IconRefresh size={rem(16)} />}
-              loading={lifecycleAction === "reset"}
-              variant="light"
-              onClick={onOpenResetConfirm}
-            >
-              {t("lifecycle.reset")}
-            </Button>
+            {runtime.actions.start ? (
+              <Button
+                disabled={busy}
+                leftSection={<IconPlayerPlay size={rem(16)} />}
+                loading={lifecycleAction === "start"}
+                variant="light"
+                onClick={onStart}
+              >
+                {t("lifecycle.start")}
+              </Button>
+            ) : null}
+            {runtime.actions.stop ? (
+              <Button
+                disabled={busy}
+                leftSection={<IconSquare size={rem(16)} />}
+                loading={lifecycleAction === "stop"}
+                variant="light"
+                onClick={onStop}
+              >
+                {t("lifecycle.stop")}
+              </Button>
+            ) : null}
+            {runtime.actions.restart ? (
+              <Button
+                disabled={busy}
+                leftSection={<IconRotateClockwise size={rem(16)} />}
+                loading={lifecycleAction === "restart"}
+                variant="light"
+                onClick={onOpenRestartConfirm}
+              >
+                {t("lifecycle.restart")}
+              </Button>
+            ) : null}
+            {runtime.actions.reset ? (
+              <Button
+                color="red"
+                disabled={busy}
+                leftSection={<IconRefresh size={rem(16)} />}
+                loading={lifecycleAction === "reset"}
+                variant="light"
+                onClick={onOpenResetConfirm}
+              >
+                {t("lifecycle.reset")}
+              </Button>
+            ) : null}
           </Group>
         </Stack>
       </Paper>
@@ -496,10 +504,7 @@ function ManagedView({
       </Paper>
 
       {runtime.lifecycle ? (
-        <RuntimeLifecycleStatus
-          lifecycle={runtime.lifecycle}
-          configurationStatus={runtime.configuration?.status}
-        />
+        <RuntimeLifecycleStatus lifecycle={runtime.lifecycle} />
       ) : null}
 
       <LifecycleControls

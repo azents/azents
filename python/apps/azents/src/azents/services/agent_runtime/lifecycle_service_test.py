@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime
 
+import pytest
+
 from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeProviderConnectionState,
@@ -14,7 +16,10 @@ from azents.core.runtime_profile import (
     RuntimeConfigurationStateStatus,
 )
 from azents.repos.agent_runtime.data import AgentRuntime
-from azents.repos.runtime_profile.data import RuntimeConfigurationSlot
+from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationAppliedSlot,
+    RuntimeConfigurationSlot,
+)
 from azents.services.agent_runtime.lifecycle_data import (
     AgentRuntimeConfigurationStatus,
 )
@@ -117,6 +122,31 @@ def _resolution(
     )
 
 
+def _resolution_with_previous_applied(
+    runtime: AgentRuntime,
+) -> RuntimeProfileResolutionResult:
+    """Create a ready desired slot that differs from a previous applied slot."""
+    resolution = _resolution(
+        status=RuntimeConfigurationResolutionStatus.READY,
+        reason_code=None,
+    )
+    desired = resolution.desired
+    assert desired.digest is not None
+    assert desired.document is not None
+    return RuntimeProfileResolutionResult(
+        runtime=runtime,
+        desired=desired,
+        applied=RuntimeConfigurationAppliedSlot(
+            sequence=desired.sequence + 1,
+            target_generation=desired.target_generation,
+            digest=desired.digest,
+            document=desired.document,
+            applied_at=datetime.now(UTC),
+        ),
+        runtime_created=True,
+    )
+
+
 class TestAgentRuntimeLifecyclePresentation:
     """Agent Runtime lifecycle presentation calculation tests."""
 
@@ -126,7 +156,9 @@ class TestAgentRuntimeLifecyclePresentation:
 
     def test_stopped_default_presentation(self) -> None:
         """Default state returns stable stopped availability."""
-        runtime = _runtime()
+        runtime = _runtime(
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED
+        )
         lifecycle = self.service.calculate_lifecycle(
             runtime,
             configuration=None,
@@ -139,6 +171,17 @@ class TestAgentRuntimeLifecyclePresentation:
         assert lifecycle.target is RuntimeDesiredState.STOPPED
         assert actions.start is True
         assert actions.use_runner is False
+
+    def test_stopped_runtime_without_provider_authority_has_no_host_actions(
+        self,
+    ) -> None:
+        """Disconnected Provider state cannot authorize host management."""
+        actions = self.service._calculate_actions(_runtime())
+
+        assert actions.start is False
+        assert actions.stop is False
+        assert actions.restart is False
+        assert actions.reset is False
 
     def test_stopped_target_ignores_configuration_recreation_wait(self) -> None:
         """A stopped Runtime adopts its desired configuration on the next start."""
@@ -188,6 +231,10 @@ class TestAgentRuntimeLifecyclePresentation:
         assert lifecycle.convergence == "stopping"
         assert lifecycle.availability == "transitioning"
         assert lifecycle.reason_code == "runtime_stopping"
+        actions = self.service._calculate_actions(runtime)
+        assert actions.start is False
+        assert actions.stop is False
+        assert actions.restart is False
 
     def test_provider_disconnected_when_desired_running(self) -> None:
         """Running target while Provider is disconnected is blocked."""
@@ -218,7 +265,10 @@ class TestAgentRuntimeLifecyclePresentation:
 
         assert lifecycle.convergence == "starting"
         assert lifecycle.availability == "transitioning"
-        assert self.service._calculate_actions(runtime).use_runner is False
+        actions = self.service._calculate_actions(runtime)
+        assert actions.stop is True
+        assert actions.restart is False
+        assert actions.use_runner is False
 
     def test_running_with_ready_runner(self) -> None:
         """Provider running plus Runner ready is available."""
@@ -363,8 +413,10 @@ class TestAgentRuntimeLifecyclePresentation:
         assert actions.restart is False
         assert actions.reset is False
 
-    def test_running_target_preserves_configuration_recreation_block(self) -> None:
-        """A running target still requires explicit configuration recreation."""
+    def test_ready_runner_remains_available_while_configuration_update_waits(
+        self,
+    ) -> None:
+        """A connected Runner remains usable while a new configuration waits."""
         runtime = _runtime(
             desired_state=RuntimeDesiredState.RUNNING,
             provider_observed_state=RuntimeProviderObservedState.RUNNING,
@@ -383,9 +435,78 @@ class TestAgentRuntimeLifecyclePresentation:
             removing=False,
         )
 
-        assert lifecycle.convergence == "blocked"
-        assert lifecycle.availability == "configuration_blocked"
-        assert lifecycle.reason_code == "runtime_recreation_required"
+        assert lifecycle.convergence == "stable"
+        assert lifecycle.availability == "ready"
+        assert lifecycle.reason_code is None
+
+    @pytest.mark.asyncio
+    async def test_stopped_runtime_applies_selected_configuration_on_next_start(
+        self,
+    ) -> None:
+        """A stopped resource is not blocked by its previously applied revision."""
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.STOPPED,
+            provider_observed_state=RuntimeProviderObservedState.UNKNOWN,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            runner_state=RuntimeRunnerState.DISCONNECTED,
+        )
+        resolution = _resolution_with_previous_applied(runtime)
+
+        configuration = await self.service._configuration_status(resolution)
+        actions = self.service._calculate_lifecycle_actions(
+            runtime,
+            configuration=configuration,
+            removing=False,
+        )
+
+        assert configuration.status == "configured_not_created"
+        assert actions.start is True
+
+    @pytest.mark.asyncio
+    async def test_ready_runner_keeps_configuration_difference_visible(
+        self,
+    ) -> None:
+        """A usable Runtime reports selected and applied revisions separately."""
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.RUNNING,
+            provider_observed_state=RuntimeProviderObservedState.UNKNOWN,
+            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+            runner_state=RuntimeRunnerState.READY,
+        )
+        resolution = _resolution_with_previous_applied(runtime)
+
+        configuration = await self.service._configuration_status(resolution)
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=configuration,
+            removing=False,
+        )
+
+        assert configuration.status == "waiting_for_recreation"
+        assert lifecycle.availability == "ready"
+
+    def test_ready_runner_remains_available_when_provider_disconnects(self) -> None:
+        """Provider control loss does not hide a connected Runtime."""
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.RUNNING,
+            provider_observed_state=RuntimeProviderObservedState.UNKNOWN,
+            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+            runner_state=RuntimeRunnerState.READY,
+        )
+
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=None,
+            removing=False,
+        )
+        actions = self.service._calculate_actions(runtime)
+
+        assert lifecycle.availability == "ready"
+        assert actions.start is False
+        assert actions.stop is False
+        assert actions.restart is False
+        assert actions.reset is False
+        assert actions.use_runner is True
 
     def test_blocked_configuration_rejects_creation_commands(self) -> None:
         """A blocked desired revision cannot create a new Runtime incarnation."""

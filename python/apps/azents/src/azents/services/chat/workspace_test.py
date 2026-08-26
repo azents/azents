@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     RuntimeDesiredState,
+    RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
     WorkspaceUserRole,
@@ -479,6 +480,37 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
     assert [entry.path for entry in state.workspace.manifest.entries] == [
         (AGENT_WORKSPACE_ROOT / "README.md").as_posix(),
         (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix(),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_keeps_ready_runner_when_host_controls_disconnect() -> None:
+    """Runner access remains available without Provider host authority."""
+    runtime = _make_agent_runtime(
+        provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED
+    )
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.get_workspace("agent-1", "user-1")
+
+    assert isinstance(result, Success)
+    state = result.value
+    assert state.lifecycle is not None
+    assert state.lifecycle.availability == "ready"
+    assert state.workspace.type == "READY"
+    assert state.actions.start is None
+    assert state.actions.stop is None
+    assert state.actions.restart is None
+    assert state.actions.reset is None
+    assert runner_operations.list_calls == [
+        ("runtime-1", 1, AGENT_WORKSPACE_ROOT.as_posix())
     ]
 
 
@@ -978,6 +1010,9 @@ def _make_agent_runtime(
     *,
     workspace_path: str | None = AGENT_WORKSPACE_ROOT.as_posix(),
     provider_observed_state: RuntimeProviderObservedState | None = None,
+    provider_connection_state: RuntimeProviderConnectionState = (
+        RuntimeProviderConnectionState.CONNECTED
+    ),
     desired_state: RuntimeDesiredState | None = None,
     desired_generation: int = 7,
     runner_state: RuntimeRunnerState = RuntimeRunnerState.READY,
@@ -997,6 +1032,7 @@ def _make_agent_runtime(
         terminal_delete_acknowledgement_kind=None,
         desired_state=desired_state,
         desired_generation=desired_generation,
+        provider_connection_state=provider_connection_state,
         provider_observed_state=provider_observed_state,
         runner_state=runner_state,
         runner_generation=1,

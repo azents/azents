@@ -11,7 +11,7 @@
     "controlUnavailableTitle": "Workspace control unavailable",
     "restartRuntime": "Restart Runtime",
     "restartConfirmTitle": "Restart Runtime?",
-    "restartConfirmDescription": "The Runtime will be temporarily unavailable while its execution resource is replaced and normal startup converges.",
+    "restartConfirmDescription": "The Runtime will be temporarily unavailable while it restarts.",
     "restartPreservationNotice": "Agent Workspace files and preserved Runtime storage are retained.",
     "confirmRestart": "Restart Runtime",
     "cancel": "Cancel",

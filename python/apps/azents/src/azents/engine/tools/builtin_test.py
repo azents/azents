@@ -92,6 +92,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationAppliedSlot,
     RuntimeConfigurationSlot,
     RuntimeConfigurationState,
 )
@@ -340,6 +341,9 @@ def _runtime_configuration_state(
         _DEFAULT_RUNTIME_CONFIGURATION_DOCUMENT
     ),
     reason_code: str | None = None,
+    sequence: int = 1,
+    target_generation: int = 7,
+    applied: RuntimeConfigurationAppliedSlot | None = None,
 ) -> RuntimeConfigurationState:
     """Create one bounded desired Runtime configuration state."""
     now = datetime(2026, 8, 11, tzinfo=UTC)
@@ -351,9 +355,9 @@ def _runtime_configuration_state(
     return RuntimeConfigurationState(
         runtime_id="runtime-1",
         desired=RuntimeConfigurationSlot(
-            sequence=1,
+            sequence=sequence,
             status=status,
-            target_generation=7,
+            target_generation=target_generation,
             digest=digest,
             document=desired_document,
             reason_code=reason_code,
@@ -362,7 +366,7 @@ def _runtime_configuration_state(
             provider_acknowledged_at=None,
             runner_observed_at=None,
         ),
-        applied=None,
+        applied=applied,
         created_at=now,
         updated_at=now,
     )
@@ -861,21 +865,28 @@ def _make_toolkit(
             object(),
             requested_agent_id,
         )
-        if runtime.provider_observed_state is RuntimeProviderObservedState.FAILED:
+        runner_ready = (
+            runtime.desired_state is RuntimeDesiredState.RUNNING
+            and runtime.runner_state is RuntimeRunnerState.READY
+            and runtime.runner_generation > 0
+            and runtime.workspace_path is not None
+        )
+        if (
+            runtime.provider_observed_state is RuntimeProviderObservedState.FAILED
+            and not runner_ready
+        ):
             raise RuntimeStorageError("Runtime failed")
         if (
             runtime.provider_connection_state
             is RuntimeProviderConnectionState.DISCONNECTED
+            and not runner_ready
         ):
             raise RuntimeStorageError("Runtime Provider is disconnected")
         if runtime.desired_state is not RuntimeDesiredState.RUNNING:
             if options.get("start_if_stopped", True) is False:
                 raise RuntimeStorageError("Runtime is not running")
             await agent_runtime_service.ensure_started_for_agent(requested_agent_id)
-        if (
-            runtime.provider_observed_state is not RuntimeProviderObservedState.RUNNING
-            or runtime.runner_state is not RuntimeRunnerState.READY
-        ):
+        if runtime.runner_state is not RuntimeRunnerState.READY:
             wait_timeout_seconds = options.get("wait_timeout_seconds", 120.0)
             if wait_timeout_seconds == 0.0:
                 raise RuntimeStorageError("Runtime is still starting")
@@ -883,10 +894,7 @@ def _make_toolkit(
                 object(),
                 requested_agent_id,
             )
-        if (
-            runtime.provider_observed_state is not RuntimeProviderObservedState.RUNNING
-            or runtime.runner_state is not RuntimeRunnerState.READY
-        ):
+        if runtime.runner_state is not RuntimeRunnerState.READY:
             raise RuntimeStorageError("Runtime runner is not ready")
         return RuntimeOperationTarget(
             id=runtime.id,
@@ -1622,6 +1630,50 @@ class TestRuntimeToolkitUpdateContext:
         assert "provider_capability_missing" not in prompt
         assert "## Runtime Behavior" not in prompt
         runtime_service.ensure_started_for_agent.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_prompt_uses_applied_profile_for_ready_runner(self) -> None:
+        """A blocked future selection does not fence the ready applied Runtime."""
+        toolkit = _make_toolkit(
+            provider_observed_state=RuntimeProviderObservedState.STOPPED,
+            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+        )
+        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
+        profile_repository = runtime_service.runtime_profile_repository
+        profile_repository.get_configuration_state.return_value = (
+            _runtime_configuration_state(
+                status=RuntimeConfigurationStateStatus.BLOCKED,
+                digest=None,
+                document=None,
+                reason_code="provider_disabled",
+                sequence=2,
+                applied=RuntimeConfigurationAppliedSlot(
+                    sequence=1,
+                    target_generation=7,
+                    digest="a" * 64,
+                    document=_runtime_configuration_document(),
+                    applied_at=datetime(2026, 8, 11, tzinfo=UTC),
+                ),
+            )
+        )
+        await toolkit.update_context(_make_context())
+
+        prompt = await toolkit.get_static_prompt(_make_context())
+        tool = _find_tool(
+            (await toolkit.update_context(_make_context())).tools,
+            "exec_command",
+        )
+        result = await tool.handler(json.dumps({"command": "pwd"}))
+
+        assert "Runtime-dependent operations are currently unavailable." not in prompt
+        assert isinstance(result, FunctionToolResult)
+        assert cast(Any, toolkit)._expected_runtime_authority == (
+            RuntimeOperationAuthority(
+                configuration_sequence=1,
+                configuration_digest="a" * 64,
+                desired_generation=7,
+            )
+        )
 
     @pytest.mark.asyncio
     async def test_prompt_includes_agent_workspace_path(self) -> None:
@@ -2650,17 +2702,18 @@ class TestProcessToolHandler:
         assert "empty polls default to 5000 ms" in write_yield["description"]
 
     @pytest.mark.asyncio
-    async def test_exec_command_waits_when_provider_not_running(
+    async def test_exec_command_waits_when_runner_not_ready(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """exec_command waits until Provider is ready unless running."""
+        """exec_command waits until the Runner can serve operations."""
         monkeypatch.setattr(
             builtin_module,
             "_RUNTIME_READY_WAIT_TIMEOUT_SECONDS",
             0.0,
         )
         toolkit = _make_toolkit(
-            provider_observed_state=RuntimeProviderObservedState.STOPPED
+            provider_observed_state=RuntimeProviderObservedState.STOPPED,
+            runner_state=RuntimeRunnerState.STARTING,
         )
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "exec_command")
@@ -2757,10 +2810,11 @@ class TestProcessToolHandler:
 
     @pytest.mark.asyncio
     async def test_exec_command_fails_fast_when_provider_disconnected(self) -> None:
-        """Runtime with disconnected Provider fails explicitly."""
+        """Disconnected Provider fails when no ready Runner can serve operations."""
         toolkit = _make_toolkit(
             provider_observed_state=RuntimeProviderObservedState.STOPPED,
             provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
+            runner_state=RuntimeRunnerState.UNKNOWN,
         )
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "exec_command")

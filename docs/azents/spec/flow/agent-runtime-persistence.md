@@ -38,8 +38,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-08-25
-spec_version: 29
+last_verified_at: 2026-08-26
+spec_version: 30
 ---
 
 # Agent Runtime Persistence
@@ -84,8 +84,9 @@ selected-Profile authority or resolved configuration. Both blocked and unconfigu
 preserve any older applied slot while its running incarnation remains current.
 
 Provider connectivity is operational evidence rather than configuration identity. Disconnect and
-reconnect events do not change desired status, sequence, or digest; current connection authority
-separately gates lifecycle dispatch and exact Runtime operation qualification.
+reconnect events do not change desired status, sequence, or digest. Current connection authority
+gates lifecycle dispatch and operations that create or replace compute, but it does not fence an
+already-ready current-generation Runner serving a retained applied configuration.
 
 Resolution commits through a Runtime compare-and-set that verifies the expected sequence high-water,
 desired generation, and every snapshot identity/version relationship. A materially new source,
@@ -109,9 +110,11 @@ Workspace evidence.
 
 Capability/Profile changes never reassign the Agent to another Provider or Profile. Provider or
 Profile loss preserves stored selection, Provider binding, applied state, running compute, and
-existing storage while blocking new create/start/restart/reset/recreate work. Historical hierarchy
-conversion occurs only inside the one-way Alembic migration; runtime services do not read legacy
-policy tables, snapshots, overrides, or status fallbacks.
+existing storage while blocking new create/start/restart/reset/recreate work. A current-generation
+ready Runner may continue ordinary data-plane operations from that retained applied state even when
+the future desired slot becomes blocked or unconfigured. Historical hierarchy conversion occurs
+only inside the one-way Alembic migration; runtime services do not read legacy policy tables,
+snapshots, overrides, or status fallbacks.
 
 An Owner-only exact-version Workspace Runtime Profile hard delete physically removes the Profile in
 the same PostgreSQL transaction that clears a matching Workspace default and Agent selections,
@@ -378,6 +381,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-08-26 (spec_version=30)** — Separated Provider-authorized host lifecycle from
+  ready-Runner data-plane usability and allowed a retained applied configuration to keep
+  serving operations while a future desired selection is unavailable or pending recreation.
 - **2026-08-25 (spec_version=29)** — Fenced Kubernetes Lease creation/renewal/takeover with
   absence or exact-resourceVersion optimistic concurrency and made terminal-delete acknowledgement
   wait for observed absence of every Provider-owned Runtime resource.

@@ -1,90 +1,69 @@
 {
-  "title": "Runtime 수명 주기",
-  "description": "서버가 판단한 목표, 수렴 상태, Provider, Runner 상태입니다.",
-  "generation": "수명 주기 generation {generation}",
+  "title": "Runtime 상태",
+  "description": "Runtime 사용 가능 여부와 관리형 실행 환경의 제어 가능 여부를 확인합니다.",
   "fields": {
-    "target": "목표",
-    "convergence": "수렴 상태",
-    "providerResource": "Provider 리소스",
-    "providerConnection": "Provider 연결",
-    "runner": "Runner",
-    "configuration": "구성"
+    "executionEnvironment": "실행 환경",
+    "runtimeConnection": "Runtime 연결",
+    "hostControls": "호스트 제어"
   },
-  "target": {
-    "running": "실행",
-    "stopped": "중지"
-  },
-  "convergence": {
-    "stable": "안정",
+  "status": {
+    "ready": "사용 가능",
+    "stopped": "정지됨",
     "starting": "시작 중",
-    "stopping": "중지 중",
+    "stopping": "정지 중",
     "resetting": "초기화 중",
     "recovering": "복구 중",
-    "blocked": "차단됨",
-    "failed": "실패"
-  },
-  "availability": {
-    "ready": "사용 가능",
-    "stopped": "중지됨",
-    "transitioning": "전환 중",
-    "provider_disconnected": "Provider 연결 끊김",
-    "runner_unavailable": "Runner 사용 불가",
-    "configuration_blocked": "구성 차단됨",
-    "failed": "실패",
+    "providerDisconnected": "호스트 제어 사용 불가",
+    "runnerUnavailable": "연결 사용 불가",
+    "configurationBlocked": "설정 필요",
+    "failed": "확인 필요",
     "removing": "제거 중"
   },
-  "providerConnection": {
-    "connected": "연결됨",
-    "disconnected": "연결 끊김"
-  },
-  "providerResource": {
-    "unknown": "알 수 없음",
-    "stopped": "중지됨",
+  "executionEnvironment": {
+    "unknown": "상태 확인 불가",
+    "stopped": "정지됨",
     "starting": "시작 중",
     "running": "실행 중",
-    "stopping": "중지 중",
+    "stopping": "정지 중",
     "recovering": "복구 중",
     "resetting": "초기화 중",
-    "failed": "실패"
+    "failed": "확인 필요"
   },
-  "runner": {
-    "unknown": "알 수 없음",
+  "runtimeConnection": {
+    "unknown": "연결 확인 중",
     "disconnected": "연결 끊김",
-    "starting": "시작 중",
-    "ready": "준비됨",
-    "degraded": "성능 저하",
-    "failed": "실패"
+    "starting": "연결 중",
+    "ready": "연결됨",
+    "degraded": "일부 제한됨",
+    "failed": "사용 불가"
   },
-  "configuration": {
-    "profile_required": "Profile 필요",
-    "configuration_blocked": "차단됨",
-    "configured_not_created": "생성 준비됨",
-    "waiting_for_recreation": "재생성 필요",
-    "applied": "적용됨"
+  "hostControls": {
+    "connected": "사용 가능",
+    "disconnected": "사용 불가"
   },
   "reasons": {
-    "runtimeRemovalInProgress": "Runtime 영구 제거가 진행 중입니다. 완료될 때까지 수명 주기 작업을 사용할 수 없습니다.",
-    "runtimeFailed": "현재 수명 주기 generation이 실패했습니다. 사용할 수 있는 복구 작업을 확인하세요.",
-    "providerFailed": "Provider가 Runtime 리소스 실패를 보고했습니다.",
-    "runtimeRecreationRequired": "원하는 구성과 적용된 Runtime 구성이 다릅니다. 재생성이 필요합니다.",
-    "providerDisabled": "선택한 Runtime Provider가 비활성화되어 있습니다.",
-    "providerWorkspaceUnavailable": "선택한 Runtime Provider를 이 Workspace에서 사용할 수 없습니다.",
-    "providerDisconnected": "Provider 연결을 사용할 수 없어 요청한 전환이 현재 수렴할 수 없습니다.",
-    "providerCapabilityUnavailable": "Provider가 현재 필요한 기능을 제공하지 않습니다.",
-    "providerCapabilityInvalid": "Provider 기능 보고가 올바르지 않습니다.",
-    "profileDocumentInvalid": "선택한 Runtime Profile 구성이 올바르지 않습니다.",
-    "profileIncompatible": "선택한 Runtime Profile이 Provider와 호환되지 않습니다.",
-    "runtimeConfigurationBlocked": "원하는 Runtime 구성이 차단되었습니다.",
-    "runtimeProfileRequired": "Runtime 리소스를 생성하기 전에 사용 가능한 Runtime Profile을 선택하세요.",
-    "runtimeResetting": "Runtime을 초기화하고 있습니다. Agent Workspace 데이터가 삭제됩니다.",
-    "runtimeRecovering": "Provider가 Runtime 리소스를 복구하고 있습니다.",
-    "runtimeStarting": "Runtime이 실행 목표로 수렴하고 있습니다.",
-    "runtimeStopping": "Runtime이 중지 목표로 수렴하고 있습니다.",
-    "runnerUnknown": "Runner 준비 상태가 아직 관찰되지 않았습니다.",
-    "runnerDisconnected": "Runtime 리소스는 실행 중이지만 Runner 연결을 사용할 수 없습니다.",
-    "runnerStarting": "Runtime 리소스가 실행된 상태에서 Runner가 시작 중입니다.",
-    "runnerDegraded": "Runner가 성능 저하 상태를 보고했습니다.",
-    "runnerFailed": "Runner가 실패를 보고했습니다.",
-    "unknown": "서버가 제한된 사유로 Runtime을 사용할 수 없다고 판단했습니다."
+    "runtimeRemovalInProgress": "Runtime을 영구 제거하고 있습니다. 제거가 끝날 때까지 Runtime 접근과 제어를 사용할 수 없습니다.",
+    "runtimeFailed": "Runtime이 요청한 상태에 도달하지 못했습니다. 가능한 복구 작업을 실행하거나 다시 시도하세요.",
+    "providerFailed": "관리형 실행 환경에 문제가 발생했습니다. 재시작 작업을 사용할 수 있으면 재시작하세요.",
+    "runtimeRecreationRequired": "선택한 설정과 현재 적용된 설정이 다릅니다. 적용하려면 Runtime을 재시작하세요.",
+    "providerDisabled": "선택한 실행 환경을 사용할 수 없습니다. 다른 Runtime Profile을 선택하세요.",
+    "providerWorkspaceUnavailable": "현재 이 Workspace에서는 선택한 실행 환경을 사용할 수 없습니다.",
+    "providerDisconnected": "호스트 제어를 일시적으로 사용할 수 없습니다. Runtime 연결이 유지되는 동안에는 계속 사용할 수 있습니다.",
+    "providerCapabilityUnavailable": "선택한 실행 환경이 필요한 설정을 모두 지원하지 않습니다.",
+    "providerCapabilityInvalid": "실행 환경에서 사용할 수 없는 설정 정보를 보고했습니다.",
+    "profileDocumentInvalid": "선택한 Runtime Profile에 올바르지 않은 설정이 있습니다.",
+    "profileIncompatible": "선택한 Runtime Profile을 이 실행 환경에서 사용할 수 없습니다.",
+    "runtimeConfigurationBlocked": "선택한 Runtime 설정을 현재 적용할 수 없습니다. Runtime Profile을 확인하세요.",
+    "runtimeProfileRequired": "Runtime을 시작하기 전에 사용 가능한 Runtime Profile을 선택하세요.",
+    "runtimeResetting": "Runtime을 초기화하고 있습니다. Agent Workspace 파일이 삭제됩니다.",
+    "runtimeRecovering": "실행 환경을 복구하고 있습니다. 복구가 끝나면 Runtime 연결이 다시 제공됩니다.",
+    "runtimeStarting": "Runtime을 시작하고 있습니다. 연결이 완료되면 사용할 수 있습니다.",
+    "runtimeStopping": "Runtime을 정지하고 있습니다. Agent Workspace 파일은 유지됩니다.",
+    "runnerUnknown": "Runtime 연결을 확인하고 있습니다.",
+    "runnerDisconnected": "실행 환경은 실행 중이지만 Runtime 연결을 사용할 수 없습니다. 재시작 작업을 사용할 수 있으면 재시작하세요.",
+    "runnerStarting": "실행 환경이 실행 중이며 Runtime 연결을 준비하고 있습니다.",
+    "runnerDegraded": "Runtime 연결이 일부 제한되어 몇몇 작업을 사용할 수 없습니다.",
+    "runnerFailed": "Runtime 연결에 실패했습니다. 재시작 작업을 사용할 수 있으면 Runtime을 재시작하세요.",
+    "unknown": "Runtime을 일시적으로 사용할 수 없습니다. 상태를 새로 고치거나 가능한 복구 작업을 실행하세요."
   }
 }

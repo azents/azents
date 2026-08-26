@@ -115,30 +115,17 @@
     "metricsTab": "Metrics",
     "settingsTab": "Settings",
     "settingsTitle": "Runtime settings",
-    "settingsSubtitle": "Start, stop, and check the status of this runtime.",
+    "settingsSubtitle": "Review status, settings, and the controls currently available for this Runtime.",
     "configurationTitle": "Runtime status",
     "configurationLoading": "Loading runtime configuration…",
-    "configurationTechnicalDetails": "Technical details",
-    "configurationCurrent": "Current configuration",
-    "configurationDesired": "New configuration",
-    "configurationApplied": "Currently applied configuration",
-    "configurationNoDesired": "No desired configuration has been resolved.",
-    "configurationNoApplied": "No configuration has been applied to a runtime.",
-    "configurationEvidence": {
-      "sequence": "Configuration sequence",
-      "profile": "Runtime profile",
-      "infrastructure": "Infrastructure",
-      "generation": "Generation",
-      "digest": "Digest"
-    },
+    "configurationDesired": "Selected settings",
+    "configurationApplied": "Currently applied settings",
     "configurationNetworkTitle": "Effective network",
     "configurationNetworkMode": "Mode: {mode}",
     "configurationNetworkProtocol": "External protocol scope: {protocol}",
     "configurationNetworkDomains": "Domain authority: {mode}",
     "configurationNetworkHttpsInspected": "HTTPS traffic is inspected using the Runtime trust configuration.",
     "configurationNetworkHttpsNotInspected": "HTTPS traffic is not inspected by the managed Runtime proxy.",
-    "configurationNetworkRecreationRequired": "Recreate the Runtime to apply this network configuration.",
-    "configurationNetworkBlocked": "This network configuration is currently blocked.",
     "configurationNetworkModes": {
       "direct": "Direct network",
       "proxy_required": "Inspected HTTP proxy required",
@@ -156,28 +143,28 @@
     "configurationStatus": {
       "profile_required": {
         "label": "Setup required",
-        "description": "Choose an environment before using the runtime."
+        "description": "Choose a Runtime Profile before starting the Runtime."
       },
       "configuration_blocked": {
         "label": "Needs attention",
-        "description": "The selected runtime configuration is not currently available. Check the settings."
+        "description": "The selected settings cannot be applied. Review Runtime settings and choose an available option."
       },
       "configured_not_created": {
         "label": "Ready to start",
-        "description": "Setup is complete. The configuration will be applied when the runtime starts."
+        "description": "The selected settings will be applied when the Runtime starts."
       },
       "waiting_for_recreation": {
-        "label": "Update required",
-        "description": "Recreate the runtime to apply the new configuration."
+        "label": "Restart required",
+        "description": "The Runtime is still using the currently applied settings. Restart it to apply the selected settings."
       },
       "applied": {
-        "label": "Healthy",
-        "description": "The runtime is using the latest configuration and is ready to use."
+        "label": "Applied",
+        "description": "The Runtime is using the selected settings."
       }
     },
-    "stopRuntimeDescription": "Stop the running runtime pod without deleting workspace files.",
+    "stopRuntimeDescription": "Stop the Runtime without deleting Agent Workspace files.",
     "runtimeNotRunningHint": "The runtime is not running, so there is nothing to stop.",
-    "runtimeControlUnavailableHint": "Runtime control is currently unavailable.",
+    "runtimeControlUnavailableHint": "No host action is currently available.",
     "noSession": "Start the agent workspace first.",
     "loadingWorkspace": "Loading agent workspace…",
     "inactiveTitle": "Runtime is not running",
@@ -185,8 +172,8 @@
     "restoreFailedTitle": "Runtime restore failed",
     "restoreFailedDescription": "The previous Agent Workspace state could not be restored.",
     "runtimeFailedTitle": "Runtime failed",
-    "runtimeFailedDescription": "The runtime provider reported a failure.",
-    "controlUnavailableTitle": "Runtime control connection is unavailable",
+    "runtimeFailedDescription": "The managed execution environment reported a failure.",
+    "controlUnavailableTitle": "Runtime connection unavailable",
     "retryRestore": "Retry restore",
     "cancel": "Cancel",
     "browserPath": "Path",
@@ -239,7 +226,7 @@
     "resetRuntimeConfirm": "This will discard agent workspace files and any preserved runtime state, then start an empty runtime. This action cannot be undone.",
     "restartRuntime": "Restart Runtime",
     "restartConfirmTitle": "Restart Runtime?",
-    "restartConfirmDescription": "The Runtime will be temporarily unavailable while its execution resource is replaced and normal startup converges.",
+    "restartConfirmDescription": "The Runtime will be temporarily unavailable while it restarts.",
     "restartPreservationNotice": "Agent Workspace files and preserved Runtime storage are retained.",
     "confirmRestart": "Restart Runtime",
     "startRuntime": "Start runtime",
@@ -289,15 +276,6 @@
       "unavailable": "Unavailable",
       "error": "Error"
     },
-    "configurationReasons": {
-      "sourceMismatch": "The stored Runtime Profile references do not form one exact Provider path.",
-      "profileDisabled": "A selected Runtime Profile or Provider Profile is disabled.",
-      "providerUnavailable": "The exact Runtime Provider is disabled, disconnected, or unavailable to this Workspace.",
-      "capabilityUnavailable": "The Provider's current capabilities cannot satisfy the selected Profile.",
-      "profileInvalid": "The selected Profile document is invalid.",
-      "unknown": "The desired Runtime configuration could not be resolved."
-    },
-    "configurationMissingCapabilities": "Missing capabilities: {capabilities}",
     "runtimeFreeTitle": "No managed Runtime",
     "runtimeFreeDescription": "This agent can continue using model and remote capabilities, but Agent Workspace files and Projects require a managed Runtime.",
     "addRuntime": "Add Runtime",
@@ -310,7 +288,13 @@
       "deleting_runtime": "Deleting physical Runtime",
       "finalizing": "Finalizing removal",
       "completed": "Removal completed"
-    }
+    },
+    "configurationConfiguredValues": "Review settings",
+    "configurationProfile": "Runtime Profile",
+    "configurationExecutionProfile": "Infrastructure Profile",
+    "configurationValueUnavailable": "Not selected",
+    "resettingRuntime": "Resetting Runtime…",
+    "recoveringRuntime": "Recovering Runtime…"
   },
   "toolCall": {
     "preparing": "Writing command...",
