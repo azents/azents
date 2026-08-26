@@ -994,20 +994,13 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             except ValueError as error:
                 self._json_response(400, {"message": str(error)})
                 return
-            response_object = (
-                cast(dict[str, object], delivery.response)
-                if isinstance(delivery.response, dict)
-                else None
-            )
+            response = delivery.response
+            response_type = response.get("type") if isinstance(response, dict) else None
             self._json_response(
                 200,
                 {
                     "status": delivery.status,
-                    "response_type": (
-                        response_object.get("type")
-                        if response_object is not None
-                        else None
-                    ),
+                    "response_type": response_type,
                 },
             )
             return
