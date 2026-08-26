@@ -155,6 +155,7 @@ const workspacePanel: WorkspacePanelContainerOutput = {
   onSelectProjectPickerDirectory: noop,
   onRefreshProjectPicker: noop,
   onStartRuntimeForProjectPicker: noop,
+  onRestartRuntimeForProjectPicker: noop,
   onCloseProjectRegistration: noop,
   onSetProjectRegistrationMode: noop,
   onSetProjectRegistrationStartingRef: noop,

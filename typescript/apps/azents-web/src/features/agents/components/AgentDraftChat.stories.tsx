@@ -148,6 +148,7 @@ const args: AgentDraftChatContainerOutput = {
   onSelectProjectPickerDirectory: noop,
   onRefreshProjectPicker: noop,
   onStartRuntimeForProjectPicker: noop,
+  onRestartRuntimeForProjectPicker: noop,
   onSessionScopeChange: noop,
   onSendInput: sendMessage,
   onSendMessage: sendMessage,

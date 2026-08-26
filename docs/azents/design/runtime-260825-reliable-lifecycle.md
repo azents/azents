@@ -2,6 +2,7 @@
 title: "Clear and Reliable Runtime Lifecycle Design"
 created: 2026-08-25
 updated: 2026-08-25
+implemented: 2026-08-25
 tags: [runtime, lifecycle, provider, runner, frontend, reliability, design]
 document_role: primary
 document_type: design

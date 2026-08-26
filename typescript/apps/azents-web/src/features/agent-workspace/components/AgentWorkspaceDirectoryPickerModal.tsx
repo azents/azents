@@ -25,6 +25,8 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { useState } from "react";
+import { RuntimeLifecycleStatus } from "@/features/runtime-lifecycle/components/RuntimeLifecycleStatus";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
@@ -38,6 +40,7 @@ export interface AgentWorkspaceDirectoryPickerModalProps {
   onSelectDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefresh: () => void;
   onStartRuntime: () => void;
+  onRestartRuntime: () => void;
   runtimeSettingsHref?: string;
   translationNamespace?: "chat" | "agentWorkspacePicker";
 }
@@ -64,10 +67,12 @@ export function AgentWorkspaceDirectoryPickerModal({
   onSelectDirectory,
   onRefresh,
   onStartRuntime,
+  onRestartRuntime,
   runtimeSettingsHref,
   translationNamespace = "agentWorkspacePicker",
 }: AgentWorkspaceDirectoryPickerModalProps): React.ReactElement {
   const t = useTranslations(translationNamespace);
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
 
   const renderCapabilityContent = (): React.ReactElement | null => {
     if (state.type === "RUNTIME_FREE") {
@@ -104,31 +109,35 @@ export function AgentWorkspaceDirectoryPickerModal({
       return null;
     }
 
-    const { runtime, workspace } = state.server;
+    const { lifecycle, workspace } = state.server;
+    const lifecycleStatus = lifecycle ? (
+      <RuntimeLifecycleStatus lifecycle={lifecycle} compact />
+    ) : null;
     const isTransitioning =
-      runtime.type === "STARTING" ||
-      runtime.type === "RESETTING" ||
-      runtime.type === "STOPPING" ||
-      workspace.type === "CONNECTING";
+      lifecycle?.availability === "transitioning" ||
+      (lifecycle === null && workspace.type === "CONNECTING");
 
     if (isTransitioning) {
       return (
-        <Center py="xl">
-          <Stack align="center" gap="xs">
-            <Loader size="sm" />
-            <Text c="dimmed" size="sm" ta="center">
-              {t("workspacePanel.restoringRuntime")}
-            </Text>
-            <Button
-              loading={state.isRefreshing}
-              size="xs"
-              variant="subtle"
-              onClick={onRefresh}
-            >
-              {t("workspacePanel.refresh")}
-            </Button>
-          </Stack>
-        </Center>
+        <Stack gap="md">
+          {lifecycleStatus}
+          <Center py="xl">
+            <Stack align="center" gap="xs">
+              <Loader size="sm" />
+              <Text c="dimmed" size="sm" ta="center">
+                {t("workspacePanel.restoringRuntime")}
+              </Text>
+              <Button
+                loading={state.isRefreshing}
+                size="xs"
+                variant="subtle"
+                onClick={onRefresh}
+              >
+                {t("workspacePanel.refresh")}
+              </Button>
+            </Stack>
+          </Center>
+        </Stack>
       );
     }
 
@@ -137,50 +146,61 @@ export function AgentWorkspaceDirectoryPickerModal({
       workspace.type === "READ_FAILED"
     ) {
       return (
-        <Alert color="red" title={t("workspacePanel.controlUnavailableTitle")}>
-          <Stack gap="xs">
-            <Text size="sm">{workspace.detail}</Text>
-            <Group gap="xs">
-              <Button
-                loading={state.isRefreshing}
-                size="xs"
-                variant="default"
-                onClick={onRefresh}
-              >
-                {t("workspacePanel.refresh")}
-              </Button>
-              <Button
-                loading={state.isStarting}
-                size="xs"
-                onClick={onStartRuntime}
-              >
-                {t("workspacePanel.restartRuntime")}
-              </Button>
-            </Group>
-          </Stack>
-        </Alert>
+        <Stack gap="md">
+          {lifecycleStatus}
+          <Alert
+            color="red"
+            title={t("workspacePanel.controlUnavailableTitle")}
+          >
+            <Stack gap="xs">
+              <Text size="sm">{workspace.detail}</Text>
+              <Group gap="xs">
+                <Button
+                  loading={state.isRefreshing}
+                  size="xs"
+                  variant="default"
+                  onClick={onRefresh}
+                >
+                  {t("workspacePanel.refresh")}
+                </Button>
+                {state.server.actions.restart ? (
+                  <Button
+                    loading={state.isRestarting}
+                    size="xs"
+                    onClick={() => setRestartConfirmOpen(true)}
+                  >
+                    {t("workspacePanel.restartRuntime")}
+                  </Button>
+                ) : null}
+              </Group>
+            </Stack>
+          </Alert>
+        </Stack>
       );
     }
 
     if (workspace.type !== "READY") {
       return (
-        <Alert color="blue" title={t("workspacePanel.inactiveTitle")}>
-          <Stack gap="xs">
-            <Text size="sm">{t("workspacePanel.inactiveDescription")}</Text>
-            <Group gap="xs">
-              <Button
-                loading={state.isStarting}
-                size="xs"
-                onClick={onStartRuntime}
-              >
-                {t("projectPickerStartRuntime")}
-              </Button>
-              <Button size="xs" variant="subtle" onClick={onRefresh}>
-                {t("workspacePanel.refresh")}
-              </Button>
-            </Group>
-          </Stack>
-        </Alert>
+        <Stack gap="md">
+          {lifecycleStatus}
+          <Alert color="blue" title={t("workspacePanel.inactiveTitle")}>
+            <Stack gap="xs">
+              <Text size="sm">{t("workspacePanel.inactiveDescription")}</Text>
+              <Group gap="xs">
+                <Button
+                  loading={state.isStarting}
+                  size="xs"
+                  onClick={onStartRuntime}
+                >
+                  {t("projectPickerStartRuntime")}
+                </Button>
+                <Button size="xs" variant="subtle" onClick={onRefresh}>
+                  {t("workspacePanel.refresh")}
+                </Button>
+              </Group>
+            </Stack>
+          </Alert>
+        </Stack>
       );
     }
 
@@ -345,6 +365,38 @@ export function AgentWorkspaceDirectoryPickerModal({
         ) : null}
         {renderCapabilityContent()}
         {renderServerContent()}
+        <Modal
+          centered
+          opened={restartConfirmOpen}
+          title={t("workspacePanel.restartConfirmTitle")}
+          onClose={() => setRestartConfirmOpen(false)}
+        >
+          <Stack gap="md">
+            <Text size="sm">
+              {t("workspacePanel.restartConfirmDescription")}
+            </Text>
+            <Alert color="blue">
+              {t("workspacePanel.restartPreservationNotice")}
+            </Alert>
+            <Group justify="flex-end">
+              <Button
+                variant="default"
+                onClick={() => setRestartConfirmOpen(false)}
+              >
+                {t("workspacePanel.cancel")}
+              </Button>
+              <Button
+                loading={state.type === "SERVER" ? state.isRestarting : false}
+                onClick={() => {
+                  setRestartConfirmOpen(false);
+                  onRestartRuntime();
+                }}
+              >
+                {t("workspacePanel.confirmRestart")}
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
       </Stack>
     </Modal>
   );

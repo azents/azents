@@ -40,6 +40,7 @@ interface ProjectPanelProps {
   onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onRestartRuntimeForProjectPicker: () => void;
   onCloseProjectRegistration: () => void;
   onSetProjectRegistrationMode: (mode: ProjectRegistrationMode) => void;
   onSetProjectRegistrationStartingRef: (ref: string | null) => void;
@@ -57,6 +58,7 @@ export function ProjectPanel({
   onSelectProjectPickerDirectory,
   onRefreshProjectPicker,
   onStartRuntimeForProjectPicker,
+  onRestartRuntimeForProjectPicker,
   onCloseProjectRegistration,
   onSetProjectRegistrationMode,
   onSetProjectRegistrationStartingRef,
@@ -207,6 +209,7 @@ export function ProjectPanel({
         onSelectDirectory={onSelectProjectPickerDirectory}
         onRefresh={onRefreshProjectPicker}
         onStartRuntime={onStartRuntimeForProjectPicker}
+        onRestartRuntime={onRestartRuntimeForProjectPicker}
       />
 
       <Modal

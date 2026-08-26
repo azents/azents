@@ -1,0 +1,90 @@
+{
+  "title": "Runtime lifecycle",
+  "description": "Server-authoritative target, convergence, Provider, and Runner status.",
+  "generation": "Lifecycle generation {generation}",
+  "fields": {
+    "target": "Target",
+    "convergence": "Convergence",
+    "providerResource": "Provider resource",
+    "providerConnection": "Provider connection",
+    "runner": "Runner",
+    "configuration": "Configuration"
+  },
+  "target": {
+    "running": "Running",
+    "stopped": "Stopped"
+  },
+  "convergence": {
+    "stable": "Stable",
+    "starting": "Starting",
+    "stopping": "Stopping",
+    "resetting": "Resetting",
+    "recovering": "Recovering",
+    "blocked": "Blocked",
+    "failed": "Failed"
+  },
+  "availability": {
+    "ready": "Ready",
+    "stopped": "Stopped",
+    "transitioning": "Transitioning",
+    "provider_disconnected": "Provider disconnected",
+    "runner_unavailable": "Runner unavailable",
+    "configuration_blocked": "Configuration blocked",
+    "failed": "Failed",
+    "removing": "Removing"
+  },
+  "providerConnection": {
+    "connected": "Connected",
+    "disconnected": "Disconnected"
+  },
+  "providerResource": {
+    "unknown": "Unknown",
+    "stopped": "Stopped",
+    "starting": "Starting",
+    "running": "Running",
+    "stopping": "Stopping",
+    "recovering": "Recovering",
+    "resetting": "Resetting",
+    "failed": "Failed"
+  },
+  "runner": {
+    "unknown": "Unknown",
+    "disconnected": "Disconnected",
+    "starting": "Starting",
+    "ready": "Ready",
+    "degraded": "Degraded",
+    "failed": "Failed"
+  },
+  "configuration": {
+    "profile_required": "Profile required",
+    "configuration_blocked": "Blocked",
+    "configured_not_created": "Ready for creation",
+    "waiting_for_recreation": "Recreation required",
+    "applied": "Applied"
+  },
+  "reasons": {
+    "runtimeRemovalInProgress": "Permanent Runtime removal is in progress. Lifecycle actions remain unavailable until it completes.",
+    "runtimeFailed": "The current lifecycle generation failed. Review the available recovery actions.",
+    "providerFailed": "The Provider reported that the Runtime resource failed.",
+    "runtimeRecreationRequired": "The desired configuration differs from the applied Runtime. Recreation is required.",
+    "providerDisabled": "The selected Runtime Provider is disabled.",
+    "providerWorkspaceUnavailable": "The selected Runtime Provider is unavailable to this Workspace.",
+    "providerDisconnected": "The Provider connection is unavailable, so the requested transition cannot currently converge.",
+    "providerCapabilityUnavailable": "The Provider does not currently expose the required capabilities.",
+    "providerCapabilityInvalid": "The Provider capability report is invalid.",
+    "profileDocumentInvalid": "The selected Runtime Profile configuration is invalid.",
+    "profileIncompatible": "The selected Runtime Profile is incompatible with the Provider.",
+    "runtimeConfigurationBlocked": "The desired Runtime configuration is blocked.",
+    "runtimeProfileRequired": "Choose an available Runtime Profile before creating Runtime resources.",
+    "runtimeResetting": "The Runtime is resetting. Agent Workspace data is being cleared.",
+    "runtimeRecovering": "The Provider is recovering the Runtime resource.",
+    "runtimeStarting": "The Runtime is converging toward the running target.",
+    "runtimeStopping": "The Runtime is converging toward the stopped target.",
+    "runnerUnknown": "Runner readiness has not been observed yet.",
+    "runnerDisconnected": "The Runtime resource is running, but the Runner connection is unavailable.",
+    "runnerStarting": "The Runtime resource is running while the Runner starts.",
+    "runnerDegraded": "The Runner reported degraded availability.",
+    "runnerFailed": "The Runner reported a failure.",
+    "unknown": "The Runtime is unavailable for a bounded server-reported reason."
+  }
+}

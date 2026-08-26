@@ -7,7 +7,6 @@ from azents.core.enums import (
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
-    RuntimeSummary,
 )
 from azents.core.runtime_profile import (
     RuntimeConfigurationDocument,
@@ -16,6 +15,9 @@ from azents.core.runtime_profile import (
 )
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import RuntimeConfigurationSlot
+from azents.services.agent_runtime.lifecycle_data import (
+    AgentRuntimeConfigurationStatus,
+)
 from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.runtime_profile_resolution.data import (
     RuntimeProfileResolutionResult,
@@ -115,93 +117,174 @@ def _resolution(
     )
 
 
-class TestAgentRuntimeLifecycleSummary:
-    """Agent Runtime lifecycle summary calculation tests."""
+class TestAgentRuntimeLifecyclePresentation:
+    """Agent Runtime lifecycle presentation calculation tests."""
 
     def setup_method(self) -> None:
         """Create service under test."""
         self.service = object.__new__(AgentRuntimeService)
 
-    def test_stopped_default_summary(self) -> None:
-        """Default state returns stopped summary."""
-        state = self.service.calculate_state(_runtime())
+    def test_stopped_default_presentation(self) -> None:
+        """Default state returns stable stopped availability."""
+        runtime = _runtime()
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=None,
+            removing=False,
+        )
+        actions = self.service._calculate_actions(runtime)
 
-        assert state.summary == RuntimeSummary.STOPPED
-        assert state.actions.start is True
-        assert state.actions.use_runner is False
+        assert lifecycle.convergence == "stable"
+        assert lifecycle.availability == "stopped"
+        assert lifecycle.target is RuntimeDesiredState.STOPPED
+        assert actions.start is True
+        assert actions.use_runner is False
+
+    def test_stopped_target_ignores_configuration_recreation_wait(self) -> None:
+        """A stopped Runtime adopts its desired configuration on the next start."""
+        runtime = _runtime(
+            desired_generation=3,
+            provider_observed_state=RuntimeProviderObservedState.STOPPED,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            runner_state=RuntimeRunnerState.DISCONNECTED,
+        )
+        configuration = AgentRuntimeConfigurationStatus(
+            status="waiting_for_recreation",
+            desired=None,
+            applied=None,
+        )
+
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=configuration,
+            removing=False,
+        )
+
+        assert lifecycle.convergence == "stable"
+        assert lifecycle.availability == "stopped"
+        assert lifecycle.reason_code is None
+
+    def test_stopping_target_ignores_configuration_recreation_wait(self) -> None:
+        """A cleanup-only Stop reports transition instead of configuration blocking."""
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.STOPPED,
+            desired_generation=3,
+            provider_observed_state=RuntimeProviderObservedState.RUNNING,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            runner_state=RuntimeRunnerState.READY,
+        )
+        configuration = AgentRuntimeConfigurationStatus(
+            status="waiting_for_recreation",
+            desired=None,
+            applied=None,
+        )
+
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=configuration,
+            removing=False,
+        )
+
+        assert lifecycle.convergence == "stopping"
+        assert lifecycle.availability == "transitioning"
+        assert lifecycle.reason_code == "runtime_stopping"
 
     def test_provider_disconnected_when_desired_running(self) -> None:
-        """start desired state while Provider is disconnected is blocked summary."""
-        state = self.service.calculate_state(
-            _runtime(desired_state=RuntimeDesiredState.RUNNING)
+        """Running target while Provider is disconnected is blocked."""
+        runtime = _runtime(desired_state=RuntimeDesiredState.RUNNING)
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=None,
+            removing=False,
         )
 
-        assert state.summary == RuntimeSummary.PROVIDER_DISCONNECTED
-        assert state.actions.reset is False
+        assert lifecycle.convergence == "blocked"
+        assert lifecycle.availability == "provider_disconnected"
+        assert lifecycle.reason_code == "provider_disconnected"
+        assert self.service._calculate_actions(runtime).reset is False
 
     def test_connected_stopped_provider_with_running_desired_is_starting(self) -> None:
-        """Provider observed stopped after start request is starting summary."""
-        state = self.service.calculate_state(
-            _runtime(
-                desired_state=RuntimeDesiredState.RUNNING,
-                provider_observed_state=RuntimeProviderObservedState.STOPPED,
-                provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
-            )
+        """Provider stopped after a start request is transitioning."""
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.RUNNING,
+            provider_observed_state=RuntimeProviderObservedState.STOPPED,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+        )
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=None,
+            removing=False,
         )
 
-        assert state.summary == RuntimeSummary.STARTING
-        assert state.actions.use_runner is False
+        assert lifecycle.convergence == "starting"
+        assert lifecycle.availability == "transitioning"
+        assert self.service._calculate_actions(runtime).use_runner is False
 
     def test_running_with_ready_runner(self) -> None:
-        """Provider running + Runner ready is running/use_runner state."""
-        state = self.service.calculate_state(
-            _runtime(
-                desired_state=RuntimeDesiredState.RUNNING,
-                provider_observed_state=RuntimeProviderObservedState.RUNNING,
-                provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
-                runner_state=RuntimeRunnerState.READY,
-            )
+        """Provider running plus Runner ready is available."""
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.RUNNING,
+            provider_observed_state=RuntimeProviderObservedState.RUNNING,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            runner_state=RuntimeRunnerState.READY,
+        )
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=None,
+            removing=False,
         )
 
-        assert state.summary == RuntimeSummary.RUNNING
-        assert state.actions.use_runner is True
+        assert lifecycle.convergence == "stable"
+        assert lifecycle.availability == "ready"
+        assert lifecycle.provider.connection is RuntimeProviderConnectionState.CONNECTED
+        assert lifecycle.provider.resource is RuntimeProviderObservedState.RUNNING
+        assert lifecycle.runner.state is RuntimeRunnerState.READY
+        assert self.service._calculate_actions(runtime).use_runner is True
 
     def test_running_backend_with_unavailable_runner(self) -> None:
         """Backend running without Runner is runner_unavailable."""
-        state = self.service.calculate_state(
-            _runtime(
-                desired_state=RuntimeDesiredState.RUNNING,
-                provider_observed_state=RuntimeProviderObservedState.RUNNING,
-                provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
-                runner_state=RuntimeRunnerState.DISCONNECTED,
-            )
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.RUNNING,
+            provider_observed_state=RuntimeProviderObservedState.RUNNING,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            runner_state=RuntimeRunnerState.DISCONNECTED,
         )
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=None,
+            removing=False,
+        )
+        actions = self.service._calculate_actions(runtime)
 
-        assert state.summary == RuntimeSummary.RUNNER_UNAVAILABLE
-        assert state.actions.stop is True
-        assert state.actions.restart is True
-        assert state.actions.reset is True
-        assert state.actions.use_runner is False
+        assert lifecycle.convergence == "stable"
+        assert lifecycle.availability == "runner_unavailable"
+        assert lifecycle.reason_code == "runner_disconnected"
+        assert actions.stop is True
+        assert actions.restart is True
+        assert actions.reset is True
+        assert actions.use_runner is False
 
     def test_current_generation_failure_wins(self) -> None:
-        """Current generation failure is reflected as failed summary."""
-        state = self.service.calculate_state(
+        """Current-generation failure wins presentation precedence."""
+        lifecycle = self.service.calculate_lifecycle(
             _runtime(
                 desired_state=RuntimeDesiredState.RUNNING,
                 desired_generation=2,
                 failure_generation=2,
                 failure_code="start_failed",
                 failure_message="Start failed",
-            )
+            ),
+            configuration=None,
+            removing=False,
         )
 
-        assert state.summary == RuntimeSummary.FAILED
-        assert state.failure is not None
-        assert state.failure.code == "start_failed"
+        assert lifecycle.convergence == "failed"
+        assert lifecycle.availability == "failed"
+        assert lifecycle.reason_code == "runtime_failed"
 
     def test_old_generation_failure_is_ignored(self) -> None:
-        """Previous generation failure is not reflected in summary."""
-        state = self.service.calculate_state(
+        """Previous-generation failure does not replace current presentation."""
+        lifecycle = self.service.calculate_lifecycle(
             _runtime(
                 desired_state=RuntimeDesiredState.RUNNING,
                 desired_generation=2,
@@ -209,23 +292,100 @@ class TestAgentRuntimeLifecycleSummary:
                 failure_generation=1,
                 failure_code="old_failed",
                 failure_message="Old failure",
-            )
+            ),
+            configuration=None,
+            removing=False,
         )
 
-        assert state.summary == RuntimeSummary.STARTING
-        assert state.failure is None
+        assert lifecycle.convergence == "starting"
+        assert lifecycle.availability == "transitioning"
 
     def test_terminal_deletion_disables_all_runtime_actions(self) -> None:
         """Terminal deletion does not expose lifecycle actions."""
-        state = self.service.calculate_state(
-            _runtime(terminal_delete_requested_generation=3)
+        runtime = _runtime(terminal_delete_requested_generation=3)
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=None,
+            removing=False,
+        )
+        actions = self.service._calculate_actions(runtime)
+
+        assert lifecycle.availability == "removing"
+        assert actions.start is False
+        assert actions.stop is False
+        assert actions.restart is False
+        assert actions.reset is False
+        assert actions.use_runner is False
+
+    def test_active_removal_disables_shared_lifecycle_actions(self) -> None:
+        """An active removal suppresses Workspace and Runtime lifecycle actions."""
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.RUNNING,
+            provider_observed_state=RuntimeProviderObservedState.RUNNING,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            runner_state=RuntimeRunnerState.READY,
         )
 
-        assert state.actions.start is False
-        assert state.actions.stop is False
-        assert state.actions.restart is False
-        assert state.actions.reset is False
-        assert state.actions.use_runner is False
+        actions = self.service._calculate_lifecycle_actions(
+            runtime,
+            configuration=None,
+            removing=True,
+        )
+
+        assert actions.start is False
+        assert actions.stop is False
+        assert actions.restart is False
+        assert actions.reset is False
+        assert actions.use_runner is False
+
+    def test_blocked_configuration_disables_creation_actions(self) -> None:
+        """Blocked configuration suppresses actions that can create resources."""
+        resolution = _resolution(
+            status=RuntimeConfigurationResolutionStatus.BLOCKED,
+            reason_code="provider_disabled",
+        )
+        runtime = _runtime(
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED
+        )
+        configuration = AgentRuntimeConfigurationStatus(
+            status="configuration_blocked",
+            desired=resolution.desired,
+            applied=None,
+        )
+
+        actions = self.service._calculate_lifecycle_actions(
+            runtime,
+            configuration=configuration,
+            removing=False,
+        )
+
+        assert actions.start is False
+        assert actions.restart is False
+        assert actions.reset is False
+
+    def test_running_target_preserves_configuration_recreation_block(self) -> None:
+        """A running target still requires explicit configuration recreation."""
+        runtime = _runtime(
+            desired_state=RuntimeDesiredState.RUNNING,
+            provider_observed_state=RuntimeProviderObservedState.RUNNING,
+            provider_connection_state=RuntimeProviderConnectionState.CONNECTED,
+            runner_state=RuntimeRunnerState.READY,
+        )
+        configuration = AgentRuntimeConfigurationStatus(
+            status="waiting_for_recreation",
+            desired=None,
+            applied=None,
+        )
+
+        lifecycle = self.service.calculate_lifecycle(
+            runtime,
+            configuration=configuration,
+            removing=False,
+        )
+
+        assert lifecycle.convergence == "blocked"
+        assert lifecycle.availability == "configuration_blocked"
+        assert lifecycle.reason_code == "runtime_recreation_required"
 
     def test_blocked_configuration_rejects_creation_commands(self) -> None:
         """A blocked desired revision cannot create a new Runtime incarnation."""

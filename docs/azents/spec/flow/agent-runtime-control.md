@@ -12,6 +12,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/rdb/models/agent_runtime_removal.py
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/api/public/agent_runtime/**
+  - python/apps/azents/src/azents/api/public/chat/**
   - python/apps/azents/src/azents/services/agent_runtime_removal/**
   - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/rdb/models/runtime_profile.py
@@ -36,9 +38,19 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
+  - python/apps/azents/specs/public/openapi.json
+  - python/libs/azents-public-client/**
+  - typescript/packages/azents-public-client/**
+  - typescript/apps/azents-web/src/features/runtime-lifecycle/**
+  - typescript/apps/azents-web/src/features/agent-workspace/**
+  - typescript/apps/azents-web/src/features/agents/**
+  - typescript/apps/azents-web/src/features/chat/workspace/**
+  - testenv/azents/e2e/src/support/runtime_profiles.py
+  - testenv/azents/e2e/src/tests/required/public/test_runtime_profiles.py
+  - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
 last_verified_at: 2026-08-25
-spec_version: 67
+spec_version: 68
 ---
 
 # Agent Runtime Control
@@ -190,12 +202,45 @@ infrastructure Profile, and Provider capability identifiers inside these documen
 snapshot evidence rather than foreign keys to mutable source rows. Superseded desired and applied
 documents are not retained as product history.
 
-Server output exposes raw Runtime data only as diagnostics. UI behavior must be driven by the server-computed summary/actions:
+Server output exposes raw Runtime data only as diagnostics. UI behavior is driven by
+one server-computed lifecycle presentation and the server-computed public actions.
+The presentation contains:
 
-- summary examples: `STOPPED`, `STARTING`, `RUNNING`, `STOPPING`, `RESETTING`, `RECOVERING`, `PROVIDER_DISCONNECTED`, `RUNNER_UNAVAILABLE`, `FAILED`
-- actions examples: start, stop, restart, reset, recover
+- desired target (`running` or `stopped`);
+- convergence (`stable`, `starting`, `stopping`, `resetting`, `recovering`,
+  `blocked`, or `failed`);
+- direct Provider connection and resource facts;
+- the direct Runner state;
+- overall availability (`ready`, `stopped`, `transitioning`,
+  `provider_disconnected`, `runner_unavailable`, `configuration_blocked`,
+  `failed`, or `removing`);
+- one bounded safe reason code or `null`; and
+- desired generation as the freshness identity.
 
-Frontend code may handle API failure and network failure locally, but it must not recompute Runtime availability by combining raw provider/runner states.
+Presentation precedence is terminal removal, current-generation or Provider
+failure, blocked desired configuration, Provider disconnection that blocks
+convergence, desired/observed convergence, Provider-running Runner unavailability,
+then ready or stopped stability. Higher-precedence availability never rewrites the
+direct Provider or Runner facts.
+
+The Agent Runtime response and Agent Workspace bootstrap response expose the same
+lifecycle presentation composed by `AgentRuntimeService`. Workspace keeps its
+separate Runtime/access union only for file-browser layout and obtains lifecycle
+actions from the same server authority. The public single-summary projection is not
+part of the current API.
+
+Runtime Settings and Workspace render the shared target, convergence, Provider,
+Runner, configuration, availability, and bounded reason. They poll while
+convergence is non-stable, permanent removal is active, or configuration is waiting
+for recreation. Frontend code may handle API failure and network failure locally,
+but it must not recompute Runtime availability or operation completion from raw
+Provider/Runner fields.
+
+Restart requires explicit confirmation that Agent Workspace storage is preserved
+and the Runtime will be temporarily unavailable. Reset uses a distinct destructive
+confirmation because it may delete Agent Workspace data. Mutation loading covers
+request submission only; after submission, the shared lifecycle presentation and
+polling show convergence.
 
 ## Coordination Store
 
@@ -557,11 +602,29 @@ monotonic across terminal cleanup and rearm.
 
 - `start` sets desired state to running.
 - `stop` sets desired state to stopped and must preserve workspace data.
-- `restart` restarts compute but must preserve workspace data.
+- `restart` deletes the current compute resource, preserves workspace data, and
+  uses a successful correlated Provider completion to durably rearm `start` for
+  the same desired generation.
 - `recover`/reconcile may repair control/backend drift but must preserve workspace data.
 - `reset` is the only lifecycle operation allowed to delete Agent Workspace data.
 
 Reset carries its own desired generation and a final desired state. Provider is responsible for performing backend deletion/recreation according to that command and reporting the resulting observed state.
+
+Restart completion handoff succeeds only for the exact Runtime, current desired
+generation, `restart` command, running target, non-terminal-delete state, and a
+Provider report generation that is not stale. The atomic handoff records `start` as
+the current lifecycle command, makes that same generation immediately claimable by
+the reconciler, and clears an uncertain current-generation dispatch failure. It
+does not advance desired generation or configuration sequence. A lost completion
+can be retried idempotently, and a persisted handoff survives Control restart.
+
+Docker Restart validates ownership and complete configuration, removes only the
+Runtime container, preserves the Provider-owned Runtime root and Agent Workspace,
+and reports stopped. Kubernetes Restart requests deletion of the Runtime Pod and
+execution-scoped policy/proxy resources, preserves the Workspace PVC/PV and stable
+Runtime CA, and reports stopping after deletion acknowledgement. Neither Provider
+creates replacement compute inside Restart; ordinary Start convergence owns the
+replacement.
 
 Runtime configuration authority is one bounded desired/applied current-state row plus the
 Runtime-owned sequence high-water mark. Resolution snapshots the Agent's exact Workspace Runtime
@@ -594,8 +657,10 @@ evidence. Mode, Runtime trust, mandatory-host mapping, PodSpec, PVC, and Docker 
 waiting for an explicit recreation operation. Recreation snapshots the exact target version plus
 configuration sequence, digest, and desired generation, dispatches one fenced next generation,
 skips stale or superseded items, and completes only after that exact replacement state becomes
-applied. Stopped Runtimes skip immediate recreation and adopt the current Profile on their next
-start.
+applied and the Runtime has the expected desired generation, Provider-running
+observation, connected Provider, ready positive-generation Runner, and current
+Runner-reported Agent Workspace path. Stopped Runtimes skip immediate recreation
+and adopt the current Profile on their next start.
 
 Start, stop, restart, ordinary recreation, recovery, and in-place adoption preserve Agent Workspace
 data. Reset and terminal delete retain their explicit destructive boundaries. Provider or Profile
@@ -664,6 +729,11 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-25** (spec_version 68) — Replaced the public single-summary Runtime
+  projection with one server-computed lifecycle presentation shared by Runtime and
+  Workspace APIs, added authoritative UI polling and Restart/Reset confirmation
+  boundaries, and required deterministic Workspace preservation evidence across
+  Stop, Restart, and Profile Recreation with deletion only through Reset.
 - **2026-08-24** (spec_version 65) — Made `file.read_text` character-oriented
   end to end, with Runner-owned incremental decoding, character cursors, and
   explicit truncation metadata while preserving bounded byte-chunk I/O.

@@ -19,14 +19,9 @@ from azents.core.enums import (
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
-    RuntimeSummary,
     WorkspaceUserRole,
 )
-from azents.repos.agent_runtime.data import (
-    AgentRuntime,
-    AgentRuntimeActions,
-    AgentRuntimeSummaryState,
-)
+from azents.repos.agent_runtime.data import AgentRuntime
 from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeSystemMetricsSample,
@@ -36,6 +31,9 @@ from azents.services.agent_runtime.lifecycle_data import (
     AgentAccessDenied,
     AgentNotBelongToWorkspace,
     AgentNotFound,
+    AgentRuntimeLifecyclePresentation,
+    AgentRuntimeLifecycleProvider,
+    AgentRuntimeLifecycleRunner,
     AgentRuntimePublicActions,
     AgentRuntimeReadOutput,
 )
@@ -268,7 +266,7 @@ async def test_stopped_and_disconnected_overlays_preserve_retained_series() -> N
         _service(
             stopped_store,
             _runtime(runner_generation=stopped_generation),
-            summary=RuntimeSummary.STOPPED,
+            stopped=True,
         )
     )
 
@@ -384,11 +382,11 @@ def _service(
     store: InMemoryRuntimeCoordinationStore,
     runtime: AgentRuntime,
     *,
-    summary: RuntimeSummary = RuntimeSummary.RUNNING,
+    stopped: bool = False,
 ) -> AgentRuntimeSystemMetricsService:
     return AgentRuntimeSystemMetricsService(
         agent_runtime_service=_RuntimeReader(
-            Success(_read_output(runtime=runtime, summary=summary))
+            Success(_read_output(runtime=runtime, stopped=stopped))
         ),
         coordination_store=store,
         clock=lambda: _NOW,
@@ -435,19 +433,22 @@ async def _register_capable(
 def _read_output(
     *,
     runtime: AgentRuntime | None,
-    summary: RuntimeSummary = RuntimeSummary.STOPPED,
+    stopped: bool = False,
 ) -> AgentRuntimeReadOutput:
-    state = (
-        AgentRuntimeSummaryState(
-            summary=summary,
-            actions=AgentRuntimeActions(
-                start=False,
-                stop=False,
-                restart=False,
-                reset=False,
-                use_runner=False,
+    lifecycle = (
+        AgentRuntimeLifecyclePresentation(
+            target=(
+                RuntimeDesiredState.STOPPED if stopped else RuntimeDesiredState.RUNNING
             ),
-            failure=None,
+            convergence="stable",
+            provider=AgentRuntimeLifecycleProvider(
+                connection=runtime.provider_connection_state,
+                resource=runtime.provider_observed_state,
+            ),
+            runner=AgentRuntimeLifecycleRunner(state=runtime.runner_state),
+            availability="stopped" if stopped else "ready",
+            reason_code=None,
+            desired_generation=runtime.desired_generation,
         )
         if runtime is not None
         else None
@@ -467,7 +468,7 @@ def _read_output(
         removal_impact=None,
         removal=None,
         runtime=runtime,
-        state=state,
+        lifecycle=lifecycle,
         configuration=None,
         actions=AgentRuntimePublicActions(
             add=False,

@@ -6,6 +6,7 @@ Agent Workspace panel bootstrap response.
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**lifecycle** | [**AgentRuntimeLifecyclePresentationResponse**](AgentRuntimeLifecyclePresentationResponse.md) |  | 
 **runtime** | [**AgentWorkspaceRuntimeResponse**](AgentWorkspaceRuntimeResponse.md) | Provider runtime status | 
 **workspace** | [**Workspace**](Workspace.md) |  | 
 **actions** | [**AgentWorkspaceActionsResponse**](AgentWorkspaceActionsResponse.md) | Runtime lifecycle actions | 

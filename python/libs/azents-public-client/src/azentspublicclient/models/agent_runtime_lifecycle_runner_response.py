@@ -17,20 +17,19 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
+from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState
 from typing import Optional, Set
 from typing_extensions import Self
 
-class AgentRuntimeFailureResponse(BaseModel):
+class AgentRuntimeLifecycleRunnerResponse(BaseModel):
     """
-    Agent Runtime failure response.
+    Current Runner lifecycle fact.
     """ # noqa: E501
-    generation: StrictInt
-    code: StrictStr
-    message: StrictStr
+    state: RuntimeRunnerState
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["generation", "code", "message"]
+    __properties: ClassVar[List[str]] = ["state"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -50,7 +49,7 @@ class AgentRuntimeFailureResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of AgentRuntimeFailureResponse from a JSON string"""
+        """Create an instance of AgentRuntimeLifecycleRunnerResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -82,7 +81,7 @@ class AgentRuntimeFailureResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of AgentRuntimeFailureResponse from a dict"""
+        """Create an instance of AgentRuntimeLifecycleRunnerResponse from a dict"""
         if obj is None:
             return None
 
@@ -90,9 +89,7 @@ class AgentRuntimeFailureResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "generation": obj.get("generation"),
-            "code": obj.get("code"),
-            "message": obj.get("message")
+            "state": obj.get("state")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

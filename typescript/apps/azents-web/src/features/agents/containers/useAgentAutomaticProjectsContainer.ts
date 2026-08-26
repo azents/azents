@@ -42,6 +42,7 @@ export interface AgentAutomaticProjectsContainerOutput {
   onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onRestartRuntimeForProjectPicker: () => void;
   onRemoveProject: (path: string) => void;
   onMoveProject: (path: string, direction: "up" | "down") => void;
   onSave: () => Promise<void>;
@@ -176,6 +177,10 @@ export function useAgentAutomaticProjectsContainer({
   const onStartRuntimeForProjectPicker = useCallback((): void => {
     setSaveError(null);
     picker.startRuntime();
+  }, [picker]);
+  const onRestartRuntimeForProjectPicker = useCallback((): void => {
+    setSaveError(null);
+    picker.restartRuntime();
   }, [picker]);
 
   const onRemoveProject = useCallback((path: string): void => {
@@ -330,6 +335,7 @@ export function useAgentAutomaticProjectsContainer({
     onSelectProjectPickerDirectory: picker.selectDirectory,
     onRefreshProjectPicker: picker.refresh,
     onStartRuntimeForProjectPicker,
+    onRestartRuntimeForProjectPicker,
     onRemoveProject,
     onMoveProject,
     onSave,

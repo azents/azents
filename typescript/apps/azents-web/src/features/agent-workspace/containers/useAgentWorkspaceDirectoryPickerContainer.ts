@@ -1,6 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  shouldPollAgentWorkspaceLifecycle,
+  shouldPollRuntimeLifecycle,
+} from "@/features/runtime-lifecycle/runtimeLifecycle";
 import { trpc } from "@/trpc/client";
 import type {
   ProjectDirectoryPickerEntry,
@@ -27,6 +31,7 @@ export interface AgentWorkspaceDirectoryPickerContainerOutput {
   selectDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   refresh: () => void;
   startRuntime: () => void;
+  restartRuntime: () => void;
 }
 
 function errorMessage(error: unknown): string {
@@ -54,11 +59,15 @@ export function useAgentWorkspaceDirectoryPickerContainer({
     { handle, agentId },
     {
       enabled: enabled && isOpen,
-      refetchInterval: (query): number | false =>
-        query.state.data?.capability === "removing" ||
-        query.state.data?.configuration?.status === "waiting_for_recreation"
+      refetchInterval: (query): number | false => {
+        const runtime = query.state.data;
+        return shouldPollRuntimeLifecycle(runtime?.lifecycle, {
+          removing: runtime?.capability === "removing",
+          configurationStatus: runtime?.configuration?.status,
+        })
           ? WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS
-          : false,
+          : false;
+      },
     },
   );
   const runtimeManaged = runtimeQuery.data?.capability === "managed";
@@ -68,11 +77,9 @@ export function useAgentWorkspaceDirectoryPickerContainer({
     {
       enabled: enabled && isOpen && runtimeManaged,
       refetchInterval: (query): number | false =>
-        query.state.data?.workspace.type === "CONNECTING" ||
-        query.state.data?.workspace.type === "CONTROL_UNAVAILABLE" ||
-        query.state.data?.runtime.type === "STARTING" ||
-        query.state.data?.runtime.type === "RESETTING" ||
-        query.state.data?.runtime.type === "STOPPING"
+        shouldPollAgentWorkspaceLifecycle(query.state.data, {
+          configurationStatus: runtimeQuery.data?.configuration?.status,
+        })
           ? WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS
           : false,
     },
@@ -102,7 +109,20 @@ export function useAgentWorkspaceDirectoryPickerContainer({
   );
   const startRuntimeMutation = trpc.chat.startAgentRuntime.useMutation({
     onSuccess: async () => {
-      await utils.chat.getAgentWorkspace.invalidate({ agentId });
+      await Promise.all([
+        utils.chat.getAgentRuntime.invalidate({ handle, agentId }),
+        utils.chat.getAgentWorkspace.invalidate({ agentId }),
+      ]);
+    },
+  });
+  const restartRuntimeMutation = trpc.chat.restartAgentRuntime.useMutation({
+    onSuccess: async () => {
+      setCurrentPath(null);
+      await Promise.all([
+        utils.chat.getAgentRuntime.invalidate({ handle, agentId }),
+        utils.chat.getAgentWorkspace.invalidate({ agentId }),
+        utils.chat.readAgentWorkspacePath.invalidate({ agentId }),
+      ]);
     },
   });
 
@@ -154,6 +174,7 @@ export function useAgentWorkspaceDirectoryPickerContainer({
       entries,
       isRefreshing: workspaceQuery.isFetching || directoryQuery.isFetching,
       isStarting: startRuntimeMutation.isPending,
+      isRestarting: restartRuntimeMutation.isPending,
     };
   }, [
     activePath,
@@ -169,6 +190,7 @@ export function useAgentWorkspaceDirectoryPickerContainer({
     runtimeQuery.error,
     runtimeQuery.isError,
     runtimeQuery.isLoading,
+    restartRuntimeMutation.isPending,
     startRuntimeMutation.isPending,
     workspaceQuery.data,
     workspaceQuery.error,
@@ -216,6 +238,17 @@ export function useAgentWorkspaceDirectoryPickerContainer({
     }
     startRuntimeMutation.mutate({ handle, agentId });
   }, [agentId, handle, runtimeQuery.data?.actions.start, startRuntimeMutation]);
+  const restartRuntime = useCallback((): void => {
+    if (workspaceQuery.data?.actions.restart === null) {
+      return;
+    }
+    restartRuntimeMutation.mutate({ handle, agentId });
+  }, [
+    agentId,
+    handle,
+    restartRuntimeMutation,
+    workspaceQuery.data?.actions.restart,
+  ]);
 
   return {
     state,
@@ -226,5 +259,6 @@ export function useAgentWorkspaceDirectoryPickerContainer({
     selectDirectory,
     refresh,
     startRuntime,
+    restartRuntime,
   };
 }

@@ -69,6 +69,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
+  - typescript/apps/azents-web/src/features/runtime-lifecycle/**
   - typescript/apps/azents-web/src/features/runtime-metrics/**
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
@@ -105,7 +106,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-08-25
-spec_version: 73
+spec_version: 74
 ---
 
 # Workspace & Membership
@@ -230,10 +231,16 @@ erDiagram
 
 Agent Workspace API exposes Agent Runtime capability and lifecycle state. Read APIs do not ensure or
 start a Runtime. Server reads PostgreSQL capability, optional logical Runtime, Provider/Runner state,
-and durable removal progress as source of truth and returns server-computed Workspace state and
-actions.
+configuration state, and durable removal progress as source of truth. When a logical Runtime exists,
+the Agent Runtime response and Agent Workspace bootstrap response expose the same server-computed
+lifecycle presentation: desired target, convergence, direct Provider connection/resource facts,
+direct Runner state, overall availability, one bounded reason code, and desired generation.
 
-UI renders server-calculated summary/actions. It does not recompute availability on frontend by combining Provider/Runner raw state. Frontend-side judgment is limited to API failure and network error.
+Workspace retains its separate Runtime and access unions only for file-browser layout. Lifecycle
+actions come from the same `AgentRuntimeService` authority used by Runtime Settings. The UI renders
+the server lifecycle and actions; it does not consume a public single-summary projection or
+recompute availability and operation completion from Provider/Runner raw state. Frontend-side
+judgment is limited to API failure and network error.
 
 Managed Runtime surfaces also render the server-derived system-metrics overview. One
 Agent-authorized response supplies CPU, memory, disk, Runner-observable scope, freshness/lifecycle
@@ -247,18 +254,24 @@ derive zero values or browser-owned history. When a current percentage exists, t
 it with a 0–100 usage bar and a labeled locally scaled area trend. The trend has no persistent or
 active point markers, tooltip, or touch/hover visual state.
 
-The concrete-session Workspace panel requests the Project browser manifest only while the server-provided Agent Workspace state is `READY`. Manifest loading or failure does not replace lifecycle state and actions while the Agent Workspace is unavailable or transitioning.
+The concrete-session Workspace panel requests the Project browser manifest only while the
+server-provided Agent Workspace state is `READY`. Manifest loading or failure does not replace
+lifecycle state and actions while the Agent Workspace is unavailable or transitioning. Workspace
+and Runtime-backed directory pickers poll while lifecycle convergence is non-stable, permanent
+removal is active, or configuration is waiting for recreation. They render the shared lifecycle
+presentation and expose Start or Restart only when the corresponding server action is available.
 
-| Runtime summary | Workspace response | Behavior |
+| Runtime authority | Lifecycle availability | Workspace response and behavior |
 |---|---|---|
-| capability `none` | `UNAVAILABLE` | No managed Runtime authority. Show capability-aware empty state and Add Runtime when authorized |
-| capability `removing` | `UNAVAILABLE` | Runtime access is revoked while irreversible removal remains pending. Show progress and no add/cancel action |
-| `STOPPED` | `UNAVAILABLE` | No currently running Runtime. Provide start action |
-| `STARTING` / `STOPPING` / `RESETTING` / `RECOVERING` | `UNAVAILABLE` or transitional summary | In transition. Do not expose READY early |
-| `PROVIDER_DISCONNECTED` | `UNAVAILABLE` | No Provider connection/observation, so lifecycle/workspace access unavailable. Show explicit error |
-| `RUNNER_UNAVAILABLE` | `UNAVAILABLE` | Provider observation exists but Runner operation path is absent. Show retry/recover action |
-| `FAILED` | `UNAVAILABLE` | Show server failure code/message and only available actions |
-| `RUNNING` | `READY` | File list/read/download available only if the current Runner-reported Agent Workspace path and Runner operation path are both valid |
+| capability `none` | no lifecycle presentation | `UNAVAILABLE`; show the Runtime-free state and Add Runtime only when authorized |
+| capability `removing` | `removing` | `UNAVAILABLE`; Runtime access is revoked while irreversible removal remains pending, with progress and no add/cancel action |
+| stopped target and resource | `stopped` | `UNAVAILABLE`; expose Start only when the server action is available |
+| starting, stopping, resetting, or recovering convergence | `transitioning` | `UNAVAILABLE` or `CONNECTING`; show convergence and do not expose `READY` early |
+| Provider command authority disconnected | `provider_disconnected` | `UNAVAILABLE`; show the direct Provider facts, bounded reason, and only server-authorized recovery actions |
+| desired configuration unavailable or waiting for recreation | `configuration_blocked` | `UNAVAILABLE`; preserve direct Provider/Runner facts and block actions that require current configuration |
+| Provider resource running without a ready Runner | `runner_unavailable` | `UNAVAILABLE`; show the direct Runner fact, bounded reason, and only server-authorized actions |
+| current-generation Runtime or Provider failure | `failed` | `UNAVAILABLE`; show the bounded lifecycle reason and only server-authorized actions |
+| running resource and ready current Runner | `ready` | `READY` only when the current Runner-reported Agent Workspace path and exact Runner operation target are also valid |
 
 Runtime-dependent file, browser, Project, directory-validation, and worktree operations resolve one
 shared exact operation target. The resolver may request start/wait when the explicit operation
@@ -280,7 +293,10 @@ Agent Workspace path preview first uses Runner `file.stat` to classify the path.
 
 Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/reconcile and ordinary
 recreation do not delete Agent Workspace data. Only explicit `reset` and terminal delete may delete
-Agent Workspace data.
+Agent Workspace data. Workspace, directory-picker, and Runtime Settings Restart controls require
+explicit confirmation that storage is preserved while compute is temporarily unavailable. Reset
+uses a distinct destructive confirmation and is rendered only when the server returns the Reset
+action.
 
 ### Workspace Runtime Profiles
 
@@ -780,6 +796,10 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-25 (spec_version=74)** — Replaced the removed public Runtime summary
+  contract with the shared server-authoritative lifecycle presentation in Workspace,
+  aligned Workspace and directory-picker polling and action gates with that authority,
+  and distinguished preserving Restart confirmation from destructive Reset.
 - **2026-08-24 (spec_version=72)** — Made Agent Workspace text previews use
   Runner-returned character truncation instead of rejecting text by byte size;
   binary preview size limits remain byte-oriented.

@@ -177,7 +177,7 @@ def _setup_project_browser(
             _headers=headers,
         )
         last_state = state
-        if state.state is not None and state.state.actions.use_runner:
+        if state.lifecycle is not None and state.actions.use_runner:
             break
         time.sleep(1)
     else:

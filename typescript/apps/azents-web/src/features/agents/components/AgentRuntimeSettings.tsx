@@ -32,6 +32,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { RuntimeLifecycleStatus } from "@/features/runtime-lifecycle/components/RuntimeLifecycleStatus";
 import { RuntimeSystemMetricsOverview } from "@/features/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import type { AgentRuntimeSettingsState } from "../containers/useAgentRuntimeSettingsContainer";
 import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
@@ -53,6 +54,7 @@ interface AgentRuntimeSettingsProps {
   actionNotice: "added" | "profileUpdated" | null;
   addConfirmOpen: boolean;
   removeConfirmOpen: boolean;
+  restartConfirmOpen: boolean;
   resetConfirmOpen: boolean;
   removalAcknowledged: boolean;
   isAdding: boolean;
@@ -68,11 +70,13 @@ interface AgentRuntimeSettingsProps {
   onCloseRemoveConfirm: () => void;
   onRemovalAcknowledgedChange: (acknowledged: boolean) => void;
   onConfirmRemove: () => void;
+  onOpenRestartConfirm: () => void;
+  onCloseRestartConfirm: () => void;
   onOpenResetConfirm: () => void;
   onCloseResetConfirm: () => void;
   onStart: () => void;
   onStop: () => void;
-  onRestart: () => void;
+  onConfirmRestart: () => void;
   onConfirmReset: () => void;
   onRefresh: () => void;
 }
@@ -273,20 +277,26 @@ function RuntimeFreeView({
 function LifecycleControls({
   runtime,
   lifecycleAction,
+  restartConfirmOpen,
   resetConfirmOpen,
   onStart,
   onStop,
-  onRestart,
+  onOpenRestartConfirm,
+  onCloseRestartConfirm,
+  onConfirmRestart,
   onOpenResetConfirm,
   onCloseResetConfirm,
   onConfirmReset,
 }: {
   runtime: AgentRuntimeResponse;
   lifecycleAction: "start" | "stop" | "restart" | "reset" | null;
+  restartConfirmOpen: boolean;
   resetConfirmOpen: boolean;
   onStart: () => void;
   onStop: () => void;
-  onRestart: () => void;
+  onOpenRestartConfirm: () => void;
+  onCloseRestartConfirm: () => void;
+  onConfirmRestart: () => void;
   onOpenResetConfirm: () => void;
   onCloseResetConfirm: () => void;
   onConfirmReset: () => void;
@@ -328,16 +338,16 @@ function LifecycleControls({
               leftSection={<IconRotateClockwise size={rem(16)} />}
               loading={lifecycleAction === "restart"}
               variant="light"
-              onClick={onRestart}
+              onClick={onOpenRestartConfirm}
             >
               {t("lifecycle.restart")}
             </Button>
             <Button
-              color="gray"
+              color="red"
               disabled={!runtime.actions.reset || busy}
               leftSection={<IconRefresh size={rem(16)} />}
               loading={lifecycleAction === "reset"}
-              variant="subtle"
+              variant="light"
               onClick={onOpenResetConfirm}
             >
               {t("lifecycle.reset")}
@@ -347,12 +357,40 @@ function LifecycleControls({
       </Paper>
       <Modal
         centered
+        opened={restartConfirmOpen}
+        title={t("lifecycle.restartConfirmTitle")}
+        onClose={onCloseRestartConfirm}
+      >
+        <Stack gap="md">
+          <Text size="sm">{t("lifecycle.restartConfirmDescription")}</Text>
+          <Alert color="blue">{t("lifecycle.restartPreservationNotice")}</Alert>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={onCloseRestartConfirm}>
+              {t("cancel")}
+            </Button>
+            <Button
+              loading={lifecycleAction === "restart"}
+              onClick={onConfirmRestart}
+            >
+              {t("lifecycle.confirmRestart")}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal
+        centered
         opened={resetConfirmOpen}
         title={t("lifecycle.resetConfirmTitle")}
         onClose={onCloseResetConfirm}
       >
         <Stack gap="md">
-          <Text size="sm">{t("lifecycle.resetConfirmDescription")}</Text>
+          <Alert
+            color="red"
+            icon={<IconAlertTriangle size={rem(18)} />}
+            title={t("lifecycle.resetDestructiveTitle")}
+          >
+            {t("lifecycle.resetConfirmDescription")}
+          </Alert>
           <Group justify="flex-end">
             <Button variant="default" onClick={onCloseResetConfirm}>
               {t("cancel")}
@@ -378,6 +416,7 @@ function ManagedView({
   isUpdatingProfile,
   isRemoving,
   removeConfirmOpen,
+  restartConfirmOpen,
   resetConfirmOpen,
   removalAcknowledged,
   lifecycleAction,
@@ -387,11 +426,13 @@ function ManagedView({
   onCloseRemoveConfirm,
   onRemovalAcknowledgedChange,
   onConfirmRemove,
+  onOpenRestartConfirm,
+  onCloseRestartConfirm,
   onOpenResetConfirm,
   onCloseResetConfirm,
   onStart,
   onStop,
-  onRestart,
+  onConfirmRestart,
   onConfirmReset,
 }: {
   runtime: AgentRuntimeResponse;
@@ -400,6 +441,7 @@ function ManagedView({
   isUpdatingProfile: boolean;
   isRemoving: boolean;
   removeConfirmOpen: boolean;
+  restartConfirmOpen: boolean;
   resetConfirmOpen: boolean;
   removalAcknowledged: boolean;
   lifecycleAction: "start" | "stop" | "restart" | "reset" | null;
@@ -409,11 +451,13 @@ function ManagedView({
   onCloseRemoveConfirm: () => void;
   onRemovalAcknowledgedChange: (acknowledged: boolean) => void;
   onConfirmRemove: () => void;
+  onOpenRestartConfirm: () => void;
+  onCloseRestartConfirm: () => void;
   onOpenResetConfirm: () => void;
   onCloseResetConfirm: () => void;
   onStart: () => void;
   onStop: () => void;
-  onRestart: () => void;
+  onConfirmRestart: () => void;
   onConfirmReset: () => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents.runtimeSettings");
@@ -451,13 +495,23 @@ function ManagedView({
         </Stack>
       </Paper>
 
+      {runtime.lifecycle ? (
+        <RuntimeLifecycleStatus
+          lifecycle={runtime.lifecycle}
+          configurationStatus={runtime.configuration?.status}
+        />
+      ) : null}
+
       <LifecycleControls
         runtime={runtime}
         lifecycleAction={lifecycleAction}
+        restartConfirmOpen={restartConfirmOpen}
         resetConfirmOpen={resetConfirmOpen}
         onStart={onStart}
         onStop={onStop}
-        onRestart={onRestart}
+        onOpenRestartConfirm={onOpenRestartConfirm}
+        onCloseRestartConfirm={onCloseRestartConfirm}
+        onConfirmRestart={onConfirmRestart}
         onOpenResetConfirm={onOpenResetConfirm}
         onCloseResetConfirm={onCloseResetConfirm}
         onConfirmReset={onConfirmReset}
@@ -617,6 +671,7 @@ export function AgentRuntimeSettings({
   actionNotice,
   addConfirmOpen,
   removeConfirmOpen,
+  restartConfirmOpen,
   resetConfirmOpen,
   removalAcknowledged,
   isAdding,
@@ -632,11 +687,13 @@ export function AgentRuntimeSettings({
   onCloseRemoveConfirm,
   onRemovalAcknowledgedChange,
   onConfirmRemove,
+  onOpenRestartConfirm,
+  onCloseRestartConfirm,
   onOpenResetConfirm,
   onCloseResetConfirm,
   onStart,
   onStop,
-  onRestart,
+  onConfirmRestart,
   onConfirmReset,
   onRefresh,
 }: AgentRuntimeSettingsProps): React.ReactElement {
@@ -722,6 +779,7 @@ export function AgentRuntimeSettings({
             isUpdatingProfile={isUpdatingProfile}
             isRemoving={isRemoving}
             removeConfirmOpen={removeConfirmOpen}
+            restartConfirmOpen={restartConfirmOpen}
             resetConfirmOpen={resetConfirmOpen}
             removalAcknowledged={removalAcknowledged}
             lifecycleAction={lifecycleAction}
@@ -731,11 +789,13 @@ export function AgentRuntimeSettings({
             onCloseRemoveConfirm={onCloseRemoveConfirm}
             onRemovalAcknowledgedChange={onRemovalAcknowledgedChange}
             onConfirmRemove={onConfirmRemove}
+            onOpenRestartConfirm={onOpenRestartConfirm}
+            onCloseRestartConfirm={onCloseRestartConfirm}
             onOpenResetConfirm={onOpenResetConfirm}
             onCloseResetConfirm={onCloseResetConfirm}
             onStart={onStart}
             onStop={onStop}
-            onRestart={onRestart}
+            onConfirmRestart={onConfirmRestart}
             onConfirmReset={onConfirmReset}
           />
         ) : null}

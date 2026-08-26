@@ -1187,8 +1187,13 @@
         "start": "시작",
         "stop": "정지",
         "restart": "재시작",
+        "restartConfirmTitle": "Runtime을 재시작할까요?",
+        "restartConfirmDescription": "실행 리소스를 교체하고 정상 시작 상태로 수렴하는 동안 Runtime을 일시적으로 사용할 수 없습니다.",
+        "restartPreservationNotice": "Agent Workspace 파일과 보존된 Runtime 저장소는 유지됩니다.",
+        "confirmRestart": "Runtime 재시작",
         "reset": "초기화",
         "resetConfirmTitle": "Runtime 상태를 초기화할까요?",
+        "resetDestructiveTitle": "Agent Workspace 데이터가 삭제됩니다",
         "resetConfirmDescription": "현재 Workspace 파일과 보존된 Runtime 상태를 삭제하고 빈 Runtime을 준비합니다. 되돌릴 수 없습니다.",
         "confirmReset": "Runtime 초기화"
       },

@@ -7,6 +7,7 @@ import type {
   WorkspaceProjectPanelState,
 } from "../types";
 import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
+import type { AgentRuntimeLifecyclePresentationResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const noop = (): void => {};
@@ -35,7 +36,68 @@ const restartAction = {
   path: "",
 } as const;
 
+const readyLifecycle: AgentRuntimeLifecyclePresentationResponse = {
+  target: "running",
+  convergence: "stable",
+  provider: { connection: "connected", resource: "running" },
+  runner: { state: "ready" },
+  availability: "ready",
+  reason_code: null,
+  desired_generation: 4,
+};
+
+const stoppedLifecycle: AgentRuntimeLifecyclePresentationResponse = {
+  target: "stopped",
+  convergence: "stable",
+  provider: { connection: "connected", resource: "stopped" },
+  runner: { state: "disconnected" },
+  availability: "stopped",
+  reason_code: null,
+  desired_generation: 5,
+};
+
+const startingLifecycle: AgentRuntimeLifecyclePresentationResponse = {
+  target: "running",
+  convergence: "starting",
+  provider: { connection: "connected", resource: "starting" },
+  runner: { state: "disconnected" },
+  availability: "transitioning",
+  reason_code: "runtime_starting",
+  desired_generation: 6,
+};
+
+const recoveringLifecycle: AgentRuntimeLifecyclePresentationResponse = {
+  target: "running",
+  convergence: "recovering",
+  provider: { connection: "connected", resource: "running" },
+  runner: { state: "starting" },
+  availability: "transitioning",
+  reason_code: "runner_starting",
+  desired_generation: 7,
+};
+
+const failedLifecycle: AgentRuntimeLifecyclePresentationResponse = {
+  target: "running",
+  convergence: "failed",
+  provider: { connection: "connected", resource: "failed" },
+  runner: { state: "disconnected" },
+  availability: "failed",
+  reason_code: "runtime_failed",
+  desired_generation: 8,
+};
+
+const runnerUnavailableLifecycle: AgentRuntimeLifecyclePresentationResponse = {
+  target: "running",
+  convergence: "stable",
+  provider: { connection: "connected", resource: "running" },
+  runner: { state: "disconnected" },
+  availability: "runner_unavailable",
+  reason_code: "runner_disconnected",
+  desired_generation: 9,
+};
+
 const readyServerState: AgentWorkspaceServerState = {
+  lifecycle: readyLifecycle,
   runtime: {
     type: "RUNNING",
     runtime_id: "runtime-1",
@@ -387,6 +449,7 @@ const meta = {
     onSelectProjectPickerDirectory: noop,
     onRefreshProjectPicker: noop,
     onStartRuntimeForProjectPicker: noop,
+    onRestartRuntimeForProjectPicker: noop,
     onCloseProjectRegistration: noop,
     onSetProjectRegistrationMode: noop,
     onSetProjectRegistrationStartingRef: noop,
@@ -422,7 +485,7 @@ export const RuntimeFree = {
         removal_impact: null,
         removal: null,
         runtime: null,
-        state: null,
+        lifecycle: null,
         configuration: null,
         actions: {
           add: true,
@@ -526,7 +589,16 @@ export const SettingsRuntimeInactive = {
   args: {
     state: {
       ...readyState,
+      runtimeConfiguration: {
+        type: "LOADED",
+        configuration: {
+          status: "waiting_for_recreation",
+          desired: null,
+          applied: null,
+        },
+      },
       server: {
+        lifecycle: stoppedLifecycle,
         runtime: {
           type: "NOT_STARTED",
           runtime_id: "runtime-1",
@@ -562,6 +634,7 @@ export const RuntimeInactive = {
     state: {
       ...readyState,
       server: {
+        lifecycle: stoppedLifecycle,
         runtime: {
           type: "NOT_STARTED",
           runtime_id: "runtime-1",
@@ -590,6 +663,7 @@ export const RuntimeRestoreFailed = {
     state: {
       ...readyState,
       server: {
+        lifecycle: failedLifecycle,
         runtime: {
           type: "RESTORE_FAILED",
           runtime_id: "runtime-1",
@@ -618,6 +692,7 @@ export const RuntimeStarting = {
     state: {
       ...readyState,
       server: {
+        lifecycle: startingLifecycle,
         runtime: {
           type: "STARTING",
           runtime_id: "runtime-1",
@@ -643,6 +718,7 @@ export const RuntimeRestoring = {
     state: {
       ...readyState,
       server: {
+        lifecycle: recoveringLifecycle,
         runtime: {
           type: "RUNNING",
           runtime_id: "runtime-1",
@@ -668,6 +744,7 @@ export const RuntimeError = {
     state: {
       ...readyState,
       server: {
+        lifecycle: runnerUnavailableLifecycle,
         runtime: {
           type: "RUNNING",
           runtime_id: "runtime-1",
@@ -689,6 +766,21 @@ export const RuntimeError = {
       manifest: null,
       selectedEntry: null,
       inspectorState: { type: "IDLE" },
+    },
+  },
+} satisfies Story;
+
+export const RuntimeErrorWithoutResetAuthority = {
+  args: {
+    state: {
+      ...RuntimeError.args.state,
+      server: {
+        ...RuntimeError.args.state.server,
+        actions: {
+          ...RuntimeError.args.state.server.actions,
+          reset: null,
+        },
+      },
     },
   },
 } satisfies Story;

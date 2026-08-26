@@ -232,7 +232,7 @@ async def test_runtime_free_get_is_read_only_and_has_no_physical_summary() -> No
     assert isinstance(result, Success)
     assert result.value.capability is AgentRuntimeCapability.NONE
     assert result.value.runtime is None
-    assert result.value.state is None
+    assert result.value.lifecycle is None
     assert result.value.configuration is None
     assert result.value.actions.add is True
     assert result.value.actions.remove is False
@@ -302,7 +302,7 @@ async def test_managed_configured_missing_runtime_can_start_read_only() -> None:
 
     assert isinstance(result, Success)
     assert result.value.runtime is None
-    assert result.value.state is None
+    assert result.value.lifecycle is None
     assert result.value.runtime_profile_status == "configured"
     assert result.value.actions.start is True
     fixture.ensure_for_agent.assert_not_awaited()

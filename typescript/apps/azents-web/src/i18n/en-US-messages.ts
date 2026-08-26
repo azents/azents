@@ -16,6 +16,7 @@ import metadata from "../../messages/en-US/metadata.json";
 import nav from "../../messages/en-US/nav.json";
 import oauth from "../../messages/en-US/oauth.json";
 import oauthCallback from "../../messages/en-US/oauthCallback.json";
+import runtimeLifecycle from "../../messages/en-US/runtimeLifecycle.json";
 import runtimeMetrics from "../../messages/en-US/runtimeMetrics.json";
 import security from "../../messages/en-US/security.json";
 import skills from "../../messages/en-US/skills.json";
@@ -43,6 +44,7 @@ const messages = composeMessages([
   ["nav", nav],
   ["oauth", oauth],
   ["oauthCallback", oauthCallback],
+  ["runtimeLifecycle", runtimeLifecycle],
   ["runtimeMetrics", runtimeMetrics],
   ["security", security],
   ["skills", skills],

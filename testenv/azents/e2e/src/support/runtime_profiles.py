@@ -49,9 +49,10 @@ def start_and_wait_for_agent_runtime(
         )
         last_state = state
         if (
-            state.state is not None
+            state.lifecycle is not None
             and state.runtime is not None
-            and state.state.actions.use_runner
+            and state.lifecycle.availability == "ready"
+            and state.actions.use_runner
             and state.runtime.workspace_path
         ):
             return

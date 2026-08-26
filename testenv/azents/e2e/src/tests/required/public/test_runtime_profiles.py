@@ -9,6 +9,7 @@ import azentspublicclient
 import pytest
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
+from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
@@ -19,6 +20,12 @@ from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_response import AgentRuntimeResponse
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.agent_workspace_directory_response import (
+    AgentWorkspaceDirectoryResponse,
+)
+from azentspublicclient.models.agent_workspace_mkdir_request import (
+    AgentWorkspaceMkdirRequest,
+)
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
@@ -34,7 +41,6 @@ from azentspublicclient.models.runtime_recreation_operation_response import (
 from azentspublicclient.models.runtime_recreation_operation_status import (
     RuntimeRecreationOperationStatus,
 )
-from azentspublicclient.models.runtime_summary import RuntimeSummary
 from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.workspace_runtime_profile_default_replace_request import (  # noqa: E501
     WorkspaceRuntimeProfileDefaultReplaceRequest,
@@ -281,13 +287,14 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
             _headers=headers,
         )
         runtime = current.runtime
-        state = current.state
+        lifecycle = current.lifecycle
         configuration = current.configuration
-        if runtime is None or state is None or configuration is None:
+        if runtime is None or lifecycle is None or configuration is None:
             return False
         reconciled_runtime = current
         return (
-            state.summary == RuntimeSummary.STOPPED
+            lifecycle.availability == "stopped"
+            and lifecycle.convergence == "stable"
             and configuration.status == "configured_not_created"
             and configuration.desired is not None
             and configuration.applied is None
@@ -310,8 +317,9 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
     assert (
         reconciled_runtime.runtime.runtime_provider_id == explicit_profile.provider_id
     )
-    assert reconciled_runtime.state is not None
-    assert reconciled_runtime.state.summary == RuntimeSummary.STOPPED
+    assert reconciled_runtime.lifecycle is not None
+    assert reconciled_runtime.lifecycle.availability == "stopped"
+    assert reconciled_runtime.lifecycle.convergence == "stable"
     assert reconciled_runtime.configuration is not None
     assert reconciled_runtime.configuration.status == "configured_not_created"
     assert reconciled_runtime.configuration.desired is not None
@@ -361,12 +369,13 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
             _headers=headers,
         )
         configuration = applied_runtime.configuration
-        state = applied_runtime.state
+        lifecycle = applied_runtime.lifecycle
         return (
             configuration is not None
-            and state is not None
+            and lifecycle is not None
             and configuration.status == "applied"
-            and state.summary == RuntimeSummary.RUNNING
+            and lifecycle.availability == "ready"
+            and lifecycle.convergence == "stable"
         )
 
     wait_until(
@@ -389,6 +398,31 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
     assert desired.runner_observed_at is not None
     assert applied.applied_at is not None
     prior_applied_sequence = applied.sequence
+
+    assert applied_runtime.runtime is not None
+    assert applied_runtime.runtime.workspace_path
+    sentinel_path = (
+        f"{applied_runtime.runtime.workspace_path}/"
+        f".runtime-profile-recreation-sentinel-{unique()}"
+    )
+    workspace_api = ChatV1Api(public_api_client)
+    workspace_api.chat_v1_create_agent_workspace_directory(
+        agent_id=explicit_agent.id,
+        agent_workspace_mkdir_request=AgentWorkspaceMkdirRequest(
+            path=sentinel_path,
+            parents=False,
+        ),
+        _headers=headers,
+    )
+    sentinel_before_recreation = workspace_api.chat_v1_read_agent_workspace_path(
+        agent_id=explicit_agent.id,
+        path=sentinel_path,
+        _headers=headers,
+    )
+    assert isinstance(
+        sentinel_before_recreation.actual_instance,
+        AgentWorkspaceDirectoryResponse,
+    )
 
     operation = profile_api.runtime_profile_v1_create_profile_recreation(
         profile_id=explicit_profile_id,
@@ -440,12 +474,16 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
             _headers=headers,
         )
         configuration = recreated_runtime.configuration
+        lifecycle = recreated_runtime.lifecycle
         current_applied = configuration.applied if configuration is not None else None
         return (
             configuration is not None
+            and lifecycle is not None
             and configuration.status == "applied"
             and current_applied is not None
             and current_applied.sequence > prior_applied_sequence
+            and lifecycle.availability == "ready"
+            and lifecycle.convergence == "stable"
         )
 
     wait_until(
@@ -453,6 +491,69 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
         timeout=120,
         interval=1,
         message="Recreated Runtime did not apply its replacement state",
+    )
+    assert recreated_runtime is not None
+    assert recreated_runtime.configuration is not None
+    assert recreated_runtime.lifecycle is not None
+    recreated_desired = recreated_runtime.configuration.desired
+    recreated_applied = recreated_runtime.configuration.applied
+    assert recreated_desired is not None
+    assert recreated_applied is not None
+    assert recreated_applied.sequence == recreated_desired.sequence
+    assert recreated_applied.sequence > prior_applied_sequence
+    assert recreated_applied.target_generation == recreated_desired.target_generation
+    assert (
+        recreated_desired.target_generation
+        == recreated_runtime.lifecycle.desired_generation
+    )
+    assert recreated_applied.digest == recreated_desired.digest
+    assert recreated_desired.provider_reported_digest == recreated_desired.digest
+    assert recreated_desired.runner_reported_digest == recreated_desired.digest
+    assert recreated_desired.workspace_runtime_profile_id == explicit_profile_id
+    assert recreated_applied.workspace_runtime_profile_id == explicit_profile_id
+    assert (
+        recreated_desired.workspace_runtime_profile_version == explicit_profile.version
+    )
+    assert (
+        recreated_applied.workspace_runtime_profile_version == explicit_profile.version
+    )
+    assert recreated_desired.provider_id == runtime_provider_resource_id
+    assert recreated_applied.provider_id == runtime_provider_resource_id
+    assert (
+        recreated_desired.provider_capability_revision_id
+        == explicit_profile.capability_revision_id
+    )
+    assert (
+        recreated_applied.provider_capability_revision_id
+        == explicit_profile.capability_revision_id
+    )
+    assert (
+        recreated_desired.infrastructure_profile_id
+        == explicit_profile.infrastructure_profile_id
+    )
+    assert (
+        recreated_applied.infrastructure_profile_id
+        == explicit_profile.infrastructure_profile_id
+    )
+    assert (
+        recreated_desired.infrastructure_profile_version
+        == explicit_profile.infrastructure_profile_version
+    )
+    assert (
+        recreated_applied.infrastructure_profile_version
+        == explicit_profile.infrastructure_profile_version
+    )
+    assert recreated_desired.provider_acknowledged_at is not None
+    assert recreated_desired.runner_observed_at is not None
+    assert recreated_applied.applied_at is not None
+    sentinel_after_recreation = workspace_api.chat_v1_read_agent_workspace_path(
+        agent_id=explicit_agent.id,
+        path=sentinel_path,
+        _headers=headers,
+    )
+    assert isinstance(
+        sentinel_after_recreation.actual_instance,
+        AgentWorkspaceDirectoryResponse,
     )
 
     _stop_runtime_provider(azents_runtime_provider_docker_container)
@@ -724,8 +825,9 @@ def run_owner_deletes_runtime_profile_in_web_and_running_runtime_is_retained(
     assert runtime_after.runtime is not None
     assert runtime_after.runtime.id == prior_runtime_id
     assert runtime_after.runtime.workspace_path == prior_workspace_path
-    assert runtime_after.state is not None
-    assert runtime_after.state.summary == RuntimeSummary.RUNNING
+    assert runtime_after.lifecycle is not None
+    assert runtime_after.lifecycle.availability == "configuration_blocked"
+    assert runtime_after.lifecycle.convergence == "blocked"
     assert runtime_after.configuration is not None
     assert runtime_after.configuration.status == "profile_required"
     assert runtime_after.configuration.desired is not None
