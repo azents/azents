@@ -50,7 +50,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
 last_verified_at: 2026-08-26
-spec_version: 69
+spec_version: 70
 ---
 
 # Agent Runtime Control
@@ -282,6 +282,13 @@ evidence-mismatch failure for the new target. Stale reports must not overwrite w
 observed state, configuration evidence, runner availability, or current failure fields.
 
 Provider report framing always uses the generation accepted for the current Control stream. A Provider reconnect or leader failover may observe backend resources whose labels contain an older Provider generation; those labels are historical command metadata and must be replaced with the current connection generation before initial resync reports, watch reports, or command completion reports are sent to Control.
+
+The Provider refreshes its connection lease on a task independent from serial lifecycle command
+execution. A rejected or timed-out heartbeat ends the run loop, cancels in-flight command work, and
+returns authority to the outer reconnect loop. Provider and Control gRPC transport queues are
+bounded, and Control removes at most one lifecycle command from coordination for a live Provider
+stream until that command completes. A command completion report is applied through the completion
+frame exactly once; independent initial-resync and watch reports remain separate report frames.
 
 Kubernetes Provider lifecycle reports describe the backend Pod state directly. Process-local
 command history, verification caches, and NetworkPolicy state do not rewrite an observed running

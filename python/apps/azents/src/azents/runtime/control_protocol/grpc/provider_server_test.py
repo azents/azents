@@ -448,6 +448,52 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
 
 
 @pytest.mark.asyncio
+async def test_provider_grpc_keeps_only_one_command_in_flight() -> None:
+    """Control leaves later commands in coordination until completion frees a slot."""
+    request_ids = iter(("req-1", "req-2"))
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: next(request_ids),
+    )
+    servicer = _servicer(service, FakeReportSink())
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    first = await service.dispatch_provider_command(
+        _provider_command(
+            generation=accepted.register_accepted.generation,
+            command_type=RuntimeProviderCommandType.START,
+        ),
+        created_at=_now(),
+    )
+    second = await service.dispatch_provider_command(
+        _provider_command(
+            generation=accepted.register_accepted.generation,
+            command_type=RuntimeProviderCommandType.START,
+        ),
+        created_at=_now(),
+    )
+
+    relayed = await anext(stream)
+    remaining = await service.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.register_accepted.generation,
+        consumer_id="probe",
+        block_ms=0,
+    )
+    await _close_stream(stream)
+
+    assert isinstance(first, RuntimeDispatchResult)
+    assert isinstance(second, RuntimeDispatchResult)
+    assert relayed.request_id == first.request_id
+    assert remaining is not None
+    assert remaining.request_id == second.request_id
+
+
+@pytest.mark.asyncio
 async def test_provider_grpc_rejects_restart_report_for_another_runtime() -> None:
     """A correlated Restart completion cannot hand off a different Runtime."""
     store = InMemoryRuntimeCoordinationStore()
