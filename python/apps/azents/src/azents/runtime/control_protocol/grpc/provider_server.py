@@ -68,6 +68,7 @@ from azents.services.runtime_provider_control.data import (
 )
 
 _DEFAULT_COMMAND_BLOCK_MS = 500
+_MAX_OUTBOUND_MESSAGES = 1
 _KUBERNETES_PROVIDER_PROTOCOL_VERSION_V2 = "agent-runtime-provider-kubernetes-v2"
 _KUBERNETES_PROVIDER_PROTOCOL_VERSION_V3 = "agent-runtime-provider-kubernetes-v3"
 _LOGGER = logging.getLogger(__name__)
@@ -329,8 +330,12 @@ class RuntimeProviderControlGrpcServicer(
                 "owner_replica_id": self._owner_replica_id,
             },
         )
-        outbound: asyncio.Queue[_ProviderOutbound] = asyncio.Queue()
+        outbound: asyncio.Queue[_ProviderOutbound] = asyncio.Queue(
+            maxsize=_MAX_OUTBOUND_MESSAGES
+        )
         commands_by_request_id: dict[str, _RelayedProviderCommand] = {}
+        command_slot = asyncio.Event()
+        command_slot.set()
         inbound_task = asyncio.create_task(
             self._consume_provider_messages(
                 request_iterator,
@@ -341,6 +346,7 @@ class RuntimeProviderControlGrpcServicer(
                 authentication=authentication,
                 commands_by_request_id=commands_by_request_id,
                 protocol_version=registration.protocol_version,
+                command_slot=command_slot,
             )
         )
         command_task = asyncio.create_task(
@@ -350,6 +356,7 @@ class RuntimeProviderControlGrpcServicer(
                 generation=accepted.generation,
                 authentication=authentication,
                 commands_by_request_id=commands_by_request_id,
+                command_slot=command_slot,
             )
         )
         yield runtime_provider_control_pb2.ControlMessage(
@@ -405,6 +412,7 @@ class RuntimeProviderControlGrpcServicer(
         authentication: RuntimeProviderCredentialAuthentication,
         commands_by_request_id: dict[str, _RelayedProviderCommand],
         protocol_version: str,
+        command_slot: asyncio.Event,
     ) -> None:
         async for message in request_iterator:
             payload = message.WhichOneof("payload")
@@ -605,6 +613,7 @@ class RuntimeProviderControlGrpcServicer(
                     ):
                         handler = self._observe_completion_handler
                         await handler.reconcile_observe_completion(report)
+                command_slot.set()
 
     async def _provider_generation_current(
         self,
@@ -644,8 +653,10 @@ class RuntimeProviderControlGrpcServicer(
         generation: int,
         authentication: RuntimeProviderCredentialAuthentication,
         commands_by_request_id: dict[str, _RelayedProviderCommand],
+        command_slot: asyncio.Event,
     ) -> None:
         while True:
+            await command_slot.wait()
             if not await self._connection_tracker.connection_active(
                 authentication=authentication,
                 generation=generation,
@@ -703,6 +714,7 @@ class RuntimeProviderControlGrpcServicer(
                     "operation_type": envelope.operation_type,
                 },
             )
+            command_slot.clear()
             commands_by_request_id[envelope.request_id] = _RelayedProviderCommand(
                 command_type=RuntimeProviderCommandType(command.command_type),
                 runtime_id=command.runtime_id,

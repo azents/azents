@@ -73,6 +73,10 @@ class RuntimeProviderControlStreamClosed(RuntimeError):
     """Provider Control gRPC stream closed before the requested operation finished."""
 
 
+_MAX_OUTBOUND_MESSAGES = 256
+_MAX_PENDING_COMMANDS = 1
+
+
 PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN = "azents_issued_token"
 PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT = "kubernetes_service_account"
 _PROVIDER_AUTH_METHOD_HEADER = "x-azents-runtime-provider-auth-method"
@@ -99,9 +103,11 @@ class GrpcProviderControlClient(ProviderControlClient):
             provider_auth_method,
         )
         self._outbound: asyncio.Queue[runtime_provider_control_pb2.ProviderMessage] = (
-            asyncio.Queue()
+            asyncio.Queue(maxsize=_MAX_OUTBOUND_MESSAGES)
         )
-        self._commands: asyncio.Queue[ProviderCommandEnvelope] = asyncio.Queue()
+        self._commands: asyncio.Queue[ProviderCommandEnvelope] = asyncio.Queue(
+            maxsize=_MAX_PENDING_COMMANDS
+        )
         self._pending_heartbeat_acks: dict[str, asyncio.Future[bool]] = {}
         self._runtime_by_request_id: dict[str, str] = {}
         self._accepted: asyncio.Future[ProviderRegistrationAccepted] | None = None
@@ -178,19 +184,17 @@ class GrpcProviderControlClient(ProviderControlClient):
             heartbeat.operational_diagnostics.CopyFrom(
                 _operational_diagnostics_message(operational_diagnostics)
             )
-        await self._send(
-            runtime_provider_control_pb2.ProviderMessage(
-                connection_id=self._require_connection_id(),
-                request_id=request_id,
-                generation=generation,
-                heartbeat=heartbeat,
-            )
-        )
         try:
-            return await asyncio.wait_for(
-                future,
-                timeout=self._heartbeat_ack_timeout_seconds,
-            )
+            async with asyncio.timeout(self._heartbeat_ack_timeout_seconds):
+                await self._send(
+                    runtime_provider_control_pb2.ProviderMessage(
+                        connection_id=self._require_connection_id(),
+                        request_id=request_id,
+                        generation=generation,
+                        heartbeat=heartbeat,
+                    )
+                )
+                return await future
         finally:
             self._pending_heartbeat_acks.pop(request_id, None)
 
