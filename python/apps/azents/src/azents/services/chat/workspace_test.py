@@ -147,8 +147,7 @@ class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
         runtime = self.runtime
         if (
             runtime is None
-            or runtime.provider_observed_state
-            is not RuntimeProviderObservedState.RUNNING
+            or runtime.desired_state is not RuntimeDesiredState.RUNNING
             or runtime.runner_state is not RuntimeRunnerState.READY
             or runtime.workspace_path is None
         ):
@@ -515,6 +514,40 @@ async def test_get_workspace_keeps_ready_runner_when_host_controls_disconnect() 
 
 
 @pytest.mark.asyncio
+async def test_get_workspace_keeps_ready_runner_during_provider_transition() -> None:
+    """Provider host convergence does not fence qualified Runner access."""
+    runtime = _make_agent_runtime(
+        provider_observed_state=RuntimeProviderObservedState.STARTING,
+        desired_state=RuntimeDesiredState.RUNNING,
+    )
+    runner_operations = _FakeRunnerOperations()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,
+        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        session_manager=_session_manager,
+    )
+
+    result = await service.get_workspace("agent-1", "user-1")
+
+    assert isinstance(result, Success)
+    state = result.value
+    assert state.lifecycle is not None
+    assert state.lifecycle.availability == "ready"
+    assert state.lifecycle.convergence == "stable"
+    assert state.runtime.type == "STARTING"
+    assert state.workspace.type == "READY"
+    assert state.actions.start is None
+    assert state.actions.stop is not None
+    assert state.actions.restart is None
+    assert state.actions.reset is not None
+    assert runner_operations.list_calls == [
+        ("runtime-1", 1, AGENT_WORKSPACE_ROOT.as_posix())
+    ]
+
+
+@pytest.mark.asyncio
 async def test_get_workspace_exposes_restart_without_waiting_for_runner() -> None:
     """Provider-observed Runtime exposes recovery before Runner is ready."""
     runtime = _make_agent_runtime(runner_state=RuntimeRunnerState.DISCONNECTED)
@@ -617,6 +650,7 @@ async def test_get_workspace_shows_starting_when_start_requested() -> None:
     runtime = _make_agent_runtime(
         provider_observed_state=RuntimeProviderObservedState.STOPPED,
         desired_state=RuntimeDesiredState.RUNNING,
+        runner_state=RuntimeRunnerState.STARTING,
     )
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),

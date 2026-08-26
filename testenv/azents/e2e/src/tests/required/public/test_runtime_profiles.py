@@ -590,6 +590,54 @@ def test_runtime_profile_precedence_applied_evidence_and_recreation(
         )
         assert retained_agent.runtime_profile_id == explicit_profile_id
         assert retained_agent.runtime_profile_available is False
+        retained_runtime: AgentRuntimeResponse | None = None
+
+        def ready_runner_without_host_authority() -> bool:
+            nonlocal retained_runtime
+            retained_runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+                agent_id=explicit_agent.id,
+                handle=handle,
+                _headers=headers,
+            )
+            lifecycle = retained_runtime.lifecycle
+            actions = retained_runtime.actions
+            return (
+                lifecycle is not None
+                and lifecycle.availability == "ready"
+                and lifecycle.convergence == "stable"
+                and actions.use_runner
+                and not actions.start
+                and not actions.stop
+                and not actions.restart
+                and not actions.reset
+            )
+
+        wait_until(
+            ready_runner_without_host_authority,
+            timeout=30,
+            interval=1,
+            message=("Ready Runner did not retain data authority after Provider loss"),
+        )
+        assert retained_runtime is not None
+        assert retained_runtime.lifecycle is not None
+        assert retained_runtime.lifecycle.availability == "ready"
+        assert retained_runtime.lifecycle.convergence == "stable"
+        assert retained_runtime.actions.use_runner is True
+        assert retained_runtime.actions.start is False
+        assert retained_runtime.actions.stop is False
+        assert retained_runtime.actions.restart is False
+        assert retained_runtime.actions.reset is False
+        sentinel_while_provider_disconnected = (
+            workspace_api.chat_v1_read_agent_workspace_path(
+                agent_id=explicit_agent.id,
+                path=sentinel_path,
+                _headers=headers,
+            )
+        )
+        assert isinstance(
+            sentinel_while_provider_disconnected.actual_instance,
+            AgentWorkspaceDirectoryResponse,
+        )
         with pytest.raises(ApiException) as restart_error:
             runtime_api.agent_runtime_v1_restart_agent_runtime(
                 agent_id=explicit_agent.id,

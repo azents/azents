@@ -12,6 +12,7 @@ import {
   Paper,
   rem,
   Select,
+  SimpleGrid,
   Stack,
   Tabs,
   Text,
@@ -313,6 +314,7 @@ export function WorkspacePanel({
     const canStartRuntime = actions.start !== null;
     const canStopRuntime = actions.stop !== null;
     const canRestartRuntime = actions.restart !== null;
+    const canResetRuntime = actions.reset !== null;
     const lifecycleControl = canStopRuntime
       ? "stop"
       : canStartRuntime
@@ -322,95 +324,121 @@ export function WorkspacePanel({
 
     return (
       <Stack gap="md">
-        <Paper withBorder p="md" radius="lg">
+        <Box>
+          <Text size="lg" fw={700}>
+            {t("settingsTitle")}
+          </Text>
+          <Text size="sm" c="dimmed">
+            {t("settingsSubtitle")}
+          </Text>
+        </Box>
+
+        {lifecycle ? (
+          <RuntimeLifecycleStatus lifecycle={lifecycle} compact />
+        ) : null}
+        <RuntimeConfigurationStatus state={state.runtimeConfiguration} />
+
+        <Paper withBorder p={{ base: "sm", sm: "md" }} radius="lg">
           <Stack gap="md">
-            <Box>
-              <Text size="lg" fw={700}>
-                {t("settingsTitle")}
+            <Stack gap={2}>
+              <Text size="sm" fw={700}>
+                {t("hostControlsTitle")}
               </Text>
               <Text size="sm" c="dimmed">
-                {t("settingsSubtitle")}
+                {t("hostControlsDescription")}
               </Text>
-            </Box>
-
-            <RuntimeConfigurationStatus state={state.runtimeConfiguration} />
-            {lifecycle ? (
-              <RuntimeLifecycleStatus lifecycle={lifecycle} compact />
-            ) : null}
+            </Stack>
 
             {lifecycleControl ? (
-              <Paper withBorder p="md" radius="md">
-                <Group justify="space-between" align="center" gap="md">
-                  <Group gap="sm" miw={0} wrap="nowrap">
-                    <Box
-                      c={starting ? "blue" : "red"}
-                      style={{ display: "inline-flex" }}
-                    >
-                      {starting ? (
-                        <IconPlayerPlay size="1rem" />
-                      ) : (
-                        <IconPower size="1rem" />
+              <Group justify="space-between" align="flex-start" gap="md">
+                <Group
+                  gap="sm"
+                  miw={rem(200)}
+                  style={{ flex: 1 }}
+                  wrap="nowrap"
+                >
+                  <Box
+                    c={starting ? "blue" : "red"}
+                    style={{ display: "inline-flex" }}
+                  >
+                    {starting ? (
+                      <IconPlayerPlay size="1rem" />
+                    ) : (
+                      <IconPower size="1rem" />
+                    )}
+                  </Box>
+                  <Box miw={0}>
+                    <Text size="sm" fw={600}>
+                      {t(starting ? "startRuntime" : "stopRuntime")}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {t(
+                        starting
+                          ? "inactiveDescription"
+                          : "stopRuntimeDescription",
                       )}
-                    </Box>
-                    <Box miw={0}>
-                      <Text size="sm" fw={600}>
-                        {t(starting ? "startRuntime" : "stopRuntime")}
-                      </Text>
-                      <Text size="xs" c="dimmed">
-                        {t(
-                          starting
-                            ? "inactiveDescription"
-                            : "stopRuntimeDescription",
-                        )}
-                      </Text>
-                    </Box>
-                  </Group>
-                  <Group gap="xs">
-                    {canRestartRuntime ? (
-                      <Button
-                        leftSection={<IconRefresh size="1rem" />}
-                        variant="default"
-                        disabled={
-                          state.isStarting ||
-                          state.isStopping ||
-                          state.isResetting
-                        }
-                        onClick={() => setRestartConfirmOpen(true)}
-                      >
-                        {t("restartRuntime")}
-                      </Button>
-                    ) : null}
+                    </Text>
+                  </Box>
+                </Group>
+                <SimpleGrid
+                  cols={{ base: 1, xs: canRestartRuntime ? 2 : 1 }}
+                  spacing="xs"
+                  w={{ base: "100%", xs: "auto" }}
+                >
+                  {canRestartRuntime ? (
                     <Button
-                      color={starting ? "blue" : "red"}
-                      variant="light"
-                      loading={starting ? state.isStarting : state.isStopping}
+                      leftSection={<IconRefresh size="1rem" />}
+                      variant="default"
                       disabled={
                         state.isStarting ||
                         state.isStopping ||
                         state.isResetting
                       }
-                      onClick={starting ? onStartRuntime : onStopRuntime}
+                      onClick={() => setRestartConfirmOpen(true)}
                     >
-                      {starting
-                        ? state.isStarting
-                          ? t("startingRuntime")
-                          : t("startRuntime")
-                        : state.isStopping
-                          ? t("stoppingRuntime")
-                          : t("stopRuntime")}
+                      {t("restartRuntime")}
                     </Button>
-                  </Group>
-                </Group>
-              </Paper>
-            ) : null}
-
-            {lifecycleControl === null &&
-            (lifecycle === null || lifecycle.convergence === "stable") ? (
-              <Text size="xs" c="dimmed">
+                  ) : null}
+                  <Button
+                    color={starting ? "blue" : "red"}
+                    variant="light"
+                    loading={starting ? state.isStarting : state.isStopping}
+                    disabled={
+                      state.isStarting || state.isStopping || state.isResetting
+                    }
+                    onClick={starting ? onStartRuntime : onStopRuntime}
+                  >
+                    {starting
+                      ? state.isStarting
+                        ? t("startingRuntime")
+                        : t("startRuntime")
+                      : state.isStopping
+                        ? t("stoppingRuntime")
+                        : t("stopRuntime")}
+                  </Button>
+                </SimpleGrid>
+              </Group>
+            ) : (
+              <Text size="sm" c="dimmed">
                 {runtime.type === "NOT_STARTED" || runtime.type === "HIBERNATED"
                   ? t("runtimeNotRunningHint")
                   : t("runtimeControlUnavailableHint")}
               </Text>
+            )}
+
+            {canResetRuntime ? (
+              <Box>
+                <Button
+                  color="red"
+                  size="xs"
+                  variant="subtle"
+                  loading={state.isResetting}
+                  disabled={state.isStarting || state.isStopping}
+                  onClick={() => setResetConfirmOpen(true)}
+                >
+                  {t("resetRuntime")}
+                </Button>
+              </Box>
             ) : null}
           </Stack>
         </Paper>
@@ -547,43 +575,16 @@ export function WorkspacePanel({
                   )}
                 </Group>
                 {actions.reset ? (
-                  <>
-                    <Button
-                      c="dimmed"
-                      size="xs"
-                      variant="transparent"
-                      onClick={() => setResetConfirmOpen(true)}
-                      loading={state.isResetting}
-                      disabled={state.isRefreshing || state.isStopping}
-                    >
-                      {t("resetRuntime")}
-                    </Button>
-                    <Modal
-                      opened={resetConfirmOpen}
-                      onClose={() => setResetConfirmOpen(false)}
-                      title={t("resetRuntime")}
-                      centered
-                    >
-                      <Stack gap="md">
-                        <Text size="sm">{t("resetRuntimeConfirm")}</Text>
-                        <Group justify="flex-end">
-                          <Button
-                            variant="default"
-                            onClick={() => setResetConfirmOpen(false)}
-                          >
-                            {t("cancel")}
-                          </Button>
-                          <Button
-                            color="red"
-                            onClick={handleConfirmReset}
-                            loading={state.isResetting}
-                          >
-                            {t("resetRuntime")}
-                          </Button>
-                        </Group>
-                      </Stack>
-                    </Modal>
-                  </>
+                  <Button
+                    c="dimmed"
+                    size="xs"
+                    variant="transparent"
+                    onClick={() => setResetConfirmOpen(true)}
+                    loading={state.isResetting}
+                    disabled={state.isRefreshing || state.isStopping}
+                  >
+                    {t("resetRuntime")}
+                  </Button>
                 ) : null}
               </Stack>
             </Stack>
@@ -624,43 +625,16 @@ export function WorkspacePanel({
                     </Button>
                   ) : null}
                   {actions.reset ? (
-                    <>
-                      <Button
-                        c="dimmed"
-                        size="xs"
-                        variant="transparent"
-                        onClick={() => setResetConfirmOpen(true)}
-                        loading={state.isResetting}
-                        disabled={state.isStarting || state.isResetting}
-                      >
-                        {t("resetRuntime")}
-                      </Button>
-                      <Modal
-                        opened={resetConfirmOpen}
-                        onClose={() => setResetConfirmOpen(false)}
-                        title={t("resetRuntime")}
-                        centered
-                      >
-                        <Stack gap="md">
-                          <Text size="sm">{t("resetRuntimeConfirm")}</Text>
-                          <Group justify="flex-end">
-                            <Button
-                              variant="default"
-                              onClick={() => setResetConfirmOpen(false)}
-                            >
-                              {t("cancel")}
-                            </Button>
-                            <Button
-                              color="red"
-                              onClick={handleConfirmReset}
-                              loading={state.isResetting}
-                            >
-                              {t("resetRuntime")}
-                            </Button>
-                          </Group>
-                        </Stack>
-                      </Modal>
-                    </>
+                    <Button
+                      c="dimmed"
+                      size="xs"
+                      variant="transparent"
+                      onClick={() => setResetConfirmOpen(true)}
+                      loading={state.isResetting}
+                      disabled={state.isStarting || state.isResetting}
+                    >
+                      {t("resetRuntime")}
+                    </Button>
                   ) : null}
                 </Stack>
               )}
@@ -872,7 +846,9 @@ export function WorkspacePanel({
             value="workspace"
             leftSection={<IconFolderOpen size="1rem" />}
           >
-            {t("workspaceTab")}
+            <Text component="span" inherit visibleFrom="xs">
+              {t("workspaceTab")}
+            </Text>
           </Tabs.Tab>
           {metricsTabAvailable ? (
             <Tabs.Tab
@@ -880,7 +856,9 @@ export function WorkspacePanel({
               value="metrics"
               leftSection={<IconChartHistogram size="1rem" />}
             >
-              {t("metricsTab")}
+              <Text component="span" inherit visibleFrom="xs">
+                {t("metricsTab")}
+              </Text>
             </Tabs.Tab>
           ) : null}
           <Tabs.Tab
@@ -888,7 +866,9 @@ export function WorkspacePanel({
             value="settings"
             leftSection={<IconSettings size="1rem" />}
           >
-            {t("settingsTab")}
+            <Text component="span" inherit visibleFrom="xs">
+              {t("settingsTab")}
+            </Text>
           </Tabs.Tab>
         </Tabs.List>
 
@@ -949,6 +929,31 @@ export function WorkspacePanel({
             </Button>
             <Button onClick={handleConfirmRestart}>
               {t("confirmRestart")}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal
+        centered
+        opened={resetConfirmOpen}
+        title={t("resetRuntime")}
+        onClose={() => setResetConfirmOpen(false)}
+      >
+        <Stack gap="md">
+          <Text size="sm">{t("resetRuntimeConfirm")}</Text>
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() => setResetConfirmOpen(false)}
+            >
+              {t("cancel")}
+            </Button>
+            <Button
+              color="red"
+              onClick={handleConfirmReset}
+              loading={state.type === "SERVER" && state.isResetting}
+            >
+              {t("resetRuntime")}
             </Button>
           </Group>
         </Stack>
