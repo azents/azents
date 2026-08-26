@@ -131,6 +131,15 @@ class _RuntimeProfileProjection:
     reason_code: str | None
 
 
+@dataclasses.dataclass(frozen=True)
+class _RuntimeLifecycleConvergenceResult:
+    """Derived lifecycle presentation fields after precedence checks."""
+
+    convergence: RuntimeLifecycleConvergence
+    availability: RuntimeAvailability
+    reason_code: str | None
+
+
 @dataclasses.dataclass
 class AgentRuntimeService:
     """Agent Runtime lifecycle service."""
@@ -1366,9 +1375,10 @@ class AgentRuntimeService:
             availability = "removing"
             reason_code = "runtime_removal_in_progress"
         elif runtime.desired_state is RuntimeDesiredState.STOPPED:
-            convergence, availability, reason_code = self._lifecycle_convergence(
-                runtime
-            )
+            lifecycle = self._lifecycle_convergence(runtime)
+            convergence = lifecycle.convergence
+            availability = lifecycle.availability
+            reason_code = lifecycle.reason_code
         elif runtime.runner_state is RuntimeRunnerState.READY:
             convergence = "stable"
             availability = "ready"
@@ -1403,9 +1413,10 @@ class AgentRuntimeService:
             availability = "provider_disconnected"
             reason_code = "provider_disconnected"
         else:
-            convergence, availability, reason_code = self._lifecycle_convergence(
-                runtime
-            )
+            lifecycle = self._lifecycle_convergence(runtime)
+            convergence = lifecycle.convergence
+            availability = lifecycle.availability
+            reason_code = lifecycle.reason_code
 
         return AgentRuntimeLifecyclePresentation(
             target=runtime.desired_state,
@@ -1423,7 +1434,7 @@ class AgentRuntimeService:
     @staticmethod
     def _lifecycle_convergence(
         runtime: AgentRuntime,
-    ) -> tuple[RuntimeLifecycleConvergence, RuntimeAvailability, str | None]:
+    ) -> _RuntimeLifecycleConvergenceResult:
         """Derive lifecycle status after higher-precedence checks."""
         observed = runtime.provider_observed_state
         if runtime.desired_state is RuntimeDesiredState.STOPPED:
@@ -1431,16 +1442,40 @@ class AgentRuntimeService:
                 RuntimeProviderObservedState.STOPPED,
                 RuntimeProviderObservedState.UNKNOWN,
             }:
-                return "stable", "stopped", None
+                return _RuntimeLifecycleConvergenceResult(
+                    convergence="stable",
+                    availability="stopped",
+                    reason_code=None,
+                )
             if observed is RuntimeProviderObservedState.RESETTING:
-                return "resetting", "transitioning", "runtime_resetting"
-            return "stopping", "transitioning", "runtime_stopping"
+                return _RuntimeLifecycleConvergenceResult(
+                    convergence="resetting",
+                    availability="transitioning",
+                    reason_code="runtime_resetting",
+                )
+            return _RuntimeLifecycleConvergenceResult(
+                convergence="stopping",
+                availability="transitioning",
+                reason_code="runtime_stopping",
+            )
         if observed is RuntimeProviderObservedState.RESETTING:
-            return "resetting", "transitioning", "runtime_resetting"
+            return _RuntimeLifecycleConvergenceResult(
+                convergence="resetting",
+                availability="transitioning",
+                reason_code="runtime_resetting",
+            )
         if observed is RuntimeProviderObservedState.RECOVERING:
-            return "recovering", "transitioning", "runtime_recovering"
+            return _RuntimeLifecycleConvergenceResult(
+                convergence="recovering",
+                availability="transitioning",
+                reason_code="runtime_recovering",
+            )
         if observed is not RuntimeProviderObservedState.RUNNING:
-            return "starting", "transitioning", "runtime_starting"
+            return _RuntimeLifecycleConvergenceResult(
+                convergence="starting",
+                availability="transitioning",
+                reason_code="runtime_starting",
+            )
         if runtime.runner_state is not RuntimeRunnerState.READY:
             reason_by_state = {
                 RuntimeRunnerState.UNKNOWN: "runner_unknown",
@@ -1449,12 +1484,16 @@ class AgentRuntimeService:
                 RuntimeRunnerState.DEGRADED: "runner_degraded",
                 RuntimeRunnerState.FAILED: "runner_failed",
             }
-            return (
-                "stable",
-                "runner_unavailable",
-                reason_by_state[runtime.runner_state],
+            return _RuntimeLifecycleConvergenceResult(
+                convergence="stable",
+                availability="runner_unavailable",
+                reason_code=reason_by_state[runtime.runner_state],
             )
-        return "stable", "ready", None
+        return _RuntimeLifecycleConvergenceResult(
+            convergence="stable",
+            availability="ready",
+            reason_code=None,
+        )
 
     def _calculate_actions(self, runtime: AgentRuntime) -> AgentRuntimeActions:
         """Calculate action availability from Runtime raw axes."""

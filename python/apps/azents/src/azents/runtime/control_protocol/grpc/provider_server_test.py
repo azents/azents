@@ -76,6 +76,10 @@ class FakeReportSink:
     restart_handoffs: list[RuntimeProviderReport] = dataclasses.field(
         default_factory=list
     )
+    report_recorded: asyncio.Event = dataclasses.field(default_factory=asyncio.Event)
+    restart_handoff_completed: asyncio.Event = dataclasses.field(
+        default_factory=asyncio.Event
+    )
 
     async def record_provider_report(
         self,
@@ -88,6 +92,7 @@ class FakeReportSink:
         self.configuration_acknowledgements.append(
             configuration_acknowledgement_allowed
         )
+        self.report_recorded.set()
 
     async def complete_restart_handoff(
         self,
@@ -95,6 +100,7 @@ class FakeReportSink:
     ) -> bool:
         """Record one successful correlated Restart handoff."""
         self.restart_handoffs.append(report)
+        self.restart_handoff_completed.set()
         return True
 
 
@@ -103,10 +109,12 @@ class FakeObserveCompletionHandler:
     """Collect correlated successful OBSERVE completion reports."""
 
     reports: list[RuntimeProviderReport] = dataclasses.field(default_factory=list)
+    report_reconciled: asyncio.Event = dataclasses.field(default_factory=asyncio.Event)
 
     async def reconcile_observe_completion(self, report: RuntimeProviderReport) -> bool:
         """Record one eligible report."""
         self.reports.append(report)
+        self.report_reconciled.set()
         return True
 
 
@@ -433,7 +441,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
             ),
         )
     )
-    await asyncio.sleep(0)
+    await sink.restart_handoff_completed.wait()
     replies = await service.read_replies(
         reply_stream_id=result.reply_stream_id,
         after_cursor=None,
@@ -616,9 +624,11 @@ async def test_provider_grpc_hands_only_observe_completion_to_reconciler() -> No
     )
     await inbound.put(completion)
     await inbound.put(completion)
-    await asyncio.sleep(0)
+    await handler.report_reconciled.wait()
+    duplicate_error = await anext(stream)
 
     assert len(handler.reports) == 1
+    assert duplicate_error.error.code == "INVALID_PROVIDER_COMMAND_COMPLETION"
     assert handler.reports[0].reconciliation == RuntimeProviderReconciliationEvidence(
         observations=(
             RuntimeProviderReconciliationObservation(
@@ -944,7 +954,7 @@ async def test_provider_grpc_v3_enforcement_controls_configuration_acknowledgeme
             report=report,
         )
     )
-    await asyncio.sleep(0)
+    await sink.report_recorded.wait()
     await _close_stream(stream)
 
     assert len(sink.reports) == 1

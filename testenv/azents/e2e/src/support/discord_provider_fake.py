@@ -9,7 +9,7 @@ import time
 from collections.abc import Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
-from typing import ClassVar, cast
+from typing import ClassVar, NamedTuple, cast
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
@@ -79,6 +79,13 @@ _COMMAND_ROLE_CONTRACTS = {
     "azents_settings": ("azents", 1),
     "conversation_settings": ("Conversation settings", 3),
 }
+
+
+class DiscordInteractionDeliveryResult(NamedTuple):
+    """HTTP outcome returned by one signed interaction delivery."""
+
+    status: int
+    response: object
 
 
 class FakeState:
@@ -497,7 +504,10 @@ class FakeState:
             self.interaction_configurations.append({"application_id": application_id})
             self._interaction_endpoint_url = endpoint_url
 
-    def deliver_interaction(self, payload: dict[str, object]) -> tuple[int, object]:
+    def deliver_interaction(
+        self,
+        payload: dict[str, object],
+    ) -> DiscordInteractionDeliveryResult:
         """Sign and send one interaction without retaining its body or signature."""
         interaction_id = payload.get("id")
         interaction_type = payload.get("type")
@@ -559,7 +569,10 @@ class FakeState:
             if completion is not None:
                 evidence.update(completion)
             self.interactions.append(evidence)
-        return response_status, response_payload
+        return DiscordInteractionDeliveryResult(
+            status=response_status,
+            response=response_payload,
+        )
 
     def complete_interaction_response(
         self,
@@ -977,19 +990,19 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/__testenv/interactions":
             try:
-                status, response = self.state.deliver_interaction(self._json_body())
+                delivery = self.state.deliver_interaction(self._json_body())
             except ValueError as error:
                 self._json_response(400, {"message": str(error)})
                 return
             response_object = (
-                cast(dict[str, object], response)
-                if isinstance(response, dict)
+                cast(dict[str, object], delivery.response)
+                if isinstance(delivery.response, dict)
                 else None
             )
             self._json_response(
                 200,
                 {
-                    "status": status,
+                    "status": delivery.status,
                     "response_type": (
                         response_object.get("type")
                         if response_object is not None

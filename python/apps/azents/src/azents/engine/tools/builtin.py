@@ -144,6 +144,15 @@ from azents.services.vfs import VfsProjectionService
 
 logger = logging.getLogger(__name__)
 
+
+@dataclasses.dataclass(frozen=True)
+class _RuntimeBehaviorPromptResult:
+    """Rendered Runtime behavior prompt and its operation authority."""
+
+    prompt: str
+    expected_authority: RuntimeOperationAuthority | None
+
+
 # ---------------------------------------------------------------------------
 # Memory prompt
 # ---------------------------------------------------------------------------
@@ -1108,8 +1117,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         """Return static runtime/files prompt for the current run."""
         if not await self._runtime_toolkit_allowed():
             return ""
-        behavior_prompt, expected_authority = await self._load_runtime_behavior_prompt()
-        self._expected_runtime_authority = expected_authority
+        behavior = await self._load_runtime_behavior_prompt()
+        self._expected_runtime_authority = behavior.expected_authority
         projection_target = await self._resolve_projection_runtime_target()
         projection_binding = await self._resolve_projection_binding(projection_target)
         projects = (
@@ -1134,8 +1143,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 else None
             ),
         )
-        if behavior_prompt:
-            return f"{prompt}\n\n{behavior_prompt}"
+        if behavior.prompt:
+            return f"{prompt}\n\n{behavior.prompt}"
         return prompt
 
     def _required_runtime_authority(self) -> RuntimeOperationAuthority:
@@ -1147,7 +1156,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 
     async def _load_runtime_behavior_prompt(
         self,
-    ) -> tuple[str, RuntimeOperationAuthority | None]:
+    ) -> _RuntimeBehaviorPromptResult:
         """Render behavior for the configuration serving Runtime operations."""
         async with self.session_manager() as session:
             runtime = await self.agent_runtime_repo.get_by_agent_id(
@@ -1155,14 +1164,20 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 self._runtime_agent_id,
             )
             if runtime is None:
-                return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, None)
+                return _RuntimeBehaviorPromptResult(
+                    prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                    expected_authority=None,
+                )
             profile_repository = self.agent_runtime_service.runtime_profile_repository
             state = await profile_repository.get_configuration_state(
                 session,
                 runtime_id=runtime.id,
             )
         if state is None:
-            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, None)
+            return _RuntimeBehaviorPromptResult(
+                prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                expected_authority=None,
+            )
         desired = state.desired
         applied = state.applied
         operation_configuration = desired
@@ -1188,17 +1203,29 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             or operation_configuration.digest is None
             or operation_configuration.document.resolved_configuration is None
         ):
-            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
+            return _RuntimeBehaviorPromptResult(
+                prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                expected_authority=expected_authority,
+            )
         effective_profile = operation_configuration.document.resolved_configuration.get(
             "effective_profile"
         )
         if not isinstance(effective_profile, dict):
-            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
+            return _RuntimeBehaviorPromptResult(
+                prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                expected_authority=expected_authority,
+            )
         try:
             parse_runtime_infrastructure_profile_spec(effective_profile)
         except ValidationError:
-            return (_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT, expected_authority)
-        return ("", expected_authority)
+            return _RuntimeBehaviorPromptResult(
+                prompt=_RUNTIME_OPERATIONS_UNAVAILABLE_PROMPT,
+                expected_authority=expected_authority,
+            )
+        return _RuntimeBehaviorPromptResult(
+            prompt="",
+            expected_authority=expected_authority,
+        )
 
     async def _make_instruction_context(
         self,
