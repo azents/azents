@@ -1738,7 +1738,7 @@ class RuntimeRunnerFileStorage:
         self,
         path: str,
         data: bytes,
-        media_type: str = "",
+        media_type: str | None = None,
         *,
         agent_id: str,
     ) -> RuntimeAttachment:
@@ -1758,7 +1758,7 @@ class RuntimeRunnerFileStorage:
             _raise_storage_error(exc)
         return RuntimeAttachment(
             uri=path,
-            media_type=media_type,
+            media_type=media_type or guess_media_type(path),
             size=result.bytes_written,
             name=PurePosixPath(path).name,
             text_preview=None,
@@ -1923,7 +1923,7 @@ class RuntimeRunnerFileStorage:
             searched_file_count=result.searched_file_count,
             matched_file_count=result.matched_file_count,
             truncated=result.truncated,
-            stopped_reason=getattr(result, "stopped_reason", None),
+            stopped_reason=result.stopped_reason,
         )
 
     def begin_runtime_operation_count(self) -> Token[int | None]:

@@ -74,8 +74,8 @@ class _FailingListStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
         recursive: bool = False,
         exclude_patterns: List[str] | None = None,
         include_directories: bool = False,
@@ -100,8 +100,8 @@ class _CountingStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
         recursive: bool = False,
         exclude_patterns: List[str] | None = None,
         include_directories: bool = False,
@@ -121,8 +121,8 @@ class _CountingStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, object]:
         """Count candidate metadata reads."""
         self.stat_calls.append(path)
@@ -132,8 +132,8 @@ class _CountingStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
         offset: int,
         limit: int,
         encoding: str,
@@ -167,8 +167,8 @@ class _SymlinkStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, object]:
         """Return metadata with configured real path."""
         metadata = await super().stat(path, agent_id=agent_id, user_id=user_id)

@@ -231,8 +231,8 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         self,
         *,
         store: ClaudeRulesAppendixDedupeStateStore,
-        agent_id: str = "",
-        session_id: str = "",
+        agent_id: str,
+        session_id: str,
     ) -> None:
         """Create Claude rules Toolkit."""
         self.store = store

@@ -49,9 +49,9 @@ class _NoBodyReadStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
-        limit: int = 0,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        limit: int | None = None,
     ) -> bytes:
         """Record an invalid body relay attempt."""
         del agent_id, user_id, limit
@@ -66,8 +66,8 @@ class _UnavailableStatStorage(FakeSharedStorage):
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, object]:
         """Raise a Runtime storage error instead of returning metadata."""
         del path, agent_id, user_id

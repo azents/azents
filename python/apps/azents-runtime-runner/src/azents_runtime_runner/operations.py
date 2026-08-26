@@ -2754,16 +2754,17 @@ def _discovered_worktree_payload(
     repository_anchor_path: str,
     branch_name: str,
     failure_code: str,
-    head_commit: str = "",
+    head_commit: str | None = None,
 ) -> dict[str, JsonValue]:
     """Build one content-free managed worktree discovery result."""
+    fingerprint_head_commit = head_commit if head_commit is not None else ""
     fingerprint = hashlib.sha256(
         "\0".join(
             (
                 str(worktree_path),
                 repository_anchor_path,
                 branch_name,
-                head_commit,
+                fingerprint_head_commit,
                 failure_code,
                 str(registered),
             )

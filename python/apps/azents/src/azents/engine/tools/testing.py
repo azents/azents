@@ -46,15 +46,16 @@ class FakeSharedStorage:
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
-        limit: int = 0,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        limit: int | None = None,
     ) -> bytes:
         """Return file."""
+        del agent_id, user_id
         if path not in self._files:
             raise FileNotFoundError(f"File not found: {path}")
         data = self._files[path]
-        if limit > 0:
+        if limit is not None:
             # Truncate text files by character count and return
             text = data.decode("utf-8", errors="replace")[:limit]
             return text.encode("utf-8")
@@ -64,7 +65,7 @@ class FakeSharedStorage:
         self,
         path: str,
         *,
-        agent_id: str = "",
+        agent_id: str | None = None,
         offset: int,
         limit: int,
         encoding: str,
@@ -87,7 +88,7 @@ class FakeSharedStorage:
         self,
         path: str,
         *,
-        agent_id: str = "",
+        agent_id: str | None = None,
         offset: int,
         max_bytes: int,
     ) -> bytes:
@@ -102,22 +103,21 @@ class FakeSharedStorage:
         self,
         path: str,
         data: bytes,
-        media_type: str = "",
+        media_type: str | None = None,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> RuntimeAttachment:
         """Simulate file storage."""
+        del agent_id, user_id
         if self._raise_permission_on_put:
             raise PermissionError(f"Cannot write to read-only path: {path}")
         self._files[path] = data
         self.put_calls.append((path, data))
         name = path.rsplit("/", 1)[-1]
-        if not media_type:
-            media_type = guess_media_type(path)
         return RuntimeAttachment(
             uri=path,
-            media_type=media_type,
+            media_type=media_type or guess_media_type(path),
             size=len(data),
             name=name,
             text_preview=None,
@@ -127,18 +127,19 @@ class FakeSharedStorage:
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> bool:
         """Check whether file exists."""
+        del agent_id, user_id
         return path in self._files
 
     async def list(
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
         recursive: bool = False,
         exclude_patterns: List[str] | None = None,
         include_directories: bool = False,
@@ -175,8 +176,8 @@ class FakeSharedStorage:
         self,
         pattern: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
         exclude_patterns: List[str] | None,
     ) -> List[RuntimeAttachment]:
         """Return entries matching the Runtime-native glob contract."""
@@ -200,10 +201,11 @@ class FakeSharedStorage:
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> List[str]:
         """Return subdirectory name list."""
+        del agent_id, user_id
         prefix = path.rstrip("/") + "/"
         dirs: set[str] = set()
         for key in self._files:
@@ -220,7 +222,7 @@ class FakeSharedStorage:
         self,
         path: str,
         *,
-        agent_id: str = "",
+        agent_id: str | None = None,
         pattern: str,
         recursive: bool = True,
         exclude_patterns: List[str] | None = None,
@@ -290,10 +292,11 @@ class FakeSharedStorage:
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict[str, object]:
         """Return file metadata."""
+        del agent_id, user_id
         if path not in self._files:
             raise FileNotFoundError(f"File not found: {path}")
         return {
@@ -306,10 +309,11 @@ class FakeSharedStorage:
         self,
         path: str,
         *,
-        agent_id: str = "",
-        user_id: str = "",
+        agent_id: str | None = None,
+        user_id: str | None = None,
     ) -> None:
         """Delete file."""
+        del agent_id, user_id
         if path in self._files:
             del self._files[path]
 
