@@ -10,7 +10,10 @@ from azents.core.enums import (
     AgentRuntimeCapability,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
+    RuntimeProviderConnectionState,
     RuntimeProviderKind,
+    RuntimeProviderObservedState,
+    RuntimeRunnerState,
 )
 from azents.core.runtime_profile import (
     RuntimeConfigurationStateStatus,
@@ -509,6 +512,16 @@ class RuntimeRecreationReconciler:
                     and applied.sequence == item.expected_configuration_sequence
                     and applied.digest == item.expected_configuration_digest
                     and applied.target_generation == item.expected_desired_generation
+                    and runtime.desired_generation == item.dispatched_generation
+                    and runtime.provider_observed_state
+                    is RuntimeProviderObservedState.RUNNING
+                    and runtime.provider_observed_generation
+                    == item.dispatched_generation
+                    and runtime.provider_connection_state
+                    is RuntimeProviderConnectionState.CONNECTED
+                    and runtime.runner_state is RuntimeRunnerState.READY
+                    and runtime.runner_generation > 0
+                    and runtime.workspace_path is not None
                 ):
                     return (
                         False,

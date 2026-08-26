@@ -362,29 +362,24 @@ class KubernetesRuntimeProvider:
         self,
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
-        """Recreate the Runtime Pod and policy while preserving its PVC."""
-        policy = self._validate_command(command)
+        """Request execution-resource deletion while preserving the Runtime PVC."""
+        self._validate_command(command)
         _LOGGER.info(
             "Kubernetes Runtime restart requested",
             extra=_log_context(command, self._config),
         )
-        if isinstance(policy, KubernetesPodProfileV3):
-            await self._start_v3(command, policy, replace_runtime=True)
-            return RuntimeLifecycleResult(
-                command_type=RuntimeLifecycleCommandType.RESTART,
-                report=await self.observe(command),
-            )
-        await self._ensure_pvc(command, policy, ca_fingerprint=None)
-        if await self._delete_strict_runtime_before_direct(command):
-            return RuntimeLifecycleResult(
-                command_type=RuntimeLifecycleCommandType.RESTART,
-                report=await self.observe(command),
-            )
-        await self._ensure_network_policy(command, policy)
-        await self._ensure_pod(command, policy, replace=True)
+        await self._validate_existing_execution_ownership(command)
+        await self._delete_runtime_pod(command)
+        await self._delete_execution_resources(command, delete_ca=False)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.RESTART,
-            report=await self.observe(command),
+            report=self._report(
+                command,
+                observed_state=RuntimeProviderObservedState.STOPPING,
+                reason="restart_deletion_requested",
+                provider_runtime_id=None,
+                reconciliation=None,
+            ),
         )
 
     async def reset(
