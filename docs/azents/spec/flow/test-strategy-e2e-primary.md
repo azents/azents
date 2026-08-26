@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-25
-spec_version: 36
+last_verified_at: 2026-08-26
+spec_version: 37
 ---
 
 # E2E Primary Test Strategy
@@ -181,6 +181,9 @@ Always-on required CI does not depend on external credentials.
   Snapshot authentication, availability, pull, or local-tag failure falls back to the
   existing current-worktree BuildKit build for the affected image. Changed image
   components always build the current worktree.
+- Python-based deterministic helper containers in required E2E reuse the prepared
+  Server image instead of pulling a separate Python runtime image during fixture
+  startup.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled

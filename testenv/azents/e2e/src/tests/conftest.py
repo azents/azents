@@ -417,13 +417,13 @@ def mock_openai_container(
 def openai_proxy_container(
     container_network: Network,
     mock_openai_container: DockerContainer,
+    azents_server_image: str,
 ) -> Generator[DockerContainer, None, None]:
     """Proxy AIMock and add deterministic Responses image generation."""
     del mock_openai_container
-    python_image = "python:3.14-alpine"
     with (
         DockerContainer(
-            python_image,
+            azents_server_image,
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
         )
         .with_volume_mapping(str(_IMAGE_GENERATION_PROXY), "/app/proxy.py", "ro")
@@ -455,12 +455,12 @@ def openai_proxy_container(
 @pytest.fixture(scope="session")
 def github_validation_proxy_container(
     container_network: Network,
+    azents_server_image: str,
 ) -> Generator[DockerContainer, None, None]:
     """Run the deterministic GitHub App validation boundary."""
-    python_image = "python:3.14-alpine"
     with (
         DockerContainer(
-            python_image,
+            azents_server_image,
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
         )
         .with_volume_mapping(str(_GITHUB_VALIDATION_PROXY), "/app/proxy.py", "ro")
@@ -497,12 +497,12 @@ def github_validation_proxy_url(
 @pytest.fixture(scope="session")
 def slack_provider_fake_container(
     container_network: Network,
+    azents_server_image: str,
 ) -> Generator[DockerContainer, None, None]:
     """Run the deterministic Slack HTTP and Socket Mode boundary."""
-    python_image = "python:3.14-alpine"
     with (
         DockerContainer(
-            python_image,
+            azents_server_image,
             docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
         )
         .with_volume_mapping(str(_SLACK_PROVIDER_FAKE), "/app/slack_fake.py", "ro")
