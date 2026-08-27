@@ -290,7 +290,7 @@ requires-dist = [
     { name = "requests", specifier = "==2.34.2" },
     { name = "selenium", specifier = "==4.47.0" },
     { name = "testcontainers", extras = ["postgres"], specifier = "==4.15.0" },
-    { name = "types-boto3", extras = ["s3"], specifier = "==1.43.72" },
+    { name = "types-boto3", extras = ["s3"], specifier = "==1.43.75" },
     { name = "types-docker", specifier = "==7.2.0.20260813" },
     { name = "types-requests", specifier = "==2.33.0.20260712" },
     { name = "websockets", specifier = "==16.1.1" },
@@ -1421,15 +1421,15 @@ wheels = [
 
 [[package]]
 name = "types-boto3"
-version = "1.43.72"
+version = "1.43.75"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore-stubs" },
     { name = "types-s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/36/1f/c9064948bba17fedd907e1a68378e16a0967555a0390e60e72fbaf65e2a8/types_boto3-1.43.72.tar.gz", hash = "sha256:ae44324d012d7b632efaefec1db3008d63175c69305a1a3617113995bd1f8320", size = 104684, upload-time = "2026-08-14T19:33:25.734Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/1f/779fe6fd54d291bdabf9b7368e7f485065d073119ef791f52c1d86d5133a/types_boto3-1.43.75.tar.gz", hash = "sha256:b2872dba3f112126683aa0c8b54f24f4a2b06dcbcf2b0a1969330be411ce79ce", size = 104648, upload-time = "2026-08-19T20:15:29.12Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/90/57/c50455c2d130ef18732d275421ff2d0cc2f501908256a21b631ac41d31f4/types_boto3-1.43.72-py3-none-any.whl", hash = "sha256:b903ca08add00c8ee2711e9b79368d189413bf92938985e03179b0f257862c10", size = 71270, upload-time = "2026-08-14T19:33:21.292Z" },
+    { url = "https://files.pythonhosted.org/packages/ea/9e/529edcde5bb44bbb61bc42fe051070b2cf98d718131a5e819eef162842d5/types_boto3-1.43.75-py3-none-any.whl", hash = "sha256:9fc6105e56c1eb62e0e5709dd5a4e3fde8df15f0713f420e519d7af32bc34310", size = 71275, upload-time = "2026-08-19T20:15:25.341Z" },
 ]
 
 [package.optional-dependencies]
