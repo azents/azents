@@ -577,7 +577,9 @@ async def test_resolve_operation_target_caps_poll_sleep_at_deadline(
     assert sleep_calls == [0.25]
 
 
-async def test_resolve_operation_target_wait_is_cancellable() -> None:
+async def test_resolve_operation_target_wait_is_cancellable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Cancellation propagates rather than becoming an operation failure."""
     unavailable = _resolution(
         runtime=_runtime(
@@ -587,6 +589,17 @@ async def test_resolve_operation_target_wait_is_cancellable() -> None:
         )
     )
     service = _OperationTargetService([unavailable])
+    sleep_started = asyncio.Event()
+    sleep_release = asyncio.Event()
+
+    async def fake_sleep(_: float) -> None:
+        sleep_started.set()
+        await sleep_release.wait()
+
+    monkeypatch.setattr(
+        "azents.services.agent_runtime.service.asyncio.sleep",
+        fake_sleep,
+    )
     task = asyncio.create_task(
         service.resolve_operation_target(
             "agent-1",
@@ -594,7 +607,7 @@ async def test_resolve_operation_target_wait_is_cancellable() -> None:
             poll_interval_seconds=60.0,
         )
     )
-    await asyncio.sleep(0)
+    await sleep_started.wait()
 
     task.cancel()
 

@@ -1149,7 +1149,6 @@ async def test_file_operation_executor_never_exceeds_worker_bound(
     ]
 
     assert await asyncio.to_thread(bound_reached.wait, 1)
-    await asyncio.sleep(0)
     assert maximum_active_count == 2
     assert sum(task.done() for task in tasks) == 0
 

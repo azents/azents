@@ -361,6 +361,14 @@ class RuntimeRecreationReconcileResult:
     completed_items: int
 
 
+@dataclasses.dataclass(frozen=True)
+class RuntimeRecreationItemProcessResult:
+    """Outcome of processing one Runtime recreation item."""
+
+    dispatched: bool
+    completed: bool
+
+
 @dataclasses.dataclass
 class RuntimeRecreationReconciler:
     """Dispatch and observe durable generation-fenced recreation items."""
@@ -395,10 +403,10 @@ class RuntimeRecreationReconciler:
                     statuses=(RuntimeRecreationItemStatus.RUNNING,),
                 )
             for item in running:
-                item_dispatched, item_completed = await self._process_item(item)
+                item_result = await self._process_item(item)
                 processed += 1
-                dispatched += int(item_dispatched)
-                completed += int(item_completed)
+                dispatched += int(item_result.dispatched)
+                completed += int(item_result.completed)
             async with self.session_manager() as session:
                 claimed = await self.profile_repository.claim_recreation_items(
                     session,
@@ -406,10 +414,10 @@ class RuntimeRecreationReconciler:
                     limit=self.item_limit,
                 )
             for item in claimed:
-                item_dispatched, item_completed = await self._process_item(item)
+                item_result = await self._process_item(item)
                 processed += 1
-                dispatched += int(item_dispatched)
-                completed += int(item_completed)
+                dispatched += int(item_result.dispatched)
+                completed += int(item_result.completed)
         return RuntimeRecreationReconcileResult(
             operations=len(operation_ids),
             processed_items=processed,
@@ -420,7 +428,7 @@ class RuntimeRecreationReconciler:
     async def _process_item(
         self,
         item: RuntimeRecreationOperationItem,
-    ) -> tuple[bool, bool]:
+    ) -> RuntimeRecreationItemProcessResult:
         async with self.session_manager() as session:
             operation = await self.profile_repository.get_recreation_operation(
                 session,
@@ -442,7 +450,10 @@ class RuntimeRecreationReconciler:
                 expected_attempt=item.attempt,
             )
             if locked_item is None:
-                return False, False
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=False,
+                )
             item = locked_item
             operation = await self.profile_repository.get_recreation_operation(
                 session,
@@ -457,50 +468,71 @@ class RuntimeRecreationReconciler:
                 else None
             )
             if operation is None or runtime is None:
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.FAILED,
-                    failure_code="runtime_not_found",
-                    failure_message="The Runtime recreation target no longer exists.",
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=await self.profile_repository.finish_recreation_item(
+                        session,
+                        item_id=item.id,
+                        expected_attempt=item.attempt,
+                        status=RuntimeRecreationItemStatus.FAILED,
+                        failure_code="runtime_not_found",
+                        failure_message=(
+                            "The Runtime recreation target no longer exists."
+                        ),
+                    ),
                 )
             if state is None:
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.FAILED,
-                    failure_code="configuration_missing",
-                    failure_message="The Runtime has no current configuration state.",
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=await self.profile_repository.finish_recreation_item(
+                        session,
+                        item_id=item.id,
+                        expected_attempt=item.attempt,
+                        status=RuntimeRecreationItemStatus.FAILED,
+                        failure_code="configuration_missing",
+                        failure_message=(
+                            "The Runtime has no current configuration state."
+                        ),
+                    ),
                 )
             if not _runtime_matches_target(runtime, state, operation):
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.SKIPPED,
-                    failure_code="target_no_longer_matches",
-                    failure_message="The Runtime no longer belongs to this target.",
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=await self.profile_repository.finish_recreation_item(
+                        session,
+                        item_id=item.id,
+                        expected_attempt=item.attempt,
+                        status=RuntimeRecreationItemStatus.SKIPPED,
+                        failure_code="target_no_longer_matches",
+                        failure_message=(
+                            "The Runtime no longer belongs to this target."
+                        ),
+                    ),
                 )
             if runtime.terminal_delete_requested_generation is not None:
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.SKIPPED,
-                    failure_code="terminal_delete_requested",
-                    failure_message="The Runtime is being terminally deleted.",
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=await self.profile_repository.finish_recreation_item(
+                        session,
+                        item_id=item.id,
+                        expected_attempt=item.attempt,
+                        status=RuntimeRecreationItemStatus.SKIPPED,
+                        failure_code="terminal_delete_requested",
+                        failure_message="The Runtime is being terminally deleted.",
+                    ),
                 )
             if runtime.desired_state is not RuntimeDesiredState.RUNNING:
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.SKIPPED,
-                    failure_code="runtime_not_running",
-                    failure_message=(
-                        "A stopped Runtime adopts the latest Profile on start."
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=await self.profile_repository.finish_recreation_item(
+                        session,
+                        item_id=item.id,
+                        expected_attempt=item.attempt,
+                        status=RuntimeRecreationItemStatus.SKIPPED,
+                        failure_code="runtime_not_running",
+                        failure_message=(
+                            "A stopped Runtime adopts the latest Profile on start."
+                        ),
                     ),
                 )
 
@@ -523,15 +555,17 @@ class RuntimeRecreationReconciler:
                     and runtime.runner_generation > 0
                     and runtime.workspace_path is not None
                 ):
-                    return (
-                        False,
-                        await self.profile_repository.finish_recreation_item(
-                            session,
-                            item_id=item.id,
-                            expected_attempt=item.attempt,
-                            status=RuntimeRecreationItemStatus.SUCCEEDED,
-                            failure_code=None,
-                            failure_message=None,
+                    return RuntimeRecreationItemProcessResult(
+                        dispatched=False,
+                        completed=(
+                            await self.profile_repository.finish_recreation_item(
+                                session,
+                                item_id=item.id,
+                                expected_attempt=item.attempt,
+                                status=RuntimeRecreationItemStatus.SUCCEEDED,
+                                failure_code=None,
+                                failure_message=None,
+                            )
                         ),
                     )
                 if runtime.failure_generation == item.dispatched_generation:
@@ -545,22 +579,31 @@ class RuntimeRecreationReconciler:
                             runtime.failure_message or "Runtime recreation failed."
                         ),
                     )
-                    return False, retried and item.attempt >= self.maximum_attempts
+                    return RuntimeRecreationItemProcessResult(
+                        dispatched=False,
+                        completed=(retried and item.attempt >= self.maximum_attempts),
+                    )
                 if (
                     runtime.desired_generation == item.dispatched_generation
                     and desired.sequence == item.expected_configuration_sequence
                     and desired.digest == item.expected_configuration_digest
                     and desired.target_generation == item.expected_desired_generation
                 ):
-                    return False, False
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.SKIPPED,
-                    failure_code="recreation_dispatch_superseded",
-                    failure_message=(
-                        "The Runtime target changed after recreation dispatch."
+                    return RuntimeRecreationItemProcessResult(
+                        dispatched=False,
+                        completed=False,
+                    )
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=await self.profile_repository.finish_recreation_item(
+                        session,
+                        item_id=item.id,
+                        expected_attempt=item.attempt,
+                        status=RuntimeRecreationItemStatus.SKIPPED,
+                        failure_code="recreation_dispatch_superseded",
+                        failure_message=(
+                            "The Runtime target changed after recreation dispatch."
+                        ),
                     ),
                 )
 
@@ -569,23 +612,31 @@ class RuntimeRecreationReconciler:
                 agent is None
                 or agent.runtime_capability is not AgentRuntimeCapability.MANAGED
             ):
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.SKIPPED,
-                    failure_code="runtime_capability_unavailable",
-                    failure_message=("The Agent no longer permits Runtime recreation."),
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=await self.profile_repository.finish_recreation_item(
+                        session,
+                        item_id=item.id,
+                        expected_attempt=item.attempt,
+                        status=RuntimeRecreationItemStatus.SKIPPED,
+                        failure_code="runtime_capability_unavailable",
+                        failure_message=(
+                            "The Agent no longer permits Runtime recreation."
+                        ),
+                    ),
                 )
             if target_version != operation.target_version:
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.SKIPPED,
-                    failure_code="target_version_changed",
-                    failure_message=(
-                        "The recreation target changed after operation creation."
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=await self.profile_repository.finish_recreation_item(
+                        session,
+                        item_id=item.id,
+                        expected_attempt=item.attempt,
+                        status=RuntimeRecreationItemStatus.SKIPPED,
+                        failure_code="target_version_changed",
+                        failure_message=(
+                            "The recreation target changed after operation creation."
+                        ),
                     ),
                 )
             if (
@@ -593,14 +644,17 @@ class RuntimeRecreationReconciler:
                 or desired.digest != item.expected_configuration_digest
                 or desired.target_generation != item.expected_desired_generation
             ):
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.SKIPPED,
-                    failure_code="configuration_target_changed",
-                    failure_message=(
-                        "The Runtime configuration changed after target snapshot."
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=await self.profile_repository.finish_recreation_item(
+                        session,
+                        item_id=item.id,
+                        expected_attempt=item.attempt,
+                        status=RuntimeRecreationItemStatus.SKIPPED,
+                        failure_code="configuration_target_changed",
+                        failure_message=(
+                            "The Runtime configuration changed after target snapshot."
+                        ),
                     ),
                 )
             if (
@@ -608,13 +662,18 @@ class RuntimeRecreationReconciler:
                 or desired.document is None
                 or desired.digest is None
             ):
-                return False, await self.profile_repository.finish_recreation_item(
-                    session,
-                    item_id=item.id,
-                    expected_attempt=item.attempt,
-                    status=RuntimeRecreationItemStatus.SKIPPED,
-                    failure_code="configuration_blocked",
-                    failure_message="The latest Runtime configuration is not ready.",
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=await self.profile_repository.finish_recreation_item(
+                        session,
+                        item_id=item.id,
+                        expected_attempt=item.attempt,
+                        status=RuntimeRecreationItemStatus.SKIPPED,
+                        failure_code="configuration_blocked",
+                        failure_message=(
+                            "The latest Runtime configuration is not ready."
+                        ),
+                    ),
                 )
             command = await (
                 self.runtime_repository.set_desired_state_if_configuration_current(
@@ -638,7 +697,10 @@ class RuntimeRecreationReconciler:
                         "Runtime configuration changed before recreation dispatch."
                     ),
                 )
-                return False, retried and item.attempt >= self.maximum_attempts
+                return RuntimeRecreationItemProcessResult(
+                    dispatched=False,
+                    completed=retried and item.attempt >= self.maximum_attempts,
+                )
             next_state = await self.profile_repository.get_configuration_state(
                 session, runtime_id=runtime.id
             )
@@ -653,7 +715,10 @@ class RuntimeRecreationReconciler:
                 desired_generation=next_state.desired.target_generation,
                 dispatched_generation=command.desired_generation,
             )
-            return updated, False
+            return RuntimeRecreationItemProcessResult(
+                dispatched=updated,
+                completed=False,
+            )
 
 
 def _runtime_matches_target(

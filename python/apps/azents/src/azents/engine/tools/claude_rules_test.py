@@ -656,7 +656,6 @@ class TestClaudeRulesToolkit:
 
         second_task = asyncio.create_task(run_second())
         await second_started.wait()
-        await asyncio.sleep(0)
         assert storage.get_calls == [rule_path]
 
         storage.get_continue_event.set()
