@@ -4,7 +4,6 @@ import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -12,7 +11,13 @@ import pytest
 from azcommon.di import Container
 from cryptography.fernet import InvalidToken
 
-from azents.core.config import Config, ExternalChannelGatewayLeaseConfig
+from azents.core.config import (
+    Config,
+    ExternalChannelConversationConfig,
+    ExternalChannelConversationLockConfig,
+    ExternalChannelGatewayLeaseConfig,
+    ExternalChannelIngressQuiesceConfig,
+)
 from azents.core.deps import get_config
 from azents.rdb.deps import get_session_manager
 from azents.repos.external_channel.data import (
@@ -325,15 +330,21 @@ def _service(
 ) -> DiscordGatewayManagerService:
     resolved_config = config
     if resolved_config is None:
-        resolved_config = cast(
-            Config,
-            SimpleNamespace(
-                external_channel_discord_callback_url=("https://callbacks.example/"),
-                external_channel_conversation=SimpleNamespace(
-                    quiesce=SimpleNamespace(discord_gateway=False)
+        resolved_config = Config.model_construct(
+            external_channel_discord_callback_url="https://callbacks.example/",
+            external_channel_conversation=ExternalChannelConversationConfig(
+                lock=ExternalChannelConversationLockConfig(
+                    backend="memory",
+                    lease_ttl_seconds=30,
+                    renewal_interval_seconds=10,
                 ),
-                testenv_external_channel_gateway_lease=None,
+                quiesce=ExternalChannelIngressQuiesceConfig(
+                    slack_http=False,
+                    slack_socket=False,
+                    discord_gateway=False,
+                ),
             ),
+            testenv_external_channel_gateway_lease=None,
         )
     return DiscordGatewayManagerService(
         session_manager=sessions,
@@ -365,15 +376,10 @@ def _test_session_manager() -> _SessionManager:
 
 def test_gateway_manager_uses_testenv_lease_override() -> None:
     """Testenv can shorten stale-lease takeover without changing defaults."""
-    config = cast(
-        Config,
-        SimpleNamespace(
-            testenv_external_channel_gateway_lease=(
-                ExternalChannelGatewayLeaseConfig(
-                    duration_seconds=5.0,
-                    renewal_interval_seconds=1.0,
-                )
-            ),
+    config = Config.model_construct(
+        testenv_external_channel_gateway_lease=ExternalChannelGatewayLeaseConfig(
+            duration_seconds=5.0,
+            renewal_interval_seconds=1.0,
         ),
     )
     service = _service(

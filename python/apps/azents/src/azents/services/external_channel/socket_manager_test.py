@@ -213,15 +213,10 @@ def _configuration() -> ExternalChannelConnectionConfiguration:
 
 def test_socket_manager_uses_testenv_lease_override() -> None:
     """Socket ownership uses the same bounded testenv lease timing."""
-    config = cast(
-        Config,
-        SimpleNamespace(
-            testenv_external_channel_gateway_lease=(
-                ExternalChannelGatewayLeaseConfig(
-                    duration_seconds=5.0,
-                    renewal_interval_seconds=1.0,
-                )
-            ),
+    config = Config.model_construct(
+        testenv_external_channel_gateway_lease=ExternalChannelGatewayLeaseConfig(
+            duration_seconds=5.0,
+            renewal_interval_seconds=1.0,
         ),
     )
     service = _service(_SessionDouble(), _RepositoryDouble(), config)

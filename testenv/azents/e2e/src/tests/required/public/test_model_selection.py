@@ -1,6 +1,6 @@
 """Workspace model selection readiness E2E test."""
 
-from typing import cast
+from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -20,12 +20,31 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
 from azentspublicclient.models.secrets import Secrets
+from pydantic import TypeAdapter, ValidationError
 
 from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
 )
 from support.utils import authenticate_user, unique, wait_until
+
+_JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
+
+
+class _DeterministicWorkspace(NamedTuple):
+    """Workspace and integration created for deterministic model-listing tests."""
+
+    token: str
+    handle: str
+    integration_id: str
+
+
+def _json_object(value: object) -> dict[str, object] | None:
+    """Validate one JSON object without bypassing the type checker."""
+    try:
+        return _JSON_OBJECT_ADAPTER.validate_python(value)
+    except ValidationError:
+        return None
 
 
 def _workspace_with_deterministic_integration(
@@ -34,8 +53,8 @@ def _workspace_with_deterministic_integration(
     *,
     variant: str,
     provider: LLMProvider = LLMProvider.OPENAI,
-) -> tuple[str, str, str]:
-    """Deterministic listing integration t t workspace t createt."""
+) -> _DeterministicWorkspace:
+    """Create a workspace with one deterministic model-listing integration."""
     uniq = unique()
     token, _, _ = authenticate_user(
         public_api_client,
@@ -62,11 +81,15 @@ def _workspace_with_deterministic_integration(
         ),
         _headers={"Authorization": f"Bearer {token}"},
     )
-    return token, handle, integration.id
+    return _DeterministicWorkspace(
+        token=token,
+        handle=handle,
+        integration_id=integration.id,
+    )
 
 
 def _headers(token: str) -> dict[str, str]:
-    """Bearer auth header t t."""
+    """Return the bearer authorization header."""
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -87,13 +110,17 @@ def _wait_for_initial_catalog_sync(
         )
         if response.status_code != 200:
             return None
-        payload = cast("dict[str, object]", response.json())
+        payload = _json_object(response.json())
+        if payload is None:
+            return None
         if payload.get("catalog_scope") != "integration":
             return None
         latest_attempt_payload = payload.get("latest_attempt")
         if not isinstance(latest_attempt_payload, dict):
             return None
-        latest_attempt = cast("dict[str, object]", latest_attempt_payload)
+        latest_attempt = _json_object(latest_attempt_payload)
+        if latest_attempt is None:
+            return None
         if latest_attempt.get("status") not in {"succeeded", "failed"}:
             return None
         return response
@@ -138,14 +165,14 @@ def _wait_for_turn_context(
         for event in reversed(history.json()["items"]):
             if event.get("kind") != "turn_marker":
                 continue
-            payload = event.get("payload")
-            if not isinstance(payload, dict):
+            payload = _json_object(event.get("payload"))
+            if payload is None:
                 continue
             profile = payload.get("applied_inference_profile")
             if not isinstance(profile, dict):
                 continue
             if profile.get("model_target_label") == target:
-                return cast("dict[str, object]", payload)
+                return payload
         return None
 
     payload = wait_until(
@@ -162,7 +189,7 @@ def _wait_for_turn_context(
 
 
 class TestModelSelectionReadiness:
-    """Model selection API readiness t."""
+    """Model selection API readiness tests."""
 
     def test_explicit_sync_is_throttled_after_initial_sync(
         self,
@@ -274,7 +301,7 @@ class TestModelSelectionReadiness:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """Deterministic listing t t skip summary t returnt."""
+        """Deterministic listing returns candidates and a typed skip summary."""
         token, handle, integration_id = _workspace_with_deterministic_integration(
             public_api_client,
             admin_api_client,
@@ -434,7 +461,7 @@ class TestModelSelectionReadiness:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """Listing t workspace default model selection t settingst."""
+        """Listing updates Workspace default model selection and settings."""
         token, handle, integration_id = _workspace_with_deterministic_integration(
             public_api_client,
             admin_api_client,
