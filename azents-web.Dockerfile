@@ -5,7 +5,7 @@ ARG ROOT_DIR=/app
 # --- pruner: extract only the required workspaces with turbo prune ---
 FROM base AS pruner
 
-RUN npm install -g turbo@2.10.10
+RUN npm install -g turbo@2.10.11
 WORKDIR ${ROOT_DIR}/typescript
 
 COPY typescript/ .
