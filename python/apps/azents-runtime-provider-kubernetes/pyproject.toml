@@ -6,7 +6,7 @@ requires-python = ">=3.14"
 dependencies = [
     "aiohttp==3.14.3",
     "azents-runtime-control",
-    "cryptography==50.0.0",
+    "cryptography==50.0.1",
 ]
 
 [dependency-groups]
