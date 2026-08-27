@@ -47,7 +47,7 @@ dependencies = [
     "openai[realtime]==2.54.0",
     "Pillow==12.3.0",
     "redis==7.4.1",
-    "mcp==1.29.0",
+    "mcp==1.29.1",
     "httpx==0.28.1",
     "ptpython==3.0.32",
     "aiohttp==3.14.3",
