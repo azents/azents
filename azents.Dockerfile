@@ -6,7 +6,7 @@ ENV VIRTUAL_ENV="${ROOT_DIR}/.venv"
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 FROM base AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.11.33@sha256:77280f2f771df71f90786c314fe1bbc1e023feac652969bbf139c280babf2eb7 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.12.6@sha256:88bc6eb1ccd4b82efd0e1b530caffabddf50dc2bf612e66c14ea25b8ee8a4d3d /uv /uvx /bin/
 
 WORKDIR $ROOT_DIR
 
