@@ -12,7 +12,7 @@ from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
+from azents.core.config import Config, ExternalChannelGatewayLeaseConfig
 from azents.core.deps import get_config
 from azents.core.enums import ExternalChannelIngressProfile
 from azents.rdb.deps import get_session_manager
@@ -288,7 +288,7 @@ class DiscordGatewayManagerService:
             while True:
                 done, _ = await asyncio.wait(
                     (connection_task, shutdown_task),
-                    timeout=self.renew_interval.total_seconds(),
+                    timeout=self._renew_interval().total_seconds(),
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if connection_task in done:
@@ -318,7 +318,7 @@ class DiscordGatewayManagerService:
                 connection_id=connection_id,
                 lease_owner=self.manager_id,
                 now=now,
-                lease_until=now + self.lease_duration,
+                lease_until=now + self._lease_duration(),
             )
             await session.commit()
             return claim
@@ -352,10 +352,31 @@ class DiscordGatewayManagerService:
                 lease_owner=self.manager_id,
                 lease_generation=lease.lease_generation,
                 now=now,
-                lease_until=now + self.lease_duration,
+                lease_until=now + self._lease_duration(),
             )
             await session.commit()
             return renewed
+
+    def _lease_override(self) -> ExternalChannelGatewayLeaseConfig | None:
+        """Return the validated testenv lease override when configured."""
+        if self.config is None:
+            return None
+        override = self.config.testenv_external_channel_gateway_lease
+        return (
+            override
+            if isinstance(override, ExternalChannelGatewayLeaseConfig)
+            else None
+        )
+
+    def _lease_duration(self) -> datetime.timedelta:
+        """Return the effective Gateway lease duration."""
+        override = self._lease_override()
+        return self.lease_duration if override is None else override.duration
+
+    def _renew_interval(self) -> datetime.timedelta:
+        """Return the effective Gateway lease renewal interval."""
+        override = self._lease_override()
+        return self.renew_interval if override is None else override.renewal_interval
 
     async def _record_gap(
         self,
