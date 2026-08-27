@@ -33,8 +33,8 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { RuntimeLifecycleStatus } from "@/features/runtime-lifecycle/components/RuntimeLifecycleStatus";
 import { RuntimeSystemMetricsOverview } from "@/features/runtime-metrics/components/RuntimeSystemMetricsOverview";
+import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
 import { FileBrowser } from "./FileBrowser";
 import { FileInfo } from "./FileInfo";
 import { FileViewer } from "./FileViewer";
