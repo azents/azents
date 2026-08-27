@@ -2,12 +2,12 @@
 
 /** Workspace panel container hook. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
-import { useRuntimeSystemMetricsContainer } from "@/features/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
+import { useAgentWorkspaceDirectoryPickerContainer } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import {
   shouldPollAgentWorkspaceLifecycle,
   shouldPollRuntimeLifecycle,
 } from "@/shared/lib/runtimeLifecycle";
+import { useRuntimeSystemMetricsContainer } from "@/shared/runtime-metrics/containers/useRuntimeSystemMetricsContainer";
 import { trpc } from "@/trpc/client";
 import {
   mapProjectBrowserManifest,
@@ -27,7 +27,7 @@ import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "../components/WorkspaceDirectoryPickerModal";
-import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
+import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
 import type { GitRefEntryResponse } from "@azents/public-client";
 
 const WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS = 2_000;

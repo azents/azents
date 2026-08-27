@@ -32,10 +32,10 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { RuntimeSystemMetricsOverview } from "@/features/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
+import { RuntimeSystemMetricsOverview } from "@/shared/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import type { AgentRuntimeSettingsState } from "../containers/useAgentRuntimeSettingsContainer";
-import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
+import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
 import type {
   AgentResponse,
   AgentRuntimeRemovalImpactResponse,

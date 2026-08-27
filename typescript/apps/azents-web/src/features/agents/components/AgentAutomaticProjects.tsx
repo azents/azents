@@ -26,7 +26,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { AgentWorkspaceDirectoryPickerModal } from "@/features/agent-workspace/components/AgentWorkspaceDirectoryPickerModal";
+import { AgentWorkspaceDirectoryPickerModal } from "@/shared/agent-workspace/components/AgentWorkspaceDirectoryPickerModal";
 import {
   automaticProjectsEditingDisabled,
   automaticProjectsSaveEnabled,
@@ -35,7 +35,7 @@ import type {
   AutomaticProjectRow,
   AutomaticProjectsState,
 } from "../automaticProjects";
-import type { ProjectDirectoryPickerEntry } from "@/features/agent-workspace/types";
+import type { ProjectDirectoryPickerEntry } from "@/shared/agent-workspace/types";
 
 interface AgentAutomaticProjectsProps {
   handle: string;

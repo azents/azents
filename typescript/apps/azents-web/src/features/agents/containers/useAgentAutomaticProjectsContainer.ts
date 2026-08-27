@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
+import { useAgentWorkspaceDirectoryPickerContainer } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import { trpc } from "@/trpc/client";
 import {
   type AutomaticProjectRow,
@@ -17,7 +17,7 @@ import {
   projectBasename,
   type ProjectPreviewStatus,
 } from "../automaticProjects";
-import type { ProjectDirectoryPickerEntry } from "@/features/agent-workspace/types";
+import type { ProjectDirectoryPickerEntry } from "@/shared/agent-workspace/types";
 import type { ApiErrorProjection } from "@/trpc/api-error";
 import type { AgentResponse } from "@azents/public-client";
 

@@ -6,7 +6,7 @@ import type {
   WorkspacePanelState,
   WorkspaceProjectPanelState,
 } from "../types";
-import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
+import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
 import type { AgentRuntimeLifecyclePresentationResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
