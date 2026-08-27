@@ -26,7 +26,7 @@ dependencies = [
     "pytz==2026.3.post1",
     "tzdata==2026.3",
     # Monitoring
-    "sentry-sdk[fastapi]==2.68.0",
+    "sentry-sdk[fastapi]==2.68.1",
     # CLI
     "typer==0.27.1",
     # Template rendering
