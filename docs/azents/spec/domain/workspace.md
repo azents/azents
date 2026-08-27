@@ -69,7 +69,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-  - typescript/apps/azents-web/src/features/runtime-lifecycle/**
+  - typescript/apps/azents-web/src/shared/components/runtime/**
+  - typescript/apps/azents-web/src/shared/lib/runtimeLifecycle*
   - typescript/apps/azents-web/src/features/runtime-metrics/**
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
@@ -105,7 +106,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-26
+last_verified_at: 2026-08-27
 spec_version: 75
 ---
 

@@ -41,7 +41,8 @@ code_paths:
   - python/apps/azents/specs/public/openapi.json
   - python/libs/azents-public-client/**
   - typescript/packages/azents-public-client/**
-  - typescript/apps/azents-web/src/features/runtime-lifecycle/**
+  - typescript/apps/azents-web/src/shared/components/runtime/**
+  - typescript/apps/azents-web/src/shared/lib/runtimeLifecycle*
   - typescript/apps/azents-web/src/features/agent-workspace/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/workspace/**
@@ -49,7 +50,7 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_profiles.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-08-26
+last_verified_at: 2026-08-27
 spec_version: 70
 ---
 
