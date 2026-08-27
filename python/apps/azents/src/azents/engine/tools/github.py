@@ -695,7 +695,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             mcp_tool = McpBaseTool(
                 name=item.raw_name,
                 description=item.description,
-                inputSchema=item.input_schema,
+                input_schema=item.input_schema,
             )
             tool = wrap_mcp_tool(
                 mcp_tool,

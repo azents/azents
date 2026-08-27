@@ -230,7 +230,7 @@ def _make_call_tool_result(text: str) -> MagicMock:
     """Create MCP CallToolResult-like object."""
     result = MagicMock()
     result.content = [TextContent(type="text", text=text)]
-    result.isError = False
+    result.is_error = False
     return result
 
 

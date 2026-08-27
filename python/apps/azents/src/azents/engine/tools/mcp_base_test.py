@@ -80,7 +80,7 @@ def _tool(name: str) -> McpBaseTool:
     return McpBaseTool(
         name=name,
         description=f"{name} tool",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
 
 
@@ -176,10 +176,12 @@ async def test_background_refresh_success_exposes_sorted_tools_next_turn() -> No
         async with toolkit:
             await _wait_refresh(toolkit)
 
-    state = await toolkit.update_context(_context())
+    with patch("azents.engine.tools.mcp_base.mcp_list_tools") as list_tools:
+        state = await toolkit.update_context(_context())
 
     assert [tool.spec.name for tool in state.tools] == ["alpha", "zeta"]
     assert (await toolkit.get_static_prompt(_context())) == ""
+    list_tools.assert_not_called()
 
 
 async def test_stored_snapshot_restores_model_tool_name() -> None:
