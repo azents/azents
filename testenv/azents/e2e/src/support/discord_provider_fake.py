@@ -65,6 +65,14 @@ _CONFIRMED_CREATE_FAILURE_SCENARIOS = {
     "rejected",
     "provider_rejected",
 }
+_CONTROLLED_RESPONSE_SCENARIOS = {
+    *_CONFIRMED_CREATE_FAILURE_SCENARIOS,
+    "server_error",
+    "provider_5xx_unknown",
+    "ambiguous",
+    "transport_unknown",
+    "timeout",
+}
 _MAX_HISTORY_PAGES = 32
 _MAX_HISTORY_MESSAGES_PER_PAGE = 100
 _MAX_CONFIGURED_OBJECT_BYTES = 16 * 1024
@@ -703,6 +711,50 @@ class FakeState:
         with self.lock:
             self.deliveries.append(delivery)
 
+    def record_message_failure(
+        self,
+        *,
+        operation: str,
+        channel_id: str,
+        message_id: str | None,
+        outcome: str,
+        file_count: int = 0,
+        file_bytes: int = 0,
+        safe_category: str | None,
+    ) -> None:
+        """Publish one failed message delivery and operation atomically."""
+        delivery: dict[str, object] = {
+            "operation": operation,
+            "channel_id": channel_id,
+            "outcome": outcome,
+        }
+        if message_id is not None:
+            delivery["message_id"] = message_id
+        if file_count:
+            delivery["file_count"] = file_count
+            delivery["file_bytes"] = file_bytes
+        if safe_category is not None:
+            delivery["safe_category"] = safe_category
+        operation_evidence: dict[str, object] = {
+            "event": "message",
+            "operation": operation,
+            "outcome": outcome,
+            "channel_id": channel_id,
+        }
+        if message_id is not None:
+            operation_evidence["message_id"] = message_id
+        if safe_category is not None:
+            operation_evidence["safe_category"] = safe_category
+        with self.lock:
+            self.deliveries.append(delivery)
+            self._evidence_sequence += 1
+            self.operation_evidence.append(
+                {
+                    "sequence": self._evidence_sequence,
+                    **operation_evidence,
+                }
+            )
+
     def get_root_thread(
         self, *, parent_channel_id: str, root_message_id: str
     ) -> str | None:
@@ -1099,7 +1151,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             )
             safe_category = _safe_category(scenario)
             if scenario in _CONFIRMED_CREATE_FAILURE_SCENARIOS:
-                self.state.record_delivery(
+                self.state.record_message_failure(
                     operation="create_message",
                     channel_id=channel_id,
                     message_id=None,
@@ -1107,13 +1159,6 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     file_count=file_count,
                     file_bytes=file_bytes,
                     safe_category=safe_category,
-                )
-                self.state.record_operation(
-                    "message",
-                    operation="create_message",
-                    outcome="failed",
-                    safe_category=safe_category,
-                    metadata={"channel_id": channel_id},
                 )
                 self._controlled_response(scenario)
                 return
@@ -1126,13 +1171,13 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             if not self.state.wait_for_delivery_barrier("create_message"):
                 self._close_connection()
                 return
-            if self._controlled_response(scenario):
+            if scenario in _CONTROLLED_RESPONSE_SCENARIOS:
                 outcome = (
                     "unknown"
                     if safe_category in {"transport_unknown", "provider_5xx_unknown"}
                     else "failed"
                 )
-                self.state.record_delivery(
+                self.state.record_message_failure(
                     operation="create_message",
                     channel_id=channel_id,
                     message_id=message_id,
@@ -1141,13 +1186,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     file_bytes=file_bytes,
                     safe_category=safe_category,
                 )
-                self.state.record_operation(
-                    "message",
-                    operation="create_message",
-                    outcome=outcome,
-                    safe_category=safe_category,
-                    metadata={"channel_id": channel_id, "message_id": message_id},
-                )
+                self._controlled_response(scenario)
                 return
             if scenario in {"malformed_json", "response_malformed"}:
                 self.state.record_operation(
@@ -1474,21 +1513,14 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         if operation == "create_message":
             nonce = _sdk_string(arguments, "nonce")
             if scenario in _CONFIRMED_CREATE_FAILURE_SCENARIOS:
-                self._controlled_response(scenario)
-                self.state.record_delivery(
+                self.state.record_message_failure(
                     operation=operation,
                     channel_id=channel_id,
                     message_id=None,
                     outcome="failed",
                     safe_category=safe_category,
                 )
-                self.state.record_operation(
-                    "message",
-                    operation=operation,
-                    outcome="failed",
-                    safe_category=safe_category,
-                    metadata={"channel_id": channel_id},
-                )
+                self._controlled_response(scenario)
                 return
             message_id, outcome = self.state.create_message(
                 channel_id=channel_id,
@@ -1506,29 +1538,20 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             ):
                 self._json_response(404, {"message": "Not found."})
                 return
-        if self._controlled_response(scenario):
+        if scenario in _CONTROLLED_RESPONSE_SCENARIOS:
             failure_outcome = (
                 "unknown"
                 if safe_category in {"transport_unknown", "provider_5xx_unknown"}
                 else "failed"
             )
-            self.state.record_delivery(
+            self.state.record_message_failure(
                 operation=operation,
                 channel_id=channel_id,
                 message_id=message_id,
                 outcome=failure_outcome,
                 safe_category=safe_category,
             )
-            self.state.record_operation(
-                "message",
-                operation=operation,
-                outcome=failure_outcome,
-                safe_category=safe_category,
-                metadata={
-                    "channel_id": channel_id,
-                    **({"message_id": message_id} if message_id is not None else {}),
-                },
-            )
+            self._controlled_response(scenario)
             return
         assert message_id is not None
         if scenario in {"malformed_json", "response_malformed"}:
@@ -1692,6 +1715,8 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
 
     def _controlled_response(self, scenario: str) -> bool:
         """Respond to one configured provider failure and stop the handler path."""
+        if scenario not in _CONTROLLED_RESPONSE_SCENARIOS:
+            return False
         if scenario == "rate_limited":
             retry_after = self.state.next_retry_after(
                 getattr(self, "_controlled_operation", "")
@@ -1714,11 +1739,15 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         elif scenario == "transport_unknown":
             self._close_connection()
         elif scenario == "timeout":
-            time.sleep(25)
+            self._wait_for_controlled_timeout()
             self._close_connection()
         else:
-            return False
+            raise AssertionError(f"Unhandled controlled Discord scenario: {scenario}")
         return True
+
+    def _wait_for_controlled_timeout(self) -> None:
+        """Delay one controlled provider timeout before closing the connection."""
+        time.sleep(25)
 
     def _close_connection(self) -> None:
         """Close one request to model a transport-ambiguous provider outcome."""
