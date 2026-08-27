@@ -6,7 +6,7 @@ requires-python = ">=3.14"
 dependencies = [
     # FastAPI & Web
     "fastapi[standard]==0.141.1",
-    "uvicorn==0.52.3",
+    "uvicorn==0.52.4",
     # Database
     "sqlalchemy[asyncio]==2.0.52",
     "psycopg[binary]==3.3.4",
