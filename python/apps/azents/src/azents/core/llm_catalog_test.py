@@ -28,6 +28,7 @@ def test_model_capabilities_serializes_required_top_level_keys() -> None:
         "compatibility",
     }
     assert data["context_window"] == {
+        "default_input_tokens": None,
         "max_input_tokens": None,
         "max_output_tokens": None,
     }
@@ -62,6 +63,7 @@ def test_build_initial_model_capabilities_promotes_legacy_supported_fields() -> 
     capabilities = build_initial_model_capabilities(
         thinking=True,
         metadata={
+            "default_input_tokens": 96_000,
             "max_input_tokens": 128000,
             "supported_builtin_tools": [
                 "web_search",
@@ -74,6 +76,7 @@ def test_build_initial_model_capabilities_promotes_legacy_supported_fields() -> 
     )
 
     assert capabilities.reasoning.supported is True
+    assert capabilities.context_window.default_input_tokens == 96_000
     assert capabilities.context_window.max_input_tokens == 128000
     assert capabilities.built_in_tools.supported == [
         "web_search",
@@ -82,20 +85,29 @@ def test_build_initial_model_capabilities_promotes_legacy_supported_fields() -> 
 
 
 @pytest.mark.parametrize(
-    "metadata",
+    ("key", "value"),
     [
-        {"max_input_tokens": 0},
-        {"max_input_tokens": -1},
-        {"max_input_tokens": True},
-        {"max_input_tokens": "128000"},
+        ("default_input_tokens", 0),
+        ("default_input_tokens", -1),
+        ("default_input_tokens", True),
+        ("default_input_tokens", "128000"),
+        ("max_input_tokens", 0),
+        ("max_input_tokens", -1),
+        ("max_input_tokens", True),
+        ("max_input_tokens", "128000"),
     ],
 )
-def test_build_initial_model_capabilities_ignores_invalid_max_input_tokens(
-    metadata: dict[str, object],
+def test_build_initial_model_capabilities_ignores_invalid_input_tokens(
+    key: str,
+    value: object,
 ) -> None:
-    """max_input_tokens that is not a positive integer is not promoted."""
-    capabilities = build_initial_model_capabilities(thinking=False, metadata=metadata)
+    """Input-token capability values must be positive integers."""
+    capabilities = build_initial_model_capabilities(
+        thinking=False,
+        metadata={key: value},
+    )
 
+    assert capabilities.context_window.default_input_tokens is None
     assert capabilities.context_window.max_input_tokens is None
 
 
@@ -141,6 +153,7 @@ def test_model_capabilities_ignores_unknown_future_fields() -> None:
 
     data = capabilities.model_dump(mode="json")
     assert data["context_window"] == {
+        "default_input_tokens": None,
         "max_input_tokens": 128000,
         "max_output_tokens": None,
     }

@@ -15,12 +15,12 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-25 | 68 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-27 | 69 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-23 | 155 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-27 | 63 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-18 | 20 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-21 | 8 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
@@ -32,12 +32,12 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-23 | 161 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-27 | 162 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-26 | 70 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-26 | 30 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-16 | 34 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-27 | 35 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-24 | 49 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-27 | 38 |
@@ -128,6 +128,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Context Compaction Historical Requirements Reconstruction](requirements/context-260305-context-compaction.md) | context-260305 | 2026-03-05 | 2026-03-23 |
 | [Session Context Inspector Historical Requirements Reconstruction](requirements/context-260530-context-inspector.md) | context-260530 | 2026-05-30 | 2026-05-30 |
 | [Display Context Usage from the Resolved Run Profile Historical Requirements Reconstruction](requirements/context-260710-context-usage-display.md) | context-260710 | 2026-07-10 | - |
+| [Model Context Ranges Requirements](requirements/context-260827-model-context-ranges.md) | context-260827 | 2026-08-27 | - |
 | [External Channel Continuation Work Completion Requirements](requirements/continuation-260803-channel-work-completion.md) | continuation-260803 | 2026-08-03 | 2026-08-04 |
 | [Sandbox Provider Control Distributed Recovery Historical Requirements Reconstruction](requirements/control-260524-sandbox-control-distributed-recovery.md) | control-260524 | 2026-05-24 | 2026-05-24 |
 | [Runtime Bounded Repair Fencing Requirements](requirements/control-260805-bounded-repair-fencing.md) | control-260805 | 2026-08-05 | 2026-08-05 |
@@ -529,6 +530,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Agent Context Compaction Historical Decision Reconstruction](adr/context-260305-context-compaction.md)
 - [Session Context Inspector](adr/context-260530-context-inspector.md)
 - [Display Context Usage from the Resolved Run Profile](adr/context-260710-context-usage-display.md)
+- [Model Context Ranges](adr/context-260827-model-context-ranges.md)
 - [External Channel Continuation Work Completion](adr/continuation-260803-channel-work-completion.md)
 - [Sandbox Provider Control Distributed Recovery Historical Decision Reconstruction](adr/control-260524-sandbox-control-distributed-recovery.md)
 - [Runtime Bounded Repair Fencing](adr/control-260805-bounded-repair-fencing.md)

@@ -426,6 +426,7 @@ class _FakeAsyncClient:
                         "visibility": "list",
                         "supported_in_api": True,
                         "context_window": 272000,
+                        "max_context_window": 872000,
                         "input_modalities": ["text", "image"],
                         "supports_parallel_tool_calls": False,
                         "supports_reasoning_summaries": True,
@@ -502,7 +503,10 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
     assert candidate.model_identifier == "gpt-5.6-luna"
     assert candidate.normalized_capabilities.compatibility.provider_family == "chatgpt"
     assert candidate.normalized_capabilities.compatibility.responses_api is True
-    assert candidate.normalized_capabilities.context_window.max_input_tokens == 272000
+    assert (
+        candidate.normalized_capabilities.context_window.default_input_tokens == 272000
+    )
+    assert candidate.normalized_capabilities.context_window.max_input_tokens == 872000
     assert candidate.normalized_capabilities.tool_calling.parallel_tool_calls is False
     assert candidate.normalized_capabilities.reasoning.effort_levels == [
         ModelReasoningEffort.LOW,
@@ -520,6 +524,10 @@ async def test_list_chatgpt_models_uses_backend_capability_metadata(
     assert (
         legacy_candidate.normalized_capabilities.context_window.max_input_tokens
         == 128000
+    )
+    assert (
+        legacy_candidate.normalized_capabilities.context_window.default_input_tokens
+        is None
     )
     assert empty_modalities_candidate.normalized_capabilities.modalities.input == []
 

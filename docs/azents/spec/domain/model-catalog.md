@@ -28,8 +28,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/llm-settings/containers/useWorkspaceModelSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-08-18
-spec_version: 20
+last_verified_at: 2026-08-27
+spec_version: 21
 ---
 
 # Model Catalog Domain Spec
@@ -67,6 +67,14 @@ A catalog snapshot contains entries projected into Azents' canonical model contr
 
 Only entries with selectable visibility are returned by the public picker list API.
 
+The normalized context-window capability stores nullable
+`default_input_tokens`, nullable `max_input_tokens`, and nullable
+`max_output_tokens`. The default is the ordinary runtime input window, while the
+maximum is the hard ceiling for an explicit Agent option cap. A maximum-only
+capability, including historical catalog and Agent snapshots, resolves that maximum
+as its default. The capability remains additive JSON and requires no relational
+migration.
+
 ## Source snapshots and sync attempts
 
 LiteLLM is the current lowerer target projection source. System synchronization
@@ -99,7 +107,7 @@ snapshots continue to retain only the current successful version. A newly starte
 source attempt terminalizes any unfinished earlier source attempt before remote
 work begins.
 
-ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, reasoning efforts, modalities, and context window. Request-dialect hints are excluded from normalized capabilities and stored projection metadata. Following Codex's provider-level capability policy, every API-supported and picker-visible ChatGPT OAuth model is projected with the semantic `web_search` built-in tool capability. `image_generation` is projected only from an explicit trusted source flag or the maintained OpenAI-family model support policy shared with OpenAI system catalog projection. ChatGPT entries do not require a matching LiteLLM model metadata key or source snapshot.
+ChatGPT OAuth integration catalogs additionally fetch the authenticated account-visible model list from the ChatGPT Codex backend during sync. Backend metadata is authoritative for visibility, reasoning efforts, modalities, and context window. `context_window` projects to the default input window and `max_context_window` projects to the maximum; when the maximum is absent, the default also supplies the maximum. Request-dialect hints are excluded from normalized capabilities and stored projection metadata. Following Codex's provider-level capability policy, every API-supported and picker-visible ChatGPT OAuth model is projected with the semantic `web_search` built-in tool capability. `image_generation` is projected only from an explicit trusted source flag or the maintained OpenAI-family model support policy shared with OpenAI system catalog projection. ChatGPT entries do not require a matching LiteLLM model metadata key or source snapshot.
 
 OpenRouter integration catalogs fetch the authenticated account-visible text-output model list from the fixed OpenRouter `/models/user` endpoint. Every valid returned model is eligible for direct projection without a model, publisher, family, upstream-provider, or LiteLLM metadata allowlist. Exact provider identifiers are preserved and receive the `openrouter/` runtime prefix. Recognized publisher aliases map to the canonical model developer; an unrecognized publisher maps to `other` and never falls back to Anthropic. OpenRouter capabilities remain conservative: missing or unverified metadata disables an individual capability rather than hiding the model. The initial projection can advertise text and verified image input, text output, function tools, reasoning, standard parameters, and semantic `web_search`; it does not advertise PDF, audio, video, image generation, prompt caching, or strict structured output.
 
@@ -179,12 +187,20 @@ The web picker is integration-first. The form displays the current model summary
 
 The picker shows catalog status and supports search plus infinite-scroll paged loading. It renders provider-independent catalog UI states for no integration selected, loading, never synced, syncing without snapshot, failed without snapshot, ready, ready with latest failed attempt, ready empty result, and loading next page. Failure state renders before empty result state.
 
+Each model card displays the resolved default context value
+`default_input_tokens ?? max_input_tokens`. When a distinct default and maximum
+both exist, the badge displays both values. The Agent option settings modal
+describes the default used when its cap is empty and the catalog maximum used for
+runtime clamping. Maximum-only snapshots retain the existing concise single-value
+presentation.
+
 For user-scoped integration catalogs, the picker can trigger integration sync. For providers backed by system catalogs, public users do not trigger system sync.
 
 ## Change History
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-08-27 | 21 | Added provider-neutral default and maximum input context capabilities, maximum-only fallback, and split-aware picker and Agent settings presentation |
 | 2026-08-18 | 20 | Replaced xAI system catalogs with credential-specific integration discovery and optional fill-only LiteLLM enrichment |
 | 2026-08-18 | 19 | Made explicitly validated remote LiteLLM DB snapshots authoritative, quarantined fallback/malformed/materially smaller sources, and removed remote source fetching from integration sync |
 | 2026-08-01 | 18 | Split Workspace model selection and LLM integration settings into focused routes and containers while preserving catalog query, sync, and submit authority |

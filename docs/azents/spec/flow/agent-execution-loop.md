@@ -82,8 +82,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-23
-spec_version: 161
+last_verified_at: 2026-08-27
+spec_version: 162
 ---
 
 # Agent Execution Loop
@@ -407,7 +407,16 @@ applied profile and effective limits. A multi-turn run can therefore contain dif
 marker snapshots after a boundary profile change; it never stamps all turns with one run-start
 selection or queries a later Session value while appending an earlier turn.
 
-The foreground `RunRequest` uses the selected Session settings: `max_output_tokens` is clamped against the selected model capability, enabled built-in tools are lowered only from that option, and the effective input window combines the selected foreground context cap with the Agent lightweight option context cap. An explicit empty built-in tool list remains all-off. Automatic retry, recovery, and worker takeover rebuild from the Session-owned selection and settings snapshots rather than rematching the mutable Agent option list.
+The foreground `RunRequest` uses the selected Session settings:
+`max_output_tokens` is clamped against the selected model capability, enabled
+built-in tools are lowered only from that option, and the effective input window
+combines the selected foreground option with the Agent lightweight option. Each
+option uses its normalized default input window when its cap is unset, treats a
+maximum-only snapshot as having that same default, and clamps an explicit cap to
+the normalized maximum before the smaller-window calculation. An explicit empty
+built-in tool list remains all-off. Automatic retry, recovery, and worker takeover
+rebuild from the Session-owned selection and settings snapshots rather than
+rematching the mutable Agent option list.
 
 `terminal_result_event_id` and `terminal_result_message` store the user-safe terminal output projection for a completed, failed, stopped, interrupted, or cancelled run. The Subagent Tree reads this projection instead of scanning child transcript history. A subagent Run also stores its durable direct-parent delivery state, terminal-result InputBuffer identity, and enqueue time so terminal mailbox delivery remains idempotent after the buffer is promoted and deleted.
 
@@ -1326,6 +1335,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-27** (spec_version 162) — Resolved foreground, lightweight, and
+  subagent input windows from distinct model defaults, model maximums, and nullable
+  option caps before preparing immutable Run limits.
 - **2026-08-23** (spec_version 161) — Centralized closed TurnAction
   policy/catalog/preparation and moved exhaustive operation dispatch into the
   Worker operation executor registry without changing execution semantics.

@@ -43,6 +43,7 @@ import {
   fallbackSelectableModelLabel,
   MAX_SELECTABLE_MODEL_OPTIONS,
   MAX_SUBAGENT_GUIDANCE_LENGTH,
+  resolveModelContextRange,
   selectableModelLabelSelectData,
 } from "../model-selection";
 import { ModelCatalogPicker } from "./ModelCatalogPicker";
@@ -248,8 +249,9 @@ function SelectableModelSettingsModal({
 }: SelectableModelSettingsModalProps): React.ReactElement {
   const t = useTranslations("workspace.agents.selectableModelOptions");
   const format = useFormatter();
-  const contextLimit =
-    option.normalized_capabilities?.context_window?.max_input_tokens ?? null;
+  const context = resolveModelContextRange(
+    option.normalized_capabilities?.context_window,
+  );
   const outputLimit =
     option.normalized_capabilities?.context_window?.max_output_tokens ?? null;
   const supportedTools =
@@ -278,11 +280,22 @@ function SelectableModelSettingsModal({
         <NumberInput
           label={t("contextWindowTokensLabel")}
           description={
-            contextLimit == null
+            context.defaultInputTokens == null
               ? t("capabilityLimitUnknown")
-              : t("capabilityLimit", { tokens: format.number(contextLimit) })
+              : context.maxInputTokens == null
+                ? t("contextCapabilityDefaultOnly", {
+                    tokens: format.number(context.defaultInputTokens),
+                  })
+                : context.defaultInputTokens === context.maxInputTokens
+                  ? t("contextCapabilitySingle", {
+                      tokens: format.number(context.defaultInputTokens),
+                    })
+                  : t("contextCapabilityRange", {
+                      defaultTokens: format.number(context.defaultInputTokens),
+                      maxTokens: format.number(context.maxInputTokens),
+                    })
           }
-          placeholder={t("noTokenCap")}
+          placeholder={t("useModelDefault")}
           min={1}
           step={1}
           allowDecimal={false}

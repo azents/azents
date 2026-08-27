@@ -25,6 +25,7 @@ DETERMINISTIC_FIXTURE_NAME_PREFIX = "__testenv_model_listing:"
 DeterministicFixtureVariant = Literal[
     "deterministic-success",
     "deterministic-model-settings",
+    "deterministic-context-ranges",
     "deterministic-openrouter",
     "deterministic-main-only",
     "deterministic-no-candidates",
@@ -34,6 +35,7 @@ DeterministicFixtureVariant = Literal[
 DETERMINISTIC_FIXTURE_VARIANTS: tuple[DeterministicFixtureVariant, ...] = (
     "deterministic-success",
     "deterministic-model-settings",
+    "deterministic-context-ranges",
     "deterministic-openrouter",
     "deterministic-main-only",
     "deterministic-no-candidates",
@@ -99,6 +101,7 @@ def build_deterministic_listing(
         case (
             "deterministic-success"
             | "deterministic-model-settings"
+            | "deterministic-context-ranges"
             | "deterministic-two-integrations"
         ):
             models = [
@@ -198,7 +201,12 @@ def _candidate(
         )
     else:
         developer = LLMModelDeveloper.OPENAI
-    max_input_tokens = 64_000 if lightweight else 128_000
+    if source == "testenv_fixture:deterministic-context-ranges":
+        default_input_tokens = None if lightweight else 96_000
+        max_input_tokens = 512_000 if lightweight else 256_000
+    else:
+        default_input_tokens = None
+        max_input_tokens = 64_000 if lightweight else 128_000
     return NormalizedModelCandidate(
         provider=provider,
         model_identifier=identifier,
@@ -207,6 +215,7 @@ def _candidate(
         model_family=family,
         normalized_capabilities=ModelCapabilities(
             context_window=ModelContextWindow(
+                default_input_tokens=default_input_tokens,
                 max_input_tokens=max_input_tokens,
                 max_output_tokens=16_000,
             ),

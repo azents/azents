@@ -111,6 +111,46 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Verify prepared context for default.",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Default context range verified."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Verify prepared context for extended.",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Extended context range verified."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Verify prepared context for clamped.",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Clamped context range verified."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Verify prepared context for legacy.",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "Legacy context range verified."
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "userMessage": "Describe uploaded image and file",
         "hasToolResult": false
       },
