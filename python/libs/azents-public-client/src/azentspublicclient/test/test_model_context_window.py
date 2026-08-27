@@ -35,6 +35,7 @@ class TestModelContextWindow(unittest.TestCase):
         model = ModelContextWindow()
         if include_optional:
             return ModelContextWindow(
+                default_input_tokens = 1.0,
                 max_input_tokens = 1.0,
                 max_output_tokens = 1.0
             )

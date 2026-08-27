@@ -63,6 +63,7 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                         display_name = '', 
                         normalized_capabilities = azentspublicclient.models.model_capabilities.ModelCapabilities(
                             context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
+                                default_input_tokens = 1.0, 
                                 max_input_tokens = 1.0, 
                                 max_output_tokens = 1.0, ), 
                             modalities = azentspublicclient.models.model_modalities.ModelModalities(
@@ -137,6 +138,7 @@ class TestModelCatalogEntryListResponse(unittest.TestCase):
                         display_name = '', 
                         normalized_capabilities = azentspublicclient.models.model_capabilities.ModelCapabilities(
                             context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
+                                default_input_tokens = 1.0, 
                                 max_input_tokens = 1.0, 
                                 max_output_tokens = 1.0, ), 
                             modalities = azentspublicclient.models.model_modalities.ModelModalities(

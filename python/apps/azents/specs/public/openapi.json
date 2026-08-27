@@ -24358,6 +24358,18 @@
       },
       "ModelContextWindow": {
         "properties": {
+          "default_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Input Tokens"
+          },
           "max_input_tokens": {
             "anyOf": [
               {

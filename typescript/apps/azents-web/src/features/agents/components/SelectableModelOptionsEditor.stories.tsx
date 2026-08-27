@@ -13,7 +13,11 @@ import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 const capabilities: ModelCapabilities = {
   reasoning: { supported: true, effort_levels: ["low", "medium", "high"] },
   built_in_tools: { supported: ["web_search", "image_generation"] },
-  context_window: { max_input_tokens: 1_000_000, max_output_tokens: null },
+  context_window: {
+    default_input_tokens: 272_000,
+    max_input_tokens: 872_000,
+    max_output_tokens: null,
+  },
   modalities: { input: ["text"], output: ["text"] },
   tool_calling: { supported: true },
   parameters: {},
@@ -162,6 +166,11 @@ export const SettingsModal = {
     const body = within(document.body);
     await expect(
       body.getByRole("dialog", { name: "Settings for default" }),
+    ).toBeVisible();
+    await expect(
+      body.getByText(
+        "No user cap uses the model default of 272,000 tokens. The catalog maximum is 872,000 tokens; higher values are saved but clamped at runtime.",
+      ),
     ).toBeVisible();
     await expect(body.getByLabelText("Web search")).toBeChecked();
     await expect(body.getByLabelText("Image generation")).toBeChecked();

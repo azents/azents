@@ -89,8 +89,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-08-25
-spec_version: 68
+last_verified_at: 2026-08-27
+spec_version: 69
 ---
 
 # Agent Domain Spec
@@ -537,7 +537,18 @@ Runtime passes the selected Session settings as `BuiltinToolSpec(name, config)` 
 
 ## 5. Context Window / Compaction
 
-`effective_context_window_tokens` in Agent response is calculated from the default main option's capability-clamped context cap and the default lightweight option's capability-clamped context cap. A user cap may be larger than the model limit, in which case the model limit wins. `effective_auto_compaction_threshold_tokens` is 90% of the effective context window.
+Each selectable model snapshot can carry a default input window and a maximum
+input window. A missing default resolves to the maximum. For each option, an unset
+`context_window_tokens` cap uses the resolved default; an explicit cap uses the
+requested value up to the resolved maximum. LiteLLM metadata and the 128,000-token
+fallback fill only missing capability limits.
+
+`effective_context_window_tokens` in Agent response is calculated from the smaller
+of the default main option's resolved effective input window and the default
+lightweight option's resolved effective input window. A user cap may be larger than
+the model maximum, in which case the maximum wins.
+`effective_auto_compaction_threshold_tokens` is 90% of the effective context
+window.
 
 Prepared foreground turns use the prompt-selected option instead of the default main option for the foreground side of the same calculation. Automatic compaction runs with the lightweight model snapshot; the lightweight option context cap participates in input budgeting, but its `max_output_tokens` setting does not replace the compactor's dynamic summary output budget.
 
@@ -574,6 +585,9 @@ Following contracts do not exist in current system.
 
 ## 8. Change History
 
+- **2026-08-27** (spec_version 69) — Resolved per-option input windows from a
+  distinct model default, model maximum, and nullable user cap before combining
+  main and lightweight limits.
 - **2026-08-25** (spec_version 68) — Made explicit managed-Agent Runtime Profile selection clear
   atomically supersede the desired configuration with higher-sequence
   `unconfigured/runtime_profile_required` authority while retaining applied Runtime evidence.

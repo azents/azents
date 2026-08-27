@@ -366,6 +366,7 @@ def test_project_xai_entries_preserves_provider_authority_and_enriches_gaps() ->
     assert entry.runtime_model_identifier == "xai/grok-4.6"
     capabilities = entry.normalized_capabilities
     assert capabilities["context_window"] == {
+        "default_input_tokens": None,
         "max_input_tokens": 500000,
         "max_output_tokens": 32768,
     }

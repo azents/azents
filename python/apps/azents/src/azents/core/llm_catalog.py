@@ -56,6 +56,7 @@ class ModelContextWindow(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    default_input_tokens: int | None = Field(default=None, ge=1)
     max_input_tokens: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
 
@@ -159,6 +160,14 @@ def build_initial_model_capabilities(
 
     if metadata is None:
         return capabilities
+
+    default_input_tokens = metadata.get("default_input_tokens")
+    if (
+        isinstance(default_input_tokens, int)
+        and not isinstance(default_input_tokens, bool)
+        and default_input_tokens > 0
+    ):
+        capabilities.context_window.default_input_tokens = default_input_tokens
 
     max_input_tokens = metadata.get("max_input_tokens")
     if isinstance(max_input_tokens, int) and not isinstance(max_input_tokens, bool):

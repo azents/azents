@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-08-16
-spec_version: 34
+last_verified_at: 2026-08-27
+spec_version: 35
 ---
 
 # Context Compaction
@@ -31,9 +31,18 @@ Context compaction keeps long session history within model input limits without 
 history. The event runtime uses append-only compaction.
 
 Automatic compaction effective context window is computed by
-`engine/context/window.py:compute_effective_context_window_tokens()`. For each prepared inference-bearing input, runtime takes the prompt-selected foreground option's capability-clamped context cap and the Agent lightweight option's capability-clamped context cap, then uses the smaller value as `effective_max_input_tokens`.
-An option context cap is stored as intent and may be larger than its current model limit; the model
-limit still wins. Effective lightweight resolution uses the Agent's stored lightweight option model
+`engine/context/window.py`. Each option first resolves a default input window and
+maximum input window from its normalized capability, using the maximum as the
+default when the distinct default is absent. LiteLLM metadata and the 128,000-token
+fallback fill missing limits. An unset option cap uses that resolved default; an
+explicit option cap is clamped to the resolved maximum.
+
+For each prepared inference-bearing input, runtime then takes the prompt-selected
+foreground option's resolved effective window and the Agent lightweight option's
+resolved effective window and uses the smaller value as
+`effective_max_input_tokens`. An option context cap is stored as intent and may be
+larger than its current model maximum; the maximum still wins. Effective
+lightweight resolution uses the Agent's stored lightweight option model
 snapshot and settings. Workspace defaults are copied into the Agent only at create time and are not read
 by runtime compaction. Automatic compaction threshold is then computed by
 `compute_auto_compaction_threshold_tokens()` as `int(effective_max_input_tokens * 0.9)`. Both values are stored in the current `AgentSession` inference snapshot and remain fixed for that prepared turn, automatic retry, and recovery. A later prepared profile may replace them at the next turn boundary, including within the same active run. The event runtime uses this Session-owned calculation as the compaction trigger source of truth and compares the threshold against the latest turn marker `usage.prompt_tokens` plus the
@@ -274,6 +283,9 @@ terminalizes.
 
 ## Changelog
 
+- **2026-08-27** (spec_version 35) — Added distinct model default and maximum input
+  windows, maximum-only fallback, and centralized per-option user-cap resolution
+  before the smaller main/lightweight compaction calculation.
 - **2026-08-16** (spec_version 34) — Added deterministic sanitized Scheduled Task
   started-cycle summary replacement before bounded continuity history.
 

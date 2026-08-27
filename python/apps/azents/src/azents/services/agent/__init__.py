@@ -33,7 +33,7 @@ from azents.core.s3.deps import get_s3_service
 from azents.engine.context.window import (
     EffectiveContextWindow,
     compute_effective_context_window_tokens,
-    get_max_input_tokens,
+    resolve_model_input_tokens,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -1149,29 +1149,29 @@ class AgentService:
         if main_option is None or lightweight_option is None:
             return None
 
-        main_max_input_tokens = get_max_input_tokens(
+        main_input_tokens = resolve_model_input_tokens(
+            main_option.model_selection.normalized_capabilities.context_window.default_input_tokens,
             main_option.model_selection.normalized_capabilities.context_window.max_input_tokens,
             to_runtime_model(
                 main_option.model_selection.provider,
                 main_option.model_selection.model_identifier,
             ),
+            main_option.settings.context_window_tokens,
         )
-        compaction_max_input_tokens = get_max_input_tokens(
+        compaction_input_tokens = resolve_model_input_tokens(
+            lightweight_option.model_selection.normalized_capabilities.context_window.default_input_tokens,
             lightweight_option.model_selection.normalized_capabilities.context_window.max_input_tokens,
             to_runtime_model(
                 lightweight_option.model_selection.provider,
                 lightweight_option.model_selection.model_identifier,
             ),
+            lightweight_option.settings.context_window_tokens,
         )
-        if lightweight_option.settings.context_window_tokens is not None:
-            compaction_max_input_tokens = min(
-                compaction_max_input_tokens,
-                lightweight_option.settings.context_window_tokens,
-            )
         return compute_effective_context_window_tokens(
-            main_max_input_tokens=main_max_input_tokens,
-            compaction_max_input_tokens=compaction_max_input_tokens,
-            context_window_tokens=main_option.settings.context_window_tokens,
+            main_max_input_tokens=main_input_tokens.effective_input_tokens,
+            compaction_max_input_tokens=(
+                compaction_input_tokens.effective_input_tokens
+            ),
         )
 
     async def _resolve_avatar(self, stored: StoredImage | None) -> UploadedImage | None:

@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useLocale } from "@/shared/providers/locale";
 import { trpc } from "@/trpc/client";
+import { modelContextBadgeValue } from "../model-selection";
 import type {
   ModelCatalogAttemptState,
   ModelCatalogState,
@@ -121,6 +122,7 @@ function formatCapabilityBadges(
   model: SelectableModelCandidate,
   labels: {
     context: (tokens: number) => string;
+    contextRange: (defaultTokens: number, maxTokens: number) => string;
     reasoning: string;
     hostedTools: string;
     toolCalling: string;
@@ -128,9 +130,13 @@ function formatCapabilityBadges(
 ): string[] {
   const capabilities = model.normalized_capabilities;
   const badges: string[] = [];
-  const context = capabilities.context_window?.max_input_tokens;
-  if (typeof context === "number") {
-    badges.push(labels.context(Math.round(context / 1000)));
+  const contextBadge = modelContextBadgeValue(capabilities.context_window);
+  if (contextBadge?.type === "RANGE") {
+    badges.push(
+      labels.contextRange(contextBadge.defaultTokens, contextBadge.maxTokens),
+    );
+  } else if (contextBadge?.type === "SINGLE") {
+    badges.push(labels.context(contextBadge.tokens));
   }
   if (capabilities.reasoning?.supported) {
     badges.push(labels.reasoning);
@@ -502,6 +508,11 @@ export function ModelCatalogPicker({
                       <Group gap={6}>
                         {formatCapabilityBadges(model, {
                           context: (tokens) => t("contextBadge", { tokens }),
+                          contextRange: (defaultTokens, maxTokens) =>
+                            t("contextRangeBadge", {
+                              defaultTokens,
+                              maxTokens,
+                            }),
                           reasoning: t("reasoningBadge"),
                           hostedTools: t("hostedToolsBadge"),
                           toolCalling: t("toolCallingBadge"),
