@@ -2,6 +2,7 @@
 title: "Model Context Ranges Design"
 created: 2026-08-27
 updated: 2026-08-27
+implemented: 2026-08-27
 tags: [model, context, catalog, agent, frontend, backend, engine, api, testing]
 document_role: primary
 document_type: design
@@ -254,7 +255,7 @@ Result: `feasible`.
 ## Design Approval
 
 - Mode: `Collaborative`
-- Decision owner: requester `건우`
+- Decision owner: requester
 - Approved on: `2026-08-27`
 - Approved Design revision: `1`
 - Approved authority IDs: `M1`, `M2`, `M3`, `M4`, `M5`, `M6`
