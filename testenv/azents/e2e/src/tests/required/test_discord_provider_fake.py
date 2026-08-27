@@ -693,6 +693,173 @@ def test_discord_fake_controls_confirmed_and_unknown_http_categories(
     assert "nonce-" not in str(evidence)
 
 
+def test_discord_fake_publishes_failure_evidence_before_response(
+    discord_fake_urls: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publish controlled failure evidence before the SDK observes its response."""
+    discord_fake_url, _ = discord_fake_urls
+    evidence_started = threading.Event()
+    release_evidence = threading.Event()
+    original_record_message_failure = STATE.record_message_failure
+
+    def record_message_failure_after_release(
+        *,
+        operation: str,
+        channel_id: str,
+        message_id: str | None,
+        outcome: str,
+        file_count: int = 0,
+        file_bytes: int = 0,
+        safe_category: str | None,
+    ) -> None:
+        evidence_started.set()
+        if not release_evidence.wait(timeout=5):
+            raise TimeoutError("controlled failure evidence was not released")
+        original_record_message_failure(
+            operation=operation,
+            channel_id=channel_id,
+            message_id=message_id,
+            outcome=outcome,
+            file_count=file_count,
+            file_bytes=file_bytes,
+            safe_category=safe_category,
+        )
+
+    monkeypatch.setattr(
+        STATE,
+        "record_message_failure",
+        record_message_failure_after_release,
+    )
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"api_scenario_sequences": {"create_message": ["forbidden"]}},
+        timeout=5,
+    ).raise_for_status()
+    responses: list[requests.Response] = []
+
+    def create_message() -> None:
+        responses.append(
+            requests.post(
+                f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
+                data={"payload_json": '{"content":"controlled"}'},
+                files={
+                    "files[0]": (
+                        "evidence.txt",
+                        b"evidence-order",
+                        "text/plain",
+                    )
+                },
+                timeout=5,
+            )
+        )
+
+    request_thread = threading.Thread(target=create_message)
+    request_thread.start()
+    try:
+        assert evidence_started.wait(timeout=5)
+        assert responses == []
+    finally:
+        release_evidence.set()
+        request_thread.join(timeout=5)
+    assert not request_thread.is_alive()
+    assert len(responses) == 1
+    assert responses[0].status_code == 403
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["operations"] == [
+        {
+            "sequence": 1,
+            "event": "message",
+            "operation": "create_message",
+            "outcome": "failed",
+            "channel_id": "400000000000000001",
+            "safe_category": "permission_denied",
+        }
+    ]
+    assert evidence["deliveries"] == [
+        {
+            "operation": "create_message",
+            "channel_id": "400000000000000001",
+            "outcome": "failed",
+            "file_count": 1,
+            "file_bytes": len(b"evidence-order"),
+            "safe_category": "permission_denied",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("scenario", "boundary_method"),
+    [
+        ("transport_unknown", "_close_connection"),
+        ("timeout", "_wait_for_controlled_timeout"),
+    ],
+)
+def test_discord_fake_publishes_failure_evidence_before_transport_boundary(
+    discord_fake_urls: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    boundary_method: str,
+) -> None:
+    """Publish unknown failure evidence before closing or delaying transport."""
+    discord_fake_url, _ = discord_fake_urls
+    original_boundary = getattr(DiscordHTTPHandler, boundary_method)
+    boundary_evidence: list[dict[str, object]] = []
+
+    def observe_boundary(handler: DiscordHTTPHandler) -> None:
+        boundary_evidence.append(
+            requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+        )
+        if boundary_method == "_close_connection":
+            original_boundary(handler)
+
+    monkeypatch.setattr(DiscordHTTPHandler, boundary_method, observe_boundary)
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"api_scenario_sequences": {"create_message": [scenario]}},
+        timeout=5,
+    ).raise_for_status()
+
+    with pytest.raises(requests.ConnectionError):
+        requests.post(
+            f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
+            data={"payload_json": '{"content":"controlled"}'},
+            files={
+                "files[0]": (
+                    "transport.txt",
+                    b"transport-boundary",
+                    "text/plain",
+                )
+            },
+            timeout=5,
+        )
+
+    assert len(boundary_evidence) == 1
+    assert boundary_evidence[0]["operations"] == [
+        {
+            "sequence": 1,
+            "event": "message",
+            "operation": "create_message",
+            "outcome": "unknown",
+            "channel_id": "400000000000000001",
+            "message_id": "400000000000000001",
+            "safe_category": "transport_unknown",
+        }
+    ]
+    assert boundary_evidence[0]["deliveries"] == [
+        {
+            "operation": "create_message",
+            "channel_id": "400000000000000001",
+            "message_id": "400000000000000001",
+            "outcome": "unknown",
+            "file_count": 1,
+            "file_bytes": len(b"transport-boundary"),
+            "safe_category": "transport_unknown",
+        }
+    ]
+
+
 def test_discord_fake_sequences_retry_after_and_blocks_provider_work(
     discord_fake_urls: tuple[str, str],
 ) -> None:

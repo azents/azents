@@ -26,7 +26,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-08-27
-spec_version: 37
+spec_version: 38
 ---
 
 # E2E Primary Test Strategy
@@ -65,6 +65,11 @@ acknowledgement evidence for durable batched External Channel ingress. Evidence 
 request counts, lifecycle categories, positions, bounded barrier state, file counts,
 aggregate byte counts, deterministic hashes, and canonical relative Azents Session
 routes only.
+
+For configured Discord REST controlled failures, the fake atomically records sanitized
+delivery and operation evidence before the SDK caller can observe an HTTP error,
+connection close, or timeout delay. Regression coverage synchronizes on the evidence
+publication and transport boundary instead of using sleeps.
 
 Fakes and test evidence never retain credentials, authorization headers, signatures,
 callback URLs, raw payloads, visible message bodies, attachment names, attachment
@@ -325,6 +330,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-27** (spec_version 38) — Made configured Discord REST failure
+  delivery and operation evidence atomic and authoritative before HTTP, connection,
+  or timeout outcomes become observable.
 - **2026-08-27** (spec_version 37) — Required recurring E2E optimization to treat
   test and fixture code as first-class implementation surfaces, combine compatible
   and separately explainable coverage-preserving changes when needed, and continue
