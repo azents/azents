@@ -12,7 +12,7 @@ import pytest
 from azcommon.di import Container
 from cryptography.fernet import InvalidToken
 
-from azents.core.config import Config
+from azents.core.config import Config, ExternalChannelGatewayLeaseConfig
 from azents.core.deps import get_config
 from azents.rdb.deps import get_session_manager
 from azents.repos.external_channel.data import (
@@ -332,6 +332,7 @@ def _service(
                 external_channel_conversation=SimpleNamespace(
                     quiesce=SimpleNamespace(discord_gateway=False)
                 ),
+                testenv_external_channel_gateway_lease=None,
             ),
         )
     return DiscordGatewayManagerService(
@@ -360,6 +361,29 @@ def _mock_dependency() -> MagicMock:
 
 def _test_session_manager() -> _SessionManager:
     return _SessionManager()
+
+
+def test_gateway_manager_uses_testenv_lease_override() -> None:
+    """Testenv can shorten stale-lease takeover without changing defaults."""
+    config = cast(
+        Config,
+        SimpleNamespace(
+            testenv_external_channel_gateway_lease=(
+                ExternalChannelGatewayLeaseConfig(
+                    duration_seconds=5.0,
+                    renewal_interval_seconds=1.0,
+                )
+            ),
+        ),
+    )
+    service = _service(
+        repository=_Repository(),
+        sessions=_SessionManager(),
+        config=config,
+    )
+
+    assert service._lease_duration() == datetime.timedelta(seconds=5)
+    assert service._renew_interval() == datetime.timedelta(seconds=1)
 
 
 @pytest.mark.asyncio

@@ -1464,17 +1464,28 @@ def azents_external_channel_gateway_factory(
             .with_command(["./bin/externalchannelgateway.sh"])
             .with_exposed_ports(8013)
         )
-        container = _configure_azents_server_container(
-            base_container,
-            container_network,
-            postgres_container,
-            rustfs_access_key,
-            rustfs_secret_key,
-            s3_bucket_name,
-            auth_jwt_secret_key,
-            credential_encryption_key,
-            system_bootstrap_setup_token,
-        ).with_env("AZ_WORKER_HEALTH_PORT", "8013")
+        container = (
+            _configure_azents_server_container(
+                base_container,
+                container_network,
+                postgres_container,
+                rustfs_access_key,
+                rustfs_secret_key,
+                s3_bucket_name,
+                auth_jwt_secret_key,
+                credential_encryption_key,
+                system_bootstrap_setup_token,
+            )
+            .with_env("AZ_WORKER_HEALTH_PORT", "8013")
+            .with_env(
+                "AZ_TESTENV_EXTERNAL_CHANNEL_GATEWAY_LEASE_DURATION_SECONDS",
+                "5",
+            )
+            .with_env(
+                "AZ_TESTENV_EXTERNAL_CHANNEL_GATEWAY_RENEWAL_INTERVAL_SECONDS",
+                "1",
+            )
+        )
 
         with container:
             _wait_for_tcp_ready(container, 8013, "azents-external-channel-gateway")
