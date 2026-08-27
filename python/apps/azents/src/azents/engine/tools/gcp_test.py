@@ -10,7 +10,7 @@ import asyncio
 from typing import AsyncContextManager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
+import httpx2 as httpx
 import pytest
 from mcp.types import TextContent, ToolAnnotations
 from mcp.types import Tool as McpBaseTool
@@ -134,15 +134,15 @@ def _make_mcp_tool(
     """Create MCP tool for tests.
 
     :param name: Tool name
-    :param read_only: readOnlyHint value; no annotations when None
+    :param read_only: read_only_hint value; no annotations when None
     """
     annotations_obj: ToolAnnotations | None = None
     if read_only is not None:
-        annotations_obj = ToolAnnotations(readOnlyHint=read_only)
+        annotations_obj = ToolAnnotations(read_only_hint=read_only)
     return McpBaseTool(
         name=name,
         description=f"Test tool {name}",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
         annotations=annotations_obj,
     )
 
@@ -201,12 +201,12 @@ class TestIsReadOnlyTool:
         assert _is_read_only_tool(tool) is True
 
     def test_read_only_hint_true(self) -> None:
-        """readOnlyHint=True is read-only."""
+        """read_only_hint=True is read-only."""
         tool = _make_mcp_tool("tool_b", read_only=True)
         assert _is_read_only_tool(tool) is True
 
     def test_read_only_hint_false(self) -> None:
-        """readOnlyHint=False is write tool."""
+        """read_only_hint=False is write tool."""
         tool = _make_mcp_tool("tool_c", read_only=False)
         assert _is_read_only_tool(tool) is False
 
@@ -440,7 +440,7 @@ def _make_call_tool_result(text: str) -> MagicMock:
     """Create CallToolResult for tests."""
     result = MagicMock()
     result.content = [TextContent(type="text", text=text)]
-    result.isError = False
+    result.is_error = False
     return result
 
 

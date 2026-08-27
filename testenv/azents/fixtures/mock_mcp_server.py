@@ -15,17 +15,12 @@ available at ``/mcp``.
 
 import os
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 _DEFAULT_HOST = os.environ.get("MOCK_MCP_HOST", "0.0.0.0")  # noqa: S104
 _DEFAULT_PORT = int(os.environ.get("MOCK_MCP_PORT", "9100"))
 
-server = FastMCP(
-    "azents-testenv-mock",
-    host=_DEFAULT_HOST,
-    port=_DEFAULT_PORT,
-    streamable_http_path="/mcp",
-)
+server = MCPServer("azents-testenv-mock")
 
 
 @server.tool()
@@ -60,4 +55,9 @@ def error() -> str:  # noqa: RET503
 
 
 if __name__ == "__main__":
-    server.run(transport="streamable-http")
+    server.run(
+        transport="streamable-http",
+        host=_DEFAULT_HOST,
+        port=_DEFAULT_PORT,
+        streamable_http_path="/mcp",
+    )

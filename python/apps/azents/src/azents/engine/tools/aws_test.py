@@ -9,13 +9,15 @@ import asyncio
 from typing import AsyncContextManager
 from unittest.mock import AsyncMock, patch
 
+import httpx2 as httpx
 import pytest
+from botocore.credentials import Credentials
 from mcp.types import Tool as McpBaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import AwsToolkitConfig, ToolkitState, TurnContext
 from azents.engine.tooling.toolkit_state import ToolkitStateIdentity
-from azents.engine.tools.aws import AwsCredentialProvider, AwsToolkit
+from azents.engine.tools.aws import AwsCredentialProvider, AwsSigV4Auth, AwsToolkit
 from azents.testing.types import is_object_factory
 
 
@@ -122,8 +124,36 @@ def _make_mcp_tool(name: str) -> McpBaseTool:
     return McpBaseTool(
         name=name,
         description=f"Test tool {name}",
-        inputSchema={"type": "object", "properties": {}},
+        input_schema={"type": "object", "properties": {}},
     )
+
+
+@pytest.mark.asyncio
+async def test_sigv4_auth_signs_httpx2_request_body() -> None:
+    """SigV4 auth signs an httpx2 request after loading its body."""
+    auth = AwsSigV4Auth(
+        Credentials(
+            "EXAMPLE_AWS_ACCESS_KEY_ID",
+            "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        ),
+        "us-east-1",
+        "aws-mcp",
+    )
+    request = httpx.Request(
+        "POST",
+        "https://aws-mcp.us-east-1.api.aws/mcp",
+        headers={"Content-Type": "application/json"},
+        content=b'{"jsonrpc":"2.0"}',
+    )
+
+    flow = auth.async_auth_flow(request)
+    signed_request = await anext(flow)
+    await flow.aclose()
+
+    authorization = signed_request.headers["Authorization"]
+    assert authorization.startswith("AWS4-HMAC-SHA256 Credential=")
+    assert "SignedHeaders=content-type;host;x-amz-date" in authorization
+    assert "X-Amz-Date" in signed_request.headers
 
 
 def _make_toolkit(

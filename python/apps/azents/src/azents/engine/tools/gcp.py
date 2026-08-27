@@ -385,7 +385,7 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
                     raw_name=tool.name,
                     model_name=tool.name,
                     description=tool.description or "",
-                    input_schema=tool.inputSchema,
+                    input_schema=tool.input_schema,
                     server_url=server.endpoint,
                     use_streamable_http=use_streamable_http,
                 )
@@ -482,11 +482,11 @@ class GcpToolkit(Toolkit[GcpToolkitConfig]):
 def _is_read_only_tool(tool: McpBaseTool) -> bool:
     """Check whether MCP tool is read-only.
 
-    When annotations.readOnlyHint is absent, treat as read-only for safety.
+    When annotations.read_only_hint is absent, treat as read-only for safety.
     """
     if tool.annotations is None:
         return True
-    read_only_hint = tool.annotations.readOnlyHint
+    read_only_hint = tool.annotations.read_only_hint
     if read_only_hint is None:
         return True
     return read_only_hint
