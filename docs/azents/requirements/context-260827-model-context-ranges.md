@@ -2,6 +2,7 @@
 title: "Model Context Ranges Requirements"
 created: 2026-08-27
 updated: 2026-08-27
+implemented: 2026-08-27
 tags: [model, context, catalog, agent, frontend, backend, engine, api]
 document_role: primary
 document_type: requirements

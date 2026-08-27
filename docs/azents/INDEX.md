@@ -128,7 +128,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Context Compaction Historical Requirements Reconstruction](requirements/context-260305-context-compaction.md) | context-260305 | 2026-03-05 | 2026-03-23 |
 | [Session Context Inspector Historical Requirements Reconstruction](requirements/context-260530-context-inspector.md) | context-260530 | 2026-05-30 | 2026-05-30 |
 | [Display Context Usage from the Resolved Run Profile Historical Requirements Reconstruction](requirements/context-260710-context-usage-display.md) | context-260710 | 2026-07-10 | - |
-| [Model Context Ranges Requirements](requirements/context-260827-model-context-ranges.md) | context-260827 | 2026-08-27 | - |
+| [Model Context Ranges Requirements](requirements/context-260827-model-context-ranges.md) | context-260827 | 2026-08-27 | 2026-08-27 |
 | [External Channel Continuation Work Completion Requirements](requirements/continuation-260803-channel-work-completion.md) | continuation-260803 | 2026-08-03 | 2026-08-04 |
 | [Sandbox Provider Control Distributed Recovery Historical Requirements Reconstruction](requirements/control-260524-sandbox-control-distributed-recovery.md) | control-260524 | 2026-05-24 | 2026-05-24 |
 | [Runtime Bounded Repair Fencing Requirements](requirements/control-260805-bounded-repair-fencing.md) | control-260805 | 2026-08-05 | 2026-08-05 |
