@@ -26,7 +26,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-08-27
-spec_version: 36
+spec_version: 37
 ---
 
 # E2E Primary Test Strategy
@@ -147,6 +147,16 @@ provider, lifecycle, compaction, or browser E2E cross-product.
 
 Always-on required CI does not depend on external credentials.
 
+- Recurring E2E optimization owns implementation through measured acceptance, not
+  only candidate analysis. One cycle may combine compatible, separately explainable
+  coverage-preserving changes in E2E scenarios, fixtures, provider fakes, support
+  code, CI setup, or production code when one change cannot clear the required
+  critical-path threshold. A below-threshold same-SHA measurement returns to
+  implementation while another safe candidate remains, then restarts the
+  two-successful-attempt measurement on the new SHA. The cycle cannot claim
+  improvement by removing tests, weakening assertions, bypassing real failure or
+  lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
+  CI resources requires explicit approval and complete cost accounting.
 - Python lint/type/unit and other deterministic checks.
 - Testenv support tests run `uv run pytest -vv ./src/support_tests` for behavior that
   requires no server, network listener, container, product image, browser, Runtime
@@ -315,6 +325,11 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-27** (spec_version 37) — Required recurring E2E optimization to treat
+  test and fixture code as first-class implementation surfaces, combine compatible
+  and separately explainable coverage-preserving changes when needed, and continue
+  new-SHA same-SHA measurement cycles until acceptance or feasible-candidate
+  exhaustion.
 - **2026-08-25** (spec_version 36) — Increased the required E2E suite from three
   parallel lanes to four while preserving one execution profile, deterministic
   file coverage, timeout policy, and single-lane cache-write ownership.
