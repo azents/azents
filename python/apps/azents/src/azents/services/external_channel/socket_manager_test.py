@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import azents.services.external_channel.socket_manager as socket_manager_module
-from azents.core.config import Config
+from azents.core.config import Config, ExternalChannelGatewayLeaseConfig
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
@@ -209,6 +209,25 @@ def _configuration() -> ExternalChannelConnectionConfiguration:
             configuration_generation=2,
         ),
     )
+
+
+def test_socket_manager_uses_testenv_lease_override() -> None:
+    """Socket ownership uses the same bounded testenv lease timing."""
+    config = cast(
+        Config,
+        SimpleNamespace(
+            testenv_external_channel_gateway_lease=(
+                ExternalChannelGatewayLeaseConfig(
+                    duration_seconds=5.0,
+                    renewal_interval_seconds=1.0,
+                )
+            ),
+        ),
+    )
+    service = _service(_SessionDouble(), _RepositoryDouble(), config)
+
+    assert service._lease_duration() == datetime.timedelta(seconds=5)
+    assert service._renew_interval() == datetime.timedelta(seconds=1)
 
 
 def _outcome(

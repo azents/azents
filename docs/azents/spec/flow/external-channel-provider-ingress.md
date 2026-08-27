@@ -65,7 +65,7 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-25
+last_verified_at: 2026-08-27
 spec_version: 50
 ---
 
@@ -282,6 +282,13 @@ Production Gateway transport is selected and validated by `discord.py`; Azents d
 not change SDK endpoint state in production. Deterministic provider tests may apply one
 explicit test-only endpoint context and must restore the SDK globals when the client
 closes.
+
+Slack Socket and Discord Gateway managers use a 45-second ownership lease renewed
+every 15 seconds by default. The deterministic E2E Gateway fixture may provide one
+paired testenv-only lease-duration and renewal-interval override. Both effective
+durations must remain non-zero after `timedelta` conversion, and renewal must remain
+strictly shorter than the lease. Without that explicit pair, production timing remains
+unchanged.
 
 ## Durable Batched Conversation Ingress
 
