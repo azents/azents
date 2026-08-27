@@ -10,6 +10,7 @@ from redis.asyncio import Redis
 
 from .redis import (
     RedisBroker,
+    _decode_wake_up_response,
     decode_broker_message,
     decode_session_wake_up,
     encode_session_wake_up,
@@ -65,6 +66,38 @@ def test_decode_broker_message_rejects_rich_legacy_payload(raw: bytes) -> None:
     """Wake-up and stop signals reject deprecated execution identity fields."""
     with pytest.raises(ValueError, match="only session_id and type"):
         decode_broker_message(raw)
+
+
+@pytest.mark.parametrize(
+    ("message_type", "expected_signal"),
+    [
+        (None, SessionWakeUp(session_id="session-1")),
+        (b"mailbox_activity", SessionMailboxActivity(session_id="session-1")),
+    ],
+)
+def test_decode_resp2_wake_up_response(
+    message_type: bytes | None,
+    expected_signal: SessionWakeUp | SessionMailboxActivity,
+) -> None:
+    """RESP2 XREADGROUP responses decode into typed broker wake-ups."""
+    fields = {b"session_id": b"session-1"}
+    if message_type is not None:
+        fields[b"type"] = message_type
+
+    wake_up = _decode_wake_up_response([[b"azents:incoming", [(b"123-0", fields)]]])
+
+    assert wake_up.stream_name == b"azents:incoming"
+    assert wake_up.entry_id == b"123-0"
+    assert wake_up.session_id == "session-1"
+    assert wake_up.signal == expected_signal
+
+
+def test_decode_wake_up_response_rejects_resp3_mapping() -> None:
+    """RESP3 mappings with legacy_responses=False fail clearly outside the factory."""
+    with pytest.raises(RuntimeError, match="must contain one stream"):
+        _decode_wake_up_response(
+            {b"azents:incoming": [(b"123-0", {b"session_id": b"session-1"})]}
+        )
 
 
 class TestRedisBrokerSetup:

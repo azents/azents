@@ -178,6 +178,61 @@ class _WakeUp(NamedTuple):
     signal: WorkerSignal
 
 
+def _decode_wake_up_response(response: object) -> _WakeUp:
+    """Decode one RESP2 XREADGROUP response into a broker wake-up."""
+    if not isinstance(response, list) or len(response) != 1:
+        raise RuntimeError("Redis XREADGROUP response must contain one stream")
+
+    stream_response = response[0]
+    if not isinstance(stream_response, (list, tuple)) or len(stream_response) != 2:
+        raise RuntimeError("Redis XREADGROUP stream response is invalid")
+
+    stream_name = stream_response[0]
+    entries = stream_response[1]
+    if not isinstance(stream_name, (bytes, str)):
+        raise RuntimeError("Redis XREADGROUP stream name must be bytes or text")
+    if not isinstance(entries, list) or len(entries) != 1:
+        raise RuntimeError("Redis XREADGROUP response must contain one entry")
+
+    entry = entries[0]
+    if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+        raise RuntimeError("Redis XREADGROUP entry is invalid")
+
+    entry_id = entry[0]
+    fields = entry[1]
+    if not isinstance(entry_id, (bytes, str)):
+        raise RuntimeError("Redis XREADGROUP entry ID must be bytes or text")
+    if not isinstance(fields, dict):
+        raise RuntimeError("Redis XREADGROUP entry fields must be a mapping")
+
+    session_id_raw = fields.get(b"session_id", fields.get("session_id"))
+    if not isinstance(session_id_raw, (bytes, str)):
+        raise RuntimeError("Redis XREADGROUP session_id must be bytes or text")
+    session_id = (
+        session_id_raw.decode() if isinstance(session_id_raw, bytes) else session_id_raw
+    )
+
+    message_type_raw = fields.get(b"type", fields.get("type"))
+    if message_type_raw is not None and not isinstance(message_type_raw, (bytes, str)):
+        raise RuntimeError("Redis XREADGROUP message type must be bytes or text")
+    message_type = (
+        message_type_raw.decode()
+        if isinstance(message_type_raw, bytes)
+        else message_type_raw or "session_wake_up"
+    )
+    signal: WorkerSignal = (
+        SessionMailboxActivity(session_id=session_id)
+        if message_type == "mailbox_activity"
+        else SessionWakeUp(session_id=session_id)
+    )
+    return _WakeUp(
+        stream_name=stream_name,
+        entry_id=entry_id,
+        session_id=session_id,
+        signal=signal,
+    )
+
+
 class _Ownership(NamedTuple):
     status: str
     owner: str
@@ -402,31 +457,7 @@ class RedisBroker:
         if not results:
             return None
 
-        stream_name, entries = results[0]
-        entry_id, fields = entries[0]
-        session_id_raw = fields[b"session_id"]
-        session_id = (
-            session_id_raw.decode()
-            if isinstance(session_id_raw, bytes)
-            else str(session_id_raw)
-        )
-        message_type_raw = fields.get(b"type", fields.get("type"))
-        message_type = (
-            message_type_raw.decode()
-            if isinstance(message_type_raw, bytes)
-            else str(message_type_raw or "session_wake_up")
-        )
-        signal: WorkerSignal = (
-            SessionMailboxActivity(session_id=session_id)
-            if message_type == "mailbox_activity"
-            else SessionWakeUp(session_id=session_id)
-        )
-        return _WakeUp(
-            stream_name=stream_name,
-            entry_id=entry_id,
-            session_id=session_id,
-            signal=signal,
-        )
+        return _decode_wake_up_response(results)
 
     async def _acquire_or_find_owner(self, session_id: str) -> _Ownership:
         """Acquire session ownership or return the live owner."""
