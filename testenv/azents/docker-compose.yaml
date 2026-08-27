@@ -23,7 +23,7 @@ services:
       POSTGRES_DB: azents
 
   valkey:
-    image: valkey/valkey:9-alpine
+    image: valkey/valkey:9-alpine@sha256:de31910896150d5e754a07d57d227cfdde4e258ddd0d1aa4607f2d2f95843715
     restart: unless-stopped
     ports:
       - "${AZENTS_TESTENV_VALKEY_PORT:-6379}:6379"
