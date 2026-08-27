@@ -4,7 +4,7 @@ import dataclasses
 import json
 from unittest.mock import AsyncMock
 
-import httpx
+import httpx2 as httpx
 import pytest
 from lightkube.generic_resource import GenericGlobalResource, GenericNamespacedResource
 
