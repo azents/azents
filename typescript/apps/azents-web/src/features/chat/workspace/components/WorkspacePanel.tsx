@@ -33,8 +33,8 @@ import {
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { RuntimeSystemMetricsOverview } from "@/features/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import { RuntimeLifecycleStatus } from "@/shared/components/runtime/RuntimeLifecycleStatus";
+import { RuntimeSystemMetricsOverview } from "@/shared/runtime-metrics/components/RuntimeSystemMetricsOverview";
 import { FileBrowser } from "./FileBrowser";
 import { FileInfo } from "./FileInfo";
 import { FileViewer } from "./FileViewer";
@@ -53,7 +53,7 @@ import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
 } from "./WorkspaceDirectoryPickerModal";
-import type { RuntimeSystemMetricsOverviewState } from "@/features/runtime-metrics/types";
+import type { RuntimeSystemMetricsOverviewState } from "@/shared/runtime-metrics/types";
 
 type WorkspacePanelTab = "workspace" | "metrics" | "settings";
 

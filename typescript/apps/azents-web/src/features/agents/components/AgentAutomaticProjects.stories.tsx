@@ -5,7 +5,7 @@ import type {
   AutomaticProjectRow,
   AutomaticProjectsState,
 } from "../automaticProjects";
-import type { ProjectDirectoryPickerState } from "@/features/agent-workspace/types";
+import type { ProjectDirectoryPickerState } from "@/shared/agent-workspace/types";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const rows: AutomaticProjectRow[] = [

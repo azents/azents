@@ -38,6 +38,7 @@ import {
 import { IconGripVertical, IconSettings, IconTrash } from "@tabler/icons-react";
 import { useFormatter, useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ModelCatalogPickerContainer } from "../containers/ModelCatalogPickerContainer";
 import {
   createSelectableModelOptionFormValue,
   fallbackSelectableModelLabel,
@@ -46,7 +47,6 @@ import {
   resolveModelContextRange,
   selectableModelLabelSelectData,
 } from "../model-selection";
-import { ModelCatalogPicker } from "./ModelCatalogPicker";
 import classes from "./SelectableModelOptionsEditor.module.css";
 import type {
   ProviderIntegrationOption,
@@ -536,7 +536,7 @@ export function SelectableModelOptionsEditor({
       </Stack>
 
       {activeOption != null && (
-        <ModelCatalogPicker
+        <ModelCatalogPickerContainer
           opened={pickerOptionId != null}
           title={t("selectModelTitle", {
             label: activeOption.label || t("newOption"),
