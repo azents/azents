@@ -5,7 +5,6 @@ import datetime
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,16 +18,11 @@ from azents.core.enums import (
     ExternalChannelIngressProfile,
     ExternalChannelTransport,
 )
-from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelTrigger,
 )
-from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
-from azents.services.external_channel.connection_revocation import (
-    ExternalChannelConnectionRevocationService,
-)
 from azents.services.external_channel.credentials import (
     ExternalChannelCredentialsCodec,
 )
@@ -42,9 +36,6 @@ from azents.services.external_channel.ingestion import (
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionProcessor,
 )
-from azents.services.external_channel.provider_control import (
-    ExternalChannelProviderControlService,
-)
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
@@ -56,13 +47,10 @@ from azents.services.external_channel.slack_socket import (
 from azents.services.external_channel.socket_manager import (
     SlackSocketManagerService,
 )
-from azents.services.external_channel.transport_ingestion import (
-    ExternalChannelTransportIngestionService,
-)
 from azents.testing.external_channel import make_provider_effect_plan
 
 
-class _SessionDouble:
+class _SessionDouble(AsyncSession):
     """Record the lifecycle transaction commit."""
 
     def __init__(self) -> None:
@@ -173,41 +161,29 @@ def _service(
 
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
-        yield cast(AsyncSession, session)
+        yield session
 
     return SlackSocketManagerService(
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
-        repository=cast(ExternalChannelRepository, repository),
-        credentials_codec=cast(ExternalChannelCredentialsCodec, object()),
-        admission_service=cast(ExternalChannelAdmissionService, object()),
-        interaction_processor=cast(ExternalChannelInteractionProcessor, object()),
-        shortcut_source_service=cast(ExternalChannelShortcutSourceService, object()),
-        transport_ingestion_service=cast(
-            ExternalChannelTransportIngestionService,
-            transport_ingestion_service or object(),
-        ),
-        revocation_service=cast(
-            ExternalChannelConnectionRevocationService,
-            revocation_service or object(),
-        ),
-        provider_control=cast(
-            ExternalChannelProviderControlService,
-            provider_control or object(),
-        ),
+        session_manager=session_manager,
+        repository=repository,  # ty: ignore[invalid-argument-type] — the lifecycle fake implements only the repository methods exercised by this manager.
+        credentials_codec=MagicMock(spec=ExternalChannelCredentialsCodec),
+        admission_service=MagicMock(spec=ExternalChannelAdmissionService),
+        interaction_processor=MagicMock(spec=ExternalChannelInteractionProcessor),
+        shortcut_source_service=MagicMock(spec=ExternalChannelShortcutSourceService),
+        transport_ingestion_service=(transport_ingestion_service or MagicMock()),  # ty: ignore[invalid-argument-type] — each test double implements only the ingestion method exercised by this manager.
+        revocation_service=(revocation_service or MagicMock()),  # ty: ignore[invalid-argument-type] — each test double implements only the revocation method exercised by this manager.
+        provider_control=(provider_control or MagicMock()),  # ty: ignore[invalid-argument-type] — each test double implements only the provider-control method exercised by this manager.
         manager_id="manager-1",
         config=config,
     )
 
 
 def _configuration() -> ExternalChannelConnectionConfiguration:
-    return cast(
-        ExternalChannelConnectionConfiguration,
-        SimpleNamespace(
-            provider_app_id="app-1",
-            provider_tenant_id="tenant-1",
-            provider_bot_user_id="UBOT",
-            configuration_generation=2,
-        ),
+    return ExternalChannelConnectionConfiguration.model_construct(
+        provider_app_id="app-1",
+        provider_tenant_id="tenant-1",
+        provider_bot_user_id="UBOT",
+        configuration_generation=2,
     )
 
 
@@ -295,8 +271,14 @@ async def test_owned_socket_schedules_controls_without_waiting_for_completion() 
         )
     )
     release = asyncio.Event()
+    attempted = asyncio.Event()
+    attempt_count = 0
 
     async def attempt(_plan: object) -> None:
+        nonlocal attempt_count
+        attempt_count += 1
+        if attempt_count == len(plans):
+            attempted.set()
         await release.wait()
 
     provider_control = SimpleNamespace(attempt=AsyncMock(side_effect=attempt))
@@ -312,7 +294,7 @@ async def test_owned_socket_schedules_controls_without_waiting_for_completion() 
         configuration=_configuration(),
         event=_event("app_mention"),
     )
-    await asyncio.sleep(0)
+    await asyncio.wait_for(attempted.wait(), timeout=1)
 
     assert isinstance(result, ExternalChannelIngestionOutcome)
     assert result.control_plans == plans
@@ -320,9 +302,16 @@ async def test_owned_socket_schedules_controls_without_waiting_for_completion() 
         plans
     )
     assert len(service.control_tasks) == 2
+    controls_finished = asyncio.Event()
+
+    def record_control_finished(_task: asyncio.Task[object]) -> None:
+        if all(task.done() for task in service.control_tasks):
+            controls_finished.set()
+
+    for task in service.control_tasks:
+        task.add_done_callback(record_control_finished)
     release.set()
-    await asyncio.gather(*tuple(service.control_tasks))
-    await asyncio.sleep(0)
+    await asyncio.wait_for(controls_finished.wait(), timeout=1)
     assert service.control_tasks == set()
 
 
@@ -414,15 +403,14 @@ async def test_retryable_ingestion_releases_degraded_after_sdk_lifecycle(
         app_mode=ExternalChannelAppMode.SINGLE,
         transport=ExternalChannelTransport.SOCKET,
     )
-    service.credentials_codec = cast(
-        ExternalChannelCredentialsCodec,
+    service.credentials_codec = (  # ty: ignore[invalid-assignment] — the lifecycle test uses only the synchronous decrypt boundary.
         SimpleNamespace(
             decrypt=lambda _: SlackConnectionCredentials(
                 bot_token="bot-token",
                 signing_secret="signing-secret",
                 app_token="app-token",
             )
-        ),
+        )
     )
     claim = AsyncMock(return_value=configuration)
     mark_active = AsyncMock(return_value=True)

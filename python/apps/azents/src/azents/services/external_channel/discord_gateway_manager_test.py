@@ -4,7 +4,6 @@ import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -52,7 +51,6 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelIngressAuthority,
 )
 from azents.services.external_channel.provider_control import (
-    ExternalChannelProviderControlService,
     get_external_channel_provider_control_service,
 )
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
@@ -91,6 +89,7 @@ class _Repository:
         self.active_calls: list[dict[str, object]] = []
         self.release_calls: list[dict[str, object]] = []
         self.renew_calls: list[dict[str, object]] = []
+        self.renewed = asyncio.Event()
 
     async def ingest_discord_event(
         self,
@@ -151,6 +150,7 @@ class _Repository:
         **kwargs: object,
     ) -> bool:
         self.renew_calls.append(kwargs)
+        self.renewed.set()
         return True
 
 
@@ -352,14 +352,10 @@ def _service(
         credentials_codec=(
             credentials_codec if credentials_codec is not None else MagicMock()
         ),  # ty: ignore[invalid-argument-type] — test fake supplies only the codec calls exercised by this manager.
-        transport_ingestion_service=cast(
-            ExternalChannelTransportIngestionService,
-            repository,
-        ),
-        provider_control=cast(
-            ExternalChannelProviderControlService,
-            provider_control if provider_control is not None else MagicMock(),
-        ),
+        transport_ingestion_service=repository,  # ty: ignore[invalid-argument-type] — the repository fake implements the exact ingestion method exercised by this manager.
+        provider_control=(
+            provider_control if provider_control is not None else MagicMock()
+        ),  # ty: ignore[invalid-argument-type] — tests supply only the provider-control calls exercised by the manager.
         manager_id="manager-1",
         gateway_client=(gateway_client if gateway_client is not None else MagicMock()),  # ty: ignore[invalid-argument-type] — test fixture supplies the public runner methods exercised by the manager.
         config=resolved_config,
@@ -754,8 +750,7 @@ async def test_active_sdk_lifecycle_renews_gateway_lease() -> None:
     )
 
     await runner.started.wait()
-    while not repository.renew_calls:
-        await asyncio.sleep(0.001)
+    await asyncio.wait_for(repository.renewed.wait(), timeout=1)
     shutdown.set()
     await task
 

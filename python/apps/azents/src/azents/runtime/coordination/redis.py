@@ -6,7 +6,6 @@ import inspect
 import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from azents_runtime_control.system_metrics import (
     RunnerSystemMetricAvailability,
@@ -1304,11 +1303,8 @@ def _required_datetime(value: object) -> datetime:
     return result
 
 
-def _json_loads(raw: str) -> dict[str, Any]:
-    payload = json.loads(raw)
-    if not isinstance(payload, dict):
-        raise RuntimeError("Runtime coordination payload must be an object")
-    return payload
+def _json_loads(raw: str) -> dict[str, JsonValue]:
+    return _json_object(json.loads(raw))
 
 
 def _json_dumps(payload: dict[str, object]) -> str:
@@ -1337,7 +1333,7 @@ def _envelope_from_json(raw: str) -> RuntimeRequestEnvelope:
         request_id=str(payload["request_id"]),
         runtime_id=str(payload["runtime_id"]),
         target=RuntimeCoordinationTarget(str(payload["target"])),
-        generation=int(payload["generation"]),
+        generation=_required_int(payload["generation"]),
         operation_type=str(payload["operation_type"]),
         payload=_json_object(payload["payload"]),
         reply_stream_id=str(payload["reply_stream_id"]),
@@ -1365,7 +1361,7 @@ def _reply_event_from_json(raw: str) -> RuntimeReplyEvent:
     return RuntimeReplyEvent(
         request_id=str(payload["request_id"]),
         runtime_id=str(payload["runtime_id"]),
-        generation=int(payload["generation"]),
+        generation=_required_int(payload["generation"]),
         event_type=RuntimeReplyEventType(str(payload["event_type"])),
         payload=_json_object(payload["payload"]),
         created_at=_required_datetime(payload["created_at"]),
@@ -1389,7 +1385,7 @@ def _body_chunk_from_json(raw: str) -> RuntimeBodyChunk:
     payload = _json_loads(raw)
     return RuntimeBodyChunk(
         request_id=str(payload["request_id"]),
-        chunk_id=int(payload["chunk_id"]),
+        chunk_id=_required_int(payload["chunk_id"]),
         data=base64.b64decode(str(payload["data_base64"])),
         created_at=_required_datetime(payload["created_at"]),
         final=bool(payload["final"]),
@@ -1438,7 +1434,7 @@ def _operation_from_json(raw: str) -> RuntimeOperationMetadata:
         runtime_id=str(payload["runtime_id"]),
         target=RuntimeCoordinationTarget(str(payload["target"])),
         target_subject_id=str(payload["target_subject_id"]),
-        generation=int(payload["generation"]),
+        generation=_required_int(payload["generation"]),
         operation_type=str(payload["operation_type"]),
         transfer_id=_optional_str(payload.get("transfer_id")),
         transfer_attempt_id=_optional_str(payload.get("transfer_attempt_id")),
@@ -1486,7 +1482,7 @@ def _connection_from_json(raw: str) -> RuntimeConnectionRecord:
         subject_id=str(payload["subject_id"]),
         connection_id=str(payload["connection_id"]),
         owner_replica_id=str(payload["owner_replica_id"]),
-        generation=int(payload["generation"]),
+        generation=_required_int(payload["generation"]),
         connected_at=_required_datetime(payload["connected_at"]),
         heartbeat_at=_required_datetime(payload["heartbeat_at"]),
         expires_at=_required_datetime(payload["expires_at"]),
@@ -1510,7 +1506,7 @@ def _system_metrics_sample_to_json(sample: RuntimeSystemMetricsSample) -> str:
 def _system_metrics_sample_from_json(raw: str) -> RuntimeSystemMetricsSample:
     payload = _json_loads(raw)
     return RuntimeSystemMetricsSample(
-        sequence=int(payload["sequence"]),
+        sequence=_required_int(payload["sequence"]),
         measured_at=_required_datetime(payload["measured_at"]),
         scope=RunnerSystemMetricsScope(str(payload["scope"])),
         cpu=_system_metric_observation_from_json(payload["cpu"]),
@@ -1553,6 +1549,13 @@ def _optional_int(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise RuntimeError("Runtime coordination integer must be an integer")
     return value
+
+
+def _required_int(value: object) -> int:
+    result = _optional_int(value)
+    if result is None:
+        raise RuntimeError("Runtime coordination integer is required")
+    return result
 
 
 def _json_object(value: object) -> dict[str, JsonValue]:
