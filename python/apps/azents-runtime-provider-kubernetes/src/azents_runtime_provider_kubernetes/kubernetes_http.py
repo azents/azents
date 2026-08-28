@@ -10,7 +10,7 @@ import ssl
 from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Self, cast
+from typing import Any, Self
 
 import aiohttp
 
@@ -145,7 +145,7 @@ class KubernetesHttpApi(KubernetesApi):
         data = await self._request_json("GET", path)
         if data is None:
             return frozenset()
-        resources = cast(list[JsonObject], data.get("resources") or [])
+        resources = _object_list(data.get("resources") or [], "resources")
         return frozenset(
             str(item["name"])
             for item in resources
@@ -157,7 +157,7 @@ class KubernetesHttpApi(KubernetesApi):
         data = await self._request_json("GET", "/apis")
         if data is None:
             return frozenset()
-        groups = cast(list[JsonObject], data.get("groups") or [])
+        groups = _object_list(data.get("groups") or [], "groups")
         return frozenset(
             str(item["name"]) for item in groups if isinstance(item.get("name"), str)
         )
@@ -192,7 +192,7 @@ class KubernetesHttpApi(KubernetesApi):
         )
         if data is None:
             return False
-        status = cast(JsonObject, data.get("status") or {})
+        status = _required_object(data.get("status") or {}, "status")
         return status.get("allowed") is True
 
     async def get_namespace(self, name: str) -> NamespaceResource | None:
@@ -204,16 +204,10 @@ class KubernetesHttpApi(KubernetesApi):
         )
         if data is None:
             return None
-        metadata = cast(JsonObject, data["metadata"])
+        metadata = _required_object(data["metadata"], "metadata")
         return NamespaceResource(
             name=str(metadata["name"]),
-            labels={
-                str(key): str(value)
-                for key, value in cast(
-                    JsonObject,
-                    metadata.get("labels") or {},
-                ).items()
-            },
+            labels=_string_mapping(metadata.get("labels") or {}, "metadata.labels"),
         )
 
     async def get_pod(self, name: str, namespace: str) -> PodResource | None:
@@ -260,7 +254,13 @@ class KubernetesHttpApi(KubernetesApi):
             f"/api/v1/namespaces/{namespace}/pods",
             params={"labelSelector": _label_selector(labels)},
         )
-        return tuple(pod_resource(item) for item in cast(JsonObject, data)["items"])
+        return tuple(
+            pod_resource(item)
+            for item in _object_list(
+                _required_object(data, "list response").get("items"),
+                "items",
+            )
+        )
 
     async def watch_pods(
         self,
@@ -300,11 +300,11 @@ class KubernetesHttpApi(KubernetesApi):
                 line = raw_line.strip()
                 if not line:
                     continue
-                event = cast(JsonObject, json.loads(line))
+                event = _decode_json_object(json.loads(line))
                 event_type = str(event.get("type") or "")
                 if event_type == "BOOKMARK":
                     continue
-                pod = cast(JsonObject | None, event.get("object"))
+                pod = _optional_object(event.get("object"), "watch object")
                 if pod is None:
                     continue
                 yield PodWatchEvent(event_type=event_type, pod=pod_resource(pod))
@@ -348,7 +348,13 @@ class KubernetesHttpApi(KubernetesApi):
             f"/api/v1/namespaces/{namespace}/persistentvolumeclaims",
             params={"labelSelector": _label_selector(labels)},
         )
-        return tuple(_pvc_resource(item) for item in cast(JsonObject, data)["items"])
+        return tuple(
+            _pvc_resource(item)
+            for item in _object_list(
+                _required_object(data, "list response").get("items"),
+                "items",
+            )
+        )
 
     async def get_service(
         self,
@@ -388,7 +394,13 @@ class KubernetesHttpApi(KubernetesApi):
             f"/api/v1/namespaces/{namespace}/services",
             params={"labelSelector": _label_selector(labels)},
         )
-        return tuple(service_resource(item) for item in cast(JsonObject, data)["items"])
+        return tuple(
+            service_resource(item)
+            for item in _object_list(
+                _required_object(data, "list response").get("items"),
+                "items",
+            )
+        )
 
     async def get_config_map(
         self,
@@ -429,7 +441,11 @@ class KubernetesHttpApi(KubernetesApi):
             params={"labelSelector": _label_selector(labels)},
         )
         return tuple(
-            config_map_resource(item) for item in cast(JsonObject, data)["items"]
+            config_map_resource(item)
+            for item in _object_list(
+                _required_object(data, "list response").get("items"),
+                "items",
+            )
         )
 
     async def get_secret(
@@ -470,7 +486,13 @@ class KubernetesHttpApi(KubernetesApi):
             f"/api/v1/namespaces/{namespace}/secrets",
             params={"labelSelector": _label_selector(labels)},
         )
-        return tuple(secret_resource(item) for item in cast(JsonObject, data)["items"])
+        return tuple(
+            secret_resource(item)
+            for item in _object_list(
+                _required_object(data, "list response").get("items"),
+                "items",
+            )
+        )
 
     async def get_network_policy(
         self,
@@ -523,7 +545,11 @@ class KubernetesHttpApi(KubernetesApi):
             params={"labelSelector": _label_selector(labels)},
         )
         return tuple(
-            network_policy_resource(item) for item in cast(JsonObject, data)["items"]
+            network_policy_resource(item)
+            for item in _object_list(
+                _required_object(data, "list response").get("items"),
+                "items",
+            )
         )
 
     async def get_lease(self, name: str, namespace: str) -> LeaseResource | None:
@@ -648,7 +674,78 @@ class KubernetesHttpApi(KubernetesApi):
                 )
             if response.status == 204:
                 return None
-            return cast(JsonObject, await response.json())
+            return _decode_json_object(await response.json())
+
+
+def _decode_json_object(value: object) -> JsonObject:
+    if not isinstance(value, dict):
+        raise RuntimeError("Kubernetes API JSON response must be an object")
+    result: JsonObject = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise RuntimeError("Kubernetes API JSON object keys must be strings")
+        result[key] = _decode_json_value(item)
+    return result
+
+
+def _decode_json_value(value: object) -> object:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, list):
+        return [_decode_json_value(item) for item in value]
+    if isinstance(value, dict):
+        return _decode_json_object(value)
+    raise RuntimeError("Kubernetes API response contains a non-JSON value")
+
+
+def _required_object(value: object, field: str) -> JsonObject:
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{field} must be an object")
+    return value
+
+
+def _optional_object(value: object, field: str) -> JsonObject | None:
+    if value is None:
+        return None
+    return _required_object(value, field)
+
+
+def _object_list(value: object, field: str) -> list[JsonObject]:
+    if not isinstance(value, list):
+        raise RuntimeError(f"{field} must be an array")
+    result: list[JsonObject] = []
+    for item in value:
+        result.append(_required_object(item, f"{field} item"))
+    return result
+
+
+def _optional_string(value: object, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise RuntimeError(f"{field} must be a string")
+    return value
+
+
+def _optional_quantity(
+    value: object,
+    field: str,
+) -> KubernetesResourceQuantity | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
+        raise RuntimeError(f"{field} must be a string or number")
+    return value
+
+
+def _string_mapping(value: object, field: str) -> dict[str, str]:
+    data = _required_object(value, field)
+    result: dict[str, str] = {}
+    for key, item in data.items():
+        if not isinstance(key, str) or not isinstance(item, str):
+            raise RuntimeError(f"{field} must map strings to strings")
+        result[key] = item
+    return result
 
 
 def _load_in_cluster_config() -> KubernetesHttpConfig:
@@ -1093,7 +1190,7 @@ def _container_resources(data: object) -> ContainerResources | None:
         return None
     if not isinstance(data, dict):
         raise RuntimeError("container.resources must be an object")
-    resource_data = cast(Mapping[object, object], data)
+    resource_data = data
     resources = ContainerResources(
         requests=_resource_quantity_map(resource_data, "requests"),
         limits=_resource_quantity_map(resource_data, "limits"),
@@ -1151,12 +1248,14 @@ def _lease_manifest(lease: LeaseResource) -> JsonObject:
 
 
 def pod_resource(data: JsonObject) -> PodResource:
-    spec = cast(JsonObject, data["spec"])
-    status = cast(JsonObject | None, data.get("status"))
+    spec = _required_object(data["spec"], "spec")
+    status = _optional_object(data.get("status"), "status")
     return PodResource(
         metadata=_object_meta(data),
         spec=PodSpec(
-            service_account_name=cast(str | None, spec.get("serviceAccountName")),
+            service_account_name=_optional_string(
+                spec.get("serviceAccountName"), "serviceAccountName"
+            ),
             automount_service_account_token=bool(
                 spec.get("automountServiceAccountToken", True)
             ),
@@ -1165,21 +1264,20 @@ def pod_resource(data: JsonObject) -> PodResource:
                 for item in spec.get("imagePullSecrets", [])
             ),
             security_context=_pod_security_context(
-                cast(JsonObject | None, spec.get("securityContext"))
+                _optional_object(spec.get("securityContext"), "securityContext")
             ),
-            node_selector={
-                str(key): str(value)
-                for key, value in cast(
-                    JsonObject,
-                    spec.get("nodeSelector") or {},
-                ).items()
-            },
+            node_selector=_string_mapping(
+                spec.get("nodeSelector") or {},
+                "nodeSelector",
+            ),
             tolerations=tuple(
-                _toleration(cast(JsonObject, item))
+                _toleration(_required_object(item, "array item"))
                 for item in spec.get("tolerations", [])
             ),
-            dns_policy=cast(str | None, spec.get("dnsPolicy")),
-            dns_config=_pod_dns_config(cast(JsonObject | None, spec.get("dnsConfig"))),
+            dns_policy=_optional_string(spec.get("dnsPolicy"), "dnsPolicy"),
+            dns_config=_pod_dns_config(
+                _optional_object(spec.get("dnsConfig"), "dnsConfig")
+            ),
             host_aliases=tuple(
                 HostAlias(
                     ip=str(item["ip"]),
@@ -1209,9 +1307,11 @@ def _container(data: JsonObject) -> ContainerSpec:
         working_dir=str(data.get("workingDir") or ""),
         resources=_container_resources(data.get("resources")),
         security_context=_container_security_context(
-            cast(JsonObject, data.get("securityContext") or {})
+            _required_object(data.get("securityContext") or {}, "securityContext")
         ),
-        readiness_probe=_probe(cast(JsonObject | None, data.get("readinessProbe"))),
+        readiness_probe=_probe(
+            _optional_object(data.get("readinessProbe"), "readinessProbe")
+        ),
         env=tuple(
             EnvVar(name=str(item["name"]), value=str(item.get("value") or ""))
             for item in data.get("env", [])
@@ -1230,26 +1330,26 @@ def _container(data: JsonObject) -> ContainerSpec:
 def _volume(
     data: JsonObject,
 ) -> PersistentVolumeClaimVolume | EmptyDirVolume | ConfigMapVolume | SecretVolume:
-    persistent_volume_claim = cast(
-        JsonObject | None,
+    persistent_volume_claim = _optional_object(
         data.get("persistentVolumeClaim"),
+        "persistentVolumeClaim",
     )
     if persistent_volume_claim is not None:
         return PersistentVolumeClaimVolume(
             name=str(data["name"]),
             claim_name=str(persistent_volume_claim["claimName"]),
         )
-    empty_dir = cast(JsonObject | None, data.get("emptyDir"))
+    empty_dir = _optional_object(data.get("emptyDir"), "emptyDir")
     if empty_dir is not None:
         return EmptyDirVolume(
             name=str(data["name"]),
-            medium=cast(str | None, empty_dir.get("medium")),
-            size_limit=cast(
-                KubernetesResourceQuantity | None,
+            medium=_optional_string(empty_dir.get("medium"), "emptyDir.medium"),
+            size_limit=_optional_quantity(
                 empty_dir.get("sizeLimit"),
+                "emptyDir.sizeLimit",
             ),
         )
-    config_map = cast(JsonObject | None, data.get("configMap"))
+    config_map = _optional_object(data.get("configMap"), "configMap")
     if config_map is not None:
         return ConfigMapVolume(
             name=str(data["name"]),
@@ -1257,7 +1357,7 @@ def _volume(
             items=_key_to_paths(config_map.get("items")),
             default_mode=_optional_int(config_map.get("defaultMode"), "defaultMode"),
         )
-    secret = cast(JsonObject | None, data.get("secret"))
+    secret = _optional_object(data.get("secret"), "secret")
     if secret is not None:
         return SecretVolume(
             name=str(data["name"]),
@@ -1308,7 +1408,7 @@ def _pod_dns_config(data: JsonObject | None) -> PodDnsConfig | None:
         options=tuple(
             PodDnsConfigOption(
                 name=str(item["name"]),
-                value=cast(str | None, item.get("value")),
+                value=_optional_string(item.get("value"), "dns option value"),
             )
             for item in data.get("options", [])
         ),
@@ -1316,7 +1416,7 @@ def _pod_dns_config(data: JsonObject | None) -> PodDnsConfig | None:
 
 
 def _container_security_context(data: JsonObject) -> ContainerSecurityContext:
-    capabilities = cast(JsonObject, data.get("capabilities") or {})
+    capabilities = _required_object(data.get("capabilities") or {}, "capabilities")
     return ContainerSecurityContext(
         privileged=bool(data.get("privileged", False)),
         allow_privilege_escalation=bool(data.get("allowPrivilegeEscalation", False)),
@@ -1326,9 +1426,9 @@ def _container_security_context(data: JsonObject) -> ContainerSecurityContext:
         run_as_group=int(data.get("runAsGroup") or 0),
         capabilities_add=tuple(str(item) for item in capabilities.get("add", [])),
         capabilities_drop=tuple(str(item) for item in capabilities.get("drop", [])),
-        proc_mount=cast(str | None, data.get("procMount")),
+        proc_mount=_optional_string(data.get("procMount"), "procMount"),
         seccomp_profile=_seccomp_profile(
-            cast(JsonObject | None, data.get("seccompProfile"))
+            _optional_object(data.get("seccompProfile"), "seccompProfile")
         ),
     )
 
@@ -1338,14 +1438,16 @@ def _seccomp_profile(data: JsonObject | None) -> SeccompProfile | None:
         return None
     return SeccompProfile(
         profile_type=str(data["type"]),
-        localhost_profile=cast(str | None, data.get("localhostProfile")),
+        localhost_profile=_optional_string(
+            data.get("localhostProfile"), "localhostProfile"
+        ),
     )
 
 
 def _probe(data: JsonObject | None) -> Probe | None:
     if data is None:
         return None
-    exec_action = cast(JsonObject | None, data.get("exec"))
+    exec_action = _optional_object(data.get("exec"), "exec")
     if exec_action is None:
         raise RuntimeError("Runtime container readiness probe must use exec")
     return Probe(
@@ -1378,11 +1480,13 @@ def _pod_security_context(data: JsonObject | None) -> PodSecurityContext | None:
 
 def _toleration(data: JsonObject) -> Toleration:
     return Toleration(
-        key=cast(str | None, data.get("key")),
-        operator=cast(str | None, data.get("operator")),
-        value=cast(str | None, data.get("value")),
-        effect=cast(str | None, data.get("effect")),
-        toleration_seconds=cast(int | None, data.get("tolerationSeconds")),
+        key=_optional_string(data.get("key"), "key"),
+        operator=_optional_string(data.get("operator"), "operator"),
+        value=_optional_string(data.get("value"), "value"),
+        effect=_optional_string(data.get("effect"), "effect"),
+        toleration_seconds=_optional_int(
+            data.get("tolerationSeconds"), "tolerationSeconds"
+        ),
     )
 
 
@@ -1391,25 +1495,25 @@ def _pod_status(status: JsonObject) -> PodStatus:
     ready_condition = next(
         (
             item
-            for item in cast(list[JsonObject], conditions)
+            for item in _object_list(conditions, "conditions")
             if item.get("type") == "Ready"
         ),
         None,
     )
     ready = ready_condition is not None and ready_condition.get("status") == "True"
     waiting_reason = _first_waiting_reason(
-        cast(list[JsonObject], status.get("containerStatuses") or [])
+        _object_list(status.get("containerStatuses") or [], "containerStatuses")
     )
     termination_evidence = _first_termination_evidence(
-        cast(list[JsonObject], status.get("containerStatuses") or [])
+        _object_list(status.get("containerStatuses") or [], "containerStatuses")
     )
     return PodStatus(
-        phase=cast(str | None, status.get("phase")),
+        phase=_optional_string(status.get("phase"), "phase"),
         ready=ready,
         ready_reason=(
             None
             if ready_condition is None
-            else cast(str | None, ready_condition.get("reason"))
+            else _optional_string(ready_condition.get("reason"), "ready reason")
         ),
         waiting_reason=waiting_reason,
         termination_evidence=termination_evidence,
@@ -1418,8 +1522,8 @@ def _pod_status(status: JsonObject) -> PodStatus:
 
 def _first_waiting_reason(container_statuses: list[JsonObject]) -> str | None:
     for item in container_statuses:
-        state = cast(JsonObject, item.get("state") or {})
-        waiting = cast(JsonObject | None, state.get("waiting"))
+        state = _required_object(item.get("state") or {}, "container state")
+        waiting = _optional_object(state.get("waiting"), "waiting state")
         if waiting is None:
             continue
         reason = waiting.get("reason")
@@ -1432,8 +1536,8 @@ def _first_termination_evidence(
     container_statuses: list[JsonObject],
 ) -> ContainerTerminationEvidence | None:
     for item in container_statuses:
-        state = cast(JsonObject, item.get("state") or {})
-        terminated = cast(JsonObject | None, state.get("terminated"))
+        state = _required_object(item.get("state") or {}, "container state")
+        terminated = _optional_object(state.get("terminated"), "terminated state")
         if terminated is None:
             continue
         name = item.get("name")
@@ -1455,9 +1559,9 @@ def _first_termination_evidence(
 
 
 def _pvc_resource(data: JsonObject) -> PersistentVolumeClaimResource:
-    spec = cast(JsonObject, data["spec"])
-    resources = cast(JsonObject, spec.get("resources") or {})
-    requests = cast(JsonObject, resources.get("requests") or {})
+    spec = _required_object(data["spec"], "spec")
+    resources = _required_object(spec.get("resources") or {}, "resources")
+    requests = _required_object(resources.get("requests") or {}, "resource requests")
     return PersistentVolumeClaimResource(
         metadata=_object_meta(data),
         spec=PersistentVolumeClaimSpec(
@@ -1470,7 +1574,7 @@ def _pvc_resource(data: JsonObject) -> PersistentVolumeClaimResource:
 
 def service_resource(data: JsonObject) -> ServiceResource:
     """Parse one Provider-owned Service."""
-    spec = cast(JsonObject, data["spec"])
+    spec = _required_object(data["spec"], "spec")
     cluster_ip = spec.get("clusterIP")
     if cluster_ip is not None and not isinstance(cluster_ip, str):
         raise RuntimeError("Service clusterIP must be a string")
@@ -1479,13 +1583,10 @@ def service_resource(data: JsonObject) -> ServiceResource:
         spec=ServiceSpec(
             service_type=str(spec.get("type") or "ClusterIP"),
             cluster_ip=cluster_ip,
-            selector={
-                str(key): str(value)
-                for key, value in cast(JsonObject, spec.get("selector") or {}).items()
-            },
+            selector=_string_mapping(spec.get("selector") or {}, "selector"),
             ports=tuple(
                 ServicePort(
-                    name=cast(str | None, item.get("name")),
+                    name=_optional_string(item.get("name"), "port name"),
                     protocol=str(item.get("protocol") or "TCP"),
                     port=_required_int(item.get("port"), "Service port"),
                     target_port=_service_target_port(item.get("targetPort")),
@@ -1500,17 +1601,14 @@ def config_map_resource(data: JsonObject) -> ConfigMapResource:
     """Parse one Provider-owned ConfigMap."""
     return ConfigMapResource(
         metadata=_object_meta(data),
-        data={
-            str(key): str(value)
-            for key, value in cast(JsonObject, data.get("data") or {}).items()
-        },
+        data=_string_mapping(data.get("data") or {}, "data"),
         immutable=_optional_bool(data.get("immutable"), "ConfigMap immutable"),
     )
 
 
 def secret_resource(data: JsonObject) -> SecretResource:
     """Parse one Provider-owned Secret into opaque byte values."""
-    encoded = cast(JsonObject, data.get("data") or {})
+    encoded = _required_object(data.get("data") or {}, "data")
     decoded: dict[str, bytes] = {}
     for key, value in encoded.items():
         if not isinstance(value, str):
@@ -1549,20 +1647,20 @@ def _optional_bool(value: object, field: str) -> bool | None:
 
 def network_policy_resource(data: JsonObject) -> NetworkPolicyResource:
     """Parse one Provider-owned Runtime NetworkPolicy."""
-    spec = cast(JsonObject, data["spec"])
+    spec = _required_object(data["spec"], "spec")
     return NetworkPolicyResource(
         metadata=_object_meta(data),
         spec=NetworkPolicySpec(
             pod_selector=_label_selector_resource(
-                cast(JsonObject, spec.get("podSelector") or {})
+                _required_object(spec.get("podSelector") or {}, "podSelector")
             ),
             policy_types=tuple(str(item) for item in spec.get("policyTypes", [])),
             ingress=tuple(
-                _network_policy_ingress_rule(cast(JsonObject, item))
+                _network_policy_ingress_rule(_required_object(item, "array item"))
                 for item in spec.get("ingress", [])
             ),
             egress=tuple(
-                _network_policy_egress_rule(cast(JsonObject, item))
+                _network_policy_egress_rule(_required_object(item, "array item"))
                 for item in spec.get("egress", [])
             ),
         ),
@@ -1572,7 +1670,8 @@ def network_policy_resource(data: JsonObject) -> NetworkPolicyResource:
 def _network_policy_egress_rule(data: JsonObject) -> NetworkPolicyEgressRule:
     return NetworkPolicyEgressRule(
         peers=tuple(
-            _network_policy_peer(cast(JsonObject, item)) for item in data.get("to", [])
+            _network_policy_peer(_required_object(item, "array item"))
+            for item in data.get("to", [])
         ),
         ports=tuple(
             NetworkPolicyPort(
@@ -1587,7 +1686,7 @@ def _network_policy_egress_rule(data: JsonObject) -> NetworkPolicyEgressRule:
 def _network_policy_ingress_rule(data: JsonObject) -> NetworkPolicyIngressRule:
     return NetworkPolicyIngressRule(
         peers=tuple(
-            _network_policy_peer(cast(JsonObject, item))
+            _network_policy_peer(_required_object(item, "array item"))
             for item in data.get("from", [])
         ),
         ports=tuple(
@@ -1607,17 +1706,21 @@ def _network_policy_port_value(value: object) -> int | str:
 
 
 def _network_policy_peer(data: JsonObject) -> NetworkPolicyPeer:
-    ip_block = cast(JsonObject | None, data.get("ipBlock"))
+    ip_block = _optional_object(data.get("ipBlock"), "ipBlock")
     return NetworkPolicyPeer(
         namespace_selector=(
             None
             if data.get("namespaceSelector") is None
-            else _label_selector_resource(cast(JsonObject, data["namespaceSelector"]))
+            else _label_selector_resource(
+                _required_object(data["namespaceSelector"], "namespaceSelector")
+            )
         ),
         pod_selector=(
             None
             if data.get("podSelector") is None
-            else _label_selector_resource(cast(JsonObject, data["podSelector"]))
+            else _label_selector_resource(
+                _required_object(data["podSelector"], "podSelector")
+            )
         ),
         ip_block=(
             None
@@ -1632,15 +1735,12 @@ def _network_policy_peer(data: JsonObject) -> NetworkPolicyPeer:
 
 def _label_selector_resource(data: JsonObject) -> LabelSelector:
     return LabelSelector(
-        match_labels={
-            str(key): str(value)
-            for key, value in cast(
-                JsonObject,
-                data.get("matchLabels") or {},
-            ).items()
-        },
+        match_labels=_string_mapping(
+            data.get("matchLabels") or {},
+            "matchLabels",
+        ),
         match_expressions=tuple(
-            _label_selector_requirement(cast(JsonObject, item))
+            _label_selector_requirement(_required_object(item, "array item"))
             for item in data.get("matchExpressions", [])
         ),
     )
@@ -1670,30 +1770,40 @@ def _label_selector_requirement(data: JsonObject) -> LabelSelectorRequirement:
 
 
 def _lease_resource(data: JsonObject) -> LeaseResource:
-    spec = cast(JsonObject, data["spec"])
-    metadata = cast(JsonObject, data.get("metadata") or {})
+    spec = _required_object(data["spec"], "spec")
+    metadata = _required_object(data.get("metadata") or {}, "metadata")
     return LeaseResource(
         metadata=_object_meta(data),
         spec=LeaseSpec(
-            holder_identity=cast(str | None, spec.get("holderIdentity")),
-            acquire_time=_parse_datetime(cast(str | None, spec.get("acquireTime"))),
-            renew_time=_parse_datetime(cast(str | None, spec.get("renewTime"))),
+            holder_identity=_optional_string(
+                spec.get("holderIdentity"), "holderIdentity"
+            ),
+            acquire_time=_parse_datetime(
+                _optional_string(spec.get("acquireTime"), "acquireTime")
+            ),
+            renew_time=_parse_datetime(
+                _optional_string(spec.get("renewTime"), "renewTime")
+            ),
             lease_duration_seconds=int(spec.get("leaseDurationSeconds") or 0),
             lease_transitions=int(spec.get("leaseTransitions") or 0),
         ),
-        resource_version=cast(str | None, metadata.get("resourceVersion")),
+        resource_version=_optional_string(
+            metadata.get("resourceVersion"), "resourceVersion"
+        ),
     )
 
 
 def _object_meta(data: JsonObject) -> ObjectMeta:
-    metadata = cast(JsonObject, data["metadata"])
+    metadata = _required_object(data["metadata"], "metadata")
     return ObjectMeta(
         name=str(metadata["name"]),
         namespace=str(metadata["namespace"]),
-        labels=cast(Mapping[str, str], metadata.get("labels") or {}),
-        annotations=cast(Mapping[str, str], metadata.get("annotations") or {}),
+        labels=_string_mapping(metadata.get("labels") or {}, "metadata.labels"),
+        annotations=_string_mapping(
+            metadata.get("annotations") or {}, "metadata.annotations"
+        ),
         deletion_timestamp=_parse_datetime(
-            cast(str | None, metadata.get("deletionTimestamp"))
+            _optional_string(metadata.get("deletionTimestamp"), "deletionTimestamp")
         ),
     )
 
