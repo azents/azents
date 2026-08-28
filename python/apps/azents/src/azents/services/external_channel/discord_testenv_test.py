@@ -108,6 +108,7 @@ async def test_gateway_invalid_session_selects_resume_or_fresh_identify(
             interactions_callback_selector_hash="selector-hash",
             handle_event=AsyncMock(),
             handle_lifecycle=lifecycle,
+            load_typing_targets=AsyncMock(return_value=()),
         )
 
     assert resume_attempts == expected_resume_attempts
