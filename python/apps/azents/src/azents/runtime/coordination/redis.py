@@ -23,6 +23,8 @@ from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeConnectionRecord,
     RuntimeCoordinationTarget,
+    RuntimeFencedMutationResult,
+    RuntimeFencedMutationStatus,
     RuntimeOperationMetadata,
     RuntimeOperationReplyAppend,
     RuntimeOperationStatus,
@@ -38,10 +40,14 @@ from azents.runtime.coordination.data import (
 _BUSYGROUP_PREFIX = "BUSYGROUP"
 _PAYLOAD_FIELD = "payload"
 _DEFAULT_STREAM_TTL_SECONDS = 60 * 60
-_INCREMENT_PERSIST_CONNECTION_GENERATION_SCRIPT = """
+_REGISTER_CONNECTION_SCRIPT = """
 local generation = redis.call('INCR', KEYS[1])
 redis.call('PERSIST', KEYS[1])
-return generation
+local record = cjson.decode(ARGV[1])
+record['generation'] = generation
+local encoded = cjson.encode(record)
+redis.call('SET', KEYS[2], encoded, 'EX', tonumber(ARGV[2]))
+return encoded
 """
 _GENERATION_FENCED_SET_CONNECTION_SCRIPT = """
 local raw = redis.call('GET', KEYS[1])
@@ -83,6 +89,227 @@ return 1
 _SYSTEM_METRICS_RETENTION_SECONDS = 3600
 _SYSTEM_METRICS_MAX_SAMPLES = 60
 
+_APPEND_OPERATION_REQUEST_IF_CONNECTION_CURRENT_SCRIPT = """
+local connection_raw = redis.call('GET', KEYS[1])
+if not connection_raw then
+  return {'connection_missing'}
+end
+local connection = cjson.decode(connection_raw)
+if tonumber(connection['generation']) ~= tonumber(ARGV[1]) then
+  return {'stale_generation'}
+end
+local proposed = cjson.decode(ARGV[2])
+local envelope = cjson.decode(ARGV[4])
+if connection['kind'] ~= proposed['target']
+  or connection['subject_id'] ~= proposed['target_subject_id']
+  or tonumber(proposed['generation']) ~= tonumber(ARGV[1])
+  or proposed['request_id'] ~= envelope['request_id']
+  or proposed['runtime_id'] ~= envelope['runtime_id']
+  or proposed['target'] ~= envelope['target']
+  or tonumber(proposed['generation']) ~= tonumber(envelope['generation'])
+  or proposed['operation_type'] ~= envelope['operation_type']
+  or proposed['reply_stream_id'] ~= envelope['reply_stream_id']
+  or proposed['deadline_at'] ~= envelope['deadline_at']
+  or proposed['body_stream_id'] ~= envelope['body_stream_id']
+  or proposed['status'] ~= 'active'
+  or proposed['request_cursor'] ~= cjson.null then
+  return {'operation_rejected'}
+end
+local current = redis.call('GET', KEYS[2])
+if current then
+  local existing = cjson.decode(current)
+  if existing['status'] == 'final'
+    or existing['request_id'] ~= proposed['request_id']
+    or existing['runtime_id'] ~= proposed['runtime_id']
+    or existing['target'] ~= proposed['target']
+    or existing['target_subject_id'] ~= proposed['target_subject_id']
+    or tonumber(existing['generation']) ~= tonumber(proposed['generation'])
+    or existing['operation_type'] ~= proposed['operation_type']
+    or existing['deadline_at'] ~= proposed['deadline_at']
+    or existing['transfer_id'] ~= proposed['transfer_id']
+    or existing['transfer_attempt_id'] ~= proposed['transfer_attempt_id']
+    or existing['transfer_dispatch_id'] ~= proposed['transfer_dispatch_id']
+    or existing['transfer_direction'] ~= proposed['transfer_direction']
+    or existing['request_stream_id'] ~= proposed['request_stream_id']
+    or existing['reply_stream_id'] ~= proposed['reply_stream_id']
+    or existing['body_stream_id'] ~= proposed['body_stream_id'] then
+    return {'operation_rejected'}
+  end
+  if existing['request_cursor']
+    and existing['request_cursor'] ~= cjson.null then
+    return {'applied', current}
+  end
+  proposed = existing
+end
+local cursor = redis.call('XADD', KEYS[3], '*', 'payload', ARGV[4])
+proposed['request_cursor'] = cursor
+local encoded = cjson.encode(proposed)
+if ARGV[3] ~= '' then
+  redis.call('SET', KEYS[2], encoded, 'EX', tonumber(ARGV[3]))
+else
+  redis.call('SET', KEYS[2], encoded)
+end
+if ARGV[5] ~= '' then
+  redis.call('EXPIRE', KEYS[3], tonumber(ARGV[5]))
+end
+return {'applied', encoded}
+"""
+
+_REQUEST_OPERATION_CANCEL_IF_CONNECTION_CURRENT_SCRIPT = """
+local connection_raw = redis.call('GET', KEYS[1])
+if not connection_raw then
+  return {'connection_missing'}
+end
+local connection = cjson.decode(connection_raw)
+if tonumber(connection['generation']) ~= tonumber(ARGV[1]) then
+  return {'stale_generation'}
+end
+local current = redis.call('GET', KEYS[2])
+if not current then
+  return {'operation_rejected'}
+end
+local operation = cjson.decode(current)
+local envelope = cjson.decode(ARGV[5])
+if connection['kind'] ~= ARGV[4]
+  or connection['subject_id'] ~= ARGV[2]
+  or operation['status'] == 'final'
+  or operation['status'] == 'cancel_requested'
+  or operation['target_subject_id'] ~= ARGV[2]
+  or tonumber(operation['generation']) ~= tonumber(ARGV[1])
+  or operation['runtime_id'] ~= ARGV[3]
+  or operation['target'] ~= ARGV[4]
+  or operation['request_stream_id'] ~= ARGV[7]
+  or envelope['runtime_id'] ~= operation['runtime_id']
+  or envelope['target'] ~= operation['target']
+  or tonumber(envelope['generation']) ~= tonumber(operation['generation'])
+  or (envelope['operation_type'] ~= 'operation.cancel'
+    and envelope['operation_type'] ~= 'file.transfer.cancel.v1')
+  or envelope['payload']['operation_id'] ~= operation['operation_id']
+  or envelope['reply_stream_id'] ~= operation['reply_stream_id']
+  or envelope['deadline_at'] ~= operation['deadline_at']
+  or envelope['body_stream_id'] ~= cjson.null then
+  return {'operation_rejected'}
+end
+redis.call('XADD', KEYS[3], '*', 'payload', ARGV[5])
+operation['status'] = 'cancel_requested'
+operation['updated_at'] = ARGV[6]
+operation['cancel_requested_at'] = ARGV[6]
+local ttl = redis.call('TTL', KEYS[2])
+local encoded = cjson.encode(operation)
+if ttl and ttl > 0 then
+  redis.call('SET', KEYS[2], encoded, 'EX', ttl)
+else
+  redis.call('SET', KEYS[2], encoded)
+end
+if ARGV[8] ~= '' then
+  redis.call('EXPIRE', KEYS[3], tonumber(ARGV[8]))
+end
+return {'applied', encoded}
+"""
+
+_TRY_START_OPERATION_IF_CONNECTION_CURRENT_SCRIPT = """
+local connection_raw = redis.call('GET', KEYS[1])
+if not connection_raw then
+  return {'connection_missing'}
+end
+local connection = cjson.decode(connection_raw)
+if tonumber(connection['generation']) ~= tonumber(ARGV[1]) then
+  return {'stale_generation'}
+end
+local current = redis.call('GET', KEYS[2])
+if not current then
+  return {'operation_rejected'}
+end
+local operation = cjson.decode(current)
+if connection['kind'] ~= ARGV[4]
+  or connection['subject_id'] ~= ARGV[2]
+  or operation['status'] ~= 'active'
+  or operation['target_subject_id'] ~= ARGV[2]
+  or tonumber(operation['generation']) ~= tonumber(ARGV[1])
+  or operation['runtime_id'] ~= ARGV[3]
+  or operation['target'] ~= ARGV[4] then
+  return {'operation_rejected'}
+end
+operation['status'] = 'running'
+operation['updated_at'] = ARGV[5]
+local ttl = redis.call('TTL', KEYS[2])
+local encoded = cjson.encode(operation)
+if ttl and ttl > 0 then
+  redis.call('SET', KEYS[2], encoded, 'EX', ttl)
+else
+  redis.call('SET', KEYS[2], encoded)
+end
+return {'applied', encoded}
+"""
+
+_APPEND_REPLY_IF_CONNECTION_CURRENT_SCRIPT = """
+local connection_raw = redis.call('GET', KEYS[1])
+if not connection_raw then
+  return {'connection_missing'}
+end
+local connection = cjson.decode(connection_raw)
+local event = cjson.decode(ARGV[2])
+if tonumber(connection['generation']) ~= tonumber(ARGV[1])
+  or tonumber(event['generation']) ~= tonumber(ARGV[1]) then
+  return {'stale_generation'}
+end
+local cursor = redis.call('XADD', KEYS[2], '*', 'payload', ARGV[2])
+if ARGV[3] ~= '' then
+  redis.call('EXPIRE', KEYS[2], tonumber(ARGV[3]))
+end
+return {'applied', cursor}
+"""
+
+_APPEND_OPERATION_REPLY_IF_CONNECTION_CURRENT_SCRIPT = """
+local connection_raw = redis.call('GET', KEYS[1])
+if not connection_raw then
+  return {'connection_missing'}
+end
+local connection = cjson.decode(connection_raw)
+if tonumber(connection['generation']) ~= tonumber(ARGV[1]) then
+  return {'stale_generation'}
+end
+local current = redis.call('GET', KEYS[2])
+if not current then
+  return {'operation_rejected'}
+end
+local operation = cjson.decode(current)
+local event = cjson.decode(ARGV[6])
+if connection['kind'] ~= ARGV[4]
+  or connection['subject_id'] ~= ARGV[2]
+  or operation['status'] == 'final'
+  or operation['target_subject_id'] ~= ARGV[2]
+  or tonumber(operation['generation']) ~= tonumber(ARGV[1])
+  or operation['runtime_id'] ~= ARGV[3]
+  or operation['target'] ~= ARGV[4]
+  or operation['reply_stream_id'] ~= ARGV[5]
+  or event['request_id'] ~= operation['request_id']
+  or event['runtime_id'] ~= operation['runtime_id']
+  or tonumber(event['generation']) ~= tonumber(operation['generation']) then
+  return {'operation_rejected'}
+end
+local cursor = redis.call('XADD', KEYS[3], '*', 'payload', ARGV[6])
+operation['updated_at'] = ARGV[8]
+operation['last_event_at'] = ARGV[8]
+if ARGV[9] ~= '' then
+  operation['status'] = ARGV[7]
+  operation['final_event_cursor'] = cursor
+else
+  operation['last_heartbeat_at'] = ARGV[8]
+end
+local ttl = redis.call('TTL', KEYS[2])
+local encoded = cjson.encode(operation)
+if ttl and ttl > 0 then
+  redis.call('SET', KEYS[2], encoded, 'EX', ttl)
+else
+  redis.call('SET', KEYS[2], encoded)
+end
+if ARGV[10] ~= '' then
+  redis.call('EXPIRE', KEYS[3], tonumber(ARGV[10]))
+end
+return {'applied', cursor, encoded}
+"""
+
 
 @dataclasses.dataclass(frozen=True)
 class _RedisStreamPayload:
@@ -98,6 +325,14 @@ class _RedisStreamEntry:
 
     cursor: object
     fields: Mapping[object, object]
+
+
+@dataclasses.dataclass(frozen=True)
+class _RedisFencedResponse:
+    """Decoded Redis response for one fenced mutation."""
+
+    status: RuntimeFencedMutationStatus
+    values: tuple[object, ...]
 
 
 # Transition ACTIVE -> RUNNING when the stored status is still active.
@@ -203,14 +438,20 @@ local proposed = cjson.decode(ARGV[1])
 if existing['status'] == 'final' then
   return nil
 end
-if existing['runtime_id'] ~= proposed['runtime_id']
+if existing['request_id'] ~= proposed['request_id']
+  or existing['runtime_id'] ~= proposed['runtime_id']
+  or existing['target'] ~= proposed['target']
+  or existing['target_subject_id'] ~= proposed['target_subject_id']
   or existing['generation'] ~= proposed['generation']
   or existing['operation_type'] ~= proposed['operation_type']
   or existing['deadline_at'] ~= proposed['deadline_at']
   or existing['transfer_id'] ~= proposed['transfer_id']
   or existing['transfer_attempt_id'] ~= proposed['transfer_attempt_id']
   or existing['transfer_dispatch_id'] ~= proposed['transfer_dispatch_id']
-  or existing['transfer_direction'] ~= proposed['transfer_direction'] then
+  or existing['transfer_direction'] ~= proposed['transfer_direction']
+  or existing['request_stream_id'] ~= proposed['request_stream_id']
+  or existing['reply_stream_id'] ~= proposed['reply_stream_id']
+  or existing['body_stream_id'] ~= proposed['body_stream_id'] then
   return nil
 end
 return current
@@ -231,6 +472,193 @@ class RedisRuntimeCoordinationStore:
         self._redis = redis
         self._key_prefix = key_prefix
         self._stream_ttl_seconds = stream_ttl_seconds
+
+    async def append_operation_request_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        metadata: RuntimeOperationMetadata,
+        envelope: RuntimeRequestEnvelope,
+        ttl_seconds: int | None,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
+        """Atomically fence, create operation metadata, and append its request."""
+        raw = await self._eval(
+            _APPEND_OPERATION_REQUEST_IF_CONNECTION_CURRENT_SCRIPT,
+            3,
+            self._connection_key(connection_kind, connection_subject_id),
+            self._operation_key(metadata.operation_id),
+            self._stream_key("request", metadata.request_stream_id),
+            connection_generation,
+            _operation_to_json(metadata),
+            "" if ttl_seconds is None else str(ttl_seconds),
+            _envelope_to_json(envelope),
+            self._stream_ttl_seconds,
+        )
+        response = _redis_fenced_response(raw)
+        value = (
+            _operation_from_json(_decode_text(response.values[0]))
+            if response.status is RuntimeFencedMutationStatus.APPLIED
+            else None
+        )
+        return RuntimeFencedMutationResult(status=response.status, value=value)
+
+    async def request_operation_cancel_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        operation_id: str,
+        expected_runtime_id: str,
+        expected_target: RuntimeCoordinationTarget,
+        envelope: RuntimeRequestEnvelope,
+        updated_at: datetime,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
+        """Atomically fence, mark one operation cancelled, and append the request."""
+        connection = await self.get_connection(
+            kind=connection_kind,
+            subject_id=connection_subject_id,
+        )
+        if connection is None:
+            return RuntimeFencedMutationResult(
+                status=RuntimeFencedMutationStatus.CONNECTION_MISSING,
+                value=None,
+            )
+        if connection.generation != connection_generation:
+            return RuntimeFencedMutationResult(
+                status=RuntimeFencedMutationStatus.STALE_GENERATION,
+                value=None,
+            )
+        operation = await self.get_operation(operation_id)
+        if operation is None:
+            return RuntimeFencedMutationResult(
+                status=RuntimeFencedMutationStatus.OPERATION_REJECTED,
+                value=None,
+            )
+        raw = await self._eval(
+            _REQUEST_OPERATION_CANCEL_IF_CONNECTION_CURRENT_SCRIPT,
+            3,
+            self._connection_key(connection_kind, connection_subject_id),
+            self._operation_key(operation_id),
+            self._stream_key("request", operation.request_stream_id),
+            connection_generation,
+            connection_subject_id,
+            expected_runtime_id,
+            expected_target.value,
+            _envelope_to_json(envelope),
+            _datetime_to_json(updated_at) or "",
+            operation.request_stream_id,
+            self._stream_ttl_seconds,
+        )
+        response = _redis_fenced_response(raw)
+        value = (
+            _operation_from_json(_decode_text(response.values[0]))
+            if response.status is RuntimeFencedMutationStatus.APPLIED
+            else None
+        )
+        return RuntimeFencedMutationResult(status=response.status, value=value)
+
+    async def try_start_operation_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        operation_id: str,
+        expected_runtime_id: str,
+        expected_target: RuntimeCoordinationTarget,
+        updated_at: datetime,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
+        """Atomically fence and transition one exact operation to running."""
+        raw = await self._eval(
+            _TRY_START_OPERATION_IF_CONNECTION_CURRENT_SCRIPT,
+            2,
+            self._connection_key(connection_kind, connection_subject_id),
+            self._operation_key(operation_id),
+            connection_generation,
+            connection_subject_id,
+            expected_runtime_id,
+            expected_target.value,
+            _datetime_to_json(updated_at) or "",
+        )
+        response = _redis_fenced_response(raw)
+        value = (
+            _operation_from_json(_decode_text(response.values[0]))
+            if response.status is RuntimeFencedMutationStatus.APPLIED
+            else None
+        )
+        return RuntimeFencedMutationResult(status=response.status, value=value)
+
+    async def append_reply_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        stream_id: str,
+        event: RuntimeReplyEvent,
+    ) -> RuntimeFencedMutationResult[str]:
+        """Atomically fence and append a reply without operation metadata."""
+        raw = await self._eval(
+            _APPEND_REPLY_IF_CONNECTION_CURRENT_SCRIPT,
+            2,
+            self._connection_key(connection_kind, connection_subject_id),
+            self._stream_key("reply", stream_id),
+            connection_generation,
+            _reply_event_to_json(event),
+            self._stream_ttl_seconds,
+        )
+        response = _redis_fenced_response(raw)
+        value = (
+            _decode_text(response.values[0])
+            if response.status is RuntimeFencedMutationStatus.APPLIED
+            else None
+        )
+        return RuntimeFencedMutationResult(status=response.status, value=value)
+
+    async def append_operation_reply_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        operation_id: str,
+        expected_runtime_id: str,
+        expected_target: RuntimeCoordinationTarget,
+        stream_id: str,
+        event: RuntimeReplyEvent,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationReplyAppend]:
+        """Atomically fence, append a reply, and mutate one exact operation."""
+        next_status = RuntimeOperationStatus.FINAL.value if event.final else ""
+        raw = await self._eval(
+            _APPEND_OPERATION_REPLY_IF_CONNECTION_CURRENT_SCRIPT,
+            3,
+            self._connection_key(connection_kind, connection_subject_id),
+            self._operation_key(operation_id),
+            self._stream_key("reply", stream_id),
+            connection_generation,
+            connection_subject_id,
+            expected_runtime_id,
+            expected_target.value,
+            stream_id,
+            _reply_event_to_json(event),
+            next_status,
+            _datetime_to_json(event.created_at) or "",
+            "1" if event.final else "",
+            self._stream_ttl_seconds,
+        )
+        response = _redis_fenced_response(raw)
+        value = (
+            RuntimeOperationReplyAppend(
+                cursor=_decode_text(response.values[0]),
+                metadata=_operation_from_json(_decode_text(response.values[1])),
+            )
+            if response.status is RuntimeFencedMutationStatus.APPLIED
+            else None
+        )
+        return RuntimeFencedMutationResult(status=response.status, value=value)
 
     async def append_request(
         self,
@@ -541,33 +969,26 @@ class RedisRuntimeCoordinationStore:
         metadata: dict[str, JsonValue],
     ) -> RuntimeConnectionRecord:
         """Register a current connection and issue a new generation."""
-        generation_key = self._connection_generation_key(kind, subject_id)
-        generation = int(
-            _decode_text(
-                await self._eval(
-                    _INCREMENT_PERSIST_CONNECTION_GENERATION_SCRIPT,
-                    1,
-                    generation_key,
-                )
-            )
-        )
         record = RuntimeConnectionRecord(
             kind=kind,
             subject_id=subject_id,
             connection_id=connection_id,
             owner_replica_id=owner_replica_id,
-            generation=generation,
+            generation=0,
             connected_at=connected_at,
             heartbeat_at=heartbeat_at,
             expires_at=heartbeat_at + timedelta(seconds=ttl_seconds),
             metadata=metadata,
         )
-        await self._redis.set(
+        raw = await self._eval(
+            _REGISTER_CONNECTION_SCRIPT,
+            2,
+            self._connection_generation_key(kind, subject_id),
             self._connection_key(kind, subject_id),
             _connection_to_json(record),
-            ex=ttl_seconds,
+            ttl_seconds,
         )
-        return record
+        return _connection_from_json(_decode_text(raw))
 
     async def get_connection(
         self,
@@ -837,6 +1258,17 @@ def _redis_sequence(value: object) -> list[object]:
     return list(value)
 
 
+def _redis_fenced_response(value: object) -> _RedisFencedResponse:
+    """Decode a fenced mutation response."""
+    items = _redis_sequence(value)
+    if not items:
+        raise RuntimeError("Redis fenced mutation response is empty")
+    return _RedisFencedResponse(
+        status=RuntimeFencedMutationStatus(_decode_text(items[0])),
+        values=tuple(items[1:]),
+    )
+
+
 def _payload_field[KeyT](fields: Mapping[KeyT, object]) -> str:
     for expected_key in (_PAYLOAD_FIELD, _PAYLOAD_FIELD.encode()):
         for key, raw in fields.items():
@@ -968,8 +1400,10 @@ def _operation_to_json(metadata: RuntimeOperationMetadata) -> str:
     return _json_dumps(
         {
             "operation_id": metadata.operation_id,
+            "request_id": metadata.request_id,
             "runtime_id": metadata.runtime_id,
             "target": metadata.target.value,
+            "target_subject_id": metadata.target_subject_id,
             "generation": metadata.generation,
             "operation_type": metadata.operation_type,
             "transfer_id": metadata.transfer_id,
@@ -981,6 +1415,7 @@ def _operation_to_json(metadata: RuntimeOperationMetadata) -> str:
                 else None
             ),
             "request_stream_id": metadata.request_stream_id,
+            "request_cursor": metadata.request_cursor,
             "reply_stream_id": metadata.reply_stream_id,
             "status": metadata.status.value,
             "created_at": _datetime_to_json(metadata.created_at),
@@ -999,8 +1434,10 @@ def _operation_from_json(raw: str) -> RuntimeOperationMetadata:
     payload = _json_loads(raw)
     return RuntimeOperationMetadata(
         operation_id=str(payload["operation_id"]),
+        request_id=str(payload["request_id"]),
         runtime_id=str(payload["runtime_id"]),
         target=RuntimeCoordinationTarget(str(payload["target"])),
+        target_subject_id=str(payload["target_subject_id"]),
         generation=int(payload["generation"]),
         operation_type=str(payload["operation_type"]),
         transfer_id=_optional_str(payload.get("transfer_id")),
@@ -1012,6 +1449,7 @@ def _operation_from_json(raw: str) -> RuntimeOperationMetadata:
             else None
         ),
         request_stream_id=str(payload["request_stream_id"]),
+        request_cursor=_optional_str(payload.get("request_cursor")),
         reply_stream_id=str(payload["reply_stream_id"]),
         status=RuntimeOperationStatus(str(payload["status"])),
         created_at=_required_datetime(payload["created_at"]),

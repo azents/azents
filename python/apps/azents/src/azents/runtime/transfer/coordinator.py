@@ -12,6 +12,7 @@ from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeConnectionRecord,
     RuntimeCoordinationTarget,
+    RuntimeFencedMutationStatus,
     RuntimeOperationMetadata,
     RuntimeOperationStatus,
     RuntimeOperationTransferDirection,
@@ -788,8 +789,10 @@ class RuntimeTransferCoordinator:
         )
         metadata = RuntimeOperationMetadata(
             operation_id=record.admission.operation_id,
+            request_id=record.dispatch_request_id,
             runtime_id=record.admission.runtime_id,
             target=RuntimeCoordinationTarget.RUNNER,
+            target_subject_id=record.admission.runtime_id,
             generation=connection.generation,
             operation_type=_TRANSFER_OPERATION_TYPE,
             transfer_id=record.admission.transfer_id,
@@ -799,6 +802,7 @@ class RuntimeTransferCoordinator:
                 record.admission.direction.value
             ),
             request_stream_id=request_stream_id,
+            request_cursor=None,
             reply_stream_id=reply_stream_id,
             status=RuntimeOperationStatus.ACTIVE,
             created_at=self._now(),
@@ -810,12 +814,6 @@ class RuntimeTransferCoordinator:
             cancel_requested_at=None,
             final_event_cursor=None,
         )
-        ensured = await self._coordination_store.ensure_operation_metadata(
-            metadata,
-            ttl_seconds=_operation_ttl_seconds(metadata),
-        )
-        if ensured is None:
-            raise RuntimeTransferDispatchError("Transfer operation metadata conflicts")
         deliverable = await self._state_store.mark_dispatch_deliverable(
             record.admission.transfer_id,
             attempt_id=record.admission.attempt_id,
@@ -831,10 +829,36 @@ class RuntimeTransferCoordinator:
         if deliverable.dispatch_status.value == "bound":
             raise RuntimeTransferDispatchError("Transfer dispatch is not deliverable")
         if deliverable.dispatch_status.value == "deliverable":
-            await self._coordination_store.append_request(
-                request_stream_id,
-                _intent_envelope(deliverable, reply_stream_id),
+            append_request = (
+                self._coordination_store.append_operation_request_if_connection_current
             )
+            appended = await append_request(
+                connection_kind=RuntimeConnectionKind.RUNNER,
+                connection_subject_id=record.admission.runtime_id,
+                connection_generation=connection.generation,
+                metadata=metadata,
+                envelope=_intent_envelope(deliverable, reply_stream_id),
+                ttl_seconds=_operation_ttl_seconds(metadata),
+            )
+            if appended.status in {
+                RuntimeFencedMutationStatus.CONNECTION_MISSING,
+                RuntimeFencedMutationStatus.STALE_GENERATION,
+            }:
+                await self.fence_generation(
+                    deliverable,
+                    missing_connection=(
+                        appended.status
+                        is RuntimeFencedMutationStatus.CONNECTION_MISSING
+                    ),
+                )
+                raise RuntimeTransferDispatchError(
+                    "Runner generation changed during transfer dispatch"
+                )
+            if appended.status is RuntimeFencedMutationStatus.OPERATION_REJECTED:
+                raise RuntimeTransferDispatchError(
+                    "Transfer operation metadata conflicts"
+                )
+            assert appended.value is not None
         dispatch_id = deliverable.dispatch_id
         if dispatch_id is None:
             raise RuntimeTransferDispatchError("Transfer dispatch identity is missing")
@@ -898,15 +922,15 @@ class RuntimeTransferCoordinator:
             or record.accepted_runner_generation is None
         ):
             return
-        await self._coordination_store.update_operation_status(
-            operation.operation_id,
-            status=RuntimeOperationStatus.CANCEL_REQUESTED,
+        await self._coordination_store.request_operation_cancel_if_connection_current(
+            connection_kind=RuntimeConnectionKind.RUNNER,
+            connection_subject_id=record.admission.runtime_id,
+            connection_generation=record.accepted_runner_generation,
+            operation_id=operation.operation_id,
+            expected_runtime_id=record.admission.runtime_id,
+            expected_target=RuntimeCoordinationTarget.RUNNER,
+            envelope=_cancel_envelope(record, operation, reason),
             updated_at=self._now(),
-            final_event_cursor=None,
-        )
-        await self._coordination_store.append_request(
-            operation.request_stream_id,
-            _cancel_envelope(record, operation, reason),
         )
 
     async def _append_upload_success_reply(

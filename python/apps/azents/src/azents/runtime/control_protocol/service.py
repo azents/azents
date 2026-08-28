@@ -33,6 +33,7 @@ from azents.runtime.coordination.data import (
     JsonValue,
     RuntimeConnectionKind,
     RuntimeCoordinationTarget,
+    RuntimeFencedMutationStatus,
     RuntimeOperationMetadata,
     RuntimeOperationStatus,
     RuntimeReplyEvent,
@@ -353,6 +354,8 @@ class RuntimeControlProtocolService:
             },
         }
         return await self._append_request(
+            connection_kind=RuntimeConnectionKind.PROVIDER,
+            connection_subject_id=command.provider_id,
             request_id=request_id,
             runtime_id=command.runtime_id,
             target=RuntimeCoordinationTarget.PROVIDER,
@@ -407,6 +410,8 @@ class RuntimeControlProtocolService:
             "payload": operation.payload,
         }
         return await self._append_request(
+            connection_kind=RuntimeConnectionKind.RUNNER,
+            connection_subject_id=operation.runtime_id,
             request_id=request_id,
             runtime_id=operation.runtime_id,
             target=RuntimeCoordinationTarget.RUNNER,
@@ -455,17 +460,8 @@ class RuntimeControlProtocolService:
             or operation.status is RuntimeOperationStatus.FINAL
             or operation.runtime_id != runtime_id
             or operation.target is not RuntimeCoordinationTarget.RUNNER
-        ):
-            return None
-        cancellation = await self._store.update_operation_status(
-            operation_id,
-            status=RuntimeOperationStatus.CANCEL_REQUESTED,
-            updated_at=created_at,
-            final_event_cursor=None,
-        )
-        if (
-            cancellation is None
-            or cancellation.status is not RuntimeOperationStatus.CANCEL_REQUESTED
+            or operation.target_subject_id != runtime_id
+            or operation.generation != runner_generation
         ):
             return None
         request_id = self._request_id_factory()
@@ -480,7 +476,28 @@ class RuntimeControlProtocolService:
             deadline_at=operation.deadline_at,
             body_stream_id=None,
         )
-        await self._store.append_request(operation.request_stream_id, envelope)
+        cancellation = await self._store.request_operation_cancel_if_connection_current(
+            connection_kind=RuntimeConnectionKind.RUNNER,
+            connection_subject_id=runtime_id,
+            connection_generation=runner_generation,
+            operation_id=operation_id,
+            expected_runtime_id=runtime_id,
+            expected_target=RuntimeCoordinationTarget.RUNNER,
+            envelope=envelope,
+            updated_at=created_at,
+        )
+        if (
+            failure := _connection_fence_failure(
+                cancellation.status,
+                target=RuntimeCoordinationTarget.RUNNER,
+                subject_id=runtime_id,
+                generation=runner_generation,
+            )
+        ) is not None:
+            return failure
+        if cancellation.status is RuntimeFencedMutationStatus.OPERATION_REJECTED:
+            return None
+        assert cancellation.value is not None
         return RuntimeDispatchResult(
             operation_id=operation_id,
             request_id=request_id,
@@ -606,21 +623,54 @@ class RuntimeControlProtocolService:
                 generation=event.generation,
             )
         if operation_id is not None:
-            appended = await self._store.append_reply_for_operation(
-                reply_stream_id,
-                event,
+            mutation = await self._store.append_operation_reply_if_connection_current(
+                connection_kind=kind,
+                connection_subject_id=expected_subject_id,
+                connection_generation=event.generation,
                 operation_id=operation_id,
+                expected_runtime_id=event.runtime_id,
+                expected_target=expected_target,
+                stream_id=reply_stream_id,
+                event=event,
             )
-            if appended is None:
+            if (
+                failure := _connection_fence_failure(
+                    mutation.status,
+                    target=expected_target,
+                    subject_id=expected_subject_id,
+                    generation=event.generation,
+                )
+            ) is not None:
+                return failure
+            if mutation.status is RuntimeFencedMutationStatus.OPERATION_REJECTED:
                 return None
+            assert mutation.value is not None
             return RuntimeReplyAppendResult(
-                cursor=appended.cursor,
+                cursor=mutation.value.cursor,
                 final=event.final,
                 operation_id=operation_id,
             )
-        cursor = await self._store.append_reply(reply_stream_id, event)
+        mutation = await self._store.append_reply_if_connection_current(
+            connection_kind=kind,
+            connection_subject_id=expected_subject_id,
+            connection_generation=event.generation,
+            stream_id=reply_stream_id,
+            event=event,
+        )
+        if (
+            failure := _connection_fence_failure(
+                mutation.status,
+                target=expected_target,
+                subject_id=expected_subject_id,
+                generation=event.generation,
+            )
+        ) is not None:
+            return failure
+        if mutation.status is RuntimeFencedMutationStatus.OPERATION_REJECTED:
+            return None
+        assert mutation.value is not None
         return RuntimeReplyAppendResult(
-            cursor=cursor,
+            cursor=mutation.value,
             final=event.final,
             operation_id=operation_id,
         )
@@ -667,6 +717,8 @@ class RuntimeControlProtocolService:
     async def _append_request(
         self,
         *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
         request_id: str,
         runtime_id: str,
         target: RuntimeCoordinationTarget,
@@ -678,7 +730,11 @@ class RuntimeControlProtocolService:
         body_stream_id: str | None,
         deadline_at: datetime | None,
         created_at: datetime,
-    ) -> RuntimeDispatchResult:
+    ) -> (
+        RuntimeDispatchResult
+        | RuntimeProtocolRouteUnavailable
+        | RuntimeProtocolStaleGeneration
+    ):
         envelope = RuntimeRequestEnvelope(
             request_id=request_id,
             runtime_id=runtime_id,
@@ -691,11 +747,16 @@ class RuntimeControlProtocolService:
             body_stream_id=body_stream_id,
         )
         operation_id = _operation_id(request_id)
-        await self._store.put_operation(
-            RuntimeOperationMetadata(
+        mutation = await self._store.append_operation_request_if_connection_current(
+            connection_kind=connection_kind,
+            connection_subject_id=connection_subject_id,
+            connection_generation=generation,
+            metadata=RuntimeOperationMetadata(
                 operation_id=operation_id,
+                request_id=request_id,
                 runtime_id=runtime_id,
                 target=target,
+                target_subject_id=connection_subject_id,
                 generation=generation,
                 operation_type=operation_type,
                 transfer_id=None,
@@ -703,6 +764,7 @@ class RuntimeControlProtocolService:
                 transfer_dispatch_id=None,
                 transfer_direction=None,
                 request_stream_id=request_stream_id,
+                request_cursor=None,
                 reply_stream_id=reply_stream_id,
                 status=RuntimeOperationStatus.ACTIVE,
                 created_at=created_at,
@@ -714,13 +776,25 @@ class RuntimeControlProtocolService:
                 cancel_requested_at=None,
                 final_event_cursor=None,
             ),
+            envelope=envelope,
             ttl_seconds=_operation_ttl_seconds(
                 created_at=created_at,
                 deadline_at=deadline_at,
                 default_ttl_seconds=self._operation_ttl_seconds,
             ),
         )
-        await self._store.append_request(request_stream_id, envelope)
+        if (
+            failure := _connection_fence_failure(
+                mutation.status,
+                target=target,
+                subject_id=connection_subject_id,
+                generation=generation,
+            )
+        ) is not None:
+            return failure
+        if mutation.status is RuntimeFencedMutationStatus.OPERATION_REJECTED:
+            raise RuntimeError("Runtime operation request identity was rejected")
+        assert mutation.value is not None
         return RuntimeDispatchResult(
             operation_id=operation_id,
             request_id=request_id,
@@ -785,3 +859,22 @@ def _connection_kind(target: RuntimeCoordinationTarget) -> RuntimeConnectionKind
     if target == RuntimeCoordinationTarget.PROVIDER:
         return RuntimeConnectionKind.PROVIDER
     return RuntimeConnectionKind.RUNNER
+
+
+def _connection_fence_failure(
+    status: RuntimeFencedMutationStatus,
+    *,
+    target: RuntimeCoordinationTarget,
+    subject_id: str,
+    generation: int,
+) -> RuntimeProtocolRouteUnavailable | RuntimeProtocolStaleGeneration | None:
+    """Map one fenced store result to the public protocol failure."""
+    if status is RuntimeFencedMutationStatus.CONNECTION_MISSING:
+        return RuntimeProtocolRouteUnavailable(target=target, subject_id=subject_id)
+    if status is RuntimeFencedMutationStatus.STALE_GENERATION:
+        return RuntimeProtocolStaleGeneration(
+            target=target,
+            subject_id=subject_id,
+            generation=generation,
+        )
+    return None

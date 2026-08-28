@@ -9,6 +9,8 @@ from azents.runtime.coordination.data import (
     RuntimeBodyChunkRecord,
     RuntimeConnectionKind,
     RuntimeConnectionRecord,
+    RuntimeCoordinationTarget,
+    RuntimeFencedMutationResult,
     RuntimeOperationMetadata,
     RuntimeOperationReplyAppend,
     RuntimeOperationStatus,
@@ -22,6 +24,75 @@ from azents.runtime.coordination.data import (
 
 class RuntimeCoordinationStore(Protocol):
     """Short-lived coordination state shared by Control replicas."""
+
+    async def append_operation_request_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        metadata: RuntimeOperationMetadata,
+        envelope: RuntimeRequestEnvelope,
+        ttl_seconds: int | None,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
+        """Atomically fence, create operation metadata, and append its request."""
+        ...
+
+    async def request_operation_cancel_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        operation_id: str,
+        expected_runtime_id: str,
+        expected_target: RuntimeCoordinationTarget,
+        envelope: RuntimeRequestEnvelope,
+        updated_at: datetime,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
+        """Atomically fence, mark one operation cancelled, and append the request."""
+        ...
+
+    async def try_start_operation_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        operation_id: str,
+        expected_runtime_id: str,
+        expected_target: RuntimeCoordinationTarget,
+        updated_at: datetime,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
+        """Atomically fence and transition one exact operation to running."""
+        ...
+
+    async def append_reply_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        stream_id: str,
+        event: RuntimeReplyEvent,
+    ) -> RuntimeFencedMutationResult[str]:
+        """Atomically fence and append a reply without operation metadata."""
+        ...
+
+    async def append_operation_reply_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        operation_id: str,
+        expected_runtime_id: str,
+        expected_target: RuntimeCoordinationTarget,
+        stream_id: str,
+        event: RuntimeReplyEvent,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationReplyAppend]:
+        """Atomically fence, append a reply, and mutate one exact operation."""
+        ...
 
     async def append_request(
         self,

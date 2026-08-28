@@ -50,8 +50,8 @@ code_paths:
   - testenv/azents/e2e/src/tests/required/public/test_runtime_profiles.py
   - testenv/azents/e2e/src/tests/web/public/test_runtime_capability_web.py
   - infra/charts/azents/**
-last_verified_at: 2026-08-27
-spec_version: 70
+last_verified_at: 2026-08-28
+spec_version: 71
 ---
 
 # Agent Runtime Control
@@ -267,13 +267,24 @@ within the selected coordination-store instance and is separate from the
 short-lived current-connection TTL. Redis does not expire these counters, and
 the in-memory implementation retains them for its process lifetime, so a
 reconnect cannot reuse a lower generation after a long offline period. Each
-Redis allocation atomically increments the counter and removes a legacy expiry
-that an earlier deployment may have left on the key.
+Redis registration atomically increments the counter, removes a legacy expiry
+that an earlier deployment may have left on the key, and installs that exact
+generation as the current connection. Concurrent registration cannot restore a
+lower generation after a higher generation becomes current.
 
-Generation fencing is enforced before volatile stream messages mutate durable state. Control rejects
-or closes Provider/Runner streams whose inbound message generation differs from the accepted
-registration generation. Durable Provider reports are accepted only when both the Provider stream
-generation and observed desired generation are monotonic relative to the `agent_runtimes` row.
+Generation fencing is enforced atomically with volatile operation mutations. One
+store transaction verifies the current connection generation while it creates
+operation metadata and appends the request. The same rule covers ordered Runner
+cancellation, Runner operation-start authorization, and Provider/Runner-originated
+reply append. Operation metadata retains the exact request ID, target subject,
+generation, request/reply streams, and admitted request cursor. Retrying one exact
+dispatch is idempotent, while a replaced connection cannot create request-less
+metadata, append a cancellation, start work, or finalize an operation.
+
+Control rejects or closes Provider/Runner streams whose inbound message generation
+differs from the accepted registration generation. Durable Provider reports are
+accepted only when both the Provider stream generation and observed desired
+generation are monotonic relative to the `agent_runtimes` row.
 Durable Runner state reports are accepted only when the Runner generation is not older than the row
 generation and any reported configuration evidence names the exact current desired generation,
 positive configuration sequence, and digest. Provider configuration evidence is additionally
@@ -745,6 +756,14 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-28** (spec_version 71) — Made connection registration and
+  operation request admission atomic, bound operation metadata to the exact target
+  subject and request identity, and generation-fenced Runner cancellation/start plus
+  Provider/Runner target replies in both Redis and in-memory coordination stores.
+- **2026-08-26** (spec_version 70) — Kept Provider connection heartbeats independent
+  from serial lifecycle command execution, bounded Provider and Control transport
+  queues, admitted one Provider command at a time, and applied command completion
+  reports exactly once.
 - **2026-08-26** (spec_version 69) — Made current-generation ready Runner evidence the
   data-plane availability authority independently of Provider host-control connectivity
   and future desired-configuration status, retained Provider authority for lifecycle

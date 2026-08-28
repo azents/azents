@@ -52,7 +52,9 @@ from azents.runtime.control_protocol.service import (
 from azents.runtime.coordination.data import (
     JsonValue,
     RuntimeBodyChunkRecord,
+    RuntimeConnectionKind,
     RuntimeCoordinationTarget,
+    RuntimeFencedMutationStatus,
     RuntimeOperationMetadata,
     RuntimeOperationStatus,
     RuntimeReplyEvent,
@@ -522,22 +524,22 @@ class RuntimeRunnerControlGrpcServicer(
                         _error(message.request_id, "RUNNER_IDENTITY_MISMATCH")
                     )
                     return
-                operation = await self._coordination_store.get_operation(
-                    message.operation_start.operation_id
+                start_operation = (
+                    self._coordination_store.try_start_operation_if_connection_current
                 )
-                allowed = False
-                if (
-                    operation is not None
-                    and message.generation == generation
-                    and message.operation_start.runtime_id == runtime_id
-                    and operation.runtime_id == runtime_id
-                    and operation.target is RuntimeCoordinationTarget.RUNNER
-                ):
-                    started = await self._coordination_store.try_start_operation(
-                        message.operation_start.operation_id,
-                        updated_at=datetime.now(UTC),
-                    )
-                    allowed = started is not None
+                started = await start_operation(
+                    connection_kind=RuntimeConnectionKind.RUNNER,
+                    connection_subject_id=runtime_id,
+                    connection_generation=generation,
+                    operation_id=message.operation_start.operation_id,
+                    expected_runtime_id=runtime_id,
+                    expected_target=RuntimeCoordinationTarget.RUNNER,
+                    updated_at=datetime.now(UTC),
+                )
+                allowed = (
+                    started.status is RuntimeFencedMutationStatus.APPLIED
+                    and started.value is not None
+                )
                 await outbound.put(
                     runtime_runner_control_pb2.RunnerControlMessage(
                         request_id=message.request_id,
