@@ -37,10 +37,12 @@ from azents.runtime.control_protocol.service import (
 from azents.runtime.coordination.data import (
     RuntimeConnectionKind,
     RuntimeCoordinationTarget,
+    RuntimeFencedMutationResult,
     RuntimeOperationMetadata,
     RuntimeOperationStatus,
     RuntimeReplyEvent,
     RuntimeReplyEventType,
+    RuntimeRequestEnvelope,
     RuntimeSystemMetricsSample,
 )
 from azents.runtime.coordination.memory import (
@@ -55,14 +57,64 @@ class RecordingTtlStore(InMemoryRuntimeCoordinationStore):
         super().__init__()
         self.last_operation_ttl_seconds: int | None = None
 
-    async def put_operation(
+    async def append_operation_request_if_connection_current(
         self,
-        metadata: RuntimeOperationMetadata,
         *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        metadata: RuntimeOperationMetadata,
+        envelope: RuntimeRequestEnvelope,
         ttl_seconds: int | None,
-    ) -> None:
+    ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
         self.last_operation_ttl_seconds = ttl_seconds
-        await super().put_operation(metadata, ttl_seconds=ttl_seconds)
+        return await super().append_operation_request_if_connection_current(
+            connection_kind=connection_kind,
+            connection_subject_id=connection_subject_id,
+            connection_generation=connection_generation,
+            metadata=metadata,
+            envelope=envelope,
+            ttl_seconds=ttl_seconds,
+        )
+
+
+class ReconnectBeforeAppendStore(InMemoryRuntimeCoordinationStore):
+    """Store that replaces one connection immediately before atomic dispatch."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reconnect_before_next_append = False
+
+    async def append_operation_request_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        metadata: RuntimeOperationMetadata,
+        envelope: RuntimeRequestEnvelope,
+        ttl_seconds: int | None,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationMetadata]:
+        if self.reconnect_before_next_append:
+            self.reconnect_before_next_append = False
+            await self.register_connection(
+                kind=connection_kind,
+                subject_id=connection_subject_id,
+                connection_id="replacement-connection",
+                owner_replica_id="control-b",
+                connected_at=metadata.created_at,
+                heartbeat_at=metadata.created_at,
+                ttl_seconds=60,
+                metadata={},
+            )
+        return await super().append_operation_request_if_connection_current(
+            connection_kind=connection_kind,
+            connection_subject_id=connection_subject_id,
+            connection_generation=connection_generation,
+            metadata=metadata,
+            envelope=envelope,
+            ttl_seconds=ttl_seconds,
+        )
 
 
 @pytest.mark.asyncio
@@ -592,6 +644,63 @@ async def test_dispatch_rejects_missing_and_stale_runner_generation() -> None:
     assert missing.subject_id == "runtime-1"
     assert isinstance(stale, RuntimeProtocolStaleGeneration)
     assert stale.generation == 0
+
+
+@pytest.mark.asyncio
+async def test_dispatch_rejects_generation_replaced_during_atomic_append() -> None:
+    """A reconnect between the initial lookup and append cannot strand work."""
+    store = ReconnectBeforeAppendStore()
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "req-race",
+    )
+    now = _now()
+    runner = await service.register_runner(_runner_registration(), registered_at=now)
+    store.reconnect_before_next_append = True
+
+    result = await service.dispatch_runner_operation(
+        _runner_operation(generation=runner.generation, now=now),
+        created_at=now,
+    )
+
+    assert isinstance(result, RuntimeProtocolStaleGeneration)
+    assert result.generation == runner.generation
+    assert await store.get_operation("operation:req-race") is None
+
+
+@pytest.mark.asyncio
+async def test_provider_dispatch_rejects_replacement_during_atomic_append() -> None:
+    """Provider reconnect cannot strand a command in its old generation."""
+    store = ReconnectBeforeAppendStore()
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "req-provider-race",
+    )
+    now = _now()
+    provider = await service.register_provider(
+        _provider_registration(),
+        registered_at=now,
+    )
+    store.reconnect_before_next_append = True
+
+    result = await service.dispatch_provider_command(
+        RuntimeProviderCommand(
+            provider_id="provider-1",
+            provider_generation=provider.generation,
+            runtime_id="runtime-1",
+            desired_generation=3,
+            command_type=RuntimeProviderCommandType.START,
+            reset_final_desired_state=None,
+            payload={"reason": "reconcile"},
+            deadline_at=now + timedelta(seconds=30),
+            runtime_configuration=_runtime_configuration(),
+        ),
+        created_at=now,
+    )
+
+    assert isinstance(result, RuntimeProtocolStaleGeneration)
+    assert result.generation == provider.generation
+    assert await store.get_operation("operation:req-provider-race") is None
 
 
 @pytest.mark.asyncio

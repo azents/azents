@@ -193,8 +193,10 @@ async def test_transfer_result_delegates_only_valid_structural_result() -> None:
     await store.put_operation(
         RuntimeOperationMetadata(
             operation_id="operation-1",
+            request_id="request-1",
             runtime_id="runtime-1",
             target=RuntimeCoordinationTarget.RUNNER,
+            target_subject_id="runtime-1",
             generation=1,
             operation_type="file.transfer.v1",
             transfer_id="transfer-1",
@@ -202,6 +204,7 @@ async def test_transfer_result_delegates_only_valid_structural_result() -> None:
             transfer_dispatch_id="dispatch-1",
             transfer_direction=RuntimeOperationTransferDirection.DOWNLOAD,
             request_stream_id="request-1",
+            request_cursor=None,
             reply_stream_id="reply-1",
             status=RuntimeOperationStatus.ACTIVE,
             created_at=now,
@@ -1217,8 +1220,10 @@ async def test_transfer_results_do_not_evict_dispatch_tombstone() -> None:
     await store.put_operation(
         RuntimeOperationMetadata(
             operation_id="operation-1",
+            request_id="request-1",
             runtime_id="runtime-1",
             target=RuntimeCoordinationTarget.RUNNER,
+            target_subject_id="runtime-1",
             generation=1,
             operation_type="file.transfer.v1",
             transfer_id="transfer-1",
@@ -1226,6 +1231,7 @@ async def test_transfer_results_do_not_evict_dispatch_tombstone() -> None:
             transfer_dispatch_id="dispatch-1",
             transfer_direction=RuntimeOperationTransferDirection.DOWNLOAD,
             request_stream_id="request-1",
+            request_cursor=None,
             reply_stream_id="reply-1",
             status=RuntimeOperationStatus.ACTIVE,
             created_at=now,
@@ -1285,7 +1291,18 @@ async def test_transfer_results_do_not_evict_dispatch_tombstone() -> None:
 async def test_runner_grpc_relays_git_operation_payload() -> None:
     """The gRPC bridge maps Git operation payloads to protobuf oneofs."""
     store = InMemoryRuntimeCoordinationStore()
-    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-git")
+    request_ids = iter(
+        (
+            "req-git-create",
+            "req-git-inspect",
+            "req-git-discover",
+            "req-git-remove-discovered",
+        )
+    )
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: next(request_ids),
+    )
     sink = FakeStateSink()
     servicer = _servicer(service, store, sink)
     inbound = QueueIterator()
@@ -1884,6 +1901,64 @@ async def test_runner_grpc_start_claim_is_atomic() -> None:
     )
     retry_ack = await anext(stream)
     assert not retry_ack.operation_start_ack.allowed
+    await _close_stream(stream)
+
+
+@pytest.mark.asyncio
+async def test_runner_grpc_rejects_start_after_generation_replacement() -> None:
+    """An old stream cannot start work after a replacement Runner registers."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
+    servicer = _servicer(service, store, FakeStateSink())
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    result = await service.dispatch_runner_operation(
+        RuntimeRunnerOperation(
+            runtime_id="runtime-1",
+            runner_generation=accepted.register_accepted.generation,
+            operation_type="file.stat",
+            owner_session_id="session-1",
+            payload={"path": "/workspace/agent"},
+            deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+            body_stream_id=None,
+        ),
+        created_at=_now(),
+    )
+    assert isinstance(result, RuntimeDispatchResult)
+    await anext(stream)
+    now = _now()
+    replacement = await store.register_connection(
+        kind=RuntimeConnectionKind.RUNNER,
+        subject_id="runtime-1",
+        connection_id="connection-2",
+        owner_replica_id="control-b",
+        connected_at=now,
+        heartbeat_at=now,
+        ttl_seconds=60,
+        metadata={},
+    )
+    assert replacement.generation > accepted.register_accepted.generation
+
+    await inbound.put(
+        runtime_runner_control_pb2.RunnerMessage(
+            connection_id="connection-1",
+            request_id="start:req-1",
+            generation=accepted.register_accepted.generation,
+            operation_start=runtime_runner_control_pb2.RunnerOperationStart(
+                runtime_id="runtime-1",
+                operation_id=result.operation_id,
+            ),
+        )
+    )
+
+    start_ack = await anext(stream)
+    metadata = await store.get_operation(result.operation_id)
+    assert not start_ack.operation_start_ack.allowed
+    assert metadata is not None
+    assert metadata.status is RuntimeOperationStatus.ACTIVE
     await _close_stream(stream)
 
 
