@@ -9,7 +9,7 @@ import time
 from collections.abc import Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
-from typing import ClassVar, NamedTuple, cast
+from typing import ClassVar, NamedTuple
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 
@@ -96,6 +96,31 @@ class DiscordInteractionDeliveryResult(NamedTuple):
     response: object
 
 
+class _MessageCreation(NamedTuple):
+    message_id: str
+    outcome: str
+
+
+class _HistoryPage(NamedTuple):
+    messages: list[dict[str, object]]
+    next_cursor: str | None
+
+
+class _GatewayStart(NamedTuple):
+    dispatches: list[dict[str, object]]
+    scenario: str
+
+
+class _MultipartFileEvidence(NamedTuple):
+    file_count: int
+    file_bytes: int
+
+
+class _ChannelMessageIds(NamedTuple):
+    channel_id: str | None
+    message_id: str | None
+
+
 class FakeState:
     """Thread-safe Discord scenarios and sanitized provider evidence."""
 
@@ -180,21 +205,23 @@ class FakeState:
                 if value is not None:
                     if not isinstance(value, str) or not value:
                         raise ValueError(f"{name} must be a non-empty string.")
-                    setattr(self, name, value)
+                    if name == "application_id":
+                        self.application_id = value
+                    elif name == "guild_id":
+                        self.guild_id = value
+                    else:
+                        self.bot_user_id = value
             scenarios = payload.get("api_scenarios")
             if scenarios is not None:
                 if not isinstance(scenarios, dict):
                     raise ValueError("api_scenarios must be an object of strings.")
-                raw_scenarios = cast(dict[object, object], scenarios)
+                raw_scenarios = scenarios
                 if not all(
                     isinstance(key, str) and isinstance(value, str)
                     for key, value in raw_scenarios.items()
                 ):
                     raise ValueError("api_scenarios must be an object of strings.")
-                self.api_scenarios = {
-                    cast(str, key): cast(str, value)
-                    for key, value in raw_scenarios.items()
-                }
+                self.api_scenarios = _string_mapping(raw_scenarios)
                 _validate_api_scenarios(self.api_scenarios)
             sequences = payload.get("api_scenario_sequences")
             if sequences is not None:
@@ -282,16 +309,13 @@ class FakeState:
             if scenarios is not None:
                 if not isinstance(scenarios, dict):
                     raise ValueError("api_scenarios must be an object of strings.")
-                raw_scenarios = cast(dict[object, object], scenarios)
+                raw_scenarios = scenarios
                 if not all(
                     isinstance(key, str) and isinstance(value, str)
                     for key, value in raw_scenarios.items()
                 ):
                     raise ValueError("api_scenarios must be an object of strings.")
-                values = {
-                    cast(str, key): cast(str, value)
-                    for key, value in raw_scenarios.items()
-                }
+                values = _string_mapping(raw_scenarios)
                 _validate_api_scenarios(values)
                 self.api_scenarios.update(values)
             sequences = payload.get("api_scenario_sequences")
@@ -425,7 +449,8 @@ class FakeState:
         operation = payload.get("operation")
         occurrence = payload.get("occurrence")
         if (
-            operation
+            not isinstance(operation, str)
+            or operation
             not in {
                 "create_message",
                 "create_thread",
@@ -441,7 +466,7 @@ class FakeState:
                 "occurrence."
             )
         with self.lock:
-            self._delivery_barrier_operation = cast(str, operation)
+            self._delivery_barrier_operation = operation
             self._delivery_barrier_occurrence = occurrence
             self._delivery_barrier_reached.clear()
             self._delivery_barrier_release.clear()
@@ -558,18 +583,16 @@ class FakeState:
                 "response_status": response_status,
             }
             if isinstance(response_payload, dict):
-                response_object = cast(dict[str, object], response_payload)
+                response_object = response_payload
                 response_type = response_object.get("type")
                 if isinstance(response_type, int):
                     evidence["response_type"] = response_type
                 data = response_object.get("data")
                 if isinstance(data, dict):
-                    data_object = cast(dict[str, object], data)
+                    data_object = data
                     components = data_object.get("components")
                     if isinstance(components, list):
-                        evidence["component_count"] = len(
-                            cast(list[object], components)
-                        )
+                        evidence["component_count"] = len(components)
                     evidence["has_content"] = isinstance(
                         data_object.get("content"), str
                     )
@@ -603,15 +626,13 @@ class FakeState:
                 completion["completed_response_type"] = response_type
             data = response.get("data")
             if isinstance(data, dict):
-                data_object = cast(dict[str, object], data)
+                data_object = data
                 completion["completed_has_content"] = isinstance(
                     data_object.get("content"), str
                 )
                 components = data_object.get("components")
                 if isinstance(components, list):
-                    completion["completed_component_count"] = len(
-                        cast(list[object], components)
-                    )
+                    completion["completed_component_count"] = len(components)
             for evidence in reversed(self.interactions):
                 if evidence.get("interaction_id") == interaction_id:
                     evidence.update(completion)
@@ -634,7 +655,7 @@ class FakeState:
     def _capture_transient_component_custom_ids(self, value: object) -> None:
         """Retain typed component IDs only transiently for the next interaction."""
         if isinstance(value, dict):
-            for key, nested in cast(dict[object, object], value).items():
+            for key, nested in value.items():
                 if key == "custom_id" and isinstance(nested, str):
                     if nested.startswith("azents-selector:"):
                         self._transient_component_custom_ids["selector"].append(nested)
@@ -643,7 +664,7 @@ class FakeState:
                 else:
                     self._capture_transient_component_custom_ids(nested)
         elif isinstance(value, list):
-            for nested in cast(list[object], value):
+            for nested in value:
                 self._capture_transient_component_custom_ids(nested)
 
     def create_message(
@@ -653,7 +674,7 @@ class FakeState:
         nonce: str | None,
         file_count: int = 0,
         file_bytes: int = 0,
-    ) -> tuple[str, str]:
+    ) -> _MessageCreation:
         """Create or converge one provider message without retaining visible content."""
         with self.lock:
             if nonce is not None and nonce in self._nonce_messages:
@@ -666,7 +687,7 @@ class FakeState:
                     self._nonce_messages[nonce] = message_id
                 outcome = "created"
             self._message_ids.add((channel_id, message_id))
-            return message_id, outcome
+            return _MessageCreation(message_id=message_id, outcome=outcome)
 
     def message_exists(self, *, channel_id: str, message_id: str) -> bool:
         """Return whether one configured or created provider message is live."""
@@ -766,7 +787,7 @@ class FakeState:
             message = self.root_messages.get((parent_channel_id, root_message_id))
             thread = message.get("thread") if message is not None else None
             if isinstance(thread, dict):
-                thread_object = cast(dict[str, object], thread)
+                thread_object = thread
                 configured_thread = thread_object.get("id")
                 if isinstance(configured_thread, str) and configured_thread:
                     return configured_thread
@@ -804,7 +825,7 @@ class FakeState:
 
     def history_page(
         self, *, channel_id: str, before: str | None, limit: int
-    ) -> tuple[list[dict[str, object]], str | None]:
+    ) -> _HistoryPage:
         """Return one bounded configured page and its oldest-message cursor."""
         with self.lock:
             pages = self.history_pages.get(channel_id, [])
@@ -816,10 +837,10 @@ class FakeState:
                         start = index + 1
                         break
                 else:
-                    return [], None
+                    return _HistoryPage(messages=[], next_cursor=None)
             page = messages[start : start + limit]
             if not page:
-                return [], None
+                return _HistoryPage(messages=[], next_cursor=None)
             oldest_value = next(
                 (
                     item.get("id")
@@ -830,7 +851,10 @@ class FakeState:
             )
             oldest = oldest_value if isinstance(oldest_value, str) else None
             next_cursor = oldest if start + limit < len(messages) else None
-            return [dict(item) for item in page], next_cursor
+            return _HistoryPage(
+                messages=[dict(item) for item in page],
+                next_cursor=next_cursor,
+            )
 
     def ensure_root_thread(
         self,
@@ -875,7 +899,7 @@ class FakeState:
             self._thread_names[channel_id] = name
             return True
 
-    def gateway_start(self, opcode: int) -> tuple[list[dict[str, object]], str]:
+    def gateway_start(self, opcode: int) -> _GatewayStart:
         """Record one Identify or Resume and return its configured behavior."""
         with self.lock:
             self.gateway_connections += 1
@@ -884,7 +908,10 @@ class FakeState:
                 self.gateway_connections - 1,
                 len(self.gateway_scenarios) - 1,
             )
-            return list(self.gateway_dispatches), self.gateway_scenarios[scenario_index]
+            return _GatewayStart(
+                dispatches=list(self.gateway_dispatches),
+                scenario=self.gateway_scenarios[scenario_index],
+            )
 
     def gateway_heartbeat(self, sequence: int | None) -> None:
         """Record heartbeat sequence only."""
@@ -936,6 +963,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
     """Serve deterministic Discord REST behavior and sanitized control state."""
 
     state: ClassVar[FakeState] = STATE
+    _controlled_operation = ""
 
     def do_GET(self) -> None:
         """Serve health, evidence, authority metadata, and bounded message reads."""
@@ -1073,7 +1101,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 self.state.complete_interaction_response(
                     application_id=application_id,
                     interaction_token=interaction_token,
-                    response=cast(dict[str, object], response),
+                    response=response,
                 )
             except ValueError as error:
                 self._json_response(400, {"message": str(error)})
@@ -1087,7 +1115,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 arguments = body.get("arguments")
                 if not isinstance(operation, str) or not isinstance(arguments, dict):
                     raise ValueError("SDK fixture requires operation and arguments.")
-                self._sdk_operation(operation, cast(dict[str, object], arguments))
+                self._sdk_operation(operation, arguments)
             except ValueError as error:
                 self._json_response(400, {"message": str(error)})
             return
@@ -1637,7 +1665,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             for raw_attachment in attachments:
                 if not isinstance(raw_attachment, dict):
                     continue
-                attachment = cast(dict[str, object], raw_attachment)
+                attachment = raw_attachment
                 if attachment.get("id") != attachment_id:
                     continue
                 self._json_response(
@@ -1718,9 +1746,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         if scenario not in _CONTROLLED_RESPONSE_SCENARIOS:
             return False
         if scenario == "rate_limited":
-            retry_after = self.state.next_retry_after(
-                getattr(self, "_controlled_operation", "")
-            )
+            retry_after = self.state.next_retry_after(self._controlled_operation)
             self._json_response(
                 429,
                 {"message": "Rate limited.", "retry_after": retry_after},
@@ -1762,7 +1788,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         payload: object = json.loads(raw)
         if not isinstance(payload, dict):
             raise ValueError("Configuration must be an object.")
-        return cast(dict[str, object], payload)
+        return payload
 
     def _read_body(self) -> bytes:
         length = int(self.headers.get("Content-Length", "0"))
@@ -1854,18 +1880,27 @@ def _sdk_identity(
         raise ValueError(f"SDK fixture field '{key}' does not match authority.")
 
 
+def _string_mapping(value: Mapping[object, object]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not isinstance(item, str):
+            raise ValueError("Expected an object of strings.")
+        result[key] = item
+    return result
+
+
 def _scenario_sequences(value: object) -> dict[str, list[str]]:
     """Validate one-shot scenario queues without retaining provider details."""
     if not isinstance(value, dict):
         raise ValueError("api_scenario_sequences must be an object.")
     result: dict[str, list[str]] = {}
-    for key, raw_values in cast(dict[object, object], value).items():
+    for key, raw_values in value.items():
         if not isinstance(key, str) or not isinstance(raw_values, list):
             raise ValueError("api_scenario_sequences must contain string lists.")
-        values = cast(list[object], raw_values)
+        values = raw_values
         if not all(isinstance(item, str) for item in values):
             raise ValueError("api_scenario_sequences must contain string lists.")
-        sequence = [cast(str, item) for item in values]
+        sequence = [item for item in values if isinstance(item, str)]
         _validate_api_scenarios(
             {str(index): item for index, item in enumerate(sequence)}
         )
@@ -1878,10 +1913,10 @@ def _retry_after_sequences(value: object) -> dict[str, list[int]]:
     if not isinstance(value, dict):
         raise ValueError("retry_after_sequences must be an object.")
     result: dict[str, list[int]] = {}
-    for key, sequence in cast(dict[object, object], value).items():
+    for key, sequence in value.items():
         if not isinstance(key, str) or not isinstance(sequence, list):
             raise ValueError("retry_after_sequences must contain integer lists.")
-        items = cast(list[object], sequence)
+        items = sequence
         if (
             not items
             or len(items) > 10
@@ -1893,7 +1928,7 @@ def _retry_after_sequences(value: object) -> dict[str, list[int]]:
             raise ValueError(
                 "retry_after_sequences values must be 1-10 integers from 1 to 300."
             )
-        result[key] = list(cast(list[int], items))
+        result[key] = [item for item in items if isinstance(item, int)]
     return result
 
 
@@ -1901,28 +1936,32 @@ def _object_pages(value: object) -> dict[str, list[list[dict[str, object]]]]:
     """Validate bounded history pages while retaining payloads only in fake memory."""
     if not isinstance(value, list):
         raise ValueError("history_pages must be a list.")
-    raw_pages = cast(list[object], value)
+    raw_pages = value
     if len(raw_pages) > _MAX_HISTORY_PAGES:
         raise ValueError("history_pages exceeds the configured page bound.")
     pages: dict[str, list[list[dict[str, object]]]] = {}
     for raw_page in raw_pages:
         if not isinstance(raw_page, list):
             raise ValueError("history_pages items must be lists.")
-        raw_items = cast(list[object], raw_page)
+        raw_items = raw_page
         if not raw_items or len(raw_items) > _MAX_HISTORY_MESSAGES_PER_PAGE:
             raise ValueError("history_pages contains an invalid page size.")
         page: list[dict[str, object]] = []
         for raw_item in raw_items:
             if not isinstance(raw_item, dict):
                 raise ValueError("history_pages messages must be objects.")
-            item = cast(dict[str, object], raw_item)
+            item = raw_item
             channel_id = item.get("channel_id")
             if not isinstance(channel_id, str) or not channel_id:
                 raise ValueError("history messages require channel_id.")
             if _serialized_size(item) > _MAX_CONFIGURED_OBJECT_BYTES:
                 raise ValueError("history message exceeds the configured size bound.")
             page.append(item)
-        channel_ids = {cast(str, item["channel_id"]) for item in page}
+        channel_ids = {
+            channel_id
+            for item in page
+            if isinstance((channel_id := item.get("channel_id")), str)
+        }
         if len(channel_ids) != 1:
             raise ValueError("history pages must contain one channel.")
         pages.setdefault(next(iter(channel_ids)), []).append(page)
@@ -1933,14 +1972,14 @@ def _root_messages(value: object) -> dict[tuple[str, str], dict[str, object]]:
     """Index configured root messages without exposing their content in evidence."""
     if not isinstance(value, list):
         raise ValueError("root_messages must be a list.")
-    raw_items = cast(list[object], value)
+    raw_items = value
     if len(raw_items) > _MAX_CONFIGURED_ROOT_MESSAGES:
         raise ValueError("root_messages exceeds the configured message bound.")
     result: dict[tuple[str, str], dict[str, object]] = {}
     for raw_item in raw_items:
         if not isinstance(raw_item, dict):
             raise ValueError("root_messages items must be objects.")
-        item = cast(dict[str, object], raw_item)
+        item = raw_item
         message_id = item.get("id")
         channel_id = item.get("channel_id")
         if not isinstance(message_id, str) or not isinstance(channel_id, str):
@@ -1994,11 +2033,11 @@ def _gateway_dispatches(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         raise ValueError("gateway_dispatches must be a list.")
     result: list[dict[str, object]] = []
-    raw_dispatches = cast(list[object], value)
+    raw_dispatches = value
     for item in raw_dispatches:
         if not isinstance(item, dict):
             raise ValueError("gateway_dispatches items must be objects.")
-        raw_item = cast(dict[str, object], item)
+        raw_item = item
         sequence = raw_item.get("sequence")
         event_type = raw_item.get("event_type")
         payload = raw_item.get("payload")
@@ -2028,12 +2067,12 @@ def _gateway_scenarios(value: object) -> list[str]:
         "invalid_session_fresh",
         "close_4014",
     }
-    scenarios = cast(list[object], value)
+    scenarios = value
     if not scenarios or not all(
         isinstance(item, str) and item in allowed for item in scenarios
     ):
         raise ValueError("gateway_scenarios contains an unsupported value.")
-    return [cast(str, item) for item in scenarios]
+    return [item for item in scenarios if isinstance(item, str)]
 
 
 def _json_object_or_empty(raw_body: bytes) -> dict[str, object]:
@@ -2044,7 +2083,7 @@ def _json_object_or_empty(raw_body: bytes) -> dict[str, object]:
         return {}
     except ValueError:
         return {}
-    return cast(dict[str, object], value) if isinstance(value, dict) else {}
+    return value if isinstance(value, dict) else {}
 
 
 def _multipart_or_json_object(raw_body: bytes) -> dict[str, object]:
@@ -2060,16 +2099,16 @@ def _session_path(body: dict[str, object]) -> str | None:
     components = body.get("components")
     if not isinstance(components, list):
         return None
-    for raw_row in cast(list[object], components):
+    for raw_row in components:
         if not isinstance(raw_row, dict):
             continue
-        row_components = cast(dict[str, object], raw_row).get("components")
+        row_components = raw_row.get("components")
         if not isinstance(row_components, list):
             continue
-        for raw_component in cast(list[object], row_components):
+        for raw_component in row_components:
             if not isinstance(raw_component, dict):
                 continue
-            url = cast(dict[str, object], raw_component).get("url")
+            url = raw_component.get("url")
             if not isinstance(url, str):
                 continue
             parsed = urlparse(url)
@@ -2085,10 +2124,10 @@ def _session_presence_category(body: dict[str, object]) -> str | None:
     embeds = body.get("embeds")
     if not isinstance(embeds, list):
         return None
-    for raw_embed in cast(list[object], embeds):
+    for raw_embed in embeds:
         if not isinstance(raw_embed, dict):
             continue
-        color = cast(dict[str, object], raw_embed).get("color")
+        color = raw_embed.get("color")
         if color == 0x57F287:
             return "session_presence_joined"
         if color == 0x99AAB5:
@@ -2104,10 +2143,13 @@ def _session_navigation_category(body: dict[str, object]) -> str | None:
     return "activity_tracker" if _session_path(body) is not None else None
 
 
-def _multipart_file_evidence(raw_body: bytes) -> tuple[int, int]:
+def _multipart_file_evidence(raw_body: bytes) -> _MultipartFileEvidence:
     """Extract multipart file count and bytes without retaining file contents."""
     file_parts = _MULTIPART_FILE_CONTENT.findall(raw_body)
-    return len(file_parts), sum(len(file_part) for file_part in file_parts)
+    return _MultipartFileEvidence(
+        file_count=len(file_parts),
+        file_bytes=sum(len(file_part) for file_part in file_parts),
+    )
 
 
 def _guild_command_collection(path: str) -> bool:
@@ -2140,14 +2182,14 @@ def _configured_guild_commands(value: object) -> dict[str, dict[str, object]]:
         return {}
     if not isinstance(value, list):
         raise ValueError("guild_commands must be a list.")
-    raw_commands = cast(list[object], value)
+    raw_commands = value
     if len(raw_commands) > _MAX_CONFIGURED_GUILD_COMMANDS:
         raise ValueError("guild_commands exceeds its bounded size.")
     commands: dict[str, dict[str, object]] = {}
     for raw_command in raw_commands:
         if not isinstance(raw_command, dict):
             raise ValueError("guild_commands entries must be objects.")
-        command = cast(dict[str, object], raw_command)
+        command = raw_command
         command_id = command.get("id")
         if (
             not isinstance(command_id, str)
@@ -2218,7 +2260,7 @@ def _guild_command_evidence(
     ]
     return sorted(
         evidence,
-        key=lambda item: (str(item["role"]), int(cast(int, item["type"]))),
+        key=lambda item: (str(item["role"]), _sdk_int(item, "type")),
     )
 
 
@@ -2230,16 +2272,19 @@ def _guild_command_role(command: Mapping[str, object]) -> str:
     return "unrelated"
 
 
-def _channel_message_ids(path: str) -> tuple[str | None, str | None]:
+def _channel_message_ids(path: str) -> _ChannelMessageIds:
     parts = path.strip("/").split("/")
     try:
         channel_index = parts.index("channels")
         message_index = parts.index("messages", channel_index)
     except ValueError:
-        return None, None
+        return _ChannelMessageIds(channel_id=None, message_id=None)
     if len(parts) <= message_index + 1 or channel_index + 1 >= len(parts):
-        return None, None
-    return parts[channel_index + 1], parts[message_index + 1]
+        return _ChannelMessageIds(channel_id=None, message_id=None)
+    return _ChannelMessageIds(
+        channel_id=parts[channel_index + 1],
+        message_id=parts[message_index + 1],
+    )
 
 
 def _channel_item_id(path: str) -> str | None:
