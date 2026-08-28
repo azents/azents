@@ -3,7 +3,6 @@
 import dataclasses
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import cast
 
 import pytest
 from azents_runtime_control.provider import (
@@ -650,7 +649,8 @@ async def test_legacy_container_is_skipped_until_command_replaces_it(
     command = _command(RuntimeLifecycleCommandType.START)
     await provider.start(command)
     container = docker.containers["azents-runtime-runtime-1"]
-    labels = cast(dict[str, str], container.spec.labels)
+    labels = container.spec.labels
+    assert isinstance(labels, dict)
     for key in (
         "azents/runtime-configuration-sequence",
         "azents/runtime-configuration-digest",
