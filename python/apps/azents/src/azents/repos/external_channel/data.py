@@ -1,5 +1,6 @@
 """Provider-generic External Channel repository data records."""
 
+import dataclasses
 import datetime
 from typing import Any, Literal
 
@@ -131,6 +132,15 @@ class ExternalChannelConnectionConfiguration(_Record):
     socket_gap_reason: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+
+@dataclasses.dataclass(frozen=True)
+class DiscordGatewayTypingTarget:
+    """One active Discord Gateway typing target."""
+
+    guild_id: str
+    channel_id: str
+    work_cycle_ids: tuple[str, ...]
 
 
 class ExternalChannelConversationPosition(_Record):

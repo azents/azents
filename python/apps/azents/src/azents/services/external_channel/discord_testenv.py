@@ -18,6 +18,7 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayEventHandler,
     DiscordGatewayIntentsError,
     DiscordGatewayLifecycleHandler,
+    DiscordGatewayTypingTargetLoader,
 )
 from azents.services.external_channel.discord_sdk import (
     DiscordSDKApplication,
@@ -374,6 +375,7 @@ class DiscordTestenvGatewayRunner:
         connected_bot_user_id: str | None = None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
     ) -> None:
         del bot_token
         resumed = False
@@ -406,6 +408,11 @@ class DiscordTestenvGatewayRunner:
                 if scenario != "open":
                     raise DiscordGatewayError(
                         "Discord deterministic Gateway scenario is unsupported."
+                    )
+                typing_targets = await load_typing_targets()
+                if typing_targets is None:
+                    raise DiscordGatewayError(
+                        "Discord Gateway typing target authority is unavailable."
                     )
                 await handle_lifecycle("resumed" if resumed else "ready")
                 for dispatch in _object_list(payload, "dispatches"):

@@ -18,6 +18,7 @@ from azents.core.enums import ExternalChannelIngressProfile
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
+    DiscordGatewayTypingTarget,
     ExternalChannelConnectionConfiguration,
     ExternalChannelIngressLease,
     ExternalChannelIngressLeaseClaim,
@@ -265,6 +266,10 @@ class DiscordGatewayManagerService:
                     lease=lease,
                     state=state,
                 ),
+                load_typing_targets=lambda: self._load_typing_targets(
+                    connection_id=connection_id,
+                    lease=lease,
+                ),
             )
         )
         shutdown_task = asyncio.create_task(shutdown_event.wait())
@@ -340,6 +345,25 @@ class DiscordGatewayManagerService:
             )
             await session.commit()
             return renewed
+
+    async def _load_typing_targets(
+        self,
+        *,
+        connection_id: str,
+        lease: ExternalChannelIngressLease,
+    ) -> tuple[DiscordGatewayTypingTarget, ...]:
+        """Load current typing targets only under the owning Gateway lease fence."""
+        async with self.session_manager() as session:
+            targets = await self.repository.list_owned_discord_typing_targets(
+                session,
+                connection_id=connection_id,
+                lease_owner=self.manager_id,
+                lease_generation=lease.lease_generation,
+                now=_utc_now(),
+            )
+        if targets is None:
+            raise DiscordGatewayLeaseLost("Discord Gateway typing authority is stale.")
+        return targets
 
     async def _record_gap(
         self,
