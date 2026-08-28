@@ -150,6 +150,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Discord External Channel Slack Parity Requirements](requirements/discord-260728-slack-parity.md) | discord-260728 | 2026-07-28 | - |
 | [Discord Bot Role Mention Invocation Requirements](requirements/discord-260802-bot-role-mention-invocation.md) | discord-260802 | 2026-08-02 | - |
 | [Discord Thread Automatic Archive Duration Requirements](requirements/discord-260820-thread-auto-archive-duration.md) | discord-260820 | 2026-08-20 | 2026-08-20 |
+| [Discord Quiet Work Presence Requirements](requirements/discord-260828-quiet-work-presence.md) | discord-260828 | 2026-08-28 | - |
 | [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
 | [DockerAgentHomeClient sandbox-daemon Sidecar Historical Requirements Reconstruction](requirements/docker-260409-docker-home-sidecar.md) | docker-260409 | 2026-04-09 | 2026-04-09 |
 | [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |
@@ -550,6 +551,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Discord External Channel Slack Parity ADR](adr/discord-260728-slack-parity.md)
 - [Discord Bot Role Mention Invocation](adr/discord-260802-bot-role-mention-invocation.md)
 - [Discord Thread Automatic Archive Duration Decisions](adr/discord-260820-thread-auto-archive-duration.md)
+- [Discord Quiet Work Presence Decisions](adr/discord-260828-quiet-work-presence.md)
 - [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
 - [DockerAgentHomeClient sandbox-daemon Sidecar Historical Decision Reconstruction](adr/docker-260409-docker-home-sidecar.md)
 - [Introduce system Docker Sandbox Provider](adr/docker-260523-docker-sandbox.md)

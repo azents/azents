@@ -1,12 +1,12 @@
 """Provider preparation and Session creation for ingress conversation owners."""
 
 import dataclasses
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ExternalChannelResourceStatus
+from azents.core.enums import ExternalChannelProvider, ExternalChannelResourceStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.ingress_queue_data import ExternalChannelIngressOwner
@@ -63,6 +63,8 @@ class ExternalChannelIngressProvisioningService:
         *,
         owner: ExternalChannelIngressOwner,
         preparation: ExternalChannelIngressProviderPreparation,
+        initial_provider: ExternalChannelProvider,
+        initial_invocation: bool,
     ) -> ExternalChannelConfiguredBindingResult:
         """Atomically revalidate and create the configured Binding/Session state."""
         connection = await self.repository.lock_connection_for_routing(
@@ -123,6 +125,10 @@ class ExternalChannelIngressProvisioningService:
                 resource_id=owner.target_resource_id,
                 route_id=owner.route_id,
                 response_mode=owner.response_mode,
+                tracker_visibility=_tracker_visibility(
+                    provider=initial_provider,
+                    invocation=initial_invocation,
+                ),
             )
         except ValueError as error:
             raise ExternalChannelIngressProvisioningError(
@@ -138,3 +144,14 @@ def _parent_channel_id(labels: dict[str, object]) -> str | None:
 def _label(labels: dict[str, object], key: str) -> str | None:
     value = labels.get(key)
     return value if isinstance(value, str) and value else None
+
+
+def _tracker_visibility(
+    *,
+    provider: ExternalChannelProvider,
+    invocation: bool,
+) -> Literal["hidden", "visible"]:
+    """Derive first-cycle Tracker eligibility from the queued provider trigger."""
+    if provider is ExternalChannelProvider.SLACK or invocation:
+        return "visible"
+    return "hidden"

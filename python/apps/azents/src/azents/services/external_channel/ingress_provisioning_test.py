@@ -235,7 +235,19 @@ async def test_prepare_classifies_non_utf8_encrypted_credentials() -> None:
     assert error.value.retryable is False
 
 
-async def test_complete_uses_caller_transaction() -> None:
+@pytest.mark.parametrize(
+    ("initial_provider", "initial_invocation", "tracker_visibility"),
+    [
+        (ExternalChannelProvider.DISCORD, False, "hidden"),
+        (ExternalChannelProvider.DISCORD, True, "visible"),
+        (ExternalChannelProvider.SLACK, False, "visible"),
+    ],
+)
+async def test_complete_uses_caller_transaction(
+    initial_provider: ExternalChannelProvider,
+    initial_invocation: bool,
+    tracker_visibility: str,
+) -> None:
     """The ready transition uses one caller-owned transaction for every DB effect."""
     transaction = cast(AsyncSession, object())
     repository = MagicMock()
@@ -294,6 +306,8 @@ async def test_complete_uses_caller_transaction() -> None:
             delivery_channel_id="400",
             initial_thread_title="Azents thread",
         ),
+        initial_provider=initial_provider,
+        initial_invocation=initial_invocation,
     )
 
     assert completed is configured
@@ -308,6 +322,7 @@ async def test_complete_uses_caller_transaction() -> None:
         resource_id="resource-1",
         route_id="route-1",
         response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        tracker_visibility=tracker_visibility,
     )
 
 
@@ -350,6 +365,8 @@ async def test_complete_rejects_changed_participation_generation() -> None:
                 delivery_channel_id=None,
                 initial_thread_title=None,
             ),
+            initial_provider=ExternalChannelProvider.DISCORD,
+            initial_invocation=True,
         )
 
     assert error.value.category == "ownership_stale"

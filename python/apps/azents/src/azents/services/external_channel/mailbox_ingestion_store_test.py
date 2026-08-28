@@ -311,6 +311,7 @@ async def test_configured_binding_rejects_a_stopping_session() -> None:
             resource_id="resource-1",
             route_id="route-1",
             response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+            tracker_visibility="visible",
         )
 
     ensure_active_work = store.work_repository.ensure_active_work
@@ -385,6 +386,8 @@ async def _accepted_control_plan_case(
     admission_succeeds: bool = True,
     access_granted: bool = True,
     separate_target: bool = False,
+    provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
+    invocation: bool = True,
 ) -> SimpleNamespace:
     session = cast(
         AsyncSession,
@@ -427,6 +430,19 @@ async def _accepted_control_plan_case(
     )
 
     request = _slack_request()
+    request = dataclasses.replace(
+        request,
+        locator=dataclasses.replace(
+            request.locator,
+            provider=provider,
+            provider_event_type=(
+                "discord_message_create"
+                if provider is ExternalChannelProvider.DISCORD
+                else request.locator.provider_event_type
+            ),
+            invocation=invocation,
+        ),
+    )
     connection = ExternalChannelConnection.model_construct(id="connection-1")
     position = ExternalChannelConversationPosition.model_construct(
         id="position-1",
@@ -557,6 +573,7 @@ async def test_new_binding_admission_includes_joined_presence() -> None:
     assert call["session_id"] == "session-1"
     assert call["binding_id"] == "binding-1"
     assert call["desired_progress"].state == "checking"
+    assert call["tracker_visibility"] == "visible"
     case.presence_intent.assert_awaited_once()
     case.settings_intent.assert_not_awaited()
     case.agent_session_repository.lock_by_id.assert_not_awaited()
@@ -573,6 +590,32 @@ async def test_existing_binding_admission_excludes_joined_presence() -> None:
     )
     case.presence_intent.assert_not_awaited()
     case.settings_intent.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("provider", "invocation", "tracker_visibility"),
+    [
+        (ExternalChannelProvider.SLACK, False, "visible"),
+        (ExternalChannelProvider.DISCORD, False, "hidden"),
+        (ExternalChannelProvider.DISCORD, True, "visible"),
+    ],
+)
+async def test_admission_derives_tracker_visibility_from_provider_invocation(
+    provider: ExternalChannelProvider,
+    invocation: bool,
+    tracker_visibility: str,
+) -> None:
+    """Discord all-messages input starts hidden until an explicit invocation."""
+    case = await _accepted_control_plan_case(
+        existing_binding=True,
+        provider=provider,
+        invocation=invocation,
+    )
+
+    assert (
+        case.work_repository.ensure_active_work.await_args.kwargs["tracker_visibility"]
+        == tracker_visibility
+    )
 
 
 async def test_existing_binding_admission_rejects_a_stopping_session() -> None:
@@ -636,6 +679,7 @@ async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> 
         agent_session_id="session-1",
     )
     work = ChannelWorkState(
+        schema_version=2,
         binding_id=binding.id,
         work_cycle_id="work-cycle-1",
         status=ExternalChannelWorkStatus.ACTIVE,
@@ -646,6 +690,7 @@ async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> 
         desired_progress=None,
         finished_at=None,
         projection_parts=[],
+        tracker_visibility="visible",
     )
     session = cast(AsyncSession, MagicMock())
 
