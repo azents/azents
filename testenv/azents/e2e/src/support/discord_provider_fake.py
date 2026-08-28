@@ -1197,6 +1197,15 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 file_bytes=file_bytes,
             )
             if not self.state.wait_for_delivery_barrier("create_message"):
+                self.state.record_message_failure(
+                    operation="create_message",
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    outcome="unknown",
+                    file_count=file_count,
+                    file_bytes=file_bytes,
+                    safe_category="transport_unknown",
+                )
                 self._close_connection()
                 return
             if scenario in _CONTROLLED_RESPONSE_SCENARIOS:
@@ -1555,6 +1564,13 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 nonce=nonce,
             )
             if not self.state.wait_for_delivery_barrier(operation):
+                self.state.record_message_failure(
+                    operation=operation,
+                    channel_id=channel_id,
+                    message_id=message_id,
+                    outcome="unknown",
+                    safe_category="transport_unknown",
+                )
                 self._close_connection()
                 return
         else:
@@ -1738,6 +1754,13 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         if operation in {"create_thread", "get_message", "get_history"} and not (
             self.state.wait_for_delivery_barrier(operation)
         ):
+            self.state.record_operation(
+                "delivery_barrier",
+                operation=operation,
+                outcome="unknown",
+                safe_category="transport_unknown",
+                metadata=metadata,
+            )
             return "transport_unknown"
         return scenario
 
