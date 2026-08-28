@@ -56,7 +56,9 @@ from azents.runtime.coordination.data import (
     RuntimeBodyChunk,
     RuntimeConnectionKind,
     RuntimeCoordinationTarget,
+    RuntimeFencedMutationResult,
     RuntimeOperationMetadata,
+    RuntimeOperationReplyAppend,
     RuntimeOperationStatus,
     RuntimeOperationTransferDirection,
     RuntimeReplyEvent,
@@ -69,6 +71,39 @@ from azents.runtime.coordination.memory import (
 from azents.runtime.transfer.data import RuntimeTransferFailure
 from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResultSink
 from azents.testing.grpc import FakeGrpcContext as BaseFakeGrpcContext
+
+
+class _ReplySignalingStore(InMemoryRuntimeCoordinationStore):
+    """Signal after an operation reply reaches the authoritative store."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.reply_appended = asyncio.Event()
+
+    async def append_operation_reply_if_connection_current(
+        self,
+        *,
+        connection_kind: RuntimeConnectionKind,
+        connection_subject_id: str,
+        connection_generation: int,
+        operation_id: str,
+        expected_runtime_id: str,
+        expected_target: RuntimeCoordinationTarget,
+        stream_id: str,
+        event: RuntimeReplyEvent,
+    ) -> RuntimeFencedMutationResult[RuntimeOperationReplyAppend]:
+        result = await super().append_operation_reply_if_connection_current(
+            connection_kind=connection_kind,
+            connection_subject_id=connection_subject_id,
+            connection_generation=connection_generation,
+            operation_id=operation_id,
+            expected_runtime_id=expected_runtime_id,
+            expected_target=expected_target,
+            stream_id=stream_id,
+            event=event,
+        )
+        self.reply_appended.set()
+        return result
 
 
 async def _close_stream[MessageT](stream: AsyncIterator[MessageT]) -> None:
@@ -393,6 +428,9 @@ class CountingRelayControlProtocol(RuntimeControlProtocolService):
         self.envelopes = envelopes
         self.claim_count = 0
         self.acked: list[RuntimeRequestEnvelope] = []
+        self.claimed_twice = asyncio.Event()
+        self.acknowledged = asyncio.Event()
+        self.empty_wait = asyncio.Event()
 
     async def claim_next_runner_request(
         self,
@@ -405,14 +443,17 @@ class CountingRelayControlProtocol(RuntimeControlProtocolService):
         """Return one envelope for each claim."""
         del runtime_id, generation, consumer_id, block_ms
         self.claim_count += 1
+        if self.claim_count >= 2:
+            self.claimed_twice.set()
         if not self.envelopes:
-            await asyncio.sleep(3600)
+            await self.empty_wait.wait()
             return None
         return self.envelopes.pop(0)
 
     async def ack_claimed_request(self, envelope: RuntimeRequestEnvelope) -> None:
         """Record an identical duplicate acknowledgement."""
         self.acked.append(envelope)
+        self.acknowledged.set()
 
 
 @pytest.mark.asyncio
@@ -846,7 +887,7 @@ async def test_runner_grpc_rejects_state_report_generation_mismatch() -> None:
 
 @pytest.mark.asyncio
 async def test_runner_grpc_relays_operations_and_appends_events() -> None:
-    store = InMemoryRuntimeCoordinationStore()
+    store = _ReplySignalingStore()
     service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
     sink = FakeStateSink()
     servicer = _servicer(service, store, sink)
@@ -924,7 +965,7 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
             ),
         )
     )
-    await asyncio.sleep(0)
+    await asyncio.wait_for(store.reply_appended.wait(), timeout=1)
     replies = await service.read_replies(
         reply_stream_id=result.reply_stream_id,
         after_cursor=None,
@@ -940,7 +981,7 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
 @pytest.mark.asyncio
 async def test_runner_grpc_expires_operation_before_relay() -> None:
     """Expired Runner operations are finalized and acked without relaying."""
-    store = InMemoryRuntimeCoordinationStore()
+    store = _ReplySignalingStore()
     service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
     sink = FakeStateSink()
     servicer = _servicer(service, store, sink)
@@ -968,16 +1009,12 @@ async def test_runner_grpc_expires_operation_before_relay() -> None:
     )
 
     assert isinstance(result, RuntimeDispatchResult)
-    replies = []
-    for _ in range(10):
-        replies = await service.read_replies(
-            reply_stream_id=result.reply_stream_id,
-            after_cursor=None,
-            limit=10,
-        )
-        if replies:
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(store.reply_appended.wait(), timeout=1)
+    replies = await service.read_replies(
+        reply_stream_id=result.reply_stream_id,
+        after_cursor=None,
+        limit=10,
+    )
 
     assert len(replies) == 1
     assert replies[0].event.event_type is RuntimeReplyEventType.FINAL_ERROR
@@ -1087,10 +1124,7 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
             active_transfer_dispatches={},
         )
     )
-    for _ in range(100):
-        if control.claim_count >= 2:
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(control.claimed_twice.wait(), timeout=1)
 
     assert outbound.qsize() == 1
     assert control.claim_count == 2
@@ -1159,10 +1193,7 @@ async def test_runner_transfer_relay_deduplicates_only_identical_intent() -> Non
             active_transfer_dispatches={dispatch_key: fingerprint},
         )
     )
-    for _ in range(100):
-        if control.acked:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(control.acknowledged.wait(), timeout=1)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -1410,7 +1441,7 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
 @pytest.mark.asyncio
 async def test_runner_grpc_round_trips_file_glob_payload_and_result() -> None:
     """The gRPC bridge preserves file.glob request and result entries."""
-    store = InMemoryRuntimeCoordinationStore()
+    store = _ReplySignalingStore()
     service = RuntimeControlProtocolService(
         store,
         request_id_factory=lambda: "req-glob",
@@ -1474,7 +1505,7 @@ async def test_runner_grpc_round_trips_file_glob_payload_and_result() -> None:
             ),
         )
     )
-    await asyncio.sleep(0)
+    await asyncio.wait_for(store.reply_appended.wait(), timeout=1)
     replies = await service.read_replies(
         reply_stream_id=result.reply_stream_id,
         after_cursor=None,
@@ -1498,7 +1529,7 @@ async def test_runner_grpc_round_trips_file_glob_payload_and_result() -> None:
 @pytest.mark.asyncio
 async def test_runner_grpc_relays_file_apply_patch_and_preserves_failure() -> None:
     """The bridge relays patch bodies and stores typed partial-failure detail."""
-    store = InMemoryRuntimeCoordinationStore()
+    store = _ReplySignalingStore()
     service = RuntimeControlProtocolService(
         store, request_id_factory=lambda: "req-patch"
     )
@@ -1598,16 +1629,12 @@ async def test_runner_grpc_relays_file_apply_patch_and_preserves_failure() -> No
             ),
         )
     )
-    replies = []
-    for _ in range(10):
-        replies = await service.read_replies(
-            reply_stream_id=result.reply_stream_id,
-            after_cursor=None,
-            limit=10,
-        )
-        if replies:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(store.reply_appended.wait(), timeout=1)
+    replies = await service.read_replies(
+        reply_stream_id=result.reply_stream_id,
+        after_cursor=None,
+        limit=10,
+    )
 
     detail = replies[0].event.payload["file_apply_patch"]
     assert isinstance(detail, dict)
@@ -1630,7 +1657,7 @@ async def test_runner_grpc_relays_file_apply_patch_and_preserves_failure() -> No
 @pytest.mark.asyncio
 async def test_runner_grpc_relays_file_edit_and_replacement_count() -> None:
     """The bridge serializes native edit parameters and final count."""
-    store = InMemoryRuntimeCoordinationStore()
+    store = _ReplySignalingStore()
     service = RuntimeControlProtocolService(
         store, request_id_factory=lambda: "req-edit"
     )
@@ -1688,16 +1715,12 @@ async def test_runner_grpc_relays_file_edit_and_replacement_count() -> None:
             ),
         )
     )
-    replies = []
-    for _ in range(10):
-        replies = await service.read_replies(
-            reply_stream_id=result.reply_stream_id,
-            after_cursor=None,
-            limit=10,
-        )
-        if replies:
-            break
-        await asyncio.sleep(0)
+    await asyncio.wait_for(store.reply_appended.wait(), timeout=1)
+    replies = await service.read_replies(
+        reply_stream_id=result.reply_stream_id,
+        after_cursor=None,
+        limit=10,
+    )
 
     assert replies[0].event.payload == {"replacements": 3}
     await _close_stream(stream)
@@ -2016,7 +2039,7 @@ async def test_runner_grpc_relays_ordered_cancel_command() -> None:
 @pytest.mark.asyncio
 async def test_runner_grpc_rejects_late_final_after_cancel() -> None:
     """Late Runner finals must not overwrite a canceled final cursor."""
-    store = InMemoryRuntimeCoordinationStore()
+    store = _ReplySignalingStore()
     service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
     servicer = _servicer(service, store, FakeStateSink())
     inbound = QueueIterator()
@@ -2076,7 +2099,9 @@ async def test_runner_grpc_rejects_late_final_after_cancel() -> None:
             ),
         )
     )
-    await asyncio.sleep(0)
+    await inbound.put(None)
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
     metadata = await store.get_operation(result.operation_id)
     assert metadata is not None
     assert metadata.status is RuntimeOperationStatus.FINAL

@@ -5,7 +5,6 @@ import dataclasses
 import json
 from collections.abc import AsyncGenerator, Callable
 from datetime import datetime, timedelta, timezone
-from typing import cast
 
 import pytest
 import pytest_asyncio
@@ -17,6 +16,7 @@ from azents_runtime_control.system_metrics import (
 from redis.asyncio import Redis
 
 from azents.runtime.coordination.data import (
+    JsonValue,
     RuntimeBodyChunk,
     RuntimeConnectionKind,
     RuntimeConnectionRecord,
@@ -103,7 +103,7 @@ class FakeRedisConnectionStore:
             generation_key, connection_key = keys
             generation = int(self.data.get(generation_key, "0")) + 1
             self.data[generation_key] = str(generation)
-            payload = json.loads(str(values[0]))
+            payload = _json_object(str(values[0]))
             payload["generation"] = generation
             encoded = json.dumps(payload)
             self.data[connection_key] = encoded
@@ -112,8 +112,17 @@ class FakeRedisConnectionStore:
         raw = self.data.get(key)
         if raw is None:
             return 0
-        payload = json.loads(raw)
-        if int(payload["generation"]) != int(cast(int, values[0])):
+        payload = _json_object(raw)
+        stored_generation = payload.get("generation")
+        expected_generation = values[0]
+        if (
+            isinstance(stored_generation, bool)
+            or not isinstance(stored_generation, int | str)
+            or isinstance(expected_generation, bool)
+            or not isinstance(expected_generation, int | str)
+        ):
+            raise ValueError("Fake Redis generation must be an integer")
+        if int(stored_generation) != int(expected_generation):
             return 0
         if "DEL" in script:
             self.data.pop(key, None)
@@ -1028,7 +1037,9 @@ async def test_connection_registry_issues_generation_fences(
 async def test_redis_connection_revoke_is_generation_fenced() -> None:
     """Redis stale revokes must not delete a newer connection generation."""
     fake_redis = FakeRedisConnectionStore()
-    store = RedisRuntimeCoordinationStore(cast(Redis, fake_redis))
+    store = RedisRuntimeCoordinationStore(
+        fake_redis  # ty: ignore[invalid-argument-type] — the focused fake implements only the Redis commands exercised by these fencing tests.
+    )
     connected_at = _now()
     first = await store.register_connection(
         kind=RuntimeConnectionKind.RUNNER,
@@ -1071,7 +1082,9 @@ async def test_redis_connection_revoke_is_generation_fenced() -> None:
 async def test_redis_connection_heartbeat_is_generation_fenced() -> None:
     """Redis stale heartbeats must not overwrite a newer connection generation."""
     fake_redis = FakeRedisConnectionStore()
-    store = RedisRuntimeCoordinationStore(cast(Redis, fake_redis))
+    store = RedisRuntimeCoordinationStore(
+        fake_redis  # ty: ignore[invalid-argument-type] — the focused fake implements only the Redis commands exercised by these fencing tests.
+    )
     connected_at = _now()
     first = await store.register_connection(
         kind=RuntimeConnectionKind.RUNNER,
@@ -1116,7 +1129,9 @@ async def test_redis_connection_heartbeat_is_generation_fenced() -> None:
 async def test_redis_get_connection_does_not_delete_reconnected_generation() -> None:
     """Expired-record cleanup must not delete a concurrent reconnect."""
     fake_redis = FakeRedisConnectionStore()
-    store = RedisRuntimeCoordinationStore(cast(Redis, fake_redis))
+    store = RedisRuntimeCoordinationStore(
+        fake_redis  # ty: ignore[invalid-argument-type] — the focused fake implements only the Redis commands exercised by these fencing tests.
+    )
     key = "azents:agent-runtime:coordination:connection:runner:runtime-1"
     now = _now()
     fake_redis.data[key] = _fake_connection_json(
@@ -1321,6 +1336,33 @@ def _metrics_sample(
         memory=available,
         disk=available,
     )
+
+
+def _json_object(raw: str) -> dict[str, JsonValue]:
+    value: object = json.loads(raw)
+    if not isinstance(value, dict):
+        raise ValueError("Fake Redis payload must be an object")
+    result: dict[str, JsonValue] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValueError("Fake Redis payload keys must be strings")
+        result[key] = _json_value(item)
+    return result
+
+
+def _json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, list):
+        return [_json_value(item) for item in value]
+    if isinstance(value, dict):
+        result: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("Fake Redis payload keys must be strings")
+            result[key] = _json_value(item)
+        return result
+    raise ValueError("Fake Redis payload contains a non-JSON value")
 
 
 def _request_envelope(request_id: str) -> RuntimeRequestEnvelope:
