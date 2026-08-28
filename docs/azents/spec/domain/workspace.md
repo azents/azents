@@ -51,7 +51,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/features/workspace/**
   - typescript/apps/azents-web/src/features/external-channel-workspace/**
-  - typescript/apps/azents-web/src/features/agent-workspace/**
+  - typescript/apps/azents-web/src/shared/agent-workspace/**
   - typescript/apps/azents-web/src/features/agents/AgentAutomaticProjectsPage.tsx
   - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
@@ -71,7 +71,7 @@ code_paths:
   - python/apps/azents-runtime-runner/**
   - typescript/apps/azents-web/src/shared/components/runtime/**
   - typescript/apps/azents-web/src/shared/lib/runtimeLifecycle*
-  - typescript/apps/azents-web/src/features/runtime-metrics/**
+  - typescript/apps/azents-web/src/shared/runtime-metrics/**
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
@@ -106,7 +106,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-27
+last_verified_at: 2026-08-28
 spec_version: 75
 ---
 

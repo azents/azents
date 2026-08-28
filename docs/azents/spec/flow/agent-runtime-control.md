@@ -43,7 +43,7 @@ code_paths:
   - typescript/packages/azents-public-client/**
   - typescript/apps/azents-web/src/shared/components/runtime/**
   - typescript/apps/azents-web/src/shared/lib/runtimeLifecycle*
-  - typescript/apps/azents-web/src/features/agent-workspace/**
+  - typescript/apps/azents-web/src/shared/agent-workspace/**
   - typescript/apps/azents-web/src/features/agents/**
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - testenv/azents/e2e/src/support/runtime_profiles.py

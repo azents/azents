@@ -32,13 +32,13 @@ code_paths:
   - python/apps/azents/specs/public/openapi.json
   - python/libs/azents-public-client/**
   - typescript/packages/azents-public-client/**
-  - typescript/apps/azents-web/src/features/runtime-metrics/**
+  - typescript/apps/azents-web/src/shared/runtime-metrics/**
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-08-26
+last_verified_at: 2026-08-28
 spec_version: 30
 ---
 
