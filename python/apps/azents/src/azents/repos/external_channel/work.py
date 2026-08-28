@@ -1964,6 +1964,8 @@ def projection_state(
         for part in projection_parts
     ):
         return "unknown"
+    if work.tracker_visibility == "hidden" and not projection_parts:
+        return "none"
     if work.desired_progress is None:
         if any(
             part.status is ExternalChannelWorkProjectionStatus.FAILED

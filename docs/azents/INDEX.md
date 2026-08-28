@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-19 | 67 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-23 | 155 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-20 | 63 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-28 | 64 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-18 | 20 |
@@ -39,9 +39,9 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-16 | 34 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-24 | 49 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-16 | 37 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-22 | 48 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-28 | 50 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-28 | 38 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-28 | 49 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -150,7 +150,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Discord External Channel Slack Parity Requirements](requirements/discord-260728-slack-parity.md) | discord-260728 | 2026-07-28 | - |
 | [Discord Bot Role Mention Invocation Requirements](requirements/discord-260802-bot-role-mention-invocation.md) | discord-260802 | 2026-08-02 | - |
 | [Discord Thread Automatic Archive Duration Requirements](requirements/discord-260820-thread-auto-archive-duration.md) | discord-260820 | 2026-08-20 | 2026-08-20 |
-| [Discord Quiet Work Presence Requirements](requirements/discord-260828-quiet-work-presence.md) | discord-260828 | 2026-08-28 | - |
+| [Discord Quiet Work Presence Requirements](requirements/discord-260828-quiet-work-presence.md) | discord-260828 | 2026-08-28 | 2026-08-28 |
 | [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
 | [DockerAgentHomeClient sandbox-daemon Sidecar Historical Requirements Reconstruction](requirements/docker-260409-docker-home-sidecar.md) | docker-260409 | 2026-04-09 | 2026-04-09 |
 | [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |

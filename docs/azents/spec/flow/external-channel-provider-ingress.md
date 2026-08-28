@@ -62,8 +62,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-22
-spec_version: 48
+last_verified_at: 2026-08-28
+spec_version: 49
 ---
 
 # External Channel Provider Ingress
@@ -254,6 +254,13 @@ Typed `on_disconnect` records a fenced degraded gap. Typed `on_ready` and `on_re
 mark the same current lease active and clear its gap. A stale callback fails the client
 and cannot mutate a newer lease.
 
+The same current Gateway owner runs one ephemeral typing registry on its existing
+`discord.Client`. A complete lease/App-claim/configuration fence projects exact
+delivery channels for connected active conversational Work. Ready and Resume rebuild
+the registry from PostgreSQL; disconnect, lease loss, Client close, and shutdown cancel
+its tasks. Public SDK typing failures are isolated from event admission and durable
+connection health.
+
 Credential failures and Gateway outcomes that cannot reconnect terminalize the current
 fenced lease in one transaction: they record the reason, release that lease, and move
 the connection to `reconnect_required`. The scheduler excludes that state until a
@@ -310,12 +317,15 @@ durable queue content.
    per-thread mode reconciles or creates the actual delivery thread through the public
    SDK; Discord parent-channel mode and Slack use their existing provider conversation
    identity without an artificial mutation.
-5. One short ready transaction re-locks the owner and current routing authority,
-   retains the prepared Discord delivery thread on the target Resource when needed,
-   reuses a compatible connected Binding/active Session or creates one root Session,
-   Binding, Channel Work, and initial controls, then records the Binding/Session on the
-   same owner without moving its items. A stopped Session, disconnected Binding, stale
-   setting, or terminal provider result cannot become ready.
+5. One short ready transaction re-locks the owner, its first authoritative queued
+   item, and current routing authority, retains the prepared Discord delivery thread on
+   the target Resource when needed, reuses a compatible connected Binding/active
+   Session or creates one root Session, Binding, Channel Work, and initial controls,
+   then records the Binding/Session on the same owner without moving its items. Slack
+   creates visible Work. Discord derives initial Tracker visibility from that queued
+   item's provider-native invocation flag; an ordinary all-messages item creates hidden
+   Work and no initial Tracker. A stopped Session, disconnected Binding, stale setting,
+   or terminal provider result cannot become ready.
 6. A ready owner's first claim contains exactly one due item; later claims contain at
    most ten due items in queue-key order. Resolution is sequential in that order
    outside a database transaction. A retry-waiting item does not block later due work.
@@ -340,13 +350,19 @@ durable queue content.
    `external_channel_message` mailbox row. Rows from one processing batch share an
    order group with contiguous sequence values following queue order and per-item
    provider-history order.
-10. In the same transaction, successful cursor advances, mailbox rows, retry-tail
+10. When at least one newly created mailbox row belongs to Slack or to a Discord item
+   whose provider-native invocation flag is true, the transaction creates or promotes
+   the active Work as Tracker-visible and may claim its latest complete Tracker
+   snapshot. A Discord batch containing only newly created ordinary all-messages input
+   creates or retains hidden Work. Duplicate mailbox rows and context-only history do
+   not promote visibility.
+11. In the same transaction, successful cursor advances, mailbox rows, retry-tail
    transitions, bounded-failure deletions, queue completion, drain-state update, and
    the existing Session runnable transition commit atomically. Retry retains the same
    ingress identity and original age while assigning a fresh tail key. Successful,
    suppressed, and bounded-failure items are deleted; no completed outcome or
    tombstone row is created.
-11. A non-empty processing batch emits one post-commit routing-only
+12. A non-empty processing batch emits one post-commit routing-only
    `SessionWakeUp(session_id)`. Broker failure does not roll back mailbox input.
    Existing pending-mailbox and stuck-Session recovery consume the committed input
    without provider resend or a durable wake row.
@@ -390,9 +406,10 @@ conversation position unchanged, so a later eligible mention can include them th
 the existing bounded provider-history range. Already committed
 mailbox input, wake, Channel Work, or AgentRun state is never cancelled or
 reclassified by a later mode change. The explicit-invocation flag remains the
-response-mode and settings-control signal; it does not demote an ordinary message that
-already passed the connected `all_messages` gate. That admitted item's exact trigger
-correlation produces `prompt_role=invocation`.
+response-mode, settings-control, and Discord Tracker-visibility promotion signal; it
+does not demote an ordinary message that already passed the connected `all_messages`
+gate. That admitted item's exact trigger correlation produces
+`prompt_role=invocation`, while its Work cycle may remain Tracker-hidden.
 
 Restricted access persists the trigger source plus immutable conversation-position,
 range-start, and trigger-position replay authority and returns one immediate
@@ -472,7 +489,10 @@ match it exactly.
 ## Evidence and Redaction
 
 Deterministic E2E uses signed raw callbacks and fake HTTP/WebSocket providers through
-public APIs. Provider evidence records operation names, bounded metadata,
+public APIs. The Discord fake also records bounded typing target snapshots and pulses
+containing only Guild, channel, and contributing Work-count metadata, including empty
+target sets used to prove completion. Provider evidence records operation names,
+bounded metadata,
 acknowledgements, Gateway state transitions, file counts, aggregate bytes, and outcomes
 only. Authorization headers, signing secrets, bot/app tokens, callback URLs, raw
 payloads, message text, attachment names, attachment bytes, and transient URLs are
@@ -496,6 +516,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-28** (spec_version 49) — Derived Discord Tracker visibility from the
+  authoritative queued invocation, promoted hidden active Work on a later mention, and
+  added lease-fenced Gateway typing target reconciliation with credential-free E2E
+  evidence.
 - **2026-08-22** (spec_version 48) — Updated deterministic External Channel
   E2E source ownership to the reusable scenario module after collection was split
   into file-level CI partitions; product ingress behavior is unchanged.

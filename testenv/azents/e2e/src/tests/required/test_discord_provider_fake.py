@@ -590,6 +590,121 @@ def test_discord_fake_serves_injected_gateway_dispatches(
     assert "Private gateway content" not in str(evidence)
 
 
+def test_discord_fake_records_redacted_typing_snapshots_and_pulses(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Store only safe active-target facts and explicit empty snapshots."""
+    discord_fake_url, _ = discord_fake_urls
+    targets = [
+        {
+            "guild_id": STATE.guild_id,
+            "channel_id": "400000000000000001",
+            "work_cycle_count": 2,
+        },
+        {
+            "guild_id": STATE.guild_id,
+            "channel_id": "400000000000000002",
+            "work_cycle_count": 1,
+        },
+    ]
+    active = requests.post(
+        f"{discord_fake_url}/__testenv/typing",
+        json={"targets": targets},
+        timeout=5,
+    )
+    empty = requests.post(
+        f"{discord_fake_url}/__testenv/typing",
+        json={"targets": []},
+        timeout=5,
+    )
+
+    assert active.status_code == 204
+    assert empty.status_code == 204
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["typing"] == {
+        "snapshots": [{"targets": targets}, {"targets": []}],
+        "pulses": targets,
+    }
+    assert evidence["request_counts"]["typing"] == 2
+    rendered = str(evidence)
+    assert "work-cycle-private-id" not in rendered
+    assert "typing-private-content" not in rendered
+
+
+def test_discord_fake_typing_failures_do_not_record_targets_and_reset_evidence(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Apply typed failure controls without retaining failed typing snapshots."""
+    discord_fake_url, _ = discord_fake_urls
+    target = {
+        "guild_id": STATE.guild_id,
+        "channel_id": "400000000000000001",
+        "work_cycle_count": 1,
+    }
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"api_scenario_sequences": {"typing": ["server_error", "ok"]}},
+        timeout=5,
+    ).raise_for_status()
+
+    failed = requests.post(
+        f"{discord_fake_url}/__testenv/typing",
+        json={"targets": [target]},
+        timeout=5,
+    )
+    delivered = requests.post(
+        f"{discord_fake_url}/__testenv/typing",
+        json={"targets": [target]},
+        timeout=5,
+    )
+
+    assert failed.status_code == 503
+    assert delivered.status_code == 204
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["typing"] == {
+        "snapshots": [{"targets": [target]}],
+        "pulses": [target],
+    }
+    assert evidence["request_counts"]["typing"] == 2
+
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={},
+        timeout=5,
+    ).raise_for_status()
+    configured = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert configured["typing"] == {"snapshots": [], "pulses": []}
+    assert "typing-private-content" not in str(configured)
+
+
+def test_discord_fake_rejects_non_redacted_typing_targets(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Reject work identifiers and visible content before they reach evidence."""
+    discord_fake_url, _ = discord_fake_urls
+    response = requests.post(
+        f"{discord_fake_url}/__testenv/typing",
+        json={
+            "targets": [
+                {
+                    "guild_id": STATE.guild_id,
+                    "channel_id": "400000000000000001",
+                    "work_cycle_count": 1,
+                    "work_cycle_id": "work-cycle-private-id",
+                    "content": "typing-private-content",
+                }
+            ]
+        },
+        timeout=5,
+    )
+
+    assert response.status_code == 400
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["typing"] == {"snapshots": [], "pulses": []}
+    assert "work-cycle-private-id" not in str(evidence)
+    assert "typing-private-content" not in str(evidence)
+
+
 def test_discord_fake_controls_injected_gateway_reconnect_and_resume(
     discord_fake_urls: tuple[str, str],
 ) -> None:
