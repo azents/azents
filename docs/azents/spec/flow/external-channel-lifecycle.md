@@ -34,8 +34,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-27
-spec_version: 38
+last_verified_at: 2026-08-29
+spec_version: 39
 ---
 
 # External Channel Lifecycle
@@ -46,6 +46,8 @@ Disconnecting a connected binding terminally sets `disconnected_at`, ends active
 Channel Work, and captures one leave-presence plan plus Activity Tracker cleanup plans
 when needed. Slack renders the presence control with Block Kit and Discord
 uses an Embed; both include the current Agent name and one `View session` button.
+The next Discord Gateway typing reconciliation removes the binding's delivery channel
+unless another active Work cycle for the same Bot/channel still contributes it.
 Provider conversation positions and already projected AgentSession history remain.
 The timestamp is the only binding connectedness authority; no lifecycle path clears
 it or reactivates history. Repeating a manual binding disconnect does not create a
@@ -69,7 +71,8 @@ same mutation returns the not-found-shaped management result.
 `channel_action ignore` is not a binding lifecycle transition. It silently finishes
 only the current active Channel Work cycle, leaves the binding connected, and creates
 no leave-presence or Activity Tracker cleanup plan. Recorded task status does not block
-the transition, and the finished cycle no longer participates in idle continuation.
+the transition, and the finished cycle no longer participates in idle continuation or
+Discord typing renewal.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, commits
@@ -196,7 +199,10 @@ hash matches the active connection. An absent or mismatched endpoint records
 `interaction_endpoint_drift` through the same terminal lease fence without retaining
 the raw selector. During SDK-owned recovery, `disconnect` records a fenced degraded
 gap and `ready` or `resumed` marks the same lease active and clears the gap. Azents
-does not run a second Gateway reconnect or Resume loop.
+not run a second Gateway reconnect or Resume loop. The current Gateway owner also
+reconciles process-local typing tasks from active Work under the same lease and
+generation fences. A restart or Resume restores still-active targets; Work finished
+during the gap is absent. Typing provider failure does not change connection health.
 
 Slack Socket Mode keeps one SDK lifecycle per current fenced lease. SDK endpoint
 replacement records a degraded gap, successful establishment marks active, and
@@ -230,7 +236,9 @@ Archive uses the explicit terminal transition policy inside the caller-owned arc
    leave-presence plan.
 
 Provider presence and cleanup effects run once after commit. Failure, ambiguity, or
-interruption does not roll back Session archive and creates no recovery work.
+interruption does not roll back Session archive and creates no recovery work. Finished
+archived Work disappears from the next Discord typing target projection; no explicit
+provider stop mutation exists.
 External Channel file transfer adds no stored byte object or file-specific cleanup
 participant.
 
@@ -300,6 +308,9 @@ before finalization.
 
 ## Changelog
 
+- **2026-08-28** (spec_version 39) — Added lifecycle removal and restart recovery
+  rules for lease-fenced Discord typing targets without introducing durable typing
+  state or provider stop operations.
 - **2026-08-25** (spec_version 38) — Required Discord activation to confirm the
   provider-reported Interaction Endpoint postcondition and made Gateway login
   terminalize absent or mismatched endpoint authority as reconnect-required.

@@ -2,6 +2,7 @@
 title: "Discord Quiet Work Presence Requirements"
 created: 2026-08-28
 updated: 2026-08-28
+implemented: 2026-08-28
 tags: [discord, external-channel, activity, product]
 document_role: primary
 document_type: requirements

@@ -64,8 +64,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-27
-spec_version: 63
+last_verified_at: 2026-08-29
+spec_version: 64
 ---
 
 # External Channel
@@ -92,7 +92,9 @@ contain multiple independent bindings.
   selector interactions retain only routing, authorization, and replay identity.
 - Bindings are Session lifecycle resources. Each binding's current or latest Channel
   Work cycle and Work-owned provider projection parts are one Session-bound Toolkit
-  State value under `external_channel/channel_work:{binding_id}`.
+  State value under `external_channel/channel_work:{binding_id}`. The versioned Work
+  state also owns cycle-scoped Activity Tracker visibility; process-local typing tasks
+  and provider messages are not visibility authority.
 - Credentials are encrypted at rest and decrypted only inside provider adapters. Public APIs, generated clients, prompts, events, logs, UI state, and test evidence expose only redacted credential status.
 - Provider history is the inbound content authority. A callback admits only a
   content-free active ingress identity. One resolved history range becomes independent
@@ -157,7 +159,7 @@ contain multiple independent bindings.
 | Ingress conversation owner and item | One active owner is unique for the effective target Resource and owns the lease, provider-conversation preparation state, nullable resulting Binding/Session, first-batch flag, and current processing-batch fence. Each active item retains a content-free physical source locator and position, immutable owner authority, queue order, attempt/original-age state, processing ownership, the exact admitted trigger correlation, and the bounded count of files observed in a live Slack or Discord callback. Its provider-native explicit-invocation flag remains separate response-mode and provider-control evidence; an ordinary message admitted by a connected `all_messages` Binding still owns an active trigger correlation. Slack `location=channel` may fan source threads into one parent owner. Discord parent-channel messages use the parent owner, while every existing Discord Thread keeps an exact independent owner and participation state. Parent participation can select the routed Agent and the response mode copied after an explicit Thread invocation, but it never makes an unbound Thread participate. A required Discord delivery thread is prepared before the owner records a new Binding and Session. The first ready claim is one item and later claims are at most ten. Successful, suppressed, terminal provisioning, and bounded-failure rows are deleted; no completed outcome, tombstone, generic job, or durable wake row exists. |
 | Mailbox item and Session events | Every canonical provider message uses one deterministic `external_channel_message` mailbox row with one `prompt_role = context | invocation`, provider-message idempotency identity, and explicit order group/sequence. Every active admitted item correlates its exact eligible human trigger row to `prompt_role=invocation`, including an ordinary connected `all_messages` trigger whose provider-native explicit-invocation flag is false; other retained history remains `context` unless it independently matches another active admitted trigger. PostgreSQL conversation-position compare-and-set is the duplicate-prevention and ordering authority. Pending mailbox state owns wake recovery. Only the exact eligible human invocation-role row created with the root Session may carry transient initial-title eligibility; promotion and mailbox deletion consume it. Promotion creates canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
-| Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, finish timestamp, and ordered current provider projection parts. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
+| Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, cycle-scoped `hidden` or `visible` Activity Tracker policy, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, finish timestamp, and ordered current provider projection parts. Slack conversational cycles are visible. A Discord cycle begins visible for an eligible explicit invocation and hidden for an ordinary message admitted by an existing all-messages Binding; a later eligible invocation promotes hidden to visible monotonically. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
 
 ## State Invariants
 
@@ -212,6 +214,14 @@ contain multiple independent bindings.
   default into the participation setting. Later configured Bindings copy that setting,
   while existing Bindings retain their own mode. Existing Agents and historical
   bindings use `all_messages`.
+- Channel Work Tracker visibility is independent from response admission after a
+  message is accepted. Slack conversational Work is always visible. Discord
+  conversational Work created or reactivated by an ordinary all-messages trigger is
+  hidden, retains complete canonical desired progress, and plans no Tracker provider
+  effect. An eligible explicit invocation in the same active cycle promotes visibility
+  once and creates the latest complete desired snapshot. Visibility never moves back
+  to hidden within that cycle. Existing Work rows were migrated as visible, and
+  Scheduled Task-owned Trackers keep their separate unconditional lifecycle.
 - Every model input boundary exposes `channel_action ignore` beside `finish` and
   `continue`. `ignore` accepts no publication or Work-update fields and uses the same
   active Session, Agent, binding, route, connection, and resource validation as other
@@ -250,6 +260,15 @@ contain multiple independent bindings.
   reads raw Gateway payloads/private SDK state nor persists a cross-process Gateway
   Resume checkpoint. Durable provider-event idempotency and the current
   lease/configuration/App-claim fence protect canonical admission.
+- The same fenced Discord Gateway connection owner reconciles ephemeral typing targets
+  from connected active Bindings and schema-valid active Channel Work. Hidden and
+  visible conversational Work both request typing on the Resource's exact parent or
+  delivery-thread channel. One public-SDK task per Bot/channel renews typing while any
+  contributing Work remains active. `finish`, `ignore`, binding termination, lease
+  loss, disconnect, Client shutdown, and process shutdown remove or cancel targets.
+  Gateway ready/resume and worker restart rebuild targets from PostgreSQL. Typing
+  failures and Discord's provider-defined indicator expiry never mutate Work,
+  connection health, mailbox input, replies, or Tracker projection state.
 - Discord `ready`, `resumed`, and `disconnect` callbacks update active or degraded
   health only through the current lease fence. Slack Socket establishment and endpoint
   replacement callbacks use the equivalent fenced active/gap transitions. One
@@ -274,10 +293,11 @@ contain multiple independent bindings.
   Provider history, per-message mailbox admission, cursor advancement, and the running
   transition occur later in the leased Session drain. A non-empty processing batch
   sends one post-commit broker wake; failure leaves canonical mailbox input
-  recoverable. Process-local joined-presence and initial-progress plans remain
-  independent controls. Failed, unknown, cancelled, or interrupted presence or
-  progress effects never block mailbox promotion, Session wake, or AgentRun creation
-  and create no recovery work. Slack lowers work through its
+  recoverable. Process-local joined-presence and eligible initial-progress plans remain
+  independent controls. Slack Work and Discord Work whose cycle is already visible may
+  plan the initial Tracker. Hidden Discord Work does not. Failed, unknown, cancelled,
+  or interrupted presence or progress effects never block mailbox promotion, Session
+  wake, or AgentRun creation and create no recovery work. Slack lowers work through its
   retained Tracker message; Discord lowers each work snapshot to one retained compact
   Embed Tracker. The Embed title carries the current-work title, while its bounded
   description carries the status summary, every ordered task title and status marker,
@@ -483,6 +503,9 @@ current provider principal and interaction before mutation.
 
 ## Changelog
 
+- **2026-08-28** (spec_version 64) — Added cycle-scoped mention-gated Discord
+  Activity Tracker visibility and lease-fenced active-Work typing reconciliation on
+  the existing Gateway Client while preserving Slack and Scheduled Task presentation.
 - **2026-08-20** (spec_version 63) — Added the connection-owned Discord Thread
   automatic archive duration, one-day migration/default, and non-secret Single/Multi
   policy updates that preserve active connection authority.

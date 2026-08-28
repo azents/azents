@@ -24,6 +24,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_delivery.py
+  - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
+  - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
   - python/apps/azents/src/azents/services/external_channel/discord_presentation.py
   - python/apps/azents/src/azents/services/external_channel/thread_title.py
   - python/apps/azents/src/azents/services/session_title.py
@@ -38,8 +40,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-24
-spec_version: 49
+last_verified_at: 2026-08-29
+spec_version: 50
 ---
 
 # External Channel Delivery and Channel Work
@@ -282,12 +284,15 @@ Session title and Agent execution.
 ## Activity Tracker Lifecycle
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
-- Releasing the first eligible invocation while a binding has no unanswered work
-  creates Channel Work and plans one Activity Tracker effect before Session wake-up.
-  Creation does not depend on Todo state or a `channel_action` call.
+- Releasing new conversational input while a binding has no unanswered work creates a
+  Channel Work cycle before Session wake-up. Slack cycles are Tracker-visible. Discord
+  cycles are visible for an eligible explicit invocation and hidden for an ordinary
+  message admitted by an existing all-messages Binding. Creation does not depend on
+  Todo state or a `channel_action` call.
 - Initial binding acceptance separately creates one Session presence control and the
-  initial Activity Tracker plan in the same transaction as the triggering mailbox
-  input. The versioned presence control replaces the former button-only Session link.
+  eligible initial Activity Tracker plan in the same transaction as the triggering
+  mailbox input. Every Binding creation is mention-gated, so its initial cycle is
+  visible. The versioned presence control replaces the former button-only Session link.
   Slack uses Block Kit and Discord uses an Embed; both state that the current Agent
   joined the conversation and place `View session` and provider-native
   `Conversation settings` actions below the message while the Binding remains
@@ -313,14 +318,21 @@ Session title and Agent execution.
   latest Block Kit payload through `chat.update`. A revision-derived provider-only
   `block_id` changes for each message iteration. Slack Agent streaming methods are
   not used.
+- Hidden Discord Work still commits every accepted title, ordered task list, desired
+  progress revision, reply, continuation, and finish transition, but plans no Tracker
+  provider effect. A later eligible mention promotes the same active cycle to visible
+  and claims one create from the latest complete desired snapshot. Concurrent progress
+  updates are re-read and re-rendered through a bounded CAS loop, so promotion cannot
+  leave visible Work without its latest Tracker claim.
 - Finishing requires a final reply. Reply effects are attempted first; only
   `delivered` results permit `chat.delete` for the Tracker. Failed, unknown, or
   not-attempted replies leave deletion `not_attempted`.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
-- Discord creates one joined-presence control and an initial compact Channel Work
-  Embed containing `◉ Agent is checking your message` from the same accepted binding
-  transaction. A Scheduled Task-owned Tracker instead contains
+- Discord creates one joined-presence control and, for a visible cycle, an initial
+  compact Channel Work Embed containing `◉ Agent is checking your message` from the
+  same accepted binding transaction. Hidden cycles omit the Embed until promoted. A
+  Scheduled Task-owned Tracker instead contains
   `◉ Agent is running a scheduled task…` followed by the task title on the next line.
   Later complete snapshots replace that retained message's content with an empty
   string and its Embed with the current bounded title, status summary, ordered
@@ -393,7 +405,29 @@ projection state:
 
 State and desired-progress revision counters remain diagnostic metadata and are not
 compared as one sequence. A failed or unknown projection never replaces canonical
-Channel Work state.
+Channel Work state. Intentionally hidden Work with no projection part reports `none`
+rather than `missing`; its canonical desired progress remains readable.
+
+## Discord Typing Presence
+
+Every active Discord conversational Work requests typing regardless of Tracker
+visibility. The current lease-fenced Discord Gateway owner derives distinct exact
+delivery channels from PostgreSQL Binding, Resource, Session, Agent, route, connection,
+App-claim, lease, and Work authority. It uses the existing long-lived
+`discord.Client`, public `get_partial_messageable()`, and awaitable public `typing()`
+operation to maintain one renewal task per Bot/channel.
+
+Ready and Resume reconcile immediately and then periodically before the provider's
+ten-second indicator expiry. Several Work cycles targeting one channel share one task
+until the final cycle finishes. Target removal, `finish`, `ignore`, binding
+termination, disconnect, lease loss, Client close, and process shutdown cancel and
+await renewal tasks. Gateway restart reloads still-active targets; Work finished while
+the Gateway is unavailable is not restored.
+
+Discord exposes no explicit stop operation, so the final indicator may remain until
+provider expiry after renewal stops. HTTP or OS failures are sanitized, retried at a
+bounded presentation cadence, and never become Work, connection-health, delivery,
+retry, or recovery authority.
 
 ## Continuation
 
@@ -455,6 +489,9 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-08-28** (spec_version 50) — Made Discord conversational Trackers
+  mention-gated per Work cycle, retained hidden canonical progress, and added
+  lease-fenced public-SDK typing for every active Discord conversational Work.
 - **2026-08-20** (spec_version 48) — Made new Discord Thread creation use the
   connection-owned four-value automatic archive policy while leaving existing and
   reconciled Threads unchanged.
