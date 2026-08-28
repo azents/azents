@@ -340,10 +340,19 @@ class ExternalChannelIngressDrainService:
                 if locked is None:
                     await session.rollback()
                     return False
+                first_item = await self.queue_repository.lock_first_authoritative_item(
+                    session,
+                    owner_id=locked.id,
+                )
+                if first_item is None:
+                    await session.rollback()
+                    return False
                 completion = await self.provisioning_service.complete(
                     session,
                     owner=ExternalChannelIngressOwner.model_validate(locked),
                     preparation=preparation,
+                    initial_provider=first_item.provider,
+                    initial_invocation=first_item.invocation,
                 )
                 await self.queue_repository.mark_owner_ready(
                     session,
@@ -618,6 +627,7 @@ class ExternalChannelIngressDrainService:
             order_sequence = 0
             enqueues: list[MailboxEnqueue] = []
             settings_trigger_keys: set[str] = set()
+            visible_tracker_mailbox_keys: set[str] = set()
             target_resource: ExternalChannelResource | None = None
             target_binding: ExternalChannelBinding | None = None
             successful_positions = {
@@ -699,6 +709,17 @@ class ExternalChannelIngressDrainService:
                                 ),
                                 sequence=order_sequence,
                             )
+                            mailbox_idempotency_key = _message_idempotency_key(
+                                invocation_id=invocation_id,
+                                provider_message_key=message.provider_message_key,
+                            )
+                            if (
+                                item.provider is ExternalChannelProvider.SLACK
+                                or item.invocation
+                            ):
+                                visible_tracker_mailbox_keys.add(
+                                    mailbox_idempotency_key
+                                )
                             enqueues.append(
                                 MailboxEnqueue(
                                     session_id=batch.session_id,
@@ -710,12 +731,7 @@ class ExternalChannelIngressDrainService:
                                     order_group=order_group,
                                     order_sequence=order_sequence,
                                     content="",
-                                    idempotency_key=_message_idempotency_key(
-                                        invocation_id=invocation_id,
-                                        provider_message_key=(
-                                            message.provider_message_key
-                                        ),
-                                    ),
+                                    idempotency_key=mailbox_idempotency_key,
                                     metadata={},
                                     attachments=[],
                                     file_parts=[],
@@ -781,6 +797,15 @@ class ExternalChannelIngressDrainService:
                 result.created and enqueue.idempotency_key in settings_trigger_keys
                 for enqueue, result in zip(enqueues, mailbox_results, strict=True)
             )
+            tracker_visibility: Literal["hidden", "visible"] = (
+                "visible"
+                if any(
+                    result.created
+                    and enqueue.idempotency_key in visible_tracker_mailbox_keys
+                    for enqueue, result in zip(enqueues, mailbox_results, strict=True)
+                )
+                else "hidden"
+            )
             if any(result.created for result in mailbox_results):
                 if target_resource is None or target_binding is None:
                     raise RuntimeError(
@@ -813,6 +838,7 @@ class ExternalChannelIngressDrainService:
                     session_id=batch.session_id,
                     binding_id=batch.binding_id,
                     desired_progress=checking_progress(),
+                    tracker_visibility=tracker_visibility,
                 )
                 progress_plan = await self.work_repository.prepare_initial_progress(
                     session,
