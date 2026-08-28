@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-27
-spec_version: 38
+last_verified_at: 2026-08-28
+spec_version: 39
 ---
 
 # E2E Primary Test Strategy
@@ -70,6 +70,12 @@ For configured Discord REST controlled failures, the fake atomically records san
 delivery and operation evidence before the SDK caller can observe an HTTP error,
 connection close, or timeout delay. Regression coverage synchronizes on the evidence
 publication and transport boundary instead of using sleeps.
+
+When a bounded Discord delivery barrier expires without release, the fake records the
+affected operation before closing transport. A message already assigned a provider
+identity publishes its sanitized delivery and operation evidence atomically as an
+unknown `transport_unknown` outcome; read and thread operations publish bounded
+barrier-expiry operation evidence.
 
 Fakes and test evidence never retain credentials, authorization headers, signatures,
 callback URLs, raw payloads, visible message bodies, attachment names, attachment
@@ -330,6 +336,8 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-28** (spec_version 39) — Made Discord delivery-barrier expiry
+  publish sanitized message or operation evidence before closing transport.
 - **2026-08-27** (spec_version 38) — Made configured Discord REST failure
   delivery and operation evidence atomic and authoritative before HTTP, connection,
   or timeout outcomes become observable.

@@ -17,6 +17,25 @@ from support.discord_provider_fake import (
 _DISCORD_VERIFY_KEY = "233988c4fcf6ffd4dcf0590950d79671de856cfa36f65c16a2be13b1613875f0"
 
 
+class _ImmediateBarrierExpiry:
+    """Model one reached barrier whose bounded release wait expires."""
+
+    def clear(self) -> None:
+        """Keep the synthetic release unset."""
+
+    def set(self) -> None:
+        """Ignore releases because the modeled wait already expired."""
+
+    def is_set(self) -> bool:
+        """Report that no release was observed before expiry."""
+        return False
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Expire immediately without using wall-clock delay."""
+        del timeout
+        return False
+
+
 class _SignedInteractionHandler(BaseHTTPRequestHandler):
     """Verify the fake's real Ed25519 interaction signature in memory."""
 
@@ -856,6 +875,168 @@ def test_discord_fake_publishes_failure_evidence_before_transport_boundary(
             "file_count": 1,
             "file_bytes": len(b"transport-boundary"),
             "safe_category": "transport_unknown",
+        }
+    ]
+
+
+def test_discord_fake_records_message_evidence_before_barrier_expiry_close(
+    discord_fake_urls: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Record an ambiguous committed message before barrier expiry closes transport."""
+    discord_fake_url, _ = discord_fake_urls
+    original_close = DiscordHTTPHandler._close_connection
+    boundary_evidence: list[dict[str, object]] = []
+
+    def observe_close(handler: DiscordHTTPHandler) -> None:
+        boundary_evidence.append(
+            requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+        )
+        original_close(handler)
+
+    monkeypatch.setattr(DiscordHTTPHandler, "_close_connection", observe_close)
+    requests.post(
+        f"{discord_fake_url}/__testenv/barrier",
+        json={"operation": "create_message", "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    monkeypatch.setattr(
+        STATE,
+        "_delivery_barrier_release",
+        _ImmediateBarrierExpiry(),
+    )
+
+    with pytest.raises(requests.ConnectionError):
+        requests.post(
+            f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
+            data={"payload_json": '{"content":"controlled"}'},
+            files={
+                "files[0]": (
+                    "barrier.txt",
+                    b"barrier-expiry",
+                    "text/plain",
+                )
+            },
+            timeout=5,
+        )
+
+    assert len(boundary_evidence) == 1
+    assert boundary_evidence[0]["operations"] == [
+        {
+            "sequence": 1,
+            "event": "message",
+            "operation": "create_message",
+            "outcome": "unknown",
+            "channel_id": "400000000000000001",
+            "message_id": "400000000000000001",
+            "safe_category": "transport_unknown",
+        }
+    ]
+    assert boundary_evidence[0]["deliveries"] == [
+        {
+            "operation": "create_message",
+            "channel_id": "400000000000000001",
+            "message_id": "400000000000000001",
+            "outcome": "unknown",
+            "file_count": 1,
+            "file_bytes": len(b"barrier-expiry"),
+            "safe_category": "transport_unknown",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("barrier_operation", "sdk_operation", "arguments", "expected_metadata"),
+    [
+        (
+            "create_thread",
+            "create_thread",
+            {
+                "guild_id": STATE.guild_id,
+                "parent_channel_id": "400000000000000001",
+                "root_message_id": "400000000000000101",
+                "name": "private-thread-name",
+                "auto_archive_duration": 60,
+            },
+            {
+                "channel_id": "400000000000000001",
+                "message_id": "400000000000000101",
+            },
+        ),
+        (
+            "get_message",
+            "fetch_message_projection",
+            {
+                "guild_id": STATE.guild_id,
+                "channel_id": "400000000000000001",
+                "message_id": "400000000000000101",
+            },
+            {
+                "channel_id": "400000000000000001",
+                "message_id": "400000000000000101",
+            },
+        ),
+        (
+            "get_history",
+            "fetch_history_projections",
+            {
+                "guild_id": STATE.guild_id,
+                "channel_id": "400000000000000001",
+                "before_message_id": "999999999999999999",
+                "limit": 100,
+            },
+            {
+                "channel_id": "400000000000000001",
+                "limit": 100,
+                "cursor": "999999999999999999",
+            },
+        ),
+    ],
+)
+def test_discord_fake_records_operation_evidence_before_barrier_expiry_close(
+    discord_fake_urls: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    barrier_operation: str,
+    sdk_operation: str,
+    arguments: dict[str, object],
+    expected_metadata: dict[str, object],
+) -> None:
+    """Record the expired provider operation before closing its transport."""
+    discord_fake_url, _ = discord_fake_urls
+    original_close = DiscordHTTPHandler._close_connection
+    boundary_evidence: list[dict[str, object]] = []
+
+    def observe_close(handler: DiscordHTTPHandler) -> None:
+        boundary_evidence.append(
+            requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+        )
+        original_close(handler)
+
+    monkeypatch.setattr(DiscordHTTPHandler, "_close_connection", observe_close)
+    requests.post(
+        f"{discord_fake_url}/__testenv/barrier",
+        json={"operation": barrier_operation, "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    monkeypatch.setattr(
+        STATE,
+        "_delivery_barrier_release",
+        _ImmediateBarrierExpiry(),
+    )
+
+    with pytest.raises(requests.ConnectionError):
+        _sdk_call(discord_fake_url, sdk_operation, **arguments)
+
+    assert len(boundary_evidence) == 1
+    assert boundary_evidence[0]["deliveries"] == []
+    assert boundary_evidence[0]["operations"] == [
+        {
+            "sequence": 1,
+            "event": "delivery_barrier",
+            "operation": barrier_operation,
+            "outcome": "unknown",
+            "safe_category": "transport_unknown",
+            **expected_metadata,
         }
     ]
 
