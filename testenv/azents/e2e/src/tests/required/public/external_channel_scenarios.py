@@ -617,6 +617,32 @@ def _successful_session_navigation_action_ids(
     return action_ids
 
 
+def _discord_typing_channel_observed(
+    provider_state: dict[str, object],
+    *,
+    channel_id: str,
+) -> bool:
+    """Return whether one safe typing snapshot includes the exact channel."""
+    typing = provider_state.get("typing")
+    if not isinstance(typing, dict):
+        return False
+    snapshots = typing.get("snapshots")
+    if not isinstance(snapshots, list):
+        return False
+    for raw_snapshot in cast(list[object], snapshots):
+        if not isinstance(raw_snapshot, dict):
+            continue
+        targets = raw_snapshot.get("targets")
+        if not isinstance(targets, list):
+            continue
+        if any(
+            isinstance(target, dict) and target.get("channel_id") == channel_id
+            for target in targets
+        ):
+            return True
+    return False
+
+
 def _completed_session_navigation_state(
     provider_state: dict[str, object],
     expected_session_path: str,
@@ -4396,6 +4422,35 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 ),
             ),
         )
+        thread_channel_id = cast(
+            str,
+            next(
+                operation["thread_channel_id"]
+                for operation in cast(list[dict[str, object]], state["operations"])
+                if operation.get("event") == "thread_create"
+                and operation.get("outcome") == "delivered"
+            ),
+        )
+        state = cast(
+            dict[str, object],
+            wait_until(
+                lambda: (
+                    provider_state
+                    if _discord_typing_channel_observed(
+                        provider_state := _discord_provider_state(
+                            discord_provider_fake_url
+                        ),
+                        channel_id=thread_channel_id,
+                    )
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message=(
+                    "Discord provisioned Thread did not receive an active typing target"
+                ),
+            ),
+        )
 
         # Keep current Gateway route authority through the adjacent title projection.
         assert generated_detail.id == session.id
@@ -4531,7 +4586,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert _DISCORD_BOT_TOKEN not in str(terminal_state)
 
 
-def test_discord_quiet_work_typing_recovers_and_late_mention_tracks_activity(
+def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     request: pytest.FixtureRequest,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
@@ -4543,7 +4598,7 @@ def test_discord_quiet_work_typing_recovers_and_late_mention_tracks_activity(
     ],
     openai_proxy_url: str,
 ) -> None:
-    """Keep Discord typing active for quiet work and track a later mention once."""
+    """Show Todo work without a mention and preserve typing through restart."""
     del azents_engine_worker_container
     application_id = "100000000000000051"
     guild_id = "200000000000000051"
@@ -4989,20 +5044,57 @@ def test_discord_quiet_work_typing_recovers_and_late_mention_tracks_activity(
         active_state = cast(
             dict[str, object],
             wait_until(
-                lambda: active_typing_state_after(
-                    snapshot_index=0,
-                    pulse_index=0,
+                lambda: (
+                    state
+                    if _successful_session_navigation_categories(
+                        state := _discord_provider_state(discord_provider_fake_url)
+                    ).count("activity_tracker")
+                    >= 1
+                    and active_typing_state_after(
+                        snapshot_index=0,
+                        pulse_index=0,
+                    )
+                    is not None
+                    else None
                 ),
                 timeout=30,
                 interval=0.2,
-                message="Discord quiet work did not publish active typing",
+                message=(
+                    "Discord unmentioned Todo work did not publish its Tracker and "
+                    "active typing"
+                ),
             ),
         )
+        quiet_tracker_action_ids = _successful_session_navigation_action_ids(
+            active_state,
+            category="activity_tracker",
+        )
+        assert quiet_tracker_action_ids
+        assert all(
+            action_ids == ["view_azents_session", "azents_conversation_settings_open"]
+            for action_ids in quiet_tracker_action_ids
+        )
+        quiet_deliveries = cast(
+            list[dict[str, object]],
+            active_state["deliveries"],
+        )
+        quiet_tracker_deliveries = [
+            delivery
+            for delivery in quiet_deliveries
+            if delivery.get("outcome") in {"delivered", "created", "duplicate"}
+            and delivery.get("safe_category") == "activity_tracker"
+        ]
+        assert {
+            delivery["message_id"]
+            for delivery in quiet_tracker_deliveries
+            if isinstance(delivery.get("message_id"), str)
+        } == {quiet_tracker_deliveries[0]["message_id"]}
         assert (
-            _successful_session_navigation_categories(active_state).count(
-                "activity_tracker"
+            sum(
+                delivery.get("operation") == "create_message"
+                for delivery in quiet_tracker_deliveries
             )
-            == 0
+            == 1
         )
         quiet_evidence = cast(
             list[dict[str, object]],
@@ -5037,8 +5129,10 @@ def test_discord_quiet_work_typing_recovers_and_late_mention_tracks_activity(
         role_mentioned=False,
         directly_mentioned=True,
     )
-    # Redeliver the quiet source while the gateway restarts, then append a late
-    # mention. Ingress deduplication must preserve one logical quiet input.
+    # Redeliver the unmentioned source while the gateway restarts, then append a late
+    # mention. Ingress deduplication must preserve one logical quiet input and the
+    # same Work must converge on one replacement Tracker identity if provider history
+    # was reset.
     configure_gateway([quiet_message, late_message], sequence=20)
     restart_state = _discord_provider_state(discord_provider_fake_url)
     restart_typing = cast(dict[str, object], restart_state["typing"])

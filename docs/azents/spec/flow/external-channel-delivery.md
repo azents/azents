@@ -41,7 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-29
-spec_version: 51
+spec_version: 52
 ---
 
 # External Channel Delivery and Channel Work
@@ -287,8 +287,8 @@ Session title and Agent execution.
 - Releasing new conversational input while a binding has no unanswered work creates a
   Channel Work cycle before Session wake-up. Slack cycles are Tracker-visible. Discord
   cycles are visible for an eligible explicit invocation and hidden for an ordinary
-  message admitted by an existing all-messages Binding. Creation does not depend on
-  Todo state or a `channel_action` call.
+  message admitted by an existing all-messages Binding. Initial checking visibility
+  does not depend on a `channel_action` call.
 - Initial binding acceptance separately creates one Session presence control and the
   eligible initial Activity Tracker plan in the same transaction as the triggering
   mailbox input. Every Binding creation is mention-gated, so its initial cycle is
@@ -318,12 +318,14 @@ Session title and Agent execution.
   latest Block Kit payload through `chat.update`. A revision-derived provider-only
   `block_id` changes for each message iteration. Slack Agent streaming methods are
   not used.
-- Hidden Discord Work still commits every accepted title, ordered task list, desired
-  progress revision, reply, continuation, and finish transition, but plans no Tracker
-  provider effect. A later eligible mention promotes the same active cycle to visible
-  and claims one create from the latest complete desired snapshot. Concurrent progress
-  updates are re-read and re-rendered through a bounded CAS loop, so promotion cannot
-  leave visible Work without its latest Tracker claim.
+- Hidden Discord Work commits initial checking state without a Tracker. A valid
+  Agent-authored `continue` transition with at least one unfinished task promotes the
+  same cycle to visible inside the canonical Work mutation and plans a create from the
+  complete title and ordered task snapshot. A later eligible mention also promotes
+  still-hidden active Work and claims one create from its latest complete desired
+  snapshot. Visibility is monotonic; concurrent progress updates are re-read and
+  re-rendered through a bounded CAS loop, so promotion cannot leave visible Work
+  without its latest Tracker claim.
 - Finishing requires a final reply. Reply effects are attempted first; only
   `delivered` results permit `chat.delete` for the Tracker. Failed, unknown, or
   not-attempted replies leave deletion `not_attempted`.
@@ -348,8 +350,8 @@ Session title and Agent execution.
   provider history, and is never created by deployment, startup, connection
   activation, or periodic background work. Discord does not create this separate
   control; every visible conversational Discord Tracker is the recurring settings
-  entry point. Hidden Discord Work creates neither surface until an eligible explicit
-  invocation promotes the Tracker.
+  entry point. Initial hidden Discord checking Work creates neither surface; canonical
+  unfinished Todo publication or an eligible explicit invocation promotes the Tracker.
 - A first eligible mention with no participation setting creates the setup claim and
   one immediate setup-control plan before Session or AgentRun creation. Slack opens the authenticated
   parent-scoped location selector. Discord posts `Answer in this channel` and
@@ -494,6 +496,9 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 52) — Made unfinished Todo publication promote hidden
+  Discord Work and create its current Tracker, while preserving hidden initial
+  checking, one Tracker identity, typing, Slack, and Scheduled Task behavior.
 - **2026-08-29** (spec_version 51) — Added the existing signed Binding settings action
   to every visible conversational Discord Tracker create/update, removed the separate
   Discord follow-up settings-only control, and preserved Slack, joined presence,

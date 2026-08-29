@@ -65,7 +65,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-29
-spec_version: 64
+spec_version: 65
 ---
 
 # External Channel
@@ -159,7 +159,7 @@ contain multiple independent bindings.
 | Ingress conversation owner and item | One active owner is unique for the effective target Resource and owns the lease, provider-conversation preparation state, nullable resulting Binding/Session, first-batch flag, and current processing-batch fence. Each active item retains a content-free physical source locator and position, immutable owner authority, queue order, attempt/original-age state, processing ownership, the exact admitted trigger correlation, and the bounded count of files observed in a live Slack or Discord callback. Its provider-native explicit-invocation flag remains separate response-mode and provider-control evidence; an ordinary message admitted by a connected `all_messages` Binding still owns an active trigger correlation. Slack `location=channel` may fan source threads into one parent owner. Discord parent-channel messages use the parent owner, while every existing Discord Thread keeps an exact independent owner and participation state. Parent participation can select the routed Agent and the response mode copied after an explicit Thread invocation, but it never makes an unbound Thread participate. A required Discord delivery thread is prepared before the owner records a new Binding and Session. The first ready claim is one item and later claims are at most ten. Successful, suppressed, terminal provisioning, and bounded-failure rows are deleted; no completed outcome, tombstone, generic job, or durable wake row exists. |
 | Mailbox item and Session events | Every canonical provider message uses one deterministic `external_channel_message` mailbox row with one `prompt_role = context | invocation`, provider-message idempotency identity, and explicit order group/sequence. Every active admitted item correlates its exact eligible human trigger row to `prompt_role=invocation`, including an ordinary connected `all_messages` trigger whose provider-native explicit-invocation flag is false; other retained history remains `context` unless it independently matches another active admitted trigger. PostgreSQL conversation-position compare-and-set is the duplicate-prevention and ordering authority. Pending mailbox state owns wake recovery. Only the exact eligible human invocation-role row created with the root Session may carry transient initial-title eligibility; promotion and mailbox deletion consume it. Promotion creates canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
-| Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, cycle-scoped `hidden` or `visible` Activity Tracker policy, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, finish timestamp, and ordered current provider projection parts. Slack conversational cycles are visible. A Discord cycle begins visible for an eligible explicit invocation and hidden for an ordinary message admitted by an existing all-messages Binding; a later eligible invocation promotes hidden to visible monotonically. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
+| Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, cycle-scoped `hidden` or `visible` Activity Tracker policy, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, finish timestamp, and ordered current provider projection parts. Slack conversational cycles are visible. A Discord cycle begins visible for an eligible explicit invocation and hidden for an ordinary message admitted by an existing all-messages Binding. A later eligible invocation or canonical `continue` transition with unfinished tasks promotes hidden to visible monotonically. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
 
 ## State Invariants
 
@@ -217,11 +217,11 @@ contain multiple independent bindings.
 - Channel Work Tracker visibility is independent from response admission after a
   message is accepted. Slack conversational Work is always visible. Discord
   conversational Work created or reactivated by an ordinary all-messages trigger is
-  hidden, retains complete canonical desired progress, and plans no Tracker provider
-  effect. An eligible explicit invocation in the same active cycle promotes visibility
-  once and creates the latest complete desired snapshot. Visibility never moves back
-  to hidden within that cycle. Existing Work rows were migrated as visible, and
-  Scheduled Task-owned Trackers keep their separate unconditional lifecycle.
+  initially hidden and plans no checking Tracker provider effect. Canonical unfinished
+  Todo publication or an eligible explicit invocation in the same active cycle promotes
+  visibility once and creates the latest complete desired snapshot. Visibility never
+  moves back to hidden within that cycle. Existing Work rows were migrated as visible,
+  and Scheduled Task-owned Trackers keep their separate unconditional lifecycle.
 - Every model input boundary exposes `channel_action ignore` beside `finish` and
   `continue`. `ignore` accepts no publication or Work-update fields and uses the same
   active Session, Agent, binding, route, connection, and resource validation as other
@@ -503,6 +503,9 @@ current provider principal and interaction before mutation.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 65) — Made Agent-authored unfinished Todo publication
+  promote hidden Discord Work to one visible Activity Tracker while retaining
+  lightweight initial checking and monotonic explicit-mention promotion.
 - **2026-08-28** (spec_version 64) — Added cycle-scoped mention-gated Discord
   Activity Tracker visibility and lease-fenced active-Work typing reconciliation on
   the existing Gateway Client while preserving Slack and Scheduled Task presentation.
