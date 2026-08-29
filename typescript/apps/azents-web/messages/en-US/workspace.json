@@ -921,6 +921,58 @@
       "socketGapTitle": "Socket delivery gap detected",
       "socketGapDescription": "Validate the connection and review channel history before continuing.",
       "capabilitiesUnavailable": "Capabilities are available after validation.",
+      "permissions": {
+        "title": "Channel permissions",
+        "notChecked": "Not checked",
+        "notCheckedDescription": "Validate this connection to check which permissions are granted.",
+        "grantedSummary": "Granted {count}",
+        "missingSummary": "Missing {count}",
+        "allGrantedDescription": "All required channel permissions are available.",
+        "missingDescription": "Some channel features are unavailable until the missing permissions are granted.",
+        "viewDetails": "View details",
+        "modalTitle": "Channel permissions",
+        "modalDescription": "These permission results come from the latest connection validation.",
+        "actionRequiredTitle": "Action required",
+        "slackAction": "In the Slack App settings, add any scopes shown below under OAuth & Permissions. If no scope is shown, reapply the App Manifest and event settings. Select Reinstall to Workspace, then validate this connection again.",
+        "discordAction": "In Discord Developer Portal and the target server, check the Bot installation and permissions, then validate this connection again.",
+        "slackScope": "Required Slack scope: {scope}",
+        "missingSection": "Missing ({count})",
+        "grantedSection": "Granted ({count})",
+        "items": {
+          "inbound_events": {
+            "label": "Receive messages",
+            "description": "Receive new messages and events from the channel."
+          },
+          "thread_history": {
+            "label": "Read conversation history",
+            "description": "Read earlier messages in conversations and threads."
+          },
+          "post_messages": {
+            "label": "Post messages",
+            "description": "Send replies to channels and threads."
+          },
+          "update_messages": {
+            "label": "Update messages",
+            "description": "Edit messages sent by the Bot."
+          },
+          "delete_messages": {
+            "label": "Delete messages",
+            "description": "Delete messages sent by the Bot."
+          },
+          "download_files": {
+            "label": "Download files",
+            "description": "Read and retrieve files attached in the channel."
+          },
+          "upload_files": {
+            "label": "Upload files",
+            "description": "Send files created in the Runtime to the channel."
+          },
+          "customize_messages": {
+            "label": "Customize message identity",
+            "description": "Show Slack messages with the Agent name and avatar."
+          }
+        }
+      },
       "discordActivationFailureTitle": "Discord connection needs attention",
       "discordFailure": {
         "discord_credentials_invalid": {
@@ -971,7 +1023,7 @@
       "accessTitle": "Participant access",
       "accessDescription": "Review active invocation grants and blocked external participants.",
       "openAccessEnabled": "Allow anyone to start a conversation",
-      "openAccessEnabledDescription": "When disabled, people need an explicit access approval.",
+      "openAccessEnabledDescription": "When this is off, only participants approved by an administrator can start a conversation.",
       "emptyAccess": "No active grants or blocks.",
       "associatedMultiAppsTitle": "Associated Workspace Apps",
       "associatedMultiAppsDescription": "Workspace-owned Slack and Discord Multi Apps that can route supported conversations to this Agent. Manage them from Workspace settings.",
