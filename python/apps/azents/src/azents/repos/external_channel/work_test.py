@@ -854,8 +854,8 @@ async def test_channel_action_ignores_connection_health_status() -> None:
     assert "external_channel_connections.status" not in _where_sql(connection_query)
 
 
-async def test_hidden_continue_retains_progress_without_tracker_effect() -> None:
-    """Hidden Work retains its latest complete progress until promotion."""
+async def test_hidden_continue_with_unfinished_tasks_creates_tracker() -> None:
+    """Canonical unfinished tasks promote hidden Work and create its Tracker."""
     work = _work(desired=True, tracker_visibility="hidden")
     binding = SimpleNamespace(
         id="binding-1",
@@ -960,8 +960,12 @@ async def test_hidden_continue_retains_progress_without_tracker_effect() -> None
     )
 
     assert transition.work_status is ExternalChannelWorkStatus.ACTIVE
-    assert transition.effects == ()
-    assert current.tracker_visibility == "hidden"
+    assert len(transition.effects) == 1
+    assert (
+        transition.effects[0].provider.target.operation
+        is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+    )
+    assert current.tracker_visibility == "visible"
     assert current.desired_progress is not None
     assert current.desired_progress.title == "Latest work…"
     assert current.desired_progress.tasks == tasks
@@ -969,17 +973,13 @@ async def test_hidden_continue_retains_progress_without_tracker_effect() -> None
 
 
 @pytest.mark.parametrize(
-    ("tracker_visibility", "expected_progress_effect"),
-    [
-        ("visible", ExternalChannelDeliveryOperation.PROGRESS_CREATE),
-        ("hidden", None),
-    ],
+    "tracker_visibility",
+    ["visible", "hidden"],
 )
-async def test_continue_after_finished_work_preserves_tracker_visibility(
+async def test_continue_after_finished_work_with_tasks_is_visible(
     tracker_visibility: Literal["hidden", "visible"],
-    expected_progress_effect: ExternalChannelDeliveryOperation | None,
 ) -> None:
-    """Channel Action replacement preserves the finished Work visibility."""
+    """A replacement cycle with unfinished tasks has a visible Tracker."""
     finished = _work(
         desired=False,
         tracker_visibility=tracker_visibility,
@@ -1089,14 +1089,12 @@ async def test_continue_after_finished_work_preserves_tracker_visibility(
 
     assert transition.work_status is ExternalChannelWorkStatus.ACTIVE
     assert transition.work_id != finished.work_cycle_id
-    assert current.tracker_visibility == tracker_visibility
-    if expected_progress_effect is None:
-        assert transition.effects == ()
-    else:
-        assert len(transition.effects) == 1
-        assert (
-            transition.effects[0].provider.target.operation is expected_progress_effect
-        )
+    assert current.tracker_visibility == "visible"
+    assert len(transition.effects) == 1
+    assert (
+        transition.effects[0].provider.target.operation
+        is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+    )
     assert current.projection_parts == []
 
 

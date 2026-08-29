@@ -4,7 +4,7 @@ import datetime
 import json
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar, assert_never, cast
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -959,6 +959,7 @@ class ExternalChannelRepository:
             if work.status is not ExternalChannelWorkStatus.ACTIVE:
                 continue
             target = _discord_gateway_typing_target(
+                resource_type=resource.resource_type,
                 labels=resource.labels,
                 provider_tenant_id=connection.provider_tenant_id,
             )
@@ -3727,6 +3728,7 @@ def _discord_gateway_lease_fence(
 
 def _discord_gateway_typing_target(
     *,
+    resource_type: ExternalChannelResourceType,
     labels: dict[str, object] | None,
     provider_tenant_id: str | None,
 ) -> tuple[str, str] | None:
@@ -3740,18 +3742,18 @@ def _discord_gateway_typing_target(
         or guild_id != provider_tenant_id
     ):
         return None
-    conversation_scope = labels.get("conversation_scope")
-    if conversation_scope == "parent_channel":
-        channel_id = labels.get("parent_channel_id")
-    elif conversation_scope == "thread":
-        delivery_channel_id = labels.get("delivery_channel_id")
-        channel_id = (
-            delivery_channel_id
-            if isinstance(delivery_channel_id, str) and delivery_channel_id
-            else labels.get("thread_id")
-        )
-    else:
-        return None
+    match resource_type:
+        case ExternalChannelResourceType.PARENT_CHANNEL:
+            channel_id = labels.get("parent_channel_id")
+        case ExternalChannelResourceType.THREAD:
+            delivery_channel_id = labels.get("delivery_channel_id")
+            channel_id = (
+                delivery_channel_id
+                if isinstance(delivery_channel_id, str) and delivery_channel_id
+                else labels.get("thread_id")
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
     if not isinstance(channel_id, str) or not channel_id.isdigit():
         return None
     return guild_id, channel_id

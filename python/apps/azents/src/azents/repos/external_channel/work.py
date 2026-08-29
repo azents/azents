@@ -1348,6 +1348,8 @@ class ExternalChannelWorkRepository:
                         title=next_title,
                         tasks=next_tasks,
                     )
+                    if work.tracker_visibility == "hidden":
+                        work.tracker_visibility = "visible"
                     work.title = next_title
                     work.tasks = next_tasks
                     work.state_revision += 1

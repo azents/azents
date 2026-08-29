@@ -66,7 +66,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-29
-spec_version: 52
+spec_version: 53
 ---
 
 # External Channel Provider Ingress
@@ -433,10 +433,11 @@ conversation position unchanged, so a later eligible mention can include them th
 the existing bounded provider-history range. Already committed
 mailbox input, wake, Channel Work, or AgentRun state is never cancelled or
 reclassified by a later mode change. The explicit-invocation flag remains the
-response-mode, settings-control, and Discord Tracker-visibility promotion signal; it
+response-mode, settings-control, and ingress-time Discord Tracker-promotion signal; it
 does not demote an ordinary message that already passed the connected `all_messages`
 gate. That admitted item's exact trigger correlation produces
-`prompt_role=invocation`, while its Work cycle may remain Tracker-hidden.
+`prompt_role=invocation`, while its Work cycle may remain Tracker-hidden until an
+eligible mention or an Agent-authored unfinished Todo transition promotes it.
 
 Restricted access persists the trigger source plus immutable conversation-position,
 range-start, and trigger-position replay authority and returns one immediate
@@ -543,6 +544,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 53) — Clarified that ordinary Discord all-messages
+  admission may begin Tracker-hidden while either a later eligible mention or
+  canonical unfinished Todo publication promotes the active Work.
 - **2026-08-29** (spec_version 52) — Stopped synchronous and queued Discord
   existing-Binding invocation admission from preparing a settings-only direct control;
   visible conversational Trackers now carry the existing signed Binding settings
