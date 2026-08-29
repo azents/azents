@@ -592,6 +592,18 @@ async def test_existing_binding_admission_excludes_joined_presence() -> None:
     case.settings_intent.assert_awaited_once()
 
 
+async def test_existing_discord_binding_uses_tracker_without_settings_message() -> None:
+    """Discord follow-up settings access is carried by the visible Tracker."""
+    case = await _accepted_control_plan_case(
+        existing_binding=True,
+        provider=ExternalChannelProvider.DISCORD,
+    )
+
+    assert case.acceptance.control_plans == (case.progress_plan,)
+    case.presence_intent.assert_not_awaited()
+    case.settings_intent.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
     ("provider", "invocation", "tracker_visibility"),
     [

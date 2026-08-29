@@ -1195,14 +1195,24 @@ async def test_admitted_all_messages_trigger_is_invocation_with_retained_context
     assert messages[1]["provider"] == provider.value
 
 
-async def test_explicit_followup_settings_and_tracker_precede_wake(
+@pytest.mark.parametrize(
+    ("provider", "expects_settings"),
+    [
+        (ExternalChannelProvider.SLACK, True),
+        (ExternalChannelProvider.DISCORD, False),
+    ],
+)
+async def test_explicit_followup_controls_precede_wake(
     monkeypatch: pytest.MonkeyPatch,
+    provider: ExternalChannelProvider,
+    expects_settings: bool,
 ) -> None:
-    """An explicit bound follow-up attempts settings then Tracker before wake."""
+    """Bound follow-ups preserve Slack settings and use only Discord Tracker."""
     item = _item(
         item_id="item-1",
         trigger_key="message-1",
         trigger_position="00000000000000000001",
+        provider=provider,
     )
     row = SimpleNamespace(id=item.id)
     (
@@ -1262,22 +1272,25 @@ async def test_explicit_followup_settings_and_tracker_precede_wake(
     desired_progress = ensure_call.kwargs["desired_progress"]
     assert desired_progress.state == "checking"
     assert ensure_call.kwargs["tracker_visibility"] == "visible"
-    work_repository.prepare_direct_control.assert_awaited_once_with(
-        transaction,
-        connection_id="connection-1",
-        resource_id="resource-1",
-        route_id="route-1",
-        binding_id="binding-1",
-        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-        request_payload={
-            "tenant_id": "tenant-1",
-            "channel_id": "channel-1",
-            "thread_ts": "thread-1",
-            "control_kind": "binding_settings_on_demand",
-            "control_version": 3,
-        },
-        operation_seed="binding-settings:binding-1",
-    )
+    if expects_settings:
+        work_repository.prepare_direct_control.assert_awaited_once_with(
+            transaction,
+            connection_id="connection-1",
+            resource_id="resource-1",
+            route_id="route-1",
+            binding_id="binding-1",
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            request_payload={
+                "tenant_id": "tenant-1",
+                "channel_id": "channel-1",
+                "thread_ts": "thread-1",
+                "control_kind": "binding_settings_on_demand",
+                "control_version": 3,
+            },
+            operation_seed="binding-settings:binding-1",
+        )
+    else:
+        work_repository.prepare_direct_control.assert_not_awaited()
     work_repository.prepare_initial_progress.assert_awaited_once_with(
         transaction,
         agent_id="agent-1",
@@ -1285,10 +1298,14 @@ async def test_explicit_followup_settings_and_tracker_precede_wake(
         binding_id="binding-1",
         work_cycle_id="work-followup",
     )
-    assert provider_control.attempt.await_args_list == [
-        ((settings_plan,), {}),
-        ((progress_plan,), {}),
-    ]
+    assert provider_control.attempt.await_args_list == (
+        [
+            ((settings_plan,), {}),
+            ((progress_plan,), {}),
+        ]
+        if expects_settings
+        else [((progress_plan,), {})]
+    )
     wake_dispatcher.dispatch.assert_awaited_once()
 
 

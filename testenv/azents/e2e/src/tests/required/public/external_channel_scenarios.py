@@ -592,6 +592,31 @@ def _successful_session_navigation_categories(
     return categories
 
 
+def _successful_session_navigation_action_ids(
+    provider_state: dict[str, object],
+    *,
+    category: str,
+) -> list[list[str]]:
+    """Return sanitized action roles for one successful navigation category."""
+    deliveries = provider_state.get("deliveries")
+    if not isinstance(deliveries, list):
+        return []
+    action_ids: list[list[str]] = []
+    for raw_delivery in cast(list[object], deliveries):
+        if not isinstance(raw_delivery, dict):
+            continue
+        delivery = cast(dict[str, object], raw_delivery)
+        raw_action_ids = delivery.get("action_ids")
+        if (
+            delivery.get("outcome") in {"delivered", "created", "duplicate"}
+            and delivery.get("safe_category") == category
+            and isinstance(raw_action_ids, list)
+            and all(isinstance(item, str) for item in raw_action_ids)
+        ):
+            action_ids.append(cast(list[str], raw_action_ids))
+    return action_ids
+
+
 def _completed_session_navigation_state(
     provider_state: dict[str, object],
     expected_session_path: str,
@@ -4425,6 +4450,10 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         "session_presence_joined",
         "activity_tracker",
     ]
+    assert _successful_session_navigation_action_ids(
+        state,
+        category="activity_tracker",
+    ) == [["view_azents_session", "azents_conversation_settings_open"]]
     assert _successful_session_presence_states(state) == ["joined"]
     request_counts = cast(dict[str, int], state["request_counts"])
     assert request_counts["create_thread"] >= 1
@@ -5072,7 +5101,7 @@ def test_discord_quiet_work_typing_recovers_and_late_mention_tracks_activity(
                     if _successful_session_navigation_categories(
                         state := _discord_provider_state(discord_provider_fake_url)
                     ).count("activity_tracker")
-                    == 1
+                    >= 1
                     and active_typing_state_after(
                         snapshot_index=late_snapshot_index,
                         pulse_index=late_pulse_index,
@@ -5083,10 +5112,46 @@ def test_discord_quiet_work_typing_recovers_and_late_mention_tracks_activity(
                 timeout=45,
                 interval=0.2,
                 message=(
-                    "Late explicit Discord mention did not publish exactly one "
-                    "Activity Tracker while work remained active"
+                    "Late explicit Discord mention did not publish the Activity "
+                    "Tracker while work remained active"
                 ),
             ),
+        )
+        late_tracker_action_ids = _successful_session_navigation_action_ids(
+            late_activity_state,
+            category="activity_tracker",
+        )
+        assert late_tracker_action_ids
+        assert all(
+            action_ids == ["view_azents_session", "azents_conversation_settings_open"]
+            for action_ids in late_tracker_action_ids
+        )
+        late_deliveries = cast(
+            list[dict[str, object]],
+            late_activity_state["deliveries"],
+        )
+        late_tracker_deliveries = [
+            delivery
+            for delivery in late_deliveries
+            if delivery.get("outcome") in {"delivered", "created", "duplicate"}
+            and delivery.get("safe_category") == "activity_tracker"
+        ]
+        assert {
+            delivery["message_id"]
+            for delivery in late_tracker_deliveries
+            if isinstance(delivery.get("message_id"), str)
+        } == {late_tracker_deliveries[0]["message_id"]}
+        assert (
+            sum(
+                delivery.get("operation") == "create_message"
+                for delivery in late_tracker_deliveries
+            )
+            == 1
+        )
+        assert not any(
+            delivery.get("outcome") in {"delivered", "created", "duplicate"}
+            and delivery.get("safe_category") == "conversation_settings"
+            for delivery in late_deliveries
         )
 
         def late_progress_held() -> list[dict[str, object]] | None:
