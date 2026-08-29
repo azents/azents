@@ -94,6 +94,11 @@ def render_summary(
     lane_duration_path: Path | None = None,
 ) -> str:
     """Render one lane summary without including failure messages or logs."""
+    timing_records = (
+        parse_timings(timings_path)
+        if timings_path is not None and timings_path.is_file()
+        else None
+    )
     lines = [
         f"### {_escape_text(lane)}",
         "",
@@ -118,7 +123,7 @@ def render_summary(
         )
         _append_optional_timing_summaries(
             lines=lines,
-            timings_path=timings_path,
+            timing_records=timing_records,
             image_build_timings_path=image_build_timings_path,
         )
         return "\n".join(lines)
@@ -157,7 +162,7 @@ def render_summary(
         lines.extend(["", "</details>", ""])
 
     slowest = sorted(
-        summary.cases,
+        _test_cases_with_call_durations(summary.cases, timing_records),
         key=lambda case: case.duration_seconds,
         reverse=True,
     )[:10]
@@ -180,7 +185,7 @@ def render_summary(
 
     _append_optional_timing_summaries(
         lines=lines,
-        timings_path=timings_path,
+        timing_records=timing_records,
         image_build_timings_path=image_build_timings_path,
     )
 
@@ -190,11 +195,11 @@ def render_summary(
 def _append_optional_timing_summaries(
     *,
     lines: list[str],
-    timings_path: Path | None,
+    timing_records: tuple[TimingRecord, ...] | None,
     image_build_timings_path: Path | None,
 ) -> None:
-    if timings_path is not None and timings_path.is_file():
-        lines.extend(_render_timing_summary(parse_timings(timings_path)))
+    if timing_records is not None:
+        lines.extend(_render_timing_summary(timing_records))
     if image_build_timings_path is not None and image_build_timings_path.is_file():
         lines.extend(
             _render_image_build_summary(
@@ -318,6 +323,49 @@ def _render_image_build_summary(records: tuple[ImageBuildTiming, ...]) -> list[s
         ]
     )
     return lines
+
+
+def _test_cases_with_call_durations(
+    cases: tuple[TestCaseResult, ...],
+    timing_records: tuple[TimingRecord, ...] | None,
+) -> tuple[TestCaseResult, ...]:
+    """Replace JUnit totals with authoritative pytest call durations when available."""
+    if timing_records is None:
+        return cases
+    call_durations = {
+        _canonical_node_id(record["node_id"]): record["duration_seconds"]
+        for record in timing_records
+        if record["record_type"] == "test_phase" and record["phase"] == "call"
+    }
+    return tuple(
+        TestCaseResult(
+            node_id=case.node_id,
+            duration_seconds=call_durations.get(
+                _canonical_node_id(case.node_id),
+                case.duration_seconds,
+            ),
+            outcome=case.outcome,
+        )
+        for case in cases
+    )
+
+
+def _canonical_node_id(node_id: str) -> str:
+    """Normalize pytest path and JUnit classname node IDs for timing correlation."""
+    address, separator, parameter_suffix = node_id.partition("[")
+    module, *segments = address.split("::")
+    if module.endswith(".py"):
+        module = module[:-3]
+        if len(segments) > 1:
+            module = ".".join((module, *segments[:-1]))
+            segments = segments[-1:]
+    normalized_module = module.replace("\\", ".").replace("/", ".")
+    canonical_address = "::".join((normalized_module, *segments))
+    return (
+        f"{canonical_address}{separator}{parameter_suffix}"
+        if separator
+        else canonical_address
+    )
 
 
 def _parse_test_case(element: element_tree.Element) -> TestCaseResult:

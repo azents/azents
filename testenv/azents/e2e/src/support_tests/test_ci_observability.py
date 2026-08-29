@@ -174,6 +174,105 @@ def test_parse_timings_and_render_detailed_summary(tmp_path: Path) -> None:
     assert "`session`" in rendered
 
 
+def test_render_summary_uses_call_time_for_slowest_tests(tmp_path: Path) -> None:
+    """Do not attribute session fixture startup to the first reported slow test."""
+    junit_path = tmp_path / "junit.xml"
+    junit_path.write_text(
+        """\
+<testsuite>
+  <testcase
+    classname="src.tests.required.admin.test_workspace.TestWorkspaceCrud"
+    name="test_create_get_update_workspace"
+    time="162.77"
+  />
+  <testcase
+    classname="src.tests.required.public.test_external_channel_discord_journeys"
+    name="test_discord_message_command_selector_and_component_journey"
+    time="17.29"
+  />
+  <testcase
+    classname="tests.test_parameters"
+    name="test_value[a::b/path]"
+    time="100"
+  />
+</testsuite>
+""",
+        encoding="utf-8",
+    )
+    timings_path = tmp_path / "pytest-timings.jsonl"
+    timings_path.write_text(
+        "\n".join(
+            [
+                (
+                    '{"duration_seconds": 162.62, "node_id": '
+                    '"src/tests/required/admin/test_workspace.py::'
+                    'TestWorkspaceCrud::test_create_get_update_workspace", '
+                    '"outcome": "passed", "phase": "setup", '
+                    '"record_type": "test_phase"}'
+                ),
+                (
+                    '{"duration_seconds": 0.16, "node_id": '
+                    '"src/tests/required/admin/test_workspace.py::'
+                    'TestWorkspaceCrud::test_create_get_update_workspace", '
+                    '"outcome": "passed", "phase": "call", '
+                    '"record_type": "test_phase"}'
+                ),
+                (
+                    '{"duration_seconds": 17.29, "node_id": '
+                    '"src/tests/required/public/'
+                    "test_external_channel_discord_journeys.py::"
+                    'test_discord_message_command_selector_and_component_journey", '
+                    '"outcome": "passed", "phase": "call", '
+                    '"record_type": "test_phase"}'
+                ),
+                (
+                    '{"duration_seconds": 100.0, "node_id": '
+                    '"tests/test_parameters.py::test_value[a::b/path]", '
+                    '"outcome": "passed", "phase": "setup", '
+                    '"record_type": "test_phase"}'
+                ),
+                (
+                    '{"duration_seconds": 0.5, "node_id": '
+                    '"tests/test_parameters.py::test_value[a::b/path]", '
+                    '"outcome": "passed", "phase": "call", '
+                    '"record_type": "test_phase"}'
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rendered = render_summary(
+        lane="required-4",
+        job_result="success",
+        junit_path=junit_path,
+        timings_path=timings_path,
+    )
+
+    discord_row = (
+        "| <code>src.tests.required.public."
+        "test_external_channel_discord_journeys::"
+        "test_discord_message_command_selector_and_component_journey</code> "
+        "| 17.29s | `passed` |"
+    )
+    workspace_row = (
+        "| <code>src.tests.required.admin.test_workspace."
+        "TestWorkspaceCrud::test_create_get_update_workspace</code> "
+        "| 0.16s | `passed` |"
+    )
+    parameter_row = (
+        "| <code>tests.test_parameters::test_value[a::b/path]</code> "
+        "| 0.50s | `passed` |"
+    )
+    assert discord_row in rendered
+    assert workspace_row in rendered
+    assert parameter_row in rendered
+    assert rendered.index(discord_row) < rendered.index(parameter_row)
+    assert rendered.index(parameter_row) < rendered.index(workspace_row)
+    assert "| `setup` | 262.62s | 2 |" in rendered
+
+
 def test_parse_and_render_image_build_timings(tmp_path: Path) -> None:
     """Render each image build and the total build time."""
     junit_path = tmp_path / "junit.xml"
