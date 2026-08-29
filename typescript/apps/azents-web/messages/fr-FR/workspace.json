@@ -916,6 +916,58 @@
       "socketGapTitle": "Interruption de livraison Socket détectée",
       "socketGapDescription": "Vérifiez la connexion et l’historique du canal avant de continuer.",
       "capabilitiesUnavailable": "Les fonctionnalités sont disponibles après validation.",
+      "permissions": {
+        "title": "Autorisations du canal",
+        "notChecked": "Non vérifiées",
+        "notCheckedDescription": "Validez cette connexion pour identifier les autorisations accordées et manquantes.",
+        "grantedSummary": "Accordées : {count}",
+        "missingSummary": "Manquantes : {count}",
+        "allGrantedDescription": "Toutes les autorisations requises pour le canal sont accordées.",
+        "missingDescription": "Certaines fonctions resteront indisponibles tant que les autorisations manquantes ne seront pas accordées.",
+        "viewDetails": "Voir le détail",
+        "modalTitle": "Autorisations du canal",
+        "modalDescription": "Cet état correspond à la dernière validation de la connexion.",
+        "actionRequiredTitle": "Configuration requise",
+        "slackAction": "Si un scope est indiqué ci-dessous, ajoutez-le dans OAuth & Permissions de la Slack App. Sinon, réappliquez le manifeste et les paramètres d’événement. Sélectionnez ensuite Reinstall to Workspace, puis validez de nouveau cette connexion.",
+        "discordAction": "Dans Discord Developer Portal et sur le serveur cible, vérifiez l’installation et les autorisations du Bot, puis validez de nouveau cette connexion.",
+        "slackScope": "Scope Slack requis : {scope}",
+        "missingSection": "Manquantes ({count})",
+        "grantedSection": "Accordées ({count})",
+        "items": {
+          "inbound_events": {
+            "label": "Recevoir les messages",
+            "description": "Recevoir les nouveaux messages et événements du canal."
+          },
+          "thread_history": {
+            "label": "Lire l’historique des conversations",
+            "description": "Lire les messages précédents des conversations et des fils."
+          },
+          "post_messages": {
+            "label": "Envoyer des messages",
+            "description": "Envoyer des réponses dans les canaux et les fils."
+          },
+          "update_messages": {
+            "label": "Modifier les messages",
+            "description": "Modifier les messages envoyés par le Bot."
+          },
+          "delete_messages": {
+            "label": "Supprimer les messages",
+            "description": "Supprimer les messages envoyés par le Bot."
+          },
+          "download_files": {
+            "label": "Télécharger les fichiers",
+            "description": "Lire et récupérer les fichiers joints dans le canal."
+          },
+          "upload_files": {
+            "label": "Importer des fichiers",
+            "description": "Envoyer dans le canal les fichiers créés dans le Runtime."
+          },
+          "customize_messages": {
+            "label": "Personnaliser l’identité des messages",
+            "description": "Afficher les messages Slack avec le nom et l’avatar de l’Agent."
+          }
+        }
+      },
       "discordActivationFailureTitle": "La connexion Discord nécessite une intervention",
       "discordFailure": {
         "discord_credentials_invalid": {
@@ -966,7 +1018,7 @@
       "accessTitle": "Accès des participants",
       "accessDescription": "Consultez les autorisations actives et les participants externes bloqués.",
       "openAccessEnabled": "Autoriser tout le monde à démarrer une conversation",
-      "openAccessEnabledDescription": "Lorsqu’elle est désactivée, les personnes nécessitent une approbation d’accès explicite.",
+      "openAccessEnabledDescription": "Lorsque cette option est désactivée, seuls les participants approuvés par un administrateur peuvent démarrer une conversation.",
       "emptyAccess": "Aucune autorisation ni aucun blocage actif.",
       "associatedMultiAppsTitle": "Applications d’espace de travail associées",
       "associatedMultiAppsDescription": "Applications Multi Slack et Discord appartenant à l’espace de travail qui peuvent router des conversations compatibles vers cet agent. Gérez-les dans les paramètres de l’espace de travail.",

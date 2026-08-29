@@ -64,8 +64,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-20
-spec_version: 63
+last_verified_at: 2026-08-29
+spec_version: 64
 ---
 
 # External Channel
@@ -362,6 +362,15 @@ and blocks. The active dedicated route management operation controls
 can invoke. This setting never overrides a block or admits the connected Azents bot.
 Removing the Single association disconnects the App. Secret fields remain blank and
 required when an existing connection is edited.
+
+Each Single App connection card labels its validated capability snapshot as channel
+permissions. The card shows only granted and missing counts; a detail modal separates
+the two sets and explains every permission in user-facing terms. Missing Slack
+permissions identify the relevant optional scope when known and direct the
+administrator to add scopes, reinstall the App, and validate again. Missing Discord
+permissions direct the administrator to check the Bot installation and server
+permissions before validating again. A connection without a capability snapshot
+instead directs the administrator to run validation.
 
 The same Agent settings surface exposes the Agent's default External Channel response
 mode even when no App is connected. Agent administrators may replace the required

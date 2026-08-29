@@ -916,6 +916,58 @@
       "socketGapTitle": "Socket delivery gap を検出しました",
       "socketGapDescription": "続行する前に接続を検証し、チャンネル履歴を確認してください。",
       "capabilitiesUnavailable": "検証後に機能を利用できます。",
+      "permissions": {
+        "title": "チャンネル権限",
+        "notChecked": "未確認",
+        "notCheckedDescription": "接続を検証すると、付与済み権限と不足している権限を確認できます。",
+        "grantedSummary": "付与済み {count}",
+        "missingSummary": "不足 {count}",
+        "allGrantedDescription": "必要なチャンネル権限がすべて付与されています。",
+        "missingDescription": "一部の機能を使用するには、不足している権限を追加する必要があります。",
+        "viewDetails": "詳細を見る",
+        "modalTitle": "チャンネル権限",
+        "modalDescription": "前回の接続検証で確認された権限の状態です。",
+        "actionRequiredTitle": "権限の設定が必要です",
+        "slackAction": "下記に scope が表示されている場合は Slack App の OAuth & Permissions に追加してください。scope がない場合は App Manifest とイベント設定を再適用してください。その後 Reinstall to Workspace を選択し、この画面でもう一度検証してください。",
+        "discordAction": "Discord Developer Portal と対象サーバーで Bot のインストールと権限を確認してから、この画面でもう一度検証してください。",
+        "slackScope": "必要な Slack scope: {scope}",
+        "missingSection": "不足している権限（{count}）",
+        "grantedSection": "付与済み権限（{count}）",
+        "items": {
+          "inbound_events": {
+            "label": "メッセージを受信",
+            "description": "チャンネルの新しいメッセージとイベントを受信します。"
+          },
+          "thread_history": {
+            "label": "会話履歴を読む",
+            "description": "会話とスレッドの過去のメッセージを読み取ります。"
+          },
+          "post_messages": {
+            "label": "メッセージを送信",
+            "description": "チャンネルとスレッドに返信を送信します。"
+          },
+          "update_messages": {
+            "label": "メッセージを編集",
+            "description": "Bot が送信したメッセージを編集します。"
+          },
+          "delete_messages": {
+            "label": "メッセージを削除",
+            "description": "Bot が送信したメッセージを削除します。"
+          },
+          "download_files": {
+            "label": "ファイルをダウンロード",
+            "description": "チャンネルに添付されたファイルを読み込み、取得します。"
+          },
+          "upload_files": {
+            "label": "ファイルをアップロード",
+            "description": "Runtime で作成したファイルをチャンネルに送信します。"
+          },
+          "customize_messages": {
+            "label": "メッセージ表示をカスタマイズ",
+            "description": "Agent の名前とアバターで Slack メッセージを表示します。"
+          }
+        }
+      },
       "discordActivationFailureTitle": "Discord 接続の対応が必要です",
       "discordFailure": {
         "discord_credentials_invalid": {
@@ -966,7 +1018,7 @@
       "accessTitle": "参加者アクセス",
       "accessDescription": "有効な呼び出し権限とブロック済みの外部参加者を確認します。",
       "openAccessEnabled": "誰でも会話を開始できるようにする",
-      "openAccessEnabledDescription": "無効にすると、人は明示的なアクセス承認が必要です。",
+      "openAccessEnabledDescription": "この設定を無効にすると、管理者が承認した参加者だけが会話を開始できます。",
       "emptyAccess": "有効な grant または block はありません。",
       "associatedMultiAppsTitle": "関連するワークスペース App",
       "associatedMultiAppsDescription": "対応する Slack・Discord の会話をこのエージェントへルーティングできる、ワークスペース所有の Multi App です。ワークスペース設定で管理できます。",

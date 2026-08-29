@@ -27,11 +27,13 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import { useModals } from "@mantine/modals";
 import {
   IconBrandDiscord,
   IconBrandSlack,
   IconCheck,
+  IconChevronRight,
   IconCopy,
   IconPencil,
   IconSettings,
@@ -101,14 +103,257 @@ function discordFailureCode(
   return isOneOf(value, DISCORD_FAILURE_CODES) ? value : "unknown";
 }
 
-function capabilityEntries(
-  capabilities: ManagedConnection["capabilities"],
-): Array<[string, boolean]> {
-  if (capabilities === null) {
+type ConnectionPermissionName =
+  | "inbound_events"
+  | "thread_history"
+  | "post_messages"
+  | "update_messages"
+  | "delete_messages"
+  | "download_files"
+  | "upload_files"
+  | "customize_messages";
+
+interface ConnectionPermission {
+  name: ConnectionPermissionName;
+  enabled: boolean;
+}
+
+const CORE_CONNECTION_PERMISSION_NAMES: readonly ConnectionPermissionName[] = [
+  "inbound_events",
+  "thread_history",
+  "post_messages",
+  "update_messages",
+  "delete_messages",
+  "download_files",
+  "upload_files",
+];
+
+const SLACK_CONNECTION_PERMISSION_NAMES: readonly ConnectionPermissionName[] = [
+  ...CORE_CONNECTION_PERMISSION_NAMES,
+  "customize_messages",
+];
+
+function connectionPermissionEntries(
+  connection: ManagedConnection,
+): ConnectionPermission[] {
+  if (connection.capabilities === null) {
     return [];
   }
-  return Object.entries(capabilities).flatMap(([key, value]) =>
-    typeof value === "boolean" ? [[key, value]] : [],
+  const names =
+    connection.provider === "slack"
+      ? SLACK_CONNECTION_PERMISSION_NAMES
+      : CORE_CONNECTION_PERMISSION_NAMES;
+  return names.map((name) => ({
+    name,
+    enabled: connection.capabilities?.[name] === true,
+  }));
+}
+
+function slackPermissionScope(
+  permission: ConnectionPermissionName,
+): string | null {
+  switch (permission) {
+    case "download_files":
+      return "files:read";
+    case "upload_files":
+      return "files:write";
+    case "customize_messages":
+      return "chat:write.customize";
+    case "inbound_events":
+    case "thread_history":
+    case "post_messages":
+    case "update_messages":
+    case "delete_messages":
+      return null;
+  }
+}
+
+function PermissionSection({
+  title,
+  permissions,
+  missing,
+  provider,
+}: {
+  title: string;
+  permissions: ConnectionPermission[];
+  missing: boolean;
+  provider: ManagedConnection["provider"];
+}): React.ReactElement {
+  const t = useTranslations("workspace.agents.externalChannels");
+
+  return (
+    <Stack gap="xs">
+      <Text fw={700} size="sm">
+        {title}
+      </Text>
+      <Stack gap={0}>
+        {permissions.map((permission, index) => {
+          const scope =
+            missing && provider === "slack"
+              ? slackPermissionScope(permission.name)
+              : null;
+          return (
+            <Box key={permission.name}>
+              {index > 0 && <Divider />}
+              <Group align="flex-start" wrap="nowrap" py="sm">
+                {missing ? (
+                  <IconShieldX
+                    size={rem(18)}
+                    color="var(--mantine-color-red-6)"
+                  />
+                ) : (
+                  <IconShieldCheck
+                    size={rem(18)}
+                    color="var(--mantine-color-green-6)"
+                  />
+                )}
+                <Box style={{ minWidth: 0 }}>
+                  <Text fw={600} size="sm">
+                    {t(`permissions.items.${permission.name}.label`)}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {t(`permissions.items.${permission.name}.description`)}
+                  </Text>
+                  {scope !== null && (
+                    <Text size="xs" c="red" mt="xs">
+                      {t("permissions.slackScope", { scope })}
+                    </Text>
+                  )}
+                </Box>
+              </Group>
+            </Box>
+          );
+        })}
+      </Stack>
+    </Stack>
+  );
+}
+
+function ConnectionPermissions({
+  connection,
+}: {
+  connection: ManagedConnection;
+}): React.ReactElement {
+  const t = useTranslations("workspace.agents.externalChannels");
+  const [opened, { open, close }] = useDisclosure(false);
+  const permissions = connectionPermissionEntries(connection);
+  const granted = permissions.filter((permission) => permission.enabled);
+  const missing = permissions.filter((permission) => !permission.enabled);
+
+  if (permissions.length === 0) {
+    return (
+      <Box>
+        <Group gap="xs">
+          <IconShieldCheck size={rem(18)} color="var(--mantine-color-gray-6)" />
+          <Text fw={600} size="sm">
+            {t("permissions.title")}
+          </Text>
+          <Badge color="gray" variant="light">
+            {t("permissions.notChecked")}
+          </Badge>
+        </Group>
+        <Text size="xs" c="dimmed" mt="xs">
+          {t("permissions.notCheckedDescription")}
+        </Text>
+      </Box>
+    );
+  }
+
+  return (
+    <>
+      <Box>
+        <Flex
+          direction={{ base: "column", sm: "row" }}
+          justify="space-between"
+          align={{ base: "stretch", sm: "flex-start" }}
+          gap="xs"
+        >
+          <Box style={{ minWidth: 0 }}>
+            <Group gap="xs">
+              {missing.length === 0 ? (
+                <IconShieldCheck
+                  size={rem(18)}
+                  color="var(--mantine-color-green-6)"
+                />
+              ) : (
+                <IconShieldX
+                  size={rem(18)}
+                  color="var(--mantine-color-red-6)"
+                />
+              )}
+              <Text fw={600} size="sm">
+                {t("permissions.title")}
+              </Text>
+            </Group>
+            <Group gap="xs" mt="xs">
+              <Badge color="green" variant="light">
+                {t("permissions.grantedSummary", { count: granted.length })}
+              </Badge>
+              <Badge
+                color={missing.length === 0 ? "gray" : "red"}
+                variant="light"
+              >
+                {t("permissions.missingSummary", { count: missing.length })}
+              </Badge>
+            </Group>
+            <Text size="xs" c="dimmed" mt="xs">
+              {missing.length === 0
+                ? t("permissions.allGrantedDescription")
+                : t("permissions.missingDescription")}
+            </Text>
+          </Box>
+          <Button
+            variant="subtle"
+            size="compact-sm"
+            w={{ base: "100%", sm: "auto" }}
+            rightSection={<IconChevronRight size={rem(14)} />}
+            onClick={open}
+          >
+            {t("permissions.viewDetails")}
+          </Button>
+        </Flex>
+      </Box>
+
+      <Modal
+        opened={opened}
+        onClose={close}
+        title={t("permissions.modalTitle")}
+        size="lg"
+      >
+        <Stack gap="lg">
+          <Text size="sm" c="dimmed">
+            {t("permissions.modalDescription")}
+          </Text>
+          {missing.length > 0 && (
+            <Alert color="red" title={t("permissions.actionRequiredTitle")}>
+              <Text size="sm">
+                {connection.provider === "slack"
+                  ? t("permissions.slackAction")
+                  : t("permissions.discordAction")}
+              </Text>
+            </Alert>
+          )}
+          {missing.length > 0 && (
+            <PermissionSection
+              title={t("permissions.missingSection", {
+                count: missing.length,
+              })}
+              permissions={missing}
+              missing
+              provider={connection.provider}
+            />
+          )}
+          <PermissionSection
+            title={t("permissions.grantedSection", {
+              count: granted.length,
+            })}
+            permissions={granted}
+            missing={false}
+            provider={connection.provider}
+          />
+        </Stack>
+      </Modal>
+    </>
   );
 }
 
@@ -188,7 +433,6 @@ function ConnectionRow({
   onSaveDiscordThreadDuration: () => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents.externalChannels");
-  const capabilities = capabilityEntries(connection.capabilities);
   const currentDiscordThreadDuration =
     discordThreadAutoArchiveDurationFromConfiguration(
       connection.provider_config,
@@ -284,23 +528,7 @@ function ConnectionRow({
             </Alert>
           )}
 
-        <Group gap="xs">
-          {capabilities.length === 0 ? (
-            <Text size="sm" c="dimmed">
-              {t("capabilitiesUnavailable")}
-            </Text>
-          ) : (
-            capabilities.map(([name, enabled]) => (
-              <Badge
-                key={name}
-                color={enabled ? "teal" : "gray"}
-                variant="light"
-              >
-                {name.replaceAll("_", " ")}
-              </Badge>
-            ))
-          )}
-        </Group>
+        <ConnectionPermissions connection={connection} />
 
         <Stack gap={4}>
           <Switch
