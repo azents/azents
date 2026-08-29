@@ -9,7 +9,13 @@ from unittest.mock import ANY, AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentRuntimeCapability, RuntimeDesiredState
+from azents.core.enums import (
+    AgentRuntimeCapability,
+    RuntimeDesiredState,
+    RuntimeProviderConnectionState,
+    RuntimeProviderObservedState,
+    RuntimeRunnerState,
+)
 from azents.core.runtime_profile import (
     RuntimeConfigurationDocument,
     RuntimeConfigurationStateStatus,
@@ -102,6 +108,16 @@ def _runtime(
     *,
     configuration_sequence: int = 1,
     desired_generation: int = 0,
+    provider_observed_state: RuntimeProviderObservedState = (
+        RuntimeProviderObservedState.RUNNING
+    ),
+    provider_observed_generation: int | None = None,
+    provider_connection_state: RuntimeProviderConnectionState = (
+        RuntimeProviderConnectionState.CONNECTED
+    ),
+    runner_state: RuntimeRunnerState = RuntimeRunnerState.READY,
+    runner_generation: int = 1,
+    workspace_path: str | None = "/runtime/workspace",
 ) -> MagicMock:
     runtime = MagicMock(spec=AgentRuntime)
     runtime.id = "runtime-1"
@@ -113,6 +129,16 @@ def _runtime(
     runtime.desired_state = RuntimeDesiredState.RUNNING
     runtime.configuration_sequence = configuration_sequence
     runtime.desired_generation = desired_generation
+    runtime.provider_observed_state = provider_observed_state
+    runtime.provider_observed_generation = (
+        desired_generation
+        if provider_observed_generation is None
+        else provider_observed_generation
+    )
+    runtime.provider_connection_state = provider_connection_state
+    runtime.runner_state = runner_state
+    runtime.runner_generation = runner_generation
+    runtime.workspace_path = workspace_path
     runtime.failure_generation = None
     runtime.failure_code = None
     runtime.failure_message = None
@@ -414,8 +440,8 @@ async def test_recreation_skips_dispatch_after_runtime_removal_fence() -> None:
     assert finish["failure_code"] == "runtime_capability_unavailable"
 
 
-async def test_recreation_completes_only_after_exact_applied_evidence() -> None:
-    """A dispatched item succeeds only after the applied pointer matches."""
+async def test_recreation_completes_only_after_exact_availability() -> None:
+    """A dispatched item succeeds only after configuration and service are ready."""
     reconciler, profiles, runtimes, _agents = _reconciler()
     item = _item(expected_sequence=1, dispatched_generation=1, expected_generation=1)
     profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
@@ -438,6 +464,31 @@ async def test_recreation_completes_only_after_exact_applied_evidence() -> None:
     finish = profiles.finish_recreation_item.await_args.kwargs
     assert finish["status"] is RuntimeRecreationItemStatus.SUCCEEDED
     assert finish["failure_code"] is None
+
+
+async def test_recreation_holds_slot_while_runner_is_unavailable() -> None:
+    """Exact applied configuration alone does not complete disruption."""
+    reconciler, profiles, runtimes, _agents = _reconciler()
+    item = _item(expected_sequence=1, dispatched_generation=1, expected_generation=1)
+    profiles.list_active_recreation_operation_ids.return_value = ["operation-1"]
+    profiles.list_recreation_items.return_value = [item]
+    profiles.claim_recreation_items.return_value = []
+    profiles.lock_recreation_item.return_value = item
+    profiles.get_recreation_operation.return_value = _operation()
+    profiles.get_configuration_state.return_value = _ready_state(target_generation=1)
+    runtimes.get_by_id.return_value = _runtime(
+        configuration_sequence=1,
+        desired_generation=1,
+        runner_state=RuntimeRunnerState.DISCONNECTED,
+        runner_generation=0,
+        workspace_path=None,
+    )
+
+    result = await reconciler.reconcile_once()
+
+    assert result.dispatched_items == 0
+    assert result.completed_items == 0
+    profiles.finish_recreation_item.assert_not_awaited()
 
 
 async def test_recreation_skips_blocked_latest_configuration() -> None:

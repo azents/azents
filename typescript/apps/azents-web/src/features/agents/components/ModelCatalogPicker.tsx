@@ -13,10 +13,9 @@ import {
   TextInput,
 } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import { useEffect, useMemo, useRef, useState } from "react";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useLocale } from "@/shared/providers/locale";
-import { trpc } from "@/trpc/client";
+import { modelContextBadgeValue } from "../model-selection";
 import type {
   ModelCatalogAttemptState,
   ModelCatalogState,
@@ -24,28 +23,9 @@ import type {
   SelectableModelCandidate,
 } from "../model-selection";
 import type { SupportedLocale } from "@/shared/lib/locale";
+import type { Ref } from "react";
 
-const PAGE_SIZE = 50;
-
-export interface ModelCatalogPickerProps {
-  opened: boolean;
-  title: string;
-  handle: string;
-  integrations: ProviderIntegrationOption[];
-  selectedIntegrationId: string | null;
-  selectedValue: string | null;
-  onClose: () => void;
-  onSelectIntegration: (integrationId: string) => void;
-  onSelectModel: (model: SelectableModelCandidate) => void;
-  onSyncCatalog: (integrationId: string) => Promise<void>;
-}
-
-interface LoadedCatalogPage {
-  models: SelectableModelCandidate[];
-  catalog: ModelCatalogState;
-}
-
-type PickerCatalogUiState =
+export type PickerCatalogUiState =
   | { type: "NO_INTEGRATION" }
   | { type: "LOADING_STATUS" }
   | { type: "NEVER_SYNCED" }
@@ -56,51 +36,38 @@ type PickerCatalogUiState =
   | { type: "READY_EMPTY" }
   | { type: "LOADING_NEXT_PAGE" };
 
-function catalogUiState(params: {
-  selectedIntegrationId: string | null;
-  queryLoading: boolean;
-  queryFetching: boolean;
-  catalogState: ModelCatalogState | null;
+export interface ModelCatalogPickerState {
+  selectedIntegration: ProviderIntegrationOption | null;
+  catalog: ModelCatalogState | null;
   models: SelectableModelCandidate[];
+  search: string;
+  loading: boolean;
+  fetching: boolean;
+  hasLoadedPage: boolean;
   hasNextPage: boolean;
-}): PickerCatalogUiState {
-  const {
-    selectedIntegrationId,
-    queryLoading,
-    queryFetching,
-    catalogState,
-    models,
-    hasNextPage,
-  } = params;
-  if (selectedIntegrationId == null) {
-    return { type: "NO_INTEGRATION" };
-  }
-  if (queryLoading && catalogState == null) {
-    return { type: "LOADING_STATUS" };
-  }
-  const latestAttempt = catalogState?.latestAttempt ?? null;
-  if (latestAttempt?.status === "failed") {
-    if (catalogState?.currentSnapshotId == null) {
-      return { type: "FAILED_WITHOUT_SNAPSHOT", attempt: latestAttempt };
-    }
-    return { type: "READY_WITH_FAILED_ATTEMPT", attempt: latestAttempt };
-  }
-  if (
-    latestAttempt?.status === "running" &&
-    catalogState?.currentSnapshotId == null
-  ) {
-    return { type: "SYNCING_WITHOUT_SNAPSHOT" };
-  }
-  if (catalogState != null && catalogState.currentSnapshotId == null) {
-    return { type: "NEVER_SYNCED" };
-  }
-  if (queryFetching && hasNextPage) {
-    return { type: "LOADING_NEXT_PAGE" };
-  }
-  if (!queryLoading && models.length === 0) {
-    return { type: "READY_EMPTY" };
-  }
-  return { type: "READY" };
+  syncSupported: boolean;
+  canSync: boolean;
+  syncRunning: boolean;
+  syncPending: boolean;
+  syncThrottled: boolean;
+  syncAvailableAt: string | null;
+  syncError: string | null;
+  ui: PickerCatalogUiState;
+}
+
+export interface ModelCatalogPickerProps {
+  opened: boolean;
+  title: string;
+  integrations: ProviderIntegrationOption[];
+  selectedIntegrationId: string | null;
+  selectedValue: string | null;
+  state: ModelCatalogPickerState;
+  loadMoreRef?: Ref<HTMLDivElement>;
+  onClose: () => void;
+  onSelectIntegration: (integrationId: string) => void;
+  onSelectModel: (model: SelectableModelCandidate) => void;
+  onSearchChange: (search: string) => void;
+  onSyncCatalog: (integrationId: string) => void;
 }
 
 function formatDate(
@@ -121,6 +88,7 @@ function formatCapabilityBadges(
   model: SelectableModelCandidate,
   labels: {
     context: (tokens: number) => string;
+    contextRange: (defaultTokens: number, maxTokens: number) => string;
     reasoning: string;
     hostedTools: string;
     toolCalling: string;
@@ -128,9 +96,13 @@ function formatCapabilityBadges(
 ): string[] {
   const capabilities = model.normalized_capabilities;
   const badges: string[] = [];
-  const context = capabilities.context_window?.max_input_tokens;
-  if (typeof context === "number") {
-    badges.push(labels.context(Math.round(context / 1000)));
+  const contextBadge = modelContextBadgeValue(capabilities.context_window);
+  if (contextBadge?.type === "RANGE") {
+    badges.push(
+      labels.contextRange(contextBadge.defaultTokens, contextBadge.maxTokens),
+    );
+  } else if (contextBadge?.type === "SINGLE") {
+    badges.push(labels.context(contextBadge.tokens));
   }
   if (capabilities.reasoning?.supported) {
     badges.push(labels.reasoning);
@@ -142,21 +114,6 @@ function formatCapabilityBadges(
     badges.push(labels.toolCalling);
   }
   return badges;
-}
-
-function syncSupportedForIntegration(
-  integration: ProviderIntegrationOption | null,
-): boolean {
-  if (integration == null) {
-    return false;
-  }
-  return (
-    integration.provider === "aws_bedrock" ||
-    integration.provider === "chatgpt_oauth" ||
-    integration.provider === "kimi_oauth" ||
-    integration.provider === "google_vertex_ai" ||
-    integration.provider === "openrouter"
-  );
 }
 
 function modelSelectionValue(
@@ -173,182 +130,20 @@ function failureMessage(attempt: ModelCatalogAttemptState): string {
 export function ModelCatalogPicker({
   opened,
   title,
-  handle,
   integrations,
   selectedIntegrationId,
   selectedValue,
+  state,
+  loadMoreRef,
   onClose,
   onSelectIntegration,
   onSelectModel,
+  onSearchChange,
   onSyncCatalog,
 }: ModelCatalogPickerProps): React.ReactElement {
   const t = useTranslations("workspace.agents.modelCatalogPicker");
   const { locale } = useLocale();
-  const [search, setSearch] = useState("");
-  const [offset, setOffset] = useState(0);
-  const [pages, setPages] = useState<LoadedCatalogPage[]>([]);
-  const [syncPending, setSyncPending] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
-  const [clock, setClock] = useState(() => Date.now());
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  const snapshotIdRef = useRef<string | null>(null);
-  const snapshotObservedRef = useRef(false);
-
-  const selectedIntegration = integrations.find(
-    (integration) => integration.value === selectedIntegrationId,
-  );
-  const selectedIntegrationOrNull = selectedIntegration ?? null;
-  const syncSupported = syncSupportedForIntegration(selectedIntegrationOrNull);
-  const catalogState = pages.at(-1)?.catalog ?? null;
-  const latestAttempt = catalogState?.latestAttempt ?? null;
-  const syncRunning = latestAttempt?.status === "running";
-  const syncAvailableAt = catalogState?.syncAvailableAt ?? null;
-  const syncAvailableAtMillis =
-    syncAvailableAt == null ? null : new Date(syncAvailableAt).getTime();
-  const syncThrottled =
-    syncAvailableAtMillis != null && syncAvailableAtMillis > clock;
-  const canSync =
-    selectedIntegrationOrNull != null &&
-    !selectedIntegrationOrNull.disabled &&
-    !syncRunning &&
-    !syncPending &&
-    !syncThrottled &&
-    syncSupported;
-
-  useEffect(() => {
-    if (syncAvailableAtMillis == null || syncAvailableAtMillis <= Date.now()) {
-      setClock(Date.now());
-      return;
-    }
-    const timeout = window.setTimeout(() => {
-      setClock(Date.now());
-    }, syncAvailableAtMillis - Date.now());
-    return () => window.clearTimeout(timeout);
-  }, [syncAvailableAtMillis]);
-
-  const query = trpc.llmProviderIntegration.listModels.useQuery(
-    {
-      handle,
-      integrationId: selectedIntegrationId ?? "",
-      search: search.trim() || void 0,
-      limit: PAGE_SIZE,
-      offset,
-    },
-    {
-      enabled: opened && selectedIntegrationId != null,
-      refetchInterval: (activeQuery) => {
-        const catalog = activeQuery.state.data?.catalog;
-        if (catalog == null || catalog.catalog_scope !== "integration") {
-          return false;
-        }
-        if (catalog.latest_attempt?.status === "running") {
-          return 1_000;
-        }
-        if (!catalog.stale || catalog.automatic_retry_blocked) {
-          return false;
-        }
-        if (catalog.sync_available_at == null) {
-          return 1_000;
-        }
-        return Math.max(
-          new Date(catalog.sync_available_at).getTime() - Date.now(),
-          1_000,
-        );
-      },
-    },
-  );
-
-  useEffect(() => {
-    setOffset(0);
-    setPages([]);
-    snapshotIdRef.current = null;
-    snapshotObservedRef.current = false;
-  }, [opened, selectedIntegrationId, search]);
-
-  useEffect(() => {
-    if (query.data == null) {
-      return;
-    }
-    const page: LoadedCatalogPage = {
-      models: query.data.models,
-      catalog: {
-        catalogId: query.data.catalog.catalog_id,
-        catalogScope: query.data.catalog.catalog_scope,
-        currentSnapshotId: query.data.catalog.current_snapshot_id,
-        currentSnapshotCreatedAt:
-          query.data.catalog.current_snapshot_created_at,
-        latestAttempt: query.data.catalog.latest_attempt,
-        stale: query.data.catalog.stale,
-        syncAvailableAt: query.data.catalog.sync_available_at,
-        automaticRetryBlocked: query.data.catalog.automatic_retry_blocked,
-        total: query.data.catalog.total,
-        loaded: query.data.catalog.offset + query.data.models.length,
-      },
-    };
-    const snapshotChanged =
-      snapshotObservedRef.current &&
-      snapshotIdRef.current !== page.catalog.currentSnapshotId;
-    snapshotIdRef.current = page.catalog.currentSnapshotId;
-    snapshotObservedRef.current = true;
-    if (query.data.catalog.offset !== 0 && snapshotChanged) {
-      setOffset(0);
-      setPages([]);
-      return;
-    }
-    setPages((current) => {
-      if (query.data.catalog.offset === 0) {
-        return [page];
-      }
-      const pageIndex = current.findIndex(
-        (item) => item.catalog.loaded === page.catalog.loaded,
-      );
-      if (pageIndex === -1) {
-        return [...current, page];
-      }
-      return current.map((item, index) => (index === pageIndex ? page : item));
-    });
-  }, [query.data]);
-
-  const models = useMemo(() => pages.flatMap((page) => page.models), [pages]);
-  const loadedCount = models.length;
-  const total = catalogState?.total ?? 0;
-  const hasNextPage = loadedCount < total;
-
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (sentinel == null || !opened || !hasNextPage) {
-      return;
-    }
-    const observer = new IntersectionObserver((entries) => {
-      const [entry] = entries;
-      if (entry?.isIntersecting && !query.isFetching) {
-        setOffset(loadedCount);
-      }
-    });
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasNextPage, loadedCount, opened, query.isFetching]);
-
-  async function handleSyncCatalog(integrationId: string): Promise<void> {
-    setSyncPending(true);
-    setSyncError(null);
-    try {
-      await onSyncCatalog(integrationId);
-    } catch (error) {
-      setSyncError(error instanceof Error ? error.message : t("syncFailed"));
-    } finally {
-      setSyncPending(false);
-    }
-  }
-
-  const uiState = catalogUiState({
-    selectedIntegrationId,
-    queryLoading: query.isLoading,
-    queryFetching: query.isFetching,
-    catalogState,
-    models,
-    hasNextPage,
-  });
+  const latestAttempt = state.catalog?.latestAttempt ?? null;
 
   return (
     <Modal opened={opened} onClose={onClose} title={title} size="xl">
@@ -367,10 +162,7 @@ export function ModelCatalogPicker({
                     : "light"
                 }
                 disabled={integration.disabled}
-                onClick={() => {
-                  onSelectIntegration(integration.value);
-                  setSearch("");
-                }}
+                onClick={() => onSelectIntegration(integration.value)}
               >
                 {integration.label}
               </Button>
@@ -378,14 +170,14 @@ export function ModelCatalogPicker({
           </Group>
         </Stack>
 
-        {selectedIntegrationOrNull == null ? (
+        {state.selectedIntegration == null ? (
           <Alert color="blue">{t("selectIntegrationFirst")}</Alert>
         ) : (
           <Card withBorder padding="sm">
             <Stack gap="xs">
               <Group justify="space-between" align="flex-start">
                 <Stack gap={2}>
-                  <Text fw={600}>{selectedIntegrationOrNull.label}</Text>
+                  <Text fw={600}>{state.selectedIntegration.label}</Text>
                   <Text size="sm" c="dimmed">
                     {t("catalogStatus", {
                       status: latestAttempt?.status ?? t("statusNeverSynced"),
@@ -394,50 +186,56 @@ export function ModelCatalogPicker({
                   <Text size="sm" c="dimmed">
                     {t("lastSynced", {
                       value: formatDate(
-                        catalogState?.currentSnapshotCreatedAt ?? null,
+                        state.catalog?.currentSnapshotCreatedAt ?? null,
                         t("never"),
                         locale,
                       ),
                     })}
                   </Text>
                   <Text size="sm" c="dimmed">
-                    {t("models", { count: catalogState?.total ?? 0 })}
+                    {t("models", { count: state.catalog?.total ?? 0 })}
                   </Text>
                 </Stack>
-                {syncSupported && (
+                {state.syncSupported && (
                   <Button
                     variant="light"
-                    disabled={!canSync}
-                    loading={syncRunning || syncPending}
-                    onClick={() => {
-                      void handleSyncCatalog(selectedIntegrationOrNull.value);
-                    }}
+                    disabled={!state.canSync}
+                    loading={state.syncRunning || state.syncPending}
+                    onClick={() =>
+                      onSyncCatalog(state.selectedIntegration?.value ?? "")
+                    }
                   >
-                    {syncRunning || syncPending
+                    {state.syncRunning || state.syncPending
                       ? t("syncRunning")
                       : t("syncCatalog")}
                   </Button>
                 )}
               </Group>
-              {catalogState?.catalogScope === "integration" &&
-                catalogState.stale &&
-                !catalogState.automaticRetryBlocked && (
+              {state.catalog?.catalogScope === "integration" &&
+                state.catalog.stale &&
+                !state.catalog.automaticRetryBlocked && (
                   <Alert color="blue">{t("staleRefreshQueued")}</Alert>
                 )}
-              {syncThrottled && syncAvailableAt != null && (
+              {state.syncThrottled && state.syncAvailableAt != null && (
                 <Alert color="gray">
                   {t("syncThrottledUntil", {
-                    value: formatDate(syncAvailableAt, t("never"), locale),
+                    value: formatDate(
+                      state.syncAvailableAt,
+                      t("never"),
+                      locale,
+                    ),
                   })}
                 </Alert>
               )}
-              {syncError != null && <Alert color="red">{syncError}</Alert>}
-              {uiState.type === "READY_WITH_FAILED_ATTEMPT" && (
+              {state.syncError != null && (
+                <Alert color="red">{state.syncError}</Alert>
+              )}
+              {state.ui.type === "READY_WITH_FAILED_ATTEMPT" && (
                 <Alert color="yellow" title={t("catalogSyncFailedTitle")}>
                   <Stack gap={4}>
-                    <Text size="sm">{failureMessage(uiState.attempt)}</Text>
-                    {uiState.attempt.action_hint && (
-                      <Text size="sm">{uiState.attempt.action_hint}</Text>
+                    <Text size="sm">{failureMessage(state.ui.attempt)}</Text>
+                    {state.ui.attempt.action_hint && (
+                      <Text size="sm">{state.ui.attempt.action_hint}</Text>
                     )}
                   </Stack>
                 </Alert>
@@ -449,35 +247,35 @@ export function ModelCatalogPicker({
         <TextInput
           label={t("searchLabel")}
           placeholder={t("searchPlaceholder")}
-          value={search}
-          onChange={(event) => setSearch(event.currentTarget.value)}
+          value={state.search}
+          onChange={(event) => onSearchChange(event.currentTarget.value)}
           disabled={selectedIntegrationId == null}
         />
 
         <Stack gap="xs">
-          {query.isLoading && pages.length === 0 && (
+          {state.loading && !state.hasLoadedPage && (
             <Group justify="center" py="md">
               <Loader size="sm" />
             </Group>
           )}
-          {uiState.type === "FAILED_WITHOUT_SNAPSHOT" && (
+          {state.ui.type === "FAILED_WITHOUT_SNAPSHOT" && (
             <Alert color="red" title={t("catalogSyncFailedTitle")}>
               <Stack gap={4}>
-                <Text size="sm">{failureMessage(uiState.attempt)}</Text>
-                {uiState.attempt.action_hint && (
-                  <Text size="sm">{uiState.attempt.action_hint}</Text>
+                <Text size="sm">{failureMessage(state.ui.attempt)}</Text>
+                {state.ui.attempt.action_hint && (
+                  <Text size="sm">{state.ui.attempt.action_hint}</Text>
                 )}
               </Stack>
             </Alert>
           )}
-          {uiState.type === "NEVER_SYNCED" && (
+          {state.ui.type === "NEVER_SYNCED" && (
             <Alert color="blue">{t("neverSynced")}</Alert>
           )}
-          {uiState.type === "SYNCING_WITHOUT_SNAPSHOT" && (
+          {state.ui.type === "SYNCING_WITHOUT_SNAPSHOT" && (
             <Alert color="blue">{t("syncingWithoutSnapshot")}</Alert>
           )}
-          {uiState.type !== "FAILED_WITHOUT_SNAPSHOT" &&
-            models.map((model) => {
+          {state.ui.type !== "FAILED_WITHOUT_SNAPSHOT" &&
+            state.models.map((model) => {
               const value = modelSelectionValue(
                 selectedIntegrationId ?? "",
                 model,
@@ -502,6 +300,11 @@ export function ModelCatalogPicker({
                       <Group gap={6}>
                         {formatCapabilityBadges(model, {
                           context: (tokens) => t("contextBadge", { tokens }),
+                          contextRange: (defaultTokens, maxTokens) =>
+                            t("contextRangeBadge", {
+                              defaultTokens,
+                              maxTokens,
+                            }),
                           reasoning: t("reasoningBadge"),
                           hostedTools: t("hostedToolsBadge"),
                           toolCalling: t("toolCallingBadge"),
@@ -525,11 +328,11 @@ export function ModelCatalogPicker({
                 </Card>
               );
             })}
-          {uiState.type === "READY_EMPTY" && (
+          {state.ui.type === "READY_EMPTY" && (
             <Alert color="gray">{t("noModels")}</Alert>
           )}
-          {hasNextPage && <div ref={sentinelRef} />}
-          {query.isFetching && pages.length > 0 && (
+          {state.hasNextPage && <div ref={loadMoreRef} />}
+          {state.fetching && state.hasLoadedPage && (
             <Group justify="center" py="sm">
               <Loader size="xs" />
             </Group>

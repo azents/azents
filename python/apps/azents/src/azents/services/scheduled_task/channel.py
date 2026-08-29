@@ -623,6 +623,7 @@ class ScheduledTaskChannelService:
             "text": page.text,
             "embeds": page.embeds,
             "desired_progress_revision": desired_revision,
+            "tracker_kind": "scheduled_task",
         }
         if current_part is not None and current_part.provider_message_key is not None:
             slack_payload["provider_message_key"] = current_part.provider_message_key

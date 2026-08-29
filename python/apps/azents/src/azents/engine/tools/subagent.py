@@ -35,7 +35,7 @@ from azents.core.tools import (
 from azents.engine.context.window import (
     compute_auto_compaction_threshold_tokens,
     compute_effective_context_window_tokens,
-    get_max_input_tokens,
+    resolve_model_input_tokens,
 )
 from azents.engine.events.engine_events import SubagentTreeChanged
 from azents.engine.events.fork_context import (
@@ -516,22 +516,23 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                 lightweight.provider,
                 lightweight.model_identifier,
             )
-            compaction_max_input_tokens = get_max_input_tokens(
+            compaction_input_tokens = resolve_model_input_tokens(
+                lightweight.normalized_capabilities.context_window.default_input_tokens,
                 lightweight.normalized_capabilities.context_window.max_input_tokens,
                 lightweight_model,
+                lightweight_option.settings.context_window_tokens,
             )
-            if lightweight_option.settings.context_window_tokens is not None:
-                compaction_max_input_tokens = min(
-                    compaction_max_input_tokens,
-                    lightweight_option.settings.context_window_tokens,
-                )
+            main_input_tokens = resolve_model_input_tokens(
+                selection.normalized_capabilities.context_window.default_input_tokens,
+                selection.normalized_capabilities.context_window.max_input_tokens,
+                main_model,
+                settings.context_window_tokens,
+            )
             context_window = compute_effective_context_window_tokens(
-                main_max_input_tokens=get_max_input_tokens(
-                    selection.normalized_capabilities.context_window.max_input_tokens,
-                    main_model,
+                main_max_input_tokens=main_input_tokens.effective_input_tokens,
+                compaction_max_input_tokens=(
+                    compaction_input_tokens.effective_input_tokens
                 ),
-                compaction_max_input_tokens=compaction_max_input_tokens,
-                context_window_tokens=settings.context_window_tokens,
             )
             effective_context_window_tokens = context_window.effective_max_input_tokens
             effective_auto_compaction_threshold_tokens = (

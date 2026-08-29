@@ -31,6 +31,9 @@ from azents.services.external_channel.channel_action import (
 from azents.services.external_channel.data import DiscordConnectionConfiguration
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
 from azents.services.external_channel.discord_sdk import DiscordSDKUnavailable
+from azents.services.external_channel.discord_settings_scope import (
+    build_discord_binding_settings_open_custom_id,
+)
 from azents.services.external_channel.provider_effect import (
     ProviderEffectOutcome,
     ProviderOperationKey,
@@ -175,6 +178,9 @@ def _service(
             config=SimpleNamespace(
                 web_url="https://azents.example",
                 avatar_cdn_base_url=None,
+                auth=SimpleNamespace(
+                    jwt=SimpleNamespace(secret_key="test-settings-secret")
+                ),
             ),
             slack_client=slack_client,
             discord_client=bound_discord_client,
@@ -578,6 +584,70 @@ async def test_discord_tracker_delivery_includes_session_navigation(
         _service(discord_client=discord_client),
         _target(provider=ExternalChannelProvider.DISCORD, operation=operation),
         operation_key=ProviderOperationKey.from_seed("discord-progress"),
+        bot_token="discord-secret",
+        file_storage=None,
+        agent_id=None,
+        authority=None,
+    )
+
+    call = method.await_args
+    assert call is not None
+    assert call.kwargs["components"] == [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "View session",
+                    "url": _SESSION_URL,
+                },
+                {
+                    "type": 2,
+                    "style": 2,
+                    "label": "Conversation settings",
+                    "custom_id": build_discord_binding_settings_open_custom_id(
+                        secret="test-settings-secret",
+                        binding_id="binding-1",
+                    ),
+                },
+            ],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "method_name"),
+    [
+        (ExternalChannelDeliveryOperation.PROGRESS_CREATE, "create_message"),
+        (ExternalChannelDeliveryOperation.PROGRESS_UPDATE, "update_message"),
+    ],
+)
+async def test_discord_scheduled_tracker_keeps_session_navigation_only(
+    operation: ExternalChannelDeliveryOperation,
+    method_name: str,
+) -> None:
+    """Scheduled Task Trackers do not expose conversation Binding settings."""
+    method = AsyncMock(
+        return_value=DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key="discord:111:555",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    discord_client = _DiscordClientDelegate(
+        create_message=method if method_name == "create_message" else AsyncMock(),
+        update_message=method if method_name == "update_message" else AsyncMock(),
+    )
+    target = _target(provider=ExternalChannelProvider.DISCORD, operation=operation)
+    target.request_payload["tracker_kind"] = "scheduled_task"
+
+    await ExternalChannelActionService._deliver_discord(
+        _service(discord_client=discord_client),
+        target,
+        operation_key=ProviderOperationKey.from_seed("discord-scheduled-progress"),
         bot_token="discord-secret",
         file_storage=None,
         agent_id=None,

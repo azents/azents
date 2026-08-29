@@ -8,21 +8,21 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import { resolveComposerSubscriptionSelection } from "@/features/chat/composerSubscriptionUsage";
 import { useFileUpload } from "@/features/chat/hooks/useFileUpload";
 import { useSubscriptionUsageContainer } from "@/features/llm-settings/containers/useSubscriptionUsageContainer";
+import { useAgentWorkspaceDirectoryPickerContainer } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import { trpc } from "@/trpc/client";
-import type {
-  ProjectDirectoryPickerEntry,
-  ProjectDirectoryPickerState,
-} from "@/features/agent-workspace/types";
 import type { ComposerSubscriptionUsagePresentationProps } from "@/features/chat/components/ComposerSubscriptionUsage";
 import type {
   PendingFile,
   UploadedFile,
 } from "@/features/chat/hooks/useFileUpload";
 import type { ChatAction } from "@/features/chat/types";
+import type {
+  ProjectDirectoryPickerEntry,
+  ProjectDirectoryPickerState,
+} from "@/shared/agent-workspace/types";
 import type {
   AgentProjectPresetResponse,
   AgentResponse,
@@ -95,6 +95,7 @@ export interface AgentDraftChatContainerOutput {
   onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onRestartRuntimeForProjectPicker: () => void;
   onSessionScopeChange: (scope: AgentDraftSessionScope) => void;
   onSendInput: (
     message: string,
@@ -730,6 +731,7 @@ export function useAgentDraftChatContainer(
     onSelectProjectPickerDirectory: projectPicker.selectDirectory,
     onRefreshProjectPicker: projectPicker.refresh,
     onStartRuntimeForProjectPicker: projectPicker.startRuntime,
+    onRestartRuntimeForProjectPicker: projectPicker.restartRuntime,
     onSessionScopeChange,
     onSendInput,
     onSendMessage,

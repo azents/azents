@@ -1,6 +1,6 @@
 """Workspace model selection readiness E2E test."""
 
-from typing import cast
+from typing import NamedTuple
 
 import azentsadminclient
 import azentspublicclient
@@ -20,8 +20,31 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
 )
 from azentspublicclient.models.secrets import Secrets
+from pydantic import TypeAdapter, ValidationError
 
+from support.runtime_profiles import (
+    create_workspace_runtime_profile,
+    start_and_wait_for_agent_runtime,
+)
 from support.utils import authenticate_user, unique, wait_until
+
+_JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
+
+
+class _DeterministicWorkspace(NamedTuple):
+    """Workspace and integration created for deterministic model-listing tests."""
+
+    token: str
+    handle: str
+    integration_id: str
+
+
+def _json_object(value: object) -> dict[str, object] | None:
+    """Validate one JSON object without bypassing the type checker."""
+    try:
+        return _JSON_OBJECT_ADAPTER.validate_python(value)
+    except ValidationError:
+        return None
 
 
 def _workspace_with_deterministic_integration(
@@ -30,8 +53,8 @@ def _workspace_with_deterministic_integration(
     *,
     variant: str,
     provider: LLMProvider = LLMProvider.OPENAI,
-) -> tuple[str, str, str]:
-    """Deterministic listing integration t t workspace t createt."""
+) -> _DeterministicWorkspace:
+    """Create a workspace with one deterministic model-listing integration."""
     uniq = unique()
     token, _, _ = authenticate_user(
         public_api_client,
@@ -58,11 +81,15 @@ def _workspace_with_deterministic_integration(
         ),
         _headers={"Authorization": f"Bearer {token}"},
     )
-    return token, handle, integration.id
+    return _DeterministicWorkspace(
+        token=token,
+        handle=handle,
+        integration_id=integration.id,
+    )
 
 
 def _headers(token: str) -> dict[str, str]:
-    """Bearer auth header t t."""
+    """Return the bearer authorization header."""
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -83,13 +110,17 @@ def _wait_for_initial_catalog_sync(
         )
         if response.status_code != 200:
             return None
-        payload = cast("dict[str, object]", response.json())
+        payload = _json_object(response.json())
+        if payload is None:
+            return None
         if payload.get("catalog_scope") != "integration":
             return None
         latest_attempt_payload = payload.get("latest_attempt")
         if not isinstance(latest_attempt_payload, dict):
             return None
-        latest_attempt = cast("dict[str, object]", latest_attempt_payload)
+        latest_attempt = _json_object(latest_attempt_payload)
+        if latest_attempt is None:
+            return None
         if latest_attempt.get("status") not in {"succeeded", "failed"}:
             return None
         return response
@@ -105,8 +136,60 @@ def _wait_for_initial_catalog_sync(
     return response
 
 
+def _wait_for_turn_context(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+    session_id: str,
+    target: str,
+    expected_effective: int,
+) -> None:
+    """Wait for one completed turn with the expected prepared context window."""
+
+    def matching_turn() -> dict[str, object] | None:
+        session = requests.get(
+            f"{server_url}/chat/v1/agents/{agent_id}/sessions/{session_id}",
+            headers=_headers(token),
+            timeout=10,
+        )
+        session.raise_for_status()
+        if session.json().get("run_state") != "idle":
+            return None
+        history = requests.get(
+            f"{server_url}/chat/v1/sessions/{session_id}/history?limit=100",
+            headers=_headers(token),
+            timeout=10,
+        )
+        history.raise_for_status()
+        for event in reversed(history.json()["items"]):
+            if event.get("kind") != "turn_marker":
+                continue
+            payload = _json_object(event.get("payload"))
+            if payload is None:
+                continue
+            profile = payload.get("applied_inference_profile")
+            if not isinstance(profile, dict):
+                continue
+            if profile.get("model_target_label") == target:
+                return payload
+        return None
+
+    payload = wait_until(
+        matching_turn,
+        timeout=120,
+        interval=0.5,
+        message=f"Prepared turn context was not observed for {target}",
+    )
+    assert payload is not None
+    assert payload["effective_context_window_tokens"] == expected_effective
+    assert payload["effective_auto_compaction_threshold_tokens"] == int(
+        expected_effective * 0.9
+    )
+
+
 class TestModelSelectionReadiness:
-    """Model selection API readiness t."""
+    """Model selection API readiness tests."""
 
     def test_explicit_sync_is_throttled_after_initial_sync(
         self,
@@ -218,7 +301,7 @@ class TestModelSelectionReadiness:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """Deterministic listing t t skip summary t returnt."""
+        """Deterministic listing returns candidates and a typed skip summary."""
         token, handle, integration_id = _workspace_with_deterministic_integration(
             public_api_client,
             admin_api_client,
@@ -378,7 +461,7 @@ class TestModelSelectionReadiness:
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
     ) -> None:
-        """Listing t workspace default model selection t settingst."""
+        """Listing updates Workspace default model selection and settings."""
         token, handle, integration_id = _workspace_with_deterministic_integration(
             public_api_client,
             admin_api_client,
@@ -427,6 +510,130 @@ class TestModelSelectionReadiness:
         assert body["default_lightweight_model_selection"]["model_identifier"] == (
             "gpt-5.5"
         )
+
+    def test_context_range_default_and_maximum_resolution(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+    ) -> None:
+        """Prepared turns use default, explicit cap, maximum clamp, and legacy max."""
+        token, handle, integration_id = _workspace_with_deterministic_integration(
+            public_api_client,
+            admin_api_client,
+            variant="deterministic-context-ranges",
+        )
+        _wait_for_initial_catalog_sync(
+            azents_public_server_url, token, handle, integration_id
+        )
+        listing = requests.get(
+            f"{azents_public_server_url}/llm-provider-integration/v1/workspaces/"
+            f"{handle}/llm-provider-integrations/{integration_id}/catalog-entries",
+            headers=_headers(token),
+            timeout=10,
+        )
+        listing.raise_for_status()
+        entries = {
+            entry["provider_model_identifier"]: entry
+            for entry in listing.json()["entries"]
+        }
+        main = entries["gpt-5.5"]
+        lightweight = entries["gpt-5.5-mini"]
+        assert main["normalized_capabilities"]["context_window"] == {
+            "default_input_tokens": 96_000,
+            "max_input_tokens": 256_000,
+            "max_output_tokens": 16_000,
+        }
+        assert lightweight["normalized_capabilities"]["context_window"] == {
+            "default_input_tokens": None,
+            "max_input_tokens": 512_000,
+            "max_output_tokens": 16_000,
+        }
+
+        def selection(identifier: str) -> dict[str, str]:
+            return {
+                "llm_provider_integration_id": integration_id,
+                "model_identifier": identifier,
+            }
+
+        scenarios = [
+            ("default", "gpt-5.5", None, 96_000),
+            ("extended", "gpt-5.5", 160_000, 160_000),
+            ("clamped", "gpt-5.5", 300_000, 256_000),
+            ("legacy", "gpt-5.5-mini", None, 512_000),
+        ]
+        runtime_profile_id = create_workspace_runtime_profile(
+            public_api_client,
+            token=token,
+            workspace_handle=handle,
+            provider_id="system-docker",
+        )
+        created = requests.post(
+            f"{azents_public_server_url}/agent/v1/workspaces/{handle}/agents",
+            headers=_headers(token),
+            json={
+                "name": "Context Range Agent",
+                "type": "public",
+                "selectable_model_options": [
+                    {
+                        "label": label,
+                        "model_selection": selection(identifier),
+                        "settings": {
+                            "context_window_tokens": context_window_tokens,
+                            "builtin_tools": [],
+                        },
+                    }
+                    for label, identifier, context_window_tokens, _ in scenarios
+                ],
+                "main_model_label": "default",
+                "lightweight_model_label": "legacy",
+                "runtime_profile_id": runtime_profile_id,
+            },
+            timeout=10,
+        )
+
+        assert created.status_code == 201, created.text
+        body = created.json()
+        assert body["effective_context_window_tokens"] == 96_000
+        agent_id = body["id"]
+        start_and_wait_for_agent_runtime(
+            public_api_client,
+            token=token,
+            workspace_handle=handle,
+            agent_id=agent_id,
+        )
+        session = requests.get(
+            f"{azents_public_server_url}/chat/v1/agents/{agent_id}/team-primary-session",
+            headers=_headers(token),
+            timeout=10,
+        )
+        session.raise_for_status()
+        session_id = session.json()["id"]
+
+        for label, _, _, expected_effective in scenarios:
+            submitted = requests.post(
+                f"{azents_public_server_url}/chat/v1/sessions/{session_id}/inputs",
+                headers=_headers(token),
+                json={
+                    "agent_id": agent_id,
+                    "client_request_id": f"context-range-{label}-{unique()}",
+                    "message": f"Verify prepared context for {label}.",
+                    "inference_profile": {
+                        "model_target_label": label,
+                        "reasoning_effort": None,
+                    },
+                },
+                timeout=10,
+            )
+            submitted.raise_for_status()
+            _wait_for_turn_context(
+                server_url=azents_public_server_url,
+                token=token,
+                agent_id=agent_id,
+                session_id=session_id,
+                target=label,
+                expected_effective=expected_effective,
+            )
 
     def test_selectable_model_options_copy_to_agent_and_fallback(
         self,

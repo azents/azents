@@ -362,29 +362,24 @@ class KubernetesRuntimeProvider:
         self,
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
-        """Recreate the Runtime Pod and policy while preserving its PVC."""
-        policy = self._validate_command(command)
+        """Request execution-resource deletion while preserving the Runtime PVC."""
+        self._validate_command(command)
         _LOGGER.info(
             "Kubernetes Runtime restart requested",
             extra=_log_context(command, self._config),
         )
-        if isinstance(policy, KubernetesPodProfileV3):
-            await self._start_v3(command, policy, replace_runtime=True)
-            return RuntimeLifecycleResult(
-                command_type=RuntimeLifecycleCommandType.RESTART,
-                report=await self.observe(command),
-            )
-        await self._ensure_pvc(command, policy, ca_fingerprint=None)
-        if await self._delete_strict_runtime_before_direct(command):
-            return RuntimeLifecycleResult(
-                command_type=RuntimeLifecycleCommandType.RESTART,
-                report=await self.observe(command),
-            )
-        await self._ensure_network_policy(command, policy)
-        await self._ensure_pod(command, policy, replace=True)
+        await self._validate_existing_execution_ownership(command)
+        await self._delete_runtime_pod(command)
+        await self._delete_execution_resources(command, delete_ca=False)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.RESTART,
-            report=await self.observe(command),
+            report=self._report(
+                command,
+                observed_state=RuntimeProviderObservedState.STOPPING,
+                reason="restart_deletion_requested",
+                provider_runtime_id=None,
+                reconciliation=None,
+            ),
         )
 
     async def reset(
@@ -485,6 +480,17 @@ class KubernetesRuntimeProvider:
         await self._delete_runtime_pod(command)
         await self._delete_execution_resources(command, delete_ca=True)
         await self._delete_workspace_pvc(command)
+        if not await self._terminal_resources_absent(command):
+            return RuntimeLifecycleResult(
+                command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
+                report=self._report(
+                    command,
+                    observed_state=RuntimeProviderObservedState.STOPPING,
+                    reason="terminal_deletion_in_progress",
+                    provider_runtime_id=None,
+                    reconciliation=None,
+                ),
+            )
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
             report=dataclasses.replace(
@@ -1719,6 +1725,65 @@ class KubernetesRuntimeProvider:
                 identity,
                 ResourceRole.PROXY_POLICY,
             )
+
+    async def _terminal_resources_absent(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> bool:
+        runtime_id = command.identity.runtime_id
+        namespace = self._config.namespace
+        resources = (
+            await self._api.get_pod(
+                resource_name(runtime_id, ResourceRole.RUNTIME_POD),
+                namespace,
+            ),
+            await self._api.get_pvc(
+                resource_name(runtime_id, ResourceRole.WORKSPACE_PVC),
+                namespace,
+            ),
+            await self._api.get_network_policy(
+                resource_name(runtime_id, ResourceRole.RUNTIME_NETWORK_POLICY),
+                namespace,
+            ),
+            await self._api.get_pod(
+                resource_name(runtime_id, ResourceRole.PROXY_POD),
+                namespace,
+            ),
+            await self._api.get_service(
+                resource_name(runtime_id, ResourceRole.PROXY_SERVICE),
+                namespace,
+            ),
+            await self._api.get_secret(
+                resource_name(runtime_id, ResourceRole.RUNTIME_CA),
+                namespace,
+            ),
+            await self._api.get_network_policy(
+                resource_name(
+                    runtime_id,
+                    ResourceRole.PROXY_INGRESS_NETWORK_POLICY,
+                ),
+                namespace,
+            ),
+            await self._api.get_network_policy(
+                resource_name(
+                    runtime_id,
+                    ResourceRole.PROXY_EGRESS_NETWORK_POLICY,
+                ),
+                namespace,
+            ),
+        )
+        if any(resource is not None for resource in resources):
+            return False
+        proxy_policy_labels = {
+            _LABEL_MANAGED_BY: "azents-runtime-provider-kubernetes",
+            _LABEL_PROVIDER_ID: self._config.provider_id,
+            _LABEL_RUNTIME_ID: runtime_id,
+            LABEL_RESOURCE_ROLE: ResourceRole.PROXY_POLICY.value,
+        }
+        return not await self._api.list_config_maps(
+            proxy_policy_labels,
+            namespace,
+        )
 
     async def _apply_owned_network_policy(
         self,

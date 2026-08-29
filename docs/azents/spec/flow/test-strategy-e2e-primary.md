@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-23
-spec_version: 35
+last_verified_at: 2026-08-28
+spec_version: 39
 ---
 
 # E2E Primary Test Strategy
@@ -65,6 +65,11 @@ acknowledgement evidence for durable batched External Channel ingress. Evidence 
 request counts, lifecycle categories, positions, bounded barrier state, file counts,
 aggregate byte counts, deterministic hashes, and canonical relative Azents Session
 routes only.
+
+Discord provider fakes publish sanitized delivery and operation evidence before callers
+can observe controlled failure boundaries. Regression coverage synchronizes on
+authoritative evidence publication and the observable boundary instead of using
+sleeps.
 
 Fakes and test evidence never retain credentials, authorization headers, signatures,
 callback URLs, raw payloads, visible message bodies, attachment names, attachment
@@ -147,6 +152,16 @@ provider, lifecycle, compaction, or browser E2E cross-product.
 
 Always-on required CI does not depend on external credentials.
 
+- Recurring E2E optimization owns implementation through measured acceptance, not
+  only candidate analysis. One cycle may combine compatible, separately explainable
+  coverage-preserving changes in E2E scenarios, fixtures, provider fakes, support
+  code, CI setup, or production code when one change cannot clear the required
+  critical-path threshold. A below-threshold same-SHA measurement returns to
+  implementation while another safe candidate remains, then restarts the
+  two-successful-attempt measurement on the new SHA. The cycle cannot claim
+  improvement by removing tests, weakening assertions, bypassing real failure or
+  lifecycle boundaries, extending timeouts, or adding sleeps. Adding runners or other
+  CI resources requires explicit approval and complete cost accounting.
 - Python lint/type/unit and other deterministic checks.
 - Testenv support tests run `uv run pytest -vv ./src/support_tests` for behavior that
   requires no server, network listener, container, product image, browser, Runtime
@@ -157,7 +172,7 @@ Always-on required CI does not depend on external credentials.
   one `suite.toml`, and every test below that directory uses the same substrate.
 - One planner discovers enabled suite directories and creates a dynamic matrix.
   It balances files only within a suite using the latest successful `main` timing
-  baseline, with a deterministic source-based fallback. Required uses three lanes;
+  baseline, with a deterministic source-based fallback. Required uses four lanes;
   Web uses one lane. Lanes are parallel partitions, not additional profiles.
   Large scenario families may expose multiple natural collection files backed by
   one reusable scenario module. When such a split replaces an existing collection
@@ -315,6 +330,19 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-28** (spec_version 39) — Made sanitized Discord failure evidence
+  authoritative before callers can observe controlled failure boundaries.
+- **2026-08-27** (spec_version 38) — Made configured Discord REST failure
+  delivery and operation evidence atomic and authoritative before HTTP, connection,
+  or timeout outcomes become observable.
+- **2026-08-27** (spec_version 37) — Required recurring E2E optimization to treat
+  test and fixture code as first-class implementation surfaces, combine compatible
+  and separately explainable coverage-preserving changes when needed, and continue
+  new-SHA same-SHA measurement cycles until acceptance or feasible-candidate
+  exhaustion.
+- **2026-08-25** (spec_version 36) — Increased the required E2E suite from three
+  parallel lanes to four while preserving one execution profile, deterministic
+  file coverage, timeout policy, and single-lane cache-write ownership.
 - **2026-08-22** (spec_version 34) — Split deterministic External Channel
   collection into natural scenario files for file-level required-lane balancing
   and added historical per-test timing projection for the first post-split plan.

@@ -68,6 +68,7 @@ from azents.services.runtime_provider_control.data import (
 )
 
 _DEFAULT_COMMAND_BLOCK_MS = 500
+_MAX_OUTBOUND_MESSAGES = 1
 _KUBERNETES_PROVIDER_PROTOCOL_VERSION_V2 = "agent-runtime-provider-kubernetes-v2"
 _KUBERNETES_PROVIDER_PROTOCOL_VERSION_V3 = "agent-runtime-provider-kubernetes-v3"
 _LOGGER = logging.getLogger(__name__)
@@ -94,6 +95,15 @@ class _ValidatedProviderReport:
     configuration_acknowledgement_allowed: bool
 
 
+@dataclasses.dataclass(frozen=True)
+class _RelayedProviderCommand:
+    """Identity needed to correlate one Provider command completion."""
+
+    command_type: RuntimeProviderCommandType
+    runtime_id: str
+    desired_generation: int
+
+
 class RuntimeProviderReportSink(Protocol):
     """Durable Provider state sink used by the gRPC bridge."""
 
@@ -104,6 +114,13 @@ class RuntimeProviderReportSink(Protocol):
         configuration_acknowledgement_allowed: bool,
     ) -> None:
         """Persist one Provider observed-state report."""
+        ...
+
+    async def complete_restart_handoff(
+        self,
+        report: SharedRuntimeProviderReport,
+    ) -> bool:
+        """Rearm one current successful Restart completion as Start."""
         ...
 
 
@@ -313,8 +330,12 @@ class RuntimeProviderControlGrpcServicer(
                 "owner_replica_id": self._owner_replica_id,
             },
         )
-        outbound: asyncio.Queue[_ProviderOutbound] = asyncio.Queue()
-        command_types_by_request_id: dict[str, RuntimeProviderCommandType] = {}
+        outbound: asyncio.Queue[_ProviderOutbound] = asyncio.Queue(
+            maxsize=_MAX_OUTBOUND_MESSAGES
+        )
+        commands_by_request_id: dict[str, _RelayedProviderCommand] = {}
+        command_slot = asyncio.Event()
+        command_slot.set()
         inbound_task = asyncio.create_task(
             self._consume_provider_messages(
                 request_iterator,
@@ -323,8 +344,9 @@ class RuntimeProviderControlGrpcServicer(
                 generation=accepted.generation,
                 connection_id=accepted.connection_id,
                 authentication=authentication,
-                command_types_by_request_id=command_types_by_request_id,
+                commands_by_request_id=commands_by_request_id,
                 protocol_version=registration.protocol_version,
+                command_slot=command_slot,
             )
         )
         command_task = asyncio.create_task(
@@ -333,7 +355,8 @@ class RuntimeProviderControlGrpcServicer(
                 provider_id=accepted.provider_id,
                 generation=accepted.generation,
                 authentication=authentication,
-                command_types_by_request_id=command_types_by_request_id,
+                commands_by_request_id=commands_by_request_id,
+                command_slot=command_slot,
             )
         )
         yield runtime_provider_control_pb2.ControlMessage(
@@ -354,7 +377,7 @@ class RuntimeProviderControlGrpcServicer(
             ):
                 yield message
         finally:
-            command_types_by_request_id.clear()
+            commands_by_request_id.clear()
             for task in (inbound_task, command_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -387,8 +410,9 @@ class RuntimeProviderControlGrpcServicer(
         generation: int,
         connection_id: str,
         authentication: RuntimeProviderCredentialAuthentication,
-        command_types_by_request_id: dict[str, RuntimeProviderCommandType],
+        commands_by_request_id: dict[str, _RelayedProviderCommand],
         protocol_version: str,
+        command_slot: asyncio.Event,
     ) -> None:
         async for message in request_iterator:
             payload = message.WhichOneof("payload")
@@ -503,6 +527,27 @@ class RuntimeProviderControlGrpcServicer(
                         _error(message.request_id, "PROVIDER_IDENTITY_MISMATCH")
                     )
                     return
+                correlated_command = commands_by_request_id.get(
+                    message.command_completion.request_id
+                )
+                if (
+                    correlated_command is None
+                    or message.request_id != message.command_completion.request_id
+                    or message.command_completion.runtime_id
+                    != correlated_command.runtime_id
+                    or (
+                        message.command_completion.report.runtime_id
+                        and message.command_completion.report.runtime_id
+                        != correlated_command.runtime_id
+                    )
+                ):
+                    await outbound.put(
+                        _error(
+                            message.request_id,
+                            "INVALID_PROVIDER_COMMAND_COMPLETION",
+                        )
+                    )
+                    return
                 validated_report: _ValidatedProviderReport | None = None
                 if message.command_completion.report.runtime_id:
                     try:
@@ -516,6 +561,23 @@ class RuntimeProviderControlGrpcServicer(
                             _error(message.request_id, "INVALID_PROVIDER_REPORT")
                         )
                         return
+                if (
+                    correlated_command.command_type
+                    is RuntimeProviderCommandType.RESTART
+                    and message.command_completion.success
+                    and (
+                        validated_report is None
+                        or validated_report.report.observed_desired_generation
+                        != correlated_command.desired_generation
+                    )
+                ):
+                    await outbound.put(
+                        _error(
+                            message.request_id,
+                            "INVALID_PROVIDER_COMMAND_COMPLETION",
+                        )
+                    )
+                    return
                 if not await self._provider_generation_current(
                     provider_id=provider_id,
                     generation=generation,
@@ -529,10 +591,7 @@ class RuntimeProviderControlGrpcServicer(
                     message.command_completion,
                     provider_id=provider_id,
                 )
-                command_type = command_types_by_request_id.pop(
-                    message.command_completion.request_id,
-                    None,
-                )
+                commands_by_request_id.pop(message.command_completion.request_id)
                 if validated_report is not None:
                     report = validated_report.report
                     await self._report_sink.record_provider_report(
@@ -542,11 +601,19 @@ class RuntimeProviderControlGrpcServicer(
                         ),
                     )
                     if (
-                        command_type is RuntimeProviderCommandType.OBSERVE
+                        correlated_command.command_type
+                        is RuntimeProviderCommandType.RESTART
+                        and message.command_completion.success
+                    ):
+                        await self._report_sink.complete_restart_handoff(report)
+                    if (
+                        correlated_command.command_type
+                        is RuntimeProviderCommandType.OBSERVE
                         and message.command_completion.success
                     ):
                         handler = self._observe_completion_handler
                         await handler.reconcile_observe_completion(report)
+                command_slot.set()
 
     async def _provider_generation_current(
         self,
@@ -585,9 +652,11 @@ class RuntimeProviderControlGrpcServicer(
         provider_id: str,
         generation: int,
         authentication: RuntimeProviderCredentialAuthentication,
-        command_types_by_request_id: dict[str, RuntimeProviderCommandType],
+        commands_by_request_id: dict[str, _RelayedProviderCommand],
+        command_slot: asyncio.Event,
     ) -> None:
         while True:
+            await command_slot.wait()
             if not await self._connection_tracker.connection_active(
                 authentication=authentication,
                 generation=generation,
@@ -645,8 +714,11 @@ class RuntimeProviderControlGrpcServicer(
                     "operation_type": envelope.operation_type,
                 },
             )
-            command_types_by_request_id[envelope.request_id] = (
-                RuntimeProviderCommandType(command.command_type)
+            command_slot.clear()
+            commands_by_request_id[envelope.request_id] = _RelayedProviderCommand(
+                command_type=RuntimeProviderCommandType(command.command_type),
+                runtime_id=command.runtime_id,
+                desired_generation=command.desired_generation,
             )
             await outbound.put(
                 _ProviderOutboundItem(

@@ -48,6 +48,8 @@ from azents.services.external_channel.participation import (
 from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+_THREAD_INTERACTION_ID = "01a03c28f6137b60b35e68ba50ce5319"
+_THREAD_BINDING_ID = "01a03bfcc50a7891a94d3328bdbd88bf"
 _CONTEXT = DiscordSettingsContext(
     connection_id="connection-1",
     guild_id="guild-1",
@@ -488,3 +490,56 @@ async def test_binding_open_rebinds_follow_up_controls_to_component_interaction(
         "component-interaction-1"
     )
     participation.mutate_parent_settings.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_binding_open_renders_bounded_thread_controls() -> None:
+    """A connected thread renders signed controls within Discord's ID limit."""
+    context = DiscordSettingsContext(
+        connection_id="connection-1",
+        guild_id="guild-1",
+        provider_parent_channel_id="channel-1",
+        provider_thread_resource_key="discord:guild-1:thread-1",
+        principal_id="principal-1",
+    )
+    binding = _binding().model_copy(update={"id": _THREAD_BINDING_ID})
+    current = ExternalChannelParticipationSettings(
+        target="thread",
+        agent_name="Agent One",
+        setting=None,
+        claim=None,
+        resource=_resource(),
+        binding=binding,
+    )
+    participation = SimpleNamespace(resolve_settings=AsyncMock(return_value=current))
+    service, _ = _service(origin=_origin(), participation=participation)
+
+    opened = await service.component_response(
+        interaction_id=_THREAD_INTERACTION_ID,
+        scope=DiscordSettingsScope(
+            action="open_binding",
+            origin_interaction_id=_THREAD_BINDING_ID,
+            setup_claim_id=None,
+            claim_generation=None,
+            source_revision=None,
+            setting_id=None,
+            settings_generation=None,
+            binding_id=None,
+            binding_version=None,
+        ),
+        context=context,
+        now=_NOW,
+    )
+
+    data = cast(dict[str, object], opened.response["data"])
+    rows = cast(list[dict[str, object]], data["components"])
+    response_buttons = cast(list[dict[str, object]], rows[0]["components"])
+    for button in response_buttons:
+        custom_id = cast(str, button["custom_id"])
+        scope = parse_discord_settings_custom_id(
+            custom_id=custom_id,
+            secret="settings-secret",
+        )
+        assert len(custom_id) == 90
+        assert scope.origin_interaction_id == _THREAD_INTERACTION_ID
+        assert scope.binding_id == _THREAD_BINDING_ID

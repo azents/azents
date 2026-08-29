@@ -525,8 +525,10 @@ async def _harness(
     )
     operation = RuntimeOperationMetadata(
         operation_id="operation-1",
+        request_id="request-1",
         runtime_id="runtime-1",
         target=RuntimeCoordinationTarget.RUNNER,
+        target_subject_id="runtime-1",
         generation=1,
         operation_type="file.transfer.v1",
         transfer_id="transfer-1",
@@ -534,6 +536,7 @@ async def _harness(
         transfer_dispatch_id="dispatch-1",
         transfer_direction=RuntimeOperationTransferDirection(direction.value),
         request_stream_id="request-1",
+        request_cursor=None,
         reply_stream_id="reply-1",
         status=RuntimeOperationStatus.ACTIVE,
         created_at=_NOW,

@@ -13,6 +13,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
@@ -35,6 +36,8 @@ from azents.repos.scheduled_task.data import ScheduledTask
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.discord_http import (
     DiscordHTTPAdmissionService,
+    DiscordHTTPIngressService,
+    DiscordSettingsComponentHandoff,
     _scheduled_task_cancel_confirmation_response,
 )
 from azents.services.external_channel.discord_interaction import (
@@ -45,10 +48,12 @@ from azents.services.external_channel.discord_selector import (
     DiscordSelectorResponseService,
 )
 from azents.services.external_channel.discord_settings import (
+    DiscordSettingsContext,
     DiscordSettingsResponseService,
 )
 from azents.services.external_channel.discord_settings_scope import (
     build_discord_settings_custom_id,
+    parse_discord_settings_custom_id,
 )
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
@@ -135,7 +140,8 @@ class _RepositoryDouble:
 class _AdmissionDouble:
     """Record only canonical token-free admission inputs."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, claimed: bool = True) -> None:
+        self.claimed = claimed
         self.inputs: list[
             tuple[
                 ExternalChannelInteractionCreate,
@@ -171,7 +177,7 @@ class _AdmissionDouble:
     ) -> object:
         del now
         self.claimed_interaction_ids.append(interaction_id)
-        return SimpleNamespace(claimed=True)
+        return SimpleNamespace(claimed=self.claimed)
 
     async def finish_interaction_provider_mutation(
         self,
@@ -257,7 +263,7 @@ class _SelectorResponseDouble:
 class _SettingsResponseDouble:
     """Provide deterministic settings rendering without provider I/O."""
 
-    def __init__(self, *, cleanup_plans: tuple[str, ...] = ()) -> None:
+    def __init__(self, *, cleanup_plans: tuple[object, ...] = ()) -> None:
         self.config = SimpleNamespace(
             auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))
         )
@@ -276,6 +282,29 @@ class _SettingsResponseDouble:
             response={"type": 7, "data": {"content": "Saved.", "components": []}},
             cleanup_plans=self.cleanup_plans,
         )
+
+
+class _InteractionResponseDouble:
+    """Record request-local deferred completion without provider I/O."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def edit_original(self, **kwargs: object) -> None:
+        self.calls.append(kwargs)
+
+
+class _DispatcherResolverDouble:
+    """Resolve one dispatcher only when the ingress explicitly opens it."""
+
+    def __init__(self, dispatcher: DiscordHTTPAdmissionService) -> None:
+        self.dispatcher = dispatcher
+        self.opens = 0
+
+    @asynccontextmanager
+    async def open(self) -> AsyncGenerator[DiscordHTTPAdmissionService, None]:
+        self.opens += 1
+        yield self.dispatcher
 
 
 def _configuration(
@@ -336,7 +365,7 @@ def _service(
     admission: _AdmissionDouble,
     scheduled_task_control: object,
     scheduled_task_channel: object,
-    cleanup_plans: tuple[str, ...] = (),
+    cleanup_plans: tuple[object, ...] = (),
 ) -> _DiscordHTTPServiceFixture:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -346,6 +375,7 @@ def _service(
     shortcut_source = _ShortcutSourceDouble()
     selector_response = _SelectorResponseDouble()
     settings_response = _SettingsResponseDouble(cleanup_plans=cleanup_plans)
+    interaction_response = _InteractionResponseDouble()
     return _DiscordHTTPServiceFixture(
         service=DiscordHTTPAdmissionService(
             session_manager=cast(SessionManager[AsyncSession], session_manager),
@@ -365,9 +395,50 @@ def _service(
             ),
             scheduled_task_control=scheduled_task_control,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
             scheduled_task_channel=scheduled_task_channel,  # ty: ignore[invalid-argument-type] # Focused test double provides only exercised behavior.
+            interaction_response_client=interaction_response,
         ),
         repository=repository,
         shortcut_source=shortcut_source,
+    )
+
+
+class _DiscordHTTPIngressFixture(NamedTuple):
+    """Lightweight ingress and its lazy dispatcher resolver."""
+
+    service: DiscordHTTPIngressService
+    resolver: _DispatcherResolverDouble
+
+
+def _ingress_service(
+    *,
+    configuration: ExternalChannelConnectionConfiguration,
+    admission: _AdmissionDouble,
+    dispatcher: DiscordHTTPAdmissionService,
+) -> _DiscordHTTPIngressFixture:
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield cast(AsyncSession, object())
+
+    resolver = _DispatcherResolverDouble(dispatcher)
+    return _DiscordHTTPIngressFixture(
+        service=DiscordHTTPIngressService(
+            session_manager=cast(SessionManager[AsyncSession], session_manager),
+            repository=cast(
+                ExternalChannelRepository,
+                _RepositoryDouble(configuration),
+            ),
+            admission_service=cast(ExternalChannelAdmissionService, admission),
+            config=cast(
+                Config,
+                SimpleNamespace(
+                    auth=SimpleNamespace(
+                        jwt=SimpleNamespace(secret_key="settings-secret")
+                    )
+                ),
+            ),
+            dispatcher_resolver=resolver,  # ty: ignore[invalid-argument-type] # Focused resolver exposes only the exercised context manager.
+        ),
+        resolver=resolver,
     )
 
 
@@ -491,6 +562,34 @@ def _settings_component_body() -> bytes:
         },
         separators=(",", ":"),
     ).encode()
+
+
+def _setup_component_body(
+    *,
+    interaction_token: str | None = "request-local-interaction-token",
+) -> bytes:
+    """Build one signed setup selection with a request-local interaction token."""
+    custom_id = build_discord_settings_custom_id(
+        secret="settings-secret",
+        action="setup_channel",
+        origin_interaction_id="origin-interaction-1",
+        setup_claim_id="setup-claim-1",
+        claim_generation=1,
+        source_revision=1,
+    )
+    payload: dict[str, object] = {
+        "id": "discord-setup-component-1",
+        "type": 3,
+        "application_id": "app-1",
+        "guild_id": "guild-1",
+        "channel_id": "channel-1",
+        "channel": {"id": "channel-1", "type": 0},
+        "member": {"user": {"id": "user-1"}},
+        "data": {"custom_id": custom_id},
+    }
+    if interaction_token is not None:
+        payload["token"] = interaction_token
+    return json.dumps(payload, separators=(",", ":")).encode()
 
 
 def _scheduled_task_component_body(custom_id: str) -> bytes:
@@ -689,6 +788,183 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
         service.settings_response_service,
     )
     assert settings_response.component_calls[0]["interaction_id"] == "interaction-row-1"
+
+
+@pytest.mark.asyncio
+async def test_setup_component_acknowledges_before_resolving_dispatcher() -> None:
+    """Claim setup once and return deferred update before heavy dispatch resolution."""
+    private_key = Ed25519PrivateKey.generate()
+    admission = _AdmissionDouble()
+    configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
+    dispatcher, _, _ = _service(
+        configuration=configuration,
+        admission=admission,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+    )
+    service, resolver = _ingress_service(
+        configuration=configuration,
+        admission=admission,
+        dispatcher=dispatcher,
+    )
+    body = _setup_component_body()
+    timestamp, signature = _signature(private_key, body)
+
+    result = await service.handle(
+        selector="opaque-selector",
+        raw_body=body,
+        timestamp=timestamp,
+        signature=signature,
+        received_at=_NOW,
+    )
+
+    assert result.response == {"type": 6}
+    assert result.settings_component_handoff is not None
+    assert resolver.opens == 0
+    assert admission.claimed_interaction_ids == ["interaction-row-1"]
+    assert "request-local-interaction-token" not in repr(result)
+
+    await service.run_settings_component_handoff(result.settings_component_handoff)
+
+    assert resolver.opens == 1
+    assert admission.finished_interaction_ids == ["interaction-row-1"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_setup_component_does_not_schedule_background_work() -> None:
+    """A mutation claim loser receives only the idempotent component ACK."""
+    private_key = Ed25519PrivateKey.generate()
+    admission = _AdmissionDouble(claimed=False)
+    configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
+    dispatcher, _, _ = _service(
+        configuration=configuration,
+        admission=admission,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+    )
+    service, resolver = _ingress_service(
+        configuration=configuration,
+        admission=admission,
+        dispatcher=dispatcher,
+    )
+    body = _setup_component_body()
+    timestamp, signature = _signature(private_key, body)
+
+    result = await service.handle(
+        selector="opaque-selector",
+        raw_body=body,
+        timestamp=timestamp,
+        signature=signature,
+        received_at=_NOW,
+    )
+
+    assert result.response is None
+    assert result.settings_component_handoff is None
+    assert resolver.opens == 0
+
+
+@pytest.mark.asyncio
+async def test_setup_component_without_token_fails_before_mutation_claim() -> None:
+    """Malformed setup callbacks cannot claim work that background cannot finish."""
+    private_key = Ed25519PrivateKey.generate()
+    admission = _AdmissionDouble()
+    configuration = _configuration(private_key.public_key().public_bytes_raw().hex())
+    dispatcher, _, _ = _service(
+        configuration=configuration,
+        admission=admission,
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+    )
+    service, resolver = _ingress_service(
+        configuration=configuration,
+        admission=admission,
+        dispatcher=dispatcher,
+    )
+    body = _setup_component_body(interaction_token=None)
+    timestamp, signature = _signature(private_key, body)
+
+    with pytest.raises(
+        DiscordInteractionInvalidPayload,
+        match="token is unavailable",
+    ):
+        await service.handle(
+            selector="opaque-selector",
+            raw_body=body,
+            timestamp=timestamp,
+            signature=signature,
+            received_at=_NOW,
+        )
+
+    assert admission.claimed_interaction_ids == []
+    assert resolver.opens == 0
+
+
+@pytest.mark.asyncio
+async def test_background_setup_completes_response_and_cleanup_delivery() -> None:
+    """Edit the deferred response and then attempt every committed cleanup."""
+    private_key = Ed25519PrivateKey.generate()
+    admission = _AdmissionDouble()
+    first_plan = make_provider_effect_plan("presence-delete")
+    second_plan = make_provider_effect_plan("progress-delete")
+    service, _, _ = _service(
+        configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
+        admission=admission,
+        cleanup_plans=(first_plan, second_plan),
+        scheduled_task_control=SimpleNamespace(),
+        scheduled_task_channel=SimpleNamespace(),
+    )
+    service.attempt_control_delivery = AsyncMock()
+    custom_id = build_discord_settings_custom_id(
+        secret="settings-secret",
+        action="setup_channel",
+        origin_interaction_id="origin-interaction-1",
+        setup_claim_id="setup-claim-1",
+        claim_generation=1,
+        source_revision=1,
+    )
+    handoff = DiscordSettingsComponentHandoff(
+        interaction_id="interaction-row-1",
+        application_id="app-1",
+        interaction_token="request-local-interaction-token",
+        scope=parse_discord_settings_custom_id(
+            custom_id=custom_id,
+            secret="settings-secret",
+        ),
+        context=DiscordSettingsContext(
+            connection_id="connection-1",
+            guild_id="guild-1",
+            provider_parent_channel_id="channel-1",
+            provider_thread_resource_key=None,
+            principal_id="principal-1",
+        ),
+        received_at=_NOW,
+    )
+
+    await service.run_settings_component_handoff(handoff)
+
+    response_client = cast(
+        _InteractionResponseDouble,
+        service.interaction_response_client,
+    )
+    assert response_client.calls == [
+        {
+            "application_id": "app-1",
+            "interaction_token": "request-local-interaction-token",
+            "response": {
+                "type": 7,
+                "data": {"content": "Saved.", "components": []},
+            },
+        }
+    ]
+    assert service.attempt_control_delivery.await_count == 2
+    assert service.attempt_control_delivery.await_args_list[0].kwargs == {
+        "connection_id": "connection-1",
+        "plan": first_plan,
+    }
+    assert service.attempt_control_delivery.await_args_list[1].kwargs == {
+        "connection_id": "connection-1",
+        "plan": second_plan,
+    }
 
 
 @pytest.mark.asyncio

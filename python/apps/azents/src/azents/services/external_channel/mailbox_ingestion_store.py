@@ -186,6 +186,7 @@ class ExternalChannelMailboxIngestionStore:
         resource_id: str,
         route_id: str,
         response_mode: ExternalChannelResponseMode,
+        tracker_visibility: Literal["hidden", "visible"],
     ) -> ExternalChannelConfiguredBindingResult:
         """Create or reuse configured Session state in the caller transaction."""
         resource = await self.repository.lock_resource(
@@ -237,6 +238,7 @@ class ExternalChannelMailboxIngestionStore:
             session_id=binding.agent_session_id,
             binding_id=binding.id,
             desired_progress=checking_progress(),
+            tracker_visibility=tracker_visibility,
         )
         presence_plan = (
             None
@@ -657,6 +659,10 @@ class ExternalChannelMailboxIngestionStore:
                 session_id=binding.agent_session_id,
                 binding_id=binding.id,
                 desired_progress=checking_progress(),
+                tracker_visibility=_tracker_visibility(
+                    provider=request.locator.provider,
+                    invocation=request.locator.invocation,
+                ),
             )
             session_presence_id = (
                 None
@@ -673,7 +679,11 @@ class ExternalChannelMailboxIngestionStore:
                     resource=conversation.resource,
                     binding=binding,
                 )
-                if existing_binding and request.locator.invocation
+                if (
+                    existing_binding
+                    and request.locator.invocation
+                    and request.locator.provider is ExternalChannelProvider.SLACK
+                )
                 else None
             )
             progress_id = await self._create_initial_progress_intent(
@@ -2228,6 +2238,17 @@ def _rejected(
 
 def _route_has_automatic_access(route: ExternalChannelAgentRoute) -> bool:
     return route.open_access_enabled
+
+
+def _tracker_visibility(
+    *,
+    provider: ExternalChannelProvider,
+    invocation: bool,
+) -> Literal["hidden", "visible"]:
+    """Derive conversational Tracker eligibility from provider admission."""
+    if provider is ExternalChannelProvider.SLACK or invocation:
+        return "visible"
+    return "hidden"
 
 
 def _response_mode_ignored_reason(

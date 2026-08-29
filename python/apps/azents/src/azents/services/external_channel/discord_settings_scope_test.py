@@ -11,6 +11,8 @@ from azents.services.external_channel.discord_settings_scope import (
 )
 
 _UPDATED_AT = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+_ORIGIN_INTERACTION_ID = "01a03c28f6137b60b35e68ba50ce5319"
+_BINDING_ID = "01a03bfcc50a7891a94d3328bdbd88bf"
 
 
 def test_setup_settings_scope_round_trips_with_current_source_fences() -> None:
@@ -72,8 +74,8 @@ def test_thread_settings_scope_round_trips_with_binding_revision() -> None:
     custom_id = build_discord_settings_custom_id(
         secret="secret",
         action="thread_mention_only",
-        origin_interaction_id="interaction-1",
-        binding_id="binding-1",
+        origin_interaction_id=_ORIGIN_INTERACTION_ID,
+        binding_id=_BINDING_ID,
         binding_updated_at=_UPDATED_AT,
     )
 
@@ -82,10 +84,34 @@ def test_thread_settings_scope_round_trips_with_binding_revision() -> None:
         secret="secret",
     )
 
-    assert len(custom_id) <= 100
-    assert scope.binding_id == "binding-1"
+    assert len(custom_id) == 90
+    assert scope.origin_interaction_id == _ORIGIN_INTERACTION_ID
+    assert scope.binding_id == _BINDING_ID
     assert scope.binding_version is not None
     assert len(scope.binding_version) == 16
+
+
+@pytest.mark.parametrize(
+    ("origin_interaction_id", "binding_id"),
+    [
+        ("interaction-1", _BINDING_ID),
+        (_ORIGIN_INTERACTION_ID, "binding-1"),
+        (_ORIGIN_INTERACTION_ID.upper(), _BINDING_ID),
+    ],
+)
+def test_thread_settings_scope_requires_canonical_internal_ids(
+    origin_interaction_id: str,
+    binding_id: str,
+) -> None:
+    """Reject thread scopes that cannot use the fixed compact identifier encoding."""
+    with pytest.raises(ValueError, match="scope is invalid"):
+        build_discord_settings_custom_id(
+            secret="secret",
+            action="thread_all_messages",
+            origin_interaction_id=origin_interaction_id,
+            binding_id=binding_id,
+            binding_updated_at=_UPDATED_AT,
+        )
 
 
 @pytest.mark.parametrize("mutation", ["payload", "signature"])

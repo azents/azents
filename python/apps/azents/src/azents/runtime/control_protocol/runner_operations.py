@@ -81,9 +81,12 @@ class RuntimeFileReadResult:
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeFileTextReadResult:
-    """Completed bounded UTF-8 file read operation result."""
+    """Completed decoded character-range operation result."""
 
     text: str
+    start_character: int
+    end_character: int
+    truncated: bool
     final_cursor: str
 
 
@@ -536,12 +539,12 @@ class RuntimeRunnerOperationClient:
         runner_generation: int,
         owner_session_id: str | None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime,
     ) -> RuntimeFileTextReadResult:
-        """Read one bounded decoded file range without Base64 file events."""
+        """Read one decoded character range without Base64 file events."""
         dispatch = await self._dispatch_runner_operation(
             RuntimeRunnerOperation(
                 runtime_id=runtime_id,
@@ -550,8 +553,8 @@ class RuntimeRunnerOperationClient:
                 owner_session_id=owner_session_id,
                 payload={
                     "path": path,
-                    "offset": offset,
-                    "max_bytes": max_bytes,
+                    "character_offset": character_offset,
+                    "max_characters": max_characters,
                     "encoding": encoding,
                 },
                 deadline_at=deadline_at,
@@ -1478,7 +1481,7 @@ class RuntimeRunnerOperationClient:
         generation: int | None = None,
         deadline_at: datetime,
     ) -> RuntimeFileTextReadResult:
-        """Resume one bounded UTF-8 file read reply stream."""
+        """Resume one decoded character-range reply stream."""
         folder = _ReplyFolder(after_cursor=after_cursor)
         final = await self._read_until_final(
             reply_stream_id,
@@ -1491,6 +1494,21 @@ class RuntimeRunnerOperationClient:
         )
         return RuntimeFileTextReadResult(
             text="".join(folder.stdout),
+            start_character=_int_payload(
+                final.event.payload,
+                "start_character",
+                default=0,
+            ),
+            end_character=_int_payload(
+                final.event.payload,
+                "end_character",
+                default=0,
+            ),
+            truncated=_bool_payload(
+                final.event.payload,
+                "truncated",
+                default=False,
+            ),
             final_cursor=final.cursor,
         )
 

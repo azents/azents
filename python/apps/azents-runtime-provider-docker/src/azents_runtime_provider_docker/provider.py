@@ -117,6 +117,14 @@ class DockerRuntimeProviderConfig:
     tmp_mount_path: str
 
 
+@dataclasses.dataclass(frozen=True)
+class _ObservedContainerState:
+    """Provider state and reason derived from one Docker container."""
+
+    state: RuntimeProviderObservedState
+    reason: str
+
+
 class DockerRuntimeProvider:
     """Lifecycle-only Runtime Provider backed by a single Docker host."""
 
@@ -173,11 +181,18 @@ class DockerRuntimeProvider:
         self,
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
-        """Recreate the Runtime container while preserving workspace data."""
-        await self._ensure_container(command, replace=True)
+        """Delete the Runtime container and preserve workspace data."""
+        self._validate_command(command)
+        await self._remove_owned_container(command)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.RESTART,
-            report=await self.observe(command),
+            report=self._report(
+                command,
+                observed_state=RuntimeProviderObservedState.STOPPED,
+                reason="restart_container_removed",
+                provider_runtime_id=None,
+                diagnostic={},
+            ),
         )
 
     async def reset(
@@ -259,11 +274,11 @@ class DockerRuntimeProvider:
                 provider_runtime_id=None,
                 diagnostic={},
             )
-        observed_state, reason = _observed_state(container)
+        observation = _observed_state(container)
         return self._report(
             command,
-            observed_state=observed_state,
-            reason=reason,
+            observed_state=observation.state,
+            reason=observation.reason,
             provider_runtime_id=container.name,
             diagnostic=_container_diagnostic(container),
         )
@@ -327,6 +342,24 @@ class DockerRuntimeProvider:
                 self._container_spec(command, profile=profile)
             )
         await self._docker.start_container(container_name)
+
+    async def _remove_owned_container(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> None:
+        container_name = _container_name(command.identity.runtime_id)
+        container = await self._docker.get_container(container_name)
+        if container is None:
+            return
+        labels = dict(container.labels)
+        if any(
+            labels.get(key) != value
+            for key, value in self._stable_labels(command).items()
+        ):
+            raise UnsupportedRuntimeConfiguration(
+                "Docker container name is owned by a different Runtime or Provider."
+            )
+        await self._docker.remove_container(container_name)
 
     def _container_spec(
         self,
@@ -537,17 +570,17 @@ class DockerRuntimeProvider:
         self,
         container: DockerContainerInfo,
     ) -> RuntimeProviderReport:
-        observed_state, reason = _observed_state(container)
+        observation = _observed_state(container)
         return RuntimeProviderReport(
             runtime_id=container.labels[_LABEL_RUNTIME_ID],
             provider_id=self._config.provider_id,
             provider_generation=_int_label(container, _LABEL_PROVIDER_GENERATION),
-            observed_state=observed_state,
+            observed_state=observation.state,
             observed_desired_generation=_int_label(
                 container, _LABEL_DESIRED_GENERATION
             ),
             provider_runtime_id=container.name,
-            reason=reason,
+            reason=observation.reason,
             diagnostic={
                 "source": "docker_container",
                 **_container_diagnostic(container),
@@ -648,20 +681,41 @@ def _ensure_writable_dir(path: Path, *, mode: int) -> None:
 
 def _observed_state(
     container: DockerContainerInfo,
-) -> tuple[RuntimeProviderObservedState, str]:
+) -> _ObservedContainerState:
     if container.state.running:
-        return RuntimeProviderObservedState.RUNNING, "container_running"
+        return _ObservedContainerState(
+            state=RuntimeProviderObservedState.RUNNING,
+            reason="container_running",
+        )
     if container.state.restarting:
-        return RuntimeProviderObservedState.STARTING, "container_restarting"
+        return _ObservedContainerState(
+            state=RuntimeProviderObservedState.STARTING,
+            reason="container_restarting",
+        )
     if container.state.oom_killed:
-        return RuntimeProviderObservedState.FAILED, "container_oom_killed"
+        return _ObservedContainerState(
+            state=RuntimeProviderObservedState.FAILED,
+            reason="container_oom_killed",
+        )
     if container.state.dead:
-        return RuntimeProviderObservedState.FAILED, "container_dead"
+        return _ObservedContainerState(
+            state=RuntimeProviderObservedState.FAILED,
+            reason="container_dead",
+        )
     if container.state.status == "exited":
-        return RuntimeProviderObservedState.FAILED, "container_exited"
+        return _ObservedContainerState(
+            state=RuntimeProviderObservedState.FAILED,
+            reason="container_exited",
+        )
     if container.state.status == "removing":
-        return RuntimeProviderObservedState.FAILED, "container_removing"
-    return RuntimeProviderObservedState.STARTING, "container_created"
+        return _ObservedContainerState(
+            state=RuntimeProviderObservedState.FAILED,
+            reason="container_removing",
+        )
+    return _ObservedContainerState(
+        state=RuntimeProviderObservedState.STARTING,
+        reason="container_created",
+    )
 
 
 def _terminal_container(container: DockerContainerInfo) -> bool:

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
+import { useAgentWorkspaceDirectoryPickerContainer } from "@/shared/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import { trpc } from "@/trpc/client";
 import {
   type AutomaticProjectRow,
@@ -17,7 +17,7 @@ import {
   projectBasename,
   type ProjectPreviewStatus,
 } from "../automaticProjects";
-import type { ProjectDirectoryPickerEntry } from "@/features/agent-workspace/types";
+import type { ProjectDirectoryPickerEntry } from "@/shared/agent-workspace/types";
 import type { ApiErrorProjection } from "@/trpc/api-error";
 import type { AgentResponse } from "@azents/public-client";
 
@@ -42,6 +42,7 @@ export interface AgentAutomaticProjectsContainerOutput {
   onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onRestartRuntimeForProjectPicker: () => void;
   onRemoveProject: (path: string) => void;
   onMoveProject: (path: string, direction: "up" | "down") => void;
   onSave: () => Promise<void>;
@@ -176,6 +177,10 @@ export function useAgentAutomaticProjectsContainer({
   const onStartRuntimeForProjectPicker = useCallback((): void => {
     setSaveError(null);
     picker.startRuntime();
+  }, [picker]);
+  const onRestartRuntimeForProjectPicker = useCallback((): void => {
+    setSaveError(null);
+    picker.restartRuntime();
   }, [picker]);
 
   const onRemoveProject = useCallback((path: string): void => {
@@ -330,6 +335,7 @@ export function useAgentAutomaticProjectsContainer({
     onSelectProjectPickerDirectory: picker.selectDirectory,
     onRefreshProjectPicker: picker.refresh,
     onStartRuntimeForProjectPicker,
+    onRestartRuntimeForProjectPicker,
     onRemoveProject,
     onMoveProject,
     onSave,

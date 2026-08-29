@@ -17,6 +17,25 @@ from support.discord_provider_fake import (
 _DISCORD_VERIFY_KEY = "233988c4fcf6ffd4dcf0590950d79671de856cfa36f65c16a2be13b1613875f0"
 
 
+class _ImmediateBarrierExpiry:
+    """Model one reached barrier whose bounded release wait expires."""
+
+    def clear(self) -> None:
+        """Keep the synthetic release unset."""
+
+    def set(self) -> None:
+        """Ignore releases because the modeled wait already expired."""
+
+    def is_set(self) -> bool:
+        """Report that no release was observed before expiry."""
+        return False
+
+    def wait(self, timeout: float | None = None) -> bool:
+        """Expire immediately without using wall-clock delay."""
+        del timeout
+        return False
+
+
 class _SignedInteractionHandler(BaseHTTPRequestHandler):
     """Verify the fake's real Ed25519 interaction signature in memory."""
 
@@ -87,6 +106,27 @@ class _SettingsInteractionHandler(_SignedInteractionHandler):
             b'"components":[{"type":1,"components":[{"type":2,'
             b'"custom_id":"a:sc:claim:1:1:signature"}]}]}}'
         )
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+
+class _DeferredInteractionHandler(_SignedInteractionHandler):
+    """Return one deferred component update for background completion tests."""
+
+    def do_POST(self) -> None:
+        """Verify the signed request and acknowledge before background work."""
+        length = int(self.headers["Content-Length"])
+        body = self.rfile.read(length)
+        signature = bytes.fromhex(self.headers["X-Signature-Ed25519"])
+        timestamp = self.headers["X-Signature-Timestamp"].encode()
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(_DISCORD_VERIFY_KEY)).verify(
+            signature, timestamp + body
+        )
+        self.received_bodies.append(body)
+        response = b'{"type":6}'
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(response)))
@@ -590,6 +630,121 @@ def test_discord_fake_serves_injected_gateway_dispatches(
     assert "Private gateway content" not in str(evidence)
 
 
+def test_discord_fake_records_redacted_typing_snapshots_and_pulses(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Store only safe active-target facts and explicit empty snapshots."""
+    discord_fake_url, _ = discord_fake_urls
+    targets = [
+        {
+            "guild_id": STATE.guild_id,
+            "channel_id": "400000000000000001",
+            "work_cycle_count": 2,
+        },
+        {
+            "guild_id": STATE.guild_id,
+            "channel_id": "400000000000000002",
+            "work_cycle_count": 1,
+        },
+    ]
+    active = requests.post(
+        f"{discord_fake_url}/__testenv/typing",
+        json={"targets": targets},
+        timeout=5,
+    )
+    empty = requests.post(
+        f"{discord_fake_url}/__testenv/typing",
+        json={"targets": []},
+        timeout=5,
+    )
+
+    assert active.status_code == 204
+    assert empty.status_code == 204
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["typing"] == {
+        "snapshots": [{"targets": targets}, {"targets": []}],
+        "pulses": targets,
+    }
+    assert evidence["request_counts"]["typing"] == 2
+    rendered = str(evidence)
+    assert "work-cycle-private-id" not in rendered
+    assert "typing-private-content" not in rendered
+
+
+def test_discord_fake_typing_failures_do_not_record_targets_and_reset_evidence(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Apply typed failure controls without retaining failed typing snapshots."""
+    discord_fake_url, _ = discord_fake_urls
+    target = {
+        "guild_id": STATE.guild_id,
+        "channel_id": "400000000000000001",
+        "work_cycle_count": 1,
+    }
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"api_scenario_sequences": {"typing": ["server_error", "ok"]}},
+        timeout=5,
+    ).raise_for_status()
+
+    failed = requests.post(
+        f"{discord_fake_url}/__testenv/typing",
+        json={"targets": [target]},
+        timeout=5,
+    )
+    delivered = requests.post(
+        f"{discord_fake_url}/__testenv/typing",
+        json={"targets": [target]},
+        timeout=5,
+    )
+
+    assert failed.status_code == 503
+    assert delivered.status_code == 204
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["typing"] == {
+        "snapshots": [{"targets": [target]}],
+        "pulses": [target],
+    }
+    assert evidence["request_counts"]["typing"] == 2
+
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={},
+        timeout=5,
+    ).raise_for_status()
+    configured = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert configured["typing"] == {"snapshots": [], "pulses": []}
+    assert "typing-private-content" not in str(configured)
+
+
+def test_discord_fake_rejects_non_redacted_typing_targets(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Reject work identifiers and visible content before they reach evidence."""
+    discord_fake_url, _ = discord_fake_urls
+    response = requests.post(
+        f"{discord_fake_url}/__testenv/typing",
+        json={
+            "targets": [
+                {
+                    "guild_id": STATE.guild_id,
+                    "channel_id": "400000000000000001",
+                    "work_cycle_count": 1,
+                    "work_cycle_id": "work-cycle-private-id",
+                    "content": "typing-private-content",
+                }
+            ]
+        },
+        timeout=5,
+    )
+
+    assert response.status_code == 400
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["typing"] == {"snapshots": [], "pulses": []}
+    assert "work-cycle-private-id" not in str(evidence)
+    assert "typing-private-content" not in str(evidence)
+
+
 def test_discord_fake_controls_injected_gateway_reconnect_and_resume(
     discord_fake_urls: tuple[str, str],
 ) -> None:
@@ -670,6 +825,335 @@ def test_discord_fake_controls_confirmed_and_unknown_http_categories(
         "provider_5xx_unknown",
     }
     assert "nonce-" not in str(evidence)
+
+
+def test_discord_fake_publishes_failure_evidence_before_response(
+    discord_fake_urls: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publish controlled failure evidence before the SDK observes its response."""
+    discord_fake_url, _ = discord_fake_urls
+    evidence_started = threading.Event()
+    release_evidence = threading.Event()
+    original_record_message_failure = STATE.record_message_failure
+
+    def record_message_failure_after_release(
+        *,
+        operation: str,
+        channel_id: str,
+        message_id: str | None,
+        outcome: str,
+        file_count: int = 0,
+        file_bytes: int = 0,
+        safe_category: str | None,
+    ) -> None:
+        evidence_started.set()
+        if not release_evidence.wait(timeout=5):
+            raise TimeoutError("controlled failure evidence was not released")
+        original_record_message_failure(
+            operation=operation,
+            channel_id=channel_id,
+            message_id=message_id,
+            outcome=outcome,
+            file_count=file_count,
+            file_bytes=file_bytes,
+            safe_category=safe_category,
+        )
+
+    monkeypatch.setattr(
+        STATE,
+        "record_message_failure",
+        record_message_failure_after_release,
+    )
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"api_scenario_sequences": {"create_message": ["forbidden"]}},
+        timeout=5,
+    ).raise_for_status()
+    responses: list[requests.Response] = []
+
+    def create_message() -> None:
+        responses.append(
+            requests.post(
+                f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
+                data={"payload_json": '{"content":"controlled"}'},
+                files={
+                    "files[0]": (
+                        "evidence.txt",
+                        b"evidence-order",
+                        "text/plain",
+                    )
+                },
+                timeout=5,
+            )
+        )
+
+    request_thread = threading.Thread(target=create_message)
+    request_thread.start()
+    try:
+        assert evidence_started.wait(timeout=5)
+        assert responses == []
+    finally:
+        release_evidence.set()
+        request_thread.join(timeout=5)
+    assert not request_thread.is_alive()
+    assert len(responses) == 1
+    assert responses[0].status_code == 403
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["operations"] == [
+        {
+            "sequence": 1,
+            "event": "message",
+            "operation": "create_message",
+            "outcome": "failed",
+            "channel_id": "400000000000000001",
+            "safe_category": "permission_denied",
+        }
+    ]
+    assert evidence["deliveries"] == [
+        {
+            "operation": "create_message",
+            "channel_id": "400000000000000001",
+            "outcome": "failed",
+            "file_count": 1,
+            "file_bytes": len(b"evidence-order"),
+            "safe_category": "permission_denied",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("scenario", "boundary_method"),
+    [
+        ("transport_unknown", "_close_connection"),
+        ("timeout", "_wait_for_controlled_timeout"),
+    ],
+)
+def test_discord_fake_publishes_failure_evidence_before_transport_boundary(
+    discord_fake_urls: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    boundary_method: str,
+) -> None:
+    """Publish unknown failure evidence before closing or delaying transport."""
+    discord_fake_url, _ = discord_fake_urls
+    original_boundary = getattr(DiscordHTTPHandler, boundary_method)
+    boundary_evidence: list[dict[str, object]] = []
+
+    def observe_boundary(handler: DiscordHTTPHandler) -> None:
+        boundary_evidence.append(
+            requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+        )
+        if boundary_method == "_close_connection":
+            original_boundary(handler)
+
+    monkeypatch.setattr(DiscordHTTPHandler, boundary_method, observe_boundary)
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"api_scenario_sequences": {"create_message": [scenario]}},
+        timeout=5,
+    ).raise_for_status()
+
+    with pytest.raises(requests.ConnectionError):
+        requests.post(
+            f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
+            data={"payload_json": '{"content":"controlled"}'},
+            files={
+                "files[0]": (
+                    "transport.txt",
+                    b"transport-boundary",
+                    "text/plain",
+                )
+            },
+            timeout=5,
+        )
+
+    assert len(boundary_evidence) == 1
+    assert boundary_evidence[0]["operations"] == [
+        {
+            "sequence": 1,
+            "event": "message",
+            "operation": "create_message",
+            "outcome": "unknown",
+            "channel_id": "400000000000000001",
+            "message_id": "400000000000000001",
+            "safe_category": "transport_unknown",
+        }
+    ]
+    assert boundary_evidence[0]["deliveries"] == [
+        {
+            "operation": "create_message",
+            "channel_id": "400000000000000001",
+            "message_id": "400000000000000001",
+            "outcome": "unknown",
+            "file_count": 1,
+            "file_bytes": len(b"transport-boundary"),
+            "safe_category": "transport_unknown",
+        }
+    ]
+
+
+def test_discord_fake_records_message_evidence_before_barrier_expiry_close(
+    discord_fake_urls: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Record an ambiguous committed message before barrier expiry closes transport."""
+    discord_fake_url, _ = discord_fake_urls
+    original_close = DiscordHTTPHandler._close_connection
+    boundary_evidence: list[dict[str, object]] = []
+
+    def observe_close(handler: DiscordHTTPHandler) -> None:
+        boundary_evidence.append(
+            requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+        )
+        original_close(handler)
+
+    monkeypatch.setattr(DiscordHTTPHandler, "_close_connection", observe_close)
+    requests.post(
+        f"{discord_fake_url}/__testenv/barrier",
+        json={"operation": "create_message", "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    monkeypatch.setattr(
+        STATE,
+        "_delivery_barrier_release",
+        _ImmediateBarrierExpiry(),
+    )
+
+    with pytest.raises(requests.ConnectionError):
+        requests.post(
+            f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
+            data={"payload_json": '{"content":"controlled"}'},
+            files={
+                "files[0]": (
+                    "barrier.txt",
+                    b"barrier-expiry",
+                    "text/plain",
+                )
+            },
+            timeout=5,
+        )
+
+    assert len(boundary_evidence) == 1
+    assert boundary_evidence[0]["operations"] == [
+        {
+            "sequence": 1,
+            "event": "message",
+            "operation": "create_message",
+            "outcome": "unknown",
+            "channel_id": "400000000000000001",
+            "message_id": "400000000000000001",
+            "safe_category": "transport_unknown",
+        }
+    ]
+    assert boundary_evidence[0]["deliveries"] == [
+        {
+            "operation": "create_message",
+            "channel_id": "400000000000000001",
+            "message_id": "400000000000000001",
+            "outcome": "unknown",
+            "file_count": 1,
+            "file_bytes": len(b"barrier-expiry"),
+            "safe_category": "transport_unknown",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("barrier_operation", "sdk_operation", "arguments", "expected_metadata"),
+    [
+        (
+            "create_thread",
+            "create_thread",
+            {
+                "guild_id": STATE.guild_id,
+                "parent_channel_id": "400000000000000001",
+                "root_message_id": "400000000000000101",
+                "name": "private-thread-name",
+                "auto_archive_duration": 60,
+            },
+            {
+                "channel_id": "400000000000000001",
+                "message_id": "400000000000000101",
+            },
+        ),
+        (
+            "get_message",
+            "fetch_message_projection",
+            {
+                "guild_id": STATE.guild_id,
+                "channel_id": "400000000000000001",
+                "message_id": "400000000000000101",
+            },
+            {
+                "channel_id": "400000000000000001",
+                "message_id": "400000000000000101",
+            },
+        ),
+        (
+            "get_history",
+            "fetch_history_projections",
+            {
+                "guild_id": STATE.guild_id,
+                "channel_id": "400000000000000001",
+                "before_message_id": "999999999999999999",
+                "limit": 100,
+            },
+            {
+                "channel_id": "400000000000000001",
+                "limit": 100,
+                "cursor": "999999999999999999",
+            },
+        ),
+    ],
+)
+def test_discord_fake_records_operation_evidence_before_barrier_expiry_close(
+    discord_fake_urls: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    barrier_operation: str,
+    sdk_operation: str,
+    arguments: dict[str, object],
+    expected_metadata: dict[str, object],
+) -> None:
+    """Record the expired provider operation before closing its transport."""
+    discord_fake_url, _ = discord_fake_urls
+    original_close = DiscordHTTPHandler._close_connection
+    boundary_evidence: list[dict[str, object]] = []
+
+    def observe_close(handler: DiscordHTTPHandler) -> None:
+        boundary_evidence.append(
+            requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+        )
+        original_close(handler)
+
+    monkeypatch.setattr(DiscordHTTPHandler, "_close_connection", observe_close)
+    requests.post(
+        f"{discord_fake_url}/__testenv/barrier",
+        json={"operation": barrier_operation, "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    monkeypatch.setattr(
+        STATE,
+        "_delivery_barrier_release",
+        _ImmediateBarrierExpiry(),
+    )
+
+    with pytest.raises(requests.ConnectionError):
+        _sdk_call(discord_fake_url, sdk_operation, **arguments)
+
+    assert len(boundary_evidence) == 1
+    assert boundary_evidence[0]["deliveries"] == []
+    assert boundary_evidence[0]["operations"] == [
+        {
+            "sequence": 1,
+            "event": "delivery_barrier",
+            "operation": barrier_operation,
+            "outcome": "unknown",
+            "safe_category": "transport_unknown",
+            **expected_metadata,
+        }
+    ]
 
 
 def test_discord_fake_sequences_retry_after_and_blocks_provider_work(
@@ -1174,6 +1658,82 @@ def test_discord_fake_records_multipart_file_sizes_without_file_bodies(
     assert "Private visible content" not in rendered
     assert "private-report.csv" not in rendered
     assert "private-discord-file-content" not in rendered
+
+
+def test_discord_fake_records_deferred_interaction_completion_without_token(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Expose ACK/completion ordering while discarding transient response data."""
+    discord_fake_url, _ = discord_fake_urls
+    _DeferredInteractionHandler.received_bodies = []
+    callback_server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        _DeferredInteractionHandler,
+    )
+    callback_thread = threading.Thread(
+        target=callback_server.serve_forever,
+        daemon=True,
+    )
+    callback_thread.start()
+    try:
+        host = callback_server.server_address[0]
+        port = callback_server.server_address[1]
+        _configure_interaction_endpoint(
+            discord_fake_url,
+            f"http://{host}:{port}/callback",
+        ).raise_for_status()
+        delivered = requests.post(
+            f"{discord_fake_url}/__testenv/interactions",
+            json={
+                "id": "700000000000000003",
+                "type": 3,
+                "application_id": STATE.application_id,
+                "guild_id": STATE.guild_id,
+                "channel_id": "400000000000000001",
+                "token": "private-interaction-token",
+                "member": {"user": {"id": "600000000000000001"}},
+                "data": {"custom_id": "a:sc:claim:1:1:signature"},
+            },
+            timeout=5,
+        )
+        delivered.raise_for_status()
+        completed = requests.post(
+            f"{discord_fake_url}/__testenv/interaction-response",
+            json={
+                "application_id": STATE.application_id,
+                "interaction_token": "private-interaction-token",
+                "response": {
+                    "type": 7,
+                    "data": {
+                        "content": "Private completion content.",
+                        "components": [],
+                    },
+                },
+            },
+            timeout=5,
+        )
+        completed.raise_for_status()
+    finally:
+        callback_server.shutdown()
+        callback_server.server_close()
+        callback_thread.join(timeout=5)
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    rendered = str(evidence)
+    assert delivered.json() == {"status": 200, "response_type": 6}
+    assert evidence["interactions"] == [
+        {
+            "interaction_id": "700000000000000003",
+            "interaction_type": 3,
+            "response_status": 200,
+            "response_type": 6,
+            "completed_response_type": 7,
+            "completed_has_content": True,
+            "completed_component_count": 0,
+        }
+    ]
+    assert "private-interaction-token" not in rendered
+    assert "Private completion content." not in rendered
 
 
 def test_discord_fake_container_uses_the_azents_server_image(

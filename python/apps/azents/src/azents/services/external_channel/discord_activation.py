@@ -6,7 +6,6 @@ import logging
 import secrets
 from dataclasses import dataclass
 from typing import Annotated, Literal
-from urllib.parse import urljoin
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +41,9 @@ from azents.services.external_channel.discord_api import (
     DiscordAPIUnavailable,
     DiscordGuildCommandSetCapability,
     get_discord_api_client,
+)
+from azents.services.external_channel.discord_endpoint import (
+    discord_interactions_endpoint_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -228,9 +230,9 @@ class DiscordConnectionActivationService:
             bot_user_id = discord_session.get_current_bot_user_id()
             selector = secrets.token_urlsafe(32)
             selector_hash = hashlib.sha256(selector.encode()).hexdigest()
-            endpoint_url = urljoin(
-                self.config.external_channel_discord_callback_url.rstrip("/") + "/",
-                f"external-channel/v1/discord/interactions/{selector}",
+            endpoint_url = discord_interactions_endpoint_url(
+                callback_base_url=self.config.external_channel_discord_callback_url,
+                selector=selector,
             )
             async with self.session_manager() as session:
                 prepared = await self.repository.prepare_discord_callback(
@@ -250,10 +252,14 @@ class DiscordConnectionActivationService:
             command_set: DiscordGuildCommandSetCapability
             failure_stage: DiscordActivationFailureStage = "provider_callback"
             try:
-                await self.discord_client.configure_interactions_endpoint(
-                    bot_token=credentials.bot_token,
-                    endpoint_url=endpoint_url,
+                configured_endpoint = (
+                    await self.discord_client.configure_interactions_endpoint(
+                        bot_token=credentials.bot_token,
+                        endpoint_url=endpoint_url,
+                    )
                 )
+                if configured_endpoint != endpoint_url:
+                    raise DiscordAPIConfigurationInvalid
                 failure_stage = "provider_commands"
                 command_set = await discord_session.reconcile_required_guild_commands(
                     application_id=metadata.application_id,

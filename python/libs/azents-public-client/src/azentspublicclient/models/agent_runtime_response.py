@@ -21,11 +21,11 @@ from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr, fi
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_runtime_configuration_status_response import AgentRuntimeConfigurationStatusResponse
+from azentspublicclient.models.agent_runtime_lifecycle_presentation_response import AgentRuntimeLifecyclePresentationResponse
 from azentspublicclient.models.agent_runtime_public_actions_response import AgentRuntimePublicActionsResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse
 from azentspublicclient.models.agent_runtime_removal_impact_response import AgentRuntimeRemovalImpactResponse
 from azentspublicclient.models.agent_runtime_removal_progress_response import AgentRuntimeRemovalProgressResponse
-from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -43,11 +43,11 @@ class AgentRuntimeResponse(BaseModel):
     removal_impact: Optional[AgentRuntimeRemovalImpactResponse]
     removal: Optional[AgentRuntimeRemovalProgressResponse]
     runtime: Optional[AgentRuntimeRawStateResponse]
-    state: Optional[AgentRuntimeSummaryResponse]
+    lifecycle: Optional[AgentRuntimeLifecyclePresentationResponse]
     configuration: Optional[AgentRuntimeConfigurationStatusResponse]
     actions: AgentRuntimePublicActionsResponse
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["capability", "capability_version", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_status", "runtime_profile_available", "runtime_profile_availability_reason_code", "removal_impact", "removal", "runtime", "state", "configuration", "actions"]
+    __properties: ClassVar[List[str]] = ["capability", "capability_version", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_status", "runtime_profile_available", "runtime_profile_availability_reason_code", "removal_impact", "removal", "runtime", "lifecycle", "configuration", "actions"]
 
     @field_validator('runtime_profile_status')
     def runtime_profile_status_validate_enum(cls, value):
@@ -106,9 +106,9 @@ class AgentRuntimeResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of runtime
         if self.runtime:
             _dict['runtime'] = self.runtime.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of state
-        if self.state:
-            _dict['state'] = self.state.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of lifecycle
+        if self.lifecycle:
+            _dict['lifecycle'] = self.lifecycle.to_dict()
         # override the default output from pydantic by calling `to_dict()` of configuration
         if self.configuration:
             _dict['configuration'] = self.configuration.to_dict()
@@ -145,10 +145,10 @@ class AgentRuntimeResponse(BaseModel):
         if self.runtime is None and "runtime" in self.model_fields_set:
             _dict['runtime'] = None
 
-        # set to None if state (nullable) is None
+        # set to None if lifecycle (nullable) is None
         # and model_fields_set contains the field
-        if self.state is None and "state" in self.model_fields_set:
-            _dict['state'] = None
+        if self.lifecycle is None and "lifecycle" in self.model_fields_set:
+            _dict['lifecycle'] = None
 
         # set to None if configuration (nullable) is None
         # and model_fields_set contains the field
@@ -177,7 +177,7 @@ class AgentRuntimeResponse(BaseModel):
             "removal_impact": AgentRuntimeRemovalImpactResponse.from_dict(obj["removal_impact"]) if obj.get("removal_impact") is not None else None,
             "removal": AgentRuntimeRemovalProgressResponse.from_dict(obj["removal"]) if obj.get("removal") is not None else None,
             "runtime": AgentRuntimeRawStateResponse.from_dict(obj["runtime"]) if obj.get("runtime") is not None else None,
-            "state": AgentRuntimeSummaryResponse.from_dict(obj["state"]) if obj.get("state") is not None else None,
+            "lifecycle": AgentRuntimeLifecyclePresentationResponse.from_dict(obj["lifecycle"]) if obj.get("lifecycle") is not None else None,
             "configuration": AgentRuntimeConfigurationStatusResponse.from_dict(obj["configuration"]) if obj.get("configuration") is not None else None,
             "actions": AgentRuntimePublicActionsResponse.from_dict(obj["actions"]) if obj.get("actions") is not None else None
         })

@@ -36,6 +36,7 @@ class TestModelCapabilities(unittest.TestCase):
         if include_optional:
             return ModelCapabilities(
                 context_window = azentspublicclient.models.model_context_window.ModelContextWindow(
+                    default_input_tokens = 1.0, 
                     max_input_tokens = 1.0, 
                     max_output_tokens = 1.0, ),
                 modalities = azentspublicclient.models.model_modalities.ModelModalities(

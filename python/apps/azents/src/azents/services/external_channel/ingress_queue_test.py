@@ -814,6 +814,24 @@ async def test_preparation_locks_connection_before_owner() -> None:
         return owner
 
     queue_repository.lock_leased_owner = AsyncMock(side_effect=lock_owner)
+    first_item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+    )
+
+    async def lock_first_item(
+        _session: AsyncSession,
+        *,
+        owner_id: str,
+    ) -> ExternalChannelIngressItem:
+        assert owner_id == owner.id
+        calls.append("item")
+        return first_item
+
+    queue_repository.lock_first_authoritative_item = AsyncMock(
+        side_effect=lock_first_item
+    )
     queue_repository.mark_owner_ready = AsyncMock()
     provider_control = MagicMock()
     presence_plan = make_provider_effect_plan("joined-presence")
@@ -832,7 +850,8 @@ async def test_preparation_locks_connection_before_owner() -> None:
         wake_dispatcher=MagicMock(),
         provider_control=provider_control,
     )
-    service.provisioning_service.prepare = AsyncMock(return_value=object())
+    preparation = object()
+    service.provisioning_service.prepare = AsyncMock(return_value=preparation)
     service.provisioning_service.complete = AsyncMock(
         return_value=ExternalChannelConfiguredBindingResult(
             binding=ExternalChannelBinding.model_construct(
@@ -851,7 +870,14 @@ async def test_preparation_locks_connection_before_owner() -> None:
     )
 
     assert prepared
-    assert calls == ["connection", "owner"]
+    assert calls == ["connection", "owner", "item"]
+    service.provisioning_service.complete.assert_awaited_once_with(
+        transaction,
+        owner=owner,
+        preparation=preparation,
+        initial_provider=ExternalChannelProvider.SLACK,
+        initial_invocation=True,
+    )
     transaction.commit.assert_awaited_once()
     queue_repository.mark_owner_ready.assert_awaited_once_with(
         transaction,
@@ -864,6 +890,71 @@ async def test_preparation_locks_connection_before_owner() -> None:
         ((presence_plan,), {}),
         ((progress_plan,), {}),
     ]
+
+
+async def test_unready_discord_nonmention_starts_hidden_without_progress() -> None:
+    """First queued Discord all-messages input creates hidden Work without Tracker."""
+    transaction = _Session()
+    owner = ExternalChannelIngressOwner.model_construct(
+        id="owner-1",
+        connection_id="connection-1",
+        lease_generation=1,
+    )
+    first_item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+        provider=ExternalChannelProvider.DISCORD,
+        invocation=False,
+    )
+    repository = MagicMock()
+    repository.lock_connection_for_routing = AsyncMock(
+        return_value=ExternalChannelConnection.model_construct(id="connection-1")
+    )
+    queue_repository = MagicMock()
+    queue_repository.lock_leased_owner = AsyncMock(return_value=owner)
+    queue_repository.lock_first_authoritative_item = AsyncMock(return_value=first_item)
+    queue_repository.mark_owner_ready = AsyncMock()
+    provider_control = MagicMock()
+    provider_control.attempt = AsyncMock()
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=MagicMock(),
+        agent_session_repository=MagicMock(),
+        wake_dispatcher=MagicMock(),
+        provider_control=provider_control,
+    )
+    preparation = object()
+    service.provisioning_service.prepare = AsyncMock(return_value=preparation)
+    service.provisioning_service.complete = AsyncMock(
+        return_value=ExternalChannelConfiguredBindingResult(
+            binding=ExternalChannelBinding.model_construct(
+                id="binding-1",
+                agent_session_id="session-1",
+            ),
+            session_created=True,
+            control_plans=(),
+        )
+    )
+
+    prepared = await service._prepare_owner(  # noqa: SLF001
+        owner=owner,
+        lease_owner="worker-1",
+        lease_generation=1,
+    )
+
+    assert prepared
+    service.provisioning_service.complete.assert_awaited_once_with(
+        transaction,
+        owner=owner,
+        preparation=preparation,
+        initial_provider=ExternalChannelProvider.DISCORD,
+        initial_invocation=False,
+    )
+    provider_control.attempt.assert_not_awaited()
+    transaction.commit.assert_awaited_once()
 
 
 async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
@@ -1104,14 +1195,24 @@ async def test_admitted_all_messages_trigger_is_invocation_with_retained_context
     assert messages[1]["provider"] == provider.value
 
 
-async def test_explicit_followup_settings_and_tracker_precede_wake(
+@pytest.mark.parametrize(
+    ("provider", "expects_settings"),
+    [
+        (ExternalChannelProvider.SLACK, True),
+        (ExternalChannelProvider.DISCORD, False),
+    ],
+)
+async def test_explicit_followup_controls_precede_wake(
     monkeypatch: pytest.MonkeyPatch,
+    provider: ExternalChannelProvider,
+    expects_settings: bool,
 ) -> None:
-    """An explicit bound follow-up attempts settings then Tracker before wake."""
+    """Bound follow-ups preserve Slack settings and use only Discord Tracker."""
     item = _item(
         item_id="item-1",
         trigger_key="message-1",
         trigger_position="00000000000000000001",
+        provider=provider,
     )
     row = SimpleNamespace(id=item.id)
     (
@@ -1170,22 +1271,26 @@ async def test_explicit_followup_settings_and_tracker_precede_wake(
     assert ensure_call is not None
     desired_progress = ensure_call.kwargs["desired_progress"]
     assert desired_progress.state == "checking"
-    work_repository.prepare_direct_control.assert_awaited_once_with(
-        transaction,
-        connection_id="connection-1",
-        resource_id="resource-1",
-        route_id="route-1",
-        binding_id="binding-1",
-        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-        request_payload={
-            "tenant_id": "tenant-1",
-            "channel_id": "channel-1",
-            "thread_ts": "thread-1",
-            "control_kind": "binding_settings_on_demand",
-            "control_version": 3,
-        },
-        operation_seed="binding-settings:binding-1",
-    )
+    assert ensure_call.kwargs["tracker_visibility"] == "visible"
+    if expects_settings:
+        work_repository.prepare_direct_control.assert_awaited_once_with(
+            transaction,
+            connection_id="connection-1",
+            resource_id="resource-1",
+            route_id="route-1",
+            binding_id="binding-1",
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            request_payload={
+                "tenant_id": "tenant-1",
+                "channel_id": "channel-1",
+                "thread_ts": "thread-1",
+                "control_kind": "binding_settings_on_demand",
+                "control_version": 3,
+            },
+            operation_seed="binding-settings:binding-1",
+        )
+    else:
+        work_repository.prepare_direct_control.assert_not_awaited()
     work_repository.prepare_initial_progress.assert_awaited_once_with(
         transaction,
         agent_id="agent-1",
@@ -1193,10 +1298,14 @@ async def test_explicit_followup_settings_and_tracker_precede_wake(
         binding_id="binding-1",
         work_cycle_id="work-followup",
     )
-    assert provider_control.attempt.await_args_list == [
-        ((settings_plan,), {}),
-        ((progress_plan,), {}),
-    ]
+    assert provider_control.attempt.await_args_list == (
+        [
+            ((settings_plan,), {}),
+            ((progress_plan,), {}),
+        ]
+        if expects_settings
+        else [((progress_plan,), {})]
+    )
     wake_dispatcher.dispatch.assert_awaited_once()
 
 
@@ -1263,7 +1372,143 @@ async def test_non_invocation_or_new_binding_does_not_repeat_settings(
 
     assert stale is False
     work_repository.prepare_direct_control.assert_not_awaited()
+    ensure_call = work_repository.ensure_active_work.await_args
+    assert ensure_call is not None
+    assert ensure_call.kwargs["tracker_visibility"] == "visible"
     wake_dispatcher.dispatch.assert_awaited_once()
+
+
+async def test_unmentioned_discord_input_requests_hidden_tracker_visibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Discord all-messages input starts hidden after canonical mailbox admission."""
+    item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+        invocation=False,
+        provider=ExternalChannelProvider.DISCORD,
+    )
+    row = SimpleNamespace(id=item.id)
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=[row])
+    transaction = _Session()
+    work_repository = MagicMock()
+    work_repository.ensure_active_work = AsyncMock(
+        return_value=SimpleNamespace(work_cycle_id="work-hidden")
+    )
+    work_repository.prepare_direct_control = AsyncMock(return_value=None)
+    work_repository.prepare_initial_progress = AsyncMock(return_value=None)
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+        work_repository=work_repository,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    stale = await service._finalize_batch(  # noqa: SLF001
+        _batch(item),
+        prepared=[
+            _PreparedSuccess(
+                item=item,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=item.trigger_provider_message_key,
+                    trigger_position=item.trigger_position,
+                ),
+            )
+        ],
+    )
+
+    assert stale is False
+    ensure_call = work_repository.ensure_active_work.await_args
+    assert ensure_call is not None
+    assert ensure_call.kwargs["tracker_visibility"] == "hidden"
+    work_repository.prepare_initial_progress.assert_awaited_once()
+
+
+async def test_late_discord_mention_requests_visible_tracker_promotion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One newly admitted Discord mention promotes the finalized active Work."""
+    ordinary = _item(
+        item_id="item-ordinary",
+        trigger_key="message-ordinary",
+        trigger_position="00000000000000000001",
+        invocation=False,
+        provider=ExternalChannelProvider.DISCORD,
+    )
+    mention = _item(
+        item_id="item-mention",
+        trigger_key="message-mention",
+        trigger_position="00000000000000000002",
+        invocation=True,
+        provider=ExternalChannelProvider.DISCORD,
+    )
+    rows = [SimpleNamespace(id=ordinary.id), SimpleNamespace(id=mention.id)]
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=rows)
+    transaction = _Session()
+    work_repository = MagicMock()
+    work_repository.ensure_active_work = AsyncMock(
+        return_value=SimpleNamespace(work_cycle_id="work-promoted")
+    )
+    work_repository.prepare_direct_control = AsyncMock(return_value=None)
+    work_repository.prepare_initial_progress = AsyncMock(return_value=None)
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+        work_repository=work_repository,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    stale = await service._finalize_batch(  # noqa: SLF001
+        _batch(ordinary, mention),
+        prepared=[
+            _PreparedSuccess(
+                item=ordinary,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=ordinary.trigger_provider_message_key,
+                    trigger_position=ordinary.trigger_position,
+                ),
+            ),
+            _PreparedSuccess(
+                item=mention,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=mention.trigger_provider_message_key,
+                    trigger_position=mention.trigger_position,
+                ),
+            ),
+        ],
+    )
+
+    assert stale is False
+    ensure_call = work_repository.ensure_active_work.await_args
+    assert ensure_call is not None
+    assert ensure_call.kwargs["tracker_visibility"] == "visible"
+    work_repository.prepare_initial_progress.assert_awaited_once()
 
 
 async def test_duplicate_explicit_invocation_does_not_repeat_settings(
@@ -1319,6 +1564,60 @@ async def test_duplicate_explicit_invocation_does_not_repeat_settings(
     work_repository.ensure_active_work.assert_not_awaited()
     work_repository.prepare_initial_progress.assert_not_awaited()
     wake_dispatcher.dispatch.assert_awaited_once()
+
+
+async def test_duplicate_discord_mention_does_not_request_tracker_promotion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A duplicate Discord mention cannot promote Work without new mailbox input."""
+    item = _item(
+        item_id="item-1",
+        trigger_key="message-1",
+        trigger_position="00000000000000000001",
+        provider=ExternalChannelProvider.DISCORD,
+    )
+    row = SimpleNamespace(id=item.id)
+    (
+        repository,
+        queue_repository,
+        mailbox_service,
+        agent_session_repository,
+        wake_dispatcher,
+        _drain,
+    ) = _collaborators(locked_rows=[row], mailbox_created=False)
+    transaction = _Session()
+    work_repository = MagicMock()
+    work_repository.prepare_direct_control = AsyncMock()
+    work_repository.ensure_active_work = AsyncMock()
+    work_repository.prepare_initial_progress = AsyncMock()
+    service = _service(
+        session_manager=_session_manager(transaction),
+        repository=repository,
+        queue_repository=queue_repository,
+        mailbox_service=mailbox_service,
+        agent_session_repository=agent_session_repository,
+        wake_dispatcher=wake_dispatcher,
+        work_repository=work_repository,
+    )
+    monkeypatch.setattr(service, "_ownership_current", AsyncMock(return_value=True))
+
+    stale = await service._finalize_batch(  # noqa: SLF001
+        _batch(item),
+        prepared=[
+            _PreparedSuccess(
+                item=item,
+                durable_cursor=None,
+                history=_history(
+                    trigger_key=item.trigger_provider_message_key,
+                    trigger_position=item.trigger_position,
+                ),
+            )
+        ],
+    )
+
+    assert stale is False
+    work_repository.ensure_active_work.assert_not_awaited()
+    work_repository.prepare_initial_progress.assert_not_awaited()
 
 
 async def test_settings_control_failure_does_not_gate_tracker_or_wake(

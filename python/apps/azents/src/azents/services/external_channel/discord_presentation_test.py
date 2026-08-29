@@ -78,7 +78,34 @@ def test_session_presence_uses_titleless_embed_navigation_and_settings() -> None
 
 def test_session_navigation_components_use_the_canonical_tracker_control() -> None:
     assert render_discord_session_navigation_components(
-        "https://azents.example/session"
+        "https://azents.example/session",
+        settings_custom_id="signed-settings",
+    ) == [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "View session",
+                    "url": "https://azents.example/session",
+                },
+                {
+                    "type": 2,
+                    "style": 2,
+                    "label": "Conversation settings",
+                    "custom_id": "signed-settings",
+                },
+            ],
+        }
+    ]
+
+
+def test_session_navigation_components_can_omit_conversation_settings() -> None:
+    """Scheduled Task Trackers retain Session navigation without Binding settings."""
+    assert render_discord_session_navigation_components(
+        "https://azents.example/session",
+        settings_custom_id=None,
     ) == [
         {
             "type": 1,

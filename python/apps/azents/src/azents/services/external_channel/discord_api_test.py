@@ -148,9 +148,10 @@ class _EndpointTransport(DiscordInteractionEndpointTransport):
         *,
         bot_token: str,
         endpoint_url: str,
-    ) -> None:
+    ) -> str:
         assert bot_token == "redacted-token"
         self.configured_endpoint = endpoint_url
+        return endpoint_url
 
 
 def _client(
@@ -261,12 +262,13 @@ async def test_configures_interaction_endpoint_through_direct_gap() -> None:
     client, _, endpoint, _ = _client()
     endpoint_url = "https://callbacks.example/discord/interactions/opaque-selector"
 
-    await client.configure_interactions_endpoint(
+    configured_endpoint = await client.configure_interactions_endpoint(
         bot_token="redacted-token",
         endpoint_url=endpoint_url,
     )
 
     assert endpoint.configured_endpoint == endpoint_url
+    assert configured_endpoint == endpoint_url
 
 
 @pytest.mark.asyncio
@@ -276,13 +278,21 @@ async def test_callback_transport_issues_exact_current_application_patch() -> No
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx.Response(200, request=request)
+        return httpx.Response(
+            200,
+            request=request,
+            json={
+                "interactions_endpoint_url": (
+                    "https://callbacks.example/discord/interactions/selector"
+                )
+            },
+        )
 
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(handler),
     ) as http_client:
         transport = DiscordInteractionEndpointHTTPTransport(http_client)
-        await transport.configure(
+        configured_endpoint = await transport.configure(
             bot_token="redacted-token",
             endpoint_url="https://callbacks.example/discord/interactions/selector",
         )
@@ -297,6 +307,9 @@ async def test_callback_transport_issues_exact_current_application_patch() -> No
             "https://callbacks.example/discord/interactions/selector"
         )
     }
+    assert configured_endpoint == (
+        "https://callbacks.example/discord/interactions/selector"
+    )
 
 
 def test_settings_command_uses_provider_valid_chat_input_name() -> None:

@@ -1,7 +1,9 @@
 """ExternalChannelRepository tests."""
 
+import dataclasses
 import datetime
 from types import SimpleNamespace
+from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -12,28 +14,48 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionProductMode,
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelIngressProfile,
     ExternalChannelProvider,
+    ExternalChannelResourceStatus,
+    ExternalChannelResourceType,
+    ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
+    ExternalChannelWorkStatus,
     LLMProvider,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAppClaim,
+    RDBExternalChannelBinding,
     RDBExternalChannelConnection,
     RDBExternalChannelIngressLease,
+    RDBExternalChannelResource,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.toolkit_state import RDBToolkitState
+from azents.repos.agent_session import AgentSessionRepository
+from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
+    ExternalChannelBindingCreate,
     ExternalChannelConnectionCreate,
     ExternalChannelConversationPosition,
+    ExternalChannelResourceCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work_state import (
+    CHANNEL_WORK_STATE_SCHEMA_VERSION,
+    EXTERNAL_CHANNEL_TOOLKIT_STATE_NAMESPACE,
+    ChannelWorkState,
+    channel_work_state_name,
+)
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
@@ -118,6 +140,183 @@ def _connection_create(workspace_id: str) -> ExternalChannelConnectionCreate:
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class _DiscordGatewayTypingFixture:
+    """Persisted owners needed to project Discord Gateway typing targets."""
+
+    repository: ExternalChannelRepository
+    connection_id: str
+    agent_id: str
+    agent_session_id: str
+    route_id: str
+    lease_owner: str
+    lease_generation: int
+
+
+async def _create_discord_gateway_typing_fixture(
+    session: AsyncSession,
+) -> _DiscordGatewayTypingFixture:
+    """Create one valid leased Discord Gateway ownership graph."""
+    workspace_id = await _create_workspace(
+        session,
+        "discord-gateway-typing-targets",
+    )
+    integration = RDBLLMProviderIntegration(
+        workspace_id=workspace_id,
+        provider=LLMProvider.ANTHROPIC,
+        name="discord-gateway-typing-integration",
+        encrypted_credentials="encrypted",
+        config=None,
+    )
+    session.add(integration)
+    await session.flush()
+    selection = make_test_model_selection_dict(
+        integration_id=integration.id,
+        provider=LLMProvider.ANTHROPIC,
+        model_identifier="discord-gateway-typing-model",
+    )
+    agent = RDBAgent(
+        workspace_id=workspace_id,
+        name="Discord Gateway Typing Agent",
+        model_selection=selection,
+        lightweight_model_selection=selection,
+    )
+    session.add(agent)
+    await session.flush()
+    runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent.id)
+    runtime.workspace_path = "/workspace/agent"
+    session.add(runtime)
+    await session.flush()
+
+    repository = ExternalChannelRepository()
+    connection = await repository.create_connection(
+        session,
+        _connection_create(workspace_id).model_copy(
+            update={
+                "provider": ExternalChannelProvider.DISCORD,
+                "ingress_profile": (ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP),
+                "provider_app_id": "discord-gateway-typing-app",
+                "provider_tenant_id": "100",
+            }
+        ),
+    )
+    session.add(
+        RDBExternalChannelAppClaim(
+            provider=ExternalChannelProvider.DISCORD,
+            provider_app_id="discord-gateway-typing-app",
+            connection_id=connection.id,
+            claim_generation=1,
+        )
+    )
+    await session.flush()
+    route = await repository.create_agent_route(
+        session,
+        ExternalChannelAgentRouteCreate(
+            connection_id=connection.id,
+            agent_id=agent.id,
+            agent_id_snapshot=agent.id,
+            route_mode=ExternalChannelRouteMode.DEDICATED,
+            connection_app_mode=ExternalChannelAppMode.SINGLE,
+            catalog_status=ExternalChannelRouteCatalogStatus.AVAILABLE,
+            catalog_removed_at=None,
+            catalog_removed_by_user_id=None,
+        ),
+    )
+    agent_session = await AgentSessionRepository().create(
+        session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
+            agent_id=agent.id,
+            title=None,
+        ),
+    )
+    claim = await repository.claim_discord_gateway_lease(
+        session,
+        connection_id=connection.id,
+        lease_owner="typing-manager",
+        now=_at(1),
+        lease_until=_at(10),
+    )
+    assert claim is not None
+    return _DiscordGatewayTypingFixture(
+        repository=repository,
+        connection_id=connection.id,
+        agent_id=agent.id,
+        agent_session_id=agent_session.id,
+        route_id=route.id,
+        lease_owner="typing-manager",
+        lease_generation=claim.lease.lease_generation,
+    )
+
+
+async def _create_discord_gateway_typing_binding(
+    session: AsyncSession,
+    fixture: _DiscordGatewayTypingFixture,
+    *,
+    key: str,
+    resource_type: ExternalChannelResourceType,
+    labels: dict[str, object],
+    work_cycle_id: str,
+    work_status: ExternalChannelWorkStatus = ExternalChannelWorkStatus.ACTIVE,
+    tracker_visibility: Literal["hidden", "visible"] = "visible",
+) -> str:
+    """Create one binding and its exact current Channel Work Toolkit State."""
+    resource = await fixture.repository.create_resource_idempotent(
+        session,
+        ExternalChannelResourceCreate(
+            connection_id=fixture.connection_id,
+            resource_type=resource_type,
+            provider_resource_key=key,
+            labels=labels,
+            status=ExternalChannelResourceStatus.ACTIVE,
+            latest_activity_at=None,
+            unavailable_at=None,
+            deleted_at=None,
+        ),
+    )
+    binding = await fixture.repository.create_binding_idempotent(
+        session,
+        ExternalChannelBindingCreate(
+            resource_id=resource.id,
+            route_id=fixture.route_id,
+            agent_session_id=fixture.agent_session_id,
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+            disconnected_at=None,
+            disconnect_reason=None,
+        ),
+        expected_access_request_id=None,
+    )
+    session.add(
+        RDBToolkitState(
+            agent_id=fixture.agent_id,
+            session_id=fixture.agent_session_id,
+            toolkit_namespace=EXTERNAL_CHANNEL_TOOLKIT_STATE_NAMESPACE,
+            state_name=channel_work_state_name(binding.id),
+            state_json=ChannelWorkState(
+                schema_version=CHANNEL_WORK_STATE_SCHEMA_VERSION,
+                binding_id=binding.id,
+                work_cycle_id=work_cycle_id,
+                status=work_status,
+                tracker_visibility=tracker_visibility,
+                title=None,
+                tasks=[],
+                state_revision=1,
+                desired_progress_revision=0,
+                desired_progress=None,
+                finished_at=(
+                    None if work_status is ExternalChannelWorkStatus.ACTIVE else _at(2)
+                ),
+                projection_parts=[],
+            ).model_dump(mode="json"),
+            schema_version=CHANNEL_WORK_STATE_SCHEMA_VERSION,
+        )
+    )
+    await session.flush()
+    return binding.id
+
+
 @pytest.mark.asyncio
 async def test_detach_user_references_preserves_external_channel_invariants() -> None:
     """Detach retained audit references without violating configured-actor checks."""
@@ -189,6 +388,208 @@ async def test_conversation_position_lock_and_compare_and_set_are_fenced(
     lock_statement = session.scalar.await_args.args[0]
     assert "FOR UPDATE" in str(lock_statement.compile(dialect=postgresql.dialect()))
     assert session.flush.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_discord_gateway_typing_targets_fence_stale_lease_and_allow_empty(
+    rdb_session: AsyncSession,
+) -> None:
+    """A valid lease returns an empty projection while stale authority returns None."""
+    fixture = await _create_discord_gateway_typing_fixture(rdb_session)
+
+    stale = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner="stale-manager",
+        lease_generation=fixture.lease_generation,
+        now=_at(2),
+    )
+    empty = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(2),
+    )
+
+    assert stale is None
+    assert empty == ()
+
+
+@pytest.mark.asyncio
+async def test_discord_gateway_typing_targets_project_active_current_work(
+    rdb_session: AsyncSession,
+) -> None:
+    """Only active Work on current owners contributes its exact delivery target."""
+    fixture = await _create_discord_gateway_typing_fixture(rdb_session)
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-parent",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        labels={
+            "guild_id": "100",
+            "parent_channel_id": "200",
+        },
+        work_cycle_id="work-hidden-parent",
+        tracker_visibility="hidden",
+    )
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-thread-delivery",
+        resource_type=ExternalChannelResourceType.THREAD,
+        labels={
+            "guild_id": "100",
+            "thread_id": "301",
+            "delivery_channel_id": "300",
+        },
+        work_cycle_id="work-visible-thread",
+    )
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-thread-shared",
+        resource_type=ExternalChannelResourceType.THREAD,
+        labels={
+            "guild_id": "100",
+            "thread_id": "302",
+            "delivery_channel_id": "300",
+        },
+        work_cycle_id="work-shared-channel",
+    )
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-thread-fallback",
+        resource_type=ExternalChannelResourceType.THREAD,
+        labels={
+            "guild_id": "100",
+            "thread_id": "400",
+        },
+        work_cycle_id="work-thread-fallback",
+    )
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-finished",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        labels={
+            "guild_id": "100",
+            "parent_channel_id": "500",
+        },
+        work_cycle_id="work-finished",
+        work_status=ExternalChannelWorkStatus.FINISHED,
+    )
+    disconnected_binding_id = await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-disconnected",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        labels={
+            "guild_id": "100",
+            "parent_channel_id": "600",
+        },
+        work_cycle_id="work-disconnected",
+    )
+    unavailable_binding_id = await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-unavailable",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        labels={
+            "guild_id": "100",
+            "parent_channel_id": "700",
+        },
+        work_cycle_id="work-unavailable",
+    )
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-malformed",
+        resource_type=ExternalChannelResourceType.THREAD,
+        labels={
+            "guild_id": "999",
+            "thread_id": "not-a-snowflake",
+        },
+        work_cycle_id="work-malformed",
+    )
+    disconnected_binding = await rdb_session.get(
+        RDBExternalChannelBinding,
+        disconnected_binding_id,
+    )
+    unavailable_binding = await rdb_session.get(
+        RDBExternalChannelBinding,
+        unavailable_binding_id,
+    )
+    assert disconnected_binding is not None
+    assert unavailable_binding is not None
+    disconnected_binding.disconnected_at = _at(2)
+    unavailable_resource = await rdb_session.get(
+        RDBExternalChannelResource,
+        unavailable_binding.resource_id,
+    )
+    assert unavailable_resource is not None
+    unavailable_resource.status = ExternalChannelResourceStatus.UNAVAILABLE
+    await rdb_session.flush()
+
+    targets = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(3),
+    )
+
+    assert targets is not None
+    assert [
+        (target.guild_id, target.channel_id, target.work_cycle_ids)
+        for target in targets
+    ] == [
+        ("100", "200", ("work-hidden-parent",)),
+        (
+            "100",
+            "300",
+            ("work-shared-channel", "work-visible-thread"),
+        ),
+        ("100", "400", ("work-thread-fallback",)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_discord_gateway_typing_targets_exclude_stopping_session(
+    rdb_session: AsyncSession,
+) -> None:
+    """A stop request immediately removes otherwise active Work from projection."""
+    fixture = await _create_discord_gateway_typing_fixture(rdb_session)
+    await _create_discord_gateway_typing_binding(
+        rdb_session,
+        fixture,
+        key="typing-stopping-session",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        labels={
+            "guild_id": "100",
+            "parent_channel_id": "200",
+        },
+        work_cycle_id="work-stopping-session",
+    )
+    agent_session = await rdb_session.get(
+        RDBAgentSession,
+        fixture.agent_session_id,
+    )
+    assert agent_session is not None
+    agent_session.stop_requested_at = _at(2)
+    await rdb_session.flush()
+
+    targets = await fixture.repository.list_owned_discord_typing_targets(
+        rdb_session,
+        connection_id=fixture.connection_id,
+        lease_owner=fixture.lease_owner,
+        lease_generation=fixture.lease_generation,
+        now=_at(3),
+    )
+
+    assert targets == ()
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,6 @@ from azents.core.enums import (
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
-    RuntimeSummary,
     RuntimeTerminalDeleteAcknowledgementKind,
 )
 from azents.core.runtime_profile import (
@@ -39,9 +38,12 @@ from azents.services.agent_runtime.lifecycle_data import (
     AgentRuntimeAdditionOutput,
     AgentRuntimeConfigurationStatus,
     AgentRuntimeLifecycleOutput,
+    AgentRuntimeLifecyclePresentation,
     AgentRuntimeReadOutput,
     AgentRuntimeRemovalOutput,
     AgentRuntimeRemovalProgress,
+    RuntimeAvailability,
+    RuntimeLifecycleConvergence,
 )
 from azents.services.agent_runtime_system_metrics.data import (
     AgentRuntimeSystemMetricsOutput,
@@ -53,30 +55,48 @@ from azents.services.agent_runtime_system_metrics.data import (
 )
 
 
-class AgentRuntimeActionsResponse(BaseModel):
-    """Agent Runtime action availability response."""
+class AgentRuntimeLifecycleProviderResponse(BaseModel):
+    """Current Provider lifecycle facts."""
 
-    start: bool
-    stop: bool
-    restart: bool
-    reset: bool
-    use_runner: bool
+    connection: RuntimeProviderConnectionState
+    resource: RuntimeProviderObservedState
 
 
-class AgentRuntimeFailureResponse(BaseModel):
-    """Agent Runtime failure response."""
+class AgentRuntimeLifecycleRunnerResponse(BaseModel):
+    """Current Runner lifecycle fact."""
 
-    generation: int
-    code: str
-    message: str
+    state: RuntimeRunnerState
 
 
-class AgentRuntimeSummaryResponse(BaseModel):
-    """Agent Runtime summary response."""
+class AgentRuntimeLifecyclePresentationResponse(BaseModel):
+    """Server-authoritative Runtime lifecycle presentation."""
 
-    summary: RuntimeSummary
-    actions: AgentRuntimeActionsResponse
-    failure: AgentRuntimeFailureResponse | None
+    target: RuntimeDesiredState
+    convergence: RuntimeLifecycleConvergence
+    provider: AgentRuntimeLifecycleProviderResponse
+    runner: AgentRuntimeLifecycleRunnerResponse
+    availability: RuntimeAvailability
+    reason_code: str | None
+    desired_generation: int
+
+    @classmethod
+    def convert_from(cls, data: AgentRuntimeLifecyclePresentation) -> Self:
+        """Convert the shared service lifecycle presentation."""
+        return cls(
+            target=data.target,
+            convergence=data.convergence,
+            provider=AgentRuntimeLifecycleProviderResponse.model_validate(
+                data.provider,
+                from_attributes=True,
+            ),
+            runner=AgentRuntimeLifecycleRunnerResponse.model_validate(
+                data.runner,
+                from_attributes=True,
+            ),
+            availability=data.availability,
+            reason_code=data.reason_code,
+            desired_generation=data.desired_generation,
+        )
 
 
 type RuntimeConfigurationStatus = Literal[
@@ -462,7 +482,7 @@ class AgentRuntimeResponse(BaseModel):
     removal_impact: AgentRuntimeRemovalImpactResponse | None
     removal: AgentRuntimeRemovalProgressResponse | None
     runtime: AgentRuntimeRawStateResponse | None
-    state: AgentRuntimeSummaryResponse | None
+    lifecycle: AgentRuntimeLifecyclePresentationResponse | None
     configuration: AgentRuntimeConfigurationStatusResponse | None
     actions: AgentRuntimePublicActionsResponse
 
@@ -494,23 +514,9 @@ class AgentRuntimeResponse(BaseModel):
                 if data.runtime is not None
                 else None
             ),
-            state=(
-                AgentRuntimeSummaryResponse(
-                    summary=data.state.summary,
-                    actions=AgentRuntimeActionsResponse.model_validate(
-                        data.state.actions,
-                        from_attributes=True,
-                    ),
-                    failure=(
-                        AgentRuntimeFailureResponse.model_validate(
-                            data.state.failure,
-                            from_attributes=True,
-                        )
-                        if data.state.failure is not None
-                        else None
-                    ),
-                )
-                if data.state is not None
+            lifecycle=(
+                AgentRuntimeLifecyclePresentationResponse.convert_from(data.lifecycle)
+                if data.lifecycle is not None
                 else None
             ),
             configuration=(
@@ -618,7 +624,7 @@ class AgentRuntimeLifecycleResponse(BaseModel):
     """Agent Runtime lifecycle command response."""
 
     runtime: AgentRuntimeRawStateResponse
-    state: AgentRuntimeSummaryResponse
+    lifecycle: AgentRuntimeLifecyclePresentationResponse
     configuration: AgentRuntimeConfigurationStatusResponse
     command_type: RuntimeLifecycleCommandType
     desired_generation: int
@@ -628,20 +634,8 @@ class AgentRuntimeLifecycleResponse(BaseModel):
         """Convert service lifecycle output to a response object."""
         return cls(
             runtime=AgentRuntimeRawStateResponse.convert_from(data.runtime),
-            state=AgentRuntimeSummaryResponse(
-                summary=data.state.summary,
-                actions=AgentRuntimeActionsResponse.model_validate(
-                    data.state.actions,
-                    from_attributes=True,
-                ),
-                failure=(
-                    AgentRuntimeFailureResponse.model_validate(
-                        data.state.failure,
-                        from_attributes=True,
-                    )
-                    if data.state.failure is not None
-                    else None
-                ),
+            lifecycle=AgentRuntimeLifecyclePresentationResponse.convert_from(
+                data.lifecycle
             ),
             configuration=AgentRuntimeConfigurationStatusResponse.convert_from(
                 data.configuration

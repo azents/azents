@@ -20,9 +20,9 @@ from collections.abc import Awaitable, Callable
 from typing import Generic, NamedTuple, TypeVar
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 from azcommon.result import Success
-from mcp.shared.exceptions import McpError
+from mcp import MCPError
 from mcp.types import (
     AudioContent,
     BlobResourceContents,
@@ -134,7 +134,7 @@ def _build_mcp_tool_snapshot(
             raw_name=tool.name,
             model_name=tool.name,
             description=tool.description or "",
-            input_schema=tool.inputSchema,
+            input_schema=tool.input_schema,
             server_url=server_url,
             use_streamable_http=use_streamable_http,
         )
@@ -208,7 +208,7 @@ async def _extract_tool_result(
                         tool_name=tool_name,
                         part_index=index,
                         filename=_filename_from_uri(str(item.resource.uri)),
-                        media_type=item.resource.mimeType or "text/plain",
+                        media_type=item.resource.mime_type or "text/plain",
                         text=item.resource.text,
                     )
                     if artifact_part is None:
@@ -221,7 +221,9 @@ async def _extract_tool_result(
                         tool_name=tool_name,
                         part_index=index,
                         filename=_filename_from_uri(str(item.resource.uri)),
-                        media_type=item.resource.mimeType or "application/octet-stream",
+                        media_type=(
+                            item.resource.mime_type or "application/octet-stream"
+                        ),
                         base64_data=item.resource.blob,
                     )
                     if artifact_part is None:
@@ -235,13 +237,13 @@ async def _extract_tool_result(
                     sink=artifact_sink,
                     tool_name=tool_name,
                     part_index=index,
-                    filename=_default_filename(tool_name, index, item.mimeType),
-                    media_type=item.mimeType,
+                    filename=_default_filename(tool_name, index, item.mime_type),
+                    media_type=item.mime_type,
                     base64_data=item.data,
                 )
                 if artifact_part is None:
                     text_parts.append(
-                        f"[unsupported content type: image ({item.mimeType})]"
+                        f"[unsupported content type: image ({item.mime_type})]"
                     )
                 else:
                     output.append(artifact_part)
@@ -250,13 +252,13 @@ async def _extract_tool_result(
                     sink=artifact_sink,
                     tool_name=tool_name,
                     part_index=index,
-                    filename=_default_filename(tool_name, index, item.mimeType),
-                    media_type=item.mimeType,
+                    filename=_default_filename(tool_name, index, item.mime_type),
+                    media_type=item.mime_type,
                     base64_data=item.data,
                 )
                 if artifact_part is None:
                     text_parts.append(
-                        f"[unsupported content type: audio ({item.mimeType})]"
+                        f"[unsupported content type: audio ({item.mime_type})]"
                     )
                 else:
                     output.append(artifact_part)
@@ -264,7 +266,7 @@ async def _extract_tool_result(
                 text_parts.append(f"[resource link: {item.name}] {item.uri}")
 
     text = "\n".join(text_parts)
-    if result.isError:
+    if result.is_error:
         text = f"[MCP Error] {text}"
 
     if not output:
@@ -407,7 +409,7 @@ def _find_http_status_error(exc: BaseException) -> httpx.HTTPStatusError | None:
     return None
 
 
-def _find_mcp_error(exc: BaseException) -> McpError | None:
+def _find_mcp_error(exc: BaseException) -> MCPError | None:
     """Find MCP protocol error in exception tree."""
     if isinstance(exc, BaseExceptionGroup):
         for sub in exc.exceptions:
@@ -415,7 +417,7 @@ def _find_mcp_error(exc: BaseException) -> McpError | None:
             if found is not None:
                 return found
         return None
-    if isinstance(exc, McpError):
+    if isinstance(exc, MCPError):
         return exc
     return None
 
@@ -474,7 +476,7 @@ def wrap_mcp_tool(
     spec = FunctionToolSpec(
         name=mcp_tool.name,
         description=mcp_tool.description or "",
-        input_schema=mcp_tool.inputSchema,
+        input_schema=mcp_tool.input_schema,
     )
 
     async def handler(arguments_json: str) -> str | FunctionToolResult:
@@ -642,6 +644,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
 
     async def __aexit__(self, *exc: object) -> None:
         """Cancel background connection task."""
+        self._entered = False
         if self._bg_task is not None and not self._bg_task.done():
             self._bg_task.cancel()
             try:
@@ -777,7 +780,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
             mcp_tool = McpBaseTool(
                 name=item.raw_name,
                 description=item.description,
-                inputSchema=item.input_schema,
+                input_schema=item.input_schema,
             )
             tool = wrap_mcp_tool(
                 mcp_tool,

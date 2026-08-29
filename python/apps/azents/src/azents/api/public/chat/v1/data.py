@@ -7,6 +7,9 @@ from typing import Literal, Self, assert_never
 
 from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
+from azents.api.public.agent_runtime.v1.data import (
+    AgentRuntimeLifecyclePresentationResponse,
+)
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
@@ -1320,6 +1323,9 @@ class AgentWorkspaceActionsResponse(BaseModel):
 class AgentWorkspaceResponse(BaseModel):
     """Agent Workspace panel bootstrap response."""
 
+    lifecycle: AgentRuntimeLifecyclePresentationResponse | None = Field(
+        description="Shared Agent Runtime lifecycle presentation"
+    )
     runtime: AgentWorkspaceRuntimeResponse = Field(
         description="Provider runtime status"
     )
@@ -1334,6 +1340,11 @@ class AgentWorkspaceResponse(BaseModel):
     def from_domain(cls, state: AgentWorkspaceState) -> Self:
         """Convert from service model."""
         return cls(
+            lifecycle=(
+                AgentRuntimeLifecyclePresentationResponse.convert_from(state.lifecycle)
+                if state.lifecycle is not None
+                else None
+            ),
             runtime=AgentWorkspaceRuntimeResponse.from_domain(state.runtime),
             workspace=_workspace_access_response_from_domain(state.workspace),
             actions=AgentWorkspaceActionsResponse.from_domain(state.actions),

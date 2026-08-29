@@ -32,14 +32,14 @@ code_paths:
   - python/apps/azents/specs/public/openapi.json
   - python/libs/azents-public-client/**
   - typescript/packages/azents-public-client/**
-  - typescript/apps/azents-web/src/features/runtime-metrics/**
+  - typescript/apps/azents-web/src/shared/runtime-metrics/**
   - typescript/apps/azents-web/src/features/agents/components/AgentRuntimeSettings.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentRuntimeSettingsContainer.ts
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/trpc/routers/chat.ts
   - infra/charts/azents/**
-last_verified_at: 2026-08-24
-spec_version: 27
+last_verified_at: 2026-08-28
+spec_version: 30
 ---
 
 # Agent Runtime Persistence
@@ -66,7 +66,10 @@ applied slot. Superseded desired or applied documents are not retained as produc
 there is no configuration archive or Profile tombstone.
 
 The Runtime Profile resolver reads the exact Agent selection, Workspace Profile, infrastructure
-Profile, Provider, and current capability as lock-free versioned snapshots. A ready desired
+Profile, Provider, and current capability as lock-free versioned snapshots. An explicit
+selection clear takes the Agent selection-version fence and atomically writes the managed
+Runtime's next `unconfigured/runtime_profile_required` desired slot, clearing desired
+Provider/Runner acknowledgement evidence while preserving any applied slot. A ready desired
 document records their scalar IDs, versions, digests, Agent selection version, source trace,
 resolved full configuration, target desired generation, canonical digest, and complete retained
 Profile v1 or Profile v2 document. These source identifiers are snapshot evidence rather than
@@ -81,8 +84,9 @@ selected-Profile authority or resolved configuration. Both blocked and unconfigu
 preserve any older applied slot while its running incarnation remains current.
 
 Provider connectivity is operational evidence rather than configuration identity. Disconnect and
-reconnect events do not change desired status, sequence, or digest; current connection authority
-separately gates lifecycle dispatch and exact Runtime operation qualification.
+reconnect events do not change desired status, sequence, or digest. Current connection authority
+gates lifecycle dispatch and operations that create or replace compute, but it does not fence an
+already-ready current-generation Runner serving a retained applied configuration.
 
 Resolution commits through a Runtime compare-and-set that verifies the expected sequence high-water,
 desired generation, and every snapshot identity/version relationship. A materially new source,
@@ -106,9 +110,11 @@ Workspace evidence.
 
 Capability/Profile changes never reassign the Agent to another Provider or Profile. Provider or
 Profile loss preserves stored selection, Provider binding, applied state, running compute, and
-existing storage while blocking new create/start/restart/reset/recreate work. Historical hierarchy
-conversion occurs only inside the one-way Alembic migration; runtime services do not read legacy
-policy tables, snapshots, overrides, or status fallbacks.
+existing storage while blocking new create/start/restart/reset/recreate work. A current-generation
+ready Runner may continue ordinary data-plane operations from that retained applied state even when
+the future desired slot becomes blocked or unconfigured. Historical hierarchy conversion occurs
+only inside the one-way Alembic migration; runtime services do not read legacy policy tables,
+snapshots, overrides, or status fallbacks.
 
 An Owner-only exact-version Workspace Runtime Profile hard delete physically removes the Profile in
 the same PostgreSQL transaction that clears a matching Workspace default and Agent selections,
@@ -175,8 +181,10 @@ appears in the chat Runtime/Workspace panel and Agent Runtime settings, polls at
 interval only while its owning surface is visible or mounted, and is invalidated after lifecycle
 mutations. The browser renders server-retained samples with unavailable observations and missed
 intervals as true gaps; it does not accumulate, interpolate, or authorize history locally. Metrics
-are informational and cannot affect authorization, lifecycle, configuration, scheduling, billing,
-or destructive operations.
+with a current percentage pair a 0–100 usage bar with a labeled locally scaled area trend. The
+trend has no persistent or active point markers, tooltip, or touch/hover visual state. Metrics are
+informational and cannot affect authorization, lifecycle, configuration, scheduling, billing, or
+destructive operations.
 
 ## Workspace Path Contract
 
@@ -231,8 +239,10 @@ Session bindings and deleted Project/worktree rows are never restored.
 ## Kubernetes Provider v3
 
 Kubernetes Provider v3 is an external process that talks to the Kubernetes API and Runtime Control
-gRPC. It uses Lease leader election so only the active leader issues lifecycle commands for a
-provider id.
+gRPC. It uses Kubernetes Lease leader election so only the active leader issues lifecycle commands
+for a provider id. Lease creation is conditional on absence, while renewal and expired-holder
+takeover use the exact observed `resourceVersion`; a `409 Conflict` means the process did not
+acquire leadership and must remain or become standby.
 
 Current Runtime Control admits protocol `agent-runtime-provider-kubernetes-v2` for retained legacy
 direct contracts and protocol `agent-runtime-provider-kubernetes-v3` for current strict contracts.
@@ -307,7 +317,10 @@ discarded and can retry only after a later periodic `OBSERVE`.
 The logical Runtime CA and Agent Workspace PVC survive stop, restart, recovery, and ordinary
 recreation. Proxy policy/artifact replacement retains the stable Service and CA identity. Reset and
 terminal delete remain the only PVC-destructive boundaries; terminal delete also removes every
-Provider-owned strict-network resource.
+Provider-owned strict-network resource. A terminal-delete acknowledgement is emitted only after
+the Provider observes the Runtime Pod, Workspace PVC, logical CA, and all owned strict-network and
+proxy resources absent. While Kubernetes deletion is still in progress, the Provider reports a
+non-acknowledged stopping observation and Control retries the same terminal delete.
 
 ## Docker Provider v1
 
@@ -368,6 +381,12 @@ Required checks:
 
 ## Changelog
 
+- **2026-08-26 (spec_version=30)** — Separated Provider-authorized host lifecycle from
+  ready-Runner data-plane usability and allowed a retained applied configuration to keep
+  serving operations while a future desired selection is unavailable or pending recreation.
+- **2026-08-25 (spec_version=29)** — Fenced Kubernetes Lease creation/renewal/takeover with
+  absence or exact-resourceVersion optimistic concurrency and made terminal-delete acknowledgement
+  wait for observed absence of every Provider-owned Runtime resource.
 - **2026-08-24 (spec_version=27)** — Added the optional Runner system-metrics capability,
   generation-scoped volatile 60-sample series, privacy-safe Agent read projection, and shared
   chat/settings overview while preserving Provider, PostgreSQL, lifecycle, and Agent Workspace

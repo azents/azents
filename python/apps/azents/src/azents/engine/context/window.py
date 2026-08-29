@@ -22,6 +22,15 @@ class EffectiveContextWindow:
     auto_compaction_threshold_tokens: int
 
 
+@dataclasses.dataclass(frozen=True)
+class ResolvedModelInputTokens:
+    """Resolved model input limits after metadata fallback and user intent."""
+
+    default_input_tokens: int
+    max_input_tokens: int
+    effective_input_tokens: int
+
+
 def compute_auto_compaction_threshold_tokens(max_input_tokens: int) -> int:
     """Calculate auto compaction trigger threshold token count.
 
@@ -60,33 +69,60 @@ def compute_effective_context_window_tokens(
     )
 
 
-def get_max_input_tokens(
+def resolve_model_input_tokens(
+    capability_default_input_tokens: int | None,
     capability_max_input_tokens: int | None,
     litellm_model: str,
-) -> int:
-    """Resolve max_input_tokens with three-step fallback.
+    context_window_tokens: int | None,
+) -> ResolvedModelInputTokens:
+    """Resolve default, maximum, and effective model input limits.
 
-    1. Normalized capability contract
-    2. LiteLLM model info
-    3. 128,000 fallback
+    The normalized capability is authoritative. LiteLLM and the 128,000-token
+    fallback fill missing maximum metadata. A missing default uses the resolved
+    maximum, while explicit user intent is clamped to that maximum.
 
+    :param capability_default_input_tokens: provider default input window
     :param capability_max_input_tokens: max_input_tokens from capability contract
     :param litellm_model: LiteLLM model string
-    :return: max_input_tokens
+    :param context_window_tokens: nullable user-configured input cap
+    :return: resolved input-token limits
     """
+    litellm_max_input_tokens: int | None = None
+    if capability_max_input_tokens is None:
+        try:
+            info = litellm.get_model_info(litellm_model)
+            max_input = info.get("max_input_tokens")
+            if isinstance(max_input, int) and not isinstance(max_input, bool):
+                if max_input > 0:
+                    litellm_max_input_tokens = max_input
+        except Exception:  # noqa: BLE001 — LiteLLM catalog errors vary by provider.
+            logger.debug(
+                "Failed to get model info from litellm",
+                extra={"model": litellm_model},
+                exc_info=True,
+            )
+
     if capability_max_input_tokens is not None:
-        return capability_max_input_tokens
-
-    try:
-        info = litellm.get_model_info(litellm_model)
-        max_input = info.get("max_input_tokens")
-        if isinstance(max_input, int):
-            return max_input
-    except Exception:  # noqa: BLE001 — LiteLLM model catalog error shape differs by provider.
-        logger.debug(
-            "Failed to get model info from litellm",
-            extra={"model": litellm_model},
-            exc_info=True,
+        max_input_tokens = capability_max_input_tokens
+    elif capability_default_input_tokens is not None:
+        max_input_tokens = max(
+            capability_default_input_tokens,
+            litellm_max_input_tokens or capability_default_input_tokens,
         )
+    else:
+        max_input_tokens = litellm_max_input_tokens or 128_000
 
-    return 128_000
+    default_input_tokens = min(
+        capability_default_input_tokens or max_input_tokens,
+        max_input_tokens,
+    )
+    effective_input_tokens = (
+        default_input_tokens
+        if context_window_tokens is None
+        else min(context_window_tokens, max_input_tokens)
+    )
+    return ResolvedModelInputTokens(
+        default_input_tokens=default_input_tokens,
+        max_input_tokens=max_input_tokens,
+        effective_input_tokens=effective_input_tokens,
+    )

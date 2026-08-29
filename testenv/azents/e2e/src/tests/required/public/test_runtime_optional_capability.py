@@ -537,7 +537,7 @@ def test_runtime_free_model_turn_does_not_create_runtime(
     )
     assert initial.capability == AgentRuntimeCapability.NONE
     assert initial.runtime is None
-    assert initial.state is None
+    assert initial.lifecycle is None
     assert initial.configuration is None
 
     session_id = _primary_session_id(
@@ -567,7 +567,7 @@ def test_runtime_free_model_turn_does_not_create_runtime(
     )
     assert after_turn.capability == AgentRuntimeCapability.NONE
     assert after_turn.runtime is None
-    assert after_turn.state is None
+    assert after_turn.lifecycle is None
     assert after_turn.configuration is None
     _assert_manifest_unavailable(
         server_url=azents_public_server_url,

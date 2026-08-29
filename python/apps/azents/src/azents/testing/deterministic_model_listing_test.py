@@ -33,6 +33,30 @@ def test_model_settings_fixture_exposes_supported_and_unsupported_tools() -> Non
     )
 
 
+def test_context_ranges_fixture_exposes_default_and_maximum() -> None:
+    """Expose a split main range and a maximum-only lightweight range."""
+    variant = parse_deterministic_fixture_variant(
+        "__testenv_model_listing:deterministic-context-ranges"
+    )
+
+    assert variant == "deterministic-context-ranges"
+    listing = build_deterministic_listing(
+        variant=variant,
+        provider=LLMProvider.OPENAI,
+        integration_id="integration-id",
+    )
+
+    main, lightweight = listing.models
+    assert main.normalized_capabilities.context_window.default_input_tokens == 96_000
+    assert main.normalized_capabilities.context_window.max_input_tokens == 256_000
+    assert (
+        lightweight.normalized_capabilities.context_window.default_input_tokens is None
+    )
+    assert (
+        lightweight.normalized_capabilities.context_window.max_input_tokens == 512_000
+    )
+
+
 def test_openrouter_fixture_preserves_known_and_unknown_publishers() -> None:
     """Expose broad OpenRouter model ids with conservative capabilities."""
     variant = parse_deterministic_fixture_variant(

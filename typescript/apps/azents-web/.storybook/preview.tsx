@@ -3,6 +3,7 @@ import type { ColorModePreference } from "../src/shared/lib/color-mode";
 import type { Preview } from "@storybook/nextjs-vite";
 import type { ReactElement } from "react";
 
+import "@mantine/charts/styles.css";
 import "@mantine/core/styles.css";
 import "../src/app/globals.css";
 import "../src/shared/storybook/storybook.css";

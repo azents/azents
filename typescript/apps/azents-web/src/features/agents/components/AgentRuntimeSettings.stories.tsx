@@ -102,7 +102,7 @@ const runtimeFree: AgentRuntimeResponse = {
   removal_impact: null,
   removal: null,
   runtime: null,
-  state: null,
+  lifecycle: null,
   configuration: null,
   actions: { ...actions, add: true },
 };
@@ -125,6 +125,15 @@ const managed: AgentRuntimeResponse = {
     status: "configured_not_created",
     desired: null,
     applied: null,
+  },
+  lifecycle: {
+    target: "stopped",
+    convergence: "stable",
+    provider: { connection: "connected", resource: "stopped" },
+    runner: { state: "disconnected" },
+    availability: "stopped",
+    reason_code: null,
+    desired_generation: 2,
   },
   actions: { ...actions, remove: true, start: true },
 };
@@ -177,6 +186,7 @@ const meta = {
     actionNotice: null,
     addConfirmOpen: false,
     removeConfirmOpen: false,
+    restartConfirmOpen: false,
     resetConfirmOpen: false,
     removalAcknowledged: false,
     isAdding: false,
@@ -192,11 +202,13 @@ const meta = {
     onCloseRemoveConfirm: noop,
     onRemovalAcknowledgedChange: noop,
     onConfirmRemove: noop,
+    onOpenRestartConfirm: noop,
+    onCloseRestartConfirm: noop,
     onOpenResetConfirm: noop,
     onCloseResetConfirm: noop,
     onStart: noop,
     onStop: noop,
-    onRestart: noop,
+    onConfirmRestart: noop,
     onConfirmReset: noop,
     onRefresh: noop,
   },
@@ -225,6 +237,20 @@ export const RemovalConfirmation = {
   args: {
     ...Managed.args,
     removeConfirmOpen: true,
+  },
+} satisfies Story;
+
+export const RestartConfirmation = {
+  args: {
+    ...Managed.args,
+    restartConfirmOpen: true,
+  },
+} satisfies Story;
+
+export const ResetConfirmation = {
+  args: {
+    ...Managed.args,
+    resetConfirmOpen: true,
   },
 } satisfies Story;
 

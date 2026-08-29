@@ -15,41 +15,41 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-19 | 67 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-27 | 69 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-23 | 155 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-29 | 64 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-29 | 66 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-18 | 20 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-18 | 27 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-27 | 21 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-21 | 8 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-23 | 97 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-27 | 99 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-24 | 71 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-28 | 75 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-23 | 161 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-18 | 63 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-24 | 27 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-27 | 162 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-28 | 71 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-28 | 30 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-16 | 34 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-27 | 35 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-24 | 49 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-16 | 37 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-22 | 48 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 52 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 39 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 53 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
-| [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
+| [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-08-27 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-18 | 16 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-23 | 31 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-23 | 35 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-28 | 39 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-18 | 4 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-18 | 7 |
 
@@ -128,6 +128,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Context Compaction Historical Requirements Reconstruction](requirements/context-260305-context-compaction.md) | context-260305 | 2026-03-05 | 2026-03-23 |
 | [Session Context Inspector Historical Requirements Reconstruction](requirements/context-260530-context-inspector.md) | context-260530 | 2026-05-30 | 2026-05-30 |
 | [Display Context Usage from the Resolved Run Profile Historical Requirements Reconstruction](requirements/context-260710-context-usage-display.md) | context-260710 | 2026-07-10 | - |
+| [Model Context Ranges Requirements](requirements/context-260827-model-context-ranges.md) | context-260827 | 2026-08-27 | 2026-08-27 |
 | [External Channel Continuation Work Completion Requirements](requirements/continuation-260803-channel-work-completion.md) | continuation-260803 | 2026-08-03 | 2026-08-04 |
 | [Sandbox Provider Control Distributed Recovery Historical Requirements Reconstruction](requirements/control-260524-sandbox-control-distributed-recovery.md) | control-260524 | 2026-05-24 | 2026-05-24 |
 | [Runtime Bounded Repair Fencing Requirements](requirements/control-260805-bounded-repair-fencing.md) | control-260805 | 2026-08-05 | 2026-08-05 |
@@ -150,6 +151,8 @@ Design documents are accumulated records and are not listed individually in this
 | [Discord External Channel Slack Parity Requirements](requirements/discord-260728-slack-parity.md) | discord-260728 | 2026-07-28 | - |
 | [Discord Bot Role Mention Invocation Requirements](requirements/discord-260802-bot-role-mention-invocation.md) | discord-260802 | 2026-08-02 | - |
 | [Discord Thread Automatic Archive Duration Requirements](requirements/discord-260820-thread-auto-archive-duration.md) | discord-260820 | 2026-08-20 | 2026-08-20 |
+| [Discord Quiet Work Presence Requirements](requirements/discord-260828-quiet-work-presence.md) | discord-260828 | 2026-08-28 | 2026-08-28 |
+| [Discord Activity Tracker Conversation Settings Access Requirements](requirements/discord-260829-tracker-settings-access.md) | discord-260829 | 2026-08-29 | 2026-08-29 |
 | [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
 | [DockerAgentHomeClient sandbox-daemon Sidecar Historical Requirements Reconstruction](requirements/docker-260409-docker-home-sidecar.md) | docker-260409 | 2026-04-09 | 2026-04-09 |
 | [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |
@@ -341,6 +344,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Docker Runtime Provider Development Availability Requirements](requirements/runtime-260810-docker-provider-development-availability.md) | runtime-260810 | 2026-08-10 | - |
 | [Untrusted Runtime Boundary Requirements](requirements/runtime-260811-untrusted-runtime-boundary.md) | runtime-260811 | 2026-08-11 | - |
 | [Runtime System Metrics Overview Requirements](requirements/runtime-260824-system-metrics-overview.md) | runtime-260824 | 2026-08-24 | 2026-08-24 |
+| [Clear and Reliable Runtime Lifecycle Requirements](requirements/runtime-260825-reliable-lifecycle.md) | runtime-260825 | 2026-08-25 | 2026-08-25 |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
@@ -432,6 +436,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Toolkit Wake-Up Snapshot Revision Requirements](requirements/toolkit-260721-wakeup-snapshot-revision.md) | toolkit-260721 | 2026-07-21 | 2026-07-21 |
 | [Always-Visible Toolkit Tools Requirements](requirements/toolkit-260818-always-visible-tools.md) | toolkit-260818 | 2026-08-18 | 2026-08-18 |
 | [Slack Activity Tracker Lifecycle Requirements](requirements/tracker-260723-slack-activity-lifecycle.md) | tracker-260723 | 2026-07-23 | - |
+| [Discord Todo Work Activity Tracker Visibility Requirements](requirements/tracker-260829-todo-work-visibility.md) | tracker-260829 | 2026-08-29 | 2026-08-29 |
 | [Runtime File Transfer Requirements](requirements/transfer-260725-runtime-file-transfer.md) | transfer-260725 | 2026-07-25 | 2026-07-28 |
 | [Runtime Transfer Lifespan Recovery Requirements](requirements/transfer-260728-runtime-transfer-lifespan-recovery.md) | transfer-260728 | 2026-07-28 | 2026-07-28 |
 | [Continue FIFO Processing After Failed TurnActions Historical Requirements Reconstruction](requirements/turn-260708-turn-action-fifo-continuation.md) | turn-260708 | 2026-07-08 | - |
@@ -528,6 +533,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Agent Context Compaction Historical Decision Reconstruction](adr/context-260305-context-compaction.md)
 - [Session Context Inspector](adr/context-260530-context-inspector.md)
 - [Display Context Usage from the Resolved Run Profile](adr/context-260710-context-usage-display.md)
+- [Model Context Ranges](adr/context-260827-model-context-ranges.md)
 - [External Channel Continuation Work Completion](adr/continuation-260803-channel-work-completion.md)
 - [Sandbox Provider Control Distributed Recovery Historical Decision Reconstruction](adr/control-260524-sandbox-control-distributed-recovery.md)
 - [Runtime Bounded Repair Fencing](adr/control-260805-bounded-repair-fencing.md)
@@ -550,6 +556,8 @@ Design documents are accumulated records and are not listed individually in this
 - [Discord External Channel Slack Parity ADR](adr/discord-260728-slack-parity.md)
 - [Discord Bot Role Mention Invocation](adr/discord-260802-bot-role-mention-invocation.md)
 - [Discord Thread Automatic Archive Duration Decisions](adr/discord-260820-thread-auto-archive-duration.md)
+- [Discord Quiet Work Presence Decisions](adr/discord-260828-quiet-work-presence.md)
+- [Discord Activity Tracker Conversation Settings Access Decisions](adr/discord-260829-tracker-settings-access.md)
 - [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
 - [DockerAgentHomeClient sandbox-daemon Sidecar Historical Decision Reconstruction](adr/docker-260409-docker-home-sidecar.md)
 - [Introduce system Docker Sandbox Provider](adr/docker-260523-docker-sandbox.md)
@@ -741,6 +749,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Docker Runtime Provider Development Availability](adr/runtime-260810-docker-provider-development-availability.md)
 - [Untrusted Runtime Boundary](adr/runtime-260811-untrusted-runtime-boundary.md)
 - [Runtime System Metrics Overview](adr/runtime-260824-system-metrics-overview.md)
+- [Clear and Reliable Runtime Lifecycle](adr/runtime-260825-reliable-lifecycle.md)
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)
@@ -832,6 +841,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Toolkit Wake-Up Snapshot Revision](adr/toolkit-260721-wakeup-snapshot-revision.md)
 - [Always-Visible Toolkit Tools](adr/toolkit-260818-always-visible-tools.md)
 - [Slack Activity Tracker Lifecycle](adr/tracker-260723-slack-activity-lifecycle.md)
+- [Discord Todo Work Activity Tracker Visibility Decisions](adr/tracker-260829-todo-work-visibility.md)
 - [Runtime File Transfer](adr/transfer-260725-runtime-file-transfer.md)
 - [Runtime Transfer Lifespan Recovery](adr/transfer-260728-runtime-transfer-lifespan-recovery.md)
 - [Continue FIFO Processing After Failed TurnActions](adr/turn-260708-turn-action-fifo-continuation.md)

@@ -16,7 +16,7 @@ from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 logger = logging.getLogger(__name__)
-_MAX_TEXT_READ_BYTES = 64 * 1024
+_MAX_TEXT_READ_CHARACTERS = 64 * 1024
 
 
 class ReadTextInput(BaseModel):
@@ -59,18 +59,21 @@ def make_read_text_tool(
         """Read text file and return content in specified range."""
         abs_path = input.path
 
-        max_bytes = min(input.limit * 4, _MAX_TEXT_READ_BYTES)
         try:
-            text = await session_storage.get_text(
+            result = await session_storage.get_text(
                 abs_path,
                 agent_id=agent_id,
                 offset=input.offset,
-                max_bytes=max_bytes,
+                limit=min(input.limit, _MAX_TEXT_READ_CHARACTERS),
                 encoding=input.encoding,
             )
         except FileNotFoundError:
             raise FunctionToolError(
                 f"File not found: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
+            ) from None
+        except LookupError:
+            raise FunctionToolError(
+                f"Unsupported text encoding: {input.encoding}"
             ) from None
         except RuntimeStorageError as exc:
             raise FunctionToolError(f"Failed to read file: {exc.detail}") from None
@@ -87,17 +90,18 @@ def make_read_text_tool(
                 f"Failed to read file: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
             ) from None
 
-        chunk = text[: input.limit]
-        end = input.offset + len(chunk.encode(input.encoding))
         parts = [
-            f"Content of {abs_path} (bytes {input.offset}-{end}):",
+            (
+                f"Content of {abs_path} "
+                f"(characters {result.start_character}-{result.end_character}):"
+            ),
             "",
-            chunk,
+            result.text,
         ]
 
-        if len(chunk) < len(text):
+        if result.truncated:
             parts.append("")
-            parts.append(f"... (Use offset={end} to read more.)")
+            parts.append(f"... (Use offset={result.end_character} to read more.)")
 
         return "\n".join(parts)
 
@@ -108,7 +112,7 @@ def make_read_text_tool(
             "Read a text file from storage. "
             "Provide an absolute runtime path. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG} "
-            "Supports byte offset, character limit, and explicit text encoding "
+            "Supports character offset and limit, plus explicit text encoding "
             "(default utf-8) for reading large files in chunks."
         ),
     )

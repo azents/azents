@@ -43,7 +43,7 @@ from azents.core.tools import (
     ToolkitExecutionMode,
     ToolkitProvider,
 )
-from azents.engine.context.window import get_max_input_tokens
+from azents.engine.context.window import resolve_model_input_tokens
 from azents.engine.events.model_file_parts import file_output_part_from_model_file
 from azents.engine.events.types import FileOutputPart
 from azents.engine.events.user_messages import make_run_user_message
@@ -714,9 +714,11 @@ async def resolve_invoke_input_with_model_source(
         if requested_profile is not None
         else _resolve_reasoning_effort(main_selection, params)
     )
-    max_input = get_max_input_tokens(
+    main_input_tokens = resolve_model_input_tokens(
+        main_selection.normalized_capabilities.context_window.default_input_tokens,
         main_selection.normalized_capabilities.context_window.max_input_tokens,
         model,
+        main_settings.context_window_tokens,
     )
 
     compaction_model = to_runtime_model(
@@ -725,15 +727,12 @@ async def resolve_invoke_input_with_model_source(
     )
     compaction_provider = lightweight_selection.provider
     compaction_credential_kwargs = build_credential_kwargs(lightweight_integration)
-    compaction_max_input_tokens = get_max_input_tokens(
+    compaction_input_tokens = resolve_model_input_tokens(
+        lightweight_selection.normalized_capabilities.context_window.default_input_tokens,
         lightweight_selection.normalized_capabilities.context_window.max_input_tokens,
         compaction_model,
+        lightweight_option.settings.context_window_tokens,
     )
-    if lightweight_option.settings.context_window_tokens is not None:
-        compaction_max_input_tokens = min(
-            compaction_max_input_tokens,
-            lightweight_option.settings.context_window_tokens,
-        )
 
     model_developer = main_selection.model_developer
     builtin_tools = [
@@ -770,13 +769,15 @@ async def resolve_invoke_input_with_model_source(
                 stop=params.stop_sequences if params else None,
                 reasoning_effort=reasoning_effort,
                 builtin_tools=builtin_tools,
-                max_input_tokens=max_input,
+                max_input_tokens=main_input_tokens.effective_input_tokens,
                 context_window_tokens=main_settings.context_window_tokens,
                 max_turns=agent.max_turns,
                 compaction_model=compaction_model,
                 compaction_provider=compaction_provider,
                 compaction_credential_kwargs=compaction_credential_kwargs,
-                compaction_max_input_tokens=compaction_max_input_tokens,
+                compaction_max_input_tokens=(
+                    compaction_input_tokens.effective_input_tokens
+                ),
             ),
             model_selection=main_selection,
             model_settings=main_settings,

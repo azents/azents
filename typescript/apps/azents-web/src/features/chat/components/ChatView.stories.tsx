@@ -50,6 +50,15 @@ function timelineEvent(
 const readyWorkspaceState: WorkspacePanelState = {
   type: "SERVER",
   server: {
+    lifecycle: {
+      target: "running",
+      convergence: "stable",
+      provider: { connection: "connected", resource: "running" },
+      runner: { state: "ready" },
+      availability: "ready",
+      reason_code: null,
+      desired_generation: 3,
+    },
     runtime: {
       type: "RUNNING",
       runtime_id: "runtime-1",
@@ -202,6 +211,7 @@ const workspacePanel: WorkspacePanelContainerOutput = {
   onSelectProjectPickerDirectory: noop,
   onRefreshProjectPicker: noop,
   onStartRuntimeForProjectPicker: noop,
+  onRestartRuntimeForProjectPicker: noop,
   onCloseProjectRegistration: noop,
   onSetProjectRegistrationMode: noop,
   onSetProjectRegistrationStartingRef: noop,

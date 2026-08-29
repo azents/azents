@@ -31,5 +31,6 @@ Conventions for TypeScript code under `typescript/`.
 | Configure azents-web Storybook with @storybook/nextjs-vite and shared decorators that mirror Mantine, next-intl, locale, color mode, and app globals. | [storybook-provider-structure](../conventions/typescript/storybook-provider-structure.md) |
 | After a successful tRPC mutation, invalidate related queries with `utils.<router>.<query>.invalidate()` — never use `query.refetch()` to refresh data. | [trpc-cache-invalidation](../conventions/typescript/trpc-cache-invalidation.md) |
 | In azents-web, call public API endpoints through generated @azents/public-client functions instead of raw ctx.apiClient HTTP methods or hand-written internal API fetch URLs, so frontend paths stay aligned with OpenAPI. | [use-generated-public-client](../conventions/typescript/use-generated-public-client.md) |
+| Write normal product UI status copy around user-relevant capability and next actions; separate independently actionable states and reserve implementation metadata for explicit diagnostic surfaces. | [user-relevant-status-copy](../conventions/typescript/user-relevant-status-copy.md) |
 
 <!-- END_TABLE -->

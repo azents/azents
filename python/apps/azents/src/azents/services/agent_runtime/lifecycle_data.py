@@ -12,13 +12,15 @@ from azents.core.enums import (
     AgentRuntimeRemovalStatus,
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
+    RuntimeProviderConnectionState,
+    RuntimeProviderObservedState,
+    RuntimeRunnerState,
     RuntimeTerminalDeleteAcknowledgementKind,
 )
 from azents.repos.agent_runtime.data import (
     AgentRuntime,
     AgentRuntimeActions,
     AgentRuntimeFailureSummary,
-    AgentRuntimeSummaryState,
 )
 from azents.repos.agent_runtime_removal_scope.data import AgentRuntimeRemovalImpact
 from azents.repos.runtime_profile.data import (
@@ -47,6 +49,53 @@ RuntimeProfileConfigurationStatus = Literal[
     "configured",
     "unavailable",
 ]
+
+
+RuntimeLifecycleConvergence = Literal[
+    "stable",
+    "starting",
+    "stopping",
+    "resetting",
+    "recovering",
+    "blocked",
+    "failed",
+]
+
+RuntimeAvailability = Literal[
+    "ready",
+    "stopped",
+    "transitioning",
+    "provider_disconnected",
+    "runner_unavailable",
+    "configuration_blocked",
+    "failed",
+    "removing",
+]
+
+
+class AgentRuntimeLifecycleProvider(BaseModel):
+    """Current Provider connection and resource facts."""
+
+    connection: RuntimeProviderConnectionState
+    resource: RuntimeProviderObservedState
+
+
+class AgentRuntimeLifecycleRunner(BaseModel):
+    """Current Runner fact."""
+
+    state: RuntimeRunnerState
+
+
+class AgentRuntimeLifecyclePresentation(BaseModel):
+    """Server-authoritative Runtime lifecycle presentation."""
+
+    target: RuntimeDesiredState
+    convergence: RuntimeLifecycleConvergence
+    provider: AgentRuntimeLifecycleProvider
+    runner: AgentRuntimeLifecycleRunner
+    availability: RuntimeAvailability
+    reason_code: str | None
+    desired_generation: int = Field(ge=0)
 
 
 class AgentRuntimePublicActions(BaseModel):
@@ -100,9 +149,17 @@ class AgentRuntimeReadOutput(BaseModel):
     removal_impact: AgentRuntimeRemovalImpact | None
     removal: AgentRuntimeRemovalProgress | None
     runtime: AgentRuntime | None
-    state: AgentRuntimeSummaryState | None
+    lifecycle: AgentRuntimeLifecyclePresentation | None
     configuration: AgentRuntimeConfigurationStatus | None
     actions: AgentRuntimePublicActions
+
+
+class AgentRuntimeLifecycleSnapshot(BaseModel):
+    """Internal shared lifecycle snapshot for Runtime and Workspace surfaces."""
+
+    runtime: AgentRuntime | None
+    lifecycle: AgentRuntimeLifecyclePresentation | None
+    actions: AgentRuntimeActions
 
 
 class AgentRuntimeAdditionOutput(BaseModel):
@@ -121,7 +178,7 @@ class AgentRuntimeRemovalOutput(BaseModel):
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeOperationAuthority:
-    """Expected desired Runtime configuration for one explicit operation."""
+    """Expected active Runtime configuration for one explicit operation."""
 
     configuration_sequence: int
     configuration_digest: str
@@ -156,12 +213,21 @@ class RuntimeOperationTargetResolver(Protocol):
         """Wait for and return one exact qualified Runtime target."""
         ...
 
+    async def get_lifecycle_snapshot(
+        self,
+        agent_id: str,
+    ) -> AgentRuntimeLifecycleSnapshot:
+        """Return one shared lifecycle snapshot without mutation."""
+        ...
+
 
 class AgentRuntimeOutput(BaseModel):
     """Agent Runtime API output model."""
 
     runtime: AgentRuntime = Field(description="Raw runtime state")
-    state: AgentRuntimeSummaryState = Field(description="Server-computed state")
+    lifecycle: AgentRuntimeLifecyclePresentation = Field(
+        description="Server-computed lifecycle presentation"
+    )
     configuration: AgentRuntimeConfigurationStatus = Field(
         description="Server-computed Runtime configuration status"
     )
@@ -171,7 +237,9 @@ class AgentRuntimeLifecycleOutput(BaseModel):
     """Lifecycle command output model."""
 
     runtime: AgentRuntime = Field(description="Changed Runtime")
-    state: AgentRuntimeSummaryState = Field(description="Server-computed state")
+    lifecycle: AgentRuntimeLifecyclePresentation = Field(
+        description="Server-computed lifecycle presentation"
+    )
     command_type: RuntimeLifecycleCommandType = Field(description="Command type")
     desired_generation: int = Field(description="Desired generation")
     configuration: AgentRuntimeConfigurationStatus = Field(
@@ -256,12 +324,15 @@ __all__ = [
     "AgentRuntimeConfigurationStatus",
     "AgentRuntimeFailureSummary",
     "AgentRuntimeLifecycleOutput",
+    "AgentRuntimeLifecyclePresentation",
+    "AgentRuntimeLifecycleProvider",
+    "AgentRuntimeLifecycleRunner",
+    "AgentRuntimeLifecycleSnapshot",
     "AgentRuntimeOutput",
     "AgentRuntimePublicActions",
     "AgentRuntimeReadOutput",
     "AgentRuntimeRemovalProgress",
     "AgentRuntimeRemovalOutput",
-    "AgentRuntimeSummaryState",
     "InvalidResetFinalDesiredState",
     "ProviderDisconnected",
     "RuntimeProviderUnavailable",
@@ -269,5 +340,7 @@ __all__ = [
     "RuntimeOperationAuthority",
     "RuntimeOperationTarget",
     "RuntimeOperationTargetResolver",
+    "RuntimeAvailability",
+    "RuntimeLifecycleConvergence",
     "RuntimeProfileConfigurationStatus",
 ]

@@ -53,6 +53,7 @@ const meta = {
     onSelectProjectPickerDirectory: noopPath,
     onRefreshProjectPicker: noop,
     onStartRuntimeForProjectPicker: noop,
+    onRestartRuntimeForProjectPicker: noop,
     onCloseProjectRegistration: noop,
     onSetProjectRegistrationMode: noop,
     onSetProjectRegistrationStartingRef: noop,

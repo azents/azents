@@ -7,7 +7,7 @@ collect and cache kind->plural mapping from K8s API discovery endpoints.
 import dataclasses
 import logging
 
-import httpx
+import httpx2 as httpx
 from lightkube.generic_resource import (
     GenericGlobalResource,
     GenericNamespacedResource,

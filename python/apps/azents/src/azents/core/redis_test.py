@@ -20,6 +20,12 @@ def _connection_kwargs(client: Redis) -> dict[str, Any]:
 class TestCreateRedisClient:
     """Verify resilience settings are applied to Redis client."""
 
+    def test_resp2_protocol_is_preserved(self) -> None:
+        """RESP2 preserves the stream response shape consumed by the broker."""
+        client = create_redis_client("redis://localhost:6379")
+        kwargs = _connection_kwargs(client)
+        assert kwargs["protocol"] == 2
+
     def test_health_check_interval_is_set(self) -> None:
         """health_check_interval=30s preemptively blocks stale idle connections."""
         client = create_redis_client("redis://localhost:6379")
@@ -36,7 +42,7 @@ class TestCreateRedisClient:
         """I/O timeout (socket_timeout) is unset because it breaks blocking commands."""
         client = create_redis_client("redis://localhost:6379")
         kwargs = _connection_kwargs(client)
-        assert kwargs.get("socket_timeout") is None
+        assert kwargs["socket_timeout"] is None
 
     def test_no_automatic_retry(self) -> None:
         """Automatic retry is intentionally not configured.

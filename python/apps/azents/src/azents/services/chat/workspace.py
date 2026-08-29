@@ -26,8 +26,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
-from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeActions
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileBulkDeleteResult,
@@ -62,6 +61,8 @@ from azents.runtime.transfer.workspace_download import (
     WorkspaceDownloadRequest,
 )
 from azents.services.agent_runtime.lifecycle_data import (
+    AgentRuntimeLifecyclePresentation,
+    AgentRuntimeLifecycleSnapshot,
     RuntimeOperationTarget,
     RuntimeOperationTargetResolver,
 )
@@ -85,7 +86,6 @@ _API_RUNTIME_TRANSFER_COORDINATOR_DEP = Depends(
 _AGENT_REPOSITORY_DEP = Depends(AgentRepository)
 _WORKSPACE_USER_REPOSITORY_DEP = Depends(WorkspaceUserRepository)
 _RUNNER_OPERATION_CLIENT_DEP = Depends(get_runtime_runner_operation_client)
-_RUNTIME_REPOSITORY_DEP = Depends(AgentRuntimeRepository)
 _RUNTIME_TARGET_RESOLVER_DEP = Depends(AgentRuntimeService)
 _SESSION_MANAGER_DEP = Depends(get_session_manager)
 _RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 120
@@ -265,6 +265,7 @@ class AgentWorkspaceActions:
 class AgentWorkspaceState:
     """Workspace panel state. Express Runtime and workspace access separately."""
 
+    lifecycle: AgentRuntimeLifecyclePresentation | None
     runtime: AgentWorkspaceRuntime
     workspace: AgentWorkspaceAccessState
     actions: AgentWorkspaceActions
@@ -480,34 +481,15 @@ def _restart_action(agent_id: str) -> AgentWorkspaceAction:
 
 def _actions_for_runtime(
     agent_id: str,
-    runtime: AgentWorkspaceRuntime,
+    actions: AgentRuntimeActions,
 ) -> AgentWorkspaceActions:
-    """Return lifecycle action set matching Provider runtime state."""
-    match runtime.type:
-        case "NOT_STARTED":
-            return AgentWorkspaceActions(start=_start_action(agent_id))
-        case "RUNNING":
-            return AgentWorkspaceActions(
-                stop=_stop_action(agent_id),
-                restart=_restart_action(agent_id),
-                reset=_reset_action(agent_id),
-            )
-        case "HIBERNATED":
-            return AgentWorkspaceActions(
-                start=_start_action(agent_id),
-                reset=_reset_action(agent_id),
-            )
-        case "RESTORE_FAILED" | "LOST":
-            return AgentWorkspaceActions(
-                start=_start_action(agent_id),
-                stop=_stop_action(agent_id),
-                restart=_restart_action(agent_id),
-                reset=_reset_action(agent_id),
-            )
-        case "STARTING" | "RESETTING":
-            return AgentWorkspaceActions(stop=_stop_action(agent_id))
-        case "STOPPING":
-            return AgentWorkspaceActions()
+    """Return lifecycle routes from the shared server action authority."""
+    return AgentWorkspaceActions(
+        start=_start_action(agent_id) if actions.start else None,
+        stop=_stop_action(agent_id) if actions.stop else None,
+        restart=_restart_action(agent_id) if actions.restart else None,
+        reset=_reset_action(agent_id) if actions.reset else None,
+    )
 
 
 class WorkspaceRunnerOperations(Protocol):
@@ -548,12 +530,12 @@ class WorkspaceRunnerOperations(Protocol):
         runner_generation: int,
         owner_session_id: str | None,
         path: str,
-        offset: int,
-        max_bytes: int,
+        character_offset: int,
+        max_characters: int,
         encoding: str,
         deadline_at: datetime,
     ) -> RuntimeFileTextReadResult:
-        """Read one bounded Workspace text preview."""
+        """Read one bounded Workspace character range."""
         ...
 
     async def stat_file(
@@ -632,7 +614,6 @@ class AgentWorkspaceFileService:
             _WORKSPACE_USER_REPOSITORY_DEP
         ),
         runner_operations: WorkspaceRunnerOperations = _RUNNER_OPERATION_CLIENT_DEP,
-        runtime_repository: AgentRuntimeRepository = _RUNTIME_REPOSITORY_DEP,
         runtime_target_resolver: RuntimeOperationTargetResolver = (
             _RUNTIME_TARGET_RESOLVER_DEP
         ),
@@ -644,7 +625,6 @@ class AgentWorkspaceFileService:
         self._agent_repository = agent_repository
         self._workspace_user_repository = workspace_user_repository
         self._runner_operations = runner_operations
-        self._runtime_repository = runtime_repository
         self._runtime_target_resolver = runtime_target_resolver
         self._session_manager = session_manager
         self._runtime_workspace_download_service = runtime_workspace_download_service
@@ -664,10 +644,10 @@ class AgentWorkspaceFileService:
             case _:
                 assert_never(access_result)
 
-        runtime = await self._get_runtime(agent.id)
+        snapshot = await self._runtime_target_resolver.get_lifecycle_snapshot(agent.id)
         return await self._workspace_panel_state(
             agent,
-            runtime=runtime,
+            snapshot=snapshot,
             user_id=user_id,
         )
 
@@ -693,23 +673,15 @@ class AgentWorkspaceFileService:
                 return Failure(NotWorkspaceMember())
             return Success(agent)
 
-    async def _get_runtime(
-        self,
-        agent_id: str,
-    ) -> AgentRuntime | None:
-        """Fetch AgentRuntime."""
-        async with self._session_manager() as session:
-            return await self._runtime_repository.get_by_agent_id(session, agent_id)
-
     async def _workspace_panel_state(
         self,
         agent: Agent,
         *,
-        runtime: AgentRuntime | None,
+        snapshot: AgentRuntimeLifecycleSnapshot,
         user_id: str,
     ) -> Result[AgentWorkspaceState, AgentWorkspaceError]:
         """Return Provider runtime and workspace access separately."""
-        runtime_panel = self._runtime_panel_state(runtime)
+        runtime_panel = self._runtime_panel_state(snapshot.runtime)
         workspace_state = await self._workspace_access_state(
             agent,
             runtime_panel=runtime_panel,
@@ -717,9 +689,10 @@ class AgentWorkspaceFileService:
         )
         return Success(
             AgentWorkspaceState(
+                lifecycle=snapshot.lifecycle,
                 runtime=runtime_panel,
                 workspace=workspace_state,
-                actions=_actions_for_runtime(agent.id, runtime_panel),
+                actions=_actions_for_runtime(agent.id, snapshot.actions),
             )
         )
 
@@ -806,26 +779,11 @@ class AgentWorkspaceFileService:
         user_id: str,
     ) -> AgentWorkspaceAccessState:
         """Return workspace access state owned by Runner."""
-        if runtime_panel.type in {"STARTING", "RESETTING"}:
-            return AgentWorkspaceAccessConnecting(type="CONNECTING")
-        if runtime_panel.type != "RUNNING":
+        runtime_id = runtime_panel.runtime_id
+        if runtime_id is None:
             return AgentWorkspaceAccessUnavailable(
                 type="UNAVAILABLE",
                 reason="RUNTIME_NOT_RUNNING",
-            )
-        runtime_id = runtime_panel.runtime_id
-        if runtime_id is None:
-            return AgentWorkspaceControlUnavailable(
-                type="CONTROL_UNAVAILABLE",
-                detail="Agent runtime id is unavailable.",
-                retry_after_ms=1000,
-            )
-        try:
-            workspace_root = agent_workspace_root(runtime_panel.workspace_path)
-        except AgentWorkspacePathUnavailable:
-            return AgentWorkspaceAccessUnavailable(
-                type="UNAVAILABLE",
-                reason="WORKSPACE_PATH_UNAVAILABLE",
             )
         try:
             runtime = await self._runtime_target_resolver.resolve_operation_target(
@@ -834,6 +792,18 @@ class AgentWorkspaceFileService:
                 start_if_stopped=False,
             )
         except RuntimeStorageError as error:
+            if runtime_panel.type in {"STARTING", "RESETTING"}:
+                return AgentWorkspaceAccessConnecting(type="CONNECTING")
+            if runtime_panel.type != "RUNNING":
+                return AgentWorkspaceAccessUnavailable(
+                    type="UNAVAILABLE",
+                    reason="RUNTIME_NOT_RUNNING",
+                )
+            if runtime_panel.workspace_path is None:
+                return AgentWorkspaceAccessUnavailable(
+                    type="UNAVAILABLE",
+                    reason="WORKSPACE_PATH_UNAVAILABLE",
+                )
             return AgentWorkspaceControlUnavailable(
                 type="CONTROL_UNAVAILABLE",
                 detail=str(error),
@@ -844,6 +814,13 @@ class AgentWorkspaceFileService:
                 type="CONTROL_UNAVAILABLE",
                 detail="Runtime changed while workspace access was being prepared.",
                 retry_after_ms=1000,
+            )
+        try:
+            workspace_root = agent_workspace_root(runtime.workspace_path)
+        except AgentWorkspacePathUnavailable:
+            return AgentWorkspaceAccessUnavailable(
+                type="UNAVAILABLE",
+                reason="WORKSPACE_PATH_UNAVAILABLE",
             )
         ready = await self._ready_access(
             runtime,
@@ -1451,25 +1428,27 @@ class AgentWorkspaceFileService:
                     detail="Runtime file metadata did not include a file size."
                 )
             )
-        if size_bytes > limit:
-            return Failure(AgentWorkspaceFileTooLarge(size=size_bytes, limit=limit))
         media_type = _guess_media_type(path)
         if _is_text_preview_candidate(media_type):
             text_result = await self._runner_read_text_file(
                 runtime,
                 path,
-                max_bytes=limit,
+                max_characters=limit,
                 encoding="utf-8",
             )
             match text_result:
-                case Success(text):
-                    pass
+                case Success(result):
+                    text = result.text
+                    truncated = result.truncated
                 case Failure(error):
                     return Failure(error)
                 case _:
                     assert_never(text_result)
         else:
+            if size_bytes > limit:
+                return Failure(AgentWorkspaceFileTooLarge(size=size_bytes, limit=limit))
             text = None
+            truncated = False
         return Success(
             AgentWorkspaceFile(
                 type="FILE",
@@ -1477,7 +1456,7 @@ class AgentWorkspaceFileService:
                 media_type=media_type,
                 size=size_bytes,
                 text=text,
-                truncated=False,
+                truncated=truncated,
             )
         )
 
@@ -1531,22 +1510,22 @@ class AgentWorkspaceFileService:
         runtime: RuntimeOperationTarget,
         path: PurePosixPath,
         *,
-        max_bytes: int,
+        max_characters: int,
         encoding: str,
-    ) -> Result[str, AgentWorkspaceError]:
-        """Read bounded decoded preview text through the active Runtime Runner."""
+    ) -> Result[RuntimeFileTextReadResult, AgentWorkspaceError]:
+        """Read bounded decoded preview characters through the active Runner."""
         try:
             result = await self._runner_operations.read_text_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
                 path=path.as_posix(),
-                offset=0,
-                max_bytes=max_bytes,
+                character_offset=0,
+                max_characters=max_characters,
                 encoding=encoding,
                 deadline_at=_runner_file_operation_deadline(),
             )
-            return Success(result.text)
+            return Success(result)
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:

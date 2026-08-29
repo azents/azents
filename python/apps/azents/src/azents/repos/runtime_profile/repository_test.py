@@ -748,6 +748,162 @@ async def test_delete_workspace_profile_clears_live_authority_and_retains_applie
     assert skipped_item.failure_code == "target_deleted"
 
 
+async def test_clear_agent_selection_replaces_desired_configuration_atomically(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Explicit selection clear preserves applied Runtime evidence."""
+    repository = RuntimeProfileRepository()
+    workspace_repository = WorkspaceRepository()
+    async with rdb_session_manager() as session:
+        provider_id = await _create_provider(
+            session,
+            logical_id="profile-selection-clear-provider",
+        )
+        workspace_result = await workspace_repository.create(
+            session,
+            WorkspaceCreate(
+                name="Profile selection clear",
+                handle="profile-selection-clear",
+            ),
+        )
+        assert isinstance(workspace_result, Success)
+        workspace_id = await workspace_repository.resolve_id(
+            session,
+            "profile-selection-clear",
+        )
+        assert workspace_id is not None
+        infrastructure = await repository.create_infrastructure_profile(
+            session,
+            create=_infrastructure_create(provider_id),
+        )
+        profile = await repository.create_workspace_runtime_profile(
+            session,
+            create=WorkspaceRuntimeProfileCreate(
+                workspace_id=workspace_id,
+                provider_id=provider_id,
+                infrastructure_profile_id=infrastructure.id,
+                display_name="Clear me",
+                description="Selected Profile",
+                lifecycle=RuntimeProfileLifecycle.ACTIVE,
+                policy={"schema_version": 1, "network_restriction": None},
+                digest="b" * 64,
+                actor_workspace_user_id=None,
+            ),
+        )
+        integration = RDBLLMProviderIntegration(
+            workspace_id=workspace_id,
+            provider=LLMProvider.ANTHROPIC,
+            name="profile-selection-clear-integration",
+            encrypted_credentials="encrypted-test-value",
+            config=None,
+        )
+        session.add(integration)
+        await session.flush()
+        selection = make_test_model_selection_dict(
+            integration_id=integration.id,
+            provider=LLMProvider.ANTHROPIC,
+            model_identifier="profile-selection-clear",
+        )
+        agent = RDBAgent(
+            workspace_id=workspace_id,
+            name="Selected Agent",
+            model_selection=selection,
+            lightweight_model_selection=selection,
+            runtime_profile_id=profile.id,
+            runtime_capability=AgentRuntimeCapability.MANAGED,
+            shell_enabled=True,
+        )
+        session.add(agent)
+        await session.flush()
+        runtime = RDBAgentRuntime(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            runtime_provider_id="profile-selection-clear-provider",
+            runtime_provider_resource_id=provider_id,
+        )
+        session.add(runtime)
+        await session.flush()
+        runtime.configuration_sequence = 4
+        runtime.desired_generation = 3
+        runtime.workspace_path = "/workspace/agent"
+        document = RuntimeConfigurationDocument(
+            schema_version=1,
+            source_trace={},
+            provider_id=provider_id,
+            provider_capability_revision_id=None,
+            infrastructure_profile_id=infrastructure.id,
+            infrastructure_profile_version=infrastructure.version,
+            workspace_runtime_profile_id=profile.id,
+            workspace_runtime_profile_version=profile.version,
+            agent_selection_version=agent.runtime_profile_selection_version,
+            required_capabilities=(),
+            missing_capabilities=(),
+            resolved_configuration={"workspace": "preserved"},
+        ).model_dump(mode="json")
+        now = datetime.datetime.now(datetime.UTC)
+        session.add(
+            RDBRuntimeConfigurationState(
+                runtime_id=runtime.id,
+                desired_sequence=4,
+                desired_status=RuntimeConfigurationStateStatus.READY,
+                desired_target_generation=3,
+                desired_digest="c" * 64,
+                desired_document=document,
+                desired_reason_code=None,
+                provider_reported_digest="c" * 64,
+                runner_reported_digest="c" * 64,
+                provider_acknowledged_at=now,
+                runner_observed_at=now,
+                applied_sequence=4,
+                applied_target_generation=3,
+                applied_digest="c" * 64,
+                applied_document=document,
+                applied_at=now,
+            )
+        )
+        await session.flush()
+
+        assert not await repository.clear_agent_runtime_profile_selection(
+            session,
+            agent_id=agent.id,
+            expected_selection_version=2,
+        )
+        assert await repository.clear_agent_runtime_profile_selection(
+            session,
+            agent_id=agent.id,
+            expected_selection_version=1,
+        )
+
+        retained_agent = await session.get(RDBAgent, agent.id)
+        retained_runtime = await AgentRuntimeRepository().get_by_id(session, runtime.id)
+        state = await repository.get_configuration_state(
+            session,
+            runtime_id=runtime.id,
+        )
+
+    assert retained_agent is not None
+    assert retained_agent.runtime_profile_id is None
+    assert retained_agent.runtime_profile_selection_version == 2
+    assert retained_runtime is not None
+    assert retained_runtime.configuration_sequence == 5
+    assert retained_runtime.runtime_provider_resource_id == provider_id
+    assert retained_runtime.workspace_path == "/workspace/agent"
+    assert state is not None
+    assert state.desired.sequence == 5
+    assert state.desired.status is RuntimeConfigurationStateStatus.UNCONFIGURED
+    assert state.desired.target_generation == 3
+    assert state.desired.reason_code == "runtime_profile_required"
+    assert state.desired.digest is None
+    assert state.desired.document is None
+    assert state.desired.provider_reported_digest is None
+    assert state.desired.runner_reported_digest is None
+    assert state.desired.provider_acknowledged_at is None
+    assert state.desired.runner_observed_at is None
+    assert state.applied is not None
+    assert state.applied.sequence == 4
+    assert state.applied.document.workspace_runtime_profile_id == profile.id
+
+
 async def test_infrastructure_profile_impact_and_hard_delete_preserve_runtime(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:

@@ -271,6 +271,61 @@ async def test_provider_running_report_clears_start_timeout_failure(
     assert runtime.failure_message is None
 
 
+async def test_provider_sink_completes_current_restart_handoff(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A current Provider Restart completion rearms ordinary Start."""
+    repo = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        runtime_id = await _create_runtime(session, "provider-sink-restart-handoff")
+        command = await repo.set_desired_state(
+            session,
+            runtime_id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        await repo.mark_lifecycle_dispatched(
+            session,
+            runtime_id,
+            command.desired_generation,
+        )
+    sink = RuntimeProviderReportRepositorySink(
+        repo,
+        _profile_repository(),
+        rdb_session_manager,
+    )
+    report = RuntimeProviderReport(
+        runtime_id=runtime_id,
+        provider_id="system-kubernetes",
+        provider_generation=1,
+        observed_state=SharedProviderState.STOPPED,
+        observed_desired_generation=command.desired_generation,
+        provider_runtime_id=None,
+        reason="restart_deletion_requested",
+        diagnostic={},
+        reported_at=datetime(2026, 8, 25, tzinfo=UTC),
+        terminal_delete_acknowledged=False,
+        runtime_configuration=_runtime_configuration_evidence(
+            command.desired_generation
+        ),
+        reconciliation=None,
+    )
+    await sink.record_provider_report(
+        report,
+        configuration_acknowledgement_allowed=False,
+    )
+
+    completed = await sink.complete_restart_handoff(report)
+
+    assert completed is True
+    async with rdb_session_manager() as session:
+        runtime = await repo.get_by_id(session, runtime_id)
+    assert runtime is not None
+    assert runtime.last_lifecycle_command is RuntimeLifecycleCommandType.START
+    assert runtime.last_lifecycle_dispatch_generation == command.desired_generation - 1
+
+
 async def test_provider_starting_report_does_not_acknowledge_configuration(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:

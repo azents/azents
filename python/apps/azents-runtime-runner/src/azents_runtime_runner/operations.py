@@ -53,7 +53,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_BASH_TIMEOUT_SECONDS = 120
 _MAX_FILE_READ_BYTES = 8 * 1024 * 1024
-_MAX_TEXT_READ_BYTES = 64 * 1024
+_MAX_TEXT_READ_CHARACTERS = 64 * 1024
+_TEXT_READ_CHUNK_BYTES = 64 * 1024
 _DEFAULT_MAX_FILE_OPERATION_WORKERS = 8
 _DEFAULT_MAX_GREP_SEARCHED_FILES = 10_000
 _DEFAULT_MAX_GREP_SCANNED_BYTES = 128 * 1024 * 1024
@@ -584,12 +585,21 @@ class RunnerOperations:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
         offset = _int_payload(operation.payload, "offset", default=0)
-        max_bytes = _optional_int_payload(operation.payload, "max_bytes")
-        if max_bytes is None:
-            max_bytes = _MAX_FILE_READ_BYTES
+        requested = _optional_int_payload(operation.payload, "max_bytes")
+        if offset < 0 or (requested is not None and requested <= 0):
+            await self._final_error(
+                operation,
+                "INVALID_FILE_READ_RANGE",
+                "File read offset must be non-negative and max_bytes must be positive",
+            )
+            return
+        max_bytes = min(
+            requested if requested is not None else _MAX_FILE_READ_BYTES,
+            _MAX_FILE_READ_BYTES,
+        )
         data = await self._run_file_operation(
             operation,
-            lambda cancellation: _read_file_bytes(
+            lambda cancellation: _read_file_range_bytes(
                 path,
                 offset=offset,
                 max_bytes=max_bytes,
@@ -604,22 +614,40 @@ class RunnerOperations:
         await self._final_success(operation, {"bytes_read": len(data)})
 
     async def _file_read_text(self, operation: RunnerOperationEnvelope) -> None:
-        """Read a bounded decoded text range without a Base64 file event."""
+        """Read a decoded character range without a Base64 file event."""
         try:
             path = self._workspace.resolve(operation.payload.get("path"))
         except ValueError as exc:
             await self._final_error(operation, "INVALID_PATH", str(exc))
             return
-        offset = _int_payload(operation.payload, "offset", default=0)
-        requested = _optional_int_payload(operation.payload, "max_bytes")
-        max_bytes = min(
-            requested if requested is not None else _MAX_TEXT_READ_BYTES,
-            _MAX_TEXT_READ_BYTES,
+        character_offset = _int_payload(
+            operation.payload,
+            "character_offset",
+            default=0,
         )
+        requested = _int_payload(
+            operation.payload,
+            "max_characters",
+            default=0,
+        )
+        if character_offset < 0 or requested <= 0:
+            await self._final_error(
+                operation,
+                "INVALID_FILE_READ_TEXT_RANGE",
+                (
+                    "Text read character offset must be non-negative and "
+                    "max_characters must be positive"
+                ),
+            )
+            return
+        max_characters = min(requested, _MAX_TEXT_READ_CHARACTERS)
         encoding = _optional_str_payload(operation.payload, "encoding") or "utf-8"
         try:
-            codecs.lookup(encoding)
-        except LookupError:
+            decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
+            empty_decoded = decoder.decode(b"", final=False)
+        except LookupError, TypeError, ValueError:
+            empty_decoded = None
+        if not isinstance(empty_decoded, str):
             await self._final_error(
                 operation,
                 "FILE_READ_TEXT_UNSUPPORTED_ENCODING",
@@ -627,25 +655,36 @@ class RunnerOperations:
             )
             return
         try:
-            data = await self._run_file_operation(
+            result = await self._run_file_operation(
                 operation,
-                lambda cancellation: _read_file_range_bytes(
+                lambda cancellation: _read_file_character_range(
                     path,
-                    offset=offset,
-                    max_bytes=max_bytes,
+                    character_offset=character_offset,
+                    max_characters=max_characters,
+                    encoding=encoding,
                     cancellation=cancellation,
                 ),
             )
-            text = data.decode(encoding)
         except UnicodeDecodeError:
             await self._final_error(
                 operation,
                 "FILE_READ_TEXT_DECODE_ERROR",
-                f"File range cannot be decoded as {encoding}",
+                f"File cannot be decoded as {encoding}",
             )
             return
-        await self._event(operation, RuntimeRunnerEventType.STDOUT, {"text": text})
-        await self._final_success(operation, {"bytes_read": len(data)})
+        await self._event(
+            operation,
+            RuntimeRunnerEventType.STDOUT,
+            {"text": result.text},
+        )
+        await self._final_success(
+            operation,
+            {
+                "start_character": character_offset,
+                "end_character": character_offset + len(result.text),
+                "truncated": result.truncated,
+            },
+        )
 
     async def _file_write(self, operation: RunnerOperationEnvelope) -> None:
         try:
@@ -2715,16 +2754,17 @@ def _discovered_worktree_payload(
     repository_anchor_path: str,
     branch_name: str,
     failure_code: str,
-    head_commit: str = "",
+    head_commit: str | None = None,
 ) -> dict[str, JsonValue]:
     """Build one content-free managed worktree discovery result."""
+    fingerprint_head_commit = head_commit if head_commit is not None else ""
     fingerprint = hashlib.sha256(
         "\0".join(
             (
                 str(worktree_path),
                 repository_anchor_path,
                 branch_name,
-                head_commit,
+                fingerprint_head_commit,
                 failure_code,
                 str(registered),
             )
@@ -3085,19 +3125,6 @@ def _move_paths(
     return {"moved_entries": moved_entries}
 
 
-def _read_file_bytes(
-    path: Path,
-    *,
-    offset: int,
-    max_bytes: int,
-    cancellation: threading.Event,
-) -> bytes:
-    """Read bounded file bytes in a filesystem worker."""
-    if cancellation.is_set():
-        return b""
-    return path.read_bytes()[offset : offset + max_bytes]
-
-
 def _read_file_range_bytes(
     path: Path,
     *,
@@ -3108,9 +3135,76 @@ def _read_file_range_bytes(
     """Read one bounded byte range without reading the complete file."""
     if cancellation.is_set():
         return b""
+    if offset < 0 or max_bytes <= 0:
+        raise ValueError("File read range must be positive and non-negative")
     with path.open("rb") as source:
         source.seek(offset)
         return source.read(max_bytes)
+
+
+@dataclass(frozen=True)
+class _CharacterReadResult:
+    """One bounded character range and whether more text follows."""
+
+    text: str
+    truncated: bool
+
+
+def _read_file_character_range(
+    path: Path,
+    *,
+    character_offset: int,
+    max_characters: int,
+    encoding: str,
+    cancellation: threading.Event,
+) -> _CharacterReadResult:
+    """Read one decoded character range with bounded memory."""
+    if character_offset < 0 or max_characters <= 0:
+        raise ValueError("Character read range must be positive and non-negative")
+    decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
+    character_position = 0
+    collected_count = 0
+    target_count = max_characters + 1
+    parts: list[str] = []
+
+    def append_decoded(decoded: str) -> None:
+        """Collect decoded characters inside the requested range."""
+        nonlocal character_position, collected_count
+        decoded_end = character_position + len(decoded)
+        if decoded_end > character_offset:
+            start = max(character_offset - character_position, 0)
+            remaining = target_count - collected_count
+            part = decoded[start : start + remaining]
+            parts.append(part)
+            collected_count += len(part)
+        character_position = decoded_end
+
+    with path.open("rb") as source:
+        while collected_count < target_count and not cancellation.is_set():
+            data = source.read(_TEXT_READ_CHUNK_BYTES)
+            eof = len(data) < _TEXT_READ_CHUNK_BYTES
+            decoder_state = decoder.getstate()
+            try:
+                decoded = decoder.decode(data, final=eof)
+            except UnicodeDecodeError as exc:
+                buffered_bytes = decoder_state[0]
+                valid_data_bytes = max(exc.start - len(buffered_bytes), 0)
+                decoder.setstate(decoder_state)
+                append_decoded(
+                    decoder.decode(data[:valid_data_bytes], final=False),
+                )
+                if collected_count >= target_count:
+                    break
+                raise
+            append_decoded(decoded)
+            if eof:
+                break
+
+    text = "".join(parts)
+    return _CharacterReadResult(
+        text=text[:max_characters],
+        truncated=len(text) > max_characters,
+    )
 
 
 def _write_file_bytes(

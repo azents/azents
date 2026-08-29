@@ -36,6 +36,8 @@ def create_redis_client(url: str) -> Redis:
     """
     return Redis.from_url(
         url,
+        protocol=2,
         health_check_interval=_HEALTH_CHECK_INTERVAL_SECONDS,
         socket_connect_timeout=_SOCKET_CONNECT_TIMEOUT_SECONDS,
+        socket_timeout=None,
     )

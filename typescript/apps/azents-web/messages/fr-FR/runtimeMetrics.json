@@ -1,6 +1,6 @@
 {
   "title": "Métriques système",
-  "description": "Utilisation visible par le Runner pendant la dernière heure.",
+  "description": "Utilisation des ressources signalée par le Runtime pendant la dernière heure.",
   "loading": "Chargement des métriques du Runtime…",
   "errorTitle": "Impossible de charger les métriques du Runtime",
   "scope": "Portée : {scope}",
@@ -16,7 +16,7 @@
     "unavailable": "Indisponible",
     "unsupported": "Non pris en charge",
     "stopped": "Runtime arrêté",
-    "disconnected": "Runner déconnecté"
+    "disconnected": "Runtime déconnecté"
   },
   "metrics": {
     "cpu": "CPU",

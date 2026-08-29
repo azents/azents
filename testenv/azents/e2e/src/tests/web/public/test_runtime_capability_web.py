@@ -4,24 +4,36 @@ from dataclasses import dataclass
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
+from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import (
     LLMProviderIntegrationV1Api,
 )
 from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
+from azentspublicclient.exceptions import ApiException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
 from azentspublicclient.models.agent_model_selection_input import (
     AgentModelSelectionInput,
 )
 from azentspublicclient.models.agent_runtime_capability import AgentRuntimeCapability
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.agent_workspace_directory_response import (
+    AgentWorkspaceDirectoryResponse,
+)
+from azentspublicclient.models.agent_workspace_mkdir_request import (
+    AgentWorkspaceMkdirRequest,
+)
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
 from azentspublicclient.models.llm_provider import LLMProvider
 from azentspublicclient.models.llm_provider_integration_create_request import (
     LLMProviderIntegrationCreateRequest,
+)
+from azentspublicclient.models.runtime_provider_connection_state import (
+    RuntimeProviderConnectionState,
 )
 from azentspublicclient.models.runtime_system_metrics_summary import (
     RuntimeSystemMetricsSummary,
@@ -142,6 +154,64 @@ def _wait_for_runtime_metrics(
         )
 
     WebDriverWait(driver, 120, poll_frequency=1).until(metrics_are_ready)
+
+
+def _wait_for_runtime_ready(
+    driver: WebDriver,
+    *,
+    runtime_api: AgentRuntimeV1Api,
+    token: str,
+    handle: str,
+    agent_id: str,
+    minimum_generation: int,
+) -> None:
+    """Wait for one newer Runtime generation to regain full availability."""
+
+    def runtime_is_ready(_: WebDriver) -> bool:
+        runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=_headers(token),
+        )
+        lifecycle = runtime.lifecycle
+        return (
+            lifecycle is not None
+            and lifecycle.desired_generation >= minimum_generation
+            and lifecycle.target == "running"
+            and lifecycle.convergence == "stable"
+            and lifecycle.availability == "ready"
+            and lifecycle.provider.resource == "running"
+            and lifecycle.runner.state == "ready"
+        )
+
+    WebDriverWait(driver, 120, poll_frequency=1).until(runtime_is_ready)
+
+
+def _wait_for_runtime_start_authorized(
+    driver: WebDriver,
+    *,
+    runtime_api: AgentRuntimeV1Api,
+    token: str,
+    handle: str,
+    agent_id: str,
+) -> None:
+    """Wait for Provider observation to authorize managed host creation."""
+
+    def runtime_start_is_authorized(_: WebDriver) -> bool:
+        runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=_headers(token),
+        )
+        lifecycle = runtime.lifecycle
+        return (
+            lifecycle is not None
+            and lifecycle.provider.connection
+            is RuntimeProviderConnectionState.CONNECTED
+            and runtime.actions.start
+        )
+
+    WebDriverWait(driver, 120, poll_frequency=1).until(runtime_start_is_authorized)
 
 
 def _create_workspace(
@@ -292,10 +362,19 @@ def test_runtime_free_add_and_remove_progress(
     _assert_visible_text(browser_driver, "Temporary Runtime controls")
     _assert_visible_text(browser_driver, "Permanently remove managed Runtime")
 
+    runtime_api = AgentRuntimeV1Api(public_api_client)
+    _wait_for_runtime_start_authorized(
+        browser_driver,
+        runtime_api=runtime_api,
+        token=workspace.token,
+        handle=workspace.handle,
+        agent_id=agent.id,
+    )
+    browser_driver.refresh()
     _click_button(browser_driver, "Start")
     _wait_for_runtime_metrics(
         browser_driver,
-        runtime_api=AgentRuntimeV1Api(public_api_client),
+        runtime_api=runtime_api,
         token=workspace.token,
         handle=workspace.handle,
         agent_id=agent.id,
@@ -309,9 +388,82 @@ def test_runtime_free_add_and_remove_progress(
         ec.visibility_of_element_located(
             (
                 By.CSS_SELECTOR,
-                "[aria-label='Recent one-hour usage trend'] circle",
+                "[role='img'][aria-label='Recent one-hour usage trend']",
             )
         )
+    )
+
+    runtime_before_restart = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent.id,
+        handle=workspace.handle,
+        _headers=_headers(workspace.token),
+    )
+    assert runtime_before_restart.lifecycle is not None
+    assert runtime_before_restart.lifecycle.availability == "ready"
+    assert runtime_before_restart.runtime is not None
+    assert runtime_before_restart.runtime.workspace_path
+    prior_generation = runtime_before_restart.lifecycle.desired_generation
+    sentinel_path = (
+        f"{runtime_before_restart.runtime.workspace_path}/"
+        f".runtime-restart-sentinel-{unique()}"
+    )
+    workspace_api = ChatV1Api(public_api_client)
+    workspace_api.chat_v1_create_agent_workspace_directory(
+        agent_id=agent.id,
+        agent_workspace_mkdir_request=AgentWorkspaceMkdirRequest(
+            path=sentinel_path,
+            parents=False,
+        ),
+        _headers=_headers(workspace.token),
+    )
+    sentinel_before_restart = workspace_api.chat_v1_read_agent_workspace_path(
+        agent_id=agent.id,
+        path=sentinel_path,
+        _headers=_headers(workspace.token),
+    )
+    assert isinstance(
+        sentinel_before_restart.actual_instance,
+        AgentWorkspaceDirectoryResponse,
+    )
+
+    _assert_visible_text(browser_driver, "Runtime status")
+    _assert_visible_text(browser_driver, "Execution environment")
+    _assert_visible_text(browser_driver, "Runtime connection")
+    _assert_visible_text(browser_driver, "Host controls")
+    _click_button(browser_driver, "Restart")
+    _assert_visible_text(browser_driver, "Restart Runtime?")
+    _assert_visible_text(
+        browser_driver,
+        "The Runtime will be temporarily unavailable while it restarts.",
+    )
+    _assert_visible_text(
+        browser_driver,
+        "Agent Workspace files and preserved Runtime storage are retained.",
+    )
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//*[@role='dialog']//button[normalize-space()='Restart Runtime']",
+            )
+        )
+    ).click()
+    _wait_for_runtime_ready(
+        browser_driver,
+        runtime_api=runtime_api,
+        token=workspace.token,
+        handle=workspace.handle,
+        agent_id=agent.id,
+        minimum_generation=prior_generation + 1,
+    )
+    sentinel_after_restart = workspace_api.chat_v1_read_agent_workspace_path(
+        agent_id=agent.id,
+        path=sentinel_path,
+        _headers=_headers(workspace.token),
+    )
+    assert isinstance(
+        sentinel_after_restart.actual_instance,
+        AgentWorkspaceDirectoryResponse,
     )
 
     browser_driver.set_window_size(1440, 1000)
@@ -336,7 +488,7 @@ def test_runtime_free_add_and_remove_progress(
         ec.visibility_of_element_located(
             (
                 By.CSS_SELECTOR,
-                "[aria-label='Recent one-hour usage trend'] circle",
+                "[role='img'][aria-label='Recent one-hour usage trend']",
             )
         )
     )
@@ -352,7 +504,7 @@ def test_runtime_free_add_and_remove_progress(
         ec.visibility_of_element_located(
             (
                 By.CSS_SELECTOR,
-                "[aria-label='Recent one-hour usage trend'] circle",
+                "[role='img'][aria-label='Recent one-hour usage trend']",
             )
         )
     )
@@ -362,6 +514,10 @@ def test_runtime_free_add_and_remove_progress(
             (By.XPATH, "//*[@role='tab' and normalize-space()='Settings']")
         )
     ).click()
+    _assert_visible_text(browser_driver, "Runtime status")
+    _assert_visible_text(browser_driver, "Execution environment")
+    _assert_visible_text(browser_driver, "Runtime connection")
+    _assert_visible_text(browser_driver, "Host controls")
     _click_button(browser_driver, "Stop runtime")
     _open_metrics_tab(browser_driver)
     _assert_visible_text(browser_driver, "Runtime stopped", timeout_seconds=120)
@@ -369,14 +525,87 @@ def test_runtime_free_add_and_remove_progress(
         ec.visibility_of_element_located(
             (
                 By.CSS_SELECTOR,
-                "[aria-label='Recent one-hour usage trend'] circle",
+                "[role='img'][aria-label='Recent one-hour usage trend']",
             )
         )
+    )
+
+    stopped_runtime = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent.id,
+        handle=workspace.handle,
+        _headers=_headers(workspace.token),
+    )
+    assert stopped_runtime.lifecycle is not None
+    assert stopped_runtime.lifecycle.availability == "stopped"
+    stopped_generation = stopped_runtime.lifecycle.desired_generation
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (By.XPATH, "//*[@role='tab' and normalize-space()='Settings']")
+        )
+    ).click()
+    _click_button(browser_driver, "Start runtime")
+    _wait_for_runtime_ready(
+        browser_driver,
+        runtime_api=runtime_api,
+        token=workspace.token,
+        handle=workspace.handle,
+        agent_id=agent.id,
+        minimum_generation=stopped_generation + 1,
+    )
+    sentinel_after_stop_start = workspace_api.chat_v1_read_agent_workspace_path(
+        agent_id=agent.id,
+        path=sentinel_path,
+        _headers=_headers(workspace.token),
+    )
+    assert isinstance(
+        sentinel_after_stop_start.actual_instance,
+        AgentWorkspaceDirectoryResponse,
     )
 
     browser_driver.get(
         f"{azents_main_web_url}/w/{workspace.handle}/agents/{agent.id}/settings/runtime"
     )
+    runtime_before_reset = runtime_api.agent_runtime_v1_get_agent_runtime(
+        agent_id=agent.id,
+        handle=workspace.handle,
+        _headers=_headers(workspace.token),
+    )
+    assert runtime_before_reset.lifecycle is not None
+    reset_generation = runtime_before_reset.lifecycle.desired_generation
+    _click_button(browser_driver, "Reset")
+    _assert_visible_text(browser_driver, "Reset Runtime state?")
+    _assert_visible_text(browser_driver, "Agent Workspace data will be deleted")
+    _assert_visible_text(
+        browser_driver,
+        (
+            "Reset discards current Runtime workspace files and preserved Runtime "
+            "state, then prepares an empty Runtime. This cannot be undone."
+        ),
+    )
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.XPATH,
+                "//*[@role='dialog']//button[normalize-space()='Reset Runtime']",
+            )
+        )
+    ).click()
+    _wait_for_runtime_ready(
+        browser_driver,
+        runtime_api=runtime_api,
+        token=workspace.token,
+        handle=workspace.handle,
+        agent_id=agent.id,
+        minimum_generation=reset_generation + 1,
+    )
+    with pytest.raises(ApiException) as reset_read_error:
+        workspace_api.chat_v1_read_agent_workspace_path(
+            agent_id=agent.id,
+            path=sentinel_path,
+            _headers=_headers(workspace.token),
+        )
+    assert reset_read_error.value.status == 404
+
     _assert_visible_text(browser_driver, "Permanently remove managed Runtime")
     _click_button(browser_driver, "Remove Runtime")
     _assert_visible_text(browser_driver, "Permanently remove Runtime?")

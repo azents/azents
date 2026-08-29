@@ -1,5 +1,6 @@
 """Provider run loop contract tests."""
 
+import asyncio
 import dataclasses
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -47,6 +48,8 @@ class FakeControlClient(ProviderControlClient):
         self.commands: list[ProviderCommandEnvelope] = []
         self.completions: list[ProviderCommandCompletion] = []
         self.heartbeat_ok = True
+        self.heartbeat_interval_seconds = 20
+        self.heartbeats_changed = asyncio.Event()
 
     async def register_provider(
         self,
@@ -61,7 +64,7 @@ class FakeControlClient(ProviderControlClient):
             provider_id=registration.provider_id,
             connection_id=connection_id,
             generation=11,
-            heartbeat_interval_seconds=20,
+            heartbeat_interval_seconds=self.heartbeat_interval_seconds,
         )
 
     async def heartbeat_provider(
@@ -75,7 +78,16 @@ class FakeControlClient(ProviderControlClient):
         """Record a heartbeat."""
         del operational_diagnostics
         self.heartbeats.append((provider_id, generation))
+        self.heartbeats_changed.set()
         return self.heartbeat_ok
+
+    async def wait_for_heartbeat_count(self, expected: int) -> None:
+        """Wait until the expected heartbeat count is recorded."""
+        while len(self.heartbeats) < expected:
+            self.heartbeats_changed.clear()
+            if len(self.heartbeats) >= expected:
+                return
+            await self.heartbeats_changed.wait()
 
     async def report_provider_state(self, report: RuntimeProviderReport) -> None:
         """Record Provider observed state."""
@@ -110,6 +122,8 @@ class FakeLifecycle(RuntimeProviderLifecycle):
     fail_with: Exception | None = None
     fail_on_observe_known: Exception | None = None
     commands: list[RuntimeLifecycleCommand] = dataclasses.field(default_factory=list)
+    command_started: asyncio.Event | None = None
+    command_release: asyncio.Event | None = None
 
     async def start(self, command: RuntimeLifecycleCommand) -> RuntimeLifecycleResult:
         """Start a Runtime."""
@@ -159,6 +173,10 @@ class FakeLifecycle(RuntimeProviderLifecycle):
         if self.fail_with is not None:
             raise self.fail_with
         self.commands.append(command)
+        if self.command_started is not None:
+            self.command_started.set()
+        if self.command_release is not None:
+            await self.command_release.wait()
         return RuntimeLifecycleResult(
             command_type=command.command_type,
             report=_report(command),
@@ -233,7 +251,7 @@ async def test_process_next_command_dispatches_and_completes_success() -> None:
     assert completion.report.provider_generation == 11
     assert lifecycle.commands == [command]
     assert client.completions == [completion]
-    assert client.reports[-1].observed_state is RuntimeProviderObservedState.RUNNING
+    assert client.reports == []
 
 
 @pytest.mark.asyncio
@@ -310,6 +328,63 @@ async def test_heartbeat_rejection_is_not_silently_recovered() -> None:
 
     with pytest.raises(ProviderConnectionRejected):
         await loop.start()
+
+
+@pytest.mark.asyncio
+async def test_run_forever_heartbeats_while_command_is_blocked() -> None:
+    """A slow lifecycle command must not pause the Provider connection lease."""
+    client = FakeControlClient()
+    client.heartbeat_interval_seconds = 0
+    command_started = asyncio.Event()
+    command_release = asyncio.Event()
+    lifecycle = FakeLifecycle(
+        command_started=command_started,
+        command_release=command_release,
+    )
+    command = _command(RuntimeLifecycleCommandType.START)
+    client.commands.append(ProviderCommandEnvelope(request_id="req-1", command=command))
+    loop = _loop(client, lifecycle)
+    stop = asyncio.Event()
+
+    run_task = asyncio.create_task(loop.run_forever(stop=stop, command_block_ms=0))
+    await asyncio.wait_for(command_started.wait(), timeout=1)
+    await asyncio.wait_for(client.wait_for_heartbeat_count(2), timeout=1)
+    stop.set()
+    command_release.set()
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert lifecycle.commands == [command]
+    assert len(client.heartbeats) >= 2
+
+
+@pytest.mark.asyncio
+async def test_run_forever_propagates_heartbeat_failure_during_command() -> None:
+    """A rejected heartbeat cancels command work so the caller can reconnect."""
+    client = FakeControlClient()
+    client.heartbeat_interval_seconds = 0
+    command_started = asyncio.Event()
+    command_release = asyncio.Event()
+    lifecycle = FakeLifecycle(
+        command_started=command_started,
+        command_release=command_release,
+    )
+    client.commands.append(
+        ProviderCommandEnvelope(
+            request_id="req-1",
+            command=_command(RuntimeLifecycleCommandType.START),
+        )
+    )
+    loop = _loop(client, lifecycle)
+    stop = asyncio.Event()
+
+    run_task = asyncio.create_task(loop.run_forever(stop=stop, command_block_ms=0))
+    await asyncio.wait_for(command_started.wait(), timeout=1)
+    client.heartbeat_ok = False
+
+    with pytest.raises(ProviderConnectionRejected):
+        await asyncio.wait_for(run_task, timeout=1)
+
+    assert client.completions == []
 
 
 def _loop(

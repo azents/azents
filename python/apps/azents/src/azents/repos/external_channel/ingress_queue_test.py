@@ -240,6 +240,29 @@ async def test_claim_due_batch_refreshes_updated_at_before_dto_conversion() -> N
     session.refresh.assert_awaited_once_with(item, attribute_names=["updated_at"])
 
 
+async def test_lock_first_authoritative_item_returns_oldest_retained_trigger() -> None:
+    """Provisioning reads the first queued trigger while its owner remains locked."""
+    repository = ExternalChannelIngressQueueRepository()
+    session = _session()
+    first = _item(1)
+    first.provider = ExternalChannelProvider.DISCORD
+    first.invocation = False
+    session.scalar.return_value = first
+
+    item = await repository.lock_first_authoritative_item(
+        session,
+        owner_id="owner-1",
+    )
+
+    assert item is not None
+    assert item.id == first.id
+    assert item.provider is ExternalChannelProvider.DISCORD
+    assert item.invocation is False
+    statement = session.scalar.await_args.args[0]
+    assert statement._limit_clause.value == 1  # noqa: SLF001
+    assert statement._for_update_arg is not None  # noqa: SLF001
+
+
 async def test_mark_owner_ready_preserves_creation_invocation_for_auto_title() -> None:
     """Provisioning marks the first invocation only after Session creation commits."""
     repository = ExternalChannelIngressQueueRepository()

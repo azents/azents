@@ -73,6 +73,13 @@ class FakeReportSink:
 
     reports: list[RuntimeProviderReport] = dataclasses.field(default_factory=list)
     configuration_acknowledgements: list[bool] = dataclasses.field(default_factory=list)
+    restart_handoffs: list[RuntimeProviderReport] = dataclasses.field(
+        default_factory=list
+    )
+    report_recorded: asyncio.Event = dataclasses.field(default_factory=asyncio.Event)
+    restart_handoff_completed: asyncio.Event = dataclasses.field(
+        default_factory=asyncio.Event
+    )
 
     async def record_provider_report(
         self,
@@ -85,6 +92,16 @@ class FakeReportSink:
         self.configuration_acknowledgements.append(
             configuration_acknowledgement_allowed
         )
+        self.report_recorded.set()
+
+    async def complete_restart_handoff(
+        self,
+        report: RuntimeProviderReport,
+    ) -> bool:
+        """Record one successful correlated Restart handoff."""
+        self.restart_handoffs.append(report)
+        self.restart_handoff_completed.set()
+        return True
 
 
 @dataclasses.dataclass
@@ -92,10 +109,12 @@ class FakeObserveCompletionHandler:
     """Collect correlated successful OBSERVE completion reports."""
 
     reports: list[RuntimeProviderReport] = dataclasses.field(default_factory=list)
+    report_reconciled: asyncio.Event = dataclasses.field(default_factory=asyncio.Event)
 
     async def reconcile_observe_completion(self, report: RuntimeProviderReport) -> bool:
         """Record one eligible report."""
         self.reports.append(report)
+        self.report_reconciled.set()
         return True
 
 
@@ -374,7 +393,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
             provider_generation=accepted.register_accepted.generation,
             runtime_id="runtime-1",
             desired_generation=5,
-            command_type=RuntimeProviderCommandType.START,
+            command_type=RuntimeProviderCommandType.RESTART,
             reset_final_desired_state=None,
             payload={
                 "identity": {
@@ -397,6 +416,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
     command = await anext(stream)
     assert isinstance(result, RuntimeDispatchResult)
     assert command.provider_command.runtime_id == "runtime-1"
+    assert command.provider_command.command_type == "restart"
     assert command.provider_command.runner_image == "runner:latest"
     assert command.provider_command.transfer_endpoint == "runtime-transfer:8030"
     assert command.provider_command.runner_auth_token == "runner-token"
@@ -421,7 +441,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
             ),
         )
     )
-    await asyncio.sleep(0)
+    await sink.restart_handoff_completed.wait()
     replies = await service.read_replies(
         reply_stream_id=result.reply_stream_id,
         after_cursor=None,
@@ -431,7 +451,107 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
     assert replies[0].event.event_type is RuntimeReplyEventType.FINAL_SUCCESS
     assert "workspace_path" not in replies[0].event.payload
     assert not hasattr(sink.reports[0], "workspace_path")
+    assert sink.restart_handoffs == [sink.reports[0]]
     await _close_stream(stream)
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_keeps_only_one_command_in_flight() -> None:
+    """Control leaves later commands in coordination until completion frees a slot."""
+    request_ids = iter(("req-1", "req-2"))
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: next(request_ids),
+    )
+    servicer = _servicer(service, FakeReportSink())
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    first = await service.dispatch_provider_command(
+        _provider_command(
+            generation=accepted.register_accepted.generation,
+            command_type=RuntimeProviderCommandType.START,
+        ),
+        created_at=_now(),
+    )
+    second = await service.dispatch_provider_command(
+        _provider_command(
+            generation=accepted.register_accepted.generation,
+            command_type=RuntimeProviderCommandType.START,
+        ),
+        created_at=_now(),
+    )
+
+    relayed = await anext(stream)
+    remaining = await service.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.register_accepted.generation,
+        consumer_id="probe",
+        block_ms=0,
+    )
+    await _close_stream(stream)
+
+    assert isinstance(first, RuntimeDispatchResult)
+    assert isinstance(second, RuntimeDispatchResult)
+    assert relayed.request_id == first.request_id
+    assert remaining is not None
+    assert remaining.request_id == second.request_id
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_rejects_restart_report_for_another_runtime() -> None:
+    """A correlated Restart completion cannot hand off a different Runtime."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(store, request_id_factory=lambda: "req-1")
+    sink = FakeReportSink()
+    servicer = _servicer(service, sink)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    result = await service.dispatch_provider_command(
+        _provider_command(
+            generation=accepted.register_accepted.generation,
+            command_type=RuntimeProviderCommandType.RESTART,
+        ),
+        created_at=_now(),
+    )
+    assert isinstance(result, RuntimeDispatchResult)
+    await anext(stream)
+    report = _report_message()
+    report.runtime_id = "runtime-2"
+    await inbound.put(
+        runtime_provider_control_pb2.ProviderMessage(
+            connection_id="connection-1",
+            request_id="req-1",
+            generation=accepted.register_accepted.generation,
+            command_completion=runtime_provider_control_pb2.ProviderCommandCompletion(
+                request_id="req-1",
+                runtime_id="runtime-1",
+                generation=accepted.register_accepted.generation,
+                success=True,
+                report=report,
+                completed_at=_timestamp(_now()),
+            ),
+        )
+    )
+
+    error = await anext(stream)
+    replies = await service.read_replies(
+        reply_stream_id=result.reply_stream_id,
+        after_cursor=None,
+        limit=10,
+    )
+    await _close_stream(stream)
+
+    assert error.error.code == "INVALID_PROVIDER_COMMAND_COMPLETION"
+    assert replies == []
+    assert sink.reports == []
+    assert sink.restart_handoffs == []
 
 
 @pytest.mark.asyncio
@@ -504,9 +624,11 @@ async def test_provider_grpc_hands_only_observe_completion_to_reconciler() -> No
     )
     await inbound.put(completion)
     await inbound.put(completion)
-    await asyncio.sleep(0)
+    await handler.report_reconciled.wait()
+    duplicate_error = await anext(stream)
 
     assert len(handler.reports) == 1
+    assert duplicate_error.error.code == "INVALID_PROVIDER_COMMAND_COMPLETION"
     assert handler.reports[0].reconciliation == RuntimeProviderReconciliationEvidence(
         observations=(
             RuntimeProviderReconciliationObservation(
@@ -832,7 +954,7 @@ async def test_provider_grpc_v3_enforcement_controls_configuration_acknowledgeme
             report=report,
         )
     )
-    await asyncio.sleep(0)
+    await sink.report_recorded.wait()
     await _close_stream(stream)
 
     assert len(sink.reports) == 1
