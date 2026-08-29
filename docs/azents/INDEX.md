@@ -24,7 +24,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-26 | 28 |
 | [Scheduled Task Domain Spec](spec/domain/scheduled-task.md) | scheduled-task | - | 2026-08-21 | 8 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-27 | 99 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-29 | 100 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-28 | 75 |
 
@@ -39,9 +39,9 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-27 | 35 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 52 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 39 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 53 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 53 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 40 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 54 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-08-27 | 4 |
@@ -394,6 +394,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Slack Connection Setup and Management Requirements](requirements/slack-260722-connection-management.md) | slack-260722 | 2026-07-22 | - |
 | [Readable Slack Channel Messages Requirements](requirements/slack-260723-readable-channel-messages.md) | slack-260723 | 2026-07-23 | 2026-07-23 |
 | [External Channel Exchange File Publication Requirements](requirements/slack-260725-outbound-exchange-files.md) | slack-260725 | 2026-07-25 | 2026-07-25 |
+| [Slack Channel Work Presence and Tracker Parity Requirements](requirements/slack-260829-work-presence-parity.md) | slack-260829 | 2026-08-29 | 2026-08-29 |
 | [Multi-Agent Slack App Routing Requirements](requirements/slackapp-260725-multi-agent-routing.md) | slackapp-260725 | 2026-07-25 | 2026-07-26 |
 | [Slack Channel Control Feedback Requirements](requirements/slackops-260723-channel-control-feedback.md) | slackops-260723 | 2026-07-23 | 2026-07-23 |
 | [Stage 4 (browser/web QA) Historical Requirements Reconstruction](requirements/stage4-260410-stage4-web.md) | stage4-260410 | 2026-04-10 | 2026-04-10 |
@@ -799,6 +800,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Slack Connection Setup and Management](adr/slack-260722-connection-management.md)
 - [Readable Slack Channel Messages](adr/slack-260723-readable-channel-messages.md)
 - [External Channel Exchange File Publication](adr/slack-260725-outbound-exchange-files.md)
+- [Slack Channel Work Presence and Tracker Parity Decisions](adr/slack-260829-work-presence-parity.md)
 - [Multi-Agent Slack App Routing](adr/slackapp-260725-multi-agent-routing.md)
 - [Slack Channel Control Feedback](adr/slackops-260723-channel-control-feedback.md)
 - [Stage 4 (browser/web QA) Historical Decision Reconstruction](adr/stage4-260410-stage4-web.md)

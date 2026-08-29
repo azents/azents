@@ -41,6 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/10fa347228db_add_slack_work_presence_ownership.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/repos/scheduled_task_cycle/**
   - python/apps/azents/src/azents/resources/vfs/toolkits/scheduled/**
@@ -58,8 +59,8 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/toolkit.ts
 api_routes:
   - /toolkit/v1
-last_verified_at: 2026-08-27
-spec_version: 99
+last_verified_at: 2026-08-29
+spec_version: 100
 ---
 
 # Toolkit
@@ -721,9 +722,11 @@ Runtime abstraction is `ToolkitStateStore` and typed `ToolkitStateHandle`. `load
 External Channel uses the same storage model through a domain-specific typed store.
 Each binding owns exactly one identity in namespace `external_channel` with state name
 `channel_work:{binding_id}`. The payload contains the current or latest Channel Work
-cycle and ordered current provider projection parts. It preserves a stable
-`work_cycle_id`, validates the binding-derived identity, and uses independent
-whole-state optimistic concurrency per binding.
+cycle, nullable Slack status anchor and initiator, and ordered current provider
+projection parts. Schema version 3 preserves existing version-2 Work while adding
+those provider-presentation coordinates. It preserves a stable `work_cycle_id`,
+validates the binding-derived identity, and uses independent whole-state optimistic
+concurrency per binding.
 
 ### Session Todo State
 
@@ -813,8 +816,12 @@ Compaction preserves only unfinished work continuity: binding, provider, resourc
 label, current title, and ordered tasks. It omits state revisions, provider projection
 diagnostics, and provider-effect outcomes.
 
-Ingress creates the current work cycle and its initial Slack Activity Tracker before
-Agent execution. The tool atomically commits an optional conversational reply and
+Ingress creates the current work cycle before Agent execution and creates an initial
+Slack or Discord Activity Tracker only when that cycle is visible. Ordinary
+all-messages admission may start hidden; an explicit invocation or unfinished Todo
+publication promotes visibility monotonically. Slack native Work presence is
+independent from this Tracker policy. The tool atomically commits an optional
+conversational reply and
 an optional current-work title plus complete ordered task replacement before any
 provider call. It then executes the returned process-local provider effects in order
 and returns ordered sanitized `delivered`, `failed`, `unknown`, or `not_attempted`
@@ -866,6 +873,9 @@ without requiring a separate Toolkit setup row.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 100) — Advanced External Channel Work state to
+  schema version 3 with nullable Slack presence coordinates and made initial Slack
+  Tracker creation follow the provider-neutral visibility and promotion lifecycle.
 - **2026-08-26** (spec_version 99) — Bound Runtime prompt and Tool execution
   authority to the configuration actually served by a ready Runner, allowing current
   data-plane work through Provider control loss or a blocked future selection while

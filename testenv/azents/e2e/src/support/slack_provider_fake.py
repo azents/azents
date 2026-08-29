@@ -44,6 +44,7 @@ class FakeState:
             self.provider_team_id = "T-E2E"
             self.provider_bot_user_id = "U-BOT-E2E"
             self.granted_scopes = (
+                "assistant:write",
                 "app_mentions:read",
                 "channels:history",
                 "channels:read",
@@ -61,6 +62,10 @@ class FakeState:
                 "chat.delete": "delivered",
             }
             self.delivery_scenario_sequences: dict[str, list[str]] = {}
+            self.presence_scenarios: dict[str, str] = {
+                "assistant.threads.setStatus": "delivered",
+                "agents.sessions.setStatus": "delivered",
+            }
             self.file_scenarios: dict[str, str] = {
                 "files.info": "available",
                 "file.download": "available",
@@ -81,6 +86,7 @@ class FakeState:
             self.request_counts: dict[str, int] = {}
             self.requests: list[dict[str, object]] = []
             self.deliveries: list[dict[str, object]] = []
+            self.presence: list[dict[str, object]] = []
             self.views: list[dict[str, object]] = []
             self._transient_views: dict[str, dict[str, object]] = {}
             self.socket_connections = 0
@@ -109,6 +115,7 @@ class FakeState:
             "granted_scopes",
             "delivery_scenarios",
             "delivery_scenario_sequences",
+            "presence_scenarios",
             "file_scenarios",
             "view_scenarios",
             "files",
@@ -172,6 +179,17 @@ class FakeState:
                         )
                     typed_sequences[key] = [cast(str, item) for item in items]
                 self.delivery_scenario_sequences = typed_sequences
+            presence_scenarios = payload.get("presence_scenarios")
+            if presence_scenarios is not None:
+                if not isinstance(presence_scenarios, dict):
+                    raise ValueError("presence_scenarios must be an object.")
+                self.presence_scenarios = {
+                    str(key): str(value)
+                    for key, value in cast(
+                        dict[object, object],
+                        presence_scenarios,
+                    ).items()
+                }
             file_scenarios = payload.get("file_scenarios")
             if file_scenarios is not None:
                 if not isinstance(file_scenarios, dict):
@@ -245,6 +263,7 @@ class FakeState:
             self.request_counts = {}
             self.requests = []
             self.deliveries = []
+            self.presence = []
             self.views = []
             self._transient_views = {}
             self.uploads = {}
@@ -443,6 +462,7 @@ class FakeState:
                 "request_counts": dict(self.request_counts),
                 "requests": list(self.requests),
                 "deliveries": list(self.deliveries),
+                "presence": list(self.presence),
                 "views": list(self.views),
                 "socket": {
                     "connections": self.socket_connections,
@@ -566,6 +586,12 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return
         if operation in {"chat.postMessage", "chat.update", "chat.delete"}:
             self._delivery(operation, body)
+            return
+        if operation in {
+            "assistant.threads.setStatus",
+            "agents.sessions.setStatus",
+        }:
+            self._presence(operation, body)
             return
         if operation in {"views.open", "views.update"}:
             self._view_mutation(operation, body)
@@ -975,6 +1001,31 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         with self.state.lock:
             self.state.deliveries.append(delivery)
         self._json_response(200, {"ok": True, "ts": timestamp})
+
+    def _presence(self, operation: str, body: dict[str, object]) -> None:
+        """Record sanitized Slack Work status without retaining titles or users."""
+        with self.state.lock:
+            scenario = self.state.presence_scenarios.get(operation, "delivered")
+        if scenario == "feature_disabled":
+            self._json_response(200, {"ok": False, "error": "feature_disabled"})
+            return
+        if scenario == "missing_scope":
+            self._json_response(200, {"ok": False, "error": "missing_scope"})
+            return
+        if self._common_failure(scenario):
+            return
+        status = _optional_string(body, "status")
+        evidence: dict[str, object] = {
+            "operation": operation,
+            "channel": _optional_string(body, "channel_id"),
+            "thread_ts": _optional_string(body, "thread_ts"),
+            "desired_state": ("idle" if status in {"", "active"} else "processing"),
+            "has_initiator": _optional_string(body, "initiator_user_id") is not None,
+            "outcome": "delivered",
+        }
+        with self.state.lock:
+            self.state.presence.append(evidence)
+        self._json_response(200, {"ok": True})
 
     def _file_failure(self, scenario: str) -> bool:
         if scenario == "ambiguous":

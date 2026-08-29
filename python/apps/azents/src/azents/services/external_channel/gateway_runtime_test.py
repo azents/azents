@@ -15,6 +15,9 @@ from azents.services.external_channel.gateway_runtime import (
 from azents.services.external_channel.ingress_recovery import (
     ExternalChannelIngressRecoveryService,
 )
+from azents.services.external_channel.slack_presence_manager import (
+    SlackWorkPresenceManagerService,
+)
 from azents.services.external_channel.socket_manager import (
     SlackSocketManagerService,
 )
@@ -58,12 +61,17 @@ def _runtime(
     *,
     slack_manager: object,
     discord_manager: object,
+    presence_manager: object | None = None,
 ) -> ExternalChannelGatewayRuntime:
     return ExternalChannelGatewayRuntime(
         slack_socket_manager=cast(SlackSocketManagerService, slack_manager),
         discord_gateway_manager=cast(
             DiscordGatewayManagerService,
             discord_manager,
+        ),
+        slack_presence_manager=cast(
+            SlackWorkPresenceManagerService,
+            _WaitingManager() if presence_manager is None else presence_manager,
         ),
         ingress_recovery_service=cast(
             ExternalChannelIngressRecoveryService,
@@ -77,23 +85,27 @@ async def test_runtime_runs_both_managers_until_shutdown() -> None:
     """All required producer loops share one graceful shutdown event."""
     slack_manager = _WaitingManager()
     discord_manager = _WaitingManager()
+    presence_manager = _WaitingManager()
     shutdown_event = asyncio.Event()
     task = asyncio.create_task(
         _runtime(
             slack_manager=slack_manager,
             discord_manager=discord_manager,
+            presence_manager=presence_manager,
         ).run(shutdown_event, mark_shutting_down=lambda: None)
     )
 
     await asyncio.gather(
         slack_manager.started.wait(),
         discord_manager.started.wait(),
+        presence_manager.started.wait(),
     )
     shutdown_event.set()
     await task
 
     assert slack_manager.stopped.is_set()
     assert discord_manager.stopped.is_set()
+    assert presence_manager.stopped.is_set()
 
 
 @pytest.mark.asyncio

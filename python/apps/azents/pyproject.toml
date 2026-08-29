@@ -61,7 +61,7 @@ dependencies = [
     "azents-runtime-control",
     "websockets==15.0.1",
     "discord-py==2.7.1",
-    "slack-sdk==3.43.0",
+    "slack-sdk==3.44.0",
 ]
 
 [project.scripts]

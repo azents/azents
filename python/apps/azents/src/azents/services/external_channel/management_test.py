@@ -978,10 +978,19 @@ def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     assert "files:read" in guidance.bot_scopes
     assert "files:write" in guidance.bot_scopes
     assert "commands" in guidance.bot_scopes
+    assert "assistant:write" in guidance.bot_scopes
     assert "request_url" not in subscriptions
     assert settings["interactivity"] == {"is_enabled": True}
     features = guidance.manifest["features"]
     assert is_external_channel_projection(features)
+    assert features["agent_view"] == {
+        "agent_description": "Incident Agent powered by Azents"
+    }
+    assert features["app_home"] == {
+        "home_tab_enabled": False,
+        "messages_tab_enabled": True,
+        "messages_tab_read_only_enabled": True,
+    }
     assert features["slash_commands"] == [
         {
             "command": "/azents",

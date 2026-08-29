@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentSessionStatus,
     ExternalChannelConversationScopeKind,
-    ExternalChannelDeliveryOperation,
     ExternalChannelIngressAuthorityKind,
     ExternalChannelIngressItemState,
     ExternalChannelIngressProfile,
@@ -1196,18 +1195,14 @@ async def test_admitted_all_messages_trigger_is_invocation_with_retained_context
 
 
 @pytest.mark.parametrize(
-    ("provider", "expects_settings"),
-    [
-        (ExternalChannelProvider.SLACK, True),
-        (ExternalChannelProvider.DISCORD, False),
-    ],
+    "provider",
+    [ExternalChannelProvider.SLACK, ExternalChannelProvider.DISCORD],
 )
 async def test_explicit_followup_controls_precede_wake(
     monkeypatch: pytest.MonkeyPatch,
     provider: ExternalChannelProvider,
-    expects_settings: bool,
 ) -> None:
-    """Bound follow-ups preserve Slack settings and use only Discord Tracker."""
+    """Bound follow-ups project one Tracker before waking the Agent."""
     item = _item(
         item_id="item-1",
         trigger_key="message-1",
@@ -1228,8 +1223,7 @@ async def test_explicit_followup_controls_precede_wake(
     work_repository.ensure_active_work = AsyncMock(
         return_value=SimpleNamespace(work_cycle_id="work-followup")
     )
-    settings_plan = make_provider_effect_plan("followup-settings")
-    work_repository.prepare_direct_control = AsyncMock(return_value=settings_plan)
+    work_repository.prepare_direct_control = AsyncMock()
     progress_plan = make_provider_effect_plan("followup-progress")
     work_repository.prepare_initial_progress = AsyncMock(return_value=progress_plan)
     provider_control = MagicMock()
@@ -1272,25 +1266,7 @@ async def test_explicit_followup_controls_precede_wake(
     desired_progress = ensure_call.kwargs["desired_progress"]
     assert desired_progress.state == "checking"
     assert ensure_call.kwargs["tracker_visibility"] == "visible"
-    if expects_settings:
-        work_repository.prepare_direct_control.assert_awaited_once_with(
-            transaction,
-            connection_id="connection-1",
-            resource_id="resource-1",
-            route_id="route-1",
-            binding_id="binding-1",
-            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-            request_payload={
-                "tenant_id": "tenant-1",
-                "channel_id": "channel-1",
-                "thread_ts": "thread-1",
-                "control_kind": "binding_settings_on_demand",
-                "control_version": 3,
-            },
-            operation_seed="binding-settings:binding-1",
-        )
-    else:
-        work_repository.prepare_direct_control.assert_not_awaited()
+    work_repository.prepare_direct_control.assert_not_awaited()
     work_repository.prepare_initial_progress.assert_awaited_once_with(
         transaction,
         agent_id="agent-1",
@@ -1298,30 +1274,24 @@ async def test_explicit_followup_controls_precede_wake(
         binding_id="binding-1",
         work_cycle_id="work-followup",
     )
-    assert provider_control.attempt.await_args_list == (
-        [
-            ((settings_plan,), {}),
-            ((progress_plan,), {}),
-        ]
-        if expects_settings
-        else [((progress_plan,), {})]
-    )
+    assert provider_control.attempt.await_args_list == [((progress_plan,), {})]
     wake_dispatcher.dispatch.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
-    ("invocation", "initial_title_eligible"),
+    ("invocation", "initial_title_eligible", "tracker_visibility"),
     [
-        (False, False),
-        (True, True),
+        (False, False, "hidden"),
+        (True, True, "visible"),
     ],
 )
-async def test_non_invocation_or_new_binding_does_not_repeat_settings(
+async def test_followup_visibility_uses_explicit_invocation(
     monkeypatch: pytest.MonkeyPatch,
     invocation: bool,
     initial_title_eligible: bool,
+    tracker_visibility: str,
 ) -> None:
-    """Continuation and new-Binding ingress retain their existing controls."""
+    """Slack follow-up visibility matches the provider-neutral invocation rule."""
     item = _item(
         item_id="item-1",
         trigger_key="message-1",
@@ -1374,7 +1344,7 @@ async def test_non_invocation_or_new_binding_does_not_repeat_settings(
     work_repository.prepare_direct_control.assert_not_awaited()
     ensure_call = work_repository.ensure_active_work.await_args
     assert ensure_call is not None
-    assert ensure_call.kwargs["tracker_visibility"] == "visible"
+    assert ensure_call.kwargs["tracker_visibility"] == tracker_visibility
     wake_dispatcher.dispatch.assert_awaited_once()
 
 
@@ -1511,7 +1481,7 @@ async def test_late_discord_mention_requests_visible_tracker_promotion(
     work_repository.prepare_initial_progress.assert_awaited_once()
 
 
-async def test_duplicate_explicit_invocation_does_not_repeat_settings(
+async def test_duplicate_explicit_invocation_does_not_project_tracker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A duplicate mailbox admission cannot repeat the settings control."""
@@ -1620,10 +1590,10 @@ async def test_duplicate_discord_mention_does_not_request_tracker_promotion(
     work_repository.prepare_initial_progress.assert_not_awaited()
 
 
-async def test_settings_control_failure_does_not_gate_tracker_or_wake(
+async def test_tracker_control_failure_does_not_gate_wake(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A failed settings effect remains post-commit and non-blocking."""
+    """A failed Tracker effect remains post-commit and non-blocking."""
     item = _item(
         item_id="item-1",
         trigger_key="message-1",
@@ -1643,13 +1613,12 @@ async def test_settings_control_failure_does_not_gate_tracker_or_wake(
     work_repository.ensure_active_work = AsyncMock(
         return_value=SimpleNamespace(work_cycle_id="work-followup")
     )
-    settings_plan = make_provider_effect_plan("followup-settings")
     progress_plan = make_provider_effect_plan("followup-progress")
-    work_repository.prepare_direct_control = AsyncMock(return_value=settings_plan)
+    work_repository.prepare_direct_control = AsyncMock()
     work_repository.prepare_initial_progress = AsyncMock(return_value=progress_plan)
     provider_control = MagicMock()
     provider_control.attempt = AsyncMock(
-        side_effect=[RuntimeError("provider unavailable"), None]
+        side_effect=RuntimeError("provider unavailable")
     )
     service = _service(
         session_manager=_session_manager(transaction),
@@ -1679,10 +1648,7 @@ async def test_settings_control_failure_does_not_gate_tracker_or_wake(
 
     assert stale is False
     transaction.commit.assert_awaited_once()
-    assert provider_control.attempt.await_args_list == [
-        ((settings_plan,), {}),
-        ((progress_plan,), {}),
-    ]
+    assert provider_control.attempt.await_args_list == [((progress_plan,), {})]
     wake_dispatcher.dispatch.assert_awaited_once()
 
 

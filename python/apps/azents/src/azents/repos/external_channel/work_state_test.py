@@ -33,11 +33,13 @@ class _SeededBinding:
 def _work(binding_id: str, *, title: str | None = None) -> ChannelWorkState:
     """Build one active Work payload."""
     return ChannelWorkState(
-        schema_version=2,
+        schema_version=3,
         binding_id=binding_id,
         work_cycle_id=f"cycle-{binding_id}",
         status=ExternalChannelWorkStatus.ACTIVE,
         tracker_visibility="visible",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
         title=title,
         tasks=[],
         state_revision=1,

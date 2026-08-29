@@ -14,6 +14,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/shortcut_source.py
   - python/apps/azents/src/azents/services/external_channel/slack_http.py
   - python/apps/azents/src/azents/services/external_channel/slack_sdk_client.py
+  - python/apps/azents/src/azents/services/external_channel/slack_presence.py
+  - python/apps/azents/src/azents/services/external_channel/slack_presence_manager.py
   - python/apps/azents/src/azents/services/external_channel/slack_socket.py
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
   - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
@@ -66,7 +68,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-29
-spec_version: 53
+spec_version: 54
 ---
 
 # External Channel Provider Ingress
@@ -125,12 +127,9 @@ Slack sends HTTP callbacks to the single fixed endpoint
    input, wake, or AgentRun.
    Configured traffic resolves one effective target conversation owner and inserts or
    reuses one content-free active ingress item even when its Binding and Session do not
-   exist yet. A new
-   eligible explicit mention in an existing Slack Binding may additionally create one
-   idempotent settings entry point; ordinary traffic, Discord traffic, deployment,
-   startup, and the drain worker do not create it. Discord exposes the same existing
-   signed Binding settings capability on every visible conversational Activity
-   Tracker instead of creating a separate settings-only message.
+   exist yet. Existing-Binding invocation creates no settings-only provider control;
+   both Slack and Discord expose the signed Binding settings capability on every
+   visible conversational Activity Tracker.
    Existing-Binding admission reads Session availability without taking a Session
    row lock. The final canonical mailbox transaction conditionally transitions only
    an active, non-stopping Session to its wake state; failure rolls back the prepared
@@ -292,12 +291,14 @@ not change SDK endpoint state in production. Deterministic provider tests may ap
 explicit test-only endpoint context and must restore the SDK globals when the client
 closes.
 
-Slack Socket and Discord Gateway managers use a 45-second ownership lease renewed
-every 15 seconds by default. The deterministic E2E Gateway fixture may provide one
-paired testenv-only lease-duration and renewal-interval override. Both effective
-durations must remain non-zero after `timedelta` conversion, and renewal must remain
-strictly shorter than the lease. Without that explicit pair, production timing remains
-unchanged.
+Slack Socket, Slack Work presence, and Discord Gateway managers use 45-second
+ownership leases renewed every 15 seconds by default. Slack presence ownership is
+independent of HTTP or Socket ingress and fences every projection against the claimed
+connection configuration generation. The deterministic E2E Gateway fixture may
+provide one paired testenv-only lease-duration and renewal-interval override. Both
+effective durations must remain non-zero after `timedelta` conversion, and renewal
+must remain strictly shorter than the lease. Without that explicit pair, production
+timing remains unchanged.
 
 ## Durable Batched Conversation Ingress
 
@@ -349,9 +350,9 @@ durable queue content.
    the target Resource when needed, reuses a compatible connected Binding/active
    Session or creates one root Session, Binding, Channel Work, and initial controls,
    then records the Binding/Session on the same owner without moving its items. Slack
-   creates visible Work. Discord derives initial Tracker visibility from that queued
-   item's provider-native invocation flag; an ordinary all-messages item creates hidden
-   Work and no initial Tracker. A stopped Session, disconnected Binding, stale setting,
+   and Discord derive initial Tracker visibility from that queued item's
+   provider-native invocation flag; an ordinary all-messages item creates hidden Work
+   and no initial Tracker. A stopped Session, disconnected Binding, stale setting,
    or terminal provider result cannot become ready.
 6. A ready owner's first claim contains exactly one due item; later claims contain at
    most ten due items in queue-key order. Resolution is sequential in that order
@@ -377,12 +378,11 @@ durable queue content.
    `external_channel_message` mailbox row. Rows from one processing batch share an
    order group with contiguous sequence values following queue order and per-item
    provider-history order.
-10. When at least one newly created mailbox row belongs to Slack or to a Discord item
-   whose provider-native invocation flag is true, the transaction creates or promotes
-   the active Work as Tracker-visible and may claim its latest complete Tracker
-   snapshot. A Discord batch containing only newly created ordinary all-messages input
-   creates or retains hidden Work. Duplicate mailbox rows and context-only history do
-   not promote visibility.
+10. When at least one newly created mailbox row has a provider-native explicit
+   invocation flag, the transaction creates or promotes the active Slack or Discord
+   Work as Tracker-visible and may claim its latest complete Tracker snapshot. A batch
+   containing only newly created ordinary all-messages input creates or retains hidden
+   Work. Duplicate mailbox rows and context-only history do not promote visibility.
 11. In the same transaction, successful cursor advances, mailbox rows, retry-tail
    transitions, bounded-failure deletions, queue completion, drain-state update, and
    the existing Session runnable transition commit atomically. Retry retains the same
@@ -535,15 +535,20 @@ structured information log with only the provider and canonical provider event t
 Session reuse and idempotent retries emit no creation log. Provider tenant, channel,
 participant, message, payload, and Session identifiers are excluded.
 
-The External Channel Gateway supervises Slack Socket and Discord Gateway manager loops
-as required process dependencies. Unexpected top-level return, cancellation, or failure
-terminates the gateway instead of leaving readiness alive without one transport class.
-Customer-specific terminal configuration remains durable connection-local health and
-does not by itself make the shared gateway unready. General Agent Workers own Session
-execution and do not own persistent provider connections.
+The External Channel Gateway supervises Slack Socket, Slack Work presence, Discord
+Gateway, and ingress-recovery manager loops as required process dependencies.
+Unexpected top-level return, cancellation, or failure terminates the gateway instead
+of leaving readiness alive without one manager class. Customer-specific terminal
+configuration remains durable connection-local health and does not by itself make the
+shared gateway unready. General Agent Workers own Session execution and do not own
+persistent provider connections.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 54) — Made Slack Tracker admission follow the same
+  explicit-invocation visibility rule as Discord, removed Slack settings-only
+  follow-up controls, and added the independently leased Slack Work presence manager
+  to required Gateway supervision.
 - **2026-08-29** (spec_version 53) — Clarified that ordinary Discord all-messages
   admission may begin Tracker-hidden while either a later eligible mention or
   canonical unfinished Todo publication promotes the active Work.

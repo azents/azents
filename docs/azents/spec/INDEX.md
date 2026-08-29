@@ -21,7 +21,7 @@ Details of all living specs. Synchronized from frontmatter.
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-26 | 28 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-08-21 | 8 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-08-27 | 99 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-08-29 | 100 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-08-18 | 12 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-08-28 | 75 |
 
@@ -36,9 +36,9 @@ Details of all living specs. Synchronized from frontmatter.
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-08-27 | 35 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 52 |
-| [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 39 |
-| [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 53 |
+| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 53 |
+| [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 40 |
+| [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 54 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-08-27 | 4 |

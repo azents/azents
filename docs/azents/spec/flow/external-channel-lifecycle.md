@@ -19,6 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
   - python/apps/azents/src/azents/services/external_channel/slack_sdk_client.py
+  - python/apps/azents/src/azents/services/external_channel/slack_presence_manager.py
   - python/apps/azents/src/azents/services/external_channel/slack_socket.py
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
   - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
@@ -35,7 +36,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-29
-spec_version: 39
+spec_version: 40
 ---
 
 # External Channel Lifecycle
@@ -72,7 +73,7 @@ same mutation returns the not-found-shaped management result.
 only the current active Channel Work cycle, leaves the binding connected, and creates
 no leave-presence or Activity Tracker cleanup plan. Recorded task status does not block
 the transition, and the finished cycle no longer participates in idle continuation or
-Discord typing renewal.
+Slack Work presence or Discord typing renewal.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, commits
@@ -105,9 +106,10 @@ state.
 
 Editing a visible Slack connection replaces App ID, HTTP/Socket transport, and the
 complete submitted credential set in one operation. It clears stale provider
-identity, capability, health, lease, and gap projections and immediately validates
-the replacement configuration. No lifecycle status prevents editing a visible
-connection, and no transport fallback occurs.
+identity, capability, health, Socket lease, Work presence lease, and gap projections,
+increments the configuration generation, and immediately validates the replacement
+configuration. No lifecycle status prevents editing a visible connection, and no
+transport fallback occurs.
 
 Editing a visible Discord connection replaces the submitted Application identity,
 target Guild configuration, and complete Bot credential set in one fenced operation.
@@ -308,6 +310,9 @@ before finalization.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 40) — Added Slack Work presence lease reset to
+  configuration replacement and terminal connection cleanup, and excluded finished
+  Work from both Slack presence and Discord typing renewal.
 - **2026-08-28** (spec_version 39) — Added lifecycle removal and restart recovery
   rules for lease-fenced Discord typing targets without introducing durable typing
   state or provider stop operations.

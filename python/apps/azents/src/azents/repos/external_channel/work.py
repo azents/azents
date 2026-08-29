@@ -17,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
@@ -897,16 +898,20 @@ class ExternalChannelWorkRepository:
         binding_id: str,
         desired_progress: ExternalChannelDesiredProgress,
         tracker_visibility: Literal["hidden", "visible"],
+        slack_presence_thread_ts: str | None,
+        slack_presence_initiator_user_id: str | None,
     ) -> ChannelWorkState:
         """Create, promote, or reuse the one active Work cycle for a binding."""
 
         def new_state() -> ChannelWorkState:
             return ChannelWorkState(
-                schema_version=2,
+                schema_version=3,
                 binding_id=binding_id,
                 work_cycle_id=uuid7().hex,
                 status=ExternalChannelWorkStatus.ACTIVE,
                 tracker_visibility=tracker_visibility,
+                slack_presence_thread_ts=slack_presence_thread_ts,
+                slack_presence_initiator_user_id=(slack_presence_initiator_user_id),
                 title=desired_progress.title,
                 tasks=list(desired_progress.tasks),
                 state_revision=1,
@@ -920,16 +925,27 @@ class ExternalChannelWorkRepository:
             current: ChannelWorkState,
         ) -> ChannelWorkStateMutation[ChannelWorkState]:
             if current.status is ExternalChannelWorkStatus.ACTIVE:
-                if (
+                promote = (
                     current.tracker_visibility == "hidden"
                     and tracker_visibility == "visible"
-                ):
-                    promoted = current.model_copy(deep=True)
-                    promoted.tracker_visibility = "visible"
-                    promoted.state_revision += 1
+                )
+                fill_slack_presence = (
+                    current.slack_presence_thread_ts is None
+                    and slack_presence_thread_ts is not None
+                )
+                if promote or fill_slack_presence:
+                    updated = current.model_copy(deep=True)
+                    if promote:
+                        updated.tracker_visibility = "visible"
+                    if fill_slack_presence:
+                        updated.slack_presence_thread_ts = slack_presence_thread_ts
+                        updated.slack_presence_initiator_user_id = (
+                            slack_presence_initiator_user_id
+                        )
+                    updated.state_revision += 1
                     return ChannelWorkStateMutation(
-                        state=promoted,
-                        result=promoted,
+                        state=updated,
+                        result=updated,
                     )
                 return ChannelWorkStateMutation(
                     state=current,
@@ -1211,11 +1227,16 @@ class ExternalChannelWorkRepository:
             if mode is ExternalChannelActionMode.IGNORE:
                 raise ValueError("Ignore requires active Channel Work.")
             return ChannelWorkState(
-                schema_version=2,
+                schema_version=3,
                 binding_id=binding.id,
                 work_cycle_id=uuid7().hex,
                 status=ExternalChannelWorkStatus.ACTIVE,
                 tracker_visibility=tracker_visibility,
+                slack_presence_thread_ts=_slack_resource_thread_ts(
+                    connection.provider,
+                    resource,
+                ),
+                slack_presence_initiator_user_id=None,
                 title=None,
                 tasks=[],
                 state_revision=1,
@@ -1791,6 +1812,21 @@ def _provider_payload(
     if desired_progress_revision is not None:
         payload["desired_progress_revision"] = desired_progress_revision
     return payload
+
+
+def _slack_resource_thread_ts(
+    provider: ExternalChannelProvider,
+    resource: RDBExternalChannelResource,
+) -> str | None:
+    """Return the retained Slack Thread root for a replacement Work cycle."""
+    if (
+        provider is not ExternalChannelProvider.SLACK
+        or resource.resource_type is not ExternalChannelResourceType.THREAD
+        or resource.labels is None
+    ):
+        return None
+    value = resource.labels.get("thread_ts")
+    return value if isinstance(value, str) and value else None
 
 
 def _reply_parts(

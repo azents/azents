@@ -487,6 +487,7 @@ class ExternalChannelManagementRepository:
         connection.http_callback_selector_hash = None
         connection.encrypted_credentials = encrypted_credentials
         connection.capabilities = None
+        connection.configuration_generation += 1
         connection.status = ExternalChannelConnectionStatus.CONFIGURING
         connection.last_verified_at = None
         connection.last_health_at = None
@@ -497,6 +498,9 @@ class ExternalChannelManagementRepository:
         connection.socket_heartbeat_at = None
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
+        connection.slack_presence_lease_owner = None
+        connection.slack_presence_lease_until = None
+        connection.slack_presence_heartbeat_at = None
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return await self.get_managed_multi_connection(
@@ -1187,6 +1191,7 @@ class ExternalChannelManagementRepository:
         connection.http_callback_selector_hash = None
         connection.encrypted_credentials = encrypted_credentials
         connection.capabilities = None
+        connection.configuration_generation += 1
         connection.status = ExternalChannelConnectionStatus.CONFIGURING
         connection.last_verified_at = None
         connection.last_health_at = None
@@ -1197,6 +1202,9 @@ class ExternalChannelManagementRepository:
         connection.socket_heartbeat_at = None
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
+        connection.slack_presence_lease_owner = None
+        connection.slack_presence_lease_until = None
+        connection.slack_presence_heartbeat_at = None
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return _connection(connection, route)
@@ -2129,6 +2137,9 @@ def _reset_discord_configuration(
     connection.socket_heartbeat_at = None
     connection.socket_gap_detected_at = None
     connection.socket_gap_reason = None
+    connection.slack_presence_lease_owner = None
+    connection.slack_presence_lease_until = None
+    connection.slack_presence_heartbeat_at = None
 
 
 async def _release_discord_app_claim(

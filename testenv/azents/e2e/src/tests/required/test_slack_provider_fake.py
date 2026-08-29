@@ -136,6 +136,61 @@ def test_slack_fake_controls_membership_history_and_delivery_failure(
     assert update == {"ok": False, "error": "token_revoked"}
 
 
+def test_slack_fake_records_sanitized_channel_and_thread_presence(
+    slack_fake_url: str,
+) -> None:
+    """Expose native Work status evidence without retaining status text or users."""
+    channel = requests.post(
+        f"{slack_fake_url}/api/assistant.threads.setStatus",
+        json={
+            "channel_id": "C-E2E",
+            "thread_ts": "1721600000.000100",
+            "status": "Private work title",
+            "username": "Private Agent",
+        },
+        timeout=5,
+    )
+    thread = requests.post(
+        f"{slack_fake_url}/api/agents.sessions.setStatus",
+        json={
+            "channel_id": "C-E2E",
+            "thread_ts": "1721600000.000200",
+            "status": "processing",
+            "initiator_user_id": "U-PRIVATE",
+        },
+        timeout=5,
+    )
+
+    channel.raise_for_status()
+    thread.raise_for_status()
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    rendered = str(evidence)
+    assert evidence["presence"] == [
+        {
+            "operation": "assistant.threads.setStatus",
+            "channel": "C-E2E",
+            "thread_ts": "1721600000.000100",
+            "desired_state": "processing",
+            "has_initiator": False,
+            "outcome": "delivered",
+        },
+        {
+            "operation": "agents.sessions.setStatus",
+            "channel": "C-E2E",
+            "thread_ts": "1721600000.000200",
+            "desired_state": "processing",
+            "has_initiator": True,
+            "outcome": "delivered",
+        },
+    ]
+    assert "Private work title" not in rendered
+    assert "Private Agent" not in rendered
+    assert "U-PRIVATE" not in rendered
+
+
 def test_slack_fake_sequences_retry_after_and_blocks_exact_history(
     slack_fake_url: str,
 ) -> None:

@@ -459,7 +459,7 @@ async def test_discord_exchange_file_delivery_does_not_require_runtime_storage()
         (ExternalChannelDeliveryOperation.PROGRESS_UPDATE, "update_message"),
     ],
 )
-async def test_slack_tracker_delivery_includes_session_navigation(
+async def test_slack_tracker_delivery_includes_session_and_settings_actions(
     operation: ExternalChannelDeliveryOperation,
     method_name: str,
 ) -> None:
@@ -492,17 +492,23 @@ async def test_slack_tracker_delivery_includes_session_navigation(
     call = method.await_args
     assert call is not None
     blocks = call.kwargs["blocks"]
-    assert blocks[-1] == {
-        "type": "actions",
-        "elements": [
-            {
-                "type": "button",
-                "action_id": "view_azents_session",
-                "text": {"type": "plain_text", "text": "View session"},
-                "url": _SESSION_URL,
-            }
-        ],
+    assert blocks[-1]["type"] == "actions"
+    elements = blocks[-1]["elements"]
+    assert isinstance(elements, list)
+    assert elements[0] == {
+        "type": "button",
+        "action_id": "view_azents_session",
+        "text": {"type": "plain_text", "text": "View session"},
+        "url": _SESSION_URL,
     }
+    assert isinstance(elements[1], dict)
+    assert elements[1]["action_id"] == "azents_conversation_settings_open"
+    assert elements[1]["text"] == {
+        "type": "plain_text",
+        "text": "Conversation settings",
+    }
+    assert isinstance(elements[1]["value"], str)
+    assert elements[1]["value"]
 
 
 @pytest.mark.asyncio

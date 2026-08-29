@@ -618,6 +618,7 @@ class ScheduledTaskChannelService:
             "text": slack.text,
             "blocks": slack.blocks,
             "desired_progress_revision": desired_revision,
+            "tracker_kind": "scheduled_task",
         }
         discord_payload: dict[str, object] = {
             "text": page.text,
