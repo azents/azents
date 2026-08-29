@@ -13,6 +13,9 @@ from azents.services.external_channel.discord_gateway_manager import (
 from azents.services.external_channel.ingress_recovery import (
     ExternalChannelIngressRecoveryService,
 )
+from azents.services.external_channel.slack_presence_manager import (
+    SlackWorkPresenceManagerService,
+)
 from azents.services.external_channel.socket_manager import (
     SlackSocketManagerService,
 )
@@ -33,6 +36,10 @@ class ExternalChannelGatewayRuntime:
     discord_gateway_manager: Annotated[
         DiscordGatewayManagerService,
         Depends(DiscordGatewayManagerService),
+    ]
+    slack_presence_manager: Annotated[
+        SlackWorkPresenceManagerService,
+        Depends(SlackWorkPresenceManagerService),
     ]
     ingress_recovery_service: Annotated[
         ExternalChannelIngressRecoveryService,
@@ -55,6 +62,9 @@ class ExternalChannelGatewayRuntime:
             ),
             "Discord Gateway": asyncio.create_task(
                 self.discord_gateway_manager.run(shutdown_event)
+            ),
+            "Slack Work Presence": asyncio.create_task(
+                self.slack_presence_manager.run(shutdown_event)
             ),
             "Ingress Recovery": asyncio.create_task(
                 self.ingress_recovery_service.run(shutdown_event)

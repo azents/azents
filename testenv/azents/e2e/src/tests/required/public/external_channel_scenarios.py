@@ -1290,9 +1290,15 @@ def test_http_admission_unknown_participant_and_approval_journey(
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
+    azents_external_channel_gateway_factory: Callable[
+        [], AbstractContextManager[Container]
+    ],
 ) -> None:
     """Exercise connection setup, signed admission, dedupe, and idempotent approval."""
     del azents_engine_worker_container
+    gateway_context = azents_external_channel_gateway_factory()
+    gateway_context.__enter__()
+    request.addfinalizer(lambda: gateway_context.__exit__(None, None, None))
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
         timeout=5,
@@ -1591,7 +1597,18 @@ def test_http_admission_unknown_participant_and_approval_journey(
         if not isinstance(counts, dict):
             return None
         typed = cast(dict[str, Any], counts)
-        if typed.get("chat.postMessage") == 3 and typed.get("chat.delete") == 1:
+        presence = state.get("presence")
+        has_processing_presence = isinstance(presence, list) and any(
+            isinstance(item, dict)
+            and item.get("operation") == "agents.sessions.setStatus"
+            and item.get("desired_state") == "processing"
+            for item in cast(list[object], presence)
+        )
+        if (
+            typed.get("chat.postMessage") == 3
+            and typed.get("chat.delete") == 1
+            and has_processing_presence
+        ):
             return state
         return None
 
@@ -1625,6 +1642,14 @@ def test_http_admission_unknown_participant_and_approval_journey(
         "activity_tracker",
     ]
     assert _successful_session_presence_states(provider_state) == ["joined"]
+    assert cast(list[dict[str, object]], provider_state["presence"])[-1] == {
+        "operation": "agents.sessions.setStatus",
+        "channel": _CHANNEL_ID,
+        "thread_ts": root_timestamp,
+        "desired_state": "processing",
+        "has_initiator": True,
+        "outcome": "delivered",
+    }
     deliveries = cast(list[dict[str, object]], provider_state["deliveries"])
     assert any(
         delivery.get("session_path")
@@ -1795,6 +1820,12 @@ def test_http_admission_unknown_participant_and_approval_journey(
                     == ["left"]
                     and cast(dict[str, Any], state["request_counts"]).get("chat.delete")
                     == 1
+                    and any(
+                        isinstance(item, dict)
+                        and item.get("operation") == "agents.sessions.setStatus"
+                        and item.get("desired_state") == "idle"
+                        for item in cast(list[object], state.get("presence", []))
+                    )
                 )
                 else None
             ),
@@ -3326,13 +3357,21 @@ def test_provider_native_channel_work_progress_journey(
     actions = blocks[1]
     assert actions["type"] == "actions"
     action_elements = cast(list[dict[str, object]], actions["elements"])
-    assert len(action_elements) == 1
+    assert len(action_elements) == 2
     assert action_elements[0]["type"] == "button"
     assert action_elements[0]["action_id"] == "view_azents_session"
     assert action_elements[0]["text"] == {
         "type": "plain_text",
         "text": "View session",
     }
+    assert action_elements[1]["type"] == "button"
+    assert action_elements[1]["action_id"] == "azents_conversation_settings_open"
+    assert action_elements[1]["text"] == {
+        "type": "plain_text",
+        "text": "Conversation settings",
+    }
+    assert isinstance(action_elements[1]["value"], str)
+    assert action_elements[1]["value"]
     tasks = cast(list[dict[str, object]], plan["tasks"])
     assert [task["task_id"] for task in tasks] == [
         "inspect",

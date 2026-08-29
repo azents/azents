@@ -1754,6 +1754,14 @@ def slack_manifest_guidance(
             "description": f"{normalized_name[:60]} powered by Azents",
         },
         "features": {
+            "agent_view": {
+                "agent_description": (f"{normalized_name[:240]} powered by Azents"),
+            },
+            "app_home": {
+                "home_tab_enabled": False,
+                "messages_tab_enabled": True,
+                "messages_tab_read_only_enabled": True,
+            },
             "bot_user": {
                 "display_name": bot_name,
                 "always_online": False,

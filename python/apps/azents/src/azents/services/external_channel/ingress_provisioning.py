@@ -151,7 +151,6 @@ def _tracker_visibility(
     provider: ExternalChannelProvider,
     invocation: bool,
 ) -> Literal["hidden", "visible"]:
-    """Derive first-cycle Tracker eligibility from the queued provider trigger."""
-    if provider is ExternalChannelProvider.SLACK or invocation:
-        return "visible"
-    return "hidden"
+    """Derive first-cycle Tracker eligibility from explicit invocation."""
+    del provider
+    return "visible" if invocation else "hidden"

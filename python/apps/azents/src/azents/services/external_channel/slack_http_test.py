@@ -850,8 +850,8 @@ async def test_auth_test_derives_optional_internal_capabilities_independently(
 ) -> None:
     """Optional scopes never gate unrelated text connection behavior."""
     required_scopes = (
-        "app_mentions:read,channels:history,channels:read,groups:history,"
-        "groups:read,chat:write,commands,users:read"
+        "assistant:write,app_mentions:read,channels:history,channels:read,"
+        "groups:history,groups:read,chat:write,commands,users:read"
     )
 
     def handler(request: httpx.Request) -> httpx.Response:

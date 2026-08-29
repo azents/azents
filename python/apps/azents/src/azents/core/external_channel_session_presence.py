@@ -150,21 +150,6 @@ def setup_required_payload(
     return payload
 
 
-def binding_settings_on_demand_payload(
-    labels: dict[str, object] | None,
-) -> dict[str, object]:
-    """Build one provider target for settings requested by a new mention."""
-    payload = session_presence_payload(labels, state="joined")
-    payload.pop("presence_state")
-    payload.update(
-        {
-            "control_kind": "binding_settings_on_demand",
-            "control_version": 3,
-        }
-    )
-    return payload
-
-
 def session_presence_sentence(
     agent_name: str,
     state: ExternalChannelSessionPresenceState,

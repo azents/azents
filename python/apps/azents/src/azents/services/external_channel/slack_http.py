@@ -58,6 +58,7 @@ SLACK_SELECTOR_VIEW_CALLBACK_ID = "azents_agent_selector"
 SLACK_SCHEDULED_TASK_EDIT_VIEW_CALLBACK_ID = "azents_scheduled_task_edit"
 _MAX_SLACK_SCHEDULED_TASK_EDIT_METADATA_LENGTH = 512
 SLACK_REQUIRED_BOT_SCOPES = (
+    "assistant:write",
     "app_mentions:read",
     "channels:history",
     "channels:read",

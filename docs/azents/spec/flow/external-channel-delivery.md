@@ -26,6 +26,9 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_delivery.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
+  - python/apps/azents/src/azents/services/external_channel/slack_presence.py
+  - python/apps/azents/src/azents/services/external_channel/slack_presence_manager.py
+  - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
   - python/apps/azents/src/azents/services/external_channel/discord_presentation.py
   - python/apps/azents/src/azents/services/external_channel/thread_title.py
   - python/apps/azents/src/azents/services/session_title.py
@@ -41,7 +44,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-29
-spec_version: 52
+spec_version: 53
 ---
 
 # External Channel Delivery and Channel Work
@@ -285,10 +288,10 @@ Session title and Agent execution.
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
 - Releasing new conversational input while a binding has no unanswered work creates a
-  Channel Work cycle before Session wake-up. Slack cycles are Tracker-visible. Discord
-  cycles are visible for an eligible explicit invocation and hidden for an ordinary
-  message admitted by an existing all-messages Binding. Initial checking visibility
-  does not depend on a `channel_action` call.
+  Channel Work cycle before Session wake-up. Slack and Discord cycles are visible for
+  an eligible explicit invocation and hidden for an ordinary message admitted by an
+  existing all-messages Binding. Initial checking visibility does not depend on a
+  `channel_action` call.
 - Initial binding acceptance separately creates one Session presence control and the
   eligible initial Activity Tracker plan in the same transaction as the triggering
   mailbox input. Every Binding creation is mention-gated, so its initial cycle is
@@ -311,14 +314,15 @@ Session title and Agent execution.
   Nested tasks use `task_id`, literal title, Slack status, and optional literal
   rich-text details/output plus labeled URL sources. They omit standalone
   `task_card` block types. The Plan sends no `plan_id`, is read-only, and requires
-  no Slack interaction callback. Initial creation and every complete update append
-  one Block Kit `View session` action derived from the current provider target's
-  canonical Workspace, Agent, and Session identity.
+  no Slack interaction callback. Initial creation and every complete conversational
+  update append Block Kit `View session` and signed Binding-scoped
+  `Conversation settings` actions derived from current canonical authority. Scheduled
+  Task Trackers omit the conversation settings action.
 - Task or title changes update the retained provider message with the complete
   latest Block Kit payload through `chat.update`. A revision-derived provider-only
   `block_id` changes for each message iteration. Slack Agent streaming methods are
   not used.
-- Hidden Discord Work commits initial checking state without a Tracker. A valid
+- Hidden Slack or Discord Work commits initial checking state without a Tracker. A valid
   Agent-authored `continue` transition with at least one unfinished task promotes the
   same cycle to visible inside the canonical Work mutation and plans a create from the
   complete title and ordered task snapshot. A later eligible mention also promotes
@@ -344,14 +348,10 @@ Session title and Agent execution.
   `Conversation settings` action from the current Binding. Scheduled Task Trackers
   retain only Session navigation and task controls. Update, delete, replacement, and
   final-reply cleanup use the same Work-owned Tracker identity and revision fence.
-- An eligible Slack explicit mention in an existing connected Binding may create one
-  idempotent version-3 settings control for that Binding. The control contains only
-  provider-native `Conversation settings`, does not repeat joined presence or rewrite
-  provider history, and is never created by deployment, startup, connection
-  activation, or periodic background work. Discord does not create this separate
-  control; every visible conversational Discord Tracker is the recurring settings
-  entry point. Initial hidden Discord checking Work creates neither surface; canonical
-  unfinished Todo publication or an eligible explicit invocation promotes the Tracker.
+- Slack and Discord create no separate settings-only follow-up control. Every visible
+  conversational Tracker is the recurring signed settings entry point. Initial hidden
+  checking Work creates neither Tracker nor settings surface; canonical unfinished Todo
+  publication or an eligible explicit invocation promotes the Tracker.
 - A first eligible mention with no participation setting creates the setup claim and
   one immediate setup-control plan before Session or AgentRun creation. Slack opens the authenticated
   parent-scoped location selector. Discord posts `Answer in this channel` and
@@ -414,6 +414,29 @@ State and desired-progress revision counters remain diagnostic metadata and are 
 compared as one sequence. A failed or unknown projection never replaces canonical
 Channel Work state. Intentionally hidden Work with no projection part reports `none`
 rather than `missing`; its canonical desired progress remains readable.
+
+## Slack Work Presence
+
+Every active Slack conversational Work requests provider-native presence regardless of
+Tracker visibility. A dedicated Gateway manager claims one independent lease per active
+Slack connection, decrypts only that connection's current Bot credential, and fences
+target projection and renewal by the captured configuration generation.
+
+Parent-channel Work uses public `assistant_threads_setStatus` at the first trigger
+message retained for the cycle, with a bounded checking or work title and periodic
+refresh before provider expiry. Exact-thread Work uses public
+`agents_sessions_setStatus` at the retained root: active Work sends `processing` with
+the first initiating participant, while finished or unavailable Work restores
+`active`. These coordinates are presentation metadata only and never change Resource,
+Binding, Session, history, or reply targeting.
+
+The manager compares canonical targets with process-local delivered observations,
+retries failed or ambiguous mutations only on later reconciliation, clears removed
+active observations, and applies retained finished idle state once after ownership
+handover. Lease loss, configuration replacement, disconnect, or shutdown stops the
+owned loop; a graceful current owner best-effort clears observed active state before
+release. Provider outcomes are sanitized and never mutate Work, connection health,
+Tracker state, or reply delivery.
 
 ## Discord Typing Presence
 
@@ -496,6 +519,10 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 53) — Added leased Slack channel/thread Work presence,
+  aligned Slack Tracker visibility and promotion with Discord, moved recurring
+  conversation settings onto visible Slack Trackers, and removed settings-only
+  follow-up controls without changing Scheduled Task actions or reply targeting.
 - **2026-08-29** (spec_version 52) — Made unfinished Todo publication promote hidden
   Discord Work and create its current Tracker, while preserving hidden initial
   checking, one Tracker identity, typing, Slack, and Scheduled Task behavior.

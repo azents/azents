@@ -240,7 +240,8 @@ async def test_prepare_classifies_non_utf8_encrypted_credentials() -> None:
     [
         (ExternalChannelProvider.DISCORD, False, "hidden"),
         (ExternalChannelProvider.DISCORD, True, "visible"),
-        (ExternalChannelProvider.SLACK, False, "visible"),
+        (ExternalChannelProvider.SLACK, False, "hidden"),
+        (ExternalChannelProvider.SLACK, True, "visible"),
     ],
 )
 async def test_complete_uses_caller_transaction(

@@ -20,6 +20,7 @@ from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
+    ExternalChannelResourceType,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
@@ -71,11 +72,13 @@ def _work(
     projection_parts: list[ChannelWorkProjectionPartState] | None = None,
 ) -> ChannelWorkState:
     return ChannelWorkState(
-        schema_version=2,
+        schema_version=3,
         binding_id="binding-1",
         work_cycle_id="work-1",
         status=ExternalChannelWorkStatus.ACTIVE,
         tracker_visibility=tracker_visibility,
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
         title="Working…" if desired else None,
         tasks=[],
         state_revision=2,
@@ -370,11 +373,13 @@ async def test_initial_progress_is_claimed_once_per_active_work(
 ) -> None:
     """Repeated admissions cannot create another Tracker for the same active Work."""
     work = ChannelWorkState(
-        schema_version=2,
+        schema_version=3,
         binding_id="binding-1",
         work_cycle_id="work-1",
         status=ExternalChannelWorkStatus.ACTIVE,
         tracker_visibility="visible",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
         title=None,
         tasks=[],
         state_revision=1,
@@ -506,6 +511,8 @@ async def test_ensure_active_work_promotes_hidden_work_monotonically() -> None:
         binding_id="binding-1",
         desired_progress=progress,
         tracker_visibility="hidden",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
     )
     hidden_work_cycle_id = hidden.work_cycle_id
     hidden_state_revision = hidden.state_revision
@@ -518,6 +525,8 @@ async def test_ensure_active_work_promotes_hidden_work_monotonically() -> None:
         binding_id="binding-1",
         desired_progress=progress,
         tracker_visibility="hidden",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
     )
     assert repeated_hidden == hidden
 
@@ -528,6 +537,8 @@ async def test_ensure_active_work_promotes_hidden_work_monotonically() -> None:
         binding_id="binding-1",
         desired_progress=progress,
         tracker_visibility="visible",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
     )
     assert promoted.work_cycle_id == hidden_work_cycle_id
     assert promoted.tracker_visibility == "visible"
@@ -542,6 +553,8 @@ async def test_ensure_active_work_promotes_hidden_work_monotonically() -> None:
         binding_id="binding-1",
         desired_progress=progress,
         tracker_visibility="hidden",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
     )
     assert repeated_visible == promoted
     state_store.update.assert_awaited()
@@ -584,6 +597,8 @@ async def test_ensure_active_work_uses_requested_visibility_for_new_cycle() -> N
         binding_id="binding-1",
         desired_progress=checking_progress(),
         tracker_visibility="hidden",
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
     )
 
     assert replacement.work_cycle_id != finished.work_cycle_id
@@ -1015,6 +1030,7 @@ async def test_continue_after_finished_work_with_tasks_is_visible(
     )
     resource = SimpleNamespace(
         id="resource-1",
+        resource_type=ExternalChannelResourceType.THREAD,
         labels={
             "channel_id": "channel-1",
             "thread_ts": "1.000001",

@@ -504,10 +504,8 @@ async def _accepted_control_plan_case(
     )
     work = SimpleNamespace(work_cycle_id="work-1")
     presence_plan = make_provider_effect_plan("joined-presence")
-    settings_plan = make_provider_effect_plan("binding-settings")
     progress_plan = make_provider_effect_plan("initial-progress")
     presence_intent = AsyncMock(return_value=presence_plan)
-    settings_intent = AsyncMock(return_value=settings_plan)
 
     store._lock_authority = AsyncMock(return_value=connection)
     repository.lock_conversation_position = AsyncMock(return_value=position)
@@ -527,7 +525,6 @@ async def _accepted_control_plan_case(
     )
     work_repository.ensure_active_work = AsyncMock(return_value=work)
     store._create_session_presence_intent = presence_intent
-    store._create_binding_settings_on_demand_intent = settings_intent
     store._create_initial_progress_intent = AsyncMock(return_value=progress_plan)
     repository.advance_conversation_position_if_current = AsyncMock(return_value=True)
     store._initialize_thread_position = AsyncMock()
@@ -550,9 +547,7 @@ async def _accepted_control_plan_case(
         acceptance=acceptance,
         work_repository=work_repository,
         presence_intent=presence_intent,
-        settings_intent=settings_intent,
         presence_plan=presence_plan,
-        settings_plan=settings_plan,
         progress_plan=progress_plan,
         repository=repository,
         agent_session_repository=store.agent_session_repository,
@@ -574,22 +569,19 @@ async def test_new_binding_admission_includes_joined_presence() -> None:
     assert call["binding_id"] == "binding-1"
     assert call["desired_progress"].state == "checking"
     assert call["tracker_visibility"] == "visible"
+    assert call["slack_presence_thread_ts"] == "thread-1"
+    assert call["slack_presence_initiator_user_id"] == "participant-1"
     case.presence_intent.assert_awaited_once()
-    case.settings_intent.assert_not_awaited()
     case.agent_session_repository.lock_by_id.assert_not_awaited()
     case.agent_session_repository.admit_input_wakeup.assert_awaited_once()
 
 
 async def test_existing_binding_admission_excludes_joined_presence() -> None:
-    """An existing Binding mention returns settings and progress without joined."""
+    """An existing Binding mention returns only its normal Tracker plan."""
     case = await _accepted_control_plan_case(existing_binding=True)
 
-    assert case.acceptance.control_plans == (
-        case.settings_plan,
-        case.progress_plan,
-    )
+    assert case.acceptance.control_plans == (case.progress_plan,)
     case.presence_intent.assert_not_awaited()
-    case.settings_intent.assert_awaited_once()
 
 
 async def test_existing_discord_binding_uses_tracker_without_settings_message() -> None:
@@ -601,13 +593,13 @@ async def test_existing_discord_binding_uses_tracker_without_settings_message() 
 
     assert case.acceptance.control_plans == (case.progress_plan,)
     case.presence_intent.assert_not_awaited()
-    case.settings_intent.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
     ("provider", "invocation", "tracker_visibility"),
     [
-        (ExternalChannelProvider.SLACK, False, "visible"),
+        (ExternalChannelProvider.SLACK, False, "hidden"),
+        (ExternalChannelProvider.SLACK, True, "visible"),
         (ExternalChannelProvider.DISCORD, False, "hidden"),
         (ExternalChannelProvider.DISCORD, True, "visible"),
     ],
@@ -617,7 +609,7 @@ async def test_admission_derives_tracker_visibility_from_provider_invocation(
     invocation: bool,
     tracker_visibility: str,
 ) -> None:
-    """Discord all-messages input starts hidden until an explicit invocation."""
+    """Ordinary all-messages input starts hidden until explicit invocation."""
     case = await _accepted_control_plan_case(
         existing_binding=True,
         provider=provider,
@@ -644,7 +636,6 @@ async def test_existing_binding_admission_rejects_a_stopping_session() -> None:
     )
     case.work_repository.ensure_active_work.assert_not_awaited()
     case.presence_intent.assert_not_awaited()
-    case.settings_intent.assert_not_awaited()
     case.agent_session_repository.admit_input_wakeup.assert_not_awaited()
 
 
@@ -691,10 +682,12 @@ async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> 
         agent_session_id="session-1",
     )
     work = ChannelWorkState(
-        schema_version=2,
+        schema_version=3,
         binding_id=binding.id,
         work_cycle_id="work-cycle-1",
         status=ExternalChannelWorkStatus.ACTIVE,
+        slack_presence_thread_ts=None,
+        slack_presence_initiator_user_id=None,
         title=None,
         tasks=[],
         state_revision=1,
@@ -782,49 +775,6 @@ async def test_session_presence_intent_replaces_open_session_control() -> None:
         "control_kind": "session_presence",
         "control_version": 2,
         "presence_state": "joined",
-        "tenant_id": "tenant-1",
-        "channel_id": "channel-1",
-        "thread_ts": "thread-1",
-    }
-
-
-async def test_existing_binding_settings_intent_is_on_demand_and_versioned() -> None:
-    """The next eligible mention creates one non-rollout settings entry point."""
-    repository = MagicMock()
-    work_repository = MagicMock()
-    plan = make_provider_effect_plan("binding-settings")
-    work_repository.prepare_direct_control = AsyncMock(return_value=plan)
-    store = _store(repository=repository, work_repository=work_repository)
-    resource = ExternalChannelResource.model_construct(
-        id="resource-1",
-        connection_id="connection-1",
-        labels={
-            "provider": "slack",
-            "tenant_id": "tenant-1",
-            "channel_id": "channel-1",
-            "thread_ts": "thread-1",
-        },
-    )
-    binding = ExternalChannelBinding.model_construct(
-        id="binding-1",
-        resource_id=resource.id,
-        route_id="route-1",
-    )
-
-    result = await store._create_binding_settings_on_demand_intent(
-        cast(AsyncSession, MagicMock()),
-        resource=resource,
-        binding=binding,
-    )
-
-    assert result == plan
-    call = work_repository.prepare_direct_control.await_args
-    assert call is not None
-    call = call.kwargs
-    assert call["binding_id"] == "binding-1"
-    assert call["request_payload"] == {
-        "control_kind": "binding_settings_on_demand",
-        "control_version": 3,
         "tenant_id": "tenant-1",
         "channel_id": "channel-1",
         "thread_ts": "thread-1",

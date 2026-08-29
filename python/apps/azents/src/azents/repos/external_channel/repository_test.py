@@ -300,6 +300,8 @@ async def _create_discord_gateway_typing_binding(
                 work_cycle_id=work_cycle_id,
                 status=work_status,
                 tracker_visibility=tracker_visibility,
+                slack_presence_thread_ts=None,
+                slack_presence_initiator_user_id=None,
                 title=None,
                 tasks=[],
                 state_revision=1,
@@ -1290,6 +1292,80 @@ class TestExternalChannelRepository:
         assert recovered is not None
         assert recovered.status is ExternalChannelConnectionStatus.ACTIVE
         assert recovered.socket_gap_reason is None
+
+
+async def test_slack_presence_lease_is_configuration_fenced(
+    rdb_session: AsyncSession,
+) -> None:
+    """Only the current generation owner can renew or project Slack presence."""
+    workspace_id = await _create_workspace(
+        rdb_session,
+        "slack-presence-lease",
+    )
+    repository = ExternalChannelRepository()
+    connection = await repository.create_connection(
+        rdb_session,
+        _connection_create(workspace_id),
+    )
+
+    assert await repository.list_slack_presence_connection_ids(rdb_session) == [
+        connection.id
+    ]
+    claimed = await repository.claim_slack_presence_connection(
+        rdb_session,
+        connection_id=connection.id,
+        lease_owner="presence-manager",
+        now=_at(1),
+        lease_until=_at(10),
+    )
+
+    assert claimed is not None
+    stale_generation = claimed.configuration_generation + 1
+    assert (
+        await repository.renew_slack_presence_lease(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="presence-manager",
+            required_configuration_generation=stale_generation,
+            now=_at(2),
+            lease_until=_at(11),
+        )
+        is False
+    )
+    assert (
+        await repository.list_owned_slack_work_presence_targets(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="presence-manager",
+            required_configuration_generation=stale_generation,
+            now=_at(2),
+        )
+        is None
+    )
+    assert (
+        await repository.list_owned_slack_work_presence_targets(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="presence-manager",
+            required_configuration_generation=claimed.configuration_generation,
+            now=_at(2),
+        )
+        == ()
+    )
+    assert await repository.renew_slack_presence_lease(
+        rdb_session,
+        connection_id=connection.id,
+        lease_owner="presence-manager",
+        required_configuration_generation=claimed.configuration_generation,
+        now=_at(2),
+        lease_until=_at(11),
+    )
+    assert await repository.release_slack_presence_lease(
+        rdb_session,
+        connection_id=connection.id,
+        lease_owner="presence-manager",
+        now=_at(3),
+    )
 
 
 async def test_create_agent_route_enforces_mode_and_workspace_boundaries(

@@ -143,6 +143,22 @@ class DiscordGatewayTypingTarget:
     work_cycle_ids: tuple[str, ...]
 
 
+@dataclasses.dataclass(frozen=True)
+class SlackWorkPresenceTarget:
+    """One desired Slack Work presence projection."""
+
+    binding_id: str
+    work_cycle_id: str
+    kind: Literal["channel_loading", "thread_agent"]
+    desired_state: Literal["processing", "idle"]
+    channel_id: str
+    thread_ts: str
+    initiator_user_id: str | None
+    status_text: str | None
+    agent_name: str
+    customize_messages: bool
+
+
 class ExternalChannelConversationPosition(_Record):
     """Durable provider-history read position for one conversation scope."""
 

@@ -35,8 +35,7 @@ from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
 from azents.core.slack_external_channel_progress import (
-    render_slack_binding_settings_on_demand,
-    render_slack_session_navigation_actions,
+    render_slack_session_actions,
     render_slack_session_presence,
     render_slack_setup_required,
 )
@@ -1106,7 +1105,12 @@ class ExternalChannelActionService:
                 if not isinstance(text, str) or blocks is None or context is None:
                     return _invalid_payload()
                 blocks.append(
-                    render_slack_session_navigation_actions(context.session_url)
+                    _slack_progress_actions(
+                        target=target,
+                        channel_id=channel_id,
+                        session_url=context.session_url,
+                        jwt_secret=self.config.auth.jwt.secret_key,
+                    )
                 )
                 return await self.slack_client.post_blocks(
                     bot_token=bot_token,
@@ -1133,7 +1137,12 @@ class ExternalChannelActionService:
                 ):
                     return _invalid_payload()
                 blocks.append(
-                    render_slack_session_navigation_actions(context.session_url)
+                    _slack_progress_actions(
+                        target=target,
+                        channel_id=channel_id,
+                        session_url=context.session_url,
+                        jwt_secret=self.config.auth.jwt.secret_key,
+                    )
                 )
                 return await self.slack_client.update_message(
                     bot_token=bot_token,
@@ -1225,37 +1234,6 @@ class ExternalChannelActionService:
                     secret=self.config.auth.jwt.secret_key,
                     connection_id=target.connection_id,
                     provider_parent_channel_id=channel_id,
-                ),
-            )
-            return await self.slack_client.post_blocks(
-                bot_token=bot_token,
-                tenant_id=tenant_id,
-                channel_id=channel_id,
-                thread_ts=thread_ts,
-                text=control.text,
-                blocks=control.blocks,
-                icon_url=None,
-            )
-        if control_kind == "binding_settings_on_demand":
-            context = _session_navigation_context(
-                target,
-                web_url=self.config.web_url,
-            )
-            if (
-                context is None
-                or target.resource_id is None
-                or target.binding_id is None
-            ):
-                return _invalid_payload()
-            control = render_slack_binding_settings_on_demand(
-                agent_name=context.agent_name,
-                settings_action_id=SLACK_SETTINGS_OPEN_ACTION_ID,
-                settings_action_value=build_slack_settings_locator(
-                    secret=self.config.auth.jwt.secret_key,
-                    connection_id=target.connection_id,
-                    provider_parent_channel_id=channel_id,
-                    resource_id=target.resource_id,
-                    binding_id=target.binding_id,
                 ),
             )
             return await self.slack_client.post_blocks(
@@ -1694,6 +1672,35 @@ def _session_navigation_context(
     return _SessionNavigationContext(
         agent_name=target.agent_name,
         session_url=session_url,
+    )
+
+
+def _slack_progress_actions(
+    *,
+    target: ProviderTarget,
+    channel_id: str,
+    session_url: str,
+    jwt_secret: str,
+) -> dict[str, object]:
+    """Render Slack Tracker controls from exact current target authority."""
+    if target.request_payload.get("tracker_kind") == "scheduled_task":
+        return render_slack_session_actions(
+            session_url=session_url,
+            settings_action_id=None,
+            settings_action_value=None,
+        )
+    if target.resource_id is None or target.binding_id is None:
+        raise ValueError("Conversational Slack Tracker authority is incomplete.")
+    return render_slack_session_actions(
+        session_url=session_url,
+        settings_action_id=SLACK_SETTINGS_OPEN_ACTION_ID,
+        settings_action_value=build_slack_settings_locator(
+            secret=jwt_secret,
+            connection_id=target.connection_id,
+            provider_parent_channel_id=channel_id,
+            resource_id=target.resource_id,
+            binding_id=target.binding_id,
+        ),
     )
 
 

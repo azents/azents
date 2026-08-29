@@ -28,7 +28,7 @@ from azents.repos.toolkit_state.data import ToolkitStateUpsert
 
 EXTERNAL_CHANNEL_TOOLKIT_STATE_NAMESPACE = "external_channel"
 CHANNEL_WORK_STATE_NAME_PREFIX = "channel_work:"
-CHANNEL_WORK_STATE_SCHEMA_VERSION = 2
+CHANNEL_WORK_STATE_SCHEMA_VERSION = 3
 
 
 class ChannelWorkProjectionPartState(BaseModel):
@@ -47,11 +47,13 @@ class ChannelWorkState(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal[2]
+    schema_version: Literal[3]
     binding_id: str = Field(min_length=1)
     work_cycle_id: str = Field(min_length=1)
     status: ExternalChannelWorkStatus
     tracker_visibility: Literal["hidden", "visible"]
+    slack_presence_thread_ts: str | None
+    slack_presence_initiator_user_id: str | None
     title: str | None
     tasks: list[ExternalChannelWorkTask]
     state_revision: int = Field(ge=1)
