@@ -12,7 +12,7 @@ import urllib.request
 from base64 import b64encode, urlsafe_b64encode
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar, NamedTuple
+from typing import ClassVar, NamedTuple, Protocol, runtime_checkable
 from urllib.parse import parse_qs, urlsplit
 
 _PROMPT = "Provider image generation handoff"
@@ -57,6 +57,15 @@ class _DynamicWorktreeScenario(NamedTuple):
     operation: str
     path: str
     force: bool
+
+
+@runtime_checkable
+class _ChunkReadable(Protocol):
+    """Response stream that exposes a non-blocking buffered chunk read."""
+
+    def read1(self, size: int = -1) -> bytes:
+        """Read at most one buffered chunk."""
+        ...
 
 
 def _object(value: object) -> dict[str, object]:
@@ -3170,7 +3179,12 @@ class _Handler(BaseHTTPRequestHandler):
                     self.send_header(key, value)
             self.send_header("Connection", "close")
             self.end_headers()
-            while chunk := response.read(64 * 1024):
+            read_chunk = (
+                response.read1
+                if isinstance(response, _ChunkReadable)
+                else response.read
+            )
+            while chunk := read_chunk(64 * 1024):
                 self.wfile.write(chunk)
                 self.wfile.flush()
         finally:
