@@ -719,6 +719,7 @@ class FakeState:
         file_bytes: int = 0,
         safe_category: str | None = None,
         session_path: str | None = None,
+        action_ids: list[str] | None = None,
     ) -> None:
         """Record sanitized provider mutation evidence."""
         delivery: dict[str, object] = {
@@ -735,6 +736,8 @@ class FakeState:
             delivery["safe_category"] = safe_category
         if session_path is not None:
             delivery["session_path"] = session_path
+        if action_ids:
+            delivery["action_ids"] = action_ids
         with self.lock:
             self.deliveries.append(delivery)
 
@@ -1672,6 +1675,11 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             session_path=(
                 _session_path(arguments) if operation != "delete_message" else None
             ),
+            action_ids=(
+                _session_action_ids(arguments)
+                if operation != "delete_message"
+                else None
+            ),
         )
         self.state.record_operation(
             "message",
@@ -2239,7 +2247,42 @@ def _session_navigation_category(body: dict[str, object]) -> str | None:
     presence_category = _session_presence_category(body)
     if presence_category is not None:
         return presence_category
-    return "activity_tracker" if _session_path(body) is not None else None
+    if _session_path(body) is not None:
+        return "activity_tracker"
+    if _session_action_ids(body) == ["azents_conversation_settings_open"]:
+        return "conversation_settings"
+    return None
+
+
+def _session_action_ids(body: dict[str, object]) -> list[str]:
+    """Return sanitized action roles without retaining signed component IDs."""
+    components = body.get("components")
+    if not isinstance(components, list):
+        return []
+    action_ids: list[str] = []
+    for raw_row in components:
+        if not isinstance(raw_row, dict):
+            continue
+        row_components = raw_row.get("components")
+        if not isinstance(row_components, list):
+            continue
+        for raw_component in row_components:
+            if not isinstance(raw_component, dict):
+                continue
+            url = raw_component.get("url")
+            if isinstance(url, str) and _session_path(
+                {"components": [{"components": [raw_component]}]}
+            ):
+                action_ids.append("view_azents_session")
+                continue
+            custom_id = raw_component.get("custom_id")
+            if (
+                isinstance(custom_id, str)
+                and custom_id.startswith("a:")
+                and raw_component.get("label") == "Conversation settings"
+            ):
+                action_ids.append("azents_conversation_settings_open")
+    return action_ids
 
 
 def _multipart_file_evidence(raw_body: bytes) -> _MultipartFileEvidence:

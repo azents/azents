@@ -679,7 +679,11 @@ class ExternalChannelMailboxIngestionStore:
                     resource=conversation.resource,
                     binding=binding,
                 )
-                if existing_binding and request.locator.invocation
+                if (
+                    existing_binding
+                    and request.locator.invocation
+                    and request.locator.provider is ExternalChannelProvider.SLACK
+                )
                 else None
             )
             progress_id = await self._create_initial_progress_intent(

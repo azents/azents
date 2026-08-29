@@ -39,9 +39,9 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-27 | 35 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 50 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 51 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 39 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 51 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 52 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-08-27 | 4 |
@@ -152,6 +152,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Discord Bot Role Mention Invocation Requirements](requirements/discord-260802-bot-role-mention-invocation.md) | discord-260802 | 2026-08-02 | - |
 | [Discord Thread Automatic Archive Duration Requirements](requirements/discord-260820-thread-auto-archive-duration.md) | discord-260820 | 2026-08-20 | 2026-08-20 |
 | [Discord Quiet Work Presence Requirements](requirements/discord-260828-quiet-work-presence.md) | discord-260828 | 2026-08-28 | 2026-08-28 |
+| [Discord Activity Tracker Conversation Settings Access Requirements](requirements/discord-260829-tracker-settings-access.md) | discord-260829 | 2026-08-29 | 2026-08-29 |
 | [Shared Development Snapshot Identifier Requirements](requirements/docids-260721-shared-development-snapshot-identifiers.md) | docids-260721 | 2026-07-21 | 2026-07-21 |
 | [DockerAgentHomeClient sandbox-daemon Sidecar Historical Requirements Reconstruction](requirements/docker-260409-docker-home-sidecar.md) | docker-260409 | 2026-04-09 | 2026-04-09 |
 | [Introduce system Docker Sandbox Provider Historical Requirements Reconstruction](requirements/docker-260523-docker-sandbox.md) | docker-260523 | 2026-05-23 | 2026-05-23 |
@@ -555,6 +556,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Discord Bot Role Mention Invocation](adr/discord-260802-bot-role-mention-invocation.md)
 - [Discord Thread Automatic Archive Duration Decisions](adr/discord-260820-thread-auto-archive-duration.md)
 - [Discord Quiet Work Presence Decisions](adr/discord-260828-quiet-work-presence.md)
+- [Discord Activity Tracker Conversation Settings Access Decisions](adr/discord-260829-tracker-settings-access.md)
 - [Shared Development Snapshot Identifiers](adr/docids-260721-shared-development-snapshot-identifiers.md)
 - [DockerAgentHomeClient sandbox-daemon Sidecar Historical Decision Reconstruction](adr/docker-260409-docker-home-sidecar.md)
 - [Introduce system Docker Sandbox Provider](adr/docker-260523-docker-sandbox.md)

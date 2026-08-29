@@ -66,7 +66,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-29
-spec_version: 51
+spec_version: 52
 ---
 
 # External Channel Provider Ingress
@@ -126,9 +126,11 @@ Slack sends HTTP callbacks to the single fixed endpoint
    Configured traffic resolves one effective target conversation owner and inserts or
    reuses one content-free active ingress item even when its Binding and Session do not
    exist yet. A new
-   eligible explicit mention in an existing Binding may additionally create one
-   idempotent settings entry point; ordinary traffic, deployment, startup, and the
-   drain worker do not create it.
+   eligible explicit mention in an existing Slack Binding may additionally create one
+   idempotent settings entry point; ordinary traffic, Discord traffic, deployment,
+   startup, and the drain worker do not create it. Discord exposes the same existing
+   signed Binding settings capability on every visible conversational Activity
+   Tracker instead of creating a separate settings-only message.
    Existing-Binding admission reads Session availability without taking a Session
    row lock. The final canonical mailbox transaction conditionally transitions only
    an active, non-stopping Session to its wake state; failure rolls back the prepared
@@ -541,6 +543,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 52) — Stopped synchronous and queued Discord
+  existing-Binding invocation admission from preparing a settings-only direct control;
+  visible conversational Trackers now carry the existing signed Binding settings
+  entry point while Slack admission remains unchanged.
 - **2026-08-28** (spec_version 51) — Derived Discord Tracker visibility from the
   authoritative queued invocation, promoted hidden active Work on a later mention, and
   added lease-fenced Gateway typing target reconciliation with credential-free E2E

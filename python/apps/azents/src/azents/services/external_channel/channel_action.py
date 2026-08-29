@@ -72,7 +72,6 @@ from azents.services.external_channel.discord_delivery import (
     _sdk_timeout_result,
 )
 from azents.services.external_channel.discord_presentation import (
-    render_discord_binding_settings_on_demand,
     render_discord_session_navigation_components,
     render_discord_session_presence,
     render_discord_setup_required,
@@ -773,39 +772,6 @@ class ExternalChannelActionService:
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "binding_settings_on_demand"
-                ):
-                    context = _session_navigation_context(
-                        target,
-                        web_url=self.config.web_url,
-                    )
-                    if (
-                        context is None
-                        or files
-                        or not isinstance(target.binding_id, str)
-                        or not target.binding_id
-                    ):
-                        return _discord_invalid_payload()
-                    control = render_discord_binding_settings_on_demand(
-                        agent_name=context.agent_name,
-                        settings_custom_id=(
-                            build_discord_binding_settings_open_custom_id(
-                                secret=self.config.auth.jwt.secret_key,
-                                binding_id=target.binding_id,
-                            )
-                        ),
-                    )
-                    return await discord_client.create_message(
-                        bot_token=bot_token,
-                        guild_id=guild_id,
-                        channel_id=delivery_channel_id,
-                        content=control.text,
-                        operation_key=operation_key,
-                        components=control.components,
-                        embeds=control.embeds,
-                    )
-                if (
-                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
                     and payload.get("control_kind") == "scheduled_task_registration"
                 ):
                     text = payload.get("text")
@@ -885,9 +851,13 @@ class ExternalChannelActionService:
                     )
                     if context is None or components is not None:
                         return _discord_invalid_payload()
-                    components = render_discord_session_navigation_components(
-                        context.session_url
+                    components = _discord_tracker_components(
+                        target,
+                        session_url=context.session_url,
+                        secret=self.config.auth.jwt.secret_key,
                     )
+                    if components is None:
+                        return _discord_invalid_payload()
                 if files:
                     if components is not None or embeds is not None:
                         return _discord_invalid_payload()
@@ -1003,15 +973,20 @@ class ExternalChannelActionService:
                     or message_id is None
                 ):
                     return _discord_invalid_payload()
+                components = _discord_tracker_components(
+                    target,
+                    session_url=context.session_url,
+                    secret=self.config.auth.jwt.secret_key,
+                )
+                if components is None:
+                    return _discord_invalid_payload()
                 return await discord_client.update_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,
                     message_id=message_id,
                     content=_discord_agent_content(target, text),
-                    components=render_discord_session_navigation_components(
-                        context.session_url
-                    ),
+                    components=components,
                     embeds=embeds,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
@@ -1719,6 +1694,29 @@ def _session_navigation_context(
     return _SessionNavigationContext(
         agent_name=target.agent_name,
         session_url=session_url,
+    )
+
+
+def _discord_tracker_components(
+    target: ProviderTarget,
+    *,
+    session_url: str,
+    secret: str,
+) -> list[dict[str, object]] | None:
+    """Render current Discord Tracker controls from exact target authority."""
+    if target.request_payload.get("tracker_kind") == "scheduled_task":
+        return render_discord_session_navigation_components(
+            session_url,
+            settings_custom_id=None,
+        )
+    if not isinstance(target.binding_id, str) or not target.binding_id:
+        return None
+    return render_discord_session_navigation_components(
+        session_url,
+        settings_custom_id=build_discord_binding_settings_open_custom_id(
+            secret=secret,
+            binding_id=target.binding_id,
+        ),
     )
 
 

@@ -36,9 +36,9 @@ Details of all living specs. Synchronized from frontmatter.
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-08-27 | 35 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 50 |
+| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 51 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 39 |
-| [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 51 |
+| [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 52 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-08-27 | 4 |

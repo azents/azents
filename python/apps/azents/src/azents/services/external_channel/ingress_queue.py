@@ -668,7 +668,11 @@ class ExternalChannelIngressDrainService:
                             )
                         target_resource = resource
                         target_binding = binding
-                        if item.invocation and not item.initial_title_eligible:
+                        if (
+                            item.provider is ExternalChannelProvider.SLACK
+                            and item.invocation
+                            and not item.initial_title_eligible
+                        ):
                             settings_trigger_keys.add(
                                 _message_idempotency_key(
                                     invocation_id=item.invocation_id,

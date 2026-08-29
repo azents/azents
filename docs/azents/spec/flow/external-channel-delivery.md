@@ -41,7 +41,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-29
-spec_version: 50
+spec_version: 51
 ---
 
 # External Channel Delivery and Channel Work
@@ -337,14 +337,19 @@ Session title and Agent execution.
   Later complete snapshots replace that retained message's content with an empty
   string and its Embed with the current bounded title, status summary, ordered
   checklist, prioritized context, and labeled sources. Creation and update both send
-  one `View session` link component derived from the current canonical Workspace,
-  Agent, and Session target. Update, delete, replacement, and final-reply cleanup use
-  the same Work-owned Tracker identity and revision fence.
-- An eligible explicit mention in an existing connected Binding may create one
+  a `View session` link derived from the current canonical Workspace, Agent, and
+  Session target. Conversational Tracker creation and update also derive one signed
+  `Conversation settings` action from the current Binding. Scheduled Task Trackers
+  retain only Session navigation and task controls. Update, delete, replacement, and
+  final-reply cleanup use the same Work-owned Tracker identity and revision fence.
+- An eligible Slack explicit mention in an existing connected Binding may create one
   idempotent version-3 settings control for that Binding. The control contains only
   provider-native `Conversation settings`, does not repeat joined presence or rewrite
   provider history, and is never created by deployment, startup, connection
-  activation, or periodic background work.
+  activation, or periodic background work. Discord does not create this separate
+  control; every visible conversational Discord Tracker is the recurring settings
+  entry point. Hidden Discord Work creates neither surface until an eligible explicit
+  invocation promotes the Tracker.
 - A first eligible mention with no participation setting creates the setup claim and
   one immediate setup-control plan before Session or AgentRun creation. Slack opens the authenticated
   parent-scoped location selector. Discord posts `Answer in this channel` and
@@ -489,6 +494,10 @@ already-committed terminal result does not replay provider publication.
 
 ## Changelog
 
+- **2026-08-29** (spec_version 51) — Added the existing signed Binding settings action
+  to every visible conversational Discord Tracker create/update, removed the separate
+  Discord follow-up settings-only control, and preserved Slack, joined presence,
+  hidden Work, and Scheduled Task presentation.
 - **2026-08-28** (spec_version 50) — Made Discord conversational Trackers
   mention-gated per Work cycle, retained hidden canonical progress, and added
   lease-fenced public-SDK typing for every active Discord conversational Work.
