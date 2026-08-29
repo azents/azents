@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import PurePosixPath
+from typing import NamedTuple
 
 from azents_runtime_control.provider import (
     RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_ENFORCEMENT,
@@ -3406,17 +3407,30 @@ def _network_policy_name(runtime_id: str) -> str:
     return resource_name(runtime_id, ResourceRole.RUNTIME_NETWORK_POLICY)
 
 
-def _observed_state(pod: PodResource) -> tuple[RuntimeProviderObservedState, str]:
+class _ObservedState(NamedTuple):
+    """Observed Runtime state and its stable provider reason."""
+
+    state: RuntimeProviderObservedState
+    reason: str
+
+
+def _observed_state(pod: PodResource) -> _ObservedState:
     if pod.metadata.deletion_timestamp is not None:
-        return RuntimeProviderObservedState.STOPPING, "pod_deleting"
+        return _ObservedState(RuntimeProviderObservedState.STOPPING, "pod_deleting")
     if pod.status is None:
-        return RuntimeProviderObservedState.STARTING, "pod_created"
+        return _ObservedState(RuntimeProviderObservedState.STARTING, "pod_created")
     if pod.status.phase == "Running" and pod.status.ready:
-        return RuntimeProviderObservedState.RUNNING, "pod_running"
+        return _ObservedState(RuntimeProviderObservedState.RUNNING, "pod_running")
     if pod.status.phase in {"Failed", "Unknown"}:
-        return RuntimeProviderObservedState.STOPPED, f"pod_{pod.status.phase.lower()}"
+        return _ObservedState(
+            RuntimeProviderObservedState.STOPPED,
+            f"pod_{pod.status.phase.lower()}",
+        )
     if pod.status.ready_reason in {"NodeLost", "NodeNotReady"}:
-        return RuntimeProviderObservedState.STOPPED, _pod_reason(pod.status)
+        return _ObservedState(
+            RuntimeProviderObservedState.STOPPED,
+            _pod_reason(pod.status),
+        )
     if pod.status.waiting_reason in {
         "CreateContainerConfigError",
         "CreateContainerError",
@@ -3425,8 +3439,11 @@ def _observed_state(pod: PodResource) -> tuple[RuntimeProviderObservedState, str
         "InvalidImageName",
         "RunContainerError",
     }:
-        return RuntimeProviderObservedState.FAILED, _pod_reason(pod.status)
-    return RuntimeProviderObservedState.STARTING, "pod_not_ready"
+        return _ObservedState(
+            RuntimeProviderObservedState.FAILED,
+            _pod_reason(pod.status),
+        )
+    return _ObservedState(RuntimeProviderObservedState.STARTING, "pod_not_ready")
 
 
 def _pod_reason(status: PodStatus) -> str:
