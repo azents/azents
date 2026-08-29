@@ -4502,6 +4502,739 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert _DISCORD_BOT_TOKEN not in str(terminal_state)
 
 
+def test_discord_quiet_work_typing_recovers_and_late_mention_tracks_activity(
+    request: pytest.FixtureRequest,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    discord_provider_fake_url: str,
+    azents_engine_worker_container: Container,
+    azents_external_channel_gateway_factory: Callable[
+        [], AbstractContextManager[Container]
+    ],
+    openai_proxy_url: str,
+) -> None:
+    """Keep Discord typing active for quiet work and track a later mention once."""
+    del azents_engine_worker_container
+    application_id = "100000000000000051"
+    guild_id = "200000000000000051"
+    bot_user_id = "300000000000000051"
+    bot_role_id = "350000000000000051"
+    channel_id = "400000000000000051"
+    participant_id = "600000000000000051"
+    initial_message_id = "500000000000000051"
+    quiet_message_id = "500000000000000052"
+    late_mention_message_id = "500000000000000053"
+    timestamp = "2026-08-28T00:00:00.000000+00:00"
+    quiet_text = (
+        "Discord quiet work presence E2E. Provider-native Channel Work progress E2E."
+    )
+    initial_text = f"<@&{bot_role_id}> Discord quiet work setup E2E"
+    late_mention_text = (
+        f"<@{bot_user_id}> late explicit mention during quiet work. "
+        "Provider-native Channel Work progress E2E."
+    )
+    author: dict[str, object] = {
+        "id": participant_id,
+        "username": "participant",
+        "discriminator": "0",
+        "avatar": None,
+    }
+    bot: dict[str, object] = {
+        "id": bot_user_id,
+        "username": "Azents",
+        "discriminator": "0",
+        "avatar": None,
+        "bot": True,
+    }
+
+    def message(
+        *,
+        message_id: str,
+        content: str,
+        role_mentioned: bool,
+        directly_mentioned: bool = False,
+    ) -> dict[str, object]:
+        return {
+            "id": message_id,
+            "channel_id": channel_id,
+            "guild_id": guild_id,
+            "content": content,
+            "timestamp": timestamp,
+            "edited_timestamp": None,
+            "author": author,
+            "mentions": [{"id": bot_user_id}] if directly_mentioned else [],
+            "mention_roles": [bot_role_id] if role_mentioned else [],
+            "attachments": [],
+            "embeds": [],
+            "components": [],
+            "type": 0,
+            "pinned": False,
+            "mention_everyone": False,
+            "tts": False,
+        }
+
+    def external_message_id(message_id: str) -> str:
+        return f"discord:{guild_id}:{message_id}"
+
+    def guild_create() -> dict[str, object]:
+        return {
+            "id": guild_id,
+            "name": "Quiet Work Presence E2E",
+            "unavailable": False,
+            "owner_id": participant_id,
+            "roles": [
+                {
+                    "id": bot_role_id,
+                    "name": "Azents",
+                    "color": 0,
+                    "hoist": False,
+                    "position": 1,
+                    "permissions": "0",
+                    "managed": True,
+                    "mentionable": True,
+                    "flags": 0,
+                    "tags": {"bot_id": bot_user_id},
+                }
+            ],
+            "emojis": [],
+            "stickers": [],
+            "features": [],
+            "channels": [
+                {
+                    "id": channel_id,
+                    "guild_id": guild_id,
+                    "type": 0,
+                    "name": "quiet-work-presence-e2e",
+                    "position": 0,
+                    "permission_overwrites": [],
+                }
+            ],
+            "threads": [],
+            "members": [
+                {
+                    "user": bot,
+                    "roles": [bot_role_id],
+                    "joined_at": timestamp,
+                    "deaf": False,
+                    "mute": False,
+                    "flags": 0,
+                }
+            ],
+            "presences": [],
+            "voice_states": [],
+            "stage_instances": [],
+            "guild_scheduled_events": [],
+            "member_count": 1,
+        }
+
+    def configure_gateway(
+        messages: list[dict[str, object]],
+        *,
+        sequence: int,
+    ) -> None:
+        requests.post(
+            f"{discord_provider_fake_url}/__testenv/configure",
+            json={
+                "application_id": application_id,
+                "guild_id": guild_id,
+                "bot_user_id": bot_user_id,
+                "root_messages": messages,
+                "gateway_dispatches": [
+                    {
+                        "sequence": sequence,
+                        "event_type": "GUILD_CREATE",
+                        "payload": guild_create(),
+                    },
+                    *[
+                        {
+                            "sequence": sequence + index,
+                            "event_type": "MESSAGE_CREATE",
+                            "payload": provider_message,
+                        }
+                        for index, provider_message in enumerate(messages, start=1)
+                    ],
+                ],
+                "gateway_scenarios": ["open"],
+            },
+            timeout=5,
+        ).raise_for_status()
+
+    expected_typing_target = {
+        "guild_id": guild_id,
+        "channel_id": channel_id,
+        "work_cycle_count": 1,
+    }
+
+    def active_typing_state_after(
+        *,
+        snapshot_index: int,
+        pulse_index: int,
+    ) -> dict[str, object] | None:
+        state = _discord_provider_state(discord_provider_fake_url)
+        typing = state.get("typing")
+        if not isinstance(typing, dict):
+            return None
+        typed_typing = cast(dict[str, object], typing)
+        snapshots = typed_typing.get("snapshots")
+        pulses = typed_typing.get("pulses")
+        if not isinstance(snapshots, list) or not isinstance(pulses, list):
+            return None
+        new_snapshots = cast(list[object], snapshots)[snapshot_index:]
+        new_pulses = cast(list[object], pulses)[pulse_index:]
+        if expected_typing_target not in new_pulses or not any(
+            isinstance(snapshot, dict)
+            and cast(dict[str, object], snapshot).get("targets")
+            == [expected_typing_target]
+            for snapshot in new_snapshots
+        ):
+            return None
+        return state
+
+    def empty_typing_state_after(
+        *,
+        snapshot_index: int,
+    ) -> dict[str, object] | None:
+        state = _discord_provider_state(discord_provider_fake_url)
+        typing = state.get("typing")
+        if not isinstance(typing, dict):
+            return None
+        snapshots = cast(dict[str, object], typing).get("snapshots")
+        if not isinstance(snapshots, list):
+            return None
+        new_snapshots = cast(list[object], snapshots)[snapshot_index:]
+        if (
+            not new_snapshots
+            or not isinstance(new_snapshots[-1], dict)
+            or cast(dict[str, object], new_snapshots[-1]).get("targets") != []
+        ):
+            return None
+        return state
+
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    configure_gateway(
+        [
+            message(
+                message_id=initial_message_id,
+                content=initial_text,
+                role_mentioned=True,
+            )
+        ],
+        sequence=2,
+    )
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        runtime_profile_provider_id=None,
+        shell_enabled=False,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    updated_default = external_api.external_channel_v1_update_default_response_mode(
+        agent_id=agent_id,
+        handle=handle,
+        response_mode_request=ResponseModeRequest(
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        ),
+        _headers=headers,
+    )
+    assert updated_default.response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+    setup = external_api.external_channel_v1_setup_discord_connection(
+        agent_id=agent_id,
+        handle=handle,
+        discord_connection_setup_request=DiscordConnectionSetupRequest(
+            app_id=application_id,
+            configuration=DiscordConnectionConfiguration(
+                target_guild_id=guild_id,
+                thread_auto_archive_duration_minutes=1440,
+            ),
+            credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
+        ),
+        _headers=headers,
+    )
+    request.addfinalizer(
+        lambda: external_api.external_channel_v1_disconnect_connection(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+    )
+    external_api.external_channel_v1_update_connection_access_policy(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        connection_access_policy_request=ConnectionAccessPolicyRequest(
+            open_access_enabled=True,
+        ),
+        _headers=headers,
+    )
+    chat_api = ChatV1Api(public_api_client)
+
+    def discord_binding() -> tuple[Any, Any] | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if (
+                len(projection.items) == 1
+                and projection.items[0].provider.value == "discord"
+                and projection.items[0].disconnected_at is None
+            ):
+                return session, projection.items[0]
+        return None
+
+    with azents_external_channel_gateway_factory():
+        setup_custom_id = cast(
+            str,
+            wait_until(
+                lambda: _discord_settings_component_id(
+                    discord_provider_fake_url,
+                    action_code="sc",
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Discord quiet-work setup control was not delivered",
+            ),
+        )
+        _select_discord_setup_location(
+            discord_provider_fake_url=discord_provider_fake_url,
+            interaction_id="700000000000000051",
+            application_id=application_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=participant_id,
+            custom_id=setup_custom_id,
+        )
+        session, binding = cast(
+            tuple[Any, Any],
+            wait_until(
+                discord_binding,
+                timeout=30,
+                interval=0.2,
+                message="Discord quiet-work setup did not create one binding",
+            ),
+        )
+        input_evidence = cast(
+            list[dict[str, object]],
+            wait_until(
+                lambda: (
+                    evidence
+                    if len(
+                        evidence := _external_channel_input_evidence(
+                            public_server_url=azents_public_server_url,
+                            token=token,
+                            session_id=session.id,
+                            include_pending=False,
+                        )
+                    )
+                    == 1
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Discord explicit setup input was not promoted",
+            ),
+        )
+    assert session.agent_id == agent_id
+    assert binding.response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+    assert input_evidence[0]["body"] == initial_text
+    assert input_evidence[0]["prompt_role"] == "invocation"
+
+    def session_is_idle() -> bool:
+        live = list_live(
+            server_url=azents_public_server_url,
+            token=token,
+            session_id=session.id,
+        )
+        return live.get("run") is None and live.get("session_run_state") == "idle"
+
+    wait_until(
+        session_is_idle,
+        timeout=90,
+        interval=0.2,
+        message="Discord setup work did not settle before typing evidence reset",
+    )
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.delete(
+        f"{openai_proxy_url}/v1/_external_channel_progress_requests",
+        timeout=5,
+    ).raise_for_status()
+    barrier_arm = requests.post(
+        f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier",
+        json={"binding": binding.id},
+        timeout=5,
+    )
+    assert barrier_arm.status_code == 201
+    assert barrier_arm.json() == {
+        "armed": True,
+        "reached": False,
+        "released": False,
+        "timed_out": False,
+    }
+    request.addfinalizer(
+        lambda: requests.post(
+            f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier/release",
+            timeout=5,
+        ).raise_for_status()
+    )
+    quiet_message = message(
+        message_id=quiet_message_id,
+        content=quiet_text,
+        role_mentioned=False,
+    )
+    configure_gateway([quiet_message], sequence=10)
+
+    def quiet_barrier_reached() -> dict[str, object] | None:
+        response = requests.get(
+            f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier",
+            timeout=5,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or payload.get("reached") is not True:
+            return None
+        return cast(dict[str, object], payload)
+
+    with azents_external_channel_gateway_factory():
+
+        def quiet_input_admitted() -> list[dict[str, object]] | None:
+            evidence = _external_channel_input_evidence(
+                public_server_url=azents_public_server_url,
+                token=token,
+                session_id=session.id,
+            )
+            if {item.get("external_message_id") for item in evidence} != {
+                external_message_id(initial_message_id),
+                external_message_id(quiet_message_id),
+            }:
+                return None
+            return evidence
+
+        try:
+            wait_until(
+                quiet_input_admitted,
+                timeout=75,
+                interval=0.2,
+                message="Quiet all-messages Discord input was not admitted",
+            )
+        except TimeoutError as error:
+            state = _discord_provider_state(discord_provider_fake_url)
+            observed_inputs = _external_channel_input_evidence(
+                public_server_url=azents_public_server_url,
+                token=token,
+                session_id=session.id,
+            )
+            pytest.fail(
+                f"{error}; gateway={state.get('gateway')!r}; "
+                f"request_counts={state.get('request_counts')!r}; "
+                f"typing={state.get('typing')!r}; "
+                "observed_input_ids="
+                f"{[item.get('external_message_id') for item in observed_inputs]!r}; "
+                f"progress={_progress_request_evidence(openai_proxy_url)!r}"
+            )
+        barrier_state = cast(
+            dict[str, object],
+            wait_until(
+                quiet_barrier_reached,
+                timeout=30,
+                interval=0.2,
+                message="Discord quiet-work proxy barrier was not reached",
+            ),
+        )
+        assert barrier_state.get("armed") is True
+        active_state = cast(
+            dict[str, object],
+            wait_until(
+                lambda: active_typing_state_after(
+                    snapshot_index=0,
+                    pulse_index=0,
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Discord quiet work did not publish active typing",
+            ),
+        )
+        assert (
+            _successful_session_navigation_categories(active_state).count(
+                "activity_tracker"
+            )
+            == 0
+        )
+        quiet_evidence = cast(
+            list[dict[str, object]],
+            wait_until(
+                lambda: (
+                    evidence
+                    if len(
+                        evidence := _external_channel_input_evidence(
+                            public_server_url=azents_public_server_url,
+                            token=token,
+                            session_id=session.id,
+                            include_pending=False,
+                        )
+                    )
+                    == 2
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Quiet all-messages Discord input was not promoted",
+            ),
+        )
+        assert {item["external_message_id"] for item in quiet_evidence} == {
+            external_message_id(initial_message_id),
+            external_message_id(quiet_message_id),
+        }
+        late_progress_index = len(_progress_request_evidence(openai_proxy_url))
+
+    late_message = message(
+        message_id=late_mention_message_id,
+        content=late_mention_text,
+        role_mentioned=False,
+        directly_mentioned=True,
+    )
+    # Redeliver the quiet source while the gateway restarts, then append a late
+    # mention. Ingress deduplication must preserve one logical quiet input.
+    configure_gateway([quiet_message, late_message], sequence=20)
+    restart_state = _discord_provider_state(discord_provider_fake_url)
+    restart_typing = cast(dict[str, object], restart_state["typing"])
+    restart_snapshots = cast(list[object], restart_typing["snapshots"])
+    restart_pulses = cast(list[object], restart_typing["pulses"])
+    assert restart_snapshots == []
+    assert restart_pulses == []
+    restart_snapshot_index = len(restart_snapshots)
+    restart_pulse_index = len(restart_pulses)
+    with azents_external_channel_gateway_factory():
+        recovered_typing = cast(
+            dict[str, object],
+            wait_until(
+                lambda: active_typing_state_after(
+                    snapshot_index=restart_snapshot_index,
+                    pulse_index=restart_pulse_index,
+                ),
+                timeout=75,
+                interval=0.2,
+                message=(
+                    "Discord typing did not recover after External Channel Gateway "
+                    "restart"
+                ),
+            ),
+        )
+        recovered_typing_evidence = cast(
+            dict[str, object],
+            recovered_typing["typing"],
+        )
+        late_snapshot_index = len(
+            cast(list[object], recovered_typing_evidence["snapshots"])
+        )
+        late_pulse_index = len(cast(list[object], recovered_typing_evidence["pulses"]))
+        late_evidence = cast(
+            list[dict[str, object]],
+            wait_until(
+                lambda: (
+                    evidence
+                    if len(
+                        evidence := _external_channel_input_evidence(
+                            public_server_url=azents_public_server_url,
+                            token=token,
+                            session_id=session.id,
+                            include_pending=False,
+                        )
+                    )
+                    == 3
+                    else None
+                ),
+                timeout=45,
+                interval=0.2,
+                message="Late Discord mention was not promoted once",
+            ),
+        )
+        late_activity_state = cast(
+            dict[str, object],
+            wait_until(
+                lambda: (
+                    state
+                    if _successful_session_navigation_categories(
+                        state := _discord_provider_state(discord_provider_fake_url)
+                    ).count("activity_tracker")
+                    == 1
+                    and active_typing_state_after(
+                        snapshot_index=late_snapshot_index,
+                        pulse_index=late_pulse_index,
+                    )
+                    is not None
+                    else None
+                ),
+                timeout=45,
+                interval=0.2,
+                message=(
+                    "Late explicit Discord mention did not publish exactly one "
+                    "Activity Tracker while work remained active"
+                ),
+            ),
+        )
+
+        def late_progress_held() -> list[dict[str, object]] | None:
+            evidence = _progress_request_evidence(openai_proxy_url)[
+                late_progress_index:
+            ]
+            if not any(
+                item.get("binding") == binding.id
+                and item.get("marker_present") is True
+                and item.get("matched") is True
+                and item.get("stage") == "after_progress"
+                for item in evidence
+            ):
+                return None
+            return evidence
+
+        late_progress_evidence = cast(
+            list[dict[str, object]],
+            wait_until(
+                late_progress_held,
+                timeout=45,
+                interval=0.2,
+                message=(
+                    "Late Discord mention did not reach the held progress boundary"
+                ),
+            ),
+        )
+        assert late_progress_evidence
+        assert recovered_typing["typing"] is not None
+        assert late_activity_state["typing"] is not None
+        promoted_bodies = {
+            cast(str, item["external_message_id"]): item["body"]
+            for item in late_evidence
+        }
+        assert promoted_bodies == {
+            external_message_id(initial_message_id): initial_text,
+            external_message_id(quiet_message_id): quiet_text,
+            external_message_id(late_mention_message_id): late_mention_text,
+        }
+        assert (
+            len({cast(str, item["external_message_id"]) for item in late_evidence}) == 3
+        )
+        late_held_state = _discord_provider_state(discord_provider_fake_url)
+        late_typing = cast(dict[str, object], late_held_state["typing"])
+        finish_snapshot_index = len(cast(list[object], late_typing["snapshots"]))
+        requests.post(
+            f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier/release",
+            timeout=5,
+        ).raise_for_status()
+        try:
+            wait_until(
+                session_is_idle,
+                timeout=90,
+                interval=0.2,
+                message="Discord quiet work did not settle after proxy-barrier release",
+            )
+        except TimeoutError as error:
+            live = list_live(
+                server_url=azents_public_server_url,
+                token=token,
+                session_id=session.id,
+            )
+            channel_actions = _channel_action_tool_evidence(
+                azents_public_server_url,
+                token,
+                session.id,
+                call_ids=frozenset(
+                    {
+                        "call_external_channel_progress",
+                        "call_external_channel_outcome_progress",
+                        "call_external_channel_failure_progress",
+                        "call_external_channel_finish",
+                    }
+                ),
+            )
+            typing = _discord_provider_state(discord_provider_fake_url).get("typing")
+            pytest.fail(
+                f"{error}; live={live!r}; channel_actions={channel_actions!r}; "
+                f"typing={typing!r}"
+            )
+        try:
+            terminal_state = cast(
+                dict[str, object],
+                wait_until(
+                    lambda: empty_typing_state_after(
+                        snapshot_index=finish_snapshot_index,
+                    ),
+                    timeout=30,
+                    interval=0.2,
+                    message=(
+                        "Discord quiet work did not publish an empty typing snapshot"
+                    ),
+                ),
+            )
+        except TimeoutError as error:
+            state = _discord_provider_state(discord_provider_fake_url)
+            typing = cast(dict[str, object], state["typing"])
+            observed_snapshots = cast(list[object], typing["snapshots"])
+            observed_pulses = cast(list[object], typing["pulses"])
+            terminal_projection = (
+                external_api.external_channel_v1_list_session_channels(
+                    agent_id=agent_id,
+                    session_id=session.id,
+                    handle=handle,
+                    _headers=headers,
+                )
+            )
+            terminal_work = terminal_projection.items[0].work
+            terminal_work_evidence = (
+                None
+                if terminal_work is None
+                else terminal_work.model_dump(by_alias=True)
+            )
+            channel_actions = _channel_action_tool_evidence(
+                azents_public_server_url,
+                token,
+                session.id,
+                call_ids=frozenset(
+                    {
+                        "call_external_channel_progress",
+                        "call_external_channel_outcome_progress",
+                        "call_external_channel_failure_progress",
+                        "call_external_channel_finish",
+                    }
+                ),
+            )
+            pytest.fail(
+                f"{error}; finish_snapshot_index={finish_snapshot_index}; "
+                f"snapshot_count={len(observed_snapshots)}; "
+                f"pulse_count={len(observed_pulses)}; "
+                f"latest_snapshots={observed_snapshots[-3:]!r}; "
+                f"typing_requests="
+                f"{cast(dict[str, int], state['request_counts']).get('typing', 0)}; "
+                f"terminal_work={terminal_work_evidence!r}; "
+                f"channel_actions={channel_actions!r}"
+            )
+
+    terminal_typing = cast(dict[str, object], terminal_state["typing"])
+    snapshots = cast(list[object], terminal_typing["snapshots"])
+    pulses = cast(list[object], terminal_typing["pulses"])
+    assert cast(dict[str, object], snapshots[-1]).get("targets") == []
+    assert all(pulse == expected_typing_target for pulse in pulses)
+    rendered_typing = str(terminal_typing)
+    assert quiet_text not in rendered_typing
+    assert late_mention_text not in rendered_typing
+    assert _DISCORD_BOT_TOKEN not in rendered_typing
+
+
 def test_discord_configured_message_durably_provisions_conversation(
     request: pytest.FixtureRequest,
     public_api_client: azentspublicclient.ApiClient,

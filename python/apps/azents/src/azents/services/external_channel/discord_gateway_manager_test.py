@@ -1,6 +1,7 @@
 """Deterministic tests for typed discord.py lease-fenced admission."""
 
 import asyncio
+import dataclasses
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from azents.core.config import (
 from azents.core.deps import get_config
 from azents.rdb.deps import get_session_manager
 from azents.repos.external_channel.data import (
+    DiscordGatewayTypingTarget,
     ExternalChannelIngressLease,
     ExternalChannelIngressLeaseClaim,
     ExternalChannelTrigger,
@@ -39,6 +41,7 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayIntentsError,
     DiscordGatewayLifecycleHandler,
     DiscordGatewayTerminalError,
+    DiscordGatewayTypingTargetLoader,
 )
 from azents.services.external_channel.discord_gateway_manager import (
     DiscordGatewayLeaseLost,
@@ -80,9 +83,11 @@ class _Repository:
         admission: object | None = None,
         *,
         control_plans: tuple[ProviderEffectPlan, ...] = (),
+        typing_targets: tuple[DiscordGatewayTypingTarget, ...] | None = (),
     ) -> None:
         self.admission = admission
         self.control_plans = control_plans
+        self.typing_targets = typing_targets
         self.admission_calls: list[dict[str, object]] = []
         self.reconnect_calls: list[dict[str, object]] = []
         self.gap_calls: list[dict[str, object]] = []
@@ -90,6 +95,7 @@ class _Repository:
         self.release_calls: list[dict[str, object]] = []
         self.renew_calls: list[dict[str, object]] = []
         self.renewed = asyncio.Event()
+        self.typing_calls: list[dict[str, object]] = []
 
     async def ingest_discord_event(
         self,
@@ -152,6 +158,14 @@ class _Repository:
         self.renew_calls.append(kwargs)
         self.renewed.set()
         return True
+
+    async def list_owned_discord_typing_targets(
+        self,
+        _session: object,
+        **kwargs: object,
+    ) -> tuple[DiscordGatewayTypingTarget, ...] | None:
+        self.typing_calls.append(kwargs)
+        return self.typing_targets
 
 
 class _RetryThenAcceptRepository(_Repository):
@@ -228,23 +242,33 @@ class _OwnedRepository(_Repository):
 class _IntentsFailureRunner:
     """Surface one public SDK privileged-intent rejection."""
 
-    async def run_connection(self, **_kwargs: object) -> None:
+    async def run_connection(
+        self,
+        *,
+        bot_token: str,
+        target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
+        connected_bot_user_id: str | None,
+        handle_event: DiscordGatewayEventHandler,
+        handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
+    ) -> None:
+        del (
+            bot_token,
+            target_guild_id,
+            interactions_callback_base_url,
+            interactions_callback_selector_hash,
+            connected_bot_user_id,
+            handle_event,
+            handle_lifecycle,
+            load_typing_targets,
+        )
         raise DiscordGatewayIntentsError("rejected")
 
 
 class _TerminalFailureRunner:
     """Surface one SDK-declared non-recoverable close."""
-
-    async def run_connection(self, **_kwargs: object) -> None:
-        raise DiscordGatewayTerminalError("gateway_connection_rejected")
-
-
-class _EventRunner:
-    """Exercise typed lifecycle and message callbacks before terminal exit."""
-
-    def __init__(self) -> None:
-        self.bot_token: str | None = None
-        self.target_guild_id: str | None = None
 
     async def run_connection(
         self,
@@ -256,6 +280,40 @@ class _EventRunner:
         connected_bot_user_id: str | None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
+    ) -> None:
+        del (
+            bot_token,
+            target_guild_id,
+            interactions_callback_base_url,
+            interactions_callback_selector_hash,
+            connected_bot_user_id,
+            handle_event,
+            handle_lifecycle,
+            load_typing_targets,
+        )
+        raise DiscordGatewayTerminalError("gateway_connection_rejected")
+
+
+class _EventRunner:
+    """Exercise typed lifecycle and message callbacks before terminal exit."""
+
+    def __init__(self) -> None:
+        self.bot_token: str | None = None
+        self.target_guild_id: str | None = None
+        self.typing_targets: tuple[DiscordGatewayTypingTarget, ...] | None = None
+
+    async def run_connection(
+        self,
+        *,
+        bot_token: str,
+        target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
+        connected_bot_user_id: str | None,
+        handle_event: DiscordGatewayEventHandler,
+        handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
     ) -> None:
         del (
             connected_bot_user_id,
@@ -264,6 +322,7 @@ class _EventRunner:
         )
         self.bot_token = bot_token
         self.target_guild_id = target_guild_id
+        self.typing_targets = await load_typing_targets()
         await handle_lifecycle("ready")
         await handle_event(_event())
         raise DiscordGatewayTerminalError("gateway_connection_rejected")
@@ -275,7 +334,28 @@ class _BlockingRunner:
     def __init__(self) -> None:
         self.started = asyncio.Event()
 
-    async def run_connection(self, **_kwargs: object) -> None:
+    async def run_connection(
+        self,
+        *,
+        bot_token: str,
+        target_guild_id: str,
+        interactions_callback_base_url: str,
+        interactions_callback_selector_hash: str,
+        connected_bot_user_id: str | None,
+        handle_event: DiscordGatewayEventHandler,
+        handle_lifecycle: DiscordGatewayLifecycleHandler,
+        load_typing_targets: DiscordGatewayTypingTargetLoader,
+    ) -> None:
+        del (
+            bot_token,
+            target_guild_id,
+            interactions_callback_base_url,
+            interactions_callback_selector_hash,
+            connected_bot_user_id,
+            handle_event,
+            handle_lifecycle,
+            load_typing_targets,
+        )
         self.started.set()
         await asyncio.Event().wait()
 
@@ -316,6 +396,14 @@ def _event(*, guild_id: int = 300) -> DiscordGatewayMessageEvent:
                 "attachments": [],
             },
         ),
+    )
+
+
+def _typing_target() -> DiscordGatewayTypingTarget:
+    return DiscordGatewayTypingTarget(
+        guild_id="300",
+        channel_id="200",
+        work_cycle_ids=("work-1",),
     )
 
 
@@ -695,7 +783,8 @@ async def test_sdk_terminal_close_terminalizes_connection() -> None:
 
 @pytest.mark.asyncio
 async def test_manager_passes_typed_lifecycle_and_event_handlers_to_sdk() -> None:
-    repository = _Repository(admission=object())
+    target = _typing_target()
+    repository = _Repository(admission=object(), typing_targets=(target,))
     runner = _EventRunner()
     service = _service(
         repository=repository,
@@ -719,8 +808,83 @@ async def test_manager_passes_typed_lifecycle_and_event_handlers_to_sdk() -> Non
 
     assert runner.bot_token == "test-token"
     assert runner.target_guild_id == "300"
+    assert runner.typing_targets == (target,)
+    typing_call = repository.typing_calls[0]
+    assert typing_call["connection_id"] == "connection-1"
+    assert typing_call["lease_owner"] == "manager-1"
+    assert typing_call["lease_generation"] == 3
+    assert isinstance(typing_call["now"], datetime.datetime)
+    assert typing_call["now"].tzinfo is not None
+    assert set(typing_call) == {
+        "connection_id",
+        "lease_owner",
+        "lease_generation",
+        "now",
+    }
     assert len(repository.active_calls) == 1
     assert len(repository.admission_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_typing_target_loader_returns_current_fenced_projection() -> None:
+    """The SDK sees current projection data without credentials or content."""
+    target = _typing_target()
+    repository = _Repository(typing_targets=(target,))
+    service = _service(repository=repository, sessions=_SessionManager())
+
+    targets = await service._load_typing_targets(
+        connection_id="connection-1",
+        lease=_lease(),
+    )
+
+    assert targets == (target,)
+    assert {field.name for field in dataclasses.fields(target)} == {
+        "guild_id",
+        "channel_id",
+        "work_cycle_ids",
+    }
+    assert repository.typing_calls[0]["connection_id"] == "connection-1"
+    assert repository.typing_calls[0]["lease_owner"] == "manager-1"
+    assert repository.typing_calls[0]["lease_generation"] == 3
+
+
+@pytest.mark.asyncio
+async def test_typing_target_loader_stops_when_lease_is_stale() -> None:
+    """A stale typing projection stops the owning SDK lifecycle."""
+    service = _service(
+        repository=_Repository(typing_targets=None),
+        sessions=_SessionManager(),
+    )
+
+    with pytest.raises(DiscordGatewayLeaseLost, match="typing authority is stale"):
+        await service._load_typing_targets(
+            connection_id="connection-1",
+            lease=_lease(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_stale_typing_target_loader_stops_sdk_lifecycle() -> None:
+    """The runner callback propagates a stale fence through the SDK lifecycle."""
+    service = _service(
+        repository=_Repository(typing_targets=None),
+        sessions=_SessionManager(),
+        gateway_client=_EventRunner(),
+    )
+
+    with pytest.raises(DiscordGatewayLeaseLost, match="typing authority is stale"):
+        await service._run_connection_with_lease(
+            connection_id="connection-1",
+            lease=_lease(),
+            bot_token="test-token",
+            provider_app_id="app-1",
+            target_guild_id="300",
+            interactions_callback_base_url="https://callbacks.example/",
+            interactions_callback_selector_hash="selector-hash",
+            connected_bot_user_id="900",
+            configuration_generation=2,
+            shutdown_event=asyncio.Event(),
+        )
 
 
 @pytest.mark.asyncio

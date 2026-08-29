@@ -81,6 +81,8 @@ _MAX_CONFIGURED_GUILD_COMMANDS = 100
 _MAX_GUILD_COMMAND_ID_CHARACTERS = 32
 _MAX_GUILD_COMMAND_NAME_CHARACTERS = 100
 _MAX_GUILD_COMMAND_DESCRIPTION_CHARACTERS = 100
+_MAX_TYPING_TARGETS = 100
+_MAX_TYPING_ID_CHARACTERS = 32
 _GUILD_COMMAND_TYPES = {1, 2, 3}
 _COMMAND_ROLE_CONTRACTS = {
     "message_action": ("Ask an Azents Agent", 3),
@@ -163,6 +165,8 @@ class FakeState:
             self.gateway_heartbeats: list[int | None] = []
             self.gateway_dispatch_evidence: list[dict[str, object]] = []
             self.gateway_terminal_events: list[str] = []
+            self.typing_snapshots: list[dict[str, object]] = []
+            self.typing_pulses: list[dict[str, object]] = []
             self._message_sequence = 0
             self._nonce_messages: dict[str, str] = {}
             self._message_ids: set[tuple[str, str]] = set()
@@ -280,6 +284,8 @@ class FakeState:
             self.gateway_heartbeats = []
             self.gateway_dispatch_evidence = []
             self.gateway_terminal_events = []
+            self.typing_snapshots = []
+            self.typing_pulses = []
             self._message_sequence = 0
             self._nonce_messages = {}
             self._message_ids = set()
@@ -933,6 +939,19 @@ class FakeState:
         with self.lock:
             self.gateway_terminal_events.append(scenario)
 
+    def record_typing_snapshot(self, targets: list[dict[str, object]]) -> None:
+        """Record one redacted typing snapshot and its active channel pulses."""
+        with self.lock:
+            if any(target["guild_id"] != self.guild_id for target in targets):
+                raise ValueError(
+                    "Typing target Guild identity does not match authority."
+                )
+            snapshot: dict[str, object] = {
+                "targets": [dict(target) for target in targets]
+            }
+            self.typing_snapshots.append(snapshot)
+            self.typing_pulses.extend(dict(target) for target in targets)
+
     def evidence(self) -> dict[str, object]:
         """Return test-assertable evidence with tokens, bodies, and URLs excluded."""
         with self.lock:
@@ -952,6 +971,10 @@ class FakeState:
                     "heartbeats": list(self.gateway_heartbeats),
                     "dispatches": list(self.gateway_dispatch_evidence),
                     "terminal_events": list(self.gateway_terminal_events),
+                },
+                "typing": {
+                    "snapshots": list(self.typing_snapshots),
+                    "pulses": list(self.typing_pulses),
                 },
             }
 
@@ -1107,6 +1130,17 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 self._json_response(400, {"message": str(error)})
                 return
             self._json_response(200, {"status": "ok"})
+            return
+        if parsed.path == "/__testenv/typing":
+            try:
+                targets = _typing_targets(self._json_body())
+                if self._controlled_response(self._operation("typing")):
+                    return
+                self.state.record_typing_snapshot(targets)
+            except ValueError as error:
+                self._json_response(400, {"message": str(error)})
+                return
+            self._json_response(204, None)
             return
         if parsed.path == "/__testenv/sdk":
             try:
@@ -1873,6 +1907,48 @@ def _validate_api_scenarios(scenarios: Mapping[str, str]) -> None:
     """Reject unbounded scenario labels before they can affect evidence."""
     if any(value not in _ALLOWED_API_SCENARIOS for value in scenarios.values()):
         raise ValueError("api_scenarios contains an unsupported value.")
+
+
+def _typing_targets(payload: Mapping[str, object]) -> list[dict[str, object]]:
+    """Validate a redacted complete typing snapshot without retaining its body."""
+    if set(payload) != {"targets"}:
+        raise ValueError("Typing fixture request requires only targets.")
+    value = payload.get("targets")
+    if not isinstance(value, list) or len(value) > _MAX_TYPING_TARGETS:
+        raise ValueError("Typing fixture targets are invalid.")
+    targets: list[dict[str, object]] = []
+    channel_ids: set[str] = set()
+    for raw_target in value:
+        if not isinstance(raw_target, dict):
+            raise ValueError("Typing fixture target is invalid.")
+        target = raw_target
+        if set(target) != {"guild_id", "channel_id", "work_cycle_count"}:
+            raise ValueError("Typing fixture target is invalid.")
+        guild_id = target.get("guild_id")
+        channel_id = target.get("channel_id")
+        work_cycle_count = target.get("work_cycle_count")
+        if (
+            not isinstance(guild_id, str)
+            or not guild_id.isdigit()
+            or len(guild_id) > _MAX_TYPING_ID_CHARACTERS
+            or not isinstance(channel_id, str)
+            or not channel_id.isdigit()
+            or len(channel_id) > _MAX_TYPING_ID_CHARACTERS
+            or channel_id in channel_ids
+            or not isinstance(work_cycle_count, int)
+            or isinstance(work_cycle_count, bool)
+            or work_cycle_count < 1
+        ):
+            raise ValueError("Typing fixture target is invalid.")
+        channel_ids.add(channel_id)
+        targets.append(
+            {
+                "guild_id": guild_id,
+                "channel_id": channel_id,
+                "work_cycle_count": work_cycle_count,
+            }
+        )
+    return targets
 
 
 def _sdk_string(arguments: Mapping[str, object], key: str) -> str:

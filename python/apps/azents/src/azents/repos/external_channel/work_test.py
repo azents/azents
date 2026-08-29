@@ -105,6 +105,10 @@ def test_projection_state_is_missing_without_owned_parts() -> None:
     assert projection_state(_work(desired=True)) == "missing"
 
 
+def test_projection_state_is_none_for_intentionally_hidden_work() -> None:
+    assert projection_state(_work(desired=True, tracker_visibility="hidden")) == "none"
+
+
 def test_projection_state_is_synchronized_for_current_present_part() -> None:
     assert (
         projection_state(
