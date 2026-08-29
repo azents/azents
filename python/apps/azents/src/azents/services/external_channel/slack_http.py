@@ -4,7 +4,7 @@ import datetime
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Literal, assert_never
+from typing import Literal, NamedTuple, assert_never
 from urllib.parse import parse_qsl
 
 import aiohttp
@@ -605,20 +605,27 @@ def project_slack_shortcut_source_event_from_callback_body(
     )
 
 
+class _ParsedCallbackPayload(NamedTuple):
+    """Validated callback object and its Slack callback dialect."""
+
+    payload: dict[str, object]
+    kind: Literal["event", "interaction", "command"]
+
+
 def _parse_callback_payload(
     raw_body: bytes,
-) -> tuple[dict[str, object], Literal["event", "interaction", "command"]]:
+) -> _ParsedCallbackPayload:
     """Parse either an Events API JSON payload or an interaction form payload."""
     if len(raw_body) > MAX_SLACK_HTTP_BODY_BYTES:
         raise SlackHTTPPayloadTooLarge("Slack callback body exceeds the size limit.")
     if raw_body.lstrip().startswith(b"{"):
-        return _parse_payload(raw_body), "event"
+        return _ParsedCallbackPayload(_parse_payload(raw_body), "event")
     return _parse_interaction_form_payload(raw_body)
 
 
 def _parse_interaction_form_payload(
     raw_body: bytes,
-) -> tuple[dict[str, object], Literal["interaction", "command"]]:
+) -> _ParsedCallbackPayload:
     """Read the single URL-encoded Slack interaction payload without retaining it."""
     try:
         fields = parse_qsl(
@@ -647,7 +654,7 @@ def _parse_interaction_form_payload(
             raise SlackHTTPInvalidPayload(
                 "Slack interaction callback payload must be a JSON object."
             )
-        return payload, "interaction"
+        return _ParsedCallbackPayload(payload, "interaction")
     form: dict[str, object] = {}
     for key, value in fields:
         if key in form:
@@ -659,7 +666,7 @@ def _parse_interaction_form_payload(
         raise SlackHTTPInvalidPayload(
             "Slack callback form is not a supported interaction or command."
         )
-    return form, "command"
+    return _ParsedCallbackPayload(form, "command")
 
 
 def _parse_payload(raw_body: bytes) -> dict[str, object]:

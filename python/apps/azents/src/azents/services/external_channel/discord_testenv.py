@@ -5,10 +5,13 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import AbstractAsyncContextManager
-from typing import cast
 
 import httpx
 
+from azents.core.external_channel_projection import (
+    is_external_channel_projection,
+    is_external_channel_projection_list,
+)
 from azents.repos.external_channel.data import DiscordGatewayTypingTarget
 from azents.services.external_channel.discord_events import (
     DiscordGatewayMessageEvent,
@@ -390,9 +393,9 @@ class _DiscordTestenvSDKSession:
             payload: object = response.json()
         except ValueError as error:
             raise DiscordSDKUnavailable from error
-        if not isinstance(payload, dict):
+        if not is_external_channel_projection(payload):
             raise DiscordSDKUnavailable("Discord SDK fixture response is invalid.")
-        return cast(dict[str, object], payload)
+        return payload
 
 
 class DiscordTestenvGatewayRunner:
@@ -542,11 +545,11 @@ async def _gateway_attempt(
         raise DiscordGatewayError(
             "Discord deterministic Gateway fixture response is invalid."
         ) from error
-    if not isinstance(payload, dict):
+    if not is_external_channel_projection(payload):
         raise DiscordGatewayError(
             "Discord deterministic Gateway fixture response is invalid."
         )
-    return cast(dict[str, object], payload)
+    return payload
 
 
 async def _run_typing_snapshots(
@@ -656,9 +659,9 @@ def _required_object(
     key: str,
 ) -> dict[str, object]:
     value = payload.get(key)
-    if not isinstance(value, dict):
+    if not is_external_channel_projection(value):
         raise DiscordSDKUnavailable(f"Discord SDK fixture field '{key}' is invalid.")
-    return cast(dict[str, object], value)
+    return value
 
 
 def _object_list(
@@ -666,9 +669,9 @@ def _object_list(
     key: str,
 ) -> list[dict[str, object]]:
     value = payload.get(key)
-    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+    if not is_external_channel_projection_list(value):
         raise DiscordSDKUnavailable(f"Discord SDK fixture field '{key}' is invalid.")
-    return [cast(dict[str, object], item) for item in value]
+    return value
 
 
 def _command(payload: Mapping[str, object]) -> DiscordSDKCommand:
@@ -723,23 +726,21 @@ def _capture_gateway_guild(
     channels = payload.get("channels")
     if isinstance(channels, list):
         for raw_channel in channels:
-            if not isinstance(raw_channel, dict):
+            if not is_external_channel_projection(raw_channel):
                 continue
-            channel = cast(dict[str, object], raw_channel)
-            channel_id = channel.get("id")
-            name = channel.get("name")
+            channel_id = raw_channel.get("id")
+            name = raw_channel.get("name")
             if isinstance(channel_id, str) and isinstance(name, str):
                 channel_names[channel_id] = name
     roles = payload.get("roles")
     if isinstance(roles, list):
         for raw_role in roles:
-            if not isinstance(raw_role, dict):
+            if not is_external_channel_projection(raw_role):
                 continue
-            role = cast(dict[str, object], raw_role)
-            role_id = role.get("id")
-            tags = role.get("tags")
-            if not isinstance(role_id, str) or not isinstance(tags, dict):
+            role_id = raw_role.get("id")
+            tags = raw_role.get("tags")
+            if not isinstance(role_id, str) or not is_external_channel_projection(tags):
                 continue
-            bot_id = cast(dict[str, object], tags).get("bot_id")
+            bot_id = tags.get("bot_id")
             if isinstance(bot_id, str):
                 managed_roles[role_id] = bot_id

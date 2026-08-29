@@ -4,7 +4,7 @@ import datetime
 import json
 import re
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar, assert_never, cast
+from typing import Any, NamedTuple, TypeVar, assert_never
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -3625,29 +3625,27 @@ class ExternalChannelRepository:
         limit: int,
     ) -> int:
         """Expire bounded pending requests without provider side effects."""
-        result = cast(
-            CursorResult[Any],
-            await session.execute(
-                sa.update(RDBExternalChannelAccessRequest)
-                .where(
-                    RDBExternalChannelAccessRequest.id.in_(
-                        sa.select(RDBExternalChannelAccessRequest.id)
-                        .where(
-                            RDBExternalChannelAccessRequest.status
-                            == ExternalChannelAccessRequestStatus.PENDING,
-                            RDBExternalChannelAccessRequest.expires_at <= now,
-                        )
-                        .order_by(RDBExternalChannelAccessRequest.expires_at)
-                        .limit(limit)
+        result = await session.execute(
+            sa.update(RDBExternalChannelAccessRequest)
+            .where(
+                RDBExternalChannelAccessRequest.id.in_(
+                    sa.select(RDBExternalChannelAccessRequest.id)
+                    .where(
+                        RDBExternalChannelAccessRequest.status
+                        == ExternalChannelAccessRequestStatus.PENDING,
+                        RDBExternalChannelAccessRequest.expires_at <= now,
                     )
+                    .order_by(RDBExternalChannelAccessRequest.expires_at)
+                    .limit(limit)
                 )
-                .values(
-                    status=ExternalChannelAccessRequestStatus.EXPIRED,
-                    decided_at=now,
-                    decision_summary="The access request expired.",
-                )
-            ),
+            )
+            .values(
+                status=ExternalChannelAccessRequestStatus.EXPIRED,
+                decided_at=now,
+                decision_summary="The access request expired.",
+            )
         )
+        assert isinstance(result, CursorResult)
         return int(result.rowcount or 0)
 
     async def create_access_grant(
@@ -4016,12 +4014,19 @@ def _slack_work_presence_target(
     )
 
 
+class _DiscordGatewayTypingTarget(NamedTuple):
+    """Discord Gateway guild and delivery channel target."""
+
+    guild_id: str
+    channel_id: str
+
+
 def _discord_gateway_typing_target(
     *,
     resource_type: ExternalChannelResourceType,
     labels: dict[str, object] | None,
     provider_tenant_id: str | None,
-) -> tuple[str, str] | None:
+) -> _DiscordGatewayTypingTarget | None:
     """Resolve one current Discord delivery target from resource labels."""
     if labels is None:
         return None
@@ -4046,7 +4051,7 @@ def _discord_gateway_typing_target(
             assert_never(unreachable)
     if not isinstance(channel_id, str) or not channel_id.isdigit():
         return None
-    return guild_id, channel_id
+    return _DiscordGatewayTypingTarget(guild_id, channel_id)
 
 
 def _validate_interaction_projection_value(value: object, *, depth: int) -> None:

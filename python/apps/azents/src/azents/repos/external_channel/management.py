@@ -2,6 +2,7 @@
 
 import datetime
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -103,6 +104,13 @@ def _set_discord_thread_auto_archive_duration(
     provider_config = dict(connection.provider_config or {})
     provider_config["thread_auto_archive_duration_minutes"] = duration
     connection.provider_config = provider_config
+
+
+class ExternalChannelConnectionRow(NamedTuple):
+    """Connection and its owning Agent route."""
+
+    connection: RDBExternalChannelConnection
+    route: RDBExternalChannelAgentRoute
 
 
 class ExternalChannelManagementRepository:
@@ -1083,7 +1091,7 @@ class ExternalChannelManagementRepository:
         connection_id: str,
         lock: bool = False,
         include_disconnected: bool = False,
-    ) -> tuple[RDBExternalChannelConnection, RDBExternalChannelAgentRoute] | None:
+    ) -> ExternalChannelConnectionRow | None:
         route_owner = RDBExternalChannelAgentRoute.agent_id == agent_id
         if include_disconnected:
             route_owner = sa.or_(
@@ -1124,7 +1132,7 @@ class ExternalChannelManagementRepository:
         if row is None:
             return None
         if not lock:
-            return row[0], row[1]
+            return ExternalChannelConnectionRow(row[0], row[1])
         connection_snapshot, route_snapshot = row
         connection = await session.scalar(
             sa.select(RDBExternalChannelConnection)
@@ -1160,7 +1168,7 @@ class ExternalChannelManagementRepository:
         )
         if route is None:
             return None
-        return connection, route
+        return ExternalChannelConnectionRow(connection, route)
 
     async def replace_slack_configuration(
         self,

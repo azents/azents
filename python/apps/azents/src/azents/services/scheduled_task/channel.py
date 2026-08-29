@@ -2,7 +2,7 @@
 
 import dataclasses
 from collections.abc import Sequence
-from typing import Annotated
+from typing import Annotated, NamedTuple
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -712,22 +712,38 @@ def get_scheduled_task_channel_service(
     )
 
 
+class _ProjectionOutcome(NamedTuple):
+    """Provider projection status and its optional message identity."""
+
+    status: ExternalChannelWorkProjectionStatus
+    provider_message_key: str | None
+
+
 def _projection_outcome(
     *,
     operation: ExternalChannelDeliveryOperation,
     outcome: ProviderMutationOutcome | None,
-) -> tuple[ExternalChannelWorkProjectionStatus, str | None]:
+) -> _ProjectionOutcome:
     if outcome is None:
-        return ExternalChannelWorkProjectionStatus.UNKNOWN, None
+        return _ProjectionOutcome(ExternalChannelWorkProjectionStatus.UNKNOWN, None)
     if outcome.status == "failed":
-        return ExternalChannelWorkProjectionStatus.FAILED, outcome.provider_message_key
+        return _ProjectionOutcome(
+            ExternalChannelWorkProjectionStatus.FAILED,
+            outcome.provider_message_key,
+        )
     if outcome.status == "unknown":
-        return ExternalChannelWorkProjectionStatus.UNKNOWN, outcome.provider_message_key
+        return _ProjectionOutcome(
+            ExternalChannelWorkProjectionStatus.UNKNOWN,
+            outcome.provider_message_key,
+        )
     if operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-        return ExternalChannelWorkProjectionStatus.DELETED, None
+        return _ProjectionOutcome(ExternalChannelWorkProjectionStatus.DELETED, None)
     if outcome.provider_message_key is None:
-        return ExternalChannelWorkProjectionStatus.UNKNOWN, None
-    return ExternalChannelWorkProjectionStatus.PRESENT, outcome.provider_message_key
+        return _ProjectionOutcome(ExternalChannelWorkProjectionStatus.UNKNOWN, None)
+    return _ProjectionOutcome(
+        ExternalChannelWorkProjectionStatus.PRESENT,
+        outcome.provider_message_key,
+    )
 
 
 def _provider_outcome(
