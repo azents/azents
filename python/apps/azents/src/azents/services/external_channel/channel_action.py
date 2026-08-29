@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Annotated, NotRequired, TypedDict, assert_never, cast
+from typing import Annotated, NotRequired, TypedDict, assert_never
 from urllib.parse import urlparse
 
 import httpx
@@ -871,9 +871,8 @@ class ExternalChannelActionService:
                         if file.source is ExternalChannelOutboundFileSource.EXCHANGE
                     ]
                     if runtime_files and (
-                        file_storage is None
+                        not isinstance(file_storage, RangedFileStorage)
                         or agent_id is None
-                        or not callable(getattr(file_storage, "read_range", None))
                     ):
                         return DiscordDeliveryResult(
                             status="failed",
@@ -893,9 +892,9 @@ class ExternalChannelActionService:
                             ),
                         )
                     ranged_storage = (
-                        None
-                        if file_storage is None
-                        else cast(RangedFileStorage, file_storage)
+                        file_storage
+                        if isinstance(file_storage, RangedFileStorage)
+                        else None
                     )
                     return await discord_client.create_file_message(
                         bot_token=bot_token,

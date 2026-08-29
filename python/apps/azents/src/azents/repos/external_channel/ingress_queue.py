@@ -1,6 +1,7 @@
 """Persistence primitives for active External Channel ingress queues."""
 
 import datetime
+from typing import NamedTuple
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -25,6 +26,13 @@ from azents.repos.external_channel.ingress_queue_data import (
     ExternalChannelIngressOwner,
     ExternalChannelIngressOwnerCreate,
 )
+
+
+class ExternalChannelClaimedBatch(NamedTuple):
+    """Locked ingress owner and its ordered claimed items."""
+
+    owner: RDBExternalChannelIngressOwner
+    items: list[RDBExternalChannelIngressItem]
 
 
 class ExternalChannelIngressQueueRepository:
@@ -371,13 +379,7 @@ class ExternalChannelIngressQueueRepository:
         *,
         claim: ExternalChannelIngressBatch,
         now: datetime.datetime,
-    ) -> (
-        tuple[
-            RDBExternalChannelIngressOwner,
-            list[RDBExternalChannelIngressItem],
-        ]
-        | None
-    ):
+    ) -> ExternalChannelClaimedBatch | None:
         """Lock and validate one current processing batch."""
         owner = await session.scalar(
             sa.select(RDBExternalChannelIngressOwner)
@@ -414,7 +416,7 @@ class ExternalChannelIngressQueueRepository:
         )
         if len(items) != len(item_ids):
             return None
-        return owner, items
+        return ExternalChannelClaimedBatch(owner, items)
 
     async def list_active_correlations(
         self,
