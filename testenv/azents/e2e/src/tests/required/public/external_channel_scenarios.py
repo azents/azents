@@ -3357,13 +3357,21 @@ def test_provider_native_channel_work_progress_journey(
     actions = blocks[1]
     assert actions["type"] == "actions"
     action_elements = cast(list[dict[str, object]], actions["elements"])
-    assert len(action_elements) == 1
+    assert len(action_elements) == 2
     assert action_elements[0]["type"] == "button"
     assert action_elements[0]["action_id"] == "view_azents_session"
     assert action_elements[0]["text"] == {
         "type": "plain_text",
         "text": "View session",
     }
+    assert action_elements[1]["type"] == "button"
+    assert action_elements[1]["action_id"] == "azents_conversation_settings_open"
+    assert action_elements[1]["text"] == {
+        "type": "plain_text",
+        "text": "Conversation settings",
+    }
+    assert isinstance(action_elements[1]["value"], str)
+    assert action_elements[1]["value"]
     tasks = cast(list[dict[str, object]], plan["tasks"])
     assert [task["task_id"] for task in tasks] == [
         "inspect",
