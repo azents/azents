@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import NamedTuple
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -83,6 +83,7 @@ from azents.services.mailbox import (
     MailboxService,
 )
 from azents.testing.external_channel import make_provider_effect_plan
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 8, 10, 2, tzinfo=datetime.UTC)
 
@@ -110,12 +111,21 @@ def test_job_request_coalesces_one_drain_lifecycle_and_separates_recreation() ->
     assert first.payload == recreated.payload == {"owner_id": "owner-1"}
 
 
-class _Session:
+class _Session(AsyncSession):
     """Minimal transactional AsyncSession-shaped test value."""
 
     def __init__(self) -> None:
-        self.commit = AsyncMock()
-        self.rollback = AsyncMock()
+        super().__init__()
+        self.commit_mock = AsyncMock()
+        self.rollback_mock = AsyncMock()
+
+    async def commit(self) -> None:
+        """Record one transaction commit."""
+        await self.commit_mock()
+
+    async def rollback(self) -> None:
+        """Record one transaction rollback."""
+        await self.rollback_mock()
 
 
 def _session_manager(
@@ -126,7 +136,7 @@ def _session_manager(
 
     @asynccontextmanager
     async def manager() -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, next(remaining))
+        yield next(remaining)
 
     return manager
 
@@ -313,54 +323,82 @@ def _service(
     provider_control: MagicMock | None = None,
 ) -> ExternalChannelIngressDrainService:
     """Construct the drain with isolated collaborators."""
-    work = work_repository or MagicMock()
+    work = work_repository or MagicMock(spec=ExternalChannelWorkRepository)
     if work_repository is None:
         work.ensure_active_work = AsyncMock(
             return_value=SimpleNamespace(work_cycle_id="work-1")
         )
         work.prepare_direct_control = AsyncMock(return_value=None)
         work.prepare_initial_progress = AsyncMock(return_value=None)
-    control = provider_control or MagicMock()
+    control = provider_control or MagicMock(spec=ExternalChannelProviderControlService)
     if provider_control is None:
         control.attempt = AsyncMock()
+    repository.mock_add_spec(ExternalChannelRepository)
+    queue_repository.mock_add_spec(ExternalChannelIngressQueueRepository)
+    agent_session_repository.mock_add_spec(AgentSessionRepository)
+    work.mock_add_spec(ExternalChannelWorkRepository)
+    mailbox_service.mock_add_spec(MailboxService)
+    wake_dispatcher.mock_add_spec(ExternalChannelMailboxWakeDispatcher)
+    control.mock_add_spec(ExternalChannelProviderControlService)
     return ExternalChannelIngressDrainService(
         session_manager=session_manager,
-        repository=cast(ExternalChannelRepository, repository),
-        queue_repository=cast(
-            ExternalChannelIngressQueueRepository,
+        repository=require_instance(repository, ExternalChannelRepository),
+        queue_repository=require_instance(
             queue_repository,
+            ExternalChannelIngressQueueRepository,
         ),
-        agent_session_repository=cast(
-            AgentSessionRepository,
+        agent_session_repository=require_instance(
             agent_session_repository,
+            AgentSessionRepository,
         ),
-        provider_policies=cast(
+        provider_policies=require_instance(
+            MagicMock(spec=ExternalChannelIngressProviderPolicyRegistry),
             ExternalChannelIngressProviderPolicyRegistry,
-            MagicMock(),
         ),
-        provisioning_service=cast(
+        provisioning_service=require_instance(
+            MagicMock(spec=ExternalChannelIngressProvisioningService),
             ExternalChannelIngressProvisioningService,
-            MagicMock(),
         ),
-        work_repository=cast(ExternalChannelWorkRepository, work),
-        mailbox_service=cast(MailboxService, mailbox_service),
-        wake_dispatcher=cast(
-            ExternalChannelMailboxWakeDispatcher,
+        work_repository=require_instance(work, ExternalChannelWorkRepository),
+        mailbox_service=require_instance(mailbox_service, MailboxService),
+        wake_dispatcher=require_instance(
             wake_dispatcher,
+            ExternalChannelMailboxWakeDispatcher,
         ),
-        provider_control=cast(ExternalChannelProviderControlService, control),
+        provider_control=require_instance(
+            control,
+            ExternalChannelProviderControlService,
+        ),
         metrics=ExternalChannelIngressMetrics(),
     )
+
+
+class _Collaborators(NamedTuple):
+    """Successful finalization collaborators and locked drain."""
+
+    repository: MagicMock
+    queue_repository: MagicMock
+    mailbox_service: MagicMock
+    agent_session_repository: MagicMock
+    wake_dispatcher: MagicMock
+    drain: SimpleNamespace
+
+
+class _LockedBatch(NamedTuple):
+    """Locked drain and its selected rows."""
+
+    drain: SimpleNamespace
+    rows: list[SimpleNamespace]
 
 
 def _collaborators(
     *,
     locked_rows: list[SimpleNamespace],
     mailbox_created: bool = True,
-) -> tuple[MagicMock, MagicMock, MagicMock, MagicMock, MagicMock, SimpleNamespace]:
+) -> _Collaborators:
     """Build successful finalization collaborators for one claimed batch."""
     drain = SimpleNamespace(session_id="session-1")
-    repository = MagicMock()
+    repository = MagicMock(spec=ExternalChannelRepository)
     repository.lock_connection_for_routing = AsyncMock(
         return_value=ExternalChannelConnection.model_construct(
             id="connection-1",
@@ -377,14 +415,14 @@ def _collaborators(
     repository.lock_binding = AsyncMock(return_value=_binding())
     repository.advance_conversation_position_if_current = AsyncMock(return_value=True)
 
-    queue_repository = MagicMock()
+    queue_repository = MagicMock(spec=ExternalChannelIngressQueueRepository)
     queue_repository.lock_claimed_batch = AsyncMock(return_value=(drain, locked_rows))
     queue_repository.list_active_correlations = AsyncMock(return_value={})
     queue_repository.reset_batch_for_coordination = AsyncMock()
     queue_repository.move_to_retry_tail = AsyncMock()
     queue_repository.finish_batch = AsyncMock()
 
-    mailbox_service = MagicMock()
+    mailbox_service = MagicMock(spec=MailboxService)
 
     async def enqueue_many(
         _session: AsyncSession,
@@ -402,7 +440,7 @@ def _collaborators(
         ]
 
     mailbox_service.enqueue_many = AsyncMock(side_effect=enqueue_many)
-    agent_session_repository = MagicMock()
+    agent_session_repository = MagicMock(spec=AgentSessionRepository)
     agent_session_repository.lock_by_id = AsyncMock()
     agent_session_repository.get_by_id = AsyncMock(
         return_value=SimpleNamespace(
@@ -414,9 +452,9 @@ def _collaborators(
     agent_session_repository.admit_input_wakeup = AsyncMock(
         return_value=SimpleNamespace(agent_id="agent-1")
     )
-    wake_dispatcher = MagicMock()
+    wake_dispatcher = MagicMock(spec=ExternalChannelMailboxWakeDispatcher)
     wake_dispatcher.dispatch = AsyncMock(return_value="dispatched")
-    return (
+    return _Collaborators(
         repository,
         queue_repository,
         mailbox_service,
@@ -450,12 +488,12 @@ async def test_ownership_check_reads_session_without_a_row_lock() -> None:
         wake_dispatcher=wake_dispatcher,
     )
     connection = await repository.lock_connection_for_routing(
-        cast(AsyncSession, MagicMock()),
+        MagicMock(spec=AsyncSession),
         connection_id=item.connection_id,
     )
 
     current = await service._ownership_current(  # noqa: SLF001
-        cast(AsyncSession, MagicMock()),
+        MagicMock(spec=AsyncSession),
         item=item,
         batch=_batch(item),
         connection=connection,
@@ -516,8 +554,8 @@ async def test_late_cursor_cas_conflict_rolls_back_and_resets_claim(
     )
 
     assert stale is True
-    transaction.rollback.assert_awaited_once()
-    reset_transaction.commit.assert_awaited_once()
+    transaction.rollback_mock.assert_awaited_once()
+    reset_transaction.commit_mock.assert_awaited_once()
     queue_repository.reset_batch_for_coordination.assert_awaited_once_with(
         reset_transaction,
         owner=drain,
@@ -574,8 +612,8 @@ async def test_session_admission_cas_failure_rolls_back_and_resets_claim(
     )
 
     assert stale is True
-    transaction.rollback.assert_awaited_once()
-    reset_transaction.commit.assert_awaited_once()
+    transaction.rollback_mock.assert_awaited_once()
+    reset_transaction.commit_mock.assert_awaited_once()
     queue_repository.finish_batch.assert_not_awaited()
     agent_session_repository.lock_by_id.assert_not_awaited()
     agent_session_repository.admit_input_wakeup.assert_awaited_once_with(
@@ -595,7 +633,7 @@ async def test_coordination_exhaustion_releases_current_lease(
         trigger_position="00000000000000000001",
     )
     batch = _batch(item)
-    queue_repository = MagicMock()
+    queue_repository = MagicMock(spec=ExternalChannelIngressQueueRepository)
     queue_repository.claim_lease = AsyncMock(
         return_value=ExternalChannelIngressLeaseClaim(
             owner=ExternalChannelIngressOwner.model_construct(
@@ -640,7 +678,7 @@ async def test_coordination_exhaustion_releases_current_lease(
         lease_owner=final_claim_args.kwargs["lease_owner"],
         lease_generation=7,
     )
-    assert all(transaction.commit.await_count == 1 for transaction in transactions)
+    assert all(transaction.commit_mock.await_count == 1 for transaction in transactions)
 
 
 async def test_finalization_connection_first_order_prevents_admission_deadlock(
@@ -650,6 +688,7 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
     connection_lock = asyncio.Lock()
     drain_lock = asyncio.Lock()
     admission_holds_connection = asyncio.Event()
+    finalization_waiting_for_connection = asyncio.Event()
 
     class _LockSession(_Session):
         def __init__(self, role: str) -> None:
@@ -675,7 +714,7 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
         assert task is not None
         session = _LockSession(task.get_name())
         try:
-            yield cast(AsyncSession, session)
+            yield session
         finally:
             session.release_all()
 
@@ -686,7 +725,7 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
         ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
         configuration_generation=1,
     )
-    repository = MagicMock()
+    repository = MagicMock(spec=ExternalChannelRepository)
 
     async def lock_connection(
         session: AsyncSession,
@@ -694,7 +733,7 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
         connection_id: str,
     ) -> ExternalChannelConnection:
         assert connection_id == "connection-1"
-        lock_session = cast(_LockSession, session)
+        lock_session = require_instance(session, _LockSession)
         await lock_session.acquire(connection_lock)
         if lock_session.role == "callback-admission":
             admission_holds_connection.set()
@@ -704,7 +743,7 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
     repository.lock_conversation_position = AsyncMock(
         return_value=SimpleNamespace(read_through_position=None)
     )
-    queue_repository = MagicMock()
+    queue_repository = MagicMock(spec=ExternalChannelIngressQueueRepository)
     drain = SimpleNamespace(session_id="session-1")
     item = _item(
         item_id="item-1",
@@ -718,22 +757,23 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
         *,
         claim: ExternalChannelIngressBatch,
         now: datetime.datetime,
-    ) -> tuple[SimpleNamespace, list[SimpleNamespace]]:
+    ) -> _LockedBatch:
         del claim, now
-        lock_session = cast(_LockSession, session)
+        lock_session = require_instance(session, _LockSession)
         await lock_session.acquire(drain_lock)
+        finalization_waiting_for_connection.set()
         if not lock_session.holds(connection_lock):
             # This is the former drain -> connection order. Wait until callback
             # admission owns connection, then model the later ownership lock.
             await admission_holds_connection.wait()
             await lock_session.acquire(connection_lock)
-        return drain, [row]
+        return _LockedBatch(drain, [row])
 
     queue_repository.lock_claimed_batch = AsyncMock(side_effect=lock_claimed_batch)
     queue_repository.list_active_correlations = AsyncMock(return_value={})
     queue_repository.finish_batch = AsyncMock()
     service = _service(
-        session_manager=cast(SessionManager[AsyncSession], session_manager),
+        session_manager=session_manager,
         repository=repository,
         queue_repository=queue_repository,
         mailbox_service=MagicMock(),
@@ -748,7 +788,7 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
                 session,
                 connection_id="connection-1",
             )
-            await cast(_LockSession, session).acquire(drain_lock)
+            await require_instance(session, _LockSession).acquire(drain_lock)
             await session.commit()
 
     finalize_task = asyncio.create_task(
@@ -766,7 +806,7 @@ async def test_finalization_connection_first_order_prevents_admission_deadlock(
         ),
         name="batch-finalizer",
     )
-    await asyncio.sleep(0)
+    await finalization_waiting_for_connection.wait()
     admission_task = asyncio.create_task(
         callback_admission(),
         name="callback-admission",
@@ -791,7 +831,7 @@ async def test_preparation_locks_connection_before_owner() -> None:
         connection_id="connection-1",
         lease_generation=1,
     )
-    repository = MagicMock()
+    repository = MagicMock(spec=ExternalChannelRepository)
 
     async def lock_connection(
         _session: AsyncSession,
@@ -803,7 +843,7 @@ async def test_preparation_locks_connection_before_owner() -> None:
         return ExternalChannelConnection.model_construct(id=connection_id)
 
     repository.lock_connection_for_routing = AsyncMock(side_effect=lock_connection)
-    queue_repository = MagicMock()
+    queue_repository = MagicMock(spec=ExternalChannelIngressQueueRepository)
 
     async def lock_owner(
         _session: AsyncSession,
@@ -832,12 +872,12 @@ async def test_preparation_locks_connection_before_owner() -> None:
         side_effect=lock_first_item
     )
     queue_repository.mark_owner_ready = AsyncMock()
-    provider_control = MagicMock()
+    provider_control = MagicMock(spec=ExternalChannelProviderControlService)
     presence_plan = make_provider_effect_plan("joined-presence")
     progress_plan = make_provider_effect_plan("initial-progress")
 
     async def attempt_control(_plan: object) -> None:
-        transaction.commit.assert_awaited_once()
+        transaction.commit_mock.assert_awaited_once()
 
     provider_control.attempt = AsyncMock(side_effect=attempt_control)
     service = _service(
@@ -877,7 +917,7 @@ async def test_preparation_locks_connection_before_owner() -> None:
         initial_provider=ExternalChannelProvider.SLACK,
         initial_invocation=True,
     )
-    transaction.commit.assert_awaited_once()
+    transaction.commit_mock.assert_awaited_once()
     queue_repository.mark_owner_ready.assert_awaited_once_with(
         transaction,
         owner=owner,
@@ -906,15 +946,15 @@ async def test_unready_discord_nonmention_starts_hidden_without_progress() -> No
         provider=ExternalChannelProvider.DISCORD,
         invocation=False,
     )
-    repository = MagicMock()
+    repository = MagicMock(spec=ExternalChannelRepository)
     repository.lock_connection_for_routing = AsyncMock(
         return_value=ExternalChannelConnection.model_construct(id="connection-1")
     )
-    queue_repository = MagicMock()
+    queue_repository = MagicMock(spec=ExternalChannelIngressQueueRepository)
     queue_repository.lock_leased_owner = AsyncMock(return_value=owner)
     queue_repository.lock_first_authoritative_item = AsyncMock(return_value=first_item)
     queue_repository.mark_owner_ready = AsyncMock()
-    provider_control = MagicMock()
+    provider_control = MagicMock(spec=ExternalChannelProviderControlService)
     provider_control.attempt = AsyncMock()
     service = _service(
         session_manager=_session_manager(transaction),
@@ -953,7 +993,7 @@ async def test_unready_discord_nonmention_starts_hidden_without_progress() -> No
         initial_invocation=False,
     )
     provider_control.attempt.assert_not_awaited()
-    transaction.commit.assert_awaited_once()
+    transaction.commit_mock.assert_awaited_once()
 
 
 async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
@@ -1030,7 +1070,7 @@ async def test_success_covers_earlier_retry_and_dispatches_one_batch_wake(
         transaction,
         "session-1",
     )
-    transaction.commit.assert_awaited_once()
+    transaction.commit_mock.assert_awaited_once()
     wake_dispatcher.dispatch.assert_awaited_once()
 
 
@@ -1115,7 +1155,7 @@ async def test_missing_trigger_warns_and_is_ignored_while_batch_continues(
     )
     assert warning.__dict__["external_channel_ingress_id"] == missing_item.id
     assert warning.__dict__["external_channel_failure_category"] == "trigger_missing"
-    transaction.commit.assert_awaited_once()
+    transaction.commit_mock.assert_awaited_once()
     wake_dispatcher.dispatch.assert_awaited_once()
 
 
@@ -1219,17 +1259,17 @@ async def test_explicit_followup_controls_precede_wake(
         _drain,
     ) = _collaborators(locked_rows=[row])
     transaction = _Session()
-    work_repository = MagicMock()
+    work_repository = MagicMock(spec=ExternalChannelWorkRepository)
     work_repository.ensure_active_work = AsyncMock(
         return_value=SimpleNamespace(work_cycle_id="work-followup")
     )
     work_repository.prepare_direct_control = AsyncMock()
     progress_plan = make_provider_effect_plan("followup-progress")
     work_repository.prepare_initial_progress = AsyncMock(return_value=progress_plan)
-    provider_control = MagicMock()
+    provider_control = MagicMock(spec=ExternalChannelProviderControlService)
 
     async def attempt_control(_plan: object) -> None:
-        transaction.commit.assert_awaited_once()
+        transaction.commit_mock.assert_awaited_once()
         wake_dispatcher.dispatch.assert_not_awaited()
 
     provider_control.attempt = AsyncMock(side_effect=attempt_control)
@@ -1309,7 +1349,7 @@ async def test_followup_visibility_uses_explicit_invocation(
         _drain,
     ) = _collaborators(locked_rows=[row])
     transaction = _Session()
-    work_repository = MagicMock()
+    work_repository = MagicMock(spec=ExternalChannelWorkRepository)
     work_repository.ensure_active_work = AsyncMock(
         return_value=SimpleNamespace(work_cycle_id="work-followup")
     )
@@ -1369,7 +1409,7 @@ async def test_unmentioned_discord_input_requests_hidden_tracker_visibility(
         _drain,
     ) = _collaborators(locked_rows=[row])
     transaction = _Session()
-    work_repository = MagicMock()
+    work_repository = MagicMock(spec=ExternalChannelWorkRepository)
     work_repository.ensure_active_work = AsyncMock(
         return_value=SimpleNamespace(work_cycle_id="work-hidden")
     )
@@ -1435,7 +1475,7 @@ async def test_late_discord_mention_requests_visible_tracker_promotion(
         _drain,
     ) = _collaborators(locked_rows=rows)
     transaction = _Session()
-    work_repository = MagicMock()
+    work_repository = MagicMock(spec=ExternalChannelWorkRepository)
     work_repository.ensure_active_work = AsyncMock(
         return_value=SimpleNamespace(work_cycle_id="work-promoted")
     )
@@ -1500,7 +1540,7 @@ async def test_duplicate_explicit_invocation_does_not_project_tracker(
         _drain,
     ) = _collaborators(locked_rows=[row], mailbox_created=False)
     transaction = _Session()
-    work_repository = MagicMock()
+    work_repository = MagicMock(spec=ExternalChannelWorkRepository)
     work_repository.prepare_direct_control = AsyncMock()
     work_repository.ensure_active_work = AsyncMock()
     work_repository.prepare_initial_progress = AsyncMock()
@@ -1556,7 +1596,7 @@ async def test_duplicate_discord_mention_does_not_request_tracker_promotion(
         _drain,
     ) = _collaborators(locked_rows=[row], mailbox_created=False)
     transaction = _Session()
-    work_repository = MagicMock()
+    work_repository = MagicMock(spec=ExternalChannelWorkRepository)
     work_repository.prepare_direct_control = AsyncMock()
     work_repository.ensure_active_work = AsyncMock()
     work_repository.prepare_initial_progress = AsyncMock()
@@ -1609,14 +1649,14 @@ async def test_tracker_control_failure_does_not_gate_wake(
         _drain,
     ) = _collaborators(locked_rows=[row])
     transaction = _Session()
-    work_repository = MagicMock()
+    work_repository = MagicMock(spec=ExternalChannelWorkRepository)
     work_repository.ensure_active_work = AsyncMock(
         return_value=SimpleNamespace(work_cycle_id="work-followup")
     )
     progress_plan = make_provider_effect_plan("followup-progress")
     work_repository.prepare_direct_control = AsyncMock()
     work_repository.prepare_initial_progress = AsyncMock(return_value=progress_plan)
-    provider_control = MagicMock()
+    provider_control = MagicMock(spec=ExternalChannelProviderControlService)
     provider_control.attempt = AsyncMock(
         side_effect=RuntimeError("provider unavailable")
     )
@@ -1647,7 +1687,7 @@ async def test_tracker_control_failure_does_not_gate_wake(
     )
 
     assert stale is False
-    transaction.commit.assert_awaited_once()
+    transaction.commit_mock.assert_awaited_once()
     assert provider_control.attempt.await_args_list == [((progress_plan,), {})]
     wake_dispatcher.dispatch.assert_awaited_once()
 
@@ -1708,7 +1748,7 @@ async def test_stale_ownership_does_not_enqueue_or_advance_cursor_and_logs_safel
     record = next(
         record
         for record in caplog.records
-        if getattr(record, "external_channel_failure_category", None)
+        if record.__dict__.get("external_channel_failure_category")
         == ExternalChannelIngressFailureCategory.OWNERSHIP_STALE.value
     )
     assert {key for key in record.__dict__ if key.startswith("external_channel_")} == {

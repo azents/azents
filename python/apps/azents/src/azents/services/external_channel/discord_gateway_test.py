@@ -2,8 +2,6 @@
 
 import asyncio
 import hashlib
-from types import SimpleNamespace
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -148,15 +146,12 @@ def test_library_client_requests_required_intents() -> None:
 async def test_setup_hook_accepts_exact_interaction_endpoint() -> None:
     """Gateway login accepts only the current callback selector authority."""
     client = _library_client()
-    client._application = cast(
-        discord.AppInfo,
-        SimpleNamespace(
-            interactions_endpoint_url=(
-                f"{_CALLBACK_BASE_URL}external-channel/v1/discord/interactions/"
-                f"{_CALLBACK_SELECTOR}"
-            )
-        ),
+    application = MagicMock(spec=discord.AppInfo)
+    application.interactions_endpoint_url = (
+        f"{_CALLBACK_BASE_URL}external-channel/v1/discord/interactions/"
+        f"{_CALLBACK_SELECTOR}"
     )
+    client._application = application
 
     await client.setup_hook()
 
@@ -165,10 +160,9 @@ async def test_setup_hook_accepts_exact_interaction_endpoint() -> None:
 async def test_setup_hook_rejects_missing_interaction_endpoint() -> None:
     """Provider callback removal becomes a terminal reconnect requirement."""
     client = _library_client()
-    client._application = cast(
-        discord.AppInfo,
-        SimpleNamespace(interactions_endpoint_url=None),
-    )
+    application = MagicMock(spec=discord.AppInfo)
+    application.interactions_endpoint_url = None
+    client._application = application
 
     with pytest.raises(DiscordGatewayTerminalError) as raised:
         await client.setup_hook()

@@ -5,7 +5,6 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 import pytest
@@ -242,6 +241,18 @@ def test_response_mode_accepts_ordinary_message_for_all_messages() -> None:
     )
 
 
+def _session(
+    *,
+    commit: AsyncMock | None = None,
+    rollback: AsyncMock | None = None,
+) -> AsyncSession:
+    """Build one runtime-specced AsyncSession fake."""
+    session = MagicMock(spec=AsyncSession)
+    session.commit = commit or AsyncMock()
+    session.rollback = rollback or AsyncMock()
+    return session
+
+
 def _store(
     *,
     repository: ExternalChannelRepository,
@@ -307,7 +318,7 @@ async def test_configured_binding_rejects_a_stopping_session() -> None:
         match="configured Session is unavailable",
     ):
         await store.create_configured_binding(
-            cast(AsyncSession, object()),
+            _session(),
             resource_id="resource-1",
             route_id="route-1",
             response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
@@ -389,10 +400,7 @@ async def _accepted_control_plan_case(
     provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
     invocation: bool = True,
 ) -> SimpleNamespace:
-    session = cast(
-        AsyncSession,
-        SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock()),
-    )
+    session = _session()
 
     @asynccontextmanager
     async def session_context() -> AsyncIterator[AsyncSession]:
@@ -697,7 +705,7 @@ async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> 
         projection_parts=[],
         tracker_visibility="visible",
     )
-    session = cast(AsyncSession, MagicMock())
+    session = _session()
 
     result = await store._create_initial_progress_intent(
         session,
@@ -762,7 +770,7 @@ async def test_session_presence_intent_replaces_open_session_control() -> None:
     )
 
     result = await store._create_session_presence_intent(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         resource=resource,
         binding=binding,
     )
@@ -803,7 +811,7 @@ async def test_conversation_resolution_does_not_create_session_before_acceptance
     )
 
     conversation = await store._resolve_conversation(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         request=_slack_request(),
         connection=ExternalChannelConnection.model_construct(id="connection-1"),
         source_resource=ExternalChannelResource.model_construct(id="resource-1"),
@@ -818,10 +826,7 @@ async def test_conversation_resolution_does_not_create_session_before_acceptance
 async def test_setup_required_commits_claim_without_conversation_side_effects() -> None:
     """Authorized setup admission creates no Binding, Session, mailbox, or wake."""
     commit = AsyncMock()
-    session = cast(
-        AsyncSession,
-        SimpleNamespace(commit=commit, rollback=AsyncMock()),
-    )
+    session = _session(commit=commit)
     repository = MagicMock()
     repository.get_active_block = AsyncMock(return_value=None)
     repository.get_active_access_grant = AsyncMock(return_value=object())
@@ -975,7 +980,7 @@ async def test_latest_eligible_setup_mention_replaces_continuation_source() -> N
     route = ExternalChannelAgentRoute.model_construct(id="route-1")
 
     result = await store._ensure_setup_claim(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         request=request,
         position=position,
         source_resource=source_resource,
@@ -1045,7 +1050,7 @@ async def test_duplicate_slack_event_types_reuse_setup_claim_source() -> None:
     store = _store(repository=repository)
 
     result = await store._ensure_setup_claim(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         request=request,
         position=ExternalChannelConversationPosition.model_construct(id="position-1"),
         source_resource=ExternalChannelResource.model_construct(id="source-1"),
@@ -1086,7 +1091,7 @@ async def test_discord_thread_resolves_multi_default_from_parent_channel() -> No
     )
 
     route = await store._resolve_route(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         request=request,
         connection=ExternalChannelConnection.model_construct(
             id="connection-1",
@@ -1148,13 +1153,13 @@ async def test_create_binding_reports_only_the_new_root_session() -> None:
     resource = ExternalChannelResource.model_construct(id="resource-1")
 
     first = await store._create_binding(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         route=route,
         resource=resource,
         response_mode=None,
     )
     repeated = await store._create_binding(
-        cast(AsyncSession, MagicMock()),
+        _session(),
         route=route,
         resource=resource,
         response_mode=None,

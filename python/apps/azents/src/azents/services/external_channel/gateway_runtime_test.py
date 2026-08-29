@@ -1,7 +1,8 @@
 """Persistent External Channel gateway runtime tests."""
 
 import asyncio
-from typing import cast
+from typing import Protocol, TypeVar
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -21,6 +22,15 @@ from azents.services.external_channel.slack_presence_manager import (
 from azents.services.external_channel.socket_manager import (
     SlackSocketManagerService,
 )
+from azents.testing.types import require_instance
+
+T = TypeVar("T")
+
+
+class _Manager(Protocol):
+    """Minimal Gateway manager test contract."""
+
+    async def run(self, shutdown_event: asyncio.Event) -> None: ...
 
 
 class _WaitingManager:
@@ -57,23 +67,33 @@ class _FailingManager:
         raise ValueError("manager failure")
 
 
+def _typed_manager(expected: type[T], manager: _Manager) -> T:
+    """Wrap one lifecycle implementation in a runtime-specced manager fake."""
+    mock = MagicMock(spec=expected)
+    mock.run = manager.run
+    return require_instance(mock, expected)
+
+
 def _runtime(
     *,
-    slack_manager: object,
-    discord_manager: object,
-    presence_manager: object | None = None,
+    slack_manager: _Manager,
+    discord_manager: _Manager,
+    presence_manager: _Manager | None = None,
 ) -> ExternalChannelGatewayRuntime:
     return ExternalChannelGatewayRuntime(
-        slack_socket_manager=cast(SlackSocketManagerService, slack_manager),
-        discord_gateway_manager=cast(
+        slack_socket_manager=_typed_manager(
+            SlackSocketManagerService,
+            slack_manager,
+        ),
+        discord_gateway_manager=_typed_manager(
             DiscordGatewayManagerService,
             discord_manager,
         ),
-        slack_presence_manager=cast(
+        slack_presence_manager=_typed_manager(
             SlackWorkPresenceManagerService,
             _WaitingManager() if presence_manager is None else presence_manager,
         ),
-        ingress_recovery_service=cast(
+        ingress_recovery_service=_typed_manager(
             ExternalChannelIngressRecoveryService,
             _WaitingManager(),
         ),

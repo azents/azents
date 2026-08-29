@@ -5,8 +5,8 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
-from unittest.mock import ANY, AsyncMock, call
+from typing import NamedTuple
+from unittest.mock import ANY, AsyncMock, MagicMock, call
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +26,6 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileSource,
 )
 from azents.core.external_channel_progress import ExternalChannelWorkTask
-from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.scheduled_task.data import ScheduledTask
@@ -39,10 +38,8 @@ from azents.repos.scheduled_task_cycle.data import (
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
 )
-from azents.services.external_channel.channel_action import (
-    ExternalChannelActionService,
-    RuntimeTargetResolver,
-)
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
+from azents.services.external_channel.channel_action import ExternalChannelActionService
 from azents.services.external_channel.provider_effect import (
     ProviderEffectPlan,
     ProviderMutationOutcome,
@@ -55,6 +52,7 @@ from azents.services.scheduled_task.terminal import (
     ScheduledTaskTerminalEffectSnapshot,
 )
 from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.testing.types import require_instance
 
 _NOW = datetime.datetime(2026, 8, 16, 12, 0, tzinfo=datetime.UTC)
 _AGENT_ID = "a" * 32
@@ -66,7 +64,7 @@ _RUN_ID = "r" * 32
 
 @asynccontextmanager
 async def _session_manager() -> AsyncIterator[AsyncSession]:
-    yield cast(AsyncSession, object())
+    yield require_instance(MagicMock(spec=AsyncSession), AsyncSession)
 
 
 def _cycle(
@@ -156,32 +154,43 @@ def _plan(
     )
 
 
-def _service() -> tuple[
-    ScheduledTaskChannelService,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-    AsyncMock,
-]:
-    run_repository = AsyncMock()
-    cycle_repository = AsyncMock()
-    provider_repository = AsyncMock()
-    action_service = AsyncMock()
-    config = cast(
-        Config,
-        SimpleNamespace(
-            auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="test-secret"))
+class _ServiceFixture(NamedTuple):
+    """Scheduled Channel service and its mock collaborators."""
+
+    service: ScheduledTaskChannelService
+    run_repository: AsyncMock
+    cycle_repository: AsyncMock
+    provider_repository: AsyncMock
+    action_service: AsyncMock
+
+
+def _service() -> _ServiceFixture:
+    run_repository = AsyncMock(spec=AgentRunRepository)
+    cycle_repository = AsyncMock(spec=ScheduledTaskCycleRepository)
+    provider_repository = AsyncMock(spec=ExternalChannelWorkRepository)
+    action_service = AsyncMock(spec=ExternalChannelActionService)
+    config = require_instance(
+        MagicMock(
+            spec=Config,
+            auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="test-secret")),
         ),
+        Config,
     )
     service = ScheduledTaskChannelService(
-        session_manager=cast(SessionManager[AsyncSession], _session_manager),
-        run_repository=cast(AgentRunRepository, run_repository),
-        cycle_repository=cast(ScheduledTaskCycleRepository, cycle_repository),
-        provider_repository=cast(ExternalChannelWorkRepository, provider_repository),
-        action_service=cast(ExternalChannelActionService, action_service),
+        session_manager=_session_manager,
+        run_repository=require_instance(run_repository, AgentRunRepository),
+        cycle_repository=require_instance(
+            cycle_repository,
+            ScheduledTaskCycleRepository,
+        ),
+        provider_repository=require_instance(
+            provider_repository,
+            ExternalChannelWorkRepository,
+        ),
+        action_service=require_instance(action_service, ExternalChannelActionService),
         config=config,
     )
-    return (
+    return _ServiceFixture(
         service,
         run_repository,
         cycle_repository,
@@ -630,24 +639,22 @@ async def test_terminal_cleanup_runs_after_failed_publication() -> None:
         media_type="image/png",
         expected_size=128,
     )
-    file_storage = cast(FileStorage, object())
-    authority = cast(SessionResourceAuthority, object())
-    provider_delivery_service = object()
-    resolve_runtime_target = object()
+    file_storage: FileStorage = MagicMock(spec=FileStorage)
+    authority: SessionResourceAuthority = MagicMock(spec=SessionResourceAuthority)
+    provider_delivery_service: RuntimeToProviderDeliveryExecutor = MagicMock(
+        spec=RuntimeToProviderDeliveryExecutor
+    )
+
+    async def resolve_runtime_target() -> ServerToRuntimeTarget:
+        raise AssertionError("The mocked action service must not resolve a Runtime.")
 
     outcomes = await service.execute_terminal(
         snapshot,
         files=(manifest,),
         file_storage=file_storage,
         authority=authority,
-        provider_delivery_service=cast(
-            RuntimeToProviderDeliveryExecutor,
-            provider_delivery_service,
-        ),
-        resolve_runtime_target=cast(
-            RuntimeTargetResolver,
-            resolve_runtime_target,
-        ),
+        provider_delivery_service=provider_delivery_service,
+        resolve_runtime_target=resolve_runtime_target,
     )
 
     assert [outcome.operation for outcome in outcomes] == [
