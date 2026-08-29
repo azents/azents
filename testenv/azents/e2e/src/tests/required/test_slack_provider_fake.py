@@ -7,7 +7,6 @@ import threading
 import time
 from collections.abc import Generator
 from http.server import ThreadingHTTPServer
-from typing import cast
 
 import pytest
 import requests
@@ -19,6 +18,13 @@ from support.slack_provider_fake import (
     SlackWebSocketHandler,
     ThreadingSocketServer,
 )
+
+
+def _object(value: object) -> dict[str, object]:
+    """Validate one fake evidence object with string keys."""
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise AssertionError("Expected an object with string keys.")
+    return value
 
 
 @pytest.fixture
@@ -939,9 +945,7 @@ def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
         thread.join(timeout=5)
 
     evidence = state.evidence()
-    socket_evidence = evidence["socket"]
-    assert isinstance(socket_evidence, dict)
-    socket_evidence_object = cast(dict[str, object], socket_evidence)
+    socket_evidence_object = _object(evidence["socket"])
     assert socket_evidence_object["connections"] == 1
     assert socket_evidence_object["envelope_ids"] == ["Env-1"]
     assert socket_evidence_object["acknowledgements"] == ["Env-1"]

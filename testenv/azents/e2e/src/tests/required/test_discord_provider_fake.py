@@ -938,7 +938,11 @@ def test_discord_fake_publishes_failure_evidence_before_transport_boundary(
 ) -> None:
     """Publish unknown failure evidence before closing or delaying transport."""
     discord_fake_url, _ = discord_fake_urls
-    original_boundary = getattr(DiscordHTTPHandler, boundary_method)
+    original_boundary = (
+        DiscordHTTPHandler._close_connection
+        if boundary_method == "_close_connection"
+        else DiscordHTTPHandler._wait_for_controlled_timeout
+    )
     boundary_evidence: list[dict[str, object]] = []
 
     def observe_boundary(handler: DiscordHTTPHandler) -> None:
