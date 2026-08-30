@@ -3,7 +3,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -52,7 +51,8 @@ from azents.testing.external_channel import make_provider_effect_plan
 def _session_manager() -> SessionManager[AsyncSession]:
     @asynccontextmanager
     async def manager() -> AsyncIterator[AsyncSession]:
-        yield cast(AsyncSession, object())
+        session: AsyncSession = MagicMock(spec=AsyncSession)
+        yield session
 
     return manager
 
@@ -92,43 +92,34 @@ def _resource(*, delivery_channel_id: str | None = None) -> ExternalChannelResou
 
 def _service(
     *,
-    repository: MagicMock,
-    work_repository: MagicMock | None = None,
-    credentials_codec: MagicMock | None = None,
-    discord_client: MagicMock | None = None,
-    mailbox_store: MagicMock | None = None,
+    repository: ExternalChannelRepository,
+    work_repository: ExternalChannelWorkRepository | None = None,
+    credentials_codec: ExternalChannelCredentialsCodec | None = None,
+    discord_client: DiscordDeliveryClient | None = None,
+    mailbox_store: ExternalChannelMailboxIngestionStore | None = None,
 ) -> ExternalChannelIngressProvisioningService:
     repository.get_connected_binding_by_resource = AsyncMock(return_value=None)
     conversation_provisioning = ExternalChannelConversationProvisioningService(
         session_manager=_session_manager(),
-        repository=cast(ExternalChannelRepository, repository),
-        work_repository=cast(
-            ExternalChannelWorkRepository,
-            work_repository or MagicMock(),
-        ),
-        credentials_codec=cast(
-            ExternalChannelCredentialsCodec,
-            credentials_codec or MagicMock(),
-        ),
-        discord_client=cast(
-            DiscordDeliveryClient,
-            discord_client or MagicMock(),
-        ),
+        repository=repository,
+        work_repository=work_repository
+        or MagicMock(spec=ExternalChannelWorkRepository),
+        credentials_codec=credentials_codec
+        or MagicMock(spec=ExternalChannelCredentialsCodec),
+        discord_client=discord_client or MagicMock(spec=DiscordDeliveryClient),
     )
     return ExternalChannelIngressProvisioningService(
         session_manager=_session_manager(),
-        repository=cast(ExternalChannelRepository, repository),
+        repository=repository,
         conversation_provisioning=conversation_provisioning,
-        mailbox_store=cast(
-            ExternalChannelMailboxIngestionStore,
-            mailbox_store or MagicMock(),
-        ),
+        mailbox_store=mailbox_store
+        or MagicMock(spec=ExternalChannelMailboxIngestionStore),
     )
 
 
 async def test_prepare_discord_thread_has_no_db_transition() -> None:
     """Discord provider mutation finishes before any ready-transition DB write."""
-    repository = MagicMock()
+    repository = MagicMock(spec=ExternalChannelRepository)
     repository.get_resource = AsyncMock(return_value=_resource())
     repository.get_connection_configuration = AsyncMock(
         return_value=ExternalChannelConnectionConfiguration.model_construct(
@@ -141,9 +132,9 @@ async def test_prepare_discord_thread_has_no_db_transition() -> None:
             },
         )
     )
-    codec = MagicMock()
+    codec = MagicMock(spec=ExternalChannelCredentialsCodec)
     codec.decrypt.return_value = DiscordConnectionCredentials(bot_token="secret")
-    discord = MagicMock()
+    discord = MagicMock(spec=DiscordDeliveryClient)
     discord.ensure_thread = AsyncMock(
         return_value=DiscordDeliveryResult(
             status="delivered",
@@ -153,9 +144,9 @@ async def test_prepare_discord_thread_has_no_db_transition() -> None:
             created_thread_name="Azents thread",
         )
     )
-    work_repository = MagicMock()
+    work_repository = MagicMock(spec=ExternalChannelRepository)
     work_repository.record_discord_delivery_channel = AsyncMock()
-    mailbox_store = MagicMock()
+    mailbox_store = MagicMock(spec=ExternalChannelMailboxIngestionStore)
     mailbox_store.create_configured_binding = AsyncMock()
     service = _service(
         repository=repository,
@@ -179,7 +170,7 @@ async def test_prepare_discord_thread_has_no_db_transition() -> None:
 
 async def test_prepare_classifies_invalid_encrypted_credentials() -> None:
     """Malformed persisted credentials enter bounded terminal owner cleanup."""
-    repository = MagicMock()
+    repository = MagicMock(spec=ExternalChannelRepository)
     repository.get_resource = AsyncMock(return_value=_resource())
     repository.get_connection_configuration = AsyncMock(
         return_value=ExternalChannelConnectionConfiguration.model_construct(
@@ -192,7 +183,7 @@ async def test_prepare_classifies_invalid_encrypted_credentials() -> None:
             },
         )
     )
-    codec = MagicMock()
+    codec = MagicMock(spec=ExternalChannelCredentialsCodec)
     codec.decrypt.side_effect = InvalidToken
     service = _service(repository=repository, credentials_codec=codec)
 
@@ -205,7 +196,7 @@ async def test_prepare_classifies_invalid_encrypted_credentials() -> None:
 
 async def test_prepare_classifies_non_utf8_encrypted_credentials() -> None:
     """A decryptable non-UTF-8 payload is a bounded credential failure."""
-    repository = MagicMock()
+    repository = MagicMock(spec=ExternalChannelRepository)
     repository.get_resource = AsyncMock(return_value=_resource())
     repository.get_connection_configuration = AsyncMock(
         return_value=ExternalChannelConnectionConfiguration.model_construct(
@@ -218,7 +209,7 @@ async def test_prepare_classifies_non_utf8_encrypted_credentials() -> None:
             },
         )
     )
-    codec = MagicMock()
+    codec = MagicMock(spec=ExternalChannelCredentialsCodec)
     codec.decrypt.side_effect = UnicodeDecodeError(
         "utf-8",
         b"\xff",
@@ -250,8 +241,8 @@ async def test_complete_uses_caller_transaction(
     tracker_visibility: str,
 ) -> None:
     """The ready transition uses one caller-owned transaction for every DB effect."""
-    transaction = cast(AsyncSession, object())
-    repository = MagicMock()
+    transaction: AsyncSession = MagicMock(spec=AsyncSession)
+    repository = MagicMock(spec=ExternalChannelRepository)
     repository.lock_connection_for_routing = AsyncMock(
         return_value=SimpleNamespace(id="connection-1")
     )
@@ -274,7 +265,7 @@ async def test_complete_uses_caller_transaction(
             settings_generation=3,
         )
     )
-    work_repository = MagicMock()
+    work_repository = MagicMock(spec=ExternalChannelRepository)
     work_repository.record_discord_delivery_channel = AsyncMock(return_value="400")
     binding = ExternalChannelBinding.model_construct(
         id="binding-1",
@@ -291,7 +282,7 @@ async def test_complete_uses_caller_transaction(
         session_created=True,
         control_plans=(presence_plan, progress_plan),
     )
-    mailbox_store = MagicMock()
+    mailbox_store = MagicMock(spec=ExternalChannelMailboxIngestionStore)
     mailbox_store.create_configured_binding = AsyncMock(return_value=configured)
     service = _service(
         repository=repository,
@@ -329,8 +320,8 @@ async def test_complete_uses_caller_transaction(
 
 async def test_complete_rejects_changed_participation_generation() -> None:
     """A stale configured target terminalizes before Binding or Session creation."""
-    transaction = cast(AsyncSession, object())
-    repository = MagicMock()
+    transaction: AsyncSession = MagicMock(spec=AsyncSession)
+    repository = MagicMock(spec=ExternalChannelRepository)
     repository.lock_connection_for_routing = AsyncMock(
         return_value=SimpleNamespace(id="connection-1")
     )
@@ -353,7 +344,7 @@ async def test_complete_rejects_changed_participation_generation() -> None:
             settings_generation=4,
         )
     )
-    mailbox_store = MagicMock()
+    mailbox_store = MagicMock(spec=ExternalChannelMailboxIngestionStore)
     mailbox_store.create_configured_binding = AsyncMock()
     service = _service(repository=repository, mailbox_store=mailbox_store)
 
