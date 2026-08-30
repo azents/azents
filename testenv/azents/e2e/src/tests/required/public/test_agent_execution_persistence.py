@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api
@@ -40,6 +41,7 @@ from support.runtime_profiles import (
     create_workspace_runtime_profile,
     start_and_wait_for_agent_runtime,
 )
+from support.system_bootstrap import SystemBootstrapEvidence
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -109,6 +111,14 @@ class _Workspace:
 
 
 @dataclass(frozen=True)
+class _ExecutionAgentSetup:
+    """Shared immutable workspace and Agent runtime."""
+
+    workspace: _Workspace
+    agent_id: str
+
+
+@dataclass(frozen=True)
 class _RunResult:
     """REST write run result."""
 
@@ -171,6 +181,27 @@ def _team_primary_session_id(
     session_id = payload.get("id")
     if not isinstance(session_id, str):
         raise AssertionError(f"Team primary response did not include id: {payload!r}")
+    return session_id
+
+
+def _create_execution_session(
+    *,
+    server_url: str,
+    token: str,
+    agent_id: str,
+) -> str:
+    """Create one independent non-primary Session for a persistence test."""
+    response = requests.post(
+        f"{server_url}/chat/v1/agents/{agent_id}/sessions",
+        headers={**_headers(token), "Content-Type": "application/json"},
+        json={"existing_project_paths": [], "setup_actions": []},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = _json_object(response)
+    session_id = payload.get("id")
+    if not isinstance(session_id, str):
+        raise AssertionError(f"Session response did not include id: {payload!r}")
     return session_id
 
 
@@ -964,24 +995,47 @@ wait_for_rest_contents = _wait_for_rest_contents
 wait_for_ws_action = _wait_for_ws_action
 
 
+@pytest.fixture(scope="class")
+def execution_agent_setup(
+    azents_public_server_url: str,
+    azents_admin_server_url: str,
+    system_bootstrap_evidence: SystemBootstrapEvidence,
+    azents_engine_worker_container: object,
+) -> _ExecutionAgentSetup:
+    """Prepare one Agent/runtime shared by isolated persistence Sessions."""
+    del azents_engine_worker_container
+    public_api_client = azentspublicclient.ApiClient(
+        configuration=azentspublicclient.Configuration(host=azents_public_server_url)
+    )
+    admin_api_client = azentsadminclient.ApiClient(
+        configuration=azentsadminclient.Configuration(
+            host=azents_admin_server_url,
+            access_token=system_bootstrap_evidence.access_token,
+        )
+    )
+    workspace = _setup_workspace(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+    )
+    return _ExecutionAgentSetup(
+        workspace=workspace,
+        agent_id=_create_agent(public_api_client, workspace),
+    )
+
+
 class TestAgentExecutionPersistence:
     """agent execution resultt REST reload t durable t t verifyt."""
 
     def test_single_turn_assistant_response_survives_rest_reload(
         self,
         public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        execution_agent_setup: _ExecutionAgentSetup,
     ) -> None:
         """t t user/assistant/run boundary t REST history t t."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(public_api_client, workspace)
+        workspace = execution_agent_setup.workspace
+        agent_id = execution_agent_setup.agent_id
 
         result = _run_message(
             public_api_client=public_api_client,
@@ -1011,19 +1065,13 @@ class TestAgentExecutionPersistence:
     def test_canonical_ws_history_pagination_and_intent_converge(
         self,
         public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        execution_agent_setup: _ExecutionAgentSetup,
     ) -> None:
         """Converge canonical WS delivery with paginated durable history."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(public_api_client, workspace)
-        session_id = _team_primary_session_id(
+        workspace = execution_agent_setup.workspace
+        agent_id = execution_agent_setup.agent_id
+        session_id = _create_execution_session(
             server_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
@@ -1213,19 +1261,13 @@ class TestAgentExecutionPersistence:
     def test_ws_mailbox_upsert_and_remove_use_native_identity(
         self,
         public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        execution_agent_setup: _ExecutionAgentSetup,
     ) -> None:
         """Observe typed mailbox admission and removal around one promoted turn."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
-        )
-        agent_id = _create_agent(public_api_client, workspace)
-        session_id = _team_primary_session_id(
+        workspace = execution_agent_setup.workspace
+        agent_id = execution_agent_setup.agent_id
+        session_id = _create_execution_session(
             server_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
@@ -1324,24 +1366,24 @@ class TestAgentExecutionPersistence:
     def test_failed_run_retry_live_state_recovers_before_terminal_error(
         self,
         public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        execution_agent_setup: _ExecutionAgentSetup,
     ) -> None:
         """Failed-run retry exposes live state before terminal recovery."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+        workspace = execution_agent_setup.workspace
+        agent_id = execution_agent_setup.agent_id
+        session_id = _create_execution_session(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
         )
-        agent_id = _create_agent(public_api_client, workspace)
 
         result = _run_message(
             public_api_client=public_api_client,
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
+            session_id=session_id,
             message=_RETRY_ONCE,
         )
         live_payload = _wait_for_live_retry(
@@ -1382,24 +1424,24 @@ class TestAgentExecutionPersistence:
     def test_failed_run_retry_budget_resets_after_model_turn(
         self,
         public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        execution_agent_setup: _ExecutionAgentSetup,
     ) -> None:
         """Each model turn receives a fresh failed-run retry budget."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+        workspace = execution_agent_setup.workspace
+        agent_id = execution_agent_setup.agent_id
+        session_id = _create_execution_session(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
         )
-        agent_id = _create_agent(public_api_client, workspace)
 
         result = _run_message(
             public_api_client=public_api_client,
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
+            session_id=session_id,
             message=_RETRY_ACROSS_TURNS,
         )
         failed_payload = _wait_for_failed_run_error(
@@ -1440,24 +1482,24 @@ class TestAgentExecutionPersistence:
     def test_failed_run_manual_retry_soft_reverts_terminal_error(
         self,
         public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        execution_agent_setup: _ExecutionAgentSetup,
     ) -> None:
         """Manual failed-run retry soft-reverts terminal error and restarts."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+        workspace = execution_agent_setup.workspace
+        agent_id = execution_agent_setup.agent_id
+        session_id = _create_execution_session(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
         )
-        agent_id = _create_agent(public_api_client, workspace)
 
         result = _run_message(
             public_api_client=public_api_client,
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
+            session_id=session_id,
             message=_RETRY_MANUAL,
         )
         failed_payload = _wait_for_failed_run_error(
@@ -1495,24 +1537,24 @@ class TestAgentExecutionPersistence:
     def test_failed_run_manual_retry_rejects_stale_failed_card(
         self,
         public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        execution_agent_setup: _ExecutionAgentSetup,
     ) -> None:
         """Manual failed-run retry rejects stale failed cards."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+        workspace = execution_agent_setup.workspace
+        agent_id = execution_agent_setup.agent_id
+        session_id = _create_execution_session(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
         )
-        agent_id = _create_agent(public_api_client, workspace)
 
         result = _run_message(
             public_api_client=public_api_client,
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
+            session_id=session_id,
             message=_RETRY_STALE,
         )
         failed_payload = _wait_for_failed_run_error(
@@ -1591,24 +1633,24 @@ class TestAgentExecutionPersistence:
     def test_manual_compaction_preserves_history_and_next_turn_persists(
         self,
         public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        execution_agent_setup: _ExecutionAgentSetup,
     ) -> None:
         """manual compact t UI history t next turn persistence t t."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+        workspace = execution_agent_setup.workspace
+        agent_id = execution_agent_setup.agent_id
+        session_id = _create_execution_session(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
         )
-        agent_id = _create_agent(public_api_client, workspace)
 
         first = _run_message(
             public_api_client=public_api_client,
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
+            session_id=session_id,
             message=_COMPACT_SEED,
         )
         _wait_for_rest_contents(
@@ -1667,24 +1709,24 @@ class TestAgentExecutionPersistence:
     def test_edit_user_message_replaces_later_turn_in_rest_history(
         self,
         public_api_client: azentspublicclient.ApiClient,
-        admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_engine_worker_container: object,
+        execution_agent_setup: _ExecutionAgentSetup,
     ) -> None:
         """user message edit t t turn t t t run t durable t t."""
-        del azents_engine_worker_container
-        workspace = _setup_workspace(
-            public_api_client,
-            admin_api_client,
-            azents_public_server_url,
+        workspace = execution_agent_setup.workspace
+        agent_id = execution_agent_setup.agent_id
+        session_id = _create_execution_session(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
         )
-        agent_id = _create_agent(public_api_client, workspace)
 
         first = _run_message(
             public_api_client=public_api_client,
             public_url=azents_public_server_url,
             token=workspace.token,
             agent_id=agent_id,
+            session_id=session_id,
             message=_HELLO,
         )
         _wait_for_completed_rest_contents(

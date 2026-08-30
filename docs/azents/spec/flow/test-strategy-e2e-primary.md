@@ -25,8 +25,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-28
-spec_version: 39
+last_verified_at: 2026-08-30
+spec_version: 40
 ---
 
 # E2E Primary Test Strategy
@@ -193,9 +193,15 @@ Always-on required CI does not depend on external credentials.
   and Docker Runtime Provider images whose complete build inputs are unchanged.
   Pull requests use the base-main SHA, main pushes use the previous main SHA, and
   manually dispatched measurements use the checked-out commit's first parent.
-  Snapshot authentication, availability, pull, or local-tag failure falls back to the
-  existing current-worktree BuildKit build for the affected image. Changed image
-  components always build the current worktree.
+  The direct predecessor is the fast path. When an unchanged image's exact tag is
+  unavailable, the lane fetches bounded first-parent history and may reuse the nearest
+  available immutable ancestor only when `git diff` proves that image's complete
+  build-input paths are identical to the direct predecessor. Directly prepared images
+  remain selected while unresolved images continue the ancestor lookup, and artifacts
+  retain both direct and fallback pull evidence. Authentication, history fetch,
+  compatibility, availability, pull, or local-tag failure falls back to the existing
+  current-worktree BuildKit build for the affected image. Changed image components
+  always build the current worktree.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
@@ -330,6 +336,10 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-30** (spec_version 40) — Added bounded compatible-ancestor fallback
+  for unchanged required E2E images when an exact predecessor snapshot is
+  unavailable, while preserving direct successes, immutable Git-tree validation,
+  artifact evidence, and current-worktree builds for changed or unresolved images.
 - **2026-08-28** (spec_version 39) — Made sanitized Discord failure evidence
   authoritative before callers can observe controlled failure boundaries.
 - **2026-08-27** (spec_version 38) — Made configured Discord REST failure
