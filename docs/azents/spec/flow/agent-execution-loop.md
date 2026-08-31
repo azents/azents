@@ -79,11 +79,14 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ChatView.tsx
   - typescript/apps/azents-web/src/features/chat/components/ActivityMessageRow.tsx
   - typescript/apps/azents-web/src/features/chat/components/MessageBubble.tsx
+  - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
+  - typescript/apps/azents-web/src/features/chat/toolCallActionPresentation.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-23
-spec_version: 161
+  - typescript/apps/azents-web/messages/*/chat.json
+last_verified_at: 2026-08-31
+spec_version: 162
 ---
 
 # Agent Execution Loop
@@ -372,7 +375,7 @@ Phase enum:
 - `stopping`
 
 `active_tool_calls` contains `call_id`, `name`, redacted/summarized `arguments`, `started_at`,
-and the admitting `owner_generation`. PostgreSQL is the execution and live-state authority for this set. The shared UI Run indicator renders once at the live timeline tail for the full lifetime of a live Run, rather than inside the active Activity summary or only while a model call is in flight. `agent_runs.model_call_started_at` remains the model-call duration source: it is set when each model turn enters `waiting_for_model`, preserved through `streaming_model`, and cleared when the Run leaves the model-call phases or enters failed-attempt retry backoff. REST and WebSocket live Run projections expose this timestamp as `model_call_started_at`. After ten elapsed seconds, the indicator displays the client-calculated whole-second duration immediately beside its model dots with no label and refreshes it once per second while that timestamp is present. The active Activity summary keeps its elapsed duration without parentheses and has no model-wait subtitle or model-dots icon. When it contains activity events, its circular progress indicator replaces the completed-summary check icon in the header; an empty live group renders neither a summary spinner nor a standalone indicator. When the Run closes, the Activity changes to its completed check state. Tool activity uses `executing_tools` and `active_tool_calls`.
+and the admitting `owner_generation`. PostgreSQL is the execution and live-state authority for this set. The shared UI Run indicator renders once at the live timeline tail for the full lifetime of a live Run, rather than inside the active Activity summary or only while a model call is in flight. `agent_runs.model_call_started_at` remains the model-call duration source: it is set when each model turn enters `waiting_for_model`, preserved through `streaming_model`, and cleared when the Run leaves the model-call phases or enters failed-attempt retry backoff. REST and WebSocket live Run projections expose this timestamp as `model_call_started_at`. After ten elapsed seconds, the indicator displays the client-calculated whole-second duration immediately beside its model dots with no label and refreshes it once per second while that timestamp is present. The active Activity summary keeps its elapsed duration without parentheses and has no model-wait subtitle or model-dots icon. When it contains activity events, its circular progress indicator replaces the completed-summary check icon in the header; an empty live group renders neither a summary spinner nor a standalone indicator. When the Run closes, the Activity changes to its completed check state. Tool activity uses `executing_tools` and `active_tool_calls`. Specialized client-tool rows select locale-owned action text by lifecycle: `preparing` and `running` use an in-progress expression, while terminal statuses use the completed expression.
 
 `action_executions` and `action_execution_events` are likewise live execution state, not a second
 terminal history store. Each active operation stores its admitting Session `owner_generation` and
