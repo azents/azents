@@ -90,6 +90,8 @@ ineligible for External Channel idle continuation.
 - Active Work on another binding remains eligible.
 - Goal, Scheduled Task, and other independent continuation sources remain eligible.
 - The awaiting Work remains available to compaction and management projections.
+- Awaiting Work stops Slack processing presence and Discord typing while preserving
+  its existing Channel Work Tracker and task presentation.
 
 ### REQ-3. Resume on same-binding activity
 
@@ -125,6 +127,9 @@ visible to them.
 - Normal provider authorization, binding ownership, message limits, file authority,
   and delivery outcome classification continue to apply.
 - No provider-specific interactive response surface or webhook protocol is added.
+- The feature adds no database, row, table, advisory, or long-lived transaction lock.
+  Concurrent state changes use the existing bounded Toolkit State CAS and canonical
+  Work revision only.
 
 ## Open Assumptions
 
@@ -135,5 +140,5 @@ visible to them.
 
 Confirmed by the requester on 2026-08-31 before ADR and Design decisions were
 recorded. The requester additionally confirmed that a same-binding continue action
-invalidates any earlier awaiting state. The requester confirmed a coordinated backend
-restart rather than a temporary mixed-version compatibility rollout.
+invalidates any earlier awaiting state, that awaiting Work stops Slack processing
+presence and Discord typing, and that implementation must not add a new lock.

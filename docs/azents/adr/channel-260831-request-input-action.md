@@ -56,7 +56,8 @@ Rejected alternatives:
 
 Awaiting state is cleared by either of two authoritative same-binding transitions:
 
-1. admission of an eligible human External Channel message through that binding; or
+1. creation of canonical mailbox input for an eligible human External Channel message
+   through that binding; or
 2. an explicit `channel_action continue` on that binding.
 
 A continue action invalidates both established awaiting state and any older in-flight
@@ -100,9 +101,11 @@ Rejected alternatives:
 **Affects:** `channel-260831/REQ-2`, `channel-260831/REQ-3`
 
 The Channel Work Toolkit State schema upgrade and `request_input` mode are deployed
-through a coordinated restart of every backend component that can execute Channel
-Work or evaluate External Channel idle continuation. The version-4 state migration
-runs before the homogeneous new backend begins serving the mode.
+through a coordinated restart of every backend component that reads or writes Channel
+Work Toolkit State. This includes Channel Action and idle-continuation workers,
+External Channel ingress, management and API readers, Slack Work presence managers,
+and Discord Gateway typing managers. The version-4 state migration runs before the
+homogeneous new backend begins serving the mode.
 
 The rollout does not add temporary version-3/version-4 dual-read behavior, a feature
 flag, or a generalized deployment-quiescence controller.
@@ -116,6 +119,45 @@ Rejected alternatives:
 - A generalized quiescence controller is broader than the bounded coordinated restart
   required for this state migration.
 
+### `channel-260831/ADR-D5` — Add no new lock for awaiting transitions
+
+**Affects:** `channel-260831/REQ-3`, `channel-260831/REQ-4`
+
+Awaiting request, settlement, resume, and invalidation use the existing bounded
+Channel Work Toolkit State CAS and canonical `state_revision`. The feature does not
+add a database, row, table, advisory, Session, Binding, or long-lived transaction
+lock. Existing authorization and lifecycle locks remain unchanged.
+
+If implementation discovers that the approved behavior cannot be implemented with the
+existing CAS boundary, it returns for requester review instead of adding a lock.
+
+Rejected alternatives:
+
+- A new Session or Binding lock recreates serialization around unrelated Channel Work
+  activity.
+- A table or advisory lock expands one binding-scoped lifecycle into a global
+  coordination boundary.
+- A long-lived transaction around provider delivery violates the existing
+  commit-before-call boundary.
+
+### `channel-260831/ADR-D6` — Stop active presence while awaiting input
+
+**Affects:** `channel-260831/REQ-2`, `channel-260831/REQ-3`
+
+Awaiting Work remains active and keeps its Channel Work Tracker, but it is not
+presented as actively processing. Slack Work presence projects the Work as idle, and
+Discord Gateway typing excludes it. Same-binding admitted input or continue clears
+awaiting state, after which the existing presence managers may project processing
+again.
+
+Rejected alternatives:
+
+- Continuing processing presence or typing while waiting misrepresents who must act
+  next.
+- Deleting the Work Tracker discards useful task and progress context.
+- Adding a provider-specific waiting control violates the ordinary-message-only
+  interaction boundary.
+
 ## Consequences
 
 - Channel Work remains active and retains its title, tasks, Tracker, and cycle identity
@@ -123,9 +165,13 @@ Rejected alternatives:
 - Idle continuation selection becomes binding-aware and excludes only awaiting Work.
 - Existing External Channel ingress becomes the resume authority; no Discord or Slack
   interactive webhook surface is introduced.
+- Awaiting Work stops Slack processing presence and Discord typing without deleting
+  its Tracker.
 - The persisted Channel Work Toolkit State schema requires a versioned migration.
 - Deployment requires one coordinated restart of Channel Work and idle-continuation
-  backend components before the new mode is used.
+  state readers and writers before the new mode is used.
+- Concurrency remains inside the existing Toolkit State CAS and Work revision boundary;
+  no new lock is added.
 - Scheduled Task-bound Channel Actions continue to use their separate cycle lifecycle
   and do not accept `request_input`.
 - A provider ambiguity may produce an additional continuation, but cannot silently
