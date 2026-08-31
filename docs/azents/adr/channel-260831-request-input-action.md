@@ -158,6 +158,34 @@ Rejected alternatives:
 - Adding a provider-specific waiting control violates the ordinary-message-only
   interaction boundary.
 
+### `channel-260831/ADR-D7` — Extend the existing Agent-facing prompt structure
+
+**Affects:** `channel-260831/REQ-1`
+
+`request_input` follows the existing `channel_action` guidance structure instead of
+introducing a new prompt surface. The static Toolkit prompt adds only a concise
+pre-discovery reference to requesting participant input. The Tool description owns
+the mode-selection meaning, the `mode` and `message` field schemas own their concise
+per-field guidance, and runtime validation enforces the corresponding input rules.
+
+The guidance states that `request_input` asks for required participant input, pauses
+automatic continuation for only that binding without finishing Work, and resumes from
+same-binding participant input or `continue`. It remains comparable in length and
+specificity to the existing `finish`, `continue`, and `ignore` guidance. No dynamic
+prompt, separate instruction block, mode-specific Skill, or second model-facing
+contract is added.
+
+Rejected alternatives:
+
+- A new dynamic prompt duplicates stable Tool usage guidance and creates another
+  prompt ownership boundary.
+- A separate instruction block or Skill makes one mode structurally different from
+  the existing `channel_action` modes.
+- Validation without model-facing guidance enforces argument shape but does not tell
+  the Agent when to select the mode.
+- A verbose lifecycle playbook adds prompt weight and makes the new mode inconsistent
+  with the concise existing mode descriptions.
+
 ## Consequences
 
 - Channel Work remains active and retains its title, tasks, Tracker, and cycle identity
@@ -176,3 +204,5 @@ Rejected alternatives:
   and do not accept `request_input`.
 - A provider ambiguity may produce an additional continuation, but cannot silently
   suspend Work on an unconfirmed question.
+- Agent guidance remains in the existing static prompt, Tool description, field
+  schema, and validator boundaries; no new prompt structure is introduced.

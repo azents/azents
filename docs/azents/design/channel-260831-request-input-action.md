@@ -32,7 +32,7 @@ process-local or next-Run-only suppression does not provide the required boundar
 
 | Requirement | Accepted authority | Design mechanism |
 | --- | --- | --- |
-| `channel-260831/REQ-1` | `channel-260831/ADR-D1` | Add `request_input`; preserve the active Work cycle and supported progress fields. |
+| `channel-260831/REQ-1` | `channel-260831/ADR-D1`, `channel-260831/ADR-D7` | Add `request_input`; preserve the active Work cycle and supported progress fields; extend the existing concise Agent-facing prompt structure. |
 | `channel-260831/REQ-2` | `channel-260831/ADR-D1` | Persist binding-scoped awaiting state and exclude only awaiting Work from the External Channel idle hook. |
 | `channel-260831/REQ-3` | `channel-260831/ADR-D2` | Clear and fence awaiting state on same-binding admitted human input or `continue`. |
 | `channel-260831/REQ-4` | `channel-260831/ADR-D3` | Set awaiting state only after confirmed reply delivery and reject stale settlement by cycle/revision CAS. |
@@ -83,9 +83,41 @@ concurrent transition uses `ExternalChannelWorkStateStore` bounded CAS and canon
 - Scheduled Task-bound Channel Action rejects `request_input`; Scheduled Tasks retain
   `continue` plus `submit_scheduled_task_result` as their separate lifecycle.
 
-The description states that `request_input` asks through a normal channel message,
-pauses only the selected binding's automatic continuation, and resumes through
-same-binding input or `continue`.
+The existing Agent-facing prompt structure is extended without adding a dynamic
+prompt, separate instruction block, or mode-specific Skill.
+
+The static Toolkit prompt becomes:
+
+```text
+Ordinary assistant output is not delivered to the external channel, so use
+channel_action to publish, request participant input, continue, or silently complete
+Channel Work.
+```
+
+The existing Tool description adds this mode-selection sentence beside the current
+`finish`, `continue`, and `ignore` sentences:
+
+```text
+Use `request_input` to ask for required participant input and pause that binding's
+automatic continuation without finishing Work; same-binding participant input or
+`continue` resumes it.
+```
+
+The `mode` field description adds:
+
+```text
+`request_input`: ask for required participant input and wait without finishing Work.
+```
+
+The `message` field description becomes:
+
+```text
+Required for `finish`, `request_input`, and file publication.
+```
+
+These descriptions remain concise and stable. The existing runtime validator enforces
+the required message and supported-field rules, while Scheduled Task-bound execution
+rejects the mode through its existing lifecycle boundary.
 
 ## Persisted State
 
@@ -300,7 +332,10 @@ identity.
 
 ### Focused deterministic coverage
 
-- Tool schema and validation for required message and supported optional fields.
+- Static Toolkit prompt and Tool description snapshots for the concise
+  `request_input` guidance.
+- Tool schema and validation for the mode description, required message, and
+  supported optional fields.
 - Scheduled Task-bound rejection.
 - Repository transitions for request, settlement, continue invalidation, terminal
   actions, and multiple bindings.
@@ -340,6 +375,9 @@ The design is feasible with current repository boundaries:
 - Existing migrations demonstrate validated versioned Channel Work JSON upgrades.
 - Existing Toolkit State CAS and `state_revision` provide the required concurrency
   fence without a new lock.
+- Existing static prompt, Tool description, field schema, and validator boundaries
+  can add the new mode guidance without a dynamic prompt or a new model-facing
+  instruction mechanism.
 
 The coordinated restart approved by `channel-260831/ADR-D4` provides homogeneous
 understanding of the new state before mode exposure. No feasibility blocker remains.
@@ -356,7 +394,7 @@ understanding of the new state before mode exposure. No feasibility blocker rema
 
 ## Design Authority
 
-- Design revision: `3`
+- Design revision: `4`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -371,12 +409,13 @@ understanding of the new state before mode exposure. No feasibility blocker rema
 | M9 | Deploy the state upgrade and mode through one coordinated backend restart | `channel-260831/ADR-D4` | `decided` |
 | M10 | Use existing Toolkit State CAS and Work revision without adding a lock | `channel-260831/REQ` fixed constraints, `channel-260831/ADR-D5` | `decided` |
 | M11 | Stop Slack processing presence and Discord typing while awaiting, preserving the Tracker | `channel-260831/REQ-2`, `channel-260831/ADR-D6` | `decided` |
+| M12 | Extend the existing concise static prompt, Tool description, field schema, and validator guidance without a new prompt structure | `channel-260831/REQ-1`, `channel-260831/ADR-D7`, current Toolkit prompt-placement convention | `decided` |
 
 ## Removal and Replacement
 
 | Existing unit or behavior | Removal authority | Replacement or remaining authority | Removal boundary | Absence verification |
 | --- | --- | --- | --- | --- |
-| Agent workaround that finishes Work or rewrites tasks only to stop continuation | M1, M2 | Explicit `request_input` and awaiting state | Tool guidance, state transition tests, Agent behavior | E2E verifies preserved tasks and no immediate continuation |
+| Agent workaround that finishes Work or rewrites tasks only to stop continuation | M1, M2, M12 | Explicit `request_input`, awaiting state, and concise mode-selection guidance | Existing Tool prompt/schema boundaries, state transition tests, Agent behavior | Prompt/schema snapshots and E2E verify preserved tasks and no immediate continuation |
 | Unconditional External Channel continuation for every active binding | M2, M3 | Ready-only binding selection | External Channel idle hook | Multi-binding idle-hook and E2E evidence |
 | Next-Run-only or process-local suppression | M2, M3, M5 | Durable binding-scoped awaiting state | No transient suppression path is added | Restart/recovery and unrelated-continuation tests |
 | Provider-specific interactive response proposal | M6 | Ordinary provider message and existing ingress | No new interaction route, callback, component, or webhook state | Repository and route absence search |
@@ -390,11 +429,12 @@ understanding of the new state before mode exposure. No feasibility blocker rema
 - Mode: `Collaborative`
 - Decision owner: requester
 - Approved on: `2026-08-31`
-- Approved Design revision: `3`
-- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11`
+- Approved Design revision: `4`
+- Approved authority IDs: `M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, M12`
 - Approved scope: add a binding-scoped `request_input` action that publishes an
   ordinary question, waits only after confirmed delivery, suppresses External Channel
   continuation until same-binding human input or continue, rejects stale waiting
   settlement without provider-specific interaction UX or new locks, stops processing
-  presence while awaiting, preserves the Work Tracker, and deploys through a
+  presence while awaiting, preserves the Work Tracker, extends the existing concise
+  Agent-facing prompt structure without a new prompt mechanism, and deploys through a
   coordinated homogeneous backend restart.
