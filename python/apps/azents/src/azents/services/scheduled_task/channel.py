@@ -446,6 +446,7 @@ class ScheduledTaskChannelService:
                 binding_id=binding_id,
                 work_status=ExternalChannelWorkStatus.ACTIVE,
                 state_revision=state_revision,
+                awaiting_input=False,
                 outcomes=tuple(outcomes),
             )
         )

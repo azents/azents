@@ -1046,6 +1046,7 @@ class ExternalChannelActionMode(enum.StrEnum):
 
     FINISH = "finish"
     CONTINUE = "continue"
+    REQUEST_INPUT = "request_input"
     IGNORE = "ignore"
 
 

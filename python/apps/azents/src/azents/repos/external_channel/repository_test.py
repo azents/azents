@@ -307,6 +307,7 @@ async def _create_discord_gateway_typing_binding(
                 state_revision=1,
                 desired_progress_revision=0,
                 desired_progress=None,
+                awaiting_input_run_id=None,
                 finished_at=(
                     None if work_status is ExternalChannelWorkStatus.ACTIVE else _at(2)
                 ),

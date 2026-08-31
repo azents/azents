@@ -79,7 +79,7 @@ def _work(
     projection_parts: list[ChannelWorkProjectionPartState] | None = None,
 ) -> ChannelWorkState:
     return ChannelWorkState(
-        schema_version=3,
+        schema_version=4,
         binding_id="binding-1",
         work_cycle_id="work-1",
         status=ExternalChannelWorkStatus.ACTIVE,
@@ -91,6 +91,7 @@ def _work(
         state_revision=2,
         desired_progress_revision=3,
         desired_progress=checking_progress() if desired else None,
+        awaiting_input_run_id=None,
         finished_at=None,
         projection_parts=projection_parts or [],
     )
@@ -380,7 +381,7 @@ async def test_initial_progress_is_claimed_once_per_active_work(
 ) -> None:
     """Repeated admissions cannot create another Tracker for the same active Work."""
     work = ChannelWorkState(
-        schema_version=3,
+        schema_version=4,
         binding_id="binding-1",
         work_cycle_id="work-1",
         status=ExternalChannelWorkStatus.ACTIVE,
@@ -392,6 +393,7 @@ async def test_initial_progress_is_claimed_once_per_active_work(
         state_revision=1,
         desired_progress_revision=1,
         desired_progress=checking_progress(),
+        awaiting_input_run_id=None,
         finished_at=None,
         projection_parts=[],
     )
@@ -874,6 +876,102 @@ async def test_channel_action_ignores_connection_health_status() -> None:
 
     connection_query = session.scalar.await_args_list[4].args[0]
     assert "external_channel_connections.status" not in _where_sql(connection_query)
+
+
+async def test_request_input_requires_participant_visible_message() -> None:
+    """Repository validation rejects a request that cannot reach the participant."""
+    repository = ExternalChannelWorkRepository()
+
+    with pytest.raises(ValueError, match="Request input requires"):
+        await repository.commit_direct_action(
+            MagicMock(spec=AsyncSession),
+            session_id="session-1",
+            agent_id="agent-1",
+            run_id="run-1",
+            client_tool_call_id="tool-call-request",
+            binding_id="binding-1",
+            mode=ExternalChannelActionMode.REQUEST_INPUT,
+            message=None,
+            title=None,
+            tasks=None,
+            files=(),
+            now=datetime.datetime(2026, 8, 31, tzinfo=datetime.UTC),
+        )
+
+
+async def test_awaiting_settlement_uses_exact_cycle_and_state_revision() -> None:
+    """Only the unchanged requesting Work revision can become awaiting."""
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+    current = _work(desired=False)
+
+    async def update_existing(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        mutator: Callable[[ChannelWorkState], ChannelWorkStateMutation[object]],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[object]:
+        nonlocal current
+        del _session, agent_id, session_id, binding_id, max_retries
+        mutation = mutator(current)
+        current = mutation.state
+        return mutation
+
+    state_store.update_existing = AsyncMock(side_effect=update_existing)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+
+    settled = await repository.settle_awaiting_input(
+        MagicMock(spec=AsyncSession),
+        session_id="session-1",
+        agent_id="agent-1",
+        binding_id="binding-1",
+        run_id="run-request",
+        work_cycle_id=current.work_cycle_id,
+        expected_state_revision=current.state_revision,
+    )
+
+    assert settled.established is True
+    assert settled.state_revision == 3
+    assert current.awaiting_input_run_id == "run-request"
+    assert current.state_revision == 3
+
+
+async def test_newer_transition_rejects_stale_awaiting_settlement() -> None:
+    """A newer same-binding revision fences an older delivery result."""
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+    current = _work(desired=False)
+    current.state_revision = 4
+
+    async def update_existing(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        mutator: Callable[[ChannelWorkState], ChannelWorkStateMutation[object]],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[object]:
+        del _session, agent_id, session_id, binding_id, max_retries
+        return mutator(current)
+
+    state_store.update_existing = AsyncMock(side_effect=update_existing)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+
+    settled = await repository.settle_awaiting_input(
+        MagicMock(spec=AsyncSession),
+        session_id="session-1",
+        agent_id="agent-1",
+        binding_id="binding-1",
+        run_id="run-request",
+        work_cycle_id=current.work_cycle_id,
+        expected_state_revision=3,
+    )
+
+    assert settled.established is False
+    assert settled.state_revision == 4
+    assert current.awaiting_input_run_id is None
 
 
 async def test_hidden_continue_with_unfinished_tasks_creates_tracker() -> None:
