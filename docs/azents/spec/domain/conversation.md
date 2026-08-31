@@ -27,6 +27,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run_input_event.py
   - python/apps/azents/src/azents/rdb/models/inference_profile_types.py
   - python/apps/azents/src/azents/rdb/models/event.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/629612c66084_remove_event_model_order.py
   - python/apps/azents/src/azents/rdb/models/mailbox_item.py
   - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
@@ -105,7 +106,7 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-last_verified_at: 2026-08-31
+last_verified_at: 2026-09-01
 spec_version: 156
 ---
 
@@ -1225,6 +1226,8 @@ presentations.
 
 ## 13. Changelog
 
+- **2026-08-31** — v156. Removed the redundant event model order and made event IDs the single
+  transcript order for model input, ranges, forks, cleanup cursors, and public event projections.
 - **2026-08-23** — v155. Centralized the closed TurnAction policy, public
   catalog/admission, Goal and Skill preparation, and operation handoff while
   preserving public schemas and durable action behavior.
@@ -1326,8 +1329,6 @@ presentations.
 - **2026-07-12** — v95. Promoted sequential single-head preparation, Session inference ownership, buffer-only action transport, and terminal action result history.
 - **2026-07-11** — v94. Added atomic spawn profile validation, `spawn_override` run provenance, and child last-used profile initialization.
 - **2026-07-10** — v93. Required concrete reasoning-effort choices for normal user input when explicit levels are advertised.
-- **2026-08-31** — v156. Removed the redundant event model order and made event IDs the single
-  transcript order for model input, ranges, forks, cleanup cursors, and public event projections.
 - **2026-07-10** — v92. Added durable requested/resolved inference profiles, profile-aware FIFO run boundaries, run-input associations, session-last-used intent, and retry/subagent provenance.
 - **2026-07-09** — v91. Clarified that failed-run retry state is cleared when retry wait ends and the next attempt starts, preventing stale live retry errors during later successful progress.
 - **2026-07-09** — v90. Documented child subagent human-write rejection before REST, input-buffer, command, and operation side effects.

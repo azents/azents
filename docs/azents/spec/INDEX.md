@@ -13,7 +13,7 @@ Details of all living specs. Synchronized from frontmatter.
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-08-27 | 69 |
-| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-08-31 | 156 |
+| conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-09-01 | 156 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-08-31 | 67 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
@@ -23,7 +23,7 @@ Details of all living specs. Synchronized from frontmatter.
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-08-31 | 101 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-08-18 | 12 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-08-31 | 76 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-09-01 | 76 |
 
 ## Flow Specs
 
@@ -34,7 +34,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-28 | 30 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
-| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-08-31 | 36 |
+| [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-09-01 | 36 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-08-31 | 54 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 40 |

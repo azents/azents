@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-27 | 69 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-31 | 156 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-09-01 | 156 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-31 | 67 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
@@ -26,7 +26,7 @@ Design documents are accumulated records and are not listed individually in this
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-31 | 101 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-08-18 | 12 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-31 | 76 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-09-01 | 76 |
 
 ## Living Specs — Flow
 
@@ -37,7 +37,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-28 | 30 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-31 | 36 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-09-01 | 36 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-31 | 54 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 40 |
