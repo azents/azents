@@ -974,9 +974,50 @@ async def test_newer_transition_rejects_stale_awaiting_settlement() -> None:
     assert current.awaiting_input_run_id is None
 
 
+@pytest.mark.parametrize("awaiting_run_id", [None, "run-request"])
+async def test_created_human_input_always_invalidates_older_settlement(
+    awaiting_run_id: str | None,
+) -> None:
+    """Canonical same-binding input advances revision even when Work was ready."""
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
+    current = _work(desired=False)
+    current.awaiting_input_run_id = awaiting_run_id
+
+    async def update_existing(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        mutator: Callable[[ChannelWorkState], ChannelWorkStateMutation[object]],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[object]:
+        nonlocal current
+        del _session, agent_id, session_id, binding_id, max_retries
+        mutation = mutator(current)
+        current = mutation.state
+        return mutation
+
+    state_store.update_existing = AsyncMock(side_effect=update_existing)
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
+
+    resumed = await repository.resume_from_human_input(
+        MagicMock(spec=AsyncSession),
+        session_id="session-1",
+        agent_id="agent-1",
+        binding_id="binding-1",
+    )
+
+    assert resumed is current
+    assert current.awaiting_input_run_id is None
+    assert current.state_revision == 3
+
+
 async def test_hidden_continue_with_unfinished_tasks_creates_tracker() -> None:
     """Canonical unfinished tasks promote hidden Work and create its Tracker."""
     work = _work(desired=True, tracker_visibility="hidden")
+    work.awaiting_input_run_id = "run-request"
+    initial_state_revision = work.state_revision
     binding = SimpleNamespace(
         id="binding-1",
         route_id="route-1",
@@ -1089,6 +1130,8 @@ async def test_hidden_continue_with_unfinished_tasks_creates_tracker() -> None:
     assert current.desired_progress is not None
     assert current.desired_progress.title == "Latest work…"
     assert current.desired_progress.tasks == tasks
+    assert current.awaiting_input_run_id is None
+    assert current.state_revision == initial_state_revision + 1
     assert current.projection_parts == []
 
 

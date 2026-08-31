@@ -970,6 +970,39 @@ class ExternalChannelWorkRepository:
         )
         return mutation.result
 
+    async def resume_from_human_input(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+    ) -> ChannelWorkState | None:
+        """Invalidate awaiting settlement after newly created human input."""
+
+        def resume(
+            current: ChannelWorkState,
+        ) -> ChannelWorkStateMutation[ChannelWorkState]:
+            if current.status is not ExternalChannelWorkStatus.ACTIVE:
+                return ChannelWorkStateMutation(
+                    state=current,
+                    result=current,
+                    changed=False,
+                )
+            updated = current.model_copy(deep=True)
+            updated.awaiting_input_run_id = None
+            updated.state_revision += 1
+            return ChannelWorkStateMutation(state=updated, result=updated)
+
+        mutation = await self.work_state_store.update_existing(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+            binding_id=binding_id,
+            mutator=resume,
+        )
+        return None if mutation is None else mutation.result
+
     async def has_active_binding(
         self,
         session: AsyncSession,
@@ -2181,6 +2214,7 @@ async def terminate_binding_with_plans(
             )
         work = current.model_copy(deep=True)
         work.status = ExternalChannelWorkStatus.FINISHED
+        work.awaiting_input_run_id = None
         work.finished_at = now
         work.state_revision += 1
         work.desired_progress_revision += 1

@@ -14,14 +14,14 @@ Details of all living specs. Synchronized from frontmatter.
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-08-27 | 69 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-08-31 | 156 |
-| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-08-29 | 66 |
+| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-08-31 | 67 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-08-23 | 15 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-18 | 7 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-08-27 | 21 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-26 | 28 |
 | scheduled-task | [Scheduled Task Domain Spec](domain/scheduled-task.md) | - | 2026-08-21 | 8 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
-| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-08-29 | 100 |
+| toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-08-31 | 101 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-08-18 | 12 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-08-28 | 75 |
 
@@ -29,14 +29,14 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-08-31 | 163 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-08-31 | 164 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-08-28 | 71 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-28 | 30 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-08-31 | 36 |
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
-| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 53 |
+| [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-08-31 | 54 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 40 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-29 | 54 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-08-18 | 42 |

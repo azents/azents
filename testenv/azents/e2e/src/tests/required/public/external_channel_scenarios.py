@@ -3485,7 +3485,7 @@ def test_provider_native_channel_work_progress_journey(
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
-    def completed_outcome_actions() -> list[dict[str, object]]:
+    def completed_waiting_actions() -> list[dict[str, object]]:
         evidence = _channel_action_tool_evidence(
             azents_public_server_url,
             token,
@@ -3494,7 +3494,7 @@ def test_provider_native_channel_work_progress_journey(
                 {
                     "call_external_channel_outcome_progress",
                     "call_external_channel_failure_progress",
-                    "call_external_channel_finish",
+                    "call_external_channel_request_input",
                 }
             ),
         )
@@ -3507,15 +3507,15 @@ def test_provider_native_channel_work_progress_journey(
         assert set(results) == {
             "call_external_channel_outcome_progress",
             "call_external_channel_failure_progress",
-            "call_external_channel_finish",
+            "call_external_channel_request_input",
         }, evidence
         return evidence
 
     outcome_evidence = wait_until(
-        completed_outcome_actions,
+        completed_waiting_actions,
         timeout=90,
         interval=0.2,
-        message="Direct failed and unknown Channel Action results did not complete",
+        message="Direct failed, unknown, and request-input actions did not complete",
     )
     outcome_results = {
         _string(item["call_id"]): item
@@ -3529,25 +3529,23 @@ def test_provider_native_channel_work_progress_journey(
     failed_output = outcome_results["call_external_channel_failure_progress"].get(
         "output"
     )
-    finish_output = outcome_results["call_external_channel_finish"].get("output")
+    request_input_output = outcome_results["call_external_channel_request_input"].get(
+        "output"
+    )
     assert all(
         item.get("status") == "completed" for item in outcome_results.values()
     ), outcome_evidence
     assert isinstance(failed_output, str), outcome_evidence
     assert isinstance(unknown_output, str), outcome_evidence
-    assert isinstance(finish_output, str), outcome_evidence
+    assert isinstance(request_input_output, str), outcome_evidence
     assert '"status": "failed"' in failed_output
     assert '"status": "unknown"' in unknown_output
-    assert '"status": "delivered"' in finish_output
-    for output in (failed_output, unknown_output, finish_output):
+    assert '"status": "delivered"' in request_input_output
+    assert '"awaiting_input": true' in request_input_output
+    for output in (failed_output, unknown_output, request_input_output):
         assert "delivery_id" not in output
         assert "action_id" not in output
         assert "credentials" not in output
-
-    outcome_state = _provider_state(slack_provider_fake_url)
-    outcome_counts = _int_dict(outcome_state["request_counts"])
-    assert outcome_counts["chat.update"] == 3
-    assert outcome_counts["chat.delete"] == 1
 
     def session_is_idle() -> bool:
         live = list_live(
@@ -3561,8 +3559,114 @@ def test_provider_native_channel_work_progress_journey(
         session_is_idle,
         timeout=30,
         interval=0.2,
-        message="Channel Work Session did not reach its terminal idle boundary",
+        message="Channel Work Session did not wait idly for participant input",
     )
+    waiting_evidence = _channel_action_tool_evidence(
+        azents_public_server_url,
+        token,
+        session_id,
+        call_ids=frozenset({"call_external_channel_finish"}),
+    )
+    assert not any(
+        item.get("kind") == "client_tool_result"
+        and item.get("call_id") == "call_external_channel_finish"
+        for item in waiting_evidence
+    ), waiting_evidence
+    waiting_state = _provider_state(slack_provider_fake_url)
+    waiting_counts = _int_dict(waiting_state["request_counts"])
+    assert waiting_counts["chat.update"] == 3
+    assert waiting_counts.get("chat.delete", 0) == 0
+
+    response_timestamp = f"{int(time.time())}.000400"
+    response_text = "<@B-E2E> Use the rollback option."
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {
+                        "user": "U-EXTERNAL",
+                        "ts": response_timestamp,
+                        "text": response_text,
+                    },
+                    {
+                        "user": "U-EXTERNAL",
+                        "ts": root_timestamp,
+                        "text": message_text,
+                    },
+                ]
+            ]
+        },
+        timeout=5,
+    ).raise_for_status()
+    response_body = json.dumps(
+        {
+            "type": "event_callback",
+            "event_id": f"Ev-{unique()}",
+            "event_time": int(time.time()),
+            "api_app_id": _APP_ID,
+            "team_id": _TEAM_ID,
+            "event": {
+                "type": "app_mention",
+                "channel": _CHANNEL_ID,
+                "channel_type": "channel",
+                "user": "U-EXTERNAL",
+                "text": response_text,
+                "ts": response_timestamp,
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    response = requests.post(
+        callback_url,
+        data=response_body,
+        headers=_signed_headers(response_body),
+        timeout=5,
+    )
+    assert response.status_code == 200
+
+    def completed_resume_finish() -> list[dict[str, object]]:
+        evidence = _channel_action_tool_evidence(
+            azents_public_server_url,
+            token,
+            session_id,
+            call_ids=frozenset({"call_external_channel_finish"}),
+        )
+        assert any(
+            item.get("kind") == "client_tool_result"
+            and item.get("call_id") == "call_external_channel_finish"
+            for item in evidence
+        ), evidence
+        return evidence
+
+    finish_evidence = wait_until(
+        completed_resume_finish,
+        timeout=90,
+        interval=0.2,
+        message="Same-binding participant input did not resume Channel Work",
+    )
+    finish_result = next(
+        item
+        for item in finish_evidence
+        if item.get("kind") == "client_tool_result"
+        and item.get("call_id") == "call_external_channel_finish"
+    )
+    finish_output = finish_result.get("output")
+    assert finish_result.get("status") == "completed", finish_evidence
+    assert isinstance(finish_output, str), finish_evidence
+    assert '"status": "delivered"' in finish_output
+    assert '"awaiting_input": false' in finish_output
+
+    wait_until(
+        session_is_idle,
+        timeout=30,
+        interval=0.2,
+        message="Resumed Channel Work Session did not reach terminal idle",
+    )
+    outcome_state = _provider_state(slack_provider_fake_url)
+    outcome_counts = _int_dict(outcome_state["request_counts"])
+    assert outcome_counts["chat.update"] == 3
+    assert outcome_counts["chat.delete"] == 1
     assert (
         _int_dict(_provider_state(slack_provider_fake_url)["request_counts"])
         == outcome_counts
@@ -4675,6 +4779,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     initial_message_id = "500000000000000051"
     quiet_message_id = "500000000000000052"
     late_mention_message_id = "500000000000000053"
+    response_message_id = "500000000000000054"
     timestamp = "2026-08-28T00:00:00.000000+00:00"
     quiet_text = (
         "Discord quiet work presence E2E. Provider-native Channel Work progress E2E."
@@ -4684,6 +4789,7 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
         f"<@{bot_user_id}> late explicit mention during quiet work. "
         "Provider-native Channel Work progress E2E."
     )
+    response_text = "Use the rollback option for the incident."
     author: dict[str, object] = {
         "id": participant_id,
         "username": "participant",
@@ -5434,6 +5540,147 @@ def test_discord_unmentioned_todo_work_tracks_activity_and_typing_recovers(
     assert quiet_text not in rendered_typing
     assert late_mention_text not in rendered_typing
     assert _DISCORD_BOT_TOKEN not in rendered_typing
+
+    request_input_evidence = _channel_action_tool_evidence(
+        azents_public_server_url,
+        token,
+        session.id,
+        call_ids=frozenset({"call_external_channel_request_input"}),
+    )
+    request_input_result = next(
+        item
+        for item in request_input_evidence
+        if item.get("kind") == "client_tool_result"
+        and item.get("call_id") == "call_external_channel_request_input"
+    )
+    request_input_output = request_input_result.get("output")
+    assert request_input_result.get("status") == "completed"
+    assert isinstance(request_input_output, str)
+    assert '"awaiting_input": true' in request_input_output
+
+    resume_barrier_arm = requests.post(
+        f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier",
+        json={"binding": binding.id},
+        timeout=5,
+    )
+    assert resume_barrier_arm.status_code == 201
+    response_message = message(
+        message_id=response_message_id,
+        content=response_text,
+        role_mentioned=False,
+    )
+    configure_gateway(
+        [quiet_message, late_message, response_message],
+        sequence=30,
+    )
+    awaiting_state = _discord_provider_state(discord_provider_fake_url)
+    awaiting_typing = _object(awaiting_state["typing"])
+    resume_snapshot_index = len(_list(awaiting_typing["snapshots"]))
+    resume_pulse_index = len(_list(awaiting_typing["pulses"]))
+
+    with azents_external_channel_gateway_factory():
+        resumed_input = _objects(
+            wait_until(
+                lambda: (
+                    evidence
+                    if len(
+                        evidence := _external_channel_input_evidence(
+                            public_server_url=azents_public_server_url,
+                            token=token,
+                            session_id=session.id,
+                            include_pending=False,
+                        )
+                    )
+                    == 4
+                    else None
+                ),
+                timeout=75,
+                interval=0.2,
+                message="Discord participant response did not resume awaiting Work",
+            )
+        )
+        wait_until(
+            quiet_barrier_reached,
+            timeout=30,
+            interval=0.2,
+            message="Discord request-input resume did not reach the proxy barrier",
+        )
+        resumed_typing_state = _object(
+            wait_until(
+                lambda: active_typing_state_after(
+                    snapshot_index=resume_snapshot_index,
+                    pulse_index=resume_pulse_index,
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Discord typing did not resume after participant input",
+            )
+        )
+        resumed_typing = _object(resumed_typing_state["typing"])
+        resumed_finish_snapshot_index = len(_list(resumed_typing["snapshots"]))
+        requests.post(
+            f"{openai_proxy_url}/v1/_external_channel_quiet_work_barrier/release",
+            timeout=5,
+        ).raise_for_status()
+
+        def completed_discord_finish() -> list[dict[str, object]] | None:
+            evidence = _channel_action_tool_evidence(
+                azents_public_server_url,
+                token,
+                session.id,
+                call_ids=frozenset({"call_external_channel_finish"}),
+            )
+            if not any(
+                item.get("kind") == "client_tool_result"
+                and item.get("call_id") == "call_external_channel_finish"
+                for item in evidence
+            ):
+                return None
+            return evidence
+
+        finish_evidence = _objects(
+            wait_until(
+                completed_discord_finish,
+                timeout=90,
+                interval=0.2,
+                message="Discord resumed Work did not finish",
+            )
+        )
+        wait_until(
+            session_is_idle,
+            timeout=30,
+            interval=0.2,
+            message="Discord resumed Work did not return to idle",
+        )
+        final_typing_state = _object(
+            wait_until(
+                lambda: empty_typing_state_after(
+                    snapshot_index=resumed_finish_snapshot_index,
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Discord typing did not stop after resumed Work finished",
+            )
+        )
+
+    assert {
+        _string(item["external_message_id"]): item["body"] for item in resumed_input
+    }[external_message_id(response_message_id)] == response_text
+    finish_result = next(
+        item
+        for item in finish_evidence
+        if item.get("kind") == "client_tool_result"
+        and item.get("call_id") == "call_external_channel_finish"
+    )
+    finish_output = finish_result.get("output")
+    assert isinstance(finish_output, str)
+    assert '"awaiting_input": false' in finish_output
+    assert (
+        _object(_list(_object(final_typing_state["typing"])["snapshots"])[-1]).get(
+            "targets"
+        )
+        == []
+    )
 
 
 def test_discord_configured_message_durably_provisions_conversation(

@@ -432,6 +432,79 @@ def test_progress_registry_matches_markerless_compacted_continuation() -> None:
     assert proxy.external_channel_binding(request) == "binding-quiet-123"
 
 
+def test_progress_registry_waits_for_a_new_same_binding_user_turn() -> None:
+    """A delivered request leaves the sequence inactive but resumable by input."""
+    registry = proxy._ExternalChannelProgressSequenceRegistry()
+    registry.start("binding-quiet-123")
+
+    registry.mark_awaiting("binding-quiet-123")
+
+    assert registry.is_active("binding-quiet-123") is False
+    assert registry.is_awaiting("binding-quiet-123") is True
+    registry.clear("binding-quiet-123")
+    assert registry.is_awaiting("binding-quiet-123") is False
+
+
+def test_awaiting_resume_requires_latest_same_binding_human_turn() -> None:
+    """Unrelated continuation and another Binding cannot resume waiting Work."""
+    same_binding: dict[str, object] = {
+        "input": [
+            {
+                "role": "user",
+                "content": (
+                    "Message Type: EXTERNAL_CHANNEL_TURN\n"
+                    "Binding: binding-quiet-123\n\n"
+                    "Use the rollback option."
+                ),
+            }
+        ]
+    }
+    unrelated_goal: dict[str, object] = {
+        "input": [
+            {
+                "role": "user",
+                "content": (
+                    "## Channel Work Snapshot\n"
+                    "### Binding `binding-quiet-123`\n"
+                    "Goal continuation"
+                ),
+            }
+        ]
+    }
+    other_binding: dict[str, object] = {
+        "input": [
+            {
+                "role": "user",
+                "content": (
+                    "Message Type: EXTERNAL_CHANNEL_TURN\n"
+                    "Binding: binding-other-456\n\n"
+                    "Unrelated channel input."
+                ),
+            }
+        ]
+    }
+    registry = proxy._ExternalChannelProgressSequenceRegistry()
+    registry.mark_awaiting("binding-quiet-123")
+
+    assert (
+        proxy.latest_external_channel_human_binding(same_binding) == "binding-quiet-123"
+    )
+    assert registry.is_awaiting(
+        proxy.latest_external_channel_human_binding(same_binding)
+    )
+    assert proxy.latest_external_channel_human_binding(unrelated_goal) is None
+    assert not registry.is_awaiting(
+        proxy.latest_external_channel_human_binding(unrelated_goal)
+    )
+    assert (
+        proxy.latest_external_channel_human_binding(other_binding)
+        == "binding-other-456"
+    )
+    assert not registry.is_awaiting(
+        proxy.latest_external_channel_human_binding(other_binding)
+    )
+
+
 def test_completed_history_does_not_match_a_new_unmarked_late_mention() -> None:
     """Historical tool results cannot restart progress for a later user turn."""
     request: dict[str, object] = {
@@ -473,8 +546,10 @@ def test_progress_registry_clear_all_resets_active_bindings() -> None:
     registry = proxy._ExternalChannelProgressSequenceRegistry()
     registry.start("binding-one")
     registry.start("binding-two")
+    registry.mark_awaiting("binding-two")
 
     registry.clear_all()
 
     assert registry.is_active("binding-one") is False
     assert registry.is_active("binding-two") is False
+    assert registry.is_awaiting("binding-two") is False

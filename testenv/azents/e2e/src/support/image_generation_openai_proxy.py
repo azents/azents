@@ -151,11 +151,13 @@ _EXTERNAL_CHANNEL_PROGRESS_CALL_ID = "call_external_channel_progress"
 _EXTERNAL_CHANNEL_FINISH_CALL_ID = "call_external_channel_finish"
 _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID = "call_external_channel_outcome_progress"
 _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID = "call_external_channel_failure_progress"
+_EXTERNAL_CHANNEL_REQUEST_INPUT_CALL_ID = "call_external_channel_request_input"
 _EXTERNAL_CHANNEL_PROGRESS_CALL_IDS = frozenset(
     {
         _EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
         _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID,
         _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID,
+        _EXTERNAL_CHANNEL_REQUEST_INPUT_CALL_ID,
         _EXTERNAL_CHANNEL_FINISH_CALL_ID,
     }
 )
@@ -600,6 +602,20 @@ def external_channel_binding(request: dict[str, object]) -> str | None:
     return None if compaction_match is None else compaction_match.group(1)
 
 
+def latest_external_channel_human_binding(
+    request: dict[str, object],
+) -> str | None:
+    """Return the Binding from the latest canonical human External Channel turn."""
+    latest_user_text = _last_user_text(request)
+    if (
+        latest_user_text is None
+        or "Message Type: EXTERNAL_CHANNEL_TURN" not in latest_user_text
+    ):
+        return None
+    match = _EXTERNAL_CHANNEL_TURN_BINDING.search(latest_user_text)
+    return None if match is None else match.group(1)
+
+
 def _latest_external_channel_progress_marker(
     request: dict[str, object],
 ) -> bool:
@@ -999,16 +1015,19 @@ class _ExternalChannelProgressSequenceRegistry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._bindings: set[str] = set()
+        self._awaiting_bindings: set[str] = set()
 
     def clear(self, binding: str) -> None:
         """Clear one completed deterministic progress sequence."""
         with self._lock:
             self._bindings.discard(binding)
+            self._awaiting_bindings.discard(binding)
 
     def clear_all(self) -> None:
         """Clear all sequences when their deterministic journal resets."""
         with self._lock:
             self._bindings.clear()
+            self._awaiting_bindings.clear()
 
     def is_active(self, binding: str | None) -> bool:
         """Return whether one Binding has an active progress sequence."""
@@ -1019,6 +1038,18 @@ class _ExternalChannelProgressSequenceRegistry:
         """Register one progress sequence started by the latest user turn."""
         with self._lock:
             self._bindings.add(binding)
+            self._awaiting_bindings.discard(binding)
+
+    def mark_awaiting(self, binding: str) -> None:
+        """Record one delivered question waiting for same-binding input."""
+        with self._lock:
+            self._bindings.discard(binding)
+            self._awaiting_bindings.add(binding)
+
+    def is_awaiting(self, binding: str | None) -> bool:
+        """Return whether one Binding awaits the next participant input."""
+        with self._lock:
+            return binding is not None and binding in self._awaiting_bindings
 
 
 _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES = _ExternalChannelProgressSequenceRegistry()
@@ -1823,12 +1854,19 @@ class _Handler(BaseHTTPRequestHandler):
         progress_continuation = _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.is_active(
             binding
         ) and has_current_external_channel_progress_result(request)
+        human_binding = latest_external_channel_human_binding(request)
+        awaiting_resume = _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.is_awaiting(
+            human_binding
+        )
+        if awaiting_resume:
+            binding = human_binding
         if (
             self.path == "/v1/responses"
             and binding is not None
             and (
                 progress_request
                 or progress_continuation
+                or awaiting_resume
                 or _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.has_progress_issued_for(binding)
             )
         ):
@@ -1856,6 +1894,74 @@ class _Handler(BaseHTTPRequestHandler):
                         "mode": "continue",
                         "binding": binding,
                         "title": "Investigating error logs…",
+                    },
+                )
+                return
+            if awaiting_resume:
+                if has_current_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_FINISH_CALL_ID,
+                ):
+                    _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.clear(binding)
+                    self._write_text_response(
+                        request,
+                        "External Channel request-input E2E completed.",
+                        response_id="resp_external_channel_request_input_completed",
+                    )
+                    return
+                if _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.is_armed_for(
+                    binding
+                ) and not _EXTERNAL_CHANNEL_QUIET_WORK_BARRIER.wait_for_release(
+                    binding
+                ):
+                    self._write_json(
+                        503,
+                        {
+                            "error": {
+                                "message": (
+                                    "Discord request-input resume barrier timed out "
+                                    "before release."
+                                )
+                            }
+                        },
+                    )
+                    return
+                if _request_has_named_tool(
+                    request, "tool_search"
+                ) and not _request_has_named_tool(request, "channel_action"):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_SEARCH_CALL_ID,
+                        name="tool_search",
+                        arguments={
+                            "query": "external channel finish resumed work",
+                            "limit": 5,
+                        },
+                    )
+                    return
+                if _request_has_named_tool(request, "channel_action"):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_FINISH_CALL_ID,
+                        name="channel_action",
+                        arguments={
+                            "mode": "finish",
+                            "binding": binding,
+                            "message": (
+                                "The participant response resumed and completed "
+                                "the deterministic investigation."
+                            ),
+                        },
+                    )
+                    return
+                self._write_json(
+                    409,
+                    {
+                        "error": {
+                            "message": (
+                                "Request-input resume did not expose channel_action."
+                            )
+                        }
                     },
                 )
                 return
@@ -1891,16 +1997,27 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 if has_current_tool_output(
                     request,
+                    _EXTERNAL_CHANNEL_REQUEST_INPUT_CALL_ID,
+                ):
+                    _EXTERNAL_CHANNEL_PROGRESS_SEQUENCES.mark_awaiting(binding)
+                    self._write_text_response(
+                        request,
+                        "Waiting for participant input.",
+                        response_id="resp_external_channel_request_input_waiting",
+                    )
+                    return
+                if has_current_tool_output(
+                    request,
                     _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID,
                 ):
                     self._write_function_call_response(
                         request,
-                        call_id=_EXTERNAL_CHANNEL_FINISH_CALL_ID,
+                        call_id=_EXTERNAL_CHANNEL_REQUEST_INPUT_CALL_ID,
                         name="channel_action",
                         arguments={
-                            "mode": "finish",
+                            "mode": "request_input",
                             "binding": binding,
-                            "message": "The deterministic investigation is complete.",
+                            "message": ("Which incident response option should I use?"),
                         },
                     )
                     return
