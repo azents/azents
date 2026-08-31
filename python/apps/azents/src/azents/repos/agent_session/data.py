@@ -118,17 +118,9 @@ class AgentSession(BaseModel):
         default=None,
         description="Model input head event ID",
     )
-    model_input_head_model_order: int | None = Field(
-        default=None,
-        description="Model input head model order",
-    )
     model_file_gc_cursor_event_id: str | None = Field(
         default=None,
         description="ModelFile GC cursor event ID",
-    )
-    model_file_gc_cursor_model_order: int = Field(
-        default=0,
-        description="ModelFile GC cursor model order",
     )
     started_at: datetime.datetime = Field(description="Start time")
     lifecycle_started_at: datetime.datetime | None = Field(

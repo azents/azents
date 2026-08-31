@@ -105,8 +105,8 @@ api_routes:
   - /chat/v1/sessions/{session_id}/history
   - /chat/v1/sessions/{session_id}/live
   - /chat/v1/exchange-files/{file_id}/download
-last_verified_at: 2026-08-23
-spec_version: 155
+last_verified_at: 2026-08-31
+spec_version: 156
 ---
 
 # Conversation & Events
@@ -704,11 +704,10 @@ call, result, and active-call records without the additive field are read only a
 `json_function`; newly written records contain an explicit value. Null, unknown, and malformed values
 do not receive that legacy interpretation.
 
-events have both physical append identity and model-visible order. Physical ids keep the
-durable append/audit sequence. `model_order` is scoped to a session and is the ordering/filtering key
-used when reading future model input. Sequential appends allocate `model_order` with a gap so later
-compaction can insert model-visible system events without renumbering the whole transcript.
-Compaction keeps append-only storage while presenting future model input from a single
+Event IDs are the single durable append, audit, UI, and model-visible order within a Session.
+History pagination, future model input, revert ranges, fork selection, and cleanup cursors all compare
+the fixed-width UUIDv7 hexadecimal IDs. Event append does not allocate a separate Session-scoped
+logical order. Compaction keeps append-only storage while presenting future model input from a single
 `compaction_summary` head event.
 
 Every `provider_tool_call` stores required provider-neutral semantic content under
@@ -1118,7 +1117,7 @@ event. After generation and enrichment succeed, one transaction appends adjacent
 compacted head. Failed, cancelled, stopped, and stale-plan attempts append neither event and do not
 move the head.
 
-Future model input is selected and sorted by event `model_order`. Auto and manual compaction both
+Future model input is selected from `model_input_head_event_id` and sorted by event ID. Auto and manual compaction both
 summarize the full selected model-input transcript into one `compaction_summary` event. While the
 provider operation is active, the Run exposes one stable `preparing_context` live operation; retries
 and backoff update the same identity and every terminal boundary removes it. Runtime compaction
@@ -1327,6 +1326,8 @@ presentations.
 - **2026-07-12** — v95. Promoted sequential single-head preparation, Session inference ownership, buffer-only action transport, and terminal action result history.
 - **2026-07-11** — v94. Added atomic spawn profile validation, `spawn_override` run provenance, and child last-used profile initialization.
 - **2026-07-10** — v93. Required concrete reasoning-effort choices for normal user input when explicit levels are advertised.
+- **2026-08-31** — v156. Removed the redundant event model order and made event IDs the single
+  transcript order for model input, ranges, forks, cleanup cursors, and public event projections.
 - **2026-07-10** — v92. Added durable requested/resolved inference profiles, profile-aware FIFO run boundaries, run-input associations, session-last-used intent, and retry/subagent provenance.
 - **2026-07-09** — v91. Clarified that failed-run retry state is cleared when retry wait ends and the next attempt starts, preventing stale live retry errors during later successful progress.
 - **2026-07-09** — v90. Documented child subagent human-write rejection before REST, input-buffer, command, and operation side effects.

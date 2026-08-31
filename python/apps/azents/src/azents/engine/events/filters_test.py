@@ -100,21 +100,6 @@ class _TranscriptRepo:
     def __init__(self, events: list[Event]) -> None:
         self.events = events
 
-    async def update_model_orders(
-        self,
-        session: AsyncSession,
-        session_id: str,
-        order_by_event_id: dict[str, int],
-    ) -> None:
-        """Apply model order update in memory."""
-        del session, session_id
-        by_id = {event.id: event for event in self.events}
-        for event_id, model_order in order_by_event_id.items():
-            event = by_id[event_id]
-            self.events[self.events.index(event)] = event.model_copy(
-                update={"model_order": model_order}
-            )
-
     async def update_payload(
         self,
         session: AsyncSession,
@@ -144,7 +129,6 @@ class _TranscriptRepo:
             session_id=create.session_id,
             kind=create.kind,
             payload=payload,
-            model_order=create.model_order or (len(self.events) + 1) * 1000,
             created_at=datetime.datetime.now(datetime.UTC),
         )
         self.events.append(event)
@@ -157,7 +141,7 @@ class _SessionRepo:
     def __init__(self) -> None:
         self.head_event_id: str | None = None
         self.model_input_head_event_id: str | None = None
-        self.model_input_head_model_order: int | None = None
+        self.events: list[Event] = []
 
     async def get_by_id(
         self,
@@ -168,16 +152,21 @@ class _SessionRepo:
         del session, agent_session_id
         return self
 
-    async def lock_model_input_head_if_current(
+    async def lock_compaction_plan_if_current(
         self,
         session: AsyncSession,
         *,
         session_id: str,
-        expected_event_id: str | None,
+        expected_head_event_id: str | None,
+        expected_tail_event_id: str,
     ) -> bool:
-        """Verify the planned head in the test repository."""
+        """Verify the planned boundaries in the test repository."""
         del session, session_id
-        return self.model_input_head_event_id == expected_event_id
+        latest_event_id = max(event.id for event in self.events)
+        return (
+            self.model_input_head_event_id == expected_head_event_id
+            and latest_event_id == expected_tail_event_id
+        )
 
     async def move_model_input_head(
         self,
@@ -199,6 +188,7 @@ def _compactor(
     session_manager: _SessionManager | None = None,
 ) -> EventCompactor:
     """Create an EventCompactor with tracked short session scopes."""
+    session_repo.events = transcript_repo.events
     return EventCompactor(
         session_manager=session_manager or _SessionManager(),
         transcript_repo=transcript_repo,
@@ -597,11 +587,11 @@ async def test_compactor_appends_marker_summary_and_moves_head() -> None:
     assert summary is not None
     assert session_repo.head_event_id == summary.id
     assert len(transcript_repo.events) == 4
-    assert [event.model_order for event in transcript_repo.events] == [
-        1000,
-        2000,
-        2001,
-        2002,
+    assert [event.id for event in transcript_repo.events] == [
+        f"{1:032d}",
+        f"{2:032d}",
+        f"{3:032d}",
+        f"{4:032d}",
     ]
     marker = transcript_repo.events[-2]
     assert marker.kind == EventKind.COMPACTION_MARKER
@@ -609,14 +599,9 @@ async def test_compactor_appends_marker_summary_and_moves_head() -> None:
     assert isinstance(marker_payload, CompactionMarkerPayload)
     assert marker_payload.compaction_id == "compact-1"
     assert marker_payload.status == "started"
-    model_input_events = sorted(
-        (
-            event
-            for event in transcript_repo.events
-            if event.model_order >= summary.model_order
-        ),
-        key=lambda event: event.model_order,
-    )
+    model_input_events = [
+        event for event in transcript_repo.events if event.id >= summary.id
+    ]
     assert [event.payload for event in model_input_events] == [summary.payload]
     payload = summary.payload
     assert isinstance(payload, CompactionSummaryPayload)
@@ -627,7 +612,6 @@ async def test_compactor_appends_marker_summary_and_moves_head() -> None:
     assert "1. old" in payload.content
     assert "2. recent" in payload.content
     assert '"kind"' not in payload.content
-    assert '"model_order"' not in payload.content
 
 
 async def test_compactor_opens_no_transaction_during_external_summary_call() -> None:
@@ -667,8 +651,8 @@ async def test_compactor_opens_no_transaction_during_external_summary_call() -> 
     assert [session.commit_count for session in session_manager.sessions] == [1, 1]
 
 
-async def test_compactor_preserves_input_appended_during_summary() -> None:
-    """Input appended during summary remains after the new model-input head."""
+async def test_compactor_rejects_input_appended_during_summary() -> None:
+    """Input appended during summary makes the compaction plan stale."""
     events = [
         _event(
             "1",
@@ -703,33 +687,21 @@ async def test_compactor_preserves_input_appended_during_summary() -> None:
         )
         return "summary"
 
-    summary = await _compactor(
-        session_manager=session_manager,
-        transcript_repo=transcript_repo,
-        session_repo=_SessionRepo(),
-    ).compact(
-        session_id="session-1",
-        transcript=events,
-        compaction_id="compact-1",
-        summarize=summarize,
-    )
+    session_repo = _SessionRepo()
+    with pytest.raises(CompactionPlanStaleError):
+        await _compactor(
+            session_manager=session_manager,
+            transcript_repo=transcript_repo,
+            session_repo=session_repo,
+        ).compact(
+            session_id="session-1",
+            transcript=events,
+            compaction_id="compact-1",
+            summarize=summarize,
+        )
 
-    assert summary is not None
-    concurrent_input = transcript_repo.events[1]
-    assert summary.model_order == events[0].model_order + 2
-    assert concurrent_input.model_order > summary.model_order
-    model_input_events = sorted(
-        (
-            event
-            for event in transcript_repo.events
-            if event.model_order >= summary.model_order
-        ),
-        key=lambda event: event.model_order,
-    )
-    assert [event.id for event in model_input_events] == [
-        summary.id,
-        concurrent_input.id,
-    ]
+    assert len(transcript_repo.events) == 2
+    assert session_repo.head_event_id is None
 
 
 async def test_compactor_rejects_stale_model_input_head_before_commit() -> None:
@@ -1836,7 +1808,6 @@ def _event(
         session_id="session-1",
         kind=kind,
         payload=payload,
-        model_order=int(id_suffix) * 1000,
         created_at=datetime.datetime.now(datetime.UTC),
     )
 

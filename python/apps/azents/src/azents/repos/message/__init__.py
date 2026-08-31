@@ -440,7 +440,6 @@ def _to_event(row: RDBEvent) -> Event:
         session_id=row.session_id,
         kind=row.kind,
         payload=_validate_payload(row),
-        model_order=row.model_order,
         external_id=row.external_id,
         adapter=row.adapter,
         provider=row.provider,
@@ -659,7 +658,7 @@ class MessageRepository:
                 RDBEvent.session_id == session_id,
                 RDBEvent.reverted.is_(False),
             )
-            .order_by(RDBEvent.model_order.desc())
+            .order_by(RDBEvent.id.desc())
         )
         for row in result.scalars():
             message = event_to_chat_message(row)
@@ -670,19 +669,19 @@ class MessageRepository:
             return row
         return None
 
-    async def mark_reverted_from_model_order(
+    async def mark_reverted_from_event_id(
         self,
         session: AsyncSession,
         session_id: str,
-        model_order: int,
+        event_id: str,
     ) -> int:
-        """Hide events at or above specific model_order from UI/model input."""
+        """Hide the selected event and later events from UI and model input."""
         count_result = await session.execute(
             sa.select(sa.func.count())
             .select_from(RDBEvent)
             .where(
                 RDBEvent.session_id == session_id,
-                RDBEvent.model_order >= model_order,
+                RDBEvent.id >= event_id,
                 RDBEvent.reverted.is_(False),
             )
         )
@@ -691,7 +690,7 @@ class MessageRepository:
             sa.update(RDBEvent)
             .where(
                 RDBEvent.session_id == session_id,
-                RDBEvent.model_order >= model_order,
+                RDBEvent.id >= event_id,
                 RDBEvent.reverted.is_(False),
             )
             .values(reverted=True)
@@ -731,29 +730,17 @@ class MessageRepository:
         self,
         session: AsyncSession,
         session_id: str,
-        model_order: int,
+        event_id: str,
     ) -> bool:
-        """Check whether target model_order is at or below current model input head."""
-        result = await session.execute(
-            sa.select(
-                RDBAgentSession.model_input_head_event_id,
-                RDBEvent.model_order,
+        """Check whether the target event is at or before the model-input head."""
+        head_event_id = await session.scalar(
+            sa.select(RDBAgentSession.model_input_head_event_id).where(
+                RDBAgentSession.id == session_id
             )
-            .select_from(RDBAgentSession)
-            .outerjoin(
-                RDBEvent, RDBEvent.id == RDBAgentSession.model_input_head_event_id
-            )
-            .where(RDBAgentSession.id == session_id)
         )
-        row = result.one_or_none()
-        if row is None:
-            return False
-        head_event_id, head_model_order = row
         if head_event_id is None:
             return False
-        if head_model_order is None:
-            return True
-        return model_order <= head_model_order
+        return event_id <= head_event_id
 
     def _is_empty(self, msg: ChatMessage) -> bool:
         """Return whether message is empty with no displayable content."""

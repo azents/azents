@@ -179,10 +179,11 @@ class RDBAgentSession(RDBModel):
         "ix_agent_sessions_model_input_head_event_id",
         "model_input_head_event_id",
     )
-    IX_MODEL_FILE_GC_LAG = sa.Index(
-        "ix_agent_sessions_model_file_gc_lag",
-        "model_file_gc_cursor_model_order",
-        "model_input_head_model_order",
+    IX_MODEL_FILE_GC_CURSOR = sa.Index(
+        "ix_agent_sessions_model_file_gc_cursor",
+        sa.text("model_file_gc_cursor_event_id ASC NULLS FIRST"),
+        "model_input_head_event_id",
+        postgresql_where=sa.text("model_input_head_event_id IS NOT NULL"),
     )
     IX_PENDING_COMMAND = sa.Index(
         "ix_agent_sessions_pending_command",
@@ -393,21 +394,10 @@ class RDBAgentSession(RDBModel):
         nullable=True,
         default=None,
     )
-    model_input_head_model_order: Mapped[int | None] = mapped_column(
-        sa.BigInteger,
-        nullable=True,
-        default=None,
-    )
     model_file_gc_cursor_event_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         nullable=True,
         default=None,
-    )
-    model_file_gc_cursor_model_order: Mapped[int] = mapped_column(
-        sa.BigInteger,
-        init=False,
-        server_default="0",
-        nullable=False,
     )
     model_file_gc_updated_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
@@ -556,7 +546,7 @@ class RDBAgentSession(RDBModel):
         IX_SESSION_KIND,
         IX_AGENT_ACTIVE_LAST_USER_INPUT,
         IX_MODEL_INPUT_HEAD_EVENT_ID,
-        IX_MODEL_FILE_GC_LAG,
+        IX_MODEL_FILE_GC_CURSOR,
         IX_PENDING_COMMAND,
         IX_STOP_REQUESTED_AT,
         IX_RUN_STATE_RUNNING,

@@ -96,13 +96,13 @@ def degrade_file_parts_for_fork(events: Sequence[Event]) -> list[Event]:
 def _events_from_head(
     events: Sequence[Event], *, head_event_id: str | None
 ) -> list[Event]:
-    ordered = sorted(events, key=lambda event: (event.model_order, event.id))
+    ordered = sorted(events, key=lambda event: event.id)
     if head_event_id is None:
         return ordered
     head_event = next((event for event in ordered if event.id == head_event_id), None)
     if head_event is None:
         raise ValueError("head_event_id is not present in transcript")
-    return [event for event in ordered if event.model_order >= head_event.model_order]
+    return [event for event in ordered if event.id >= head_event.id]
 
 
 def _select_recent_turn_events(events: Sequence[Event], max_turns: int) -> list[Event]:

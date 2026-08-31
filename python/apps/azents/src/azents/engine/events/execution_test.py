@@ -441,7 +441,6 @@ class _SessionState:
 
     def __init__(self, head_event_id: str | None) -> None:
         self.model_input_head_event_id = head_event_id
-        self.model_input_head_model_order = 1 if head_event_id is not None else None
 
 
 class _SessionRepo:

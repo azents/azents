@@ -1772,7 +1772,6 @@ class ChatEventResponse(BaseModel):
     session_id: str = Field(description="AgentSession ID")
     kind: EventKind = Field(description="Event kind")
     payload: dict[str, object] = Field(description="Event payload")
-    model_order: int = Field(description="Model input logical order")
     external_id: str | None = Field(default=None, description="Dedup key")
     adapter: str | None = Field(default=None, description="Adapter name")
     provider: str | None = Field(default=None, description="Provider name")
@@ -1800,7 +1799,6 @@ class ChatEventResponse(BaseModel):
             session_id=event.session_id,
             kind=event.kind,
             payload=payload,
-            model_order=event.model_order,
             external_id=event.external_id,
             adapter=event.adapter,
             provider=event.provider,

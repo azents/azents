@@ -223,10 +223,10 @@ class ChatWriteService:
                 or target.kind != EventKind.USER_MESSAGE
             ):
                 raise ValueError("Message is not editable")
-            await self.message_repository.mark_reverted_from_model_order(
+            await self.message_repository.mark_reverted_from_event_id(
                 session,
                 session_id,
-                target.model_order,
+                target.id,
             )
             await self.mailbox_item_service.delete_by_session_id(
                 session,
@@ -457,10 +457,10 @@ class ChatWriteService:
                 payload=payload,
             )
             if created:
-                await self.message_repository.mark_reverted_from_model_order(
+                await self.message_repository.mark_reverted_from_event_id(
                     session,
                     session_id,
-                    target.model_order,
+                    target.id,
                 )
                 await self.mailbox_item_service.delete_by_session_id(
                     session,

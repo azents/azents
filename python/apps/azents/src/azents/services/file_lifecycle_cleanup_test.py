@@ -335,7 +335,7 @@ class _AgentSessionRepo:
 
     def __init__(self, lagging: list[ModelFileGCLaggingSession]) -> None:
         self.lagging = lagging
-        self.advanced: list[tuple[str, str, int]] = []
+        self.advanced: list[tuple[str, str]] = []
 
     async def list_model_file_gc_lagging(
         self,
@@ -353,12 +353,11 @@ class _AgentSessionRepo:
         *,
         session_id: str,
         cursor_event_id: str,
-        cursor_model_order: int,
         updated_at: datetime.datetime,
     ) -> None:
         """Record cursor advancement."""
         del session, updated_at
-        self.advanced.append((session_id, cursor_event_id, cursor_model_order))
+        self.advanced.append((session_id, cursor_event_id))
 
 
 class _TranscriptRepo:
@@ -372,8 +371,8 @@ class _TranscriptRepo:
         session: AsyncSession,
         session_id: str,
         *,
-        after_order: int,
-        to_order: int,
+        after_event_id: str | None,
+        to_event_id: str,
         limit: int,
     ) -> list[Event]:
         """Return configured events inside the requested range."""
@@ -381,7 +380,8 @@ class _TranscriptRepo:
         return [
             event
             for event in self.events
-            if event.model_order > after_order and event.model_order <= to_order
+            if (after_event_id is None or event.id > after_event_id)
+            and event.id <= to_event_id
         ]
 
 
@@ -548,7 +548,6 @@ def _file_event(model_file_id: str = "m" * 32) -> Event:
             wire_dialect="json_function",
         ),
         created_at=_NOW,
-        model_order=10,
     )
 
 
@@ -556,9 +555,8 @@ def _lagging_session() -> ModelFileGCLaggingSession:
     """Create lagging session state."""
     return ModelFileGCLaggingSession(
         session_id="session-1",
-        head_event_id="h" * 32,
-        head_model_order=10,
-        cursor_model_order=0,
+        head_event_id="1" * 32,
+        cursor_event_id=None,
     )
 
 
@@ -699,7 +697,7 @@ async def test_model_file_gc_deletes_unpinned_model_file_and_advances_cursor() -
     assert summary.model_file_blobs_deleted == 1
     assert summary.sessions_advanced == 1
     assert model_repo.deleted_requests == [["m" * 32]]
-    assert session_repo.advanced == [("session-1", "h" * 32, 10)]
+    assert session_repo.advanced == [("session-1", "1" * 32)]
 
 
 @pytest.mark.asyncio

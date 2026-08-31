@@ -366,7 +366,7 @@ function chatActionFromValue(value: unknown): ChatAction | null {
 }
 
 interface DurableInferenceIntent {
-  modelOrder: number;
+  eventId: string;
   profile: RequestedInferenceProfile;
 }
 
@@ -379,11 +379,8 @@ function latestDurableInferenceIntent(
       continue;
     }
     const profile = eventRequestedInferenceProfile(event);
-    if (
-      profile !== null &&
-      (latest === null || event.model_order >= latest.modelOrder)
-    ) {
-      latest = { modelOrder: event.model_order, profile };
+    if (profile !== null && (latest === null || event.id >= latest.eventId)) {
+      latest = { eventId: event.id, profile };
     }
   }
   return latest;

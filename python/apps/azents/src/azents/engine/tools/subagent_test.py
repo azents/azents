@@ -166,14 +166,13 @@ class _AgentRepository:
         return self.agent
 
 
-def _event(kind: EventKind, payload: UserMessagePayload, model_order: int) -> Event:
+def _event(kind: EventKind, payload: UserMessagePayload, event_number: int) -> Event:
     """Create Event fixture."""
     return Event(
-        id=str(model_order).rjust(32, "0"),
+        id=str(event_number).rjust(32, "0"),
         session_id="root-session",
         kind=kind,
         payload=payload,
-        model_order=model_order,
         created_at=_NOW,
     )
 
@@ -214,9 +213,7 @@ def _agent_session(
         pinned=False,
         end_reason=None,
         model_input_head_event_id=None,
-        model_input_head_model_order=None,
         model_file_gc_cursor_event_id=None,
-        model_file_gc_cursor_model_order=0,
         started_at=_NOW,
         lifecycle_started_at=None,
         run_state=run_state,
@@ -1748,8 +1745,6 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
         EventKind.USER_MESSAGE,
         EventKind.SYSTEM_REMINDER,
     ]
-    assert event_repo.appended[0].model_order == 1000
-    assert event_repo.appended[1].model_order is None
     reminder_text = event_repo.appended[1].payload["text"]
     assert isinstance(reminder_text, str)
     assert "inherited conversation history" in reminder_text

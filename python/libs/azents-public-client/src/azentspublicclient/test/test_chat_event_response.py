@@ -39,7 +39,6 @@ class TestChatEventResponse(unittest.TestCase):
                 session_id = '',
                 kind = 'user_message',
                 payload = { },
-                model_order = 56,
                 external_id = '',
                 adapter = '',
                 provider = '',
@@ -54,7 +53,6 @@ class TestChatEventResponse(unittest.TestCase):
                 session_id = '',
                 kind = 'user_message',
                 payload = { },
-                model_order = 56,
                 schema_version = '',
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )

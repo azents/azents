@@ -48,7 +48,6 @@ from .data import (
 )
 
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
-_MODEL_ORDER_STEP = 1000
 _TERMINAL_RUN_STATUSES = frozenset(
     {
         AgentRunStatus.COMPLETED,
@@ -130,16 +129,10 @@ class EventTranscriptRepository:
             )
 
         payload = _validate_payload(create.kind, create.payload)
-        model_order = (
-            create.model_order
-            if create.model_order is not None
-            else await self._allocate_model_order(session, create.session_id)
-        )
         rdb = RDBEvent(
             session_id=create.session_id,
             kind=create.kind,
             payload=_serialize_payload(payload),
-            model_order=model_order,
             external_id=None,
             adapter=create.adapter,
             provider=create.provider,
@@ -185,11 +178,6 @@ class EventTranscriptRepository:
 
         payload = _validate_payload(create.kind, create.payload)
         payload_json = _serialize_payload(payload)
-        model_order = (
-            create.model_order
-            if create.model_order is not None
-            else await self._allocate_model_order(session, create.session_id)
-        )
         stmt = (
             insert(RDBEvent)
             .values(
@@ -197,7 +185,6 @@ class EventTranscriptRepository:
                 session_id=create.session_id,
                 kind=create.kind,
                 payload=payload_json,
-                model_order=model_order,
                 external_id=external_id,
                 adapter=create.adapter,
                 provider=create.provider,
@@ -322,18 +309,18 @@ class EventTranscriptRepository:
         stmt = (
             sa.select(RDBEvent)
             .where(RDBEvent.session_id == session_id, RDBEvent.reverted.is_(False))
-            .order_by(RDBEvent.model_order.asc(), RDBEvent.id.asc())
+            .order_by(RDBEvent.id.asc())
         )
         if head_event_id is not None:
-            head_order = (
-                sa.select(RDBEvent.model_order)
+            head_id = (
+                sa.select(RDBEvent.id)
                 .where(
                     RDBEvent.session_id == session_id,
                     RDBEvent.id == head_event_id,
                 )
                 .scalar_subquery()
             )
-            stmt = stmt.where(RDBEvent.model_order >= head_order)
+            stmt = stmt.where(RDBEvent.id >= head_id)
         result = await session.execute(stmt)
         return [self._build(rdb) for rdb in result.scalars()]
 
@@ -342,20 +329,22 @@ class EventTranscriptRepository:
         session: AsyncSession,
         session_id: str,
         *,
-        after_order: int,
-        to_order: int,
+        after_event_id: str | None,
+        to_event_id: str,
         limit: int,
     ) -> list[Event]:
         """Fetch a bounded event range for ModelFile GC cursor processing."""
+        predicates: list[sa.ColumnElement[bool]] = [
+            RDBEvent.session_id == session_id,
+            RDBEvent.reverted.is_(False),
+            RDBEvent.id <= to_event_id,
+        ]
+        if after_event_id is not None:
+            predicates.append(RDBEvent.id > after_event_id)
         result = await session.execute(
             sa.select(RDBEvent)
-            .where(
-                RDBEvent.session_id == session_id,
-                RDBEvent.reverted.is_(False),
-                RDBEvent.model_order > after_order,
-                RDBEvent.model_order <= to_order,
-            )
-            .order_by(RDBEvent.model_order.asc(), RDBEvent.id.asc())
+            .where(*predicates)
+            .order_by(RDBEvent.id.asc())
             .limit(limit)
         )
         return [self._build(rdb) for rdb in result.scalars()]
@@ -452,36 +441,6 @@ class EventTranscriptRepository:
             return None
         return self._build(rdb)
 
-    async def update_model_orders(
-        self,
-        session: AsyncSession,
-        session_id: str,
-        order_by_event_id: dict[str, int],
-    ) -> None:
-        """Update Event model input logical order."""
-        if not order_by_event_id:
-            return
-        rows: list[RDBEvent] = []
-        for event_id in order_by_event_id:
-            rdb = await session.get(RDBEvent, event_id)
-            if rdb is None or rdb.session_id != session_id:
-                raise ValueError("Event not found in session")
-            rows.append(rdb)
-
-        result = await session.execute(
-            sa.select(sa.func.min(RDBEvent.model_order)).where(
-                RDBEvent.session_id == session_id
-            )
-        )
-        min_order = int(result.scalar_one_or_none() or 0)
-        for offset, rdb in enumerate(rows, start=1):
-            rdb.model_order = min_order - offset
-        await session.flush()
-
-        for rdb in rows:
-            rdb.model_order = order_by_event_id[rdb.id]
-        await session.flush()
-
     async def update_payload(
         self,
         session: AsyncSession,
@@ -498,51 +457,6 @@ class EventTranscriptRepository:
         await session.refresh(rdb)
         return self._build(rdb)
 
-    async def _allocate_model_order(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> int:
-        """Acquire Session row lock and assign next model_order."""
-        await self._lock_session_for_model_order(session, session_id)
-        return await self._next_model_order(session, session_id)
-
-    async def _lock_session_for_model_order(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> None:
-        """Serialize model_order calculation for concurrent appends by session."""
-        result = await session.execute(
-            sa.select(RDBAgentSession.id)
-            .where(RDBAgentSession.id == session_id)
-            .with_for_update()
-        )
-        if result.scalar_one_or_none() is None:
-            raise ValueError("Event session not found")
-
-    async def _next_model_order(
-        self,
-        session: AsyncSession,
-        session_id: str,
-    ) -> int:
-        """Calculate next model input logical order inside Session.
-
-        Sequential appends keep a fixed gap. This leaves room to insert future
-        model-visible system events without renumbering the full transcript.
-        `model_order` is DB BigInteger, so overflow from increments of 1000 is
-        not a practical constraint from session event count perspective.
-        """
-        result = await session.execute(
-            sa.select(sa.func.max(RDBEvent.model_order)).where(
-                RDBEvent.session_id == session_id
-            )
-        )
-        current = result.scalar_one_or_none()
-        if current is None:
-            return _MODEL_ORDER_STEP
-        return int(current) + _MODEL_ORDER_STEP
-
     def _build(self, rdb: RDBEvent) -> Event:
         """Convert RDB row to domain model."""
         payload = validate_persisted_event_payload(rdb.kind, rdb.payload)
@@ -551,7 +465,6 @@ class EventTranscriptRepository:
             session_id=rdb.session_id,
             kind=rdb.kind,
             payload=payload,
-            model_order=rdb.model_order,
             external_id=rdb.external_id,
             adapter=rdb.adapter,
             provider=rdb.provider,

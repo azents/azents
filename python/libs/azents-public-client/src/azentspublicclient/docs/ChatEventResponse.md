@@ -10,7 +10,6 @@ Name | Type | Description | Notes
 **session_id** | **str** | AgentSession ID | 
 **kind** | [**EventKind**](EventKind.md) | Event kind | 
 **payload** | **Dict[str, object]** | Event payload | 
-**model_order** | **int** | Model input logical order | 
 **external_id** | **str** |  | [optional] 
 **adapter** | **str** |  | [optional] 
 **provider** | **str** |  | [optional] 

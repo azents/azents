@@ -17,7 +17,6 @@ function event(
     session_id: "session-1",
     kind,
     payload,
-    model_order: 1,
     external_id: null,
     adapter: null,
     provider: null,

@@ -431,14 +431,15 @@ class SessionHeadMoveRepository(Protocol):
         """Fetch current model-input head state."""
         ...
 
-    async def lock_model_input_head_if_current(
+    async def lock_compaction_plan_if_current(
         self,
         session: AsyncSession,
         *,
         session_id: str,
-        expected_event_id: str | None,
+        expected_head_event_id: str | None,
+        expected_tail_event_id: str,
     ) -> bool:
-        """Lock the Session and verify the planned model-input head."""
+        """Lock the Session and verify the planned compaction boundaries."""
         ...
 
     async def move_model_input_head(
@@ -462,21 +463,11 @@ class EventAppendRepository(EventPayloadRepository, Protocol):
         """Append Event."""
         ...
 
-    async def update_model_orders(
-        self,
-        session: AsyncSession,
-        session_id: str,
-        order_by_event_id: dict[str, int],
-    ) -> None:
-        """Update Event model input logical order."""
-        ...
-
 
 class SessionHeadState(Protocol):
     """Session state with model input head."""
 
     model_input_head_event_id: str | None
-    model_input_head_model_order: int | None
 
 
 class SessionHeadRepository(Protocol):

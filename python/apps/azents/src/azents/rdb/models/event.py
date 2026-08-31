@@ -36,12 +36,6 @@ class RDBEvent(RDBModel):
 
     IX_SESSION_ID = sa.Index("ix_events_session_id", "session_id")
     IX_SESSION_CREATED = sa.Index("ix_events_session_created", "session_id", "id")
-    IX_SESSION_MODEL_ORDER = sa.Index(
-        "ix_events_session_model_order",
-        "session_id",
-        "model_order",
-        unique=True,
-    )
     UQ_SESSION_EXTERNAL = sa.Index(
         "uq_events_session_external",
         "session_id",
@@ -66,7 +60,6 @@ class RDBEvent(RDBModel):
         nullable=False,
     )
     payload: Mapped[dict[str, JSONValue]] = mapped_column(JSONB, nullable=False)
-    model_order: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
     external_id: Mapped[str | None] = mapped_column(
         sa.Text,
         nullable=True,
@@ -101,6 +94,5 @@ class RDBEvent(RDBModel):
     __table_args__ = (
         IX_SESSION_ID,
         IX_SESSION_CREATED,
-        IX_SESSION_MODEL_ORDER,
         UQ_SESSION_EXTERNAL,
     )

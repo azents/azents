@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-08-27
-spec_version: 35
+last_verified_at: 2026-08-31
+spec_version: 36
 ---
 
 # Context Compaction
@@ -53,21 +53,21 @@ back to estimating the full selected transcript.
 
 When compaction is required:
 
-1. Select the full model-input transcript slice and fixed cutoff that will be summarized.
+1. Select the full ID-ordered model-input transcript and capture its current head and tail event IDs.
 2. Publish the Run-scoped live operation `preparing_context` and dispatch the compaction-start lifecycle hook. The external model and hook calls run outside compactor-owned database sessions and hold no active transaction or session-row lock used for event ordering.
 3. Generate the summary through the provider-specific adapter. Provider failures propagate through the common bounded `ModelProviderFailure` contract to the owning Run controller.
 4. Render bounded continuity history from the selected transcript, but keep it separate from the generated summary.
 5. Dispatch the compaction summary enrichment hook pipeline with the generated summary and rendered continuity history.
 6. Append the continuity history after the enriched summary.
-7. In one short database transaction, append adjacent `compaction_marker(status=started)` and `compaction_summary` events with the same `compaction_id` and reason. The summary payload contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
-8. Move `agent_sessions.model_input_head_event_id` and `agent_sessions.model_input_head_model_order` to the summary event, replace the Session's `tool_search/working_set.tool_names` with an empty list, and commit the same transaction. The Tool Search reset applies even when the Agent currently has Tool Search disabled; other Toolkit State identities are unchanged.
+7. In one short database transaction, lock the Session and revalidate both captured boundaries. A changed head or latest non-reverted event ID makes the plan stale and writes no compaction event.
+8. For a current plan, append adjacent `compaction_marker(status=started)` and `compaction_summary` events with the same `compaction_id` and reason at the physical transcript tail. The summary payload contains the enriched checkpoint followed by bounded `Recent User Messages` and `Recent Transcript` sections.
+9. Move `agent_sessions.model_input_head_event_id` to the summary event, replace the Session's `tool_search/working_set.tool_names` with an empty list, and commit the same transaction. The Tool Search reset applies even when the Agent currently has Tool Search disabled; other Toolkit State identities are unchanged.
 9. Remove the live operation after success, Stop, cancellation, or terminal failure. A skipped, failed, cancelled, or stale attempt appends no compaction marker or summary, does not move the model-input head, and does not reset the Tool Search working set.
 
-Old events remain queryable. The head pointer and event model order only change which
-event range and ordering are used for future model input. Sequential appends leave gaps in
-`model_order` so the successful marker and summary can occupy adjacent logical positions without
-renumbering the transcript. Input appended while summary generation is running remains outside the
-fixed summary cutoff and stays visible after the successful summary head.
+Old events remain queryable. The head pointer changes which ascending event-ID range is used for
+future model input. Input appended while summary generation is running invalidates the fixed plan;
+the completed summary is discarded without a marker or head change, and a later attempt rebuilds
+from current durable history.
 
 ## Summary Model
 
@@ -220,12 +220,12 @@ the immediate shape of the recent interaction.
 
 - Compaction is append-only: success atomically appends one adjacent marker/summary pair; failure or cancellation appends no compaction lifecycle event.
 - Successful compaction resets only the Session's `tool_search/working_set` in the marker/summary/head transaction. A skipped or unsuccessful attempt preserves that working set, and all other Toolkit State remains unchanged.
-- External summary generation and enrichment run before the successful commit transaction opens and do not hold the session-row event-ordering lock.
-- Events appended during external summary work remain outside the fixed selected cutoff and visible after the model-input head moves.
+- External summary generation and enrichment run before the successful commit transaction opens and do not hold a Session row lock.
+- Events appended during external summary work make the plan stale; the attempt writes no marker or summary and leaves the model-input head unchanged.
 - Summary failure or cancellation leaves the model-input head unchanged.
 - Successful compaction writes the trigger reason to both `compaction_marker.payload.reason` and `compaction_summary.payload.reason` so context/debug views can explain why the checkpoint was created.
-- `model_input_head_event_id` points at the summary event after successful compaction, and `model_input_head_model_order` stores the same head event model order for scheduler GC cursor comparisons.
-- Future model input is selected and sorted by event model order, not by physical append id.
+- `model_input_head_event_id` points at the summary event after successful compaction.
+- Future model input is selected and sorted by event ID.
 - Auto and manual compaction present future model input as one `compaction_summary` head event.
 - The summary model receives the full selected model-input transcript, not a transcript with a
   protected tail removed.
@@ -283,6 +283,8 @@ terminalizes.
 
 ## Changelog
 
+- **2026-08-31** (spec_version 36) — Made event ID the only compaction order and
+  replaced logical summary insertion with head-and-tail stale-plan validation.
 - **2026-08-27** (spec_version 35) — Added distinct model default and maximum input
   windows, maximum-only fallback, and centralized per-option user-cap resolution
   before the smaller main/lightweight compaction calculation.
