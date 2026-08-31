@@ -629,31 +629,18 @@ export function useWorkspacePanelContainer({
       },
     });
 
-  const onStartRuntime = useCallback(() => {
-    if (runtimeQuery.data?.actions.start) {
-      startRuntimeMutation.mutate({ handle, agentId });
-    }
-  }, [agentId, handle, runtimeQuery.data?.actions.start, startRuntimeMutation]);
-  const onStopRuntime = useCallback(() => {
-    if (runtimeQuery.data?.actions.stop) {
-      stopRuntimeMutation.mutate({ handle, agentId });
-    }
-  }, [agentId, handle, runtimeQuery.data?.actions.stop, stopRuntimeMutation]);
-  const onRestartRuntime = useCallback(() => {
-    if (runtimeQuery.data?.actions.restart) {
-      restartRuntimeMutation.mutate({ handle, agentId });
-    }
-  }, [
-    agentId,
-    handle,
-    restartRuntimeMutation,
-    runtimeQuery.data?.actions.restart,
-  ]);
-  const onResetRuntime = useCallback(() => {
-    if (runtimeQuery.data?.actions.reset) {
-      resetRuntimeMutation.mutate({ handle, agentId });
-    }
-  }, [agentId, handle, resetRuntimeMutation, runtimeQuery.data?.actions.reset]);
+  const onStartRuntime = useCallback((): void => {
+    startRuntimeMutation.mutate({ handle, agentId });
+  }, [agentId, handle, startRuntimeMutation]);
+  const onStopRuntime = useCallback((): void => {
+    stopRuntimeMutation.mutate({ handle, agentId });
+  }, [agentId, handle, stopRuntimeMutation]);
+  const onRestartRuntime = useCallback((): void => {
+    restartRuntimeMutation.mutate({ handle, agentId });
+  }, [agentId, handle, restartRuntimeMutation]);
+  const onResetRuntime = useCallback((): void => {
+    resetRuntimeMutation.mutate({ handle, agentId });
+  }, [agentId, handle, resetRuntimeMutation]);
 
   const onOpenDirectory = useCallback(
     (path: string) => {
