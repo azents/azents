@@ -385,8 +385,7 @@ class EventCompactor:
         if session_state is None:
             raise ValueError("AgentSession not found")
         expected_head_event_id = session_state.model_input_head_event_id
-        marker_order = max(event.model_order for event in old_events) + 1
-        summary_order = marker_order + 1
+        expected_tail_event_id = old_events[-1].id
 
         if on_started is not None:
             await on_started()
@@ -419,14 +418,15 @@ class EventCompactor:
             continuity_history,
         )
         async with self.session_manager() as session:
-            current = await self.session_repo.lock_model_input_head_if_current(
+            current = await self.session_repo.lock_compaction_plan_if_current(
                 session,
                 session_id=session_id,
-                expected_event_id=expected_head_event_id,
+                expected_head_event_id=expected_head_event_id,
+                expected_tail_event_id=expected_tail_event_id,
             )
             if not current:
                 raise CompactionPlanStaleError(
-                    "Compaction plan no longer matches the model-input head."
+                    "Compaction plan no longer matches the model-input boundaries."
                 )
             await self.transcript_repo.append(
                 session,
@@ -438,7 +438,6 @@ class EventCompactor:
                         status="started",
                         reason=reason,
                     ).model_dump(mode="json", exclude_none=True),
-                    model_order=marker_order,
                 ),
             )
             summary_event = await self.transcript_repo.append(
@@ -452,7 +451,6 @@ class EventCompactor:
                         covered_until_event_id=old_events[-1].id,
                         reason=reason,
                     ).model_dump(mode="json", exclude_none=True),
-                    model_order=summary_order,
                 ),
             )
             await self.session_repo.move_model_input_head(

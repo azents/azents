@@ -88,8 +88,7 @@ class ModelFileGCLaggingSession:
 
     session_id: str
     head_event_id: str
-    head_model_order: int
-    cursor_model_order: int
+    cursor_event_id: str | None
 
 
 @dataclass(frozen=True)
@@ -1720,14 +1719,15 @@ class AgentSessionRepository:
         )
         return result.scalar_one_or_none()
 
-    async def lock_model_input_head_if_current(
+    async def lock_compaction_plan_if_current(
         self,
         session: AsyncSession,
         *,
         session_id: str,
-        expected_event_id: str | None,
+        expected_head_event_id: str | None,
+        expected_tail_event_id: str,
     ) -> bool:
-        """Lock the Session and verify the planned model-input head."""
+        """Lock the Session and verify the planned compaction boundaries."""
         result = await session.execute(
             sa.select(RDBAgentSession)
             .where(RDBAgentSession.id == session_id)
@@ -1736,7 +1736,19 @@ class AgentSessionRepository:
         rdb = result.scalar_one_or_none()
         if rdb is None:
             raise ValueError("AgentSession not found")
-        return rdb.model_input_head_event_id == expected_event_id
+        latest_event_id = await session.scalar(
+            sa.select(RDBEvent.id)
+            .where(
+                RDBEvent.session_id == session_id,
+                RDBEvent.reverted.is_(False),
+            )
+            .order_by(RDBEvent.id.desc())
+            .limit(1)
+        )
+        return (
+            rdb.model_input_head_event_id == expected_head_event_id
+            and latest_event_id == expected_tail_event_id
+        )
 
     async def move_model_input_head(
         self,
@@ -1745,21 +1757,19 @@ class AgentSessionRepository:
         event_id: str,
     ) -> AgentSession:
         """Move Model input head to specified event."""
-        event_row = await session.execute(
-            sa.select(RDBEvent.id, RDBEvent.model_order).where(
+        event_id_row = await session.scalar(
+            sa.select(RDBEvent.id).where(
                 RDBEvent.session_id == session_id,
                 RDBEvent.id == event_id,
             )
         )
-        event = event_row.one_or_none()
-        if event is None:
+        if event_id_row is None:
             raise ValueError("Model input head event not found in session")
 
         rdb = await session.get(RDBAgentSession, session_id)
         if rdb is None:
             raise ValueError("AgentSession not found")
         rdb.model_input_head_event_id = event_id
-        rdb.model_input_head_model_order = int(event.model_order)
         await session.flush()
         await session.refresh(rdb)
         return self._build(rdb)
@@ -1776,16 +1786,19 @@ class AgentSessionRepository:
                 sa.select(
                     RDBAgentSession.id,
                     RDBAgentSession.model_input_head_event_id,
-                    RDBAgentSession.model_input_head_model_order,
-                    RDBAgentSession.model_file_gc_cursor_model_order,
+                    RDBAgentSession.model_file_gc_cursor_event_id,
                 )
                 .where(
                     RDBAgentSession.model_input_head_event_id.is_not(None),
-                    RDBAgentSession.model_input_head_model_order.is_not(None),
-                    RDBAgentSession.model_file_gc_cursor_model_order
-                    < RDBAgentSession.model_input_head_model_order,
+                    sa.or_(
+                        RDBAgentSession.model_file_gc_cursor_event_id.is_(None),
+                        RDBAgentSession.model_file_gc_cursor_event_id
+                        < RDBAgentSession.model_input_head_event_id,
+                    ),
                 )
-                .order_by(RDBAgentSession.model_file_gc_cursor_model_order)
+                .order_by(
+                    RDBAgentSession.model_file_gc_cursor_event_id.asc().nullsfirst()
+                )
                 .limit(limit)
             )
         ).all()
@@ -1793,8 +1806,7 @@ class AgentSessionRepository:
             ModelFileGCLaggingSession(
                 session_id=row.id,
                 head_event_id=row.model_input_head_event_id,
-                head_model_order=int(row.model_input_head_model_order),
-                cursor_model_order=int(row.model_file_gc_cursor_model_order),
+                cursor_event_id=row.model_file_gc_cursor_event_id,
             )
             for row in rows
         ]
@@ -1804,8 +1816,7 @@ class AgentSessionRepository:
         session: AsyncSession,
         *,
         session_id: str,
-        cursor_event_id: str | None,
-        cursor_model_order: int,
+        cursor_event_id: str,
         updated_at: datetime.datetime,
     ) -> None:
         """Advance the ModelFile GC cursor for a session."""
@@ -1813,11 +1824,13 @@ class AgentSessionRepository:
             sa.update(RDBAgentSession)
             .where(
                 RDBAgentSession.id == session_id,
-                RDBAgentSession.model_file_gc_cursor_model_order <= cursor_model_order,
+                sa.or_(
+                    RDBAgentSession.model_file_gc_cursor_event_id.is_(None),
+                    RDBAgentSession.model_file_gc_cursor_event_id <= cursor_event_id,
+                ),
             )
             .values(
                 model_file_gc_cursor_event_id=cursor_event_id,
-                model_file_gc_cursor_model_order=cursor_model_order,
                 model_file_gc_updated_at=updated_at,
             )
         )
@@ -2471,9 +2484,7 @@ class AgentSessionRepository:
             pinned=rdb.pinned,
             end_reason=rdb.end_reason,
             model_input_head_event_id=rdb.model_input_head_event_id,
-            model_input_head_model_order=rdb.model_input_head_model_order,
             model_file_gc_cursor_event_id=rdb.model_file_gc_cursor_event_id,
-            model_file_gc_cursor_model_order=rdb.model_file_gc_cursor_model_order,
             started_at=rdb.started_at,
             lifecycle_started_at=rdb.lifecycle_started_at,
             run_state=rdb.run_state,

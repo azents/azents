@@ -17934,11 +17934,6 @@
             "title": "Payload",
             "description": "Event payload"
           },
-          "model_order": {
-            "type": "integer",
-            "title": "Model Order",
-            "description": "Model input logical order"
-          },
           "external_id": {
             "anyOf": [
               {
@@ -18017,7 +18012,6 @@
           "session_id",
           "kind",
           "payload",
-          "model_order",
           "schema_version",
           "created_at"
         ],

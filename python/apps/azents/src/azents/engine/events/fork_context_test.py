@@ -28,29 +28,25 @@ def _event(
     id_suffix: str,
     kind: EventKind,
     payload: EventPayload,
-    *,
-    model_order: int,
 ) -> Event:
     return Event(
         id=f"{id_suffix:0>32}"[-32:],
         session_id="session-1",
         kind=kind,
         payload=payload,
-        model_order=model_order,
         created_at=_NOW,
     )
 
 
-def _user_event(id_suffix: str, text: str, *, model_order: int) -> Event:
+def _user_event(id_suffix: str, text: str) -> Event:
     return _event(
         id_suffix,
         EventKind.USER_MESSAGE,
         UserMessagePayload(sender_user_id=None, content=text),
-        model_order=model_order,
     )
 
 
-def _turn_marker(id_suffix: str, *, model_order: int) -> Event:
+def _turn_marker(id_suffix: str) -> Event:
     return _event(
         id_suffix,
         EventKind.TURN_MARKER,
@@ -63,7 +59,6 @@ def _turn_marker(id_suffix: str, *, model_order: int) -> Event:
                 raw={},
             ),
         ),
-        model_order=model_order,
     )
 
 
@@ -97,7 +92,7 @@ def test_parse_fork_turns_rejects_invalid_values(raw: str) -> None:
 
 def test_select_fork_events_none_returns_empty() -> None:
     """none starts with no parent transcript context."""
-    events = [_user_event("1", "before", model_order=1000)]
+    events = [_user_event("1", "before")]
 
     selected = select_fork_events(
         events,
@@ -110,9 +105,9 @@ def test_select_fork_events_none_returns_empty() -> None:
 
 def test_select_fork_events_all_starts_at_head_boundary() -> None:
     """all copies only the current model-visible range from the head boundary."""
-    before = _user_event("1", "before head", model_order=1000)
-    head = _user_event("2", "summary/head", model_order=2000)
-    after = _user_event("3", "after head", model_order=3000)
+    before = _user_event("1", "before head")
+    head = _user_event("2", "summary/head")
+    after = _user_event("3", "after head")
 
     selected = select_fork_events(
         [after, before, head],
@@ -125,12 +120,12 @@ def test_select_fork_events_all_starts_at_head_boundary() -> None:
 
 def test_select_fork_events_latest_turns_within_head_range() -> None:
     """Positive integer values select recent turns only inside the head range."""
-    before_head = _user_event("1", "before head", model_order=1000)
-    head = _user_event("2", "summary/head", model_order=2000)
-    old_turn_user = _user_event("3", "old turn", model_order=3000)
-    old_marker = _turn_marker("4", model_order=4000)
-    latest_turn_user = _user_event("5", "latest turn", model_order=5000)
-    latest_marker = _turn_marker("6", model_order=6000)
+    before_head = _user_event("1", "before head")
+    head = _user_event("2", "summary/head")
+    old_turn_user = _user_event("3", "old turn")
+    old_marker = _turn_marker("4")
+    latest_turn_user = _user_event("5", "latest turn")
+    latest_marker = _turn_marker("6")
 
     selected = select_fork_events(
         [latest_marker, before_head, latest_turn_user, old_marker, head, old_turn_user],
@@ -159,7 +154,6 @@ def test_degrade_file_parts_for_fork_replaces_user_file_with_placeholder() -> No
                 ),
             ],
         ),
-        model_order=1000,
     )
 
     [degraded] = degrade_file_parts_for_fork([source])

@@ -299,8 +299,8 @@ class FileLifecycleCleanupService:
                 events = await self.transcript_repository.list_model_file_gc_range(
                     session,
                     state.session_id,
-                    after_order=state.cursor_model_order,
-                    to_order=state.head_model_order,
+                    after_event_id=state.cursor_event_id,
+                    to_event_id=state.head_event_id,
                     limit=_MODEL_FILE_EVENT_LIMIT,
                 )
             if not events:
@@ -309,7 +309,6 @@ class FileLifecycleCleanupService:
                         session,
                         session_id=state.session_id,
                         cursor_event_id=state.head_event_id,
-                        cursor_model_order=state.head_model_order,
                         updated_at=datetime.datetime.now(datetime.UTC),
                     )
                 advanced_count += 1
@@ -331,10 +330,9 @@ class FileLifecycleCleanupService:
             if any(status == ModelFileStatus.AVAILABLE for status in statuses.values()):
                 continue
             last_event = events[-1]
-            cursor_order = min(last_event.model_order, state.head_model_order)
             cursor_event_id = (
                 state.head_event_id
-                if cursor_order >= state.head_model_order
+                if last_event.id >= state.head_event_id
                 else last_event.id
             )
             async with self.session_manager() as session:
@@ -342,7 +340,6 @@ class FileLifecycleCleanupService:
                     session,
                     session_id=state.session_id,
                     cursor_event_id=cursor_event_id,
-                    cursor_model_order=cursor_order,
                     updated_at=datetime.datetime.now(datetime.UTC),
                 )
             advanced_count += 1

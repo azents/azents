@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-27 | 69 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-23 | 155 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-31 | 156 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-29 | 66 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-08-23 | 15 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-18 | 7 |
@@ -37,7 +37,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-28 | 30 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
-| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-27 | 35 |
+| [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-31 | 36 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-16 | 24 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-29 | 53 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-29 | 40 |
@@ -46,7 +46,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-08-27 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-13 | 3 |
-| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-18 | 16 |
+| [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-08-31 | 17 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-08-23 | 31 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-30 | 40 |
@@ -169,6 +169,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Event Architecture Review Discussion Historical Requirements Reconstruction](requirements/event-260308-event-architecture-review.md) | event-260308 | 2026-03-08 | 2026-03-08 |
 | [Slack/Discord/Scheduled Event Subscription Migration Historical Requirements Reconstruction](requirements/event-260508-event-subscription-routing-2026.md) | event-260508 | 2026-05-08 | 2026-05-08 |
 | [Adopt Event / Native Event Terminology Historical Requirements Reconstruction](requirements/event-260613-event-event-terminology.md) | event-260613 | 2026-06-13 | - |
+| [ID-Ordered Event Transcript Requirements](requirements/event-260831-id-ordered-transcript.md) | event-260831 | 2026-08-31 | - |
 | [Make the events Table the Single Source of Truth and Remove session_items_oai Historical Requirements Reconstruction](requirements/events-260428-events-table-as-truth.md) | events-260428 | 2026-04-28 | 2026-04-28 |
 | [Separate Durable Events, Model Lowering, and Turn Eligibility Historical Requirements Reconstruction](requirements/events-260712-events-lowering-and-turn-eligibility.md) | events-260712 | 2026-07-12 | - |
 | [Use Single Durable Events for Provider Tool Items Historical Requirements Reconstruction](requirements/events-260719-events.md) | events-260719 | 2026-07-19 | - |
@@ -575,6 +576,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Event Architecture Review Discussion Historical Decision Reconstruction](adr/event-260308-event-architecture-review.md)
 - [Slack/Discord/Scheduled Event Subscription Migration Historical Decision Reconstruction](adr/event-260508-event-subscription-routing-2026.md)
 - [Adopt Event / Native Event Terminology](adr/event-260613-event-event-terminology.md)
+- [ID-Ordered Event Transcript](adr/event-260831-id-ordered-transcript.md)
 - [Make the events Table the Single Source of Truth and Remove session_items_oai](adr/events-260428-events-table-as-truth.md)
 - [Separate Durable Events, Model Lowering, and Turn Eligibility](adr/events-260712-events-lowering-and-turn-eligibility.md)
 - [Use Single Durable Events for Provider Tool Items](adr/events-260719-events.md)

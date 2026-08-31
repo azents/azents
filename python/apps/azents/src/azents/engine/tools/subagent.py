@@ -399,7 +399,6 @@ class SubagentToolkit(Toolkit[SubagentToolkitConfig]):
                             session_id=child.agent_session_id,
                             kind=event.kind,
                             payload=_payload_json(event),
-                            model_order=event.model_order,
                         ),
                     )
                 if forked:

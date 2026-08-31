@@ -869,7 +869,6 @@ class Event(BaseModel):
     session_id: str = Field(min_length=1)
     kind: EventKind
     payload: EventPayload
-    model_order: int = Field(default=0, description="Model input logical order")
     external_id: str | None = Field(default=None)
     adapter: str | None = Field(default=None)
     provider: str | None = Field(default=None)

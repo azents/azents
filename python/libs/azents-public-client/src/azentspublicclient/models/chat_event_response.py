@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.event_kind import EventKind
 from typing import Optional, Set
@@ -32,7 +32,6 @@ class ChatEventResponse(BaseModel):
     session_id: StrictStr = Field(description="AgentSession ID")
     kind: EventKind = Field(description="Event kind")
     payload: Dict[str, Any] = Field(description="Event payload")
-    model_order: StrictInt = Field(description="Model input logical order")
     external_id: Optional[StrictStr] = None
     adapter: Optional[StrictStr] = None
     provider: Optional[StrictStr] = None
@@ -41,7 +40,7 @@ class ChatEventResponse(BaseModel):
     schema_version: StrictStr = Field(description="Event schema version")
     created_at: datetime = Field(description="Created at")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "session_id", "kind", "payload", "model_order", "external_id", "adapter", "provider", "model", "native_format", "schema_version", "created_at"]
+    __properties: ClassVar[List[str]] = ["id", "session_id", "kind", "payload", "external_id", "adapter", "provider", "model", "native_format", "schema_version", "created_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -130,7 +129,6 @@ class ChatEventResponse(BaseModel):
             "session_id": obj.get("session_id"),
             "kind": obj.get("kind"),
             "payload": obj.get("payload"),
-            "model_order": obj.get("model_order"),
             "external_id": obj.get("external_id"),
             "adapter": obj.get("adapter"),
             "provider": obj.get("provider"),

@@ -85,7 +85,6 @@ async def _create_events(session: AsyncSession, session_id: str) -> list[str]:
             session_id=session_id,
             kind=EventKind.USER_MESSAGE,
             payload=payload,
-            model_order=order,
         )
         event.id = event_id
         session.add(event)
@@ -98,7 +97,6 @@ async def _create_events(session: AsyncSession, session_id: str) -> list[str]:
                 mode="json"
             )
         ),
-        model_order=6,
         reverted=True,
     )
     reverted.id = f"{6:032x}"

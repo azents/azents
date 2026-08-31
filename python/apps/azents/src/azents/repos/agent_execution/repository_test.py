@@ -34,7 +34,6 @@ from azents.engine.events.action_messages import ActionMessagePayload, GoalActio
 from azents.engine.events.filters import EventCompactor
 from azents.engine.events.types import (
     ActiveToolCall,
-    CompactionSummaryPayload,
     Event,
     ExternalChannelMessagePayload,
     TokenUsagePayload,
@@ -42,6 +41,7 @@ from azents.engine.events.types import (
     UserMessagePayload,
     validate_event_payload,
 )
+from azents.engine.run.errors import CompactionPlanStaleError
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -533,7 +533,6 @@ class TestEventExecutionRepositories:
             event_session.id,
         )
         assert [event.id for event in events] == [first.id, second.id]
-        assert [event.model_order for event in events] == [1000, 2000]
 
         updated = await transcript_repo.update_payload(
             rdb_session,
@@ -646,12 +645,12 @@ class TestEventExecutionRepositories:
         assert isinstance(event.payload.action, GoalAction)
         assert event.payload.message == "Ship the goal"
 
-    async def test_append_auto_model_order_waits_for_session_lock(
+    async def test_append_preserves_agent_to_session_lock_order(
         self,
         rdb_engine: AsyncEngine,
         latest_db_schema: None,
     ) -> None:
-        """Automatic model_order assignment runs after session row lock."""
+        """Event append does not block an Agent-first Session key-share lock."""
         session_factory = async_sessionmaker(rdb_engine, expire_on_commit=False)
         async with session_factory() as setup_session:
             workspace_id, agent_id, __runtime_id = await _create_agent_runtime(
@@ -670,16 +669,33 @@ class TestEventExecutionRepositories:
             )
             await setup_session.commit()
 
-        transcript_repo = EventTranscriptRepository()
+        projection_started = asyncio.Event()
+
+        class PausingTranscriptRepository(EventTranscriptRepository):
+            """Expose the point after event insert and before Agent projection lock."""
+
+            async def advance_session_projections(
+                self,
+                session: AsyncSession,
+                *,
+                session_id: str,
+                events: Sequence[Event],
+            ) -> None:
+                projection_started.set()
+                await super().advance_session_projections(
+                    session,
+                    session_id=session_id,
+                    events=events,
+                )
+
+        transcript_repo = PausingTranscriptRepository()
         async with (
-            session_factory() as lock_session,
+            session_factory() as agent_first_session,
             session_factory() as append_session,
         ):
-            lock_tx = await lock_session.begin()
-            await lock_session.execute(
-                sa.select(RDBAgentSession.id)
-                .where(RDBAgentSession.id == event_session.id)
-                .with_for_update()
+            agent_first_tx = await agent_first_session.begin()
+            await agent_first_session.execute(
+                sa.select(RDBAgent.id).where(RDBAgent.id == agent_id).with_for_update()
             )
 
             append_task = asyncio.create_task(
@@ -696,17 +712,21 @@ class TestEventExecutionRepositories:
                 )
             )
             try:
-                with pytest.raises(asyncio.TimeoutError):
-                    await asyncio.wait_for(asyncio.shield(append_task), timeout=0.2)
+                await asyncio.wait_for(projection_started.wait(), timeout=2)
+                locked_session_id = await agent_first_session.scalar(
+                    sa.select(RDBAgentSession.id)
+                    .where(RDBAgentSession.id == event_session.id)
+                    .with_for_update(read=True, key_share=True, nowait=True)
+                )
+                assert locked_session_id == event_session.id
 
-                await lock_tx.commit()
+                await agent_first_tx.commit()
                 event = await asyncio.wait_for(append_task, timeout=2)
                 await append_session.commit()
-
-                assert event.model_order == 1000
+                assert event.session_id == event_session.id
             finally:
-                if lock_tx.is_active:
-                    await lock_tx.rollback()
+                if agent_first_tx.is_active:
+                    await agent_first_tx.rollback()
                 if not append_task.done():
                     append_task.cancel()
                     with pytest.raises(asyncio.CancelledError):
@@ -787,43 +807,38 @@ class TestEventExecutionRepositories:
                 await input_session.commit()
             return "summary"
 
-        summary = await EventCompactor(
-            session_manager=session_manager,
-            transcript_repo=transcript_repo,
-            session_repo=session_repo,
-        ).compact(
-            session_id=event_session.id,
-            transcript=[first],
-            compaction_id="compaction-lock-test",
-            summarize=summarize,
-        )
+        with pytest.raises(CompactionPlanStaleError):
+            await EventCompactor(
+                session_manager=session_manager,
+                transcript_repo=transcript_repo,
+                session_repo=session_repo,
+            ).compact(
+                session_id=event_session.id,
+                transcript=[first],
+                compaction_id="compaction-lock-test",
+                summarize=summarize,
+            )
 
-        assert summary is not None
         assert concurrent_input is not None
-        assert summary.model_order < concurrent_input.model_order
         async with session_factory() as read_session:
             current_session = await session_repo.get_by_id(
                 read_session,
                 event_session.id,
             )
             assert current_session is not None
+            assert current_session.model_input_head_event_id is None
             model_input = await transcript_repo.list_for_model_input(
                 read_session,
                 event_session.id,
                 head_event_id=current_session.model_input_head_event_id,
             )
-        assert [event.id for event in model_input] == [
-            summary.id,
-            concurrent_input.id,
-        ]
-        payload = model_input[0].payload
-        assert isinstance(payload, CompactionSummaryPayload)
+        assert [event.id for event in model_input] == [first.id, concurrent_input.id]
 
-    async def test_model_input_uses_logical_order(
+    async def test_model_input_uses_event_id_order(
         self,
         rdb_session: AsyncSession,
     ) -> None:
-        """Model input is fetched by model_order, not physical id."""
+        """Model input and recent history use ascending event IDs."""
         workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
         event_session = await _agent_session_repository().create(
             rdb_session,
@@ -844,7 +859,6 @@ class TestEventExecutionRepositories:
                 payload=UserMessagePayload(
                     sender_user_id=None, content="first"
                 ).model_dump(mode="json"),
-                model_order=2000,
             ),
         )
         second = await transcript_repo.append(
@@ -855,7 +869,6 @@ class TestEventExecutionRepositories:
                 payload=UserMessagePayload(
                     sender_user_id=None, content="second"
                 ).model_dump(mode="json"),
-                model_order=1000,
             ),
         )
 
@@ -863,7 +876,7 @@ class TestEventExecutionRepositories:
             rdb_session,
             event_session.id,
         )
-        assert [event.id for event in events] == [second.id, first.id]
+        assert [event.id for event in events] == [first.id, second.id]
 
         recent = await transcript_repo.list_recent_by_session_id(
             rdb_session,
@@ -871,17 +884,6 @@ class TestEventExecutionRepositories:
             limit=10,
         )
         assert [event.id for event in recent] == [first.id, second.id]
-
-        await transcript_repo.update_model_orders(
-            rdb_session,
-            event_session.id,
-            {first.id: 500, second.id: 1500},
-        )
-        reordered = await transcript_repo.list_for_model_input(
-            rdb_session,
-            event_session.id,
-        )
-        assert [event.id for event in reordered] == [first.id, second.id]
 
     async def test_pending_run_activation_and_event_association(
         self,

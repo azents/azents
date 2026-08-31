@@ -36,7 +36,6 @@ function timelineEvent(
     session_id: storySessionId,
     kind,
     payload,
-    model_order: 1,
     external_id: null,
     adapter: null,
     provider: null,

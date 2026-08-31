@@ -21,10 +21,6 @@ class EventCreate(BaseModel):
     session_id: str = Field(description="AgentSession ID")
     kind: EventKind = Field(description="Event kind")
     payload: dict[str, JSONValue] = Field(description="Event payload")
-    model_order: int | None = Field(
-        default=None,
-        description="Model input logical order",
-    )
     external_id: str | None = Field(default=None, description="Dedup key")
     adapter: str | None = Field(default=None, description="Adapter name")
     provider: str | None = Field(default=None, description="Provider name")

@@ -78,7 +78,6 @@ def test_tool_result_attachment_output_part_projects_to_rest_attachment() -> Non
         session_id="session-1",
         kind=EventKind.CLIENT_TOOL_RESULT,
         payload=payload,
-        model_order=1,
     )
     row.created_at = datetime.datetime.now(datetime.UTC)
 
@@ -134,7 +133,6 @@ def test_user_message_attachment_projection_preserves_download_identity() -> Non
         session_id="session-1",
         kind=EventKind.USER_MESSAGE,
         payload=payload,
-        model_order=1,
     )
     row.created_at = created_at
 
@@ -188,7 +186,6 @@ def test_external_channel_message_projects_source_metadata() -> None:
         payload=_JSON_PAYLOAD_ADAPTER.validate_python(
             payload.model_dump(mode="json", exclude_none=True)
         ),
-        model_order=1,
         external_id=external_id,
     )
     row.created_at = created_at
@@ -244,14 +241,13 @@ def test_scheduled_task_events_validate_without_chat_message_projection() -> Non
         ),
     ]
 
-    for model_order, (kind, payload) in enumerate(cases, start=1):
+    for _event_number, (kind, payload) in enumerate(cases, start=1):
         row = RDBEvent(
             session_id="session-1",
             kind=kind,
             payload=_JSON_PAYLOAD_ADAPTER.validate_python(
                 payload.model_dump(mode="json")
             ),
-            model_order=model_order,
         )
         row.created_at = scheduled_for
 
@@ -285,7 +281,6 @@ def test_provider_tool_call_projects_semantic_output_and_references() -> None:
         payload=_JSON_PAYLOAD_ADAPTER.validate_python(
             provider_payload.model_dump(mode="json", exclude_none=True)
         ),
-        model_order=1,
     )
     row.created_at = datetime.datetime.now(datetime.UTC)
 
@@ -326,7 +321,6 @@ def test_provider_tool_call_projects_semantic_input_output_and_references() -> N
         payload=_JSON_PAYLOAD_ADAPTER.validate_python(
             provider_payload.model_dump(mode="json", exclude_none=True)
         ),
-        model_order=1,
     )
     row.created_at = datetime.datetime.now(datetime.UTC)
 

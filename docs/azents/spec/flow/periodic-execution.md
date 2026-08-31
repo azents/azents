@@ -40,8 +40,8 @@ code_paths:
   - python/apps/azents/bin/scheduler.sh
   - infra/charts/azents/templates/server/scheduler-deployment.yaml.tpl
   - infra/charts/azents/templates/server/scheduler-pdb.yaml.tpl
-last_verified_at: 2026-08-18
-spec_version: 16
+last_verified_at: 2026-08-31
+spec_version: 17
 ---
 
 # Periodic Execution Flow Spec
@@ -224,10 +224,10 @@ Each pass is bounded and may process:
 - due Artifact TTL rows, marking metadata expired and attempting blob deletion;
 - due ExchangeFile TTL rows, preserving existing ExchangeFile TTL behavior;
 - stale ModelFile pins for terminal runs;
-- AgentSession ModelFile GC cursor ranges where `model_file_gc_cursor_model_order` lags behind `model_input_head_model_order`; and
+- AgentSession ModelFile GC cursor ranges where `model_file_gc_cursor_event_id` is absent or precedes `model_input_head_event_id`; and
 - durable superseded-Agent-avatar cleanup jobs created atomically by committed avatar replacement or removal.
 
-ModelFile GC scans events in `(cursor_order, head_order]`, extracts FilePart `model_file_id`s,
+ModelFile GC scans events in `(cursor_event_id, head_event_id]`, extracts FilePart `model_file_id`s,
 marks available unpinned ModelFiles deleted, attempts blob deletion, and advances the session GC cursor
 only through the processed range. Access denial is metadata-driven; failed blob deletion is logged and
 can be retried by a later pass.
@@ -360,6 +360,8 @@ Model catalog source sync is a later consumer of this scheduler.
 - **2026-08-18** — v16. Added durable scheduler-owned cleanup for avatars
   superseded by committed Agent replacement/removal, plus exact observation of
   Local Job Runtime handler failures that settle during cancellation grace.
+- **2026-08-31** — v17. Replaced numeric ModelFile GC order ranges with event-ID head
+  and cursor ranges.
 - **2026-08-17** — v15. Removed the shared Job Runtime diagnostics introduced in
   v13 while preserving the current Scheduled Task dispatcher behavior.
 - **2026-08-17** — v14. Added the code-owned user Scheduled Task dispatcher to the
