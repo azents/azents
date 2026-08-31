@@ -416,6 +416,8 @@ def _provider_with_runner_env(
             proxy_addon_digest="a" * 64,
             proxy_port=8080,
             proxy_readiness_port=8081,
+            nix_store_storage_class_name="gp3",
+            nix_store_storage_request="10737418240",
             network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
             network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
             network_hard_cap_extra_egress=network_hard_cap_extra_egress,
@@ -462,6 +464,8 @@ def _provider_config(
         proxy_addon_digest="a" * 64,
         proxy_port=8080,
         proxy_readiness_port=8081,
+        nix_store_storage_class_name="gp3",
+        nix_store_storage_request="10737418240",
         image_pull_secrets=image_pull_secrets,
         pod_annotations={} if pod_annotations is None else pod_annotations,
     )
@@ -576,6 +580,7 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert result.report.observed_state is RuntimeProviderObservedState.STARTING
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     pvc = api.pvcs[("azents-runtime", "azents-runtime-runtime-1-workspace")]
+    nix_store_pvc = api.pvcs[("azents-runtime", "azents-runtime-runtime-1-nix")]
     container = pod.spec.containers[0]
     env = {item.name: item.value for item in container.env}
     assert container.image == _RUNNER_IMAGE
@@ -604,11 +609,17 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     workspace_volume = pod.spec.volumes[0]
     assert isinstance(workspace_volume, PersistentVolumeClaimVolume)
     assert workspace_volume.claim_name == pvc.metadata.name
-    assert [volume.name for volume in pod.spec.volumes] == ["agent-workspace"]
-    assert len(container.volume_mounts) == 1
+    assert [volume.name for volume in pod.spec.volumes] == [
+        "agent-workspace",
+        "nix-store",
+    ]
+    assert len(container.volume_mounts) == 2
     assert container.volume_mounts[0].name == "agent-workspace"
     assert container.volume_mounts[0].mount_path == "/runtime/home"
     assert container.volume_mounts[0].read_only is False
+    assert container.volume_mounts[1].name == "nix-store"
+    assert container.volume_mounts[1].mount_path == "/nix"
+    assert container.volume_mounts[1].read_only is False
     assert container.security_context.run_as_non_root is True
     assert container.security_context.run_as_user == 1000
     assert container.security_context.run_as_group == 1000
@@ -616,6 +627,9 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert container.security_context.capabilities_drop == ("ALL",)
     assert pvc.spec.storage_class_name == "gp3"
     assert pvc.spec.storage_request == "21474836480"
+    assert nix_store_pvc.spec.storage_class_name == "gp3"
+    assert nix_store_pvc.spec.storage_request == "10737418240"
+    assert nix_store_pvc.metadata.labels["azents/resource-role"] == "nix-store-pvc"
     assert "azents/workspace-path" not in pod.metadata.labels
     assert "azents/workspace-path" not in pvc.metadata.labels
     assert "azents/workspace-path" not in pod.metadata.annotations
@@ -636,8 +650,14 @@ async def test_direct_v2_preserves_direct_runner_contract() -> None:
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     runner = pod.spec.containers[0]
-    assert [volume.name for volume in pod.spec.volumes] == ["agent-workspace"]
-    assert [mount.mount_path for mount in runner.volume_mounts] == ["/runtime/home"]
+    assert [volume.name for volume in pod.spec.volumes] == [
+        "agent-workspace",
+        "nix-store",
+    ]
+    assert [mount.mount_path for mount in runner.volume_mounts] == [
+        "/runtime/home",
+        "/nix",
+    ]
     assert runner.security_context.allow_privilege_escalation is False
     assert runner.security_context.capabilities_add == ()
     assert runner.security_context.capabilities_drop == ("ALL",)
@@ -754,6 +774,108 @@ async def test_start_expands_pvc_but_defers_shrink_until_reset() -> None:
         )
     )
     assert api.pvcs[pvc_key].spec.storage_request == "5368709120"
+
+
+@pytest.mark.asyncio
+async def test_start_expands_nix_store_but_defers_shrink_until_reset() -> None:
+    api = FakeKubernetesApi()
+    command = _command(RuntimeLifecycleCommandType.START)
+    pvc_key = ("azents-runtime", "azents-runtime-runtime-1-nix")
+    small_provider = KubernetesRuntimeProvider(
+        api,
+        dataclasses.replace(
+            _provider_config(),
+            nix_store_storage_request="5368709120",
+        ),
+    )
+    large_provider = KubernetesRuntimeProvider(
+        api,
+        dataclasses.replace(
+            _provider_config(),
+            nix_store_storage_request="10737418240",
+        ),
+    )
+
+    await small_provider.start(command)
+    assert api.pvcs[pvc_key].spec.storage_request == "5368709120"
+
+    await large_provider.start(command)
+    assert api.pvcs[pvc_key].spec.storage_request == "10737418240"
+
+    await small_provider.start(command)
+    assert api.pvcs[pvc_key].spec.storage_request == "10737418240"
+
+    await small_provider.reset(
+        _command(
+            RuntimeLifecycleCommandType.RESET,
+            final_desired_state=RuntimeDesiredState.STOPPED,
+        )
+    )
+    assert api.pvcs[pvc_key].spec.storage_request == "5368709120"
+
+
+@pytest.mark.asyncio
+async def test_start_rejects_nix_store_storage_class_change_until_reset() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    pvc_key = ("azents-runtime", "azents-runtime-runtime-1-nix")
+    original = api.pvcs[pvc_key]
+    changed_provider = KubernetesRuntimeProvider(
+        api,
+        dataclasses.replace(
+            _provider_config(),
+            nix_store_storage_class_name="premium-rwo",
+        ),
+    )
+
+    with pytest.raises(
+        UnsupportedRuntimeConfiguration,
+        match="StorageClass change requires Runtime reset",
+    ):
+        await changed_provider.start(command)
+
+    assert api.pvcs[pvc_key] is original
+    assert api.deleted_pvcs == []
+
+    await changed_provider.reset(
+        _command(
+            RuntimeLifecycleCommandType.RESET,
+            final_desired_state=RuntimeDesiredState.STOPPED,
+        )
+    )
+    assert api.pvcs[pvc_key].spec.storage_class_name == "premium-rwo"
+
+
+@pytest.mark.asyncio
+async def test_start_rejects_foreign_nix_store_before_workspace_mutation() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    nix_key = ("azents-runtime", "azents-runtime-runtime-1-nix")
+    nix_store = api.pvcs[nix_key]
+    api.pvcs[nix_key] = dataclasses.replace(
+        nix_store,
+        metadata=dataclasses.replace(
+            nix_store.metadata,
+            labels={
+                **nix_store.metadata.labels,
+                "azents/workspace-id": "foreign-workspace",
+            },
+        ),
+    )
+    workspace_key = ("azents-runtime", "azents-runtime-runtime-1-workspace")
+    api.pvcs.pop(workspace_key)
+    api.pods.pop(("azents-runtime", "azents-runtime-runtime-1"))
+    api.operations.clear()
+
+    with pytest.raises(InvalidOwnedResourceMetadata):
+        await provider.start(command)
+
+    assert api.operations == []
+    assert workspace_key not in api.pvcs
 
 
 @pytest.mark.asyncio
@@ -1531,6 +1653,7 @@ async def test_stop_preserves_pvc() -> None:
     assert result.report.observed_state is RuntimeProviderObservedState.STOPPED
     assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1-nix") in api.pvcs
 
 
 @pytest.mark.asyncio
@@ -1552,6 +1675,7 @@ async def test_stop_allows_cleanup_of_removed_containment_runtime() -> None:
     assert result.report.observed_state is RuntimeProviderObservedState.STOPPED
     assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1-nix") in api.pvcs
 
 
 @pytest.mark.asyncio
@@ -1567,6 +1691,7 @@ async def test_restart_requests_execution_deletion_and_preserves_pvc() -> None:
     assert result.report.reason == "restart_deletion_requested"
     assert api.deleted_pods == ["azents-runtime-runtime-1"]
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1-nix") in api.pvcs
     assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
     assert api.applied_pods == applied_pods
 
@@ -1586,6 +1711,7 @@ async def test_restart_does_not_recreate_a_terminating_pod() -> None:
     assert api.deleted_pods == ["azents-runtime-runtime-1"]
     assert api.applied_pods == applied_pods
     assert ("azents-runtime", "azents-runtime-runtime-1") in api.pods
+    assert ("azents-runtime", "azents-runtime-runtime-1-nix") in api.pvcs
 
 
 @pytest.mark.asyncio
@@ -1602,8 +1728,12 @@ async def test_reset_running_deletes_and_recreates_pvc_and_pod() -> None:
     )
 
     assert result.report.observed_state is RuntimeProviderObservedState.STARTING
-    assert api.deleted_pvcs == ["azents-runtime-runtime-1-workspace"]
+    assert api.deleted_pvcs == [
+        "azents-runtime-runtime-1-workspace",
+        "azents-runtime-runtime-1-nix",
+    ]
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1-nix") in api.pvcs
     assert ("azents-runtime", "azents-runtime-runtime-1") in api.pods
 
 
@@ -1622,6 +1752,7 @@ async def test_reset_stopped_recreates_only_pvc() -> None:
 
     assert result.report.observed_state is RuntimeProviderObservedState.STOPPED
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1-nix") in api.pvcs
     assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
 
 
@@ -1642,6 +1773,7 @@ async def test_terminal_delete_removes_pod_and_pvc_idempotently() -> None:
     assert second.report.terminal_delete_acknowledged is True
     assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") not in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1-nix") not in api.pvcs
 
 
 @pytest.mark.asyncio
@@ -1661,6 +1793,7 @@ async def test_terminal_delete_retries_until_pod_and_pvc_are_absent() -> None:
     assert first.report.reason == "terminal_deletion_in_progress"
     assert ("azents-runtime", "azents-runtime-runtime-1") in api.pods
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1-nix") in api.pvcs
 
     api.defer_pod_deletion = False
     api.defer_pvc_deletion = False
@@ -1671,6 +1804,7 @@ async def test_terminal_delete_retries_until_pod_and_pvc_are_absent() -> None:
     assert second.report.terminal_delete_acknowledged is True
     assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") not in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1-nix") not in api.pvcs
 
 
 @pytest.mark.asyncio
@@ -1722,6 +1856,7 @@ async def test_terminal_delete_allows_cleanup_of_removed_containment_runtime() -
     assert result.report.terminal_delete_acknowledged is True
     assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") not in api.pvcs
+    assert ("azents-runtime", "azents-runtime-runtime-1-nix") not in api.pvcs
 
 
 @pytest.mark.asyncio
@@ -1894,6 +2029,81 @@ async def test_observe_known_runtimes_reports_pod_and_pvc() -> None:
 
 
 @pytest.mark.asyncio
+async def test_observe_known_runtimes_reports_nix_store_only_recovery() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    api.pods.pop(("azents-runtime", "azents-runtime-runtime-1"))
+    api.pvcs.pop(("azents-runtime", "azents-runtime-runtime-1-workspace"))
+
+    reports = await provider.observe_known_runtimes()
+
+    assert len(reports) == 1
+    assert reports[0].runtime_id == "runtime-1"
+    assert reports[0].observed_state is RuntimeProviderObservedState.STOPPED
+    assert reports[0].reason == "pvc_present_without_pod"
+    assert reports[0].diagnostic == {"source": "pvc"}
+
+
+@pytest.mark.asyncio
+async def test_recovery_uses_valid_nix_store_when_workspace_pvc_is_invalid() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    api.pods.pop(("azents-runtime", "azents-runtime-runtime-1"))
+    workspace_key = ("azents-runtime", "azents-runtime-runtime-1-workspace")
+    workspace = api.pvcs[workspace_key]
+    api.pvcs[workspace_key] = dataclasses.replace(
+        workspace,
+        metadata=dataclasses.replace(
+            workspace.metadata,
+            labels={
+                **workspace.metadata.labels,
+                "azents/workspace-id": "foreign-workspace",
+            },
+        ),
+    )
+
+    reports = await provider.observe_known_runtimes()
+
+    assert len(reports) == 1
+    assert reports[0].runtime_id == "runtime-1"
+    assert reports[0].reason == "pvc_present_without_pod"
+    assert reports[0].diagnostic == {"source": "pvc"}
+
+
+@pytest.mark.asyncio
+async def test_reset_rejects_foreign_nix_store_before_deleting_owned_storage() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    nix_key = ("azents-runtime", "azents-runtime-runtime-1-nix")
+    nix_store = api.pvcs[nix_key]
+    api.pvcs[nix_key] = dataclasses.replace(
+        nix_store,
+        metadata=dataclasses.replace(
+            nix_store.metadata,
+            labels={
+                **nix_store.metadata.labels,
+                "azents/workspace-id": "foreign-workspace",
+            },
+        ),
+    )
+
+    with pytest.raises(InvalidOwnedResourceMetadata):
+        await provider.reset(
+            _command(
+                RuntimeLifecycleCommandType.RESET,
+                final_desired_state=RuntimeDesiredState.STOPPED,
+            )
+        )
+
+    assert api.deleted_pvcs == []
+    assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
+    assert nix_key in api.pvcs
+
+
+@pytest.mark.asyncio
 async def test_legacy_resources_are_skipped_until_command_replaces_them() -> None:
     """Legacy Pod/PVC evidence stays untrusted while command processing continues."""
     api = FakeKubernetesApi()
@@ -1902,7 +2112,8 @@ async def test_legacy_resources_are_skipped_until_command_replaces_them() -> Non
     await provider.start(command)
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     pvc = api.pvcs[("azents-runtime", "azents-runtime-runtime-1-workspace")]
-    for resource in (pod, pvc):
+    nix_store_pvc = api.pvcs[("azents-runtime", "azents-runtime-runtime-1-nix")]
+    for resource in (pod, pvc, nix_store_pvc):
         annotations = cast(dict[str, str], resource.metadata.annotations)
         for key in (
             "azents/runtime-configuration-sequence",
@@ -2371,7 +2582,10 @@ async def test_v3_proxy_reset_recreates_pvc_and_preserves_ca() -> None:
 
     assert result.report.observed_state is RuntimeProviderObservedState.STOPPED
     assert api.secrets[ca_key] is ca
-    assert api.deleted_pvcs == ["azents-runtime-runtime-1-workspace"]
+    assert api.deleted_pvcs == [
+        "azents-runtime-runtime-1-workspace",
+        "azents-runtime-runtime-1-nix",
+    ]
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") in api.pvcs
     assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
     assert ("azents-runtime", "azents-runtime-runtime-1-proxy") not in api.pods
@@ -2744,6 +2958,7 @@ async def test_dind_profile_exposes_private_engine_socket_directly() -> None:
     assert pod.spec.automount_service_account_token is False
     assert {mount.name for mount in runner.volume_mounts} == {
         "agent-workspace",
+        "nix-store",
         "container-engine-socket",
         "runtime-shared-tmp",
     }
@@ -2770,6 +2985,7 @@ async def test_dind_profile_exposes_private_engine_socket_directly() -> None:
     runner_mounts = {mount.mount_path: mount for mount in runner.volume_mounts}
     engine_mounts = {mount.name: mount for mount in engine.volume_mounts}
     assert runner_mounts["/runtime/home"].name == "agent-workspace"
+    assert runner_mounts["/nix"].name == "nix-store"
     assert engine_mounts["agent-workspace"].mount_path == "/runtime/home"
     assert runner_mounts["/runtime/home"].read_only is False
     assert engine_mounts["agent-workspace"].read_only is False
@@ -2795,7 +3011,7 @@ async def test_dind_profile_exposes_private_engine_socket_directly() -> None:
     assert shared_tmp.name == "runtime-shared-tmp"
     assert shared_tmp.medium is None
     assert shared_tmp.size_limit == "10737418240"
-    assert len(api.pvcs) == 1
+    assert len(api.pvcs) == 2
 
     network_policy = api.network_policies[
         ("azents-runtime", "azents-runtime-runtime-1-execution")

@@ -45,6 +45,7 @@ _RUNNER_USER = f"{_RUNNER_UID}:{_RUNNER_GID}"
 _WORKSPACE_DIR_MODE = 0o755
 _NON_ROOT_WORKSPACE_DIR_MODE = 0o777
 _CONTROL_HOST_ALIAS = "host.docker.internal:host-gateway"
+_NIX_STORE_MOUNT_PATH = "/nix"
 _SECURITY_OPTIONS = ("no-new-privileges",)
 _CAP_DROP = ("ALL",)
 _LOGGER = logging.getLogger(__name__)
@@ -540,6 +541,11 @@ class DockerRuntimeProvider:
                 container_path=self._tmp_mount_path,
                 read_only=False,
             ),
+            DockerBindMount(
+                host_path=str(self._nix_store_host_dir(runtime_id)),
+                container_path=_NIX_STORE_MOUNT_PATH,
+                read_only=False,
+            ),
         )
 
     def _report(
@@ -642,10 +648,14 @@ class DockerRuntimeProvider:
     def _tmp_host_dir(self, runtime_id: str) -> Path:
         return self._runtime_root(runtime_id) / "tmp-agent"
 
+    def _nix_store_host_dir(self, runtime_id: str) -> Path:
+        return self._runtime_root(runtime_id) / "nix"
+
     def _ensure_workspace_dirs(self, runtime_id: str) -> None:
         mode = _provider_directory_mode()
         _ensure_writable_dir(self._workspace_host_dir(runtime_id), mode=mode)
         _ensure_writable_dir(self._tmp_host_dir(runtime_id), mode=mode)
+        _ensure_writable_dir(self._nix_store_host_dir(runtime_id), mode=mode)
 
     def _delete_runtime_root(self, runtime_id: str) -> None:
         runtime_root = self._runtime_root(runtime_id)
